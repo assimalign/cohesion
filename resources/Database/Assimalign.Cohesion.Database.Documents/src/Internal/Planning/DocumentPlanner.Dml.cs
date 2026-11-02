@@ -17,7 +17,7 @@ internal sealed partial class DocumentPlanner
         foreach (var assignment in update.Assignments)
         {
             Add(assignment.Path, assignment.Value);
-            ValidateMetadata(assignment.Value, update.Alias, storedSource: true);
+            ValidateMetadata(assignment.Value, DocumentSourceName.Of(update.Collection, update.Alias), storedSource: true);
             Validate(assignment.Value, allowAggregate: false, functions: _functions);
         }
         foreach (var path in update.Unset) { Add(path, null); }
@@ -27,18 +27,18 @@ internal sealed partial class DocumentPlanner
         }
         if (update.Predicate is { } predicate)
         {
-            ValidateMetadata(predicate, update.Alias, storedSource: true);
+            ValidateMetadata(predicate, DocumentSourceName.Of(update.Collection, update.Alias), storedSource: true);
             Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentUpdatePlan(collection, update, targets.AsReadOnly(),
-            ChooseAccess(update.Predicate, update.Alias, _catalog.GetIndexes(collection.Id, _snapshot)),
+            ChooseAccess(update.Predicate, DocumentSourceName.Of(update.Collection, update.Alias), _catalog.GetIndexes(collection.Id, _snapshot)),
             PlanReturning(update.Returning, update.Collection, update.Alias));
 
         void Add(OqlPathExpression path, OqlExpression? value)
         {
             _cancellationToken.ThrowIfCancellationRequested();
             var segments = new List<OqlPathSegment>();
-            foreach (var segment in PathSegments(path, update.Alias))
+            foreach (var segment in PathSegments(path, DocumentSourceName.Of(update.Collection, update.Alias)))
             {
                 _cancellationToken.ThrowIfCancellationRequested();
                 if ((segment.Name is null) == (segment.Index is null) || segment.Index < 0)
@@ -98,11 +98,11 @@ internal sealed partial class DocumentPlanner
         var collection = ResolveCollection(delete.Collection, delete.Location);
         if (delete.Predicate is { } predicate)
         {
-            ValidateMetadata(predicate, delete.Alias, storedSource: true);
+            ValidateMetadata(predicate, DocumentSourceName.Of(delete.Collection, delete.Alias), storedSource: true);
             Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentDeletePlan(collection, delete,
-            ChooseAccess(delete.Predicate, delete.Alias, _catalog.GetIndexes(collection.Id, _snapshot)),
+            ChooseAccess(delete.Predicate, DocumentSourceName.Of(delete.Collection, delete.Alias), _catalog.GetIndexes(collection.Id, _snapshot)),
             PlanReturning(delete.Returning, delete.Collection, delete.Alias));
     }
 
@@ -186,7 +186,7 @@ internal sealed partial class DocumentPlanner
             Validate(projection.Expression, allowAggregate: false, allowStar: !returning.IsValue, functions: _functions);
         }
         // A destination without AS is its own binding, independently of an INSERT SELECT source.
-        var logical = CreateLogicalPlan(new OqlSelectExpression(collection, alias ?? collection, returning.Projections,
+        var logical = CreateLogicalPlan(new OqlSelectExpression(collection, DocumentSourceName.Of(collection, alias), returning.Projections,
             null, [], null, [], false, returning.IsValue, location: returning.Location), _cancellationToken, _parameters, _functions);
         if (logical.Projections.Any(projection => projection.Name.Length == 0))
         { throw new DocumentPlanningException("CD01026", ErrorMessages.ReturningNameInvalid, returning.Location); }

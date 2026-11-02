@@ -9,7 +9,7 @@ public sealed class OqlJoinExpression : OqlSourceBindingExpression
 {
     /// <summary>Initializes a key lookup binding.</summary>
     /// <param name="collection">The right-hand stored collection name.</param>
-    /// <param name="variable">The required right-hand alias.</param>
+    /// <param name="variable">The resolved right-hand alias, explicit or inferred from the collection name.</param>
     /// <param name="key">The scalar key expression over earlier bindings.</param>
     /// <param name="isLeft">Whether to preserve unmatched inputs.</param>
     /// <param name="isNest">Whether to bind an array of matching documents.</param>

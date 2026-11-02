@@ -94,6 +94,14 @@ internal static class Program
     {
         await connection.CreateCollectionAsync("join_items", cancellationToken);
         await connection.QueryAsync("INSERT INTO join_items (KEY, VALUE) VALUES ('a',{n:1}), ('b',{n:2})", cancellationToken: cancellationToken);
+        var implicitJoin = await connection.QueryAsync("SELECT RAW b.n FROM join_items JOIN join_items AS b ON META(b).id = 'a'", cancellationToken: cancellationToken);
+        Check(implicitJoin.Documents.Select(value => value.GetInt32()).SequenceEqual(new[] { 1, 1 }), "implicit key JOIN alias");
+        var ordinary = await connection.QueryAsync("SELECT RAW join_items.n FROM join_items ORDER BY join_items.n", cancellationToken: cancellationToken);
+        var nested = await connection.QueryAsync("SELECT RAW join_items.n FROM join_items WHERE EXISTS (SELECT RAW 1 FROM [1] AS s) ORDER BY join_items.n", cancellationToken: cancellationToken);
+        Check(ordinary.Documents.Select(value => value.GetRawText()).SequenceEqual(nested.Documents.Select(value => value.GetRawText())), "implicit alias subquery parity");
+        var updated = await connection.QueryAsync("UPDATE join_items SET join_items.n = join_items.n + 1 WHERE EXISTS (SELECT RAW 1 FROM [1] AS s) RETURNING RAW join_items.n", cancellationToken: cancellationToken);
+        Check(updated.Documents.Select(value => value.GetInt32()).SequenceEqual(new[] { 2, 3 }), "implicit UPDATE targets values and RETURNING");
+        await connection.QueryAsync("UPDATE join_items SET join_items.n = join_items.n - 1", cancellationToken: cancellationToken);
         var joined = await connection.QueryAsync("SELECT META(a).id AS a, META(b).id AS b FROM join_items AS a JOIN join_items AS b ON META(b).id = META(a).id ORDER BY a.n", cancellationToken: cancellationToken);
         Check(joined.Count == 2 && joined.All(row => Equals(row[0], row[1])), "key JOIN metadata");
         var missing = await connection.QueryAsync("SELECT b, META(b).id AS id FROM [1] AS a LEFT JOIN join_items AS b ON META(b).id = 'absent'", cancellationToken: cancellationToken);

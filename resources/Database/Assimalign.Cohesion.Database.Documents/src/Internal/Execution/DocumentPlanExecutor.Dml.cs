@@ -20,7 +20,7 @@ internal static partial class DocumentPlanExecutor
     private static async ValueTask<DatabaseResult> ExecuteUpdateAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentUpdatePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext? nested = null)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name, operation: nested is null ? null : operation, nested: nested, sourceName: plan.Statement.Alias ?? plan.Statement.Collection);
+        var evaluator = new DocumentExpressionEvaluator(DocumentSourceName.Of(plan.Statement.Collection, plan.Statement.Alias), parameters, cancellationToken, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name, operation: nested is null ? null : operation, nested: nested);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
         using var returning = plan.Returning is null ? null : new ReturningRows(database, operation, plan.Returning, parameters, cancellationToken, nested);
         using var pendingMemory = operation.GetStatementMemory(cancellationToken).Reserve();
@@ -71,7 +71,7 @@ internal static partial class DocumentPlanExecutor
     private static async ValueTask<DatabaseResult> ExecuteDeleteAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentDeletePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext? nested = null)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name, operation: nested is null ? null : operation, nested: nested, sourceName: plan.Statement.Alias ?? plan.Statement.Collection);
+        var evaluator = new DocumentExpressionEvaluator(DocumentSourceName.Of(plan.Statement.Collection, plan.Statement.Alias), parameters, cancellationToken, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name, operation: nested is null ? null : operation, nested: nested);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
         using var returning = plan.Returning is null ? null : new ReturningRows(database, operation, plan.Returning, parameters, cancellationToken, nested);
         using var pendingMemory = operation.GetStatementMemory(cancellationToken).Reserve();
@@ -135,7 +135,7 @@ internal static partial class DocumentPlanExecutor
         }
         else
         {
-            var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken, writeVerb: verb, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name, operation: nested is null ? null : operation, nested: nested, sourceName: null);
+            var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken, writeVerb: verb, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name, operation: nested is null ? null : operation, nested: nested);
             foreach (var pair in values)
             {
                 cancellationToken.ThrowIfCancellationRequested();

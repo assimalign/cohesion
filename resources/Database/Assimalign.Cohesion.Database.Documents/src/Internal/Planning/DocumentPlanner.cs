@@ -77,7 +77,7 @@ internal sealed partial class DocumentPlanner
         var collection = ResolveCollection(query.Collection, query.Location);
         var indexes = _catalog.GetIndexes(collection.Id, _snapshot);
         var nonSourceNames = NonSourceNames(logical.UnnestVariables, outerNames);
-        var access = ChooseAccess(query.Predicate, query.Alias, indexes, out var accessCandidates, nonSourceNames, query.Unnest, outerNames);
+        var access = ChooseAccess(query.Predicate, DocumentSourceName.Of(query), indexes, out var accessCandidates, nonSourceNames, query.Unnest, outerNames);
         if (logical.Query.OrderBy.Count > 0 && (_estimateSinglePath || indexes.Count > 0 &&
             access is not DocumentIntersectionPath && !logical.IsGrouped && !query.IsDistinct && query.Bindings.Count == 0 &&
             logical.Query.OrderBy.All(order => order.Expression is OqlPathExpression)))
@@ -174,10 +174,12 @@ internal sealed partial class DocumentPlanner
         IReadOnlyDictionary<string, object?>? parameters = null, DocumentFunctionCatalog? functions = null, IReadOnlySet<string>? outerNames = null)
     {
         functions ??= DocumentFunctionCatalog.Standard;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken);
+        if (query.Alias is { Length: 0 })
+        { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, query.Location); }
+        var evaluator = new DocumentExpressionEvaluator(DocumentSourceName.Of(query), parameters, cancellationToken);
         long? limit = evaluator.PagingCount(query.Limit, "LIMIT");
         long offset = evaluator.PagingCount(query.Offset, "OFFSET") ?? 0;
-        var variables = query.Bindings.Count == 0 ? null : new HashSet<string>(StringComparer.Ordinal) { query.Alias ?? query.Collection };
+        var variables = query.Bindings.Count == 0 ? null : new HashSet<string>(StringComparer.Ordinal) { DocumentSourceName.Of(query) };
         foreach (var binding in query.Bindings)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -209,7 +211,7 @@ internal sealed partial class DocumentPlanner
             query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest, source: query.Source, bindings: query.Bindings == query.Unnest ? null : query.Bindings);
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression, functions)) ||
             (query.Having is not null && ContainsAggregate(query.Having, functions)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression, functions));
-        variables?.Remove(query.Alias ?? query.Collection);
+        variables?.Remove(DocumentSourceName.Of(query));
         var unnestVariables = variables;
         var groupScope = query.GroupAliases.Count > 0 || query.GroupAs is not null ? GroupScope(query, unnestVariables) : null;
         var scopes = grouped || query.IsDistinct || query.IsValue && query.OrderBy.Count > 0 ? new DocumentBindingScopes() : null;
@@ -266,7 +268,7 @@ internal sealed partial class DocumentPlanner
         }
         bool canStopEarly = !grouped && !query.IsDistinct && (query.OrderBy.Count == 0 ||
             query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" } identity &&
-                IsLocalMetadata(identity, query.Alias ?? query.Collection)) &&
+                IsLocalMetadata(identity, DocumentSourceName.Of(query))) &&
             projections.All(projection => (projection.Expression is not OqlStarExpression || query.Unnest.Count > 0) &&
                 (projection.Type != DatabaseType.Null || projection.Expression is
                     OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression));
@@ -672,11 +674,11 @@ internal sealed partial class DocumentPlanner
         }
         if (expression is OqlMetaExpression { Arguments.Count: 1 } meta &&
             meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } metadataSource &&
-            metadataSource.Segments[0].Name is string metadataName && metadataName != (query.Alias ?? query.Collection) &&
+            metadataSource.Segments[0].Name is string metadataName && metadataName != (DocumentSourceName.Of(query)) &&
             variables?.Contains(metadataName) != true && outerNames?.Contains(metadataName) == true) { return; }
         if (expression is OqlPathExpression { Segments.Count: > 0 } path &&
             (DocumentBindingScope.Resolve(bound, path.Segments[0].Name, out _) is not null ||
-             path.Segments[0].Name is string outerName && outerName != (query.Alias ?? query.Collection) &&
+             path.Segments[0].Name is string outerName && outerName != (DocumentSourceName.Of(query)) &&
                 variables?.Contains(outerName) != true && outerNames?.Contains(outerName) == true)) { return; }
         // PostgreSQL parse_agg.c:1439-1452 adjusts grouping expressions to the current
         // scope before matching. An inner t must never stand in for an outer field t.
@@ -755,7 +757,7 @@ internal sealed partial class DocumentPlanner
         (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
         (OqlCaseExpression a, OqlCaseExpression b) => (a.Operand is null) == (b.Operand is null) &&
             (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
-        (OqlPathExpression a, OqlPathExpression b) => EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth, captured),
+        (OqlPathExpression a, OqlPathExpression b) => EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
         (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && (a.Quantifier == OqlAggregateQuantifier.Distinct) == (b.Quantifier == OqlAggregateQuantifier.Distinct) && a.Arguments.Count == b.Arguments.Count &&
             a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
@@ -777,7 +779,7 @@ internal sealed partial class DocumentPlanner
     };
 
     private static bool EquivalentPath(OqlPathExpression left, OqlPathExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
-        DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth, bool captured)
+        DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth)
     {
         string? leftName = left.Segments.Count > 0 ? left.Segments[0].Name : null;
         string? rightName = right.Segments.Count > 0 ? right.Segments[0].Name : null;
@@ -792,11 +794,9 @@ internal sealed partial class DocumentPlanner
                 left.Segments.SequenceEqual(right.Segments);
         }
         if (IsVariablePath(left, variables) != IsVariablePath(right, variables)) { return false; }
-        // Own paths strip only an explicit alias. Only the captured side may name
-        // an unaliased outer row by its collection; its group key still reads fields.
-        int leftStart = !IsVariablePath(left, variables) && query.Alias is not null && leftName == query.Alias ? 1 : 0;
-        string? rightSource = captured ? query.Alias ?? query.Collection : query.Alias;
-        int rightStart = !IsVariablePath(right, variables) && rightSource is not null && rightName == rightSource ? 1 : 0;
+        string source = DocumentSourceName.Of(query);
+        int leftStart = !IsVariablePath(left, variables) && leftName == source ? 1 : 0;
+        int rightStart = !IsVariablePath(right, variables) && rightName == source ? 1 : 0;
         return left.Segments.Skip(leftStart).SequenceEqual(right.Segments.Skip(rightStart));
     }
 

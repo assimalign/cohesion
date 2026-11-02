@@ -31,8 +31,8 @@ public sealed class OqlKeyJoinParserTests
         design.ShouldNotContain("nested queries, deferred document mutations", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [OQL] - Key joins: statement-wide alias requirements reset when the parser is reused")]
-    public void Parse_JoinedThenOrdinary_ShouldResetAliasRequirement()
+    [Fact(DisplayName = "Cohesion Test [OQL] - Key joins: implicit aliases work across SELECT scopes when the parser is reused")]
+    public void Parse_JoinedThenOrdinary_ShouldAcceptImplicitAliases()
     {
         // Arrange
         var parser = new OqlQueryParser();
@@ -40,7 +40,7 @@ public sealed class OqlKeyJoinParserTests
         var joined = parser.Parse("SELECT (SELECT RAW 1 FROM a AS a JOIN b AS b ON META(b).id = 'k') FROM c");
         var ordinary = parser.Parse("SELECT * FROM c UNNEST tags");
         // Assert
-        joined.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00016");
+        joined.Diagnostics.ShouldBeEmpty();
         ordinary.Diagnostics.ShouldBeEmpty();
     }
 
@@ -89,7 +89,7 @@ public sealed class OqlKeyJoinParserTests
         select.Bindings[2].ShouldBeOfType<OqlUnnestExpression>().IsLeft.ShouldBeTrue();
     }
 
-    [Theory(DisplayName = "Cohesion Test [OQL] - Key joins: explicit aliases avoid the unresolved collection-name rule")]
+    [Theory(DisplayName = "Cohesion Test [OQL] - Key joins: implicit source and UNNEST aliases work in joined statements")]
     [InlineData("SELECT * FROM a JOIN b AS b ON META(b).id = 'k'")]
     [InlineData("SELECT * FROM a AS a JOIN b ON META(b).id = 'k'")]
     [InlineData("SELECT * FROM a AS a UNNEST a.keys JOIN b AS b ON META(b).id = 'k'")]
@@ -98,12 +98,26 @@ public sealed class OqlKeyJoinParserTests
     [InlineData("SELECT (SELECT RAW n FROM c) FROM a AS a JOIN b AS b ON META(b).id = 'k'")]
     [InlineData("SELECT * FROM (SELECT * FROM c) AS a JOIN b AS b ON META(b).id = 'k'")]
     [InlineData("SELECT (SELECT RAW 1 FROM a AS a JOIN b AS b ON META(b).id = 'k') FROM c AS c UNNEST c.tags")]
-    public void Parse_UnaliasedSource_ShouldRefuseWithLocatedCode(string text)
+    [InlineData("SELECT * FROM \"cohesion_schema.custom\" UNNEST tags custom")]
+    public void Parse_UnaliasedSource_ShouldAcceptImplicitNames(string text)
     {
         // Arrange / Act
         var statement = new OqlQueryParser().Parse(text).ShouldBeOfType<OqlQueryStatement>();
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00016");
+        statement.Diagnostics.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [OQL] - Implicit aliases: duplicate collection and inferred names keep the binding diagnostic")]
+    [InlineData("SELECT * FROM items JOIN items ON META(items).id = 'a'")]
+    [InlineData("SELECT * FROM items UNNEST tags items")]
+    [InlineData("SELECT * FROM cohesion_schema.indexes UNNEST PATHS indexes")]
+    [InlineData("SELECT * FROM \"cohesion_schema.custom\" UNNEST tags AS \"cohesion_schema.custom\"")]
+    public void Parse_DuplicateImplicitNames_ShouldRefuseWithBindingCode(string text)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse(text);
+        // Assert
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00010");
         statement.Diagnostics.Single().Start.ShouldNotBeNull();
     }
 

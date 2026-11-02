@@ -180,14 +180,23 @@ without executing and shows each SubqueryExpression, owning clause/span, nested 
 `cached_for_statement` or `per_evaluation` policy, plus captured names in `correlation`. Plans are statement-local and rebuilt on the
 next execution, including a reused request after CREATE/DROP INDEX.
 
-An unaliased FROM exports the collection name to nested SELECTs and recognizes it as the local
-META receiver. Group-key matching compares captured qualified paths with unqualified keys.
-The query's own paths still use only its explicit alias: items.g in FROM items reads the field
-items then g. Thus SELECT items.g FROM items GROUP BY g is refused with CD05001, and
-SELECT DISTINCT g FROM items ORDER BY items.g is refused with CD01014. SELECT RAW g FROM items
-ORDER BY items.g sorts on that field path. Captured group-key matching strips the collection
-receiver only on the captured side. META on an UNNEST variable, comprehension variable or unknown
-name is refused with CD05001 before evaluation.
+Every source has one binding name: its explicit alias, otherwise its collection name (#1767).
+A system source uses its last segment as written: cohesion_schema.indexes binds indexes,
+and COHESION_SCHEMA.INDEXES binds INDEXES. Quoted stored collection names stay opaque, including
+dots; only reserved system sources use their last segment. This name has the same meaning in ordinary and
+nested SELECTs, DML targets and values, RETURNING, grouping, DISTINCT, ORDER BY, index analysis
+and EXPLAIN. Thus items.g in FROM items reads g, and items alone is the whole source value.
+A field named after its own collection is reachable as items.items.g or through an explicit alias
+(for example, d.items.g in FROM items d). An alias takes precedence over a same-named field,
+following the pinned [SQL++ implicit-alias rule](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/from.adoc#L478-L484).
+Own and captured paths use the same normalization: SELECT items.g FROM items GROUP BY g,
+SELECT DISTINCT g FROM items ORDER BY items.g and SELECT RAW g FROM items ORDER BY items.g
+all execute with g semantics. UPDATE items SET items.g = 1 writes g; SET items = 1 is root
+replacement and fails with CD02016. CREATE INDEX paths remain document-relative: ON items(items.g)
+indexes the actual nested field, whereas WHERE items.g = 1 uses an index on g.
+META on an UNNEST variable, comprehension variable or unknown name is refused with CD05001
+before evaluation. A standalone ORDER BY projection alias keeps precedence, including
+SELECT x AS items FROM items ORDER BY items.
 Local META identity ordering retains identity paging; EXPLAIN
 reports identity_paging=True when this path applies. A source alias or UNNEST variable that reuses
 a captured name still obeys its own query's grouping restrictions. Complete group keys are matched
@@ -214,8 +223,9 @@ prove grouping when a comprehension or quantifier shadows an enclosing name.
 META(outer_alias).id/version follows a captured stored source's identity. Captured expression,
 derived and local-value bindings have no stored identity and return NULL for metadata.
 A nested `FROM d.items AS i`, or `FROM d AS i`
-where d is an explicit outer alias, iterates that outer value per row. An implicit collection name
-in a bare FROM continues to name the collection. This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
+where d is an explicit outer alias, iterates that outer value per row. A bare FROM items under
+an implicit outer items continues to name the collection; under an explicit outer items it
+correlates to that value. This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
 Qualified stars (`d.*`) retain their CK00001 refusal outside joined SELECT projections; see
 [key JOIN and NEST](#key-join-and-nest-1732-oq-j1).
 
@@ -263,12 +273,12 @@ General ON predicates, reversed equality, ON KEYS, expression/derived right-hand
 sources, comma joins and joins on UPDATE/DELETE remain named CK00001 refusals.
 INSERT/UPSERT SELECT and expression subqueries may contain the supported SELECT joins.
 
-Every FROM and UNNEST source in every SELECT scope of a statement containing JOIN or NEST
-requires an explicit alias, including nested SELECTs without their own joins. DML targets keep their
-existing alias rules. AS is optional for collection, JOIN/NEST and UNNEST aliases; existing expression
-FROM rules still apply. An inferred UNNEST/path alias does not satisfy this rule (CD00016).
-This temporary restriction avoids deciding the open unaliased-collection rule in #1767.
-Aliases are ordinal and unique within the SELECT (CD00010; CD01023 for direct ASTs).
+FROM and JOIN/NEST collections may omit aliases; their names become implicit aliases.
+UNNEST may infer its alias from the final named path step. AS is optional for explicit collection,
+JOIN/NEST and UNNEST aliases; existing expression FROM rules still apply. All explicit and implicit
+names are ordinal and unique within the SELECT (CD00010; CD01023 for direct ASTs).
+FROM items JOIN items ON ... and FROM items UNNEST tags items therefore repeat items.
+CD00016 is retired and reserved; the former statement-wide explicit-alias restriction is removed.
 
 Keys are ordinal strings, NULL or MISSING. Other values, including arrays, give located CD02028;
 key lists are outside this scalar-key subset. INNER JOIN drops unmatched inputs; LEFT JOIN binds
@@ -497,7 +507,8 @@ synthetic wrapper; a projected g still has Json column metadata. Ungrouped aggre
 their existing one-empty-group behavior and cannot declare GROUP AS.
 
 Each wrapper has one member for the FROM binding (the explicit alias, otherwise the collection
-name), one for each UNNEST binding, and one for each explicitly named group term. For example,
+name, or its final segment as written for a system source), one for each UNNEST binding, and one
+for each explicitly named group term. For example,
 `FROM items d LEFT UNNEST d.tags t GROUP BY d.kind AS key GROUP AS g` produces
 `[{"d": {original document}, "t": element, "key": group value}, ...]`.
 The FROM member preserves object, array, scalar and NULL roots. MISSING bindings and MISSING
@@ -678,12 +689,12 @@ The alias may be omitted for a path, defaulting to its last named step. INNER dr
 MISSING, NULL and non-array operands; LEFT preserves them with t MISSING. Null array elements
 stay NULL. Rows follow document ID then array order. WHERE runs after expansion; COUNT(*)
 counts expanded rows. With UNNEST, `SELECT *` returns synthetic `{"d":...,"t":...}` objects;
-without a FROM alias the source member is named items, while paths keep existing resolution.
+without a FROM alias the source member and path binding are named items. An unaliased system
+source uses its last segment as written for synthetic star and GROUP AS wrapper keys.
 A plain star without UNNEST preserves stored bytes. ORDER BY projection aliases outrank
 UNNEST variables. Variables shadow fields; quantified bindings may shadow enclosing variables.
 Duplicate names in one binding list give CD00010. The unaliased collection name is reserved
-for this check: `FROM items LEFT UNNEST tags items` is a duplicate, while paths still do not
-resolve an implicit items variable. Inferred duplicate aliases span the final path-name token.
+as a binding: `FROM items LEFT UNNEST tags items` is a duplicate. Inferred duplicate aliases span the final path-name token.
 Direct AST duplicates give CD01023. Group-key equivalence preserves lexical binding scope;
 a quantified t cannot match an outer t in a grouping expression.
 

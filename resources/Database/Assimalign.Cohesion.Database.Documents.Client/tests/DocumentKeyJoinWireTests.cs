@@ -26,7 +26,9 @@ public sealed class DocumentKeyJoinWireTests
         var left = await connection.QueryAsync("SELECT b, META(b).id AS id FROM [1] AS a LEFT JOIN items AS b ON META(b).id = 'absent'", cancellationToken: harness.Token);
         var nest = await connection.QueryAsync("SELECT RAW b FROM ['a','absent',NULL,MISSING] AS k LEFT NEST items AS b ON META(b).id = k", cancellationToken: harness.Token);
         var correlated = await connection.QueryAsync("SELECT RAW (SELECT RAW b.n FROM [1] AS s JOIN items AS b ON META(b).id = META(a).id) FROM items AS a ORDER BY a.n", cancellationToken: harness.Token);
+        var implicitJoin = await connection.QueryAsync("SELECT b FROM items JOIN items AS b ON META(b).id = 'a'", cancellationToken: harness.Token);
         // Assert
+        implicitJoin.Count.ShouldBe(2);
         joined.Select(row => row[0]).ShouldBe(new object?[] { "a", "b" });
         joined.ShouldAllBe(row => Equals(row[0], row[1]) && Equals(row[2], true));
         star.Documents.Single().GetRawText().ShouldBe("{\"a\":1,\"b\":{\"n\":1}}");
@@ -39,7 +41,7 @@ public sealed class DocumentKeyJoinWireTests
         plan.Documents.ShouldContain(value => value.GetProperty("operator").GetString() == "LeftKeyNest");
         foreach (var test in new[] {
             ("SELECT b FROM items AS a JOIN items AS b ON META(b).id = [META(a).id]", "CD02028"),
-            ("SELECT b FROM items JOIN items AS b ON META(b).id = 'a'", "CD00016"),
+            ("SELECT b FROM items JOIN items ON META(items).id = 'a'", "CD00010"),
             ("SELECT b FROM items AS a JOIN items AS b ON META(b).id = b.k", "CD01035") })
         {
             var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync(test.Item1, cancellationToken: harness.Token));

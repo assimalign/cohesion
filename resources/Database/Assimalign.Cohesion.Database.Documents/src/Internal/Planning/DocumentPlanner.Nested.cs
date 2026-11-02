@@ -91,7 +91,6 @@ internal sealed partial class DocumentPlanner
 
     private DocumentNestedPlan PlanNested(OqlExpression expression)
     {
-        if (ContainsKeyJoin(expression)) { ValidateJoinedAliases(expression); }
         var queries = new Dictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>(ReferenceEqualityComparer.Instance);
         var empty = new Dictionary<string, bool>(StringComparer.Ordinal);
         var free = new HashSet<string>(StringComparer.Ordinal);
@@ -100,10 +99,10 @@ internal sealed partial class DocumentPlanner
         {
             string? name = expression switch
             {
-                OqlUpdateExpression update => update.Alias ?? update.Collection,
-                OqlDeleteExpression delete => delete.Alias ?? delete.Collection,
-                OqlInsertExpression insert => insert.Alias ?? insert.Collection,
-                OqlUpsertExpression upsert => upsert.Alias ?? upsert.Collection,
+                OqlUpdateExpression update => DocumentSourceName.Of(update.Collection, update.Alias),
+                OqlDeleteExpression delete => DocumentSourceName.Of(delete.Collection, delete.Alias),
+                OqlInsertExpression insert => DocumentSourceName.Of(insert.Collection, insert.Alias),
+                OqlUpsertExpression upsert => DocumentSourceName.Of(upsert.Collection, upsert.Alias),
                 _ => null,
             };
             var local = new Dictionary<string, bool>(StringComparer.Ordinal);
@@ -130,7 +129,7 @@ internal sealed partial class DocumentPlanner
         {
             bool capturesSource = select.Source is null && outer.TryGetValue(select.Collection, out bool keyspace) && !keyspace;
             var source = new Dictionary<string, bool>(StringComparer.Ordinal)
-            { [select.Alias ?? select.Collection] = select.Alias is null && select.Source is null && !capturesSource };
+            { [DocumentSourceName.Of(select)] = select.Alias is null && select.Source is null && !capturesSource };
             var joinNames = select.Bindings == select.Unnest ? null :
                 new HashSet<string>(select.Bindings.Select(binding => binding.Variable), StringComparer.Ordinal);
             if (capturesSource)
@@ -182,7 +181,7 @@ internal sealed partial class DocumentPlanner
                 var select = subquery.Query;
                 if (select.Source is null && enclosing.TryGetValue(select.Collection, out bool keyspace) && !keyspace)
                 {
-                    select = new OqlSelectExpression("", select.Alias ?? select.Collection, select.Projections,
+                    select = new OqlSelectExpression("", DocumentSourceName.Of(select), select.Projections,
                         select.Predicate, select.GroupBy, select.Having, select.OrderBy, select.IsDistinct, select.IsValue,
                         select.Limit, select.Offset, select.Location, select.Unnest, select.GroupAliases, select.GroupAs,
                         new OqlPathExpression([new OqlPathSegment(select.Collection, null)], select.Location), select.Bindings == select.Unnest ? null : select.Bindings);
@@ -227,15 +226,6 @@ internal sealed partial class DocumentPlanner
         if (node is OqlLiteralExpression or OqlMissingExpression or OqlPathExpression or OqlParameterExpression or OqlStarExpression) { return false; }
         foreach (var child in NestedChildren(node)) { if (ContainsKeyJoin(child)) { return true; } }
         return false;
-    }
-
-    private static void ValidateJoinedAliases(OqlExpression node)
-    {
-        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (node is OqlSelectExpression query && string.IsNullOrEmpty(query.Alias))
-        { throw new DocumentPlanningException("CD01035", ErrorMessages.JoinBindingInvalid, query.Location); }
-        if (node is OqlLiteralExpression or OqlMissingExpression or OqlPathExpression or OqlParameterExpression or OqlStarExpression) { return; }
-        foreach (var child in NestedChildren(node)) { ValidateJoinedAliases(child); }
     }
 
     internal static IEnumerable<OqlExpression> NestedChildren(OqlExpression node)

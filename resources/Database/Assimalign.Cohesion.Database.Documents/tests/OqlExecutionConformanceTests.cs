@@ -106,7 +106,11 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Select] =
             [
-                new("SELECT RAW g FROM items ORDER BY items.g", [[3m], [2m], [1m]],
+                new("SELECT RAW g FROM items ORDER BY items.g", [[1m], [2m], [3m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
+                new("SELECT DISTINCT g FROM items ORDER BY items.g", [[1m], [2m], [3m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
+                new("SELECT items.g FROM items GROUP BY g", [[1m], [2m], [3m]],
                     ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
                 new("SELECT RAW g FROM items d ORDER BY d.g", [[1m], [2m], [3m]],
                     ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),

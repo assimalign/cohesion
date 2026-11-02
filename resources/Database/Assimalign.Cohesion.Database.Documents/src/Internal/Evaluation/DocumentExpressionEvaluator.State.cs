@@ -11,7 +11,7 @@ internal sealed partial class DocumentExpressionEvaluator
     {
         var state = _state as NestedEvaluationState;
         var bindings = state?.Outer;
-        if ((state?.SourceName ?? _alias) is string source)
+        if (_alias is string source)
         { bindings = new DocumentVariableBinding(source, new DocumentEvaluationContext(document.Content, document.Id, document.Version), bindings); }
         var frames = new Stack<DocumentVariableBinding>();
         bool containsBase = projectionBase is null;
@@ -35,11 +35,10 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private sealed class NestedEvaluationState : EvaluationState
     {
-        internal NestedEvaluationState(DocumentOperation? operation, DocumentVariableBinding? outer, string? sourceName) : base(operation)
-        { Outer = outer; SourceName = sourceName; }
+        internal NestedEvaluationState(DocumentOperation? operation, DocumentVariableBinding? outer) : base(operation)
+        { Outer = outer; }
 
         internal DocumentVariableBinding? Outer { get; }
-        internal string? SourceName { get; }
     }
 
     // Share the existing lazy constructor-cache slot with execution-only state so
