@@ -366,7 +366,7 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
         {
             if (_provisioningSchema is null && _database.SchemaProvisioner.Deferred is not null)
             {
-                await _database.SchemaProvisioner.WaitForTablesAsync(request, cancellationToken).ConfigureAwait(false);
+                await _database.SchemaProvisioner.WaitForTablesAsync(request, cancellationToken, CurrentTransaction?.Context).ConfigureAwait(false);
                 _database.ThrowIfOffline();
             }
             using var ddl = _provisioningSchema is null && IsSelfCommitting(request)

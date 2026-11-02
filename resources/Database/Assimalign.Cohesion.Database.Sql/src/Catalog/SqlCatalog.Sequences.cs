@@ -264,11 +264,12 @@ public sealed partial class SqlCatalog
         }
     }
 
-    internal bool RelationNameExists(string schema, string name)
-    { lock (_sync) { ThrowIfOffline(); return RelationExists(schema, name); } }
+    internal bool RelationNameExists(string schema, string name, bool includeOrphans = false)
+    { lock (_sync) { ThrowIfOffline(); return RelationExists(schema, name, includeOrphans); } }
 
-    private bool RelationExists(string schema, string name)
-        => _tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)) || SequenceNameExists(schema, name);
+    private bool RelationExists(string schema, string name, bool includeOrphans = false)
+        => _tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)) ||
+            (includeOrphans ? _sequences.ContainsKey((schema, name)) : SequenceNameExists(schema, name));
 
     // Prepared owners can still publish and reserve their names. Permanently abandoned
     // owners are invisible and may surrender their sequence metadata in the new owner's

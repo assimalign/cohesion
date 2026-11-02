@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
@@ -12,8 +13,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlDeferredProvisioningTests
 {
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CHAR widening validates on the provisioning worker and refuses repadding")]
-    public async Task BuildAsync_CharacterWidening_ShouldDeferValidationAndRejectRewrite()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CHAR widening prepares repadding on the worker and publishes jointly")]
+    public async Task BuildAsync_CharacterWidening_ShouldDeferAndPublishRepadding()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -50,7 +51,7 @@ public sealed partial class SqlDeferredProvisioningTests
         var target = await engine.OpenDatabaseAsync("pending", timeout.Token);
         try
         {
-            target.Catalog.PendingMigration.ShouldNotBeNull().Steps.ShouldHaveSingleItem().Kind.ShouldBe("AlterColumn");
+            target.Catalog.PendingMigration.ShouldNotBeNull().Steps.ShouldHaveSingleItem().Kind.ShouldBe("Joint/AlterColumnType");
             target.Catalog.TryGetTable("dbo", "chars", out var table).ShouldBeTrue();
             table.FindColumn("Value").ShouldNotBeNull().Type.MaxLength.ShouldBe(2);
         }
@@ -58,13 +59,23 @@ public sealed partial class SqlDeferredProvisioningTests
         {
             release.Set();
         }
-        while (target.OfflineError is null) { await Task.Delay(1, timeout.Token); }
+        await WaitDoneAsync(target, timeout.Token);
 
         // Assert
         Volatile.Read(ref validations).ShouldBe(1);
-        var failure = target.OfflineError.ShouldNotBeNull();
-        failure.InnerException.ShouldBeOfType<SqlSchemaMigrationException>();
-        failure.InnerException.ShouldNotBeNull().InnerException.ShouldNotBeNull().Message.ShouldContain("would rewrite existing values");
+        target.OfflineError.ShouldBeNull();
+        target.Provisioning.ShouldBeNull();
+        target.Catalog.PendingMigration.ShouldBeNull();
+        target.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(CharacterSchema(4).Compile().Hash);
+        await using var reader = await target.CreateSessionAsync(timeout.Token);
+        await using var result = (DatabaseResultSet)await reader.ExecuteAsync("SELECT Value FROM chars", cancellationToken: timeout.Token);
+        int rows = 0;
+        await foreach (var row in result.GetRowsAsync(timeout.Token))
+        {
+            row.GetValue(0).ShouldBe("a   ");
+            rows++;
+        }
+        rows.ShouldBe(1);
     }
 
     private sealed record CharacterRow(string? Value);

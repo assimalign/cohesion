@@ -9,6 +9,18 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Joint Build documentation: scripts run inline and untouched availability means DML")]
+    public void Documentation_JointBuildClaims_ShouldDescribeScriptsAndDml()
+    {
+        // Arrange
+        string design = ReadDocumentation("Sql", "DESIGN.md");
+
+        // Act / Assert
+        design.ShouldNotContain("Neither Build nor open scans data.", Case.Sensitive);
+        design.ShouldContain("any script force the typed migration inline", Case.Sensitive);
+        design.ShouldContain("DML on untouched tables remains available", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Recursive docs: bounded-state consumers run until cancellation (#1719)")]
     public void Documentation_RecursiveConsumers_ShouldDescribeCancellation()
     {
@@ -67,7 +79,7 @@ public sealed class SqlDialectDocumentationTests
     [InlineData("Sql.Language", "DIALECT.md", "Compiled-schema v8 was unchanged by SQ-A.")]
     [InlineData("Sql", "DESIGN.md", "SQL remains format 29. Failed preparation and crash recovery use kind 14 unchanged.")]
     [InlineData("Sql", "DESIGN.md", "SQL stays format 29: ordinary table records and kind 14")]
-    [InlineData("Sql", "DESIGN.md", "Current format 33 also requires extension 8's OnUpdate byte")]
+    [InlineData("Sql", "DESIGN.md", "Current format 34 also requires extension 8's OnUpdate byte")]
     [InlineData("Sql", "DESIGN.md", "SQL remains format 29: ordinary dense table records")]
     public void Documentation_FormatHistory_ShouldDistinguishHistoricalAndCurrentVersions(string project, string file, string expected)
     {

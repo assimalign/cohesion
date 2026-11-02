@@ -93,6 +93,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     private readonly SqlProvisioningWorker _provisioningWorker;
     private readonly int _bufferPoolPages;
     private readonly SqlStorageStrategy _strategy;
+
+    internal long GetAvailableMigrationBytes(string databaseName) => _strategy.GetAvailableMigrationBytes(databaseName);
     private readonly SqlQueryParserOptions _parserOptions;
 
     private SqlStorage[] _storageSnapshot = [];
@@ -225,6 +227,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>; the checkpoint worker waits on it.
     /// </summary>
     internal ManualResetEventSlim CheckpointNeededSignal => _checkpointNeededSignal;
+
+    internal bool SparseDataGrowth(string databaseName) => _strategy.SparseDataGrowth(databaseName);
 
     /// <summary>
     /// Gets the signal a database's coordinator sets when it defers an undo; the version-purge

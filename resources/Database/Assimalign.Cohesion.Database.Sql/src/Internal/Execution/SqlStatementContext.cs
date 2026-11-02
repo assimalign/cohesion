@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -38,10 +39,12 @@ internal readonly struct SqlStatementContext
         DateTimeOffset? transactionStart = null,
         SqlDdlInterlock? ddlInterlock = null,
         SqlResultPreparation? resultPreparation = null,
-        TimeSpan metadataLockTimeout = default)
+        TimeSpan metadataLockTimeout = default,
+        bool checkpointCopy = false)
     {
         _transactionStartTicks = (transactionStart ?? DateTimeOffset.UtcNow).UtcTicks;
-        _names = provisioningSchema is null && metadataLockTimeout == TimeSpan.Zero ? databaseName
+        _names = checkpointCopy ? new JointProvisioningNames(provisioningSchema, databaseName, metadataLockTimeout)
+            : provisioningSchema is null && metadataLockTimeout == TimeSpan.Zero ? databaseName
             : new ProvisioningNames(provisioningSchema, databaseName, metadataLockTimeout);
         Transaction = transaction;
         Coordinator = coordinator;
@@ -75,6 +78,57 @@ internal readonly struct SqlStatementContext
     internal SqlDdlInterlock? DdlInterlock { get; }
 
     internal TimeSpan MetadataLockTimeout => (_names as ProvisioningNames)?.LockTimeout ?? TimeSpan.Zero;
+
+    // Marker in the existing provisioning-only slot: ordinary context/metrics
+    // sizes and allocation budgets stay unchanged, including nonzero lock timeouts.
+    internal bool CheckpointCopy => _names is JointProvisioningNames;
+
+    internal void ConfigureCopySpace(Action<long, long, long, long> check, Action<long> publication, Func<long> allocations)
+    {
+        var joint = (JointProvisioningNames)_names;
+        joint.CheckSpace = check;
+        joint.CheckPublication = publication;
+        joint.CountAllocations = allocations;
+    }
+
+    internal void CheckCopySpace(long touches, long? allocations = null)
+    {
+        if (_names is JointProvisioningNames joint)
+        {
+            long pages = allocations ?? touches;
+            joint.CheckSpace!(touches, pages, joint.UnflushedPages, checked(joint.PreparedPages + pages));
+        }
+    }
+
+    internal void CheckPublicationSpace()
+    {
+        var joint = (JointProvisioningNames)_names;
+        joint.CheckPublication!(checked(joint.UnflushedPages * Page.Size));
+    }
+
+    internal long CaptureCopyAllocations()
+        => _names is JointProvisioningNames joint ? joint.CountAllocations!() : 0;
+
+    internal void AddCopyAllocations(long start)
+    {
+        if (_names is not JointProvisioningNames joint) { return; }
+        long pages = checked(joint.CountAllocations!() - start);
+        joint.PreparedPages = checked(joint.PreparedPages + pages);
+        joint.UnflushedPages = checked(joint.UnflushedPages + pages);
+    }
+
+    internal long AddCopyJournalBytes(long bytes)
+    {
+        var joint = (JointProvisioningNames)_names;
+        return joint.JournalBytes = checked(joint.JournalBytes + Math.Max(0, bytes));
+    }
+
+    internal void ResetCopyJournalBytes()
+    {
+        var joint = (JointProvisioningNames)_names;
+        joint.JournalBytes = 0;
+        joint.UnflushedPages = 0;
+    }
 
     /// <summary>
     /// Gets the database's transaction coordinator.
@@ -116,7 +170,7 @@ internal readonly struct SqlStatementContext
 
     [global::System.Diagnostics.DebuggerDisplay("ProvisioningNames")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementContext.ProvisioningNames.DebugView))]
-    private sealed class ProvisioningNames
+    private class ProvisioningNames
     {
         internal ProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
         {
@@ -135,6 +189,20 @@ internal readonly struct SqlStatementContext
             {
                 _ = value;
             }
+        }
+    }
+
+    private sealed class JointProvisioningNames : ProvisioningNames
+    {
+        internal Action<long, long, long, long>? CheckSpace { get; set; }
+        internal Action<long>? CheckPublication { get; set; }
+        internal Func<long>? CountAllocations { get; set; }
+        internal long JournalBytes { get; set; }
+        internal long UnflushedPages { get; set; }
+        internal long PreparedPages { get; set; }
+        internal JointProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
+            : base(schema, database, lockTimeout)
+        {
         }
     }
 

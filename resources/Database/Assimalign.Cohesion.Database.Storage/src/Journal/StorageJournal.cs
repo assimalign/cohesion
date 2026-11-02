@@ -195,6 +195,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     // The bytes of frames the journal holds since its last truncation, buffered frames
     // included, and the bytes the last full read scan verified.
     private long _length;
+    private long _checkpointRecordLength;
     private long _scannedLength;
     private StorageRecoveryAnalysis? _recoveryAnalysis;
     private object? _recoveryReplayToken;
@@ -480,13 +481,15 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
     }
 
+    internal long BytesSinceCheckpoint => Math.Max(0, Length - Volatile.Read(ref _checkpointRecordLength));
+
     /// <summary>
-    /// Arms the size trigger: once an append takes <see cref="Length"/> to
+    /// Arms the size trigger: once an append takes <see cref="BytesSinceCheckpoint"/> to
     /// <paramref name="threshold"/> bytes or more, <paramref name="checkpointNeeded"/> is invoked
     /// once, outside the journal's lock, and again only after the next checkpoint truncated the
     /// journal. A threshold of zero or less disarms it.
     /// </summary>
-    /// <param name="threshold">The journal length that asks for a checkpoint, in bytes.</param>
+    /// <param name="threshold">The appended journal bytes that ask for a checkpoint.</param>
     /// <param name="checkpointNeeded">The hook to invoke, or null.</param>
     internal void ConfigureCheckpointTrigger(long threshold, Action? checkpointNeeded)
     {
@@ -740,6 +743,11 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                     }
 
                     DrainMedium(forceDurable);
+                    // Appends stay suspended until this completed checkpoint's own
+                    // frame is excluded. Do not sample Length after appends resume:
+                    // a concurrent logical writer's bytes belong to the new cycle.
+                    Volatile.Write(ref _checkpointRecordLength,
+                        framePrefixSize + bodyHeaderSize + activeTransactions.Length * (long)sizeof(long) + sizeof(uint));
                     return lsn;
                 }
                 finally
@@ -1171,7 +1179,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
 
             lock (_syncRoot)
             {
-                if (_checkpointThreshold > 0 && _length >= _checkpointThreshold && !_checkpointSignaled)
+                if (_checkpointThreshold > 0 && _length - _checkpointRecordLength >= _checkpointThreshold && !_checkpointSignaled)
                 {
                     _checkpointSignaled = true;
                     checkpointNeeded = _checkpointNeeded;
@@ -1295,6 +1303,9 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
         // Any medium exception can leave a partial frame, so even an unexpected provider
         // exception must fence subsequent writes before releasing the medium lock.
+        // This includes full-disk and zero-byte write failures: a provider exception
+        // does not prove the medium unchanged. SQL joint-migration space admission runs
+        // before its intent save; it deliberately does not weaken this latch (#1447).
         catch (Exception exception) when (!disposing || exception is not ObjectDisposedException)
         {
             // Keep the detached bytes readable after a partial write. Latch before another

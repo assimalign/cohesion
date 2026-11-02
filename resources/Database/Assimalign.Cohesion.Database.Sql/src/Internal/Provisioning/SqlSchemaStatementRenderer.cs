@@ -78,6 +78,16 @@ internal static class SqlSchemaStatementRenderer
         return builder.Append(';').ToString();
     }
 
+    internal static string AlterColumnType(string tableName, CompiledSchemaColumn column)
+        => $"ALTER TABLE {QualifiedTable(tableName)} ALTER COLUMN {Identifier(column.Name)} TYPE {TypeName(column)};";
+
+    internal static string SetNullability(string tableName, CompiledSchemaColumn column)
+        => $"ALTER TABLE {QualifiedTable(tableName)} ALTER COLUMN {Identifier(column.Name)} {(column.IsNullable ? "DROP" : "SET")} NOT NULL;";
+
+    internal static string SetDefault(string tableName, CompiledSchemaColumn column)
+        => $"ALTER TABLE {QualifiedTable(tableName)} ALTER COLUMN {Identifier(column.Name)} " +
+            (column.DefaultLiteral is null ? "DROP DEFAULT;" : $"SET DEFAULT {SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral) ?? "NULL"};");
+
     internal static string AddConstraint(string tableName, CompiledSchemaConstraint constraint)
     {
         var builder = new StringBuilder($"ALTER TABLE {QualifiedTable(tableName)} ADD ");

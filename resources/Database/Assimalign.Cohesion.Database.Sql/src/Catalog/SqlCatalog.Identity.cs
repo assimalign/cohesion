@@ -128,7 +128,7 @@ public sealed partial class SqlCatalog
     // All callers hold the catalog monitor and publish this staged directory only after
     // their table transaction commits. Sequence ids are reserved in the same transaction.
     private Action StageOwnedSequences(StorageTransaction transaction, SqlCatalogTable? previous, SqlCatalogTable? updated,
-        ref ulong nextId, bool restart = false, string? renamedColumn = null, string? newColumn = null)
+        ref ulong nextId, bool restart = false, string? renamedColumn = null, string? newColumn = null, bool surrenderName = true)
     {
         // Publication holds the catalog monitor: a sequence may have disappeared after
         // binding or while its Shared grant waited. Never persist a dangling default.
@@ -150,7 +150,7 @@ public sealed partial class SqlCatalog
         bool hasOwned = false;
         if (previous is not null && _sequences.Count != 0)
         { foreach (var slot in _sequences.Values) { if (slot.Value.OwnerTableId == previous.ObjectId) { hasOwned = true; break; } } }
-        var nameOrphan = updated is null ? null : StageOrphanSequenceName(transaction, updated.Schema, updated.Name);
+        var nameOrphan = updated is null || !surrenderName ? null : StageOrphanSequenceName(transaction, updated.Schema, updated.Name);
         if (!hasIdentity && !hasOwned && nameOrphan is null) { return static () => { }; }
         var removed = new List<SqlCatalogSequence>();
         if (nameOrphan is not null) { removed.Add(nameOrphan); }
@@ -209,7 +209,7 @@ public sealed partial class SqlCatalog
                 string stem = updated.Name + "_" + column.Name + "_seq";
                 string name = stem;
                 int suffix = 0;
-                while (RelationExists(updated.Schema, name) || name.Equals(updated.Name, StringComparison.OrdinalIgnoreCase) || staged.Any(slot => slot.Value.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                while (RelationExists(updated.Schema, name) || JointNameReserved(updated.Schema, name) || name.Equals(updated.Name, StringComparison.OrdinalIgnoreCase) || staged.Any(slot => slot.Value.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
                 { name = stem + (++suffix).ToString(CultureInfo.InvariantCulture); }
                 var orphan = StageOrphanSequenceName(transaction, updated.Schema, name);
                 if (orphan is not null) { removed.Add(orphan); }

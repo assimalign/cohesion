@@ -7,6 +7,24 @@ Graph's foreign tests bind its setter with UnsafeAccessor and require an active 
 callback counts. A thrown callback therefore exercises the normal physical rollback and model
 compensation path without taking storage offline or introducing a public test surface.
 
+## Joint migration admission and unsafe-storage failures (#1447)
+
+`JournalBytesSinceCheckpoint` excludes the last completed checkpoint's own record, and
+`IsCheckpointDue` uses that count for its size test. A checkpoint-only journal is never due,
+even with a one-byte threshold; appends still trigger the existing once-per-cycle wake.
+The count is advisory across a concurrent checkpoint and introduces no journal-format change.
+
+SQL joint migrations (#1447) now admit estimated volume space before saving their intent.
+This changes no kernel latch policy. Journal frame writes, drains and flushes still fence on
+failure, including ENOSPC or an exception before the provider reports any written byte: the
+medium outcome cannot be proved. Unconfirmed commit waits, failed durable data-file flushes
+and failures after issuing a checkpoint header-slot write retain their fences. Engine-wide
+write-back/checkpoint/write-ahead-flush/version-purge failure windows and the repeated
+failed-checkpoint journal limit retain their offline policies; so do 49a provisioning failure
+and interrupted open-time recovery. A read error or a prepared-page write refusal alone stays
+online. SQL documents the admission formula,
+its concurrency/expansion limits and CS03403's unknown publication outcome in its DESIGN.
+
 ## Maintenance due hints (#1279)
 
 Storage.HasPendingCommits reads the grouped durability gate's requested/durable LSNs under its
@@ -2149,9 +2167,11 @@ with the write rate, without bound. Two triggers now decide when a storage is du
 PostgreSQL uses:
 
 - **Size.** `Storage.CheckpointJournalSize` (zero, the storage-level default, disables it)
-  is compared with `JournalLength`, the bytes the journal holds since its last truncation
-  (counted as frames are appended, records still in the append buffer included since #1252,
-  and from the verified frames when a journal is opened). The
+  is compared with `JournalBytesSinceCheckpoint`, including buffered appends but excluding
+  the completed checkpoint's own frame. The journal records that frame's exact length before
+  resuming appends, so a concurrent logical writer can never be included in the residue.
+  Before the first checkpoint, all verified journal bytes count. `JournalLength` continues to
+  report the full physical/buffered length. The
   first append that reaches the size invokes `OnCheckpointNeeded`, outside every storage lock
   and once per checkpoint cycle; an engine sets the signal its checkpoint worker waits on. This
   is PostgreSQL's `XLogWrite` requesting a checkpoint once the WAL written since the last one

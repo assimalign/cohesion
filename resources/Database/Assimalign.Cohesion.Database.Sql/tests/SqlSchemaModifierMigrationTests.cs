@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlLockWaitCollection.Name)]
 public sealed class SqlSchemaModifierMigrationTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Migration: code-first built-in bounds render validation-only ALTER")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Migration: bounds render validation-only ALTER or TYPE when assignment may trim")]
     [InlineData("VARCHAR(20)", "VARCHAR(10)", false, "VARCHAR(10)")]
     [InlineData("VARCHAR(10)", "VARCHAR(20)", false, "VARCHAR(20)")]
     [InlineData("DECIMAL(18,2)", "DECIMAL(10,2)", true, "DECIMAL(10, 2)")]
@@ -35,24 +35,36 @@ public sealed class SqlSchemaModifierMigrationTests
         // Assert
         var step = script.Steps.ShouldHaveSingleItem();
         step.Operation.Kind.ShouldBe(SqlSchemaMigrationOperationKind.AlterColumn);
-        step.StatementText.ShouldBe($"ALTER TABLE dbo.items ALTER COLUMN Value {expectedType} {(numeric ? "NOT NULL" : "NULL")};");
-        step.RollbackRequest.ShouldNotBeNull();
+        if (!numeric && previousType == "VARCHAR(20)")
+        {
+            step.StatementText.ShouldBe($"ALTER TABLE dbo.items ALTER COLUMN Value TYPE {expectedType};");
+            step.RollbackRequest.ShouldBeNull();
+        }
+        else
+        {
+            step.StatementText.ShouldBe($"ALTER TABLE dbo.items ALTER COLUMN Value {expectedType} {(numeric ? "NOT NULL" : "NULL")};");
+            step.RollbackRequest.ShouldNotBeNull();
+        }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Migration: scale and domain rewrites remain refused")]
-    [InlineData("DECIMAL(18,2)", "DECIMAL(18,3)", true)]
-    [InlineData("email", "VARCHAR(10)", false)]
-    [InlineData("email", "other_email", false)]
-    public void Generate_CodeFirstRewrite_ShouldRefuseBeforeExecution(string previousType, string desiredType, bool numeric)
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Migration: scale and domain rewrites render TYPE without compensation")]
+    [InlineData("DECIMAL(18,2)", "DECIMAL(18,3)", true, "DECIMAL(18, 3)")]
+    [InlineData("email", "VARCHAR(10)", false, "VARCHAR(10)")]
+    [InlineData("email", "other_email", false, "other_email")]
+    public void Generate_CodeFirstRewrite_ShouldRenderType(string previousType, string desiredType, bool numeric, string expectedType)
     {
         // Arrange
         var previous = Declare(previousType, numeric).Compile();
         var desired = Declare(desiredType, numeric).Compile();
         var plan = SqlSchemaMigrationPlanner.Plan(previous, desired);
 
-        // Act / Assert
-        Should.Throw<SqlSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan, previous))
-            .Message.ShouldContain("storage-type, domain, scale or default rewrite");
+        // Act
+        var script = SqlMigrationScriptGenerator.Generate(plan, previous);
+
+        // Assert
+        var step = script.Steps.ShouldHaveSingleItem();
+        step.StatementText.ShouldBe($"ALTER TABLE dbo.items ALTER COLUMN Value TYPE {expectedType};");
+        step.RollbackRequest.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Migration: an unchanged engine domain permits nullability tightening")]
@@ -75,7 +87,7 @@ public sealed class SqlSchemaModifierMigrationTests
         script.Steps.ShouldHaveSingleItem().StatementText.ShouldBe("ALTER TABLE dbo.items ALTER COLUMN Value email NOT NULL;");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - 49a: code-first bound tightening validates populated rows on the worker")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Bound tightening: precision uses 49a and VARCHAR uses joint publication on the worker")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task BuildAsync_CodeFirstBoundTightening_ShouldDeferAndEnforceResolvedBounds(bool numeric)
@@ -140,7 +152,8 @@ public sealed class SqlSchemaModifierMigrationTests
             await Task.Delay(1, timeout.Token);
         }
         result.OfflineError.ShouldBeNull();
-        applied.ShouldBe(1);
+        applied.ShouldBe(numeric ? 1 : 0);
+        if (!numeric) { result.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1); }
         result.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
         await using var writer = await result.CreateSessionAsync(timeout.Token);
         await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync(

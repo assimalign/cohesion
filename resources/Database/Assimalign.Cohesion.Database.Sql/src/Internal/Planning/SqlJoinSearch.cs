@@ -2,6 +2,8 @@ using System;
 using System.Numerics;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Sql.Language;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>Exact subset DP. Cardinalities depend on a set, not its chosen tree.</summary>
@@ -9,9 +11,26 @@ internal static class SqlJoinSearch
 {
     internal const int ExactRelationLimit = 8;
 
+    // Log/exp estimates may differ in the last bits across C runtimes. A relative
+    // 1e-12 cost tolerance lets memory and binding ordinals settle these near-ties.
+    // Memory admission itself has no tolerance: the allowed increase is zero.
+    internal static int CompareCost(double left, double right)
+        => left == right ? 0 : double.IsPositiveInfinity(right) ? -1 : double.IsPositiveInfinity(left) ? 1 :
+            Math.Abs(left - right) <= 1e-12 * Math.Max(Math.Abs(left), Math.Abs(right)) ? 0 : left < right ? -1 : 1;
+
     internal static (SqlJoinTree Tree, int States, int Partitions, double Cost) Find(int count,
-        Func<int, double> rows, Func<int, int, (SqlJoinStep Step, double Work)> join,
-        CancellationToken cancellationToken, Func<SqlJoinTree, double>? retainedBytes = null)
+        Func<int, double> rows, Func<int, int, (SqlJoinStep Step, double Work)> join, CancellationToken cancellationToken)
+        => Find(count, rows, (left, right) =>
+        {
+            var candidate = join(left, right);
+            var step = candidate.Step;
+            return new SqlJoinSearchJoin(step.Binding, step.Kind, step.Condition, step.Access, step.Hash, candidate.Work);
+        }, cancellationToken, null, null);
+
+    internal static (SqlJoinTree Tree, int States, int Partitions, double Cost) Find(int count,
+        Func<int, double> rows, Func<int, int, SqlJoinSearchJoin> join, CancellationToken cancellationToken,
+        Func<int, int, SqlJoinSearchJoin, double>? retainedBytes,
+        Action<int, int, int, SqlJoinSearchJoin>? finalized)
     {
         int size = 1 << count;
         var trees = new SqlJoinTree[size];
@@ -27,37 +46,55 @@ internal static class SqlJoinSearch
                 trees[mask] = new(binding);
                 costs[mask] = rows(mask);
                 orders[mask] = (ulong)binding;
+                finalized?.Invoke(mask, 0, 0, default);
                 continue;
             }
-            double best = double.PositiveInfinity;
-            double bestMemory = double.PositiveInfinity;
+            double best = double.PositiveInfinity, bestMemory = double.NaN;
             ulong bestOrder = ulong.MaxValue;
+            int bestLeft = 0, bestRight = 0;
+            SqlJoinSearchJoin bestJoin = default;
             for (int left = (mask - 1) & mask; left != 0; left = (left - 1) & mask)
             {
                 int right = mask ^ left;
-                var candidate = join(left, right);
                 partitions++;
+                // Work is nonnegative. Count pruned partitions to preserve the public
+                // search evidence while avoiding physical path construction for them.
+                if (CompareCost(costs[left] + costs[right], best) > 0) { continue; }
+                var candidate = join(left, right);
                 double cost = costs[left] + costs[right] + candidate.Work;
-                if (cost > best) { continue; }
-                var tree = new SqlJoinTree(-1, trees[left], trees[right], candidate.Step);
-                double memory = retainedBytes?.Invoke(tree) ?? 0;
+                int comparison = CompareCost(cost, best);
+                if (comparison > 0) { continue; }
+                double memory = double.NaN;
                 ulong order = (orders[left] << (4 * BitOperations.PopCount((uint)right))) | orders[right];
-                // Retained builds precede ordinal ties; all flat builds coexist until disposal.
-                if (cost == best && (memory > bestMemory || memory == bestMemory && order >= bestOrder)) { continue; }
+                if (comparison == 0)
+                {
+                    memory = retainedBytes?.Invoke(left, right, candidate) ?? 0;
+                    if (double.IsNaN(bestMemory)) { bestMemory = retainedBytes?.Invoke(bestLeft, bestRight, bestJoin) ?? 0; }
+                    if (memory > bestMemory || memory == bestMemory && order >= bestOrder) { continue; }
+                }
                 best = cost;
                 bestMemory = memory;
                 bestOrder = order;
-                trees[mask] = tree;
+                bestLeft = left; bestRight = right; bestJoin = candidate;
             }
+            // One tree and step per finalized subset, never per losing partition.
+            trees[mask] = new(-1, trees[bestLeft], trees[bestRight], bestJoin.Step());
             costs[mask] = best;
             orders[mask] = bestOrder;
+            finalized?.Invoke(mask, bestLeft, bestRight, bestJoin);
         }
         return (trees[^1], size - 1, partitions, costs[^1]);
     }
 }
 
+internal readonly record struct SqlJoinSearchJoin(int Binding, SqlJoinType Kind, SqlBoundExpression? Condition,
+    SqlJoinIndexPath? Access, SqlHashJoinPath? Hash, double Work)
+{
+    internal SqlJoinStep Step() => new(Binding, Kind, Condition, Access) { Hash = Hash };
+}
+
 /// <summary>Search evidence exists only on searched plans; ordinary plan sizes stay unchanged.</summary>
-internal sealed record SqlSearchedJoinPlan : SqlJoinPlan
+internal record SqlSearchedJoinPlan : SqlJoinPlan
 {
     internal SqlSearchedJoinPlan(SqlJoinPlan original, int states, int partitions, double cost,
         string order, bool reordered, bool sourceOnly) : base(original)

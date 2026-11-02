@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -23,6 +24,14 @@ public static class SqlMigrationScriptGenerator
     public static SqlMigrationScript Generate(
         SqlSchemaMigrationPlan plan,
         SqlCompiledSchema? currentSchema = null)
+        => GenerateCore(plan, currentSchema, joint: false);
+
+    // The engine can prove a rewrite from a native domain's live facets, which
+    // portable declarations alone cannot resolve. Keep that decision authoritative.
+    internal static SqlMigrationScript GenerateJoint(SqlSchemaMigrationPlan plan, SqlCompiledSchema? currentSchema)
+        => GenerateCore(plan, currentSchema, joint: true);
+
+    private static SqlMigrationScript GenerateCore(SqlSchemaMigrationPlan plan, SqlCompiledSchema? currentSchema, bool joint)
     {
         ArgumentNullException.ThrowIfNull(plan);
         if (currentSchema is not null &&
@@ -32,6 +41,16 @@ public static class SqlMigrationScriptGenerator
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptGeneratorGenerateFailure, plan.SourceHash ?? "<empty>", currentSchema.Hash));
         }
 
+        // A default change needs publication of the complete target. Preserve the base
+        // generator's refusal when no operation in the plan requires a TYPE rewrite.
+        joint = joint || plan.Operations.Any(operation => RenderChecked(operation, () =>
+        {
+            if (operation.Kind != SqlSchemaMigrationOperationKind.AlterColumn ||
+                operation.Column is not { } column || operation.PreviousColumn is not { } previous) { return false; }
+            var type = ResolveAlterColumnType(column, out string? domain);
+            var old = ResolveAlterColumnType(previous, out string? oldDomain);
+            return RequiresTypeRewrite(old, oldDomain, type, domain);
+        }));
         var steps = new List<SqlMigrationScriptStep>(plan.Operations.Count);
 
         foreach (SqlSchemaMigrationOperation operation in plan.Operations)
@@ -44,10 +63,24 @@ public static class SqlMigrationScriptGenerator
                 continue;
             }
 
-            steps.Add(Render(operation, currentSchema));
+            if (operation.Kind == SqlSchemaMigrationOperationKind.AlterColumn)
+            { RenderChecked(operation, () => { RenderAlterColumns(operation, steps, joint); return true; }); }
+            else { steps.Add(Render(operation, currentSchema)); }
         }
 
         return new SqlMigrationScript(plan, steps);
+    }
+
+    private static T RenderChecked<T>(SqlSchemaMigrationOperation operation, Func<T> render)
+    {
+        try { return render(); }
+        catch (SqlSchemaMigrationException) { throw; }
+        catch (Exception exception) when (exception is DatabaseException or ArgumentException)
+        {
+            throw new SqlSchemaMigrationException(
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationScriptGeneratorRenderFailure,
+                    operation.Kind, QualifiedName(operation), exception.Message), exception);
+        }
     }
 
     private static SqlMigrationScriptStep Render(
@@ -131,7 +164,7 @@ public static class SqlMigrationScriptGenerator
         }
     }
 
-    private static SqlMigrationScriptStep RenderAlterColumn(SqlSchemaMigrationOperation operation)
+    private static void RenderAlterColumns(SqlSchemaMigrationOperation operation, List<SqlMigrationScriptStep> steps, bool joint)
     {
         if (operation.Column is not { } column || operation.PreviousColumn is not { } previous)
         {
@@ -140,16 +173,86 @@ public static class SqlMigrationScriptGenerator
         RequireMatchingName(operation, column.Name, "column");
         DatabaseTypeInfo type = ResolveAlterColumnType(column, out string? domain);
         DatabaseTypeInfo previousType = ResolveAlterColumnType(previous, out string? previousDomain);
-        if (type.Type != previousType.Type || type.Scale != previousType.Scale ||
-            !string.Equals(domain, previousDomain, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral),
-                SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral), StringComparison.Ordinal))
+        bool changesDefault = !string.Equals(SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral),
+            SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral), StringComparison.Ordinal);
+        if (changesDefault && !joint)
         {
             throw Unsupported(operation, "ALTER metadata requiring a storage-type, domain, scale or default rewrite is not implemented");
         }
-        return new SqlMigrationScriptStep(operation, SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), column),
-            SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), previous));
+        string table = RequireParent(operation);
+        bool changesType = type.Type != previousType.Type || type.MaxLength != previousType.MaxLength ||
+            type.Precision != previousType.Precision || type.Scale != previousType.Scale ||
+            !string.Equals(domain, previousDomain, StringComparison.OrdinalIgnoreCase);
+        bool rewrite = RequiresTypeRewrite(previousType, previousDomain, type, domain);
+        if (!rewrite && !changesDefault)
+        {
+            steps.Add(RenderAlterColumn(operation));
+            return;
+        }
+
+        // A portable AlterColumn already carries both typed definitions. Lower its TYPE
+        // before any nullability change; both retain their place in declaration order.
+        // Reverse conversion can lose data even when an assignment cast exists, so
+        // TYPE has no compensating SQL. Joint execution consumes the complete plan.
+        var typed = column with { IsNullable = previous.IsNullable, DefaultLiteral = null };
+        if (rewrite)
+        {
+            // The complete declaration supplies the final default. Remove the old
+            // override before TYPE so an obsolete expression cannot block conversion.
+            if (previous.DefaultLiteral is not null)
+            {
+                var drop = new SqlSchemaMigrationOperation(operation.Kind, operation.Safety,
+                    operation.ObjectName, operation.ParentName, column: previous with { DefaultLiteral = null }, previousColumn: previous);
+                steps.Add(new SqlMigrationScriptStep(drop,
+                    SqlSchemaStatementRenderer.SetDefault(table, previous with { DefaultLiteral = null }),
+                    SqlSchemaStatementRenderer.SetDefault(table, previous)));
+            }
+            var typeOperation = new SqlSchemaMigrationOperation(operation.Kind, operation.Safety,
+                operation.ObjectName, operation.ParentName, column: typed, previousColumn: previous);
+            steps.Add(new SqlMigrationScriptStep(typeOperation,
+                SqlSchemaStatementRenderer.AlterColumnType(table, column), rollbackStatementText: null));
+        }
+        else if (changesType)
+        {
+            // Preserve 49a's reversible full-definition lowering for compatible
+            // facets, including when a separate default change is also requested.
+            typed = column with { IsNullable = previous.IsNullable, DefaultLiteral = previous.DefaultLiteral };
+            steps.Add(RenderAlterColumn(new SqlSchemaMigrationOperation(operation.Kind, operation.Safety,
+                operation.ObjectName, operation.ParentName, column: typed, previousColumn: previous)));
+        }
+        if (changesDefault || rewrite && column.DefaultLiteral is not null)
+        {
+            // The declaration's explicit default is authoritative afterwards (for example 1.234 declared
+            // on NUMERIC(8,2) is stored as that expression, while TYPE folds it to 1.23).
+            // A separate existing DDL action keeps the exported statement sequence
+            // faithful to that declaration. Joint publication includes the final default.
+            var defaultOperation = new SqlSchemaMigrationOperation(operation.Kind, operation.Safety,
+                operation.ObjectName, operation.ParentName, column: column with { IsNullable = previous.IsNullable }, previousColumn: typed);
+            steps.Add(new SqlMigrationScriptStep(defaultOperation, SqlSchemaStatementRenderer.SetDefault(table, column),
+                rewrite ? null : SqlSchemaStatementRenderer.SetDefault(table, previous)));
+        }
+        if (previous.IsNullable != column.IsNullable)
+        {
+            var nullableOperation = new SqlSchemaMigrationOperation(operation.Kind, operation.Safety,
+                operation.ObjectName, operation.ParentName, column: column, previousColumn: column with { IsNullable = previous.IsNullable });
+            steps.Add(new SqlMigrationScriptStep(nullableOperation,
+                SqlSchemaStatementRenderer.SetNullability(table, column),
+                SqlSchemaStatementRenderer.SetNullability(table, typed)));
+        }
     }
+
+    // Precision and widening length bounds retain 49a's validation-only
+    // path. They must not turn a non-TYPE migration into a physical rewrite.
+    internal static bool RequiresTypeRewrite(DatabaseTypeInfo previous, string? previousDomain, DatabaseTypeInfo type, string? domain)
+        => type.Type != previous.Type || type.Scale != previous.Scale ||
+            !string.Equals(domain, previousDomain, StringComparison.OrdinalIgnoreCase) ||
+            type.Type == DatabaseType.Character && type.MaxLength != previous.MaxLength ||
+            type.Type == DatabaseType.String && type.MaxLength is { } length &&
+                (previous.MaxLength is null || length < previous.MaxLength);
+
+    private static SqlMigrationScriptStep RenderAlterColumn(SqlSchemaMigrationOperation operation)
+        => new(operation, SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), operation.Column!),
+            SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), operation.PreviousColumn!));
 
     private static DatabaseTypeInfo ResolveAlterColumnType(CompiledSchemaColumn column, out string? domain)
     {

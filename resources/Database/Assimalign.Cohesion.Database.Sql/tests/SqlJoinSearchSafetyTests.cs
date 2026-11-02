@@ -54,8 +54,10 @@ public sealed class SqlJoinSearchSafetyTests
         session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Join search: expression hash keys retain linear candidate work (#1629)")]
-    public async Task ExecuteAsync_ExpressionKey_ShouldRetainHashJoin()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: expression hash keys retain linear candidate work (#1629)")]
+    [InlineData(1)]
+    [InlineData(10)]
+    public async Task ExecuteAsync_ExpressionKey_ShouldRetainHashJoin(int singletonInputs)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("search-expression-key", new());
@@ -70,14 +72,15 @@ public sealed class SqlJoinSearchSafetyTests
         // Act
         int rows = 0;
         await using var result = (DatabaseResultSet)await session.ExecuteAsync(
-            "SELECT a.id,b.id,c.id FROM a JOIN (b CROSS JOIN c) ON CHAR_LENGTH(a.k)=b.n", cancellationToken: CancellationToken.None);
+            "SELECT a.id,b.id,c0.id FROM a JOIN (b CROSS JOIN " + string.Join(" CROSS JOIN ", Enumerable.Range(0, singletonInputs).Select(i => $"c c{i}")) +
+            ") ON CHAR_LENGTH(a.k)=b.n", cancellationToken: CancellationToken.None);
         await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { rows++; }
         var metrics = session.LastStatementMetrics!;
         Evidence(metrics, rows);
 
         // Assert
         rows.ShouldBe(80);
-        metrics.JoinCandidatePairs.ShouldBeLessThanOrEqualTo(160);
+        metrics.JoinCandidatePairs.ShouldBeLessThanOrEqualTo(80L * (singletonInputs + 1));
         metrics.JoinAccessPaths.ShouldContain("join-hash");
     }
 
@@ -142,10 +145,13 @@ public sealed class SqlJoinSearchSafetyTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Join search: MERGE rejects association WHERE and target-only source predicates (#1629)")]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    public async Task Cost_InvalidMergeAssociation_ShouldAssertInvariants(int variant)
+    [InlineData(0, 0)]
+    [InlineData(1, 0)]
+    [InlineData(2, 0)]
+    [InlineData(0, 8)]
+    [InlineData(1, 8)]
+    [InlineData(2, 8)]
+    public async Task Cost_InvalidMergeAssociation_ShouldAssertInvariants(int variant, int extraInputs)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("search-merge-invariant", new());
@@ -154,7 +160,8 @@ public sealed class SqlJoinSearchSafetyTests
         foreach (string table in new[] { "t", "a", "b" })
         { await session.ExecuteAsync($"CREATE TABLE {table}(id INT PRIMARY KEY,k INT)", cancellationToken: CancellationToken.None); }
         var merge = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql(
-            "MERGE INTO t USING a JOIN b ON a.k=b.k ON t.id=a.id WHEN MATCHED THEN DELETE").Statement.SqlExpression).ShouldBeOfType<SqlMergePlan>();
+            "MERGE INTO t USING a JOIN b ON a.k=b.k" + string.Concat(Enumerable.Range(0, extraInputs).Select(i => $" CROSS JOIN b e{i}")) +
+            " ON t.id=a.id WHEN MATCHED THEN DELETE").Statement.SqlExpression).ShouldBeOfType<SqlMergePlan>();
         var join = merge.Source.Associations;
         var predicate = new SqlBoundIsNull(new SqlBoundColumn(variant == 1 ? join.Bindings[1].Offset : 0), false);
         if (variant < 2) { join = join with { Where = predicate }; }
@@ -237,8 +244,10 @@ public sealed class SqlJoinSearchSafetyTests
         SqlPlanner.HashKeys(condition, plan.Bindings, plan.Columns, 0, fullFrame: true, innerMask: 3).ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Join search: unproven hash builds keep the old budget-free loop plan (#1629)")]
-    public async Task ExecuteAsync_UnprovenHashBuilds_ShouldKeepOldLoopPlan()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: unproven hash builds keep the old budget-free loop plan (#1629)")]
+    [InlineData(0)]
+    [InlineData(8)]
+    public async Task ExecuteAsync_UnprovenHashBuilds_ShouldKeepOldLoopPlan(int singletonInputs)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("search-bushy-width", new() { StatementMemoryBudget = 5000 });
@@ -249,13 +258,16 @@ public sealed class SqlJoinSearchSafetyTests
             await session.ExecuteAsync($"CREATE TABLE {table}(id INT PRIMARY KEY,k INT,v INT)", cancellationToken: CancellationToken.None);
             await session.ExecuteAsync($"INSERT INTO {table} VALUES" + string.Join(',', Enumerable.Range(1, 16).Select(i => $"({i},{i},{i})")), cancellationToken: CancellationToken.None);
         }
+        await session.ExecuteAsync("CREATE TABLE singleton(id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO singleton VALUES(1)", cancellationToken: CancellationToken.None);
 
         // Act
         int rows = 0;
         try
         {
             await using var result = (DatabaseResultSet)await session.ExecuteAsync(
-                "SELECT a.id,b.id,c.id,d.id FROM a,b,c,d WHERE a.k=c.k AND b.k=d.k AND a.v=b.v", cancellationToken: CancellationToken.None);
+                "SELECT a.id,b.id,c.id,d.id FROM a,b,c,d" + string.Concat(Enumerable.Range(0, singletonInputs).Select(i => $",singleton s{i}")) +
+                " WHERE a.k=c.k AND b.k=d.k AND a.v=b.v", cancellationToken: CancellationToken.None);
             await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { rows++; }
         }
         finally { Evidence(session.LastStatementMetrics!, rows); }
@@ -265,8 +277,10 @@ public sealed class SqlJoinSearchSafetyTests
         session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Join search: an empty old prefix avoids activating later hash builds (#1629)")]
-    public async Task ExecuteAsync_EmptyJoinPrefix_ShouldPreserveBuildActivation()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: an empty old prefix avoids activating later hash builds (#1629)")]
+    [InlineData(0)]
+    [InlineData(9)]
+    public async Task ExecuteAsync_EmptyJoinPrefix_ShouldPreserveBuildActivation(int extraInputs)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("search-build-prefix", new() { StatementMemoryBudget = 11_032 });
@@ -284,7 +298,8 @@ public sealed class SqlJoinSearchSafetyTests
         try
         {
             await using var result = (DatabaseResultSet)await session.ExecuteAsync(
-                "SELECT a.id,b.id,c.id FROM a JOIN b ON a.k=b.k JOIN c ON a.k=c.k", cancellationToken: CancellationToken.None);
+                "SELECT a.id,b.id,c.id FROM a JOIN b ON a.k=b.k JOIN c ON a.k=c.k" +
+                string.Concat(Enumerable.Range(0, extraInputs).Select(i => $" CROSS JOIN c e{i}")), cancellationToken: CancellationToken.None);
             await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { rows++; }
         }
         finally { Evidence(session.LastStatementMetrics!, rows); }

@@ -85,8 +85,9 @@ internal sealed class SqlProvisioningWorker : DatabaseEngineWorker
                 _pending.RemoveFirst();
                 if (work.Rewrite is { } rewrite) { _queuedRewrites.Remove(rewrite); }
             }
-            // The migration reports a permanent step failure by taking its database
-            // offline. It does not retry the step; a later reopen may schedule a new attempt.
+            // Per-step migrations retain their offline failure policy. Joint migrations
+            // discard unpublished work and keep the old schema online. Neither retries
+            // here; only an explicit later schema application can schedule joint work.
             if (work.Rewrite is { } replacement) { replacement.Run(cancellationToken); }
             else { work.Migration!.Run(cancellationToken); }
         }

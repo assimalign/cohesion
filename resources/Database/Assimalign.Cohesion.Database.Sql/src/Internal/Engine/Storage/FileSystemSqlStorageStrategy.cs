@@ -28,6 +28,33 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
     private readonly string _rootPath;
     private readonly StorageCommitDurability? _durability;
 
+    internal override bool SparseDataGrowth(string databaseName)
+    {
+        string directory = Path.GetFullPath(DatabaseFileNames.GetDirectory(_rootPath, databaseName));
+        string dataPath = DatabaseFileNames.GetFiles(directory, DataFileSet).Data;
+        if (!OperatingSystem.IsWindows()) { return true; }
+        try
+        {
+            return IsSparseGrowth(true, dataPath, File.GetAttributes(dataPath), File.GetAttributes(directory),
+                SqlVolumeSpace.GetDriveType(dataPath));
+        }
+        catch (IOException) { return true; }
+        catch (UnauthorizedAccessException) { return true; }
+    }
+
+    internal static bool IsSparseGrowth(bool windows, string path, FileAttributes file, FileAttributes directory, DriveType drive)
+    {
+        const FileAttributes lazy = FileAttributes.Compressed | FileAttributes.SparseFile | FileAttributes.IntegrityStream;
+        bool unc = path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase) || path.StartsWith("//", StringComparison.Ordinal) ||
+            (path.StartsWith(@"\\", StringComparison.Ordinal) && !path.StartsWith(@"\\?\", StringComparison.Ordinal) &&
+                !path.StartsWith(@"\\.\", StringComparison.Ordinal));
+        return !windows || ((file | directory) & lazy) != 0 || unc ||
+            drive is DriveType.Network or DriveType.Unknown or DriveType.NoRootDirectory;
+    }
+
+    internal override long GetAvailableMigrationBytes(string databaseName)
+        => SqlVolumeSpace.GetAvailableBytes(Path.GetFullPath(DatabaseFileNames.GetDirectory(_rootPath, databaseName)));
+
     internal FileSystemSqlStorageStrategy(string rootPath, StorageCommitDurability? durability = null)
     {
         _rootPath = rootPath;

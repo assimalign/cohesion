@@ -18,6 +18,45 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </summary>
 public sealed class StorageCheckpointTriggerTests
 {
+    [Fact(DisplayName = "Cohesion Test [Storage] - Sixth pass: size wake and due predicate count the same post-checkpoint bytes")]
+    public void OnCheckpointNeeded_SmallThreshold_ShouldNotWakeBeforeDue()
+    {
+        // Arrange
+        using var storage = TornStorage.Create();
+        storage.Checkpoint();
+        storage.CheckpointJournalSize = 40;
+        int signals = 0;
+        storage.OnCheckpointNeeded = () => signals++;
+
+        // Act / Assert: the checkpoint's 38 bytes cannot make the 38-byte Begin cross 40.
+        storage.Log.AppendBegin(1);
+        signals.ShouldBe(0);
+        storage.IsCheckpointDue(TimeSpan.FromDays(1)).ShouldBeFalse();
+        storage.Log.AppendCommit(1);
+        signals.ShouldBe(1);
+        storage.IsCheckpointDue(TimeSpan.FromDays(1)).ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Storage] - Sixth pass: checkpoint residue alone never makes a tiny size due")]
+    [InlineData(1)]
+    [InlineData(38)]
+    public void IsCheckpointDue_TinySize_ShouldIgnoreCompletedCheckpointRecord(long threshold)
+    {
+        // Arrange
+        using var storage = TornStorage.Create();
+        storage.CheckpointJournalSize = threshold;
+
+        // Act / Assert
+        for (int cycle = 0; cycle < 3; cycle++)
+        {
+            storage.Checkpoint();
+            storage.JournalLength.ShouldBeGreaterThanOrEqualTo(38);
+            storage.IsCheckpointDue(TimeSpan.Zero).ShouldBeFalse();
+            storage.Insert("activity");
+            storage.IsCheckpointDue(TimeSpan.FromDays(1)).ShouldBeTrue();
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint trigger: the journal length counts verified frames and restarts at a checkpoint")]
     public void JournalLength_AppendsCheckpointsAndReopen_ShouldMatchTheJournalBytes()
     {

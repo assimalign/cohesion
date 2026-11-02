@@ -18,6 +18,7 @@ internal sealed class SqlTableReclamation
     private readonly SqlDatabase _database;
     private readonly object _readersLock = new();
     private readonly object _runLock = new();
+    private readonly object _allocationCountLock = new();
     private readonly Dictionary<long, int> _readers = new();
     private readonly Dictionary<ulong, Pending> _pending = new();
     private readonly CancellationTokenSource _stop = new();
@@ -31,6 +32,17 @@ internal sealed class SqlTableReclamation
     internal SqlTableReclamation(SqlDatabase database) { _database = database; }
 
     internal long ReclaimedPages => Interlocked.Read(ref _reclaimedPages);
+    // Copy samples only inside its own apply brackets. Pair allocator releases
+    // with their counter update so an in-flight commit cannot lose or invent
+    // allocations. No page walk, storage mutation or coordinator gate is taken.
+    internal long CaptureAllocationCount()
+    {
+        lock (_allocationCountLock)
+        {
+            var pages = _database.DataStorage.PageManager;
+            return checked(pages.PageCount - pages.FreePageCount + _reclaimedPages);
+        }
+    }
     internal bool HasWork => Volatile.Read(ref _running) != 0 || Volatile.Read(ref _discover) != 0 || Volatile.Read(ref _pendingCount) != 0;
     internal Action<ulong, CancellationToken>? BeforeBatch { get; set; }
     internal Action<ulong, CancellationToken>? BeforeBatchCommit { get; set; }
@@ -101,6 +113,16 @@ internal sealed class SqlTableReclamation
                     }
                     BeforeBatch?.Invoke(pending.ObjectId, token);
                     token.ThrowIfCancellationRequested();
+                    // One bracket can cross the threshold. Once it ends, no
+                    // later owner or poll may keep a due checkpoint busy. The
+                    // interval predicate also covers an already pending attempt
+                    // after the worker has consumed its wake signal.
+                    if (_database.Engine.CheckpointNeededSignal.IsSet ||
+                        _database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
+                    {
+                        SqlDatabaseEventSource.Log.TableReclamationYielded(_database, pending.ObjectId);
+                        return;
+                    }
                     int reclaimed;
                     // No coordinator apply gate or catalog/table lock covers the page walk.
                     // These identities can never acquire new writers or be reused by CREATE.
@@ -109,10 +131,18 @@ internal sealed class SqlTableReclamation
                         reclaimed = _database.DataStorage.FreeOwnerPages(bracket, pending.ObjectId, BatchSize);
                         BeforeBatchCommit?.Invoke(pending.ObjectId, token);
                         token.ThrowIfCancellationRequested();
-                        bracket.Commit();
+                        lock (_allocationCountLock)
+                        {
+                            bracket.Commit();
+                            Interlocked.Add(ref _reclaimedPages, reclaimed);
+                        }
                     }
+                    // The crossing append can wake a checkpoint while this bracket is
+                    // still active. Retry after it closes. Due persists until checkpoint,
+                    // so the next bracket check yields: exactly one retry wake per cycle.
+                    if (_database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
+                    { _database.Engine.CheckpointNeededSignal.Set(); }
                     pending.Pages += reclaimed;
-                    Interlocked.Add(ref _reclaimedPages, reclaimed);
                     AfterBatch?.Invoke(pending.ObjectId, reclaimed);
 
                     // A short batch alone does not prove the directory is empty: FreeOwnerPages

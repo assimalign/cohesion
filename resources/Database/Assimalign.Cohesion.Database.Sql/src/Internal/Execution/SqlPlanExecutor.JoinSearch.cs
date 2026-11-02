@@ -20,6 +20,9 @@ internal sealed partial class SqlPlanExecutor
     {
         int start = sourceOnly ? 1 : 0;
         int count = plan.Bindings.Count - start;
+        // Search is optional and outside the statement grant. Above the largest
+        // measured graph keep ordinary costing/execution, without search or probes.
+        if (count > SqlGreedyJoinSearch.RelationLimit) { return null; }
         if (count < (sourceOnly ? 2 : 3) || plan.Bindings.Any(binding => binding.Source.Table is null)) { return null; }
         // Conservative subset of PostgreSQL optimizer/README:199-285 and
         // joinrels.c:355-676. No reassociation across ANY outer/semi/anti boundary.
@@ -39,6 +42,7 @@ internal sealed partial class SqlPlanExecutor
         var sourceSteps = sourceTree is null ? plan.Steps : TreeSteps(sourceTree).ToArray();
         if (sourceSteps.Any(step => step.Kind is not (SqlJoinType.Inner or SqlJoinType.Cross))) { return null; }
         var terms = new List<(int Mask, SqlBoundExpression Expression)>();
+        var largeTerms = count > SqlJoinSearch.ExactRelationLimit ? new List<(int[] Bindings, SqlBoundExpression Expression)>() : null;
         var targetTerms = new List<SqlBoundExpression>();
         var seen = new HashSet<SqlBoundExpression>(ReferenceEqualityComparer.Instance);
         foreach (var expression in sourceSteps.Select(step => step.Condition).Append(plan.Where))
@@ -49,19 +53,37 @@ internal sealed partial class SqlPlanExecutor
                 var columns = new HashSet<int>();
                 if (!SqlPlanner.JoinRestrictionColumns(term, columns, plan.Columns)) { return null; }
                 int mask = 0;
+                List<int>? members = largeTerms is null ? null : new();
                 bool target = false;
+                bool source = false;
                 foreach (int ordinal in columns)
                 {
                     int binding = BindingOf(ordinal);
                     if (binding < start) { target = true; }
-                    else { mask |= 1 << (binding - start); }
+                    else
+                    {
+                        source = true;
+                        if (members is null) { mask |= 1 << (binding - start); }
+                        else if (!members.Contains(binding - start)) { members.Add(binding - start); }
+                    }
                 }
                 // A flat UPDATE/DELETE source can be parameterized by the target's row.
                 // Independent source materialization would discard those indexed probes.
-                if (target && mask != 0 && boundary is null) { return null; }
+                if (target && source && boundary is null) { return null; }
                 if (target) { targetTerms.Add(term); }
+                else if (members is not null)
+                {
+                    if (members.Count == 0) { members.Add(0); }
+                    members.Sort();
+                    largeTerms!.Add((members.ToArray(), term));
+                }
                 else { terms.Add((mask == 0 ? 1 : mask, term)); }
             }
+        }
+        if (largeTerms is not null)
+        {
+            if (boundary is not null && targetTerms.Count != 0) { throw new System.Diagnostics.UnreachableException(); }
+            return SearchLargeJoinOrder(plan, sourceOnly, largeTerms, targetTerms, choose, probe, costBound, retainedFrames, cancellationToken);
         }
         var inputs = plan.Inputs.Select((input, i) =>
             input with { Access = choose(plan.Bindings[i].Source.Table!, input.Access) }).ToArray();
@@ -110,7 +132,10 @@ internal sealed partial class SqlPlanExecutor
         var provenPaths = plan.Steps.SelectMany(step => step.Access is { } access
             ? access.Alternatives ?? new[] { access } : Array.Empty<SqlJoinIndexPath>()).OfType<SqlPartialJoinIndexPath>().ToArray();
         var baseline = costBound(boundInputs, estimates);
-        var result = SqlJoinSearch.Find(count, mask => rows[mask], MakeJoin, cancellationToken, RetainedBytes);
+        var summaries = new JoinRetention[rows.Length];
+        var result = SqlJoinSearch.Find(count, mask => rows[mask], MakeJoin, cancellationToken,
+            (left, right, join) => Summary(left | right, left, right, join).Retained,
+            (mask, left, right, join) => summaries[mask] = Summary(mask, left, right, join));
         var tree = Remap(result.Tree);
         if (sourceOnly)
         {
@@ -186,67 +211,60 @@ internal sealed partial class SqlPlanExecutor
             return node;
         }
 
-        double RetainedBytes(SqlJoinTree node)
+        JoinRetention Summary(int mask, int leftMask, int rightMask, SqlJoinSearchJoin join)
         {
-            // Cost the actual executor shape, including padded ordinal arrays. Scalar
-            // payloads use the hash accountant's 32-byte allowance. Variable payloads
-            // remain estimates, never the retention certificate below.
-            bool flat = IsLeftDeep(node) && !TreeSteps(node).Any(step => step.Hash is { } hash &&
-                (hash.OuterExpressions is not null || hash.InnerExpressions is not null));
+            // Finalized children summarize the executor's actual shape. Candidate
+            // memory is O(1), and is only requested on a cost tie by the DP kernel.
+            if (leftMask == 0)
+            {
+                int binding = BitOperations.TrailingZeroCount(mask);
+                int width = plan.Bindings[binding + start].Source.Columns.Count;
+                double output = rows[mask] * (24 + 8 * plan.Columns.Count + 32 * width);
+                return new(output, output, width, true, false, 0);
+            }
+            var left = summaries[leftMask];
+            var right = summaries[rightMask];
+            int resultWidth = left.Width + right.Width;
+            double resultOutput = rows[mask] * (24 + 8 * plan.Columns.Count + 32 * resultWidth);
+            double build = join.Hash is null ? right.Output : JoinBuildBytes(rows[rightMask],
+                24 + 8 * plan.Columns.Count + 32 * right.Width);
+            double peak = Math.Max(left.Peak, Math.Max(left.Output + right.Peak + build, left.Output + build + resultOutput));
+            bool flat = left.LeftDeep && BitOperations.IsPow2(rightMask);
+            bool expressions = left.ExpressionHash || right.ExpressionHash || join.Hash is { } hash &&
+                (hash.OuterExpressions is not null || hash.InnerExpressions is not null);
+            double flatBytes = left.FlatBytes;
             if (flat)
             {
-                double retained = 0;
-                foreach (var step in TreeSteps(node))
-                {
-                    if (step.Hash is not null)
-                    { retained += Build(baseRows[step.Binding - start], 24 + 40 * plan.Bindings[step.Binding].Source.Columns.Count); }
-                }
-                return retained;
+                int inner = BitOperations.TrailingZeroCount(rightMask);
+                int width = 24 + 40 * plan.Bindings[inner + start].Source.Columns.Count;
+                flatBytes += join.Hash is not null ? JoinBuildBytes(baseRows[inner], width) :
+                    join.Access is null ? JoinBufferBytes(baseRows[inner], width) : 0;
             }
-            return Materialized(node).Peak;
-
-            (double Peak, double Output) Materialized(SqlJoinTree current)
-            {
-                int mask = 0, width = 0;
-                foreach (int leaf in current.Leaves())
-                { mask |= 1 << leaf; width += plan.Bindings[leaf + start].Source.Columns.Count; }
-                double output = rows[mask] * (24 + 8 * plan.Columns.Count + 32 * width);
-                if (current.Step is null) { return (output, output); }
-                var left = Materialized(current.Left!);
-                var right = Materialized(current.Right!);
-                double build = current.Step.Hash is null ? right.Output : Build(rows[current.Right!.Leaves().Aggregate(0, (m, leaf) => m | (1 << leaf))],
-                    24 + 8 * plan.Columns.Count + 32 * current.Right.Leaves().Sum(leaf => plan.Bindings[leaf + start].Source.Columns.Count));
-                return (Math.Max(left.Peak, Math.Max(left.Output + right.Peak + build, left.Output + build + output)), output);
-            }
-            static double Build(double count, double width)
-            {
-                double capacity = count <= 0 ? 0 : Math.Max(16, Math.Pow(2, Math.Ceiling(Math.Log2(count))));
-                // Include old and new bucket/entry arrays at the largest growth.
-                return 104 + count * width + (capacity == 0 ? 0 : 96 + 30 * capacity);
-            }
+            return new(peak, resultOutput, resultWidth, flat, expressions, flatBytes);
         }
 
-        (SqlJoinStep Step, double Work) MakeJoin(int left, int right)
+        SqlJoinSearchJoin MakeJoin(int left, int right)
         {
-            var crossing = terms.Where(term => (term.Mask & (left | right)) == term.Mask &&
-                (term.Mask & left) != 0 && (term.Mask & right) != 0).Select(term => term.Expression).ToArray();
-            var condition = Combine(crossing);
-            int inner = start + BitOperations.TrailingZeroCount(right);
-            var keys = SqlPlanner.HashKeys(condition, plan.Bindings, plan.Columns, inner,
-                fullFrame: true, innerMask: right << start);
-            SqlJoinIndexPath? access = BitOperations.IsPow2(right) ? IndexPath(inner, left << start, crossing) : null;
-            double work = rows[left] * rows[right];
-            if (access is not null)
+            List<SqlBoundExpression>? crossing = null;
+            foreach (var term in terms)
             {
-                double seek = rows[left] * (1 + Math.Log2(baseRows[inner - start] + 1));
-                // Unique probes bound candidate work even with duplicate outer keys.
-                if (seek <= work || access.Index.IsUnique && access.OuterOrdinals.Count == access.Index.ColumnNames.Count) { work = seek; }
-                else { access = null; }
+                if ((term.Mask & (left | right)) == term.Mask && (term.Mask & left) != 0 && (term.Mask & right) != 0)
+                { (crossing ??= new()).Add(term.Expression); }
             }
-            double hash = 4 * (rows[left] + rows[right]);
-            if (keys is null || hash >= work) { keys = null; }
-            else { access = null; work = hash; }
-            return (new(inner, condition is null ? SqlJoinType.Cross : SqlJoinType.Inner, condition, access) { Hash = keys }, work);
+            var condition = crossing is null ? null : Combine(crossing);
+            int inner = start + BitOperations.TrailingZeroCount(right);
+            SqlJoinIndexPath? access = crossing is not null && BitOperations.IsPow2(right) ? IndexPath(inner, left << start, crossing) : null;
+            SqlHashJoinPath? keys = null;
+            double work = SearchJoinWork(rows[left], rows[right], baseRows[inner - start], ref access, ref keys);
+            // Key extraction and its safety proof allocate; a hash which cannot beat
+            // the chosen product/probe needs neither. Empty crossings need no paths.
+            if (condition is not null && 4 * (rows[left] + rows[right]) < work)
+            {
+                keys = SqlPlanner.HashKeys(condition, plan.Bindings, plan.Columns, inner,
+                    fullFrame: true, innerMask: right << start);
+                if (keys is not null) { work = 4 * (rows[left] + rows[right]); access = null; }
+            }
+            return new(inner, condition is null ? SqlJoinType.Cross : SqlJoinType.Inner, condition, access, keys, work);
         }
 
         SqlJoinIndexPath? IndexPath(int inner, int outer, IReadOnlyList<SqlBoundExpression> conditions)
@@ -314,6 +332,22 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    private static double SearchJoinWork(double outerRows, double innerRows, double baseInnerRows,
+        ref SqlJoinIndexPath? access, ref SqlHashJoinPath? keys)
+    {
+        double work = outerRows * innerRows;
+        if (access is not null)
+        {
+            double seek = outerRows * (1 + Math.Log2(baseInnerRows + 1));
+            if (seek <= work || access.Index.IsUnique && access.OuterOrdinals.Count == access.Index.ColumnNames.Count) { work = seek; }
+            else { access = null; }
+        }
+        double hash = 4 * (outerRows + innerRows);
+        if (keys is null || hash >= work) { keys = null; }
+        else { access = null; work = hash; }
+        return work;
+    }
+
     private static bool IsLeftDeep(SqlJoinTree tree) => tree.Step is null || tree.Right!.Step is null && IsLeftDeep(tree.Left!);
 
     private static bool PreservesRetention(SqlJoinPlan baseline, SqlJoinPlan candidate, bool dml)
@@ -329,6 +363,13 @@ internal sealed partial class SqlPlanExecutor
             !candidate.Steps.Select(step => step.Binding).SequenceEqual(old.Select(step => step.Binding)))) { return false; }
         for (int i = 0; i < baseline.Inputs.Count; i++)
         { if (!ReferenceEquals(baseline.Inputs[i].Access, candidate.Inputs[i].Access)) { return false; } }
+        // A lower bound/unknown estimate cannot certify moving a streamed input
+        // into an unbounded retained list (or build). Unique equality is an upper bound.
+        if (candidate.FirstBinding != baseline.FirstBinding && candidate.Steps.Any(step =>
+            step.Binding == baseline.FirstBinding && (step.Hash is not null || step.Access is null)) &&
+            baseline.InputEstimates?[baseline.FirstBinding] is not { IsComplete: true } &&
+            !Unique(baseline.Inputs[baseline.FirstBinding].Access)) { return false; }
+        if (FlatRetainedBytes(candidate, false) > FlatRetainedBytes(baseline, true)) { return false; }
         foreach (var step in candidate.Steps)
         {
             var previous = old.FirstOrDefault(item => item.Binding == step.Binding);
@@ -350,6 +391,43 @@ internal sealed partial class SqlPlanExecutor
                 !ReferenceEquals(access.Index, chosen.Index) || !access.OuterOrdinals.SequenceEqual(chosen.OuterOrdinals))) { return false; }
         }
         return true;
+    }
+
+    private readonly record struct JoinRetention(double Peak, double Output, int Width,
+        bool LeftDeep, bool ExpressionHash, double FlatBytes)
+    {
+        public double Retained => LeftDeep && !ExpressionHash ? FlatBytes : Peak;
+    }
+
+    private static bool Unique(SqlAccessPath access) => access is SqlIndexSeekPath seek &&
+        seek.Index.IsUnique && seek.EqualityValues.Count == seek.Index.ColumnNames.Count;
+
+    private static double FlatRetainedBytes(SqlJoinPlan plan, bool bound)
+    {
+        double retained = 0;
+        for (int i = 0; i < plan.Steps.Count; i++)
+        {
+            var step = plan.Steps[i];
+            int binding = bound && i == 0 && plan.FirstBinding == 1 ? 0 : step.Binding;
+            double rows = Unique(plan.Inputs[binding].Access) ? 1 : Estimate(plan.InputEstimates?[binding]);
+            int width = 24 + 40 * plan.Bindings[binding].Source.Columns.Count;
+            retained += step.Hash is not null ? JoinBuildBytes(rows, width) : step.Access is null ? JoinBufferBytes(rows, width) : 0;
+        }
+        return retained;
+    }
+
+    private static double JoinBuildBytes(double rows, double width)
+    {
+        double capacity = rows <= 0 ? 0 : Math.Max(16, Math.Pow(2, Math.Ceiling(Math.Log2(rows))));
+        // Include old and new bucket/entry arrays at the largest growth.
+        return 104 + rows * width + (capacity == 0 ? 0 : 96 + 30 * capacity);
+    }
+
+    private static double JoinBufferBytes(double rows, double width)
+    {
+        double capacity = rows <= 0 ? 0 : Math.Max(4, Math.Pow(2, Math.Ceiling(Math.Log2(rows))));
+        // Decoded rows, list object, and reference arrays including growth coexistence.
+        return 32 + rows * width + (capacity == 0 ? 0 : 48 + 16 * capacity);
     }
 
     private static IEnumerable<SqlJoinStep> TreeSteps(SqlJoinTree node)

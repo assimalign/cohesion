@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Sql.Schema — Design
 
+## TYPE migration safety (#1447, SQ-A3)
+
+Same-name domain changes compare their effective storage facets on every referring column.
+TYPE safety is proved without rows: exact integer widening, exact integer-to-float widening,
+REAL to DOUBLE and same-type facets preserving the entire source range can be Safe. Narrowing
+length, precision or scale, rounding and every unproven conversion require destructive opt-in.
+Domain conversions remain conservative, including schema-declared domains: the engine can retain
+application casts that this assembly cannot inspect. Metadata-only changes keep their existing policy.
+The runtime wraps a planner refusal with CS03105 before any step runs, including reverse
+migrations when an older application declares its schema after a successful publication.
+This changes no serialized schema shape; v11 remains current and SDK files are unchanged.
+
 ## Index key orders and format v11 (#1631, SQ-K1)
 
 CompiledSchemaIndex.KeyOrders snapshots one effective order per column. An omitted vector
