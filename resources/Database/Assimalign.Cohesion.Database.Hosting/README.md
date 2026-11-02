@@ -4,13 +4,11 @@ The Database area's runtime composition root. `DatabaseApplication` hosts the
 registered database servers and additional host services; it never references
 an ApplicationModel package.
 
-The retired resource integration (the enabled resource's control-plane registration, its
-ambient endpoints and bootstrap credential, and the admin listener the resource bound) was
-removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the
-area's resource integration returns as `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
-The admin endpoint service is kept for it: Web.Health serves `/healthz`, `/readyz`, and
-`/livez` there, readiness stays unhealthy until every wire server has bound, and every
-`/cohesion/v1` route fails closed. Nothing starts it yet.
+The resource integration is `Assimalign.Cohesion.Database.Hosting.ApplicationModel`, with explicit
+`builder.Services.AddResource(...)` registration. `DatabaseAdminEndpointService` exists and can
+serve Web.Health's `/healthz`, `/readyz`, and `/livez`; every `/cohesion/v1` route returns 403.
+Nothing in production starts that service today. T3 run EN-A1 binds it on the platform's `http`
+endpoint.
 
 The module provisions nothing and knows no schema. A model's engine builder declares
 the databases its engine owns (`sql.AddDatabase("orders", ...)` inside `AddSql`), and
@@ -22,8 +20,9 @@ any engine is built.
 The concrete `DatabaseApplicationBuilder.AddService` verb accepts either an
 `IHostService` instance or a factory over the final database application context.
 The root builder contract exposes no hosting types or background-work registration (O34).
-Registered services start in order before all servers and stop in reverse order
-after the servers drain.
+AddService registrations start first, then Services container IHostService registrations, each in
+registration order, then the reopen service and servers. Stop reverses that complete order,
+draining servers first. Every StartingAsync finishes before any StartAsync.
 Concurrent service start/stop options are rejected at construction and lifecycle
 settings are snapshotted, so retained mutable options cannot bypass this ordering.
 

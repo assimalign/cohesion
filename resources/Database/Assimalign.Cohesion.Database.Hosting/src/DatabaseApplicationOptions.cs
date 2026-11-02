@@ -26,8 +26,8 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     /// <summary>
     /// Gets or sets the content root for configuration files; defaults to the application base
     /// directory. Read, with the environment, when the builder is created
-    /// (<see cref="DatabaseApplicationBuilder.Environment"/>), as an enabled resource's ambient
-    /// context sets both then.
+    /// (<see cref="DatabaseApplicationBuilder.Environment"/>). Later option changes do not alter
+    /// the builder's environment or configuration sources.
     /// </summary>
     public FileSystemPath? ContentRootPath { get; set; }
 

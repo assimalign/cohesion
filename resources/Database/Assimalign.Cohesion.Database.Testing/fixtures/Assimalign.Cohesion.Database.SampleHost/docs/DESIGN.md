@@ -15,7 +15,7 @@ attached to a running host, so the server never accepts a connection ahead of th
 
 The fixture is owned by `Database.Testing`. The retired resource integration was removed on
 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource
-integration returns as `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
+integration is `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
 
 The sequence below shows the build and run of the fixture.
 

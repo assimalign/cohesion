@@ -97,7 +97,7 @@ holder needs the deviation protocol in `.claude/rules/deviations.md`. The applic
 integration needs no exemption property.
 
 The diagram is the area's **spine** — the root, the runtime module, the hosting-family
-integrations, the declarative plane, and the client and test packages. The area has more
+integrations, and the client and test packages. The area has more
 projects than one readable diagram holds; the table below and `docs/DEPENDENCIES.md` carry
 them all.
 
