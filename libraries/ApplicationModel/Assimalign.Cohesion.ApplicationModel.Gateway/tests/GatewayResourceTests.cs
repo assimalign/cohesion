@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,6 +20,8 @@ public sealed class GatewayResourceTests
 
     private const string Revision = "definition:1";
 
+    private static readonly TimeSpan Lease = TimeSpan.FromMinutes(1);
+
     [Fact(DisplayName = DisplayPrefix + "An instance of the planned deployment registered before the plan opens the gate when the plan runs")]
     public void Plan_AfterAnInstanceOfItsDeploymentRegistered_ShouldOpenTheGate()
     {
@@ -31,7 +34,7 @@ public sealed class GatewayResourceTests
         bool openBeforePlan = resource.Registered.IsCompleted;
 
         // Act
-        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment);
+        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment, Lease);
 
         // Assert
         accepted.ShouldBeTrue();
@@ -50,7 +53,7 @@ public sealed class GatewayResourceTests
         resource.TryMarkRegistered(instance);
 
         // Act
-        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, DeploymentId.New());
+        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, DeploymentId.New(), Lease);
 
         // Assert
         resource.Registered.IsCompleted.ShouldBeFalse();
@@ -70,7 +73,7 @@ public sealed class GatewayResourceTests
         resource.TryClose().ShouldBeTrue();
 
         // Act
-        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment);
+        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment, Lease);
 
         // Assert
         resource.IsClosed.ShouldBeTrue();
@@ -100,7 +103,7 @@ public sealed class GatewayResourceTests
             Task plan = Task.Run(() =>
             {
                 start.SignalAndWait();
-                resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment);
+                resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment, Lease);
             });
             await Task.WhenAll(publish, plan).WaitAsync(TimeSpan.FromSeconds(10));
             if (!resource.Registered.IsCompletedSuccessfully)
@@ -113,9 +116,91 @@ public sealed class GatewayResourceTests
         shut.ShouldBe(0);
     }
 
-    private static GatewayResource CreateResource()
+    [Fact(DisplayName = DisplayPrefix + "An instance of the planned deployment whose lease lapsed before the plan leaves the gate shut")]
+    public void Plan_AfterTheLeaseOfAnInstanceOfItsDeploymentLapsed_ShouldLeaveTheGateShut()
     {
-        return new GatewayResource(ApplicationGatewayDeployment.Create(TestManifests.OrdersApi), TestManifests.OrdersApi, null);
+        // Arrange: no lease expires during startup, so the instance stays registered after it stops renewing.
+        TimeSpan lease = TimeSpan.FromMilliseconds(10);
+        GatewayResource resource = CreateResource();
+        DeploymentId deployment = DeploymentId.New();
+        ApplicationInstanceManifest instance = Instance(deployment);
+        resource.Register(instance);
+        resource.TryMarkRegistered(instance);
+        Thread.Sleep(lease * 5);
+
+        // Act
+        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment, lease);
+
+        // Assert
+        resource.Registered.IsCompleted.ShouldBeFalse();
+        resource.TryClose().ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance of the planned deployment that registered a lease ago but renewed since opens the gate")]
+    public void Plan_AfterAnInstanceOfItsDeploymentRenewedWithinItsLease_ShouldOpenTheGate()
+    {
+        // Arrange: the registration is older than a lease, the renewal is not.
+        TimeSpan lease = TimeSpan.FromMilliseconds(250);
+        GatewayResource resource = CreateResource();
+        DeploymentId deployment = DeploymentId.New();
+        ApplicationInstanceManifest instance = Instance(deployment);
+        resource.Register(instance);
+        resource.TryMarkRegistered(instance);
+        Thread.Sleep(lease * 2);
+        resource.TryRenew(instance.Key).ShouldBeTrue();
+
+        // Act
+        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment, lease);
+
+        // Assert
+        resource.Registered.IsCompletedSuccessfully.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A carried instance of the planned deployment that did not renew is dropped and leaves the gate shut")]
+    public void Plan_WithACarriedInstanceOfItsDeploymentThatDidNotRenew_ShouldLeaveTheGateShut()
+    {
+        // Arrange: the record holds the instance, such as the pod a rollout restart replaced.
+        DeploymentId deployment = DeploymentId.New();
+        ApplicationInstanceManifest instance = Instance(deployment);
+        GatewayResource resource = CreateResource(Record(instance));
+
+        // Act
+        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment, Lease);
+
+        // Assert
+        resource.Registered.IsCompleted.ShouldBeFalse();
+        resource.TryClose().ShouldBeTrue();
+        resource.Aggregate.Instances.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A carried instance of the planned deployment that renewed before the plan stays registered and opens the gate")]
+    public void Plan_WithACarriedInstanceOfItsDeploymentThatRenewed_ShouldOpenTheGate()
+    {
+        // Arrange
+        DeploymentId deployment = DeploymentId.New();
+        ApplicationInstanceManifest instance = Instance(deployment);
+        GatewayResource resource = CreateResource(Record(instance));
+        resource.TryRenew(instance.Key).ShouldBeTrue();
+
+        // Act
+        resource.Plan(ApplicationGatewayDeploymentChange.Update, Revision, deployment, Lease);
+
+        // Assert
+        resource.Registered.IsCompletedSuccessfully.ShouldBeTrue();
+        resource.Aggregate.Instances.ShouldHaveSingleItem().Key.ShouldBe(instance.Key);
+    }
+
+    private static GatewayResource CreateResource(ApplicationGatewayDeploymentRecord? previous = null)
+    {
+        ApplicationGatewayDeployment aggregate = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi, previous?.State, null, previous?.Outputs);
+        return new GatewayResource(aggregate, TestManifests.OrdersApi, previous);
+    }
+
+    // A record entry of the plan's revision, so the plan keeps the definition and drops only the
+    // carried instances that did not renew.
+    private static ApplicationGatewayDeploymentRecord Record(ApplicationInstanceManifest instance)
+    {
+        return new ApplicationGatewayDeploymentRecord("Web", "orders-api", Revision, [], [instance], new Dictionary<OutputName, string>());
     }
 
     private static ApplicationInstanceManifest Instance(DeploymentId deployment)

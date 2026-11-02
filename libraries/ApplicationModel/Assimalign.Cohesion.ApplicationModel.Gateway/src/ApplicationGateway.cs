@@ -1369,7 +1369,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         // Planned before the call: an in-process provider's instances publish before it returns.
         string revision = string.Concat(Fingerprint(manifest), ":", plan.Revision);
         DeploymentId? deployment = plan.Change == ApplicationGatewayDeploymentChange.None ? null : DeploymentOf(revision, manifest, settings);
-        resource.Plan(plan.Change, revision, deployment);
+        resource.Plan(plan.Change, revision, deployment, LeaseDuration);
         ApplicationGatewayEventSource.Log.ResourcePlanned(Name, manifest, plan.Change);
         if (deployment is { } id)
         {

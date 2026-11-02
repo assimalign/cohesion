@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 // previous rollout that restarted, and is registered without opening the gate, while one that
 // registered before the plan and repeats the id the plan computes runs exactly what the plan
 // deploys, such as a pod restarted from the same definition while no gateway ran, so the plan opens
-// the gate for it. Both transitions leave pending atomically, so a registration that races the
+// the gate for it while its lease is live. Both transitions leave pending atomically, so a registration that races the
 // deadline either wins or is refused. Planning, registration, renewal, and expiry share one lock, so
 // an instance that renews or publishes again while its lease expires is either kept or dropped
 // whole, never half, and a registration that races the plan is either in the plan's scan or sees
@@ -119,12 +119,16 @@ internal sealed class GatewayResource
     // Publications open before any step plans, so an instance can register first and only renew
     // afterwards. Its registration saw the resource not yet current and left the gate shut; since a
     // deployment's id is derived from what it deploys, the plan opens the gate for an instance still
-    // registered that repeats the plan's id. The scan runs under the lock that registration takes,
+    // registered that repeats the plan's id and whose lease has not lapsed. No lease expires until
+    // the startup windows end, so a registration alone does not show that the instance still runs:
+    // one that published while a rollout was still replacing it, and then stopped, would make ready
+    // a resource that may never start. An instance that renewed within a lease still runs, as a
+    // publication after the plan would show. The scan runs under the lock that registration takes,
     // after the resource becomes current: a registration that takes the lock first is in the scan,
     // and one that takes it later reads the resource current and the deployment set when it marks
     // itself registered. The carried instances the plan drops are gone before the scan, and a window
     // that closed stays closed.
-    public void Plan(ApplicationGatewayDeploymentChange change, string revision, DeploymentId? deployment)
+    public void Plan(ApplicationGatewayDeploymentChange change, string revision, DeploymentId? deployment, TimeSpan lease)
     {
         bool sameDefinition = Previous is not null && Previous.Revision == revision;
         bool repeated = false;
@@ -155,9 +159,12 @@ internal sealed class GatewayResource
 
             if (deployment is { } id)
             {
+                long now = Stopwatch.GetTimestamp();
                 foreach (ApplicationInstanceManifest instance in Aggregate.Instances)
                 {
-                    if (instance.Deployment == id)
+                    if (instance.Deployment == id
+                        && _renewed.TryGetValue(instance.Key, out long renewed)
+                        && Stopwatch.GetElapsedTime(renewed, now) <= lease)
                     {
                         repeated = true;
                         break;

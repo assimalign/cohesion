@@ -308,7 +308,7 @@ previous definition and is registered without opening the gate. Since G34 the in
 repeat the deployment's id: one an earlier deployment started, such as a pod of the previous
 rollout that restarts, is registered without opening the gate. Since G43 the id alone decides: an
 instance that published before the plan and repeats the id the plan computes opens the gate when
-the plan runs.
+the plan runs, if it renewed within a lease.
 
 **G19 — A child gateway is one step — superseded by G26.** A parent no longer deploys its
 children, so they are not steps of its deployment. A child waits for its parent's resources itself,
@@ -496,7 +496,8 @@ the old program first (Gateway.InProcess I8).
   life: on Kubernetes a literal value in the pod template, never a ConfigMap reference.
 - **Repeated.** The instance repeats it in its manifest (`ApplicationInstanceManifest.Deployment`).
   A publication opens the gate only when it repeats the plan's id; any other is registered without
-  opening it. Since G43 an early publication that repeats the id the plan computes counts too.
+  opening it. Since G43 an early publication that repeats the id the plan computes counts too,
+  while its lease is live.
 
 *Rejected:*
 - The revision alone as the id. It leaves the settings' values out (G22), so after an update that a
@@ -757,7 +758,15 @@ had seen the resource not yet current and left the gate shut, and nothing reopen
 so the window ran out.
 - **The id decides, not the order.** When the plan makes a deployment, it scans the instances still
   registered after it drops the carried ones (G23). It opens the gate when one of them repeats the
-  plan's id. An instance of any other deployment still leaves it shut (G34).
+  plan's id. An instance of any other deployment still leaves it shut (G34). The drop comes first
+  because a record from a persistent store still holds the pod a `rollout restart` killed, with the
+  same id; a carried instance counts only once it has renewed or published in this run.
+- **Only a live lease counts.** No lease expires until the startup windows end (G23), so a
+  registration that is still there is no evidence that its instance still runs: a pod of an
+  in-progress rollout can publish and be terminated minutes before a resource that waits on its
+  dependencies is planned. The scan counts an instance only when it renewed within a lease
+  (`LeaseDuration`). A live instance renews every third of a lease, so the restarted pod above
+  still opens the gate; a dead one leaves the window to the platform's watch and `StartupTimeout`.
 - **No registration slips between the two.** The scan runs under the lock that registration takes,
   after the resource becomes current. A registration that takes the lock first is in the scan. One
   that takes it later reads the resource current and its deployment set, and opens the gate itself.
@@ -766,7 +775,12 @@ so the window ran out.
 
 *Rejected:* refusing publications until the resource is planned, for G23's reason. Also rejected:
 counting every early publication, which would let a pod of an earlier rollout stand in for the
-update again (G34).
+update again (G34); and starting the expiry sweep when publications open instead of checking the
+lease in the scan, which would also expire carried instances during startup and change G23.
+
+A provider that finishes its own rollouts on a publication must accept that the publication can
+come before the plan: since G43 the Docker provider also finishes a rollout on a renewal of an
+accepted container (cohesion-platforms).
 
 ## AOT
 
