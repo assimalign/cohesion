@@ -46,7 +46,12 @@ Instance engines and services remain caller-owned. Factory products belong to th
 
 `CreateBuilder(args)` loads the default configuration when it creates the builder, as Web's does: optional base/environment JSON, `COHESION_CONFIG__` environment variables and the arguments; providers added later win. `CreateBuilder()` and `new DatabaseApplicationBuilder(options)` start with an empty configuration. Unlike Web, there is no `CreateBuilder(options)` (owner decision 54): pass host settings with `new DatabaseApplicationBuilder(options)`. The environment and content root are read when the builder is created (`AppContext.BaseDirectory` for the files of `CreateBuilder(args)`; from `Options` for the other overloads), and Build's options snapshot takes both from `Environment`. Build creates the one provider and logger factory: building `Services` or `Logging` directly yields a separate instance the application never uses, and building `Logging` makes the application's Build fail, as with Web's builder. Services use the Cohesion interpreted resolver (`EnableDynamicCode = false`) on both JIT and NativeAOT, with scope validation and explicit closed factories/instances; Build registers the environment, configuration and logger factory in the provider. See [DESIGN.md](DESIGN.md) for ordering, rollback, isolation and ownership details.
 
-The runtime references the area root and non-area infrastructure, never Database model packages. The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
+The runtime references the area root and non-area infrastructure, never Database model packages.
+[Database.Hosting.ApplicationModel](../../Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/OVERVIEW.md)
+makes the application a managed resource with `builder.Services.AddResource(...)`. Its container
+`IHostService` starts after `AddService` registrations and before the reopen service and servers;
+stop reverses that order. Publication and restore run before any service starts, after Build has
+opened, recovered and provisioned the engines. The gateway's startup window must cover that work.
 
 The `admin` endpoint accepts `/cohesion/v1` only from transport
 peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other peers receive 403 regardless of

@@ -25,3 +25,8 @@ composition and runtime service ordering are unchanged.
 Public and private framework members use separate unconditioned item groups. Splitting the
 declarations preserves their evaluation order, membership and reference/runtime visibility;
 compiler and AOT settings are inherited from the shared build rather than duplicated here.
+
+`Database.Hosting.ApplicationModel` is a public member (#1785). An Sdk.Database application calls
+`builder.Services.AddResource(...)` without another integration reference; ApplicationModel.Hosting
+is already in the App kernel. Platform packages remain explicit application references, and no
+gateway assembly belongs in either shared framework.

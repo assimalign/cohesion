@@ -14,6 +14,7 @@
   <data name="BuilderBuildCompositionFailure6" xml:space="preserve"><value>A service factory returned null.</value></data>
   <data name="BuilderBuildCompositionFailure7" xml:space="preserve"><value>A service factory returned an already registered product.</value></data>
   <data name="BuilderBuildCompositionFailure8" xml:space="preserve"><value>A lifecycle service was registered more than once.</value></data>
+  <data name="LifecycleServiceLifetimeInvalid" xml:space="preserve"><value>Lifecycle service registration '{0}' must be a singleton.</value></data>
   <data name="BuilderSnapshotOptionsFailure" xml:space="preserve"><value>Database applications require sequential service start and stop.</value></data>
   <data name="BuilderEnsureMutableFailure" xml:space="preserve"><value>Registration is closed because application Build has begun.</value></data>
   <data name="BuilderBuildServiceProviderFailure" xml:space="preserve"><value>{0} is reserved for the application's own {1}.</value></data>

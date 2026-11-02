@@ -43,6 +43,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Client" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Embedded" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Hosting.ApplicationModel" />
 
         <!-- The SQL model family (the MVP engine): engine + wire-protocol server,
              dialect, catalog, model storage, and the typed client. -->
@@ -91,8 +92,8 @@
               Security projects were removed when these concerns folded into the engines.
             - Documents.Client and Graph.Client - shipped as NuGet-only client packages, never members
               of the App.Database shared framework (resource-areas.md).
-            - Database.ApplicationModel - NuGet-only orchestration and default-control-plane
-              package, injected by Sdk.Database only when CohesionApplicationModel=enabled.
+            - ApplicationModel platform packages - explicit application references.
+              Database.Hosting.ApplicationModel is public above; App carries its instance contracts.
             - Database.Memory - empty in-memory-strategy placeholder (no sources).
 
             Private implementation dependencies. Shipped in App.Database's Runtime

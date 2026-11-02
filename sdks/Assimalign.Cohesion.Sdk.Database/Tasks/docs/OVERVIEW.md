@@ -24,6 +24,9 @@ builder.AddSql("orders-sql", sql =>
 
 The build never treats `.sql` or another declarative file as a second schema source.
 
+The SDK emits no resource manifest, and a Database application becomes a managed resource with
+`builder.Services.AddResource(...)` from `Database.Hosting.ApplicationModel`.
+
 Set `CohesionDatabaseProject` to `true` and select one of the exact model names:
 
 ```xml

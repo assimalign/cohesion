@@ -3,7 +3,6 @@
     <RootNamespace>Assimalign.Cohesion.Database.TcpSdkHost</RootNamespace>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
-    <CohesionApplicationModel>disabled</CohesionApplicationModel>
     <CohesionDatabaseProject>false</CohesionDatabaseProject>
     <!-- Exercise the SDK's framework packs on runners without installed Cohesion frameworks. -->
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>

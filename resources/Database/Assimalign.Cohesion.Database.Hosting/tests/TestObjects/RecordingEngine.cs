@@ -55,6 +55,8 @@ internal sealed class RecordingEngine : DatabaseEngine
     /// <summary>Gets or sets a failure the engine's disposal core throws.</summary>
     internal Exception? DisposeException { get; set; }
 
+    internal Action? OnDispose { get; set; }
+
     /// <summary>Attaches the server the factory creates over this engine.</summary>
     internal void AddServer(Func<RecordingEngine, DatabaseServer> factory) => AttachServer(factory(this));
 
@@ -92,6 +94,7 @@ internal sealed class RecordingEngine : DatabaseEngine
     protected override ValueTask DisposeAsyncCore()
     {
         DisposeCount++;
+        OnDispose?.Invoke();
         return DisposeException is { } failure ? ValueTask.FromException(failure) : ValueTask.CompletedTask;
     }
 }
