@@ -487,7 +487,8 @@ internal sealed partial class SqlPlanExecutor
             }
         }
         BTreeIndex? index = null;
-        if (selected is not null && !_indexManager.TryGetIndex(key.Table.ObjectId, selected.Name, out index))
+        if (selected is not null && !(statement.CheckpointCopy && _indexManager.TryGetPrepared(key.Table.ObjectId, selected.Name, out index)) &&
+            !_indexManager.TryGetIndex(key.Table.ObjectId, selected.Name, out index))
         {
             throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintIndexUnavailable, selected.Name));
         }

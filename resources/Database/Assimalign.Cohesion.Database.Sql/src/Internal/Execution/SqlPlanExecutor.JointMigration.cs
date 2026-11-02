@@ -115,7 +115,31 @@ internal sealed partial class SqlPlanExecutor
                     CheckDomain(table, domain, row, evaluator);
                 }
             }
-            result.Add(new SqlJointMigrationTable(old, table, indexes.Where(index => index.TableObjectId == table.ObjectId).ToArray(), values));
+            bool keepsOwner = old is not null && script.Plan.Operations.Where(operation =>
+                string.Equals(operation.ParentName ?? operation.ObjectName, table.Name, StringComparison.OrdinalIgnoreCase)).All(operation =>
+                    operation.Kind is SqlSchemaMigrationOperationKind.AddIndex or SqlSchemaMigrationOperationKind.DropIndex or
+                        SqlSchemaMigrationOperationKind.AddConstraint or SqlSchemaMigrationOperationKind.DropConstraint ||
+                    operation.Kind == SqlSchemaMigrationOperationKind.AlterColumn && operation.PreviousColumn is { } column &&
+                        column with { IsNullable = operation.Column!.IsNullable } == operation.Column);
+            if (keepsOwner)
+            {
+                // Frozen missing tails and physical ordinals belong to the kept heap.
+                var columns = table.Columns.Select((column, ordinal) => new SqlCatalogColumn(column.Name, column.Type,
+                    column.IsNullable, old!.Columns[ordinal].DefaultLiteral, column.Collation, column.DomainName,
+                    old.Columns[ordinal].DefaultFunctionCalls, old.Columns[ordinal].Identity, old.Columns[ordinal].MissingValueLiteral)
+                    { RecastDefault = old.Columns[ordinal].RecastDefault }).ToArray();
+                table = new SqlCatalogTable(old!.ObjectId, table.Schema, table.Name, columns, table.PrimaryKeyColumns,
+                    table.Owner, table.OwningSchema, table.Constraints, old.DroppedColumnOrdinals);
+            }
+            var tableIndexes = indexes.Where(index => index.TableObjectId == table.ObjectId).ToArray();
+            if (keepsOwner)
+            {
+                // Retain the registered spelling as well as its tree. SQL names
+                // compare without case, while the physical manager keys are exact.
+                var previousIndexes = image.GetIndexes(old!.ObjectId);
+                tableIndexes = tableIndexes.Select(index => previousIndexes.FirstOrDefault(previous => SameJointIndex(index, previous)) ?? index).ToArray();
+            }
+            result.Add(new SqlJointMigrationTable(old, table, tableIndexes, values, keepsOwner));
         }
         // Include both ends of old and new FKs, even when the old parent is dropped
         // or a constraint is re-pointed. Stable adjacent tables keep their owners.
@@ -157,14 +181,17 @@ internal sealed partial class SqlPlanExecutor
     internal async Task ExecuteJointMigrationAsync(SqlJointMigrationPlan plan, SqlCompiledSchema schema,
         SqlStatementContext statement, Action<string> stage, CancellationToken cancellationToken)
     {
-        var changed = plan.Tables.Where(table => table.Previous is not null).ToArray();
+        var changed = plan.Tables.Where(table => table.Previous is not null && !table.KeepsOwner).ToArray();
+        var keeping = plan.Tables.Where(table => table.KeepsOwner).ToArray();
         var previous = changed.Select(table => table.Previous!).ToArray();
         var prepared = new List<SqlCatalogTable>(plan.Tables.Length);
         var created = new List<SqlCatalogIndex>();
+        var reservedTrees = new List<ulong>(keeping.Sum(item => item.Indexes.Length));
         var retiring = previous.Concat(plan.Dropped).ToArray();
-        var oldIndexes = retiring.SelectMany(table => _catalog.GetIndexes(table.ObjectId)).ToArray();
+        var oldIndexes = retiring.SelectMany(table => _catalog.GetIndexes(table.ObjectId)).Concat(keeping.SelectMany(item =>
+            _catalog.GetIndexes(item.Previous!.ObjectId).Where(index => !item.Indexes.Any(current => current.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase))))).ToArray();
         var retiredIndexes = new Dictionary<SqlCatalogIndex, BTreeIndex>(ReferenceEqualityComparer.Instance);
-        foreach (var index in oldIndexes)
+        foreach (var index in oldIndexes.Where(index => retiring.Any(table => table.ObjectId == index.TableObjectId)))
         { if (_indexManager.TryGetIndex(index.TableObjectId, index.Name, out var tree)) { retiredIndexes.Add(index, tree); } }
         bool published = false;
         bool unconfirmed = false;
@@ -188,24 +215,25 @@ internal sealed partial class SqlPlanExecutor
                 }, cancellationToken, newTable: true);
             }
             stage("OwnersDurable");
-            var descriptions = prepared.SelectMany(table => plan.Tables.Single(item => item.Shape.Name.Equals(table.Name, StringComparison.OrdinalIgnoreCase)).Indexes
+            var descriptions = prepared.Concat(keeping.Select(item => item.Shape)).SelectMany(table => plan.Tables.Single(item => item.Shape.Name.Equals(table.Name, StringComparison.OrdinalIgnoreCase)).Indexes
                 .Select(index => new SqlCatalogIndex(table.ObjectId, index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema,
                     index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls, index.KeyOrders))).ToArray();
-            created.EnsureCapacity(descriptions.Length);
+            var roots = descriptions.Where(index => prepared.Any(table => table.ObjectId == index.TableObjectId)).ToArray();
+            created.EnsureCapacity(roots.Length);
             foreach (var table in prepared)
             {
                 await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(table.ObjectId),
                     LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
                 _definitions.Get(table, cancellationToken);
             }
-            statement.CheckCopySpace(descriptions.Length);
+            statement.CheckCopySpace(roots.Length);
             long journalStart = 0;
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
             {
-                statement.CheckCopySpace(descriptions.Length);
+                statement.CheckCopySpace(roots.Length);
                 long allocationStart = statement.CaptureCopyAllocations();
                 journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
-                foreach (var index in descriptions)
+                foreach (var index in roots)
                 {
                     await _indexManager.CreateIndexAsync(statement.Transaction, index.TableObjectId,
                         new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken).ConfigureAwait(false);
@@ -216,6 +244,27 @@ internal sealed partial class SqlPlanExecutor
             }, durable: true, cancellationToken).ConfigureAwait(false);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             stage("TreesDurable");
+            foreach (var item in keeping)
+            {
+                foreach (var index in item.Indexes.Where(index => !SameJointIndex(index, _catalog.GetIndexes(item.Previous!.ObjectId))))
+                {
+                    ulong owner = _catalog.ReserveJointTreeOwner(item.Shape, cancellationToken);
+                    reservedTrees.Add(owner);
+                    stage("BeforeTreeBuild");
+                    await BuildDeferredIndexAsync(item.Shape, new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique),
+                        index.ColumnNames.Select(name => FindColumnOrdinal(item.Shape, name)).ToArray(), statement,
+                        () => { }, cancellationToken, index, owner).ConfigureAwait(false);
+                    stage("AfterTreeBuild");
+                }
+                // Validation reads the existing heap at current visibility under the
+                // joint X locks, including rows committed before lock admission.
+                foreach (var row in Scan(item.Shape, statement, cancellationToken, ConstraintCurrentSnapshot(statement)))
+                {
+                    for (int ordinal = 0; ordinal < row.Values.Length; ordinal++)
+                    { _ = CoerceForColumn(row.Values[ordinal], item.Shape.Columns[ordinal]); }
+                    ValidateRows(item.Shape, [row.Values], statement, cancellationToken, checksOnly: true);
+                }
+            }
             foreach (var item in changed)
             {
                 var table = prepared.Single(table => table.Name.Equals(item.Shape.Name, StringComparison.OrdinalIgnoreCase));
@@ -232,17 +281,18 @@ internal sealed partial class SqlPlanExecutor
                 }, cancellationToken).ConfigureAwait(false);
                 stage("TablePrepared");
             }
-            var replacedNames = retiring.Select(table => (table.Schema, table.Name)).ToHashSet();
-            var final = _catalog.Tables.Where(table => !replacedNames.Contains((table.Schema, table.Name))).Concat(prepared).ToArray();
+            var preparedAll = prepared.Concat(keeping.Select(item => item.Shape)).ToArray();
+            var replacedNames = retiring.Concat(keeping.Select(item => item.Previous!)).Select(table => (table.Schema, table.Name)).ToHashSet();
+            var final = _catalog.Tables.Where(table => !replacedNames.Contains((table.Schema, table.Name))).Concat(preparedAll).ToArray();
             var snapshot = ConstraintCurrentSnapshot(statement);
             foreach (var child in final)
             {
                 foreach (var constraint in child.Constraints.Where(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference))
                 {
                     var parent = final.Single(table => table.Schema.Equals(constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase) && table.Name.Equals(constraint.ReferencedTable, StringComparison.OrdinalIgnoreCase));
-                    if (!prepared.Contains(child) && !prepared.Contains(parent)) { continue; }
+                    if (!preparedAll.Contains(child) && !preparedAll.Contains(parent)) { continue; }
                     var reference = BindReference(child, constraint, parent, statement, cancellationToken);
-                    if (prepared.Contains(parent)) { ConstraintLookup(reference.ParentKey, statement, descriptions.Where(index => index.TableObjectId == parent.ObjectId).ToArray()); }
+                    if (preparedAll.Contains(parent)) { ConstraintLookup(reference.ParentKey, statement, descriptions.Where(index => index.TableObjectId == parent.ObjectId).ToArray()); }
                     foreach (var row in Scan(child, statement, cancellationToken, snapshot))
                     {
                         var key = reference.ChildKey.Read(row.Values);
@@ -259,12 +309,16 @@ internal sealed partial class SqlPlanExecutor
             {
                 marker = await statement.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
                 stage("Publishing");
+                _indexManager.PreparePublication(statement.Transaction);
                 try
                 {
-                    await _catalog.PublishStorageReplacementAsync(previous, null, prepared, descriptions, PublishedRegistrations(descriptions),
+                    await _catalog.PublishStorageReplacementAsync(previous, null, prepared, descriptions, PublishedRegistrations(descriptions, includePrepared: true),
                         retiredIndexes, false, marker.Sequence, string.Empty, null, cancellationToken, definitionChange: true,
                         appliedSchema: new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, 0), dropped: plan.Dropped,
-                        beforeTransaction: statement.CheckPublicationSpace).ConfigureAwait(false);
+                        beforeTransaction: statement.CheckPublicationSpace, kept: keeping.Select(item => item.Shape).ToArray(),
+                        treeOwners: reservedTrees,
+                        publishTrees: _indexManager.PublishPrepared,
+                        expectedKept: keeping.Select(item => item.Previous!).ToArray()).ConfigureAwait(false);
                 }
                 catch (Exception failure) when (SqlSchemaProvisioner.IsCommitUnconfirmed(failure))
                 {
@@ -272,6 +326,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 published = true;
                 statement.Metrics.RecordSelfCommit();
+                stage("CatalogPublished");
             }
             finally
             {
@@ -280,7 +335,7 @@ internal sealed partial class SqlPlanExecutor
                     if (marker is not null)
                     {
                         await statement.Coordinator.RollbackAsync(marker, CancellationToken.None).ConfigureAwait(false);
-                        if (published) { _catalog.ReleaseTruncatePublication(retiring); }
+                        if (published) { _catalog.ReleaseTruncatePublication(retiring, marker.Sequence); }
                     }
                 }
                 finally { _catalog.TruncateSnapshotGate.Release(); }
@@ -303,9 +358,10 @@ internal sealed partial class SqlPlanExecutor
             catch (Exception cleanup) { failures.Add(cleanup); }
             if (!published && !unconfirmed)
             {
-                try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared).ConfigureAwait(false); }
+                _indexManager.DiscardPrepared();
+                try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared, reservedTrees).ConfigureAwait(false); }
                 catch (Exception cleanup) { failures.Add(cleanup); }
-                finally { _catalog.AbandonStorageReplacement(prepared); }
+                finally { _catalog.AbandonStorageReplacement(prepared); _catalog.AbandonJointTreeOwners(reservedTrees); }
             }
             if (failures.Count != before) { throw new AggregateException(failures); }
         }
@@ -313,4 +369,12 @@ internal sealed partial class SqlPlanExecutor
 
     private static SqlCatalogTable WithOwner(SqlCatalogTable shape, ulong id)
         => new(id, shape.Schema, shape.Name, shape.Columns, shape.PrimaryKeyColumns, shape.Owner, shape.OwningSchema, shape.Constraints);
+
+    internal static bool SameJointIndex(SqlCatalogIndex index, IReadOnlyList<SqlCatalogIndex> previous)
+        => previous.Any(old => SameJointIndex(index, old));
+
+    private static bool SameJointIndex(SqlCatalogIndex index, SqlCatalogIndex old)
+        => old.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase) && old.IsUnique == index.IsUnique &&
+            old.IsPrimaryKey == index.IsPrimaryKey && old.Predicate == index.Predicate && old.KeyOrders.SequenceEqual(index.KeyOrders) &&
+            old.ColumnNames.SequenceEqual(index.ColumnNames, StringComparer.OrdinalIgnoreCase);
 }

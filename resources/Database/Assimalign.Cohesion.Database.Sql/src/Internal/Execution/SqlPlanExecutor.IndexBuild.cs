@@ -19,7 +19,8 @@ internal sealed partial class SqlPlanExecutor
     internal static Action? UniqueIndexEntryValidated { get; set; }
 
     private async Task BuildDeferredIndexAsync(SqlCatalogTable table, IndexDefinition definition,
-        int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken, SqlCatalogIndex? metadata = null)
+        int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken, SqlCatalogIndex? metadata = null,
+        ulong physicalOwner = 0)
     {
         // Counting is worker work too. Build only checks owner allocation metadata.
         long total = 0;
@@ -28,24 +29,53 @@ internal sealed partial class SqlPlanExecutor
             total++;
         }
         statement.ProvisioningProgress?.Invoke(0, total);
+        statement.CheckCopySpace(1);
+        long journalStart = 0;
         var index = await statement.Coordinator.ApplyStatementAsync(statement.Transaction,
             async bracket =>
             {
-                var createdIndex = await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
+                statement.CheckCopySpace(1);
+                long allocationStart = statement.CaptureCopyAllocations();
+                journalStart = _storage.Journal.Length - 38;
+                var createdIndex = physicalOwner == 0
+                    ? await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId, definition, cancellationToken).ConfigureAwait(false)
+                    : await _indexManager.CreatePreparedAsync(statement.Transaction, table.ObjectId, physicalOwner, definition, cancellationToken).ConfigureAwait(false);
                 // Track registration before the bracket's durable end can fail.
                 created();
+                statement.AddCopyAllocations(allocationStart);
                 return createdIndex;
             },
             durable: true, cancellationToken).ConfigureAwait(false);
+        await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
+        // A root never moves on splits. Capture once, outside the row-bracket loop;
+        // per-bracket costing must not walk/allocate the whole database directory.
+        long root = statement.CheckpointCopy ? _indexManager.ExportRegistrations(includePrepared: true)
+            .Single(value => value.ObjectId == table.ObjectId && value.Definition.Name == definition.Name).RootPageId : 0;
         long processed = 0;
+        int maximumKey = 0;
 
         // Each bracket is bounded; no table-sized storage gate prevents another table
         // from committing. The table lock and snapshot pin outlive every bracket.
         foreach (var batch in ScanVersions(table, cancellationToken).Chunk(64))
         {
             var included = metadata?.Predicate is null ? batch : batch.Where(version => MatchesIndex(table, metadata, version.Values, cancellationToken: cancellationToken, record: false)).ToArray();
+            long touches = 0, allocations = 0;
+            if (statement.CheckpointCopy)
+            {
+                foreach (var version in included)
+                { maximumKey = Math.Max(maximumKey, BuildIndexKey(table, ordinals, version.Values, metadata?.KeyOrders).Length); }
+                int height = SqlSchemaProvisioner.JointTreeHeight(_storage, root, physicalOwner == 0 ? table.ObjectId : physicalOwner, out int free);
+                int entryBytes = maximumKey + 28;
+                if (free < included.Length * entryBytes) { height += SqlSchemaProvisioner.JointTreeGrowth(included.Length, entryBytes); }
+                touches = included.Length * (4L * height + 3);
+                allocations = included.Length * 2L * height;
+                statement.CheckCopySpace(touches, allocations);
+            }
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
+                statement.CheckCopySpace(touches, allocations);
+                long allocationStart = statement.CaptureCopyAllocations();
+                journalStart = _storage.Journal.Length - 38;
                 foreach (var version in included)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -53,8 +83,10 @@ internal sealed partial class SqlPlanExecutor
                     await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
                         version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
                 }
+                statement.AddCopyAllocations(allocationStart);
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
+            await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             processed += batch.Length;
             statement.ProvisioningProgress?.Invoke(processed, Math.Max(processed, total));
         }
@@ -108,8 +140,8 @@ internal sealed partial class SqlPlanExecutor
     // A crash discards their directory entries; the pending operation rebuilds them.
     // This snapshot may miss a concurrent publication. The catalog merges only
     // this statement's added descriptions under its publication lock.
-    private IReadOnlyList<BTreeIndexRegistration> PublishedRegistrations(IReadOnlyList<SqlCatalogIndex> added)
-        => _indexManager.ExportRegistrations().Where(registration =>
+    private IReadOnlyList<BTreeIndexRegistration> PublishedRegistrations(IReadOnlyList<SqlCatalogIndex> added, bool includePrepared = false)
+        => _indexManager.ExportRegistrations(includePrepared).Where(registration =>
             _catalog.TryGetIndex(registration.ObjectId, registration.Definition.Name, out _) ||
             added.Any(index => index.TableObjectId == registration.ObjectId &&
                 string.Equals(index.Name, registration.Definition.Name, StringComparison.OrdinalIgnoreCase))).ToArray();

@@ -44,7 +44,7 @@ public sealed class SqlSequenceReviewTests
         if (indexing) { document.ShouldContain("current format 34", Case.Sensitive); }
         else
         {
-            document.ShouldContain("current record-space format is 34", Case.Sensitive);
+            document.ShouldContain("current record-space format is 35", Case.Sensitive);
             document.ShouldContain("SQL format 27 introduced the per-column TYPE default-assignment flag", Case.Sensitive);
         }
     }

@@ -130,7 +130,7 @@ internal sealed partial class SqlPlanExecutor
                     if (marker is not null)
                     {
                         await statement.Coordinator.RollbackAsync(marker, CancellationToken.None).ConfigureAwait(false);
-                        if (published) { _catalog.ReleaseTruncatePublication(previous); }
+                        if (published) { _catalog.ReleaseTruncatePublication(previous, marker.Sequence); }
                     }
                 }
                 finally { _catalog.TruncateSnapshotGate.Release(); }

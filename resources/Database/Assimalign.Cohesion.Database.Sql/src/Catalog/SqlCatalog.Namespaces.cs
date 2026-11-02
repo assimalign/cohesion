@@ -140,6 +140,7 @@ public sealed partial class SqlCatalog
             var registrations = _registrations.Where(registration => !identities.Contains(registration.ObjectId)).ToArray();
             using var transaction = _storage.BeginTransaction();
             var pending = new Dictionary<ulong, (PageId PageId, int SlotIndex)>();
+            var retireTrees = StageIndexRetirements(transaction, _registrations.Where(registration => identities.Contains(registration.ObjectId)), objects.Length);
             foreach (var slot in objects)
             {
                 var table = slot.Table;
@@ -156,6 +157,7 @@ public sealed partial class SqlCatalog
             foreach (var sequence in sequences) { DeleteSequence(transaction, sequence); }
             _storage.DeleteRow(transaction, schema.Location.PageId, schema.Location.SlotIndex);
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Schema(schema.Value.Name));
+            retireTrees();
             foreach (var key in droppedViews.Keys) { _views.Remove(key); }
             foreach (var sequence in sequences)
             {

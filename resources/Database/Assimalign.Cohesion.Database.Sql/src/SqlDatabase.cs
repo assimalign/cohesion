@@ -64,7 +64,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     private readonly SqlStorage _catalogStorage;
     private readonly SqlCatalog _catalog;
     private readonly TransactionCoordinator _coordinator;
-    private readonly BTreeIndexManager _indexManager;
+    private readonly SqlIndexManager _indexManager;
     private readonly SqlSchemaProvisioner _schemaProvisioner;
 
     // Internal diagnostics/fault-injection seam for this project's own tests.
@@ -215,14 +215,15 @@ public sealed partial class SqlDatabase : DatabaseInstance
         // them by the time the manager attaches.
         try
         {
-            _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+            _indexManager = SqlIndexManager.Create(new BTreeIndexManagerOptions
             {
                 Storage = storage,
                 TransactionSource = ResolveStatementBracket,
                 PruneBound = () => _coordinator.PruneBound,
                 LockManager = _coordinator.LockManager,
                 ExistingIndexes = _catalog.GetIndexRegistrations(),
-            });
+            }, _catalog.Tables.Select(table => table.ObjectId).Concat(_catalog.Sequences.Select(sequence => sequence.ObjectId))
+                .Concat(_catalog.GetPendingTableReclamations()).ToHashSet(), _catalog.NextReservedIdentity);
         }
         catch (IndexFormatException exception)
         {
@@ -235,6 +236,14 @@ public sealed partial class SqlDatabase : DatabaseInstance
             throw new SqlDataStorageFormatException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseFailure, name, _catalog.RecordSpaceFormatVersion, exception.Message), exception);
         }
+        catch
+        {
+            // Physical-owner validation and root reads can fail before attachment
+            // completes too; no recovery context may outlive the refused open.
+            _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw;
+        }
+        _catalog.IndexPageOwner = _indexManager.PageOwner;
         TableReclamation = new SqlTableReclamation(this);
         _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
         engine.BeforeProvisioning?.Invoke(this);
@@ -378,7 +387,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// Gets the database's index manager (the live B+Tree directory over the data
     /// file set), for the executor, the engine's background workers, and tests.
     /// </summary>
-    internal BTreeIndexManager IndexManager => _indexManager;
+    internal SqlIndexManager IndexManager => _indexManager;
 
     /// <summary>
     /// Gets the database's bound table versions — every persisted CHECK and DEFAULT, parsed

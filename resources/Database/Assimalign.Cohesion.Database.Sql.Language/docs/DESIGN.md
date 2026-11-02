@@ -310,6 +310,10 @@ corpus covers planning refusals, deferred name reservations and locked publicati
 these are engine admission rules and add no grammar or AST variant. The metadata lease includes
 engine-wide queue time. Stored-byte estimation, copy/publication probes and the engine reserve belong to the worker, while Build checks
 only its metadata floor, as SQL DESIGN and DIALECT.md specify.
+The owner-keeping conformance corpus (#1777) covers index/constraint-only tables within those
+plans: unpublished trees, current-row constraint checks and atomic mixed publication share the
+same executor in Build and ApplySchemaAsync. SQL format 35 fences physical tree ownership;
+grammar, AST and compiled-schema v11 are unchanged.
 
 ## TRUNCATE (#1716, SQ-T1)
 

@@ -86,7 +86,21 @@ internal sealed partial class SqlSchemaProvisioner
     {
         var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
         SqlJointMigrationPlan plan;
-        try { JointStage?.Invoke("Planning"); plan = executor.PlanJointMigration(schema, script, cancellationToken); }
+        try
+        {
+            JointStage?.Invoke("Planning");
+            plan = executor.PlanJointMigration(schema, script, cancellationToken);
+            if (_catalog.PendingMigration is { } recorded)
+            {
+                var choices = recorded.Steps.Where(step => step.Kind is "Joint/KeepOwner" or "Joint/RewriteOwner").ToArray();
+                var existing = plan.Tables.Where(table => table.Previous is not null).ToArray();
+                if (choices.Length != existing.Length || existing.Any(table => choices.Count(step =>
+                    step.Table.Equals(table.Shape.Name, StringComparison.OrdinalIgnoreCase) &&
+                    step.ObjectName.Equals(table.Shape.Name, StringComparison.OrdinalIgnoreCase) &&
+                    step.Kind == (table.KeepsOwner ? "Joint/KeepOwner" : "Joint/RewriteOwner")) != 1))
+                { throw new SqlCatalogException("CS06059", ErrorMessages.JointClassificationInvalid); }
+            }
+        }
         catch (Exception refusal)
         {
             // Storage, corruption and lifecycle identities take precedence (#1364).
@@ -102,9 +116,14 @@ internal sealed partial class SqlSchemaProvisioner
             { throw PlanningRefusal(schema, script.Steps.Count, refusal); }
             throw;
         }
-        var intent = new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument,
-            script.Steps.Select((step, index) => new SqlCatalogMigrationStep("Joint/" + step.Kind,
-                step.Operation.ParentName ?? step.Operation.ObjectName, step.Operation.ObjectName, index + 1)).ToArray(), script.Steps.Count);
+        var steps = script.Steps.Select((step, index) => new SqlCatalogMigrationStep("Joint/" + step.Kind,
+            step.Operation.ParentName ?? step.Operation.ObjectName, step.Operation.ObjectName, index + 1)).ToList();
+        foreach (var table in plan.Tables.Where(table => table.Previous is not null))
+        {
+            steps.Add(new SqlCatalogMigrationStep(table.KeepsOwner ? "Joint/KeepOwner" : "Joint/RewriteOwner",
+                table.Shape.Name, table.Shape.Name, steps.Count + 1));
+        }
+        var intent = new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument, steps.ToArray(), steps.Count);
         TransactionContext? locks = null;
         IDisposable? metadata = null;
         bool saved = false;

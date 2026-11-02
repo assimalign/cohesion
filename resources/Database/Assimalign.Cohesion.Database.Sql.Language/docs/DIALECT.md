@@ -1912,7 +1912,15 @@ WAL write/flush, unconfirmed commit and existing engine-wide failure policies st
 offline. An unconfirmed publication uses CS03403 and leaves recovery to decide old/new.
 Deferred Build does not copy data; RunMigrationsInline or any declared script forces the typed
 copy inline during Build. The executable SqlJointTypeMigrationTests corpus covers these edges.
-SQL format 34 gates the changed Joint/ kind-9 meaning; every earlier format is refused (#1152).
+In a joint TYPE plan, a table changed only by added/dropped indexes or CHECK, NOT NULL,
+UNIQUE and foreign-key constraints keeps its physical heap owner (#1777, SQ-A4).
+New trees build unpublished against that heap; added constraints validate existing rows under
+the joint X locks. Drops, new trees and rewritten tables publish in the same single commit.
+Space admission counts only new trees for a kept table. Failed preparation reclaims those
+trees and retains its heap and published indexes. The SqlJointTypeMigrationTests.KeepOwners
+conformance corpus covers owner retention, constraint failures, mixed publication and crash images.
+SQL format 35 gates separate tree ownership and durable per-table classification; format 34
+introduced the Joint/ kind-9 meaning. Every earlier format is refused (#1152).
 Compiled-schema v11 remains current; record encodings and wire messages are unchanged.
 SQL format 27 introduced the per-column TYPE default-assignment flag in table extension 7; older files
 refuse without an upgrade reader. Compiled-schema v8 was unchanged by SQ-A.
@@ -5062,7 +5070,7 @@ wrappers and domain CHECKs, including domains in casts and function parameter/re
 Reopening with the original compatible registration restores use.
 New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
 on every bind. Domain defaults remain literal-only
-and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 34, with no compatibility reader.
+and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 35, with no compatibility reader.
 Format 28 adds the internal sequence definition and reservation records (#1717). Relation-name
 collisions involving an existing sequence use CS03070 (42P07), as sequence creation does for any
 occupied relation name; the diagnostic names the existing kind. Table-on-table collisions retain
