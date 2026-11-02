@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Checkpoint bracket attribution (#1283, EN-C1)
+
+SQL catalog brackets now enter their file set's TransactionCheckpointInterlock; the catalog
+checkpointer uses that same gate. The catalog metadata monitor precedes this independent gate,
+then storage/page latches; catalog checkpoints never acquire metadata monitors or the data gate.
+Table reclamation enters the data coordinator's interlock after its existing due-check yield,
+rechecks priority after admission, releases the interlock before catalog retirement, and never
+takes model locks inside it. A parked writer makes the journal due while reclamation waits; the
+regression proves that it opens no bracket and can reclaim after the checkpoint completes. The non-parallel
+CheckpointBracketInterlockTests schedule catalog writes, reclamation and queued statements until
+at least eight overlaps have completed after 250 ms, with a 45-second ceiling.
+
 ## Bounded COPY TO (#1724, SQ-C1)
 
 SqlDatabaseSession.CopyToAsync owns a caller-supplied Stream through ordinary session admission,

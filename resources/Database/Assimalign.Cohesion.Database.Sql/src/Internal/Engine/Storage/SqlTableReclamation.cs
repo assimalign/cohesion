@@ -124,10 +124,22 @@ internal sealed class SqlTableReclamation
                         return;
                     }
                     int reclaimed;
-                    // No coordinator apply gate or catalog/table lock covers the page walk.
+                    // Lock/latch order: reclamation run lock -> data checkpoint interlock ->
+                    // allocation accounting -> storage transaction/page latches. No catalog,
+                    // table or row lock is acquired or awaited inside this interlock.
                     // These identities can never acquire new writers or be reused by CREATE.
-                    using (var bracket = _database.DataStorage.BeginTransaction())
+                    using (TransactionCheckpointInterlock.ForStorage(_database.DataStorage)
+                        .Enter("SqlTableReclamation", unchecked((long)pending.ObjectId), token))
                     {
+                        // Admission may have waited behind a writer that crossed the trigger.
+                        // Preserve reclamation's due-checkpoint priority after that wait too.
+                        if (_database.Engine.CheckpointNeededSignal.IsSet ||
+                            _database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
+                        {
+                            SqlDatabaseEventSource.Log.TableReclamationYielded(_database, pending.ObjectId);
+                            return;
+                        }
+                        using var bracket = _database.DataStorage.BeginTransaction("SqlTableReclamation", unchecked((long)pending.ObjectId));
                         reclaimed = _database.DataStorage.FreeOwnerPages(bracket, pending.ObjectId, BatchSize);
                         BeforeBatchCommit?.Invoke(pending.ObjectId, token);
                         token.ThrowIfCancellationRequested();

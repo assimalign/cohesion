@@ -27,24 +27,24 @@ public sealed class CheckpointBracketLoadTests
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
-        var database = await engine.CreateDatabaseAsync("load", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("load-" + Guid.NewGuid().ToString("N"), CancellationToken.None);
         await using var setup = await database.CreateSessionAsync();
         await setup.ExecuteAsync("CREATE TABLE items (id BIGINT PRIMARY KEY, value TEXT)");
         var sessions = new SqlDatabaseSession[4];
-        for (int i = 0; i < sessions.Length; i++) { sessions[i] = await database.CreateSessionAsync(); }
         try
         {
-        // Act / Assert: the shared harness records progress, bytes and checkpoint outcomes.
-        await CheckpointLoad.RunAsync(database.DataStorage, async (writer, next, token) =>
-        {
-            var session = sessions[writer];
-            var result = await session.ExecuteAsync($"INSERT INTO items VALUES ({next * 4 + writer}, 'payload')", cancellationToken: token);
-            result.Diagnostics.ShouldBeEmpty();
-        }, _output.WriteLine);
+            for (int i = 0; i < sessions.Length; i++) { sessions[i] = await database.CreateSessionAsync(); }
+            // Act / Assert: the shared harness records progress, bytes and checkpoint outcomes.
+            await CheckpointLoad.RunAsync(database.DataStorage, database.Coordinator.Checkpoint, async (writer, next, token) =>
+            {
+                var session = sessions[writer];
+                var result = await session.ExecuteAsync($"INSERT INTO items VALUES ({next * 4 + writer}, 'payload')", cancellationToken: token);
+                result.Diagnostics.ShouldBeEmpty();
+            }, _output.WriteLine);
         }
         finally
         {
-            foreach (var session in sessions) { await session.DisposeAsync(); }
+            foreach (var session in sessions) { if (session is not null) { await session.DisposeAsync(); } }
         }
     }
 }

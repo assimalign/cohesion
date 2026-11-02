@@ -195,6 +195,9 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     // The bytes of frames the journal holds since its last truncation, buffered frames
     // included, and the bytes the last full read scan verified.
     private long _length;
+    private long _peakLength;
+
+    internal long PeakLength => Volatile.Read(ref _peakLength);
     private long _checkpointRecordLength;
     private long _scannedLength;
     private StorageRecoveryAnalysis? _recoveryAnalysis;
@@ -1376,6 +1379,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         _recoveryAnalysis = null;
         _recoveryReplayToken = null;
         Volatile.Write(ref _length, _length + frameLength);
+        if (_length > _peakLength) { Volatile.Write(ref _peakLength, _length); }
         return lsn;
     }
 
@@ -1410,6 +1414,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         _recoveryAnalysis = null;
         _recoveryReplayToken = null;
         Volatile.Write(ref _length, _length + frameLength);
+        if (_length > _peakLength) { Volatile.Write(ref _peakLength, _length); }
         return lsn;
     }
 
@@ -1510,6 +1515,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             Volatile.Write(ref _lastLsn, analysis.LastLsn);
             Volatile.Write(ref _writtenLsn, analysis.LastLsn);
             Volatile.Write(ref _length, _scannedLength);
+            if (_length > _peakLength) { Volatile.Write(ref _peakLength, _length); }
             _recoveryAnalysis = analysis;
             _initialized = true;
             // Reading existing bytes does not prove a durable flush occurred:

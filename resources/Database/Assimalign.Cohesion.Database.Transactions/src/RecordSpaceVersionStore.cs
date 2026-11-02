@@ -24,7 +24,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     private const int mutationBatchSize = 64;
     private readonly Storage _storage;
     private readonly TransactionRecordSpace _records;
-    private readonly SemaphoreSlim _applyGate;
+    private readonly TransactionCheckpointInterlock _applyGate;
     private readonly Dictionary<ulong, List<LedgerEntry>> _ledger = new();
     private readonly List<PrunableVersion> _prunable = new();
     private readonly HashSet<ulong> _pendingAbortedPurges = new();
@@ -208,7 +208,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
             // Keep memory callbacks outside physical brackets and preserve reverse order.
             for (int i = end - 2; i >= start; i--)
             { if (entries[i].Kind == LedgerEntryKind.Memory) { start = i + 1; break; } }
-            using var bracket = _storage.BeginTransaction();
+            using var bracket = _storage.BeginTransaction("Undo", unchecked((long)writer.Value));
             for (int index = end - 1; index >= start; index--)
             {
                 // A repeated same-writer delete can record a no-op. Its pre-marker tombstone
@@ -231,7 +231,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
         }
     }
 
-    internal RecordSpaceVersionStore(Storage storage, TransactionRecordSpace records, SemaphoreSlim applyGate)
+    internal RecordSpaceVersionStore(Storage storage, TransactionRecordSpace records, TransactionCheckpointInterlock applyGate)
     {
         _storage = storage;
         _records = records;
@@ -420,13 +420,13 @@ public sealed class RecordSpaceVersionStore : VersionStore
         var batchSettled = new List<PrunableVersion>(Math.Min(mutationBatchSize, candidates.Count));
         ExceptionDispatchInfo? unreadable = null;
 
-        await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _applyGate.WaitAsync(cancellationToken, "Prune").ConfigureAwait(false);
         try
         {
             for (int offset = 0; offset < candidates.Count; offset += mutationBatchSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                using var bracket = _storage.BeginTransaction();
+                using var bracket = _storage.BeginTransaction("Prune");
                 int end = Math.Min(offset + mutationBatchSize, candidates.Count);
                 long batchPruned = 0;
                 batchSettled.Clear();
@@ -567,7 +567,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
                 return;
             }
 
-            using var bracket = _storage.BeginTransaction();
+            using var bracket = _storage.BeginTransaction("Recovery");
             foreach (var (pageId, slotIndex, restored) in mutations)
             {
                 if (restored is null)
@@ -643,7 +643,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     {
         long removed = 0;
 
-        await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _applyGate.WaitAsync(cancellationToken, "Undo", unchecked((long)writer.Value)).ConfigureAwait(false);
         try
         {
             for (int end = entries.Count; end > 0;)
@@ -658,7 +658,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
                 int start = Math.Max(0, end - mutationBatchSize);
                 for (int i = end - 2; i >= start; i--)
                 { if (entries[i].Kind == LedgerEntryKind.Memory) { start = i + 1; break; } }
-                using var bracket = _storage.BeginTransaction();
+                using var bracket = _storage.BeginTransaction("Undo", unchecked((long)writer.Value));
                 for (int index = end - 1; index >= start; index--)
                 {
                     removed += await UndoEntryAsync(writer, entries[index], bracket, cancellationToken).ConfigureAwait(false);

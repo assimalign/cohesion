@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
@@ -53,7 +55,8 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             if (_pendingMigration is null && prepared is not { Count: > 0 }) { return default; }
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             foreach (var location in _pendingMigrationLocations)
             { _storage.DeleteRow(transaction, location.PageId, location.SlotIndex); }
             transaction.Commit();

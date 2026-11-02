@@ -2205,25 +2205,63 @@ runs it as it ends, before it releases the gate, and the worker moves on. A boun
 trade the busy database against the others (a short one rarely catches the end of a long
 statement, a long one lets the others overshoot); the deferral needs no trade.
 
-**Concurrent-writer attribution (#1283).** The load measurement in `BlobCheckpointGrowthTests`
-is skipped by default; `COHESION_DB_PROBES=1` enables three counter-driven rounds with and without
-CPU competition. Windows constrains the process to up to three CPUs; Linux affinity is per-thread,
-so this probe enforces and claims no workload affinity there. Existing events show Blob overshoot
-with no `BracketOpen` skips, while an outside-bracket control
-verifies that signal on normal, failed and cancelled statement exits. A deterministic lane control
-now guards the consumed size wake: collecting a deferred lane outcome rechecks whether the journal
-is due in that pass and attempts at most one new checkpoint, while failures and busy-storage
-outcomes retain their retry delay. The observed 544 MB growth remains unattributed and #1283 stays
-open: an outside-gate raw bracket can prevent truncation until it ends, and checkpoint flush time
-is another investigation path. The model remains a sharp checkpoint with a soft trigger; choosing
-a bounded admission pause or a fuzzy checkpoint remains a later owner decision.
+**Concurrent-writer attribution (#1283, EN-C1).** Four continuous short-transaction writers,
+with a 64 KiB trigger and the Windows process pinned to three CPUs, observed baseline peaks of
+85,457 bytes (SQL), 92,296 (Documents), 79,494 (Graph), 110,449 (KeyValuePair), and 89,753 (Blob).
+That run did not reproduce the historical 544 MB peak. The always-on five-engine regression now
+requires at least two seconds, four completed autonomous checkpoints and 32 writes from every
+writer, continuing until those counters move with a 45-second ceiling. It asserts an exact
+append-locked journal high-water mark of at most four triggers; rates remain diagnostic only.
+Linux affinity is per thread and the test makes no affinity claim there.
 
-Normal Blob chunk writes and metadata updates use the coordinator's apply gate; the suspected raw
-outside bracket was not found on that path. SQL's background table reclamation does open raw data
-brackets outside the gate, and SQL and KeyValuePair catalog writes use independent raw brackets;
-these remain investigation paths. The opt-in Blob listener also counts process-wide first-chance
-`StorageTransactionException` occurrences, since a busy checkpoint throws before `CheckpointStart`;
-this is test-only measurement, alongside the existing deferred `BracketOpen` event.
+The measured normal-load attribution is below (bytes / deferred attempts in the same sample).
+Every deferral was Statement and had its event-21 companion; busy storage brackets were zero.
+The Release KeyValuePair maximum came from its full-suite load; its isolated load later measured
+112,784 bytes and 672 Statement deferrals. Rates are recorded in the run handoff, never asserted.
+
+| Engine | Debug peak / deferrals | Release peak / deferrals |
+|---|---:|---:|
+| SQL | 102,948 / 229 | 381,276 / 151 |
+| Documents | 90,874 / 88 | 390,055 / 8 |
+| Graph | 79,456 / 20 | 80,157 / 8 |
+| KeyValuePair | 170,405 / 481 | 1,468,539 / 1,365 |
+| Blob | 93,548 / 49 | 90,476 / 53 |
+
+The four-trigger assertion passed all five Debug loads but failed SQL (5.82x), Documents (5.95x)
+and KeyValuePair (22.41x) in Release; it remains intact. The original random-payload Blob probe,
+with three additional CPU competitors, reached 741,584 bytes (11.32x) in Debug and 1,154,886
+(17.62x) in Release, with no busy raw bracket. The largest Release cycle recorded 717 commits
+after the trigger, all before the first Statement deferral: a measured scheduling gap before the
+checkpoint request, followed by service at the releasing bracket. EN-C2 must bound admission for
+a due checkpoint even before the worker reaches TryCheckpoint; EN-C1 adds no such pause.
+
+Every refused storage checkpoint emits event 19 once per active physical bracket, including
+untouched brackets, with its operation class, optional owner, physical sequence and a shared
+refusal identity. Unnamed brackets are Raw; sequence-adopting brackets are Adopted. Equal adopted
+sequences remain separate physical brackets. The registry reuses
+its capacity and is maintained under the existing transaction lock; completion and failed begin
+remove entries there. Event 20 reports the journal high-water mark since open, maintained for
+both buffered and direct frames even with no listener. A final checkpoint after the writers end
+collects that mark; autonomous progress is required before that collection.
+
+The coordinator and all remaining normal-operation raw brackets now share
+TransactionCheckpointInterlock per storage: SQL catalog writes (including allocation, definitions,
+scripts, renames, TRUNCATE and joint publication), KeyValuePair catalog writes, and SQL table
+reclamation. Catalog file sets have independent gates; they never acquire the data gate during
+a checkpoint. Blob chunk and catalog writes already used ApplyStatementAsync and retain that
+route. Transactions event 21 attributes every event-15 deferral to its holder class and optional
+owner. A semaphore permit reserved for a descheduled waiter is attributed when that admission
+publishes its class; it is not reported as an unidentified raw bracket. Maintenance, undo and
+checkpoint holders are distinguished from statements. The catalog/reclamation stress parks both
+real bracket classes while a statement queues and proves both deferred checkpoints complete.
+
+Reclamation still yields before its next bracket when a checkpoint is due, rechecking after
+waiting for admission. The model remains
+sharp, with a soft size trigger and unchanged crash recovery and formats. EN-C2 owns the approved
+bounded admission pause near the journal limit (T3-27); EN-C1 adds no pause, fuzzy checkpoint or
+segmented journal. PostgreSQL's concurrent-insertion exclusion around checkpoint state capture
+is confined to its redo-point work (local src/backend/access/transam/xlog.c:7791-7795); that fuzzy
+model is not copied into Cohesion's steal/no-force journal.
 
 **Readers can progress during a checkpoint (#1269).** The #1254 review measured point-read
 stalls of 166–267 ms while the checkpoint held the lifecycle, transaction and pool locks.
@@ -2818,6 +2856,8 @@ session enables.
 | 4 | `JournalTailLost` | Warning | — | `database`, `strayLsn`, `redoLsn` (before the open moved it) | `OpenExisting`: a page outlived the journal records that stamped it (a lost journal tail under `None`, or a journal older than the data file); the open raises the LSN floor and the redo point to it |
 | 5 | `CheckpointStart` | Informational | `Checkpoints` | `database`, `activeTransactions` (the logical writers the anchor lists), `journalLength` | `Checkpoint`, after the active-transaction check (a refused checkpoint writes nothing) |
 | 6 | `CheckpointStop` | Informational | `Checkpoints` | `database`, `status` (`Success`, or `Error` for a checkpoint that threw), `checkpointLsn`, `durationMilliseconds` | the end of `Checkpoint`, on every path, from a `finally` |
+| 19 | `CheckpointBusy` | Verbose | Checkpoints | `database`, `bracketClass`, `owner`, `transactionSequence`, `refusal` | once for each physical bracket blocking a refused checkpoint |
+| 20 | `CheckpointJournalPeak` | Verbose | Checkpoints | `database`, `peakLength` | exact journal high-water mark since open, before an admitted checkpoint |
 | 7 | `PagesWrittenBack` | Verbose | `WriteBack` | `database`, `pages`, `durationMilliseconds` | `WriteBackDirtyPages`, when the pass wrote a page |
 | 8 | `PendingCommitsFlushed` | Verbose | `GroupCommit` | `database`, `durableLsn` | the gate's `FlushPending` (a flush worker's `FlushPendingCommits`), when it flushed |
 | 9 | `GroupCommitWindowMissed` | Verbose | `GroupCommit` | `database`, `lsn`, `windowMilliseconds` | the gate's `AwaitDurable`: the window passed before a group flush covered the commit, so the committer requested the journal flush itself (a no-op when another flush covered it first; a zero window does this on every grouped commit); not for a wait the storage going offline abandoned |

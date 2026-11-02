@@ -1321,6 +1321,34 @@ B+Tree entries retain their own physical layout and existing stamp implementatio
 
 ### Recovery and checkpoint interlock
 
+**Raw bracket admission (#1283, EN-C1).** TransactionCheckpointInterlock is one sealed concrete
+coordination primitive per storage, shared by the coordinator and synchronous catalog or
+reclamation scopes. Its weak-key registry does not retain closed storages. Catalog file sets use
+independent instances with a plain storage checkpoint; data storage binds the coordinator's
+writer-anchor checkpoint. All gate releases, including undo and pruning, service deferred work.
+Synchronous nested scopes share their entering thread's acquisition; the outermost disposal
+runs any deferred checkpoint after its brackets and page latches ended. Canceled acquisition
+owns nothing, repeated disposal is inert, and a scope cannot checkpoint its own gate.
+A short state monitor makes the final pending-work check atomic with gate release, closing the
+failed-wait handoff race; it is never held across model or storage work. A checkpoint running at
+a bracket exit publishes Checkpoint as its holder, so it cannot misattribute later deferrals to
+the ended bracket.
+
+Lock/latch order is model grants before the data gate; catalog publication takes its metadata
+monitor, its independent catalog interlock, then storage/page latches. Catalog checkpoint bodies
+take neither metadata monitors nor the data gate. Reclamation takes its run monitor, the data
+interlock, accounting monitor, then storage/page latches, releasing the interlock before catalog
+retirement. No raw body waits for a model lock inside the gate. The uncontended synchronous and asynchronous internal gate
+paths allocate zero bytes in the minimum of three warmed rounds, as does its SemaphoreSlim
+control; public synchronous scopes allocate one small idempotent lease.
+
+Event 21 CheckpointBlocked accompanies every event-15 CheckpointDeferred with the actual holder
+class and optional owner. A semaphore handoff can reserve a permit before its waiter runs; that
+attribution is published on admission rather than inventing an unknown physical bracket. Storage
+event 19 independently lists every raw physical bracket that refuses truncation. Deferred failures
+keep the existing identity-preserving handoff to the next worker attempt. This introduces no
+format, language, error identity or admission-pause policy.
+
 The ordering is deliberately the same as in both original engines:
 
 1. Open storage with its automatic open-time checkpoint deferred, allowing
@@ -1641,6 +1669,7 @@ events check `EventKeywords.None`.
 | 13 | `AbortRecordWriteFailed` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager`, when the advisory abort record could not be appended (swallowed before this source) |
 | 14 | `RecoveryAnalyzed` | Informational | — | `database`, `committed`, `aborted`, `maxSequence` | `TransactionCoordinator.AnalyzeAndScrub`, after the scrub |
 | 15 | `CheckpointDeferred` | Verbose | Checkpoints | `database` | `TransactionCoordinator.TryCheckpoint`, when a statement held the apply gate (owner decision 23) |
+| 21 | `CheckpointBlocked` | Verbose | Checkpoints | `database`, `bracketClass`, `owner` | each deferred checkpoint, attributed to the gate holder or the next admitted handoff |
 | 16 | `DeferredCheckpointSkipped` | Verbose | Checkpoints | `database`, `reason` (`BracketOpen`: the request stays; `StorageOffline`: it is dropped) | the deferred checkpoint a statement runs as it ends |
 | 17 | `DeferredCheckpointFailed` | Warning | — | `database`, `exceptionType`, `exceptionMessage` | the same, when it failed; the next `TryCheckpoint` throws the failure and its worker reports it (root event 1) |
 | 18 | `VersionPurgePass` | Verbose | Purge | `database`, `versionsPurged`, `durationMilliseconds` | `TransactionCoordinator.RunVersionPurgePass`, when the pass ran to its end (a retry failure it rethrows included) |

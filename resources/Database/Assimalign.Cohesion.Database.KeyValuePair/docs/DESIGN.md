@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Checkpoint bracket attribution (#1283, EN-C1)
+
+Catalog writes now enter their file set's TransactionCheckpointInterlock, shared with the catalog
+checkpointer. The catalog monitor precedes that independent gate and storage/page latches;
+checkpoint bodies take neither the catalog monitor nor the data apply gate. Statements retain
+the data coordinator's interlock. The four-writer load asserts the exact journal high-water mark
+and complete deferral attribution, with rates used only as diagnostics. Forced append barriers
+cover both the format-record and index-registration writes: each attributes KeyValuePairCatalog,
+services the request on scope exit, and leaves the independent data checkpoint available.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The explicit transaction binds its kernel coordinator/context to the root base, so incomplete

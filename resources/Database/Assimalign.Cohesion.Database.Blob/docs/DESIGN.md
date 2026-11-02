@@ -1,5 +1,13 @@
 # Blob engine design
 
+## Checkpoint bracket attribution (#1283, EN-C1)
+
+Chunk and metadata write brackets already route through ApplyStatementAsync; the raw-path audit
+found no additional normal-operation Blob bracket. They now share the extracted per-storage
+TransactionCheckpointInterlock with undo and pruning, so every releasing holder can service a
+deferred checkpoint. The four-writer load asserts the exact journal high-water mark and complete
+deferral attribution. No streaming, crash, format or durability contract changes.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The explicit transaction binds its kernel coordinator/context to the root base, so incomplete

@@ -1,12 +1,16 @@
 using System;
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Testing;
+using Assimalign.Cohesion.Database.Transactions.Internal;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
@@ -22,6 +26,271 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 [Collection("Journal enrollment")]
 public class TransactionCoordinatorRecoveryTests
 {
+    [Theory(DisplayName = "Cohesion Test [Transactions] - Raw scopes service deferred checkpoints on every exit and nested disposal (#1283)")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task TryCheckpoint_RawScopeExit_ShouldServiceItsDeferredCheckpoint(int exit)
+    {
+        // Arrange: the coordinator and raw scope must resolve exactly the same interlock.
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var interlock = TransactionCheckpointInterlock.ForStorage(storage);
+        TransactionCheckpointInterlock.ForStorage(storage).ShouldBeSameAs(interlock);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var canceled = new CancellationTokenSource();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        using var recorder = new EventSourceRecorder(TransactionEventSource.Log, EventLevel.Verbose);
+        int passes = 0;
+        coordinator.BeforeCheckpoint = _ => Interlocked.Increment(ref passes);
+        var expected = new InvalidOperationException("Raw scope failed.");
+        var holder = Task.Factory.StartNew(() =>
+        {
+            using var scope = interlock.Enter("Catalog", 42, ceiling.Token);
+            using var bracket = storage.BeginTransaction("Catalog", 42);
+            using var nested = interlock.Enter("Nested", 43, ceiling.Token);
+            entered.Set();
+            release.Wait(ceiling.Token);
+            if (exit == 1) { throw expected; }
+            if (exit == 2) { canceled.Cancel(); canceled.Token.ThrowIfCancellationRequested(); }
+            if (exit == 3) { nested.Dispose(); nested.Dispose(); return; }
+            bracket.Commit();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        try
+        {
+            entered.Wait(ceiling.Token);
+            // Act: no new writer is needed to collect this request.
+            coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeFalse();
+            release.Set();
+            if (exit == 1) { (await Should.ThrowAsync<InvalidOperationException>(() => holder)).ShouldBeSameAs(expected); }
+            else if (exit == 2) { await Should.ThrowAsync<OperationCanceledException>(() => holder); }
+            else { await holder.WaitAsync(ceiling.Token); }
+
+            // Assert: nested release cannot run the checkpoint until the outer bracket ended.
+            Volatile.Read(ref passes).ShouldBe(1);
+            var blocked = recorder.Events.Where(e => e.EventId == 21 && Equals(e.Payload![0], (string)storage.Name)).ShouldHaveSingleItem();
+            blocked.PayloadNames.ShouldBe(new[] { "database", "bracketClass", "owner" });
+            blocked.Payload.ShouldBe(new object[] { (string)storage.Name, "Catalog", 42L });
+            recorder.Events.ShouldNotContain(e => e.EventId == 0);
+            coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeTrue();
+            Volatile.Read(ref passes).ShouldBe(2);
+        }
+        finally
+        {
+            release.Set();
+            try { await holder.WaitAsync(ceiling.Token); }
+            catch (InvalidOperationException) when (exit == 1) { }
+            catch (OperationCanceledException) when (exit == 2) { }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Explicit checkpoint collects an older busy deferred request once (#1283)")]
+    public async Task Checkpoint_OlderBusyDeferral_ShouldClearTheCollectedRequest()
+    {
+        // Arrange: an outside test bracket makes the first deferred attempt busy.
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var outside = storage.BeginTransaction();
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        int passes = 0;
+        coordinator.BeforeCheckpoint = _ => Interlocked.Increment(ref passes);
+        var holder = Task.Factory.StartNew(() =>
+        {
+            using var scope = TransactionCheckpointInterlock.ForStorage(storage).Enter("Catalog");
+            entered.Set();
+            release.Wait(ceiling.Token);
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        try
+        {
+            entered.Wait(ceiling.Token);
+            coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeFalse();
+            release.Set();
+            await holder.WaitAsync(ceiling.Token);
+            Volatile.Read(ref passes).ShouldBe(1);
+            outside.Rollback();
+            // Act
+            coordinator.Checkpoint(ceiling.Token);
+            // Assert: an explicit checkpoint consumes the older request, rather than running twice.
+            Volatile.Read(ref passes).ShouldBe(2);
+        }
+        finally
+        {
+            release.Set();
+            await holder.WaitAsync(ceiling.Token);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Deferred checkpoint: attribute its own gate hold after the bracket ended (#1283)")]
+    public async Task TryCheckpoint_DeferredCheckpointInProgress_ShouldAttributeCheckpointRatherThanEndedBracket()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var interlock = TransactionCheckpointInterlock.ForStorage(storage);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        using var checkpointEntered = new ManualResetEventSlim();
+        using var checkpointRelease = new ManualResetEventSlim();
+        using var recorder = new EventSourceRecorder(TransactionEventSource.Log, EventLevel.Verbose);
+        int passes = 0;
+        coordinator.BeforeCheckpoint = _ =>
+        {
+            if (Interlocked.Increment(ref passes) != 1) { return; }
+            checkpointEntered.Set();
+            checkpointRelease.Wait(ceiling.Token);
+        };
+        var holder = Task.Factory.StartNew(() =>
+        {
+            using var scope = interlock.Enter("Catalog", 42);
+            using var bracket = storage.BeginTransaction("Catalog", 42);
+            entered.Set();
+            release.Wait(ceiling.Token);
+            bracket.Commit();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        try
+        {
+            entered.Wait(ceiling.Token);
+            coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeFalse();
+            release.Set();
+            checkpointEntered.Wait(ceiling.Token);
+            // Act: the physical bracket ended; its releasing flow now holds a checkpoint.
+            coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeFalse();
+            checkpointRelease.Set();
+            await holder.WaitAsync(ceiling.Token);
+            coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeTrue();
+            // Assert
+            var blocked = recorder.Events.Where(e => e.EventId == 21).ToArray();
+            blocked.Select(e => (string)e.Payload![1]!).ShouldBe(new[] { "Catalog", "Checkpoint" });
+            blocked[1].Payload![2].ShouldBe(0L);
+            recorder.Events.ShouldNotContain(e => e.EventId == 0);
+        }
+        finally
+        {
+            release.Set(); checkpointRelease.Set();
+            await holder.WaitAsync(ceiling.Token);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Interlock: nested raw scope shares coordinated apply and refuses recursive waits (#1283)")]
+    public async Task ApplyStatement_NestedRawScope_ShouldShareItsOwningAdmission()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var context = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var interlock = TransactionCheckpointInterlock.ForStorage(storage);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        // Act / Assert
+        await coordinator.ApplyStatementAsync(context, _ =>
+        {
+            using var nested = interlock.Enter("NestedRaw");
+            Should.Throw<StorageTransactionException>(() => interlock.TryCheckpoint(Timeout.InfiniteTimeSpan));
+            return 0;
+        }, ceiling.Token);
+        await coordinator.CommitAsync(context, ceiling.Token);
+        using (interlock.Enter("OuterRaw"))
+        { Should.Throw<StorageTransactionException>(() => coordinator.Checkpoint(ceiling.Token)); }
+        interlock.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Interlock: canceled entry and self-checkpoint refusal release every acquisition (#1283)")]
+    public async Task Enter_CanceledWaitAndSelfCheckpoint_ShouldLeaveTheGateUsable()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        var interlock = TransactionCheckpointInterlock.ForStorage(storage);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var canceled = new CancellationTokenSource();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var holder = Task.Factory.StartNew(() =>
+        {
+            using var scope = interlock.Enter("Catalog");
+            Should.Throw<StorageTransactionException>(() => interlock.TryCheckpoint(Timeout.InfiniteTimeSpan));
+            entered.Set();
+            release.Wait(ceiling.Token);
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        Task? waiting = null;
+        try
+        {
+            entered.Wait(ceiling.Token);
+            // Act: cancellation cannot own, release or steal the holder's acquisition.
+            var queued = new TaskCompletionSource<Thread>(TaskCreationOptions.RunContinuationsAsynchronously);
+            waiting = Task.Factory.StartNew(() =>
+            {
+                queued.SetResult(Thread.CurrentThread);
+                using var scope = interlock.Enter("Waiter", cancellationToken: canceled.Token);
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            Thread waiter = await queued.Task.WaitAsync(ceiling.Token);
+            while ((waiter.ThreadState & System.Threading.ThreadState.WaitSleepJoin) == 0 && !waiting.IsCompleted)
+            { await Task.Delay(1, ceiling.Token); }
+            waiting.IsCompleted.ShouldBeFalse();
+            canceled.Cancel();
+            await Should.ThrowAsync<OperationCanceledException>(() => waiting);
+            interlock.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeFalse();
+        }
+        finally
+        {
+            canceled.Cancel();
+            release.Set();
+            await holder.WaitAsync(ceiling.Token);
+            if (waiting is not null)
+            {
+                try { await waiting.WaitAsync(ceiling.Token); }
+                catch (OperationCanceledException) { }
+            }
+        }
+        // Assert
+        interlock.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeTrue();
+        using (interlock.Enter("AfterCancellation")) { }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Interlock: uncontended coordinator admission allocates no more than its semaphore control (#1283)")]
+    public async Task Wait_UncontendedAdmission_ShouldAllocateZeroBytes()
+    {
+        // Arrange: minimum of three warmed rounds; no time or throughput threshold.
+        using var storage = CoordinatorStorage.Create();
+        var interlock = TransactionCheckpointInterlock.ForStorage(storage);
+        using var control = new SemaphoreSlim(1, 1);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        CancellationToken token = ceiling.Token;
+        long admission = long.MaxValue;
+        long baseline = long.MaxValue;
+        long asyncAdmission = long.MaxValue;
+        long asyncBaseline = long.MaxValue;
+        // Act
+        for (int round = 0; round < 4; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1024; i++) { control.Wait(token); control.Release(); }
+            long oldBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1024; i++) { interlock.Wait(token); interlock.Release(); }
+            long newBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1024; i++) { await control.WaitAsync(token); control.Release(); }
+            long oldAsyncBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1024; i++) { await interlock.WaitAsync(token); interlock.Release(); }
+            long newAsyncBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            if (round == 0) { continue; }
+            baseline = Math.Min(baseline, oldBytes);
+            admission = Math.Min(admission, newBytes);
+            asyncBaseline = Math.Min(asyncBaseline, oldAsyncBytes);
+            asyncAdmission = Math.Min(asyncAdmission, newAsyncBytes);
+        }
+        // Assert
+        baseline.ShouldBe(0);
+        admission.ShouldBe(0);
+        asyncBaseline.ShouldBe(0);
+        asyncAdmission.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Version purge: apply callback refuses reentrancy before any work (w11 review)")]
     public async Task RunVersionPurgePass_InsideApply_ShouldRefuseBeforePruning()
     {

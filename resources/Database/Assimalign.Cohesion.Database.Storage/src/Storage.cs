@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Tracing;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Text;
@@ -86,6 +87,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     private StorageJournal? _journal;
     private long _nextTransactionSequence;
     private int _activeTransactionCount;
+    private readonly Dictionary<StorageTransaction, (string Class, long Owner)> _activeBrackets = new();
+    private long _checkpointRefusals;
 
     // The commit durability (a StorageCommitDurability) and the group-commit window in ticks.
     // Written by their setters only, the durability under _transactionLock (owner decision 26 of
@@ -1334,8 +1337,18 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// record mutations. See <see cref="StorageTransaction"/> for the semantics.
     /// </summary>
     /// <returns>The new transaction scope.</returns>
-    public StorageTransaction BeginTransaction()
+    public StorageTransaction BeginTransaction() => BeginTransaction("Raw");
+
+    /// <summary>Begins a physical bracket with its checkpoint-blocking attribution.</summary>
+    /// <param name="bracketClass">The operation class, for example Statement, Undo or SqlCatalog.</param>
+    /// <param name="owner">An optional logical writer or physical object identity.</param>
+    /// <returns>The new transaction scope.</returns>
+    /// <exception cref="ArgumentException"><paramref name="bracketClass"/> is empty.</exception>
+    /// <exception cref="StorageOfflineException">The storage is offline.</exception>
+    /// <exception cref="InvalidOperationException">The storage has not been initialized or opened.</exception>
+    public StorageTransaction BeginTransaction(string bracketClass, long owner = 0)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(bracketClass);
         if (_journal is null)
         {
             throw new InvalidOperationException(ErrorMessages.StorageFailure);
@@ -1343,13 +1356,16 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         ThrowIfOffline();
         long sequence;
+        StorageTransaction transaction;
         lock (_transactionLock)
         {
             sequence = Interlocked.Increment(ref _nextTransactionSequence);
+            transaction = new StorageTransaction(this, sequence);
 
             // Counted under the same lock the checkpoint holds, so a checkpoint can
             // never truncate the journal between a transaction's begin and its
             // completion (which would discard the full page images its changes chain onto).
+            _activeBrackets.Add(transaction, (bracketClass, owner));
             _activeTransactionCount++;
         }
 
@@ -1363,13 +1379,14 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // return the count, and every later checkpoint would refuse to run.
             lock (_transactionLock)
             {
+                _activeBrackets.Remove(transaction);
                 _activeTransactionCount--;
             }
 
             throw;
         }
 
-        return new StorageTransaction(this, sequence);
+        return transaction;
     }
 
     /// <summary>
@@ -1417,6 +1434,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
 
         ThrowIfOffline();
+        var transaction = new StorageTransaction(this, sequence);
         lock (_transactionLock)
         {
             // Adopted sequences normally come from ReserveTransactionSequence, but
@@ -1434,13 +1452,14 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 observed = previous;
             }
 
+            _activeBrackets.Add(transaction, ("Adopted", sequence));
             _activeTransactionCount++;
         }
 
         // Deliberately no begin record: the reserving caller's transaction log owns
         // the lifecycle records (see the summary above); page images
         // journaled by this bracket carry the sequence, which is all recovery needs.
-        return new StorageTransaction(this, sequence);
+        return transaction;
     }
 
     /// <summary>
@@ -1637,12 +1656,21 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             if (_activeTransactionCount > 0)
             {
+                long refusal = ++_checkpointRefusals;
+                if (StorageEventSource.Log.IsEnabled(EventLevel.Verbose, StorageEventSource.Keywords.Checkpoints))
+                {
+                    foreach (var bracket in _activeBrackets)
+                    {
+                        StorageEventSource.Log.CheckpointBusy(this, bracket.Value.Class, bracket.Value.Owner, bracket.Key.Sequence, refusal);
+                    }
+                }
                 throw new StorageTransactionException(ErrorMessages.StorageCheckpointFailure);
             }
 
             // Zero unless the event source is listening. A refused checkpoint (above) changed
             // nothing and writes no start; one that starts writes its stop whether or not it
             // completes, so its activity always closes.
+            StorageEventSource.Log.CheckpointJournalPeak(this, _journal?.PeakLength ?? 0);
             long checkpointStarted = StorageEventSource.Log.CheckpointStart(this, activeTransactionSequences.Length);
             try
             {
@@ -3526,6 +3554,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // guards double completion), so the active count pairs with
             // BeginTransaction's increment. The scope completes in the same step, so a
             // completion that throws after this point is never repeated by Dispose.
+            _activeBrackets.Remove(transaction);
             _activeTransactionCount--;
             transaction.MarkCompleted();
 

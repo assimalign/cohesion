@@ -138,7 +138,8 @@ public sealed partial class SqlCatalog
             var replacements = expected.Select(table => describe is not null ? describe(table, checked(next++)) : new SqlCatalogTable(checked(next++), table.Schema, table.Name,
                 table.Columns, table.PrimaryKeyColumns, table.Owner, table.OwningSchema, table.Constraints,
                 table.DroppedColumnOrdinals)).ToArray();
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             // Reuse kind 14 for unreachable prepared owners too. A failed build or crash
             // leaves durable reclamation work. The active statement pins these owners until
             // publication/cleanup has finished; successful publication removes these intents.
@@ -232,7 +233,8 @@ public sealed partial class SqlCatalog
             var tableRecords = replacements.Select(EncodeTable).ToArray();
             var indexRecords = indexes.Select(EncodeIndex).ToArray();
             beforeTransaction?.Invoke();
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             var tableSlots = replacements.Select((table, index) => new TableSlot(table,
                 UpsertRecord(transaction, _tables.TryGetValue((table.Schema, table.Name), out var existing) ? existing.Location : null, tableRecords[index]))).ToArray();
             foreach (var table in dropped)

@@ -352,12 +352,14 @@ internal sealed class TransactionEventSource : EventSource
 
     /// <summary>Writes that a checkpoint was deferred to the statement holding the apply gate.</summary>
     [NonEvent]
-    public void CheckpointDeferred(Storage.Storage storage)
+    public bool CheckpointDeferred(Storage.Storage storage)
     {
         if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
         {
             CheckpointDeferred(storage.Name);
+            return true;
         }
+        return false;
     }
 
     /// <summary>Writes that a deferred checkpoint did not run, and why.</summary>
@@ -454,6 +456,17 @@ internal sealed class TransactionEventSource : EventSource
     [Event(14, Level = EventLevel.Informational, Message = "Database '{0}' recovery classified {1} committed and {2} aborted transactions; the highest sequence is {3}.")]
     private void RecoveryAnalyzed(string database, int committed, int aborted, long maxSequence)
         => WriteEvent(14, database, committed, aborted, maxSequence);
+
+    [NonEvent]
+    internal void CheckpointBlocked(Storage.Storage storage, string bracketClass, long owner)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        { CheckpointBlocked(storage.Name, bracketClass, owner); }
+    }
+
+    [Event(21, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' checkpoint deferred by {1}, owner {2}.")]
+    private void CheckpointBlocked(string database, string bracketClass, long owner)
+        => WriteEvent(21, database, bracketClass, owner);
 
     [Event(15, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' deferred a checkpoint to the statement holding its apply gate.")]
     private void CheckpointDeferred(string database)
