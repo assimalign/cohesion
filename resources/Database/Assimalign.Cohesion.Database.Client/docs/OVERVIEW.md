@@ -26,7 +26,7 @@ work and require Idle before reuse. Legacy transaction-capable peers without sta
   in the pool. The exchange must use the exact same family instance.
 - **`DatabaseConnectionSettings`** — typed settings with a minimal `key=value;`
   connection-string parser (`Database`, `Principal`, `Endpoint=host[:port]`,
-  `MaxPoolSize`), plus `For(Uri)` for generated or ambient resource
+  `MaxPoolSize`), plus `For(Uri)` for configured Database wire
   endpoints.
 - **`DatabaseClientException`** — the client error root, carrying the wire's
   stable `ProtocolErrorCode`. A failed dial carries `ConnectionFailure`, names the
