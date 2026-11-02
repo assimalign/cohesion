@@ -285,9 +285,9 @@
       "name": "GRANT / REVOKE, roles",
       "today": "No",
       "expected": "Everyone",
-      "add": "T2, with the security model (#177)",
-      "tiers": ["T2"],
-      "items": { "T2": [177] },
+      "add": "T3, with the security model (#177); moved from T2 by T2 plan v3 decision 2 (owner, 2026-10-25)",
+      "tiers": ["T3"],
+      "items": { "T3": [177] },
       "unfiled": [],
       "notes": "#177 is the pre-existing security task; no language-surface item."
     },
@@ -1881,7 +1881,7 @@
       "type": "Task",
       "wbs": "L03.02.02.02.01.03",
       "language": "SQL",
-      "tier": "T2",
+      "tier": "T3",
       "family": "sql-grants",
       "title": "Add relational security behavior for principals, permissions, and schema changes"
     },
