@@ -1931,6 +1931,43 @@ overwrite the anchor open has just read (the next open would then refuse the fil
 corrupt). Open reads page 0 and both valid chains before recovery and passes their pages to it.
 Recovery never replays onto page 0 either: nothing journals it, so an image of it is damage.
 
+### Read-only recovered format preflight (#1744)
+
+An open over a data stream whose `CanWrite` is false is a recovered read-only view. The existing
+model storage factories own these streams; no new public interface or producer-to-consumer
+visibility grant is needed. A caller can run its format gates through this view, dispose it, then
+open the original streams for normal physical recovery. Refusal, cancellation and probe disposal issue no writes, truncation, checkpoint, backup or sidecar creation.
+A read failure retains its existing I/O/corruption identity. A probe mutation is API misuse and
+throws resource-backed `NotSupportedException`, without a new Database diagnostic.
+
+The header and both valid checkpoint chains are read first. The existing journal analysis verifies
+frames and classifies commits. A streaming pass retains only applicable page-record identities,
+payload lengths and offsets, never their payloads. Each requested page is reconstructed in one
+scratch page from those records in file order, then checksum-stamped. `StorageRecovery.GetPlans`,
+`ShouldApply` and `Apply` are shared with physical recovery: protected anchors, page zero, absent
+uncommitted extensions, commit selection, images, deltas and base-LSN checks have one implementation.
+There is no separate undo algorithm: recovery is already redo-only and overwrites stolen bytes.
+The owner/free-space scan consumes recovered headers one page at a time. Unchanged pages read only
+the requested header bytes, so a body I/O fault unrelated to any gate cannot introduce a refusal. The read-only
+buffer pool caches only pages subsequently read by a gate; its write guard, both transaction-begin overloads,
+the data stream and journal append/truncation guards reject mutation.
+
+Let R be retained applicable page records, P file pages, T journal transaction identities, G the
+number of distinct pages gates read and C the buffer capacity. Storage's retained page bytes are
+at most `8192 * (min(G, C) + 1)`; the extra page is the reconstruction scratch page. The retained
+record index is at most `512 * R + 128` bytes, charging allocated dictionary/list capacities and
+conservative object headers (`RetainedIndexBytes`). Existing allocator/owner and analysis identity
+state is `O(P + T + R)`, with no page payloads. Scan workspace is a returned 256 KiB journal chunk
+(or one larger frame), one decoded payload and one page-header buffer. Model-decoded catalog
+metadata follows the gate-read pages. No journal-size cap refuses an otherwise openable database;
+there is no temporary file and no dependence on query spill.
+
+The probe adds **no durable boundary**. Header/chain reads, journal analysis/indexing, recovered
+header scans, gate reads and disposal all precede the handoff to existing physical recovery.
+Storage tests compare every probe page with real recovery over mixed committed and uncommitted
+histories, torn pages and protected anchors. The existing 1,000-history oracle still checks physical
+writes in order. A 32 MiB unread journal test uses deterministic retained-byte counters.
+
 ### Checkpoints
 
 `Checkpoint()` durably flushes all page state and **truncates** the journal, writing a

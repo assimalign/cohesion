@@ -212,6 +212,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     private readonly Stream _stream;
     private readonly IFileSystemFileHandle _handle;
     private readonly bool _leaveOpen;
+    private readonly bool _readOnly;
 
     // Where the next frames go: the end of the last frame that verifies, once a read scan has
     // run to the end of the verified frames or a write has landed; -1 until then. Bytes past
@@ -226,11 +227,12 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     // The one constructor: every public way in is a static factory (database-area.md, rule 1;
     // owner decision 27 of 2026-10-06), so the journal's construction surface is the factory set
     // below and nothing else.
-    private StorageJournal(Stream stream, IFileSystemFileHandle handle, bool leaveOpen)
+    private StorageJournal(Stream stream, IFileSystemFileHandle handle, bool leaveOpen, bool readOnly = false)
     {
         _stream = stream;
         _handle = handle;
         _leaveOpen = leaveOpen;
+        _readOnly = readOnly;
     }
 
     /// <summary>
@@ -259,6 +261,17 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         ValidateStream(stream);
         return new StorageJournal(stream, stream, leaveOpen);
     }
+
+    internal static StorageJournal OpenReadOnly(StorageStream stream)
+        => new StorageJournal(stream, stream, leaveOpen: true, readOnly: true);
+
+    internal void ReadRecoveryPayload(long offset, Span<byte> destination)
+    {
+        lock (_mediumLock) { ReadAtCore(offset, destination); }
+    }
+
+    internal const int RecoveryFrameOverhead = framePrefixSize + bodyHeaderSize + sizeof(uint);
+    internal const int RecoveryPayloadOffset = framePrefixSize + bodyHeaderSize;
 
     /// <summary>Creates a journal backed by an explicit random-access file handle.</summary>
     /// <param name="handle">The file handle providing I/O and durability.</param>
@@ -1110,6 +1123,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
 
     private long Append(long transactionSequence, JournalRecordType type, PageId pageId, ReadOnlySpan<byte> payload, out long offset, out int frameLength)
     {
+        if (_readOnly) { throw new NotSupportedException(ErrorMessages.RecoveryProbeReadOnly); }
         ThrowIfDisposed();
         EnsureInitialized();
         if (payload.Length > MaximumPayloadLength)
@@ -1363,6 +1377,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         long transactionSequence, JournalRecordType type, PageId pageId,
         ReadOnlySpan<byte> payload, ReadOnlySpan<long> words, out long offset, out int frameLength)
     {
+        if (_readOnly) { throw new NotSupportedException(ErrorMessages.RecoveryProbeReadOnly); }
         long lsn = _lastLsn + 1;
         offset = _length;
         frameLength = framePrefixSize + bodyHeaderSize + payload.Length + words.Length * sizeof(long) + sizeof(uint);
@@ -1390,6 +1405,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         long transactionSequence, JournalRecordType type, PageId pageId,
         ReadOnlySpan<byte> payload, ReadOnlySpan<long> words, out long offset, out int frameLength)
     {
+        if (_readOnly) { throw new NotSupportedException(ErrorMessages.RecoveryProbeReadOnly); }
         long lsn = _lastLsn + 1;
         frameLength = framePrefixSize + bodyHeaderSize + payload.Length + words.Length * sizeof(long) + sizeof(uint);
         offset = _length;
@@ -1880,6 +1896,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// </summary>
     private void TruncateCore()
     {
+        if (_readOnly) { throw new NotSupportedException(ErrorMessages.RecoveryProbeReadOnly); }
         _scannedLength = 0;
         _recoveryAnalysis = null;
         _recoveryReplayToken = null;

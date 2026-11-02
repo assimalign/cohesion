@@ -104,22 +104,7 @@ internal static class StorageRecovery
 
         // Planning was fused into initialization and consumed here. Copy identities before
         // applying the recovery-specific protected-page and file-length exclusions.
-        var plans = new Dictionary<long, StorageRecoveryPagePlan>(analysis.Pages);
-        long originalLength = data.Length;
-        var skipped = new List<long>();
-        foreach (var (pageId, plan) in plans)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (protectedPages?.Contains(pageId) == true || (!plan.Committed && (pageId + 1) * Page.Size > originalLength))
-            {
-                skipped.Add(pageId);
-            }
-        }
-
-        foreach (long pageId in skipped)
-        {
-            plans.Remove(pageId);
-        }
+        var plans = GetPlans(analysis, data.Length, protectedPages, cancellationToken);
 
         if (plans.Count == 0)
         {
@@ -138,59 +123,10 @@ internal static class StorageRecovery
             }
 
             long pageId = (long)record.PageId;
-            var payload = record.Payload.Span;
-            byte[] page;
-            string? problem;
-
-            if (record.Type == JournalRecordType.FullPageImage)
-            {
-                page = cache.Take(pageId);
-                problem = PageImageCodec.TryApplyImage(payload, page);
-                imaged.Add(pageId);
-            }
-            else
-            {
-                if (!committed.Contains(record.TransactionSequence))
-                {
-                    continue;
-                }
-
-                if (!imaged.Contains(pageId))
-                {
-                    throw new StorageCorruptionException(
-                        record.PageId,
-                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRecoveryRunFailure, pageId, Describe(record.Type), record.Lsn));
-                }
-
-                page = cache.Get(pageId);
-                if (payload.Length < PageImageCodec.BaseLsnSize)
-                {
-                    throw Malformed(record, "it is shorter than its base LSN");
-                }
-
-                long baseLsn = BinaryPrimitives.ReadInt64LittleEndian(payload);
-                long pageLsn = BinaryPrimitives.ReadInt64LittleEndian(page.AsSpan(Page.LsnFieldOffset));
-                if (pageLsn != baseLsn)
-                {
-                    throw new StorageCorruptionException(
-                        record.PageId,
-                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRecoveryRunFailure2, pageId, Describe(record.Type), record.Lsn, baseLsn, pageLsn));
-                }
-
-                var runs = payload[PageImageCodec.BaseLsnSize..];
-                problem = record.Type == JournalRecordType.PageDelta
-                    ? PageImageCodec.TryApplyRuns(runs, page)
-                    : PageImageCodec.TryApplyImage(runs, page);
-            }
-
-            if (problem is not null)
-            {
-                throw Malformed(record, problem);
-            }
-
-            // Every rebuilt page carries the LSN of the last record applied to it: the base the
-            // next transaction's delta names.
-            BinaryPrimitives.WriteInt64LittleEndian(page.AsSpan(Page.LsnFieldOffset), record.Lsn);
+            if (!ShouldApply(record, committed)) { continue; }
+            byte[] page = record.Type == JournalRecordType.FullPageImage || !imaged.Contains(pageId) ? cache.Take(pageId) : cache.Get(pageId);
+            Apply(record, page, imaged.Contains(pageId));
+            imaged.Add(pageId);
 
             if (record.Lsn == plan.LastLsn)
             {
@@ -208,6 +144,60 @@ internal static class StorageRecovery
     /// </summary>
     internal static bool IsPageRecord(JournalRecordType type)
         => type is JournalRecordType.FullPageImage or JournalRecordType.PageDelta or JournalRecordType.CommittedPageImage;
+
+    internal static Dictionary<long, StorageRecoveryPagePlan> GetPlans(
+        StorageRecoveryAnalysis analysis, long originalLength, IReadOnlySet<long>? protectedPages,
+        CancellationToken cancellationToken)
+    {
+        var plans = new Dictionary<long, StorageRecoveryPagePlan>();
+        foreach (var (pageId, plan) in analysis.Pages)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (protectedPages?.Contains(pageId) != true && (plan.Committed || (pageId + 1) * Page.Size <= originalLength))
+            {
+                plans.Add(pageId, plan);
+            }
+        }
+        return plans;
+    }
+
+    internal static bool ShouldApply(JournalRecord record, IReadOnlySet<long> committed)
+        => record.Type == JournalRecordType.FullPageImage || committed.Contains(record.TransactionSequence);
+
+    // The physical replay and the read-only recovered view use exactly the same decoder,
+    // base-LSN checks and LSN stamping. Neither trusts stolen or torn data-file bytes.
+    internal static void Apply(JournalRecord record, byte[] page, bool imaged)
+    {
+        var payload = record.Payload.Span;
+        string? problem;
+        if (record.Type == JournalRecordType.FullPageImage)
+        {
+            problem = PageImageCodec.TryApplyImage(payload, page);
+        }
+        else
+        {
+            if (!imaged)
+            {
+                throw new StorageCorruptionException(record.PageId,
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRecoveryRunFailure,
+                        (long)record.PageId, Describe(record.Type), record.Lsn));
+            }
+            if (payload.Length < PageImageCodec.BaseLsnSize) { throw Malformed(record, "it is shorter than its base LSN"); }
+            long baseLsn = BinaryPrimitives.ReadInt64LittleEndian(payload);
+            long pageLsn = BinaryPrimitives.ReadInt64LittleEndian(page.AsSpan(Page.LsnFieldOffset));
+            if (pageLsn != baseLsn)
+            {
+                throw new StorageCorruptionException(record.PageId,
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRecoveryRunFailure2,
+                        (long)record.PageId, Describe(record.Type), record.Lsn, baseLsn, pageLsn));
+            }
+            var runs = payload[PageImageCodec.BaseLsnSize..];
+            problem = record.Type == JournalRecordType.PageDelta
+                ? PageImageCodec.TryApplyRuns(runs, page) : PageImageCodec.TryApplyImage(runs, page);
+        }
+        if (problem is not null) { throw Malformed(record, problem); }
+        BinaryPrimitives.WriteInt64LittleEndian(page.AsSpan(Page.LsnFieldOffset), record.Lsn);
+    }
 
     private static string Describe(JournalRecordType type) => type switch
     {

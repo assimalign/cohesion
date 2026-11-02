@@ -43,6 +43,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     internal int DirtyPageCount => Volatile.Read(ref _dirtyPageCount);
     internal Action<long>? WriteAheadGate;
     internal Action? WriteGuard;
+    internal bool IsReadOnly { get; init; }
     internal Action<long, long>? WriteBackAudit;
     internal Action? FlushCopyHalfway;
     internal Action? IoCleanupStarting;
@@ -999,6 +1000,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
 
         public void MarkDirty()
         {
+            if (_pool.IsReadOnly) { throw new NotSupportedException(ErrorMessages.RecoveryProbeReadOnly); }
             // Pool -> entry is the only lock order. Dirtying never enters the pool monitor.
             lock (_dirtySync)
             {
