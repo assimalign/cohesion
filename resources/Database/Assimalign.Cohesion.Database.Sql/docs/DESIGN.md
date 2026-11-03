@@ -179,6 +179,8 @@ AscendingNullsLast = 1, DescendingNullsFirst = 2 and DescendingNullsLast = 3; bi
 LAST and bit 1 means DESC. Null and zero-filled key vectors, PRIMARY KEY and UNIQUE-constraint
 indexes use ASC NULLS FIRST. Format 35 and earlier databases and v11 and earlier artifacts are
 refused through the existing recovered read-only gate before any write; no upgrade is added.
+A format-35 refusal preserves every file byte for byte on both clean and crash opens,
+including repeated refusals after disposing the engine (#1744).
 
 All maintenance, build, rewrite, conflict and undo paths use the same key transform. Direction
 never changes key equality; creation-order arbitration and the existing partial-index NULL-key
