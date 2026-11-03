@@ -1332,7 +1332,7 @@ owns nothing, repeated disposal (including value copies) is inert, and a scope c
 The value-type lease records its entering thread. Cross-thread disposal emits event 22, asserts in
 Debug and throws before changing admission; a refused disposal leaves the scope held.
 Inert coordinated leases and ended value copies return before the thread-affinity check. The live
-coordinator binds once; a second live bind throws, and disposal unbinds only its own registration.
+coordinator binds after construction initializes every callback dependency; it binds once; a second live bind throws, and disposal unbinds only its own registration.
 A short state monitor makes the final pending-work check atomic with gate release, closing the
 failed-wait handoff race; it is never held across model or storage work. A checkpoint running at
 a bracket exit publishes Checkpoint as its holder, so it cannot misattribute later deferrals to

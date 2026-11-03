@@ -565,7 +565,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             return true;
         }
 
-        return journal.LastLsn > Volatile.Read(ref _lastCheckpointLsn)
+        return interval != TimeSpan.MaxValue && journal.LastLsn > Volatile.Read(ref _lastCheckpointLsn)
             && System.Diagnostics.Stopwatch.GetElapsedTime(Volatile.Read(ref _lastCheckpointTimestamp)) >= interval;
     }
 
@@ -1376,8 +1376,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // Counted under the same lock the checkpoint holds, so a checkpoint can
             // never truncate the journal between a transaction's begin and its
             // completion (which would discard the full page images its changes chain onto).
-            _activeBrackets.Add(transaction, (bracketClass, owner));
-            _activeTransactionCount++;
+            try
+            {
+                _activeBrackets.Add(transaction, (bracketClass, owner));
+                _activeTransactionCount++;
+            }
+            catch { transaction.MarkCompleted(); throw; }
         }
 
         try
@@ -1447,26 +1451,30 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         GuardWrite();
         var transaction = new StorageTransaction(this, sequence);
-        lock (_transactionLock)
+        try
         {
-            // Adopted sequences normally come from ReserveTransactionSequence, but
-            // keep the counter monotonic even for a caller that minted its own —
-            // a later internally assigned sequence must never collide.
-            long observed = Interlocked.Read(ref _nextTransactionSequence);
-            while (sequence > observed)
+            lock (_transactionLock)
             {
-                long previous = Interlocked.CompareExchange(ref _nextTransactionSequence, sequence, observed);
-                if (previous == observed)
+                // Adopted sequences normally come from ReserveTransactionSequence, but
+                // keep the counter monotonic even for a caller that minted its own —
+                // a later internally assigned sequence must never collide.
+                long observed = Interlocked.Read(ref _nextTransactionSequence);
+                while (sequence > observed)
                 {
-                    break;
+                    long previous = Interlocked.CompareExchange(ref _nextTransactionSequence, sequence, observed);
+                    if (previous == observed)
+                    {
+                        break;
+                    }
+
+                    observed = previous;
                 }
 
-                observed = previous;
+                _activeBrackets.Add(transaction, ("Adopted", sequence));
+                _activeTransactionCount++;
             }
-
-            _activeBrackets.Add(transaction, ("Adopted", sequence));
-            _activeTransactionCount++;
         }
+        catch { transaction.MarkCompleted(); throw; }
 
         // Deliberately no begin record: the reserving caller's transaction log owns
         // the lifecycle records (see the summary above); page images

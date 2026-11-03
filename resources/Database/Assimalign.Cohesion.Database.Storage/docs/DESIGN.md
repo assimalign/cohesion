@@ -3154,3 +3154,7 @@ structured diagnostic carrier exists. Standard .NET guards retain their argument
 Storage debugger views filter nonpublic implementation state and expose only reviewed public/protected value reads. StorageStream has an empty projection: inspection does not invoke delegated stream/handle properties. Pool/free-space counts that acquire locks, journal getters that initialize storage, disposed-page guards and pointer-backed SlottedPage reads are omitted. Public identity/value/count reads and existing volatile flags remain observable without page I/O or mutation.
 
 Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.
+
+Size-only checkpoint hints (TimeSpan.MaxValue) short-circuit elapsed-time sampling after the
+journal-size trigger. Failed physical-bracket registration completes the unreturned transaction;
+probe write refusal still precedes construction in both BeginTransaction overloads (#1283, #1744).
