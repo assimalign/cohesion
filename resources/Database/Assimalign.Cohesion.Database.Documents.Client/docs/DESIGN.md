@@ -79,6 +79,22 @@ The real DocumentClient and model server run missing-database handshakes on InMe
 loopback TCP for at least one second and 200 consecutive coded refusals per transport. The
 tests assert DatabaseNotFound and reuse a one-slot pool to expose leaked failed rentals.
 
+## Set-operation wire conformance (#1803, OQ-S1)
+
+UNION [ALL] uses existing OQL text, ResultHeader, Document and Complete messages. T3-30 chooses
+one `value` column for all RAW/VALUE operands, typed columns for identical ordered named
+projections, and whole-document mode with one `document` Json column otherwise. Named MISSING
+members retain omission and typed rows retain the existing missing bitmap. No codec, frame,
+negotiated capability, protocol version or client API changes are required. Compound ordering
+and paging operate on result values before formatting.
+
+DocumentSetOperationWireTests exercises equality, NULL/MISSING, numeric widening, heterogeneous
+arity/modes, operand and compound pages, LIMIT 0, EXPLAIN operands and located CD01037/CD01038
+refusals over InMemory and TCP. Memory/work refusals retain CD05018/CD05020; rollback and a
+subsequent query prove connection reuse. The NativeAOT consumer checks headers, value equality,
+pages and EXPLAIN on both transports. INTERSECT/EXCEPT and compound nested/DML positions
+remain CK00001 until OQ-S2.
+
 ## Ordering wire conformance (#1730, #1632)
 
 InMemory and TCP tests execute every ASC/DESC NULLS combination over mixed values and MISSING,

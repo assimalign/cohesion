@@ -36,6 +36,10 @@ namespaces. The client library itself references only the transport contracts. Q
 accept JSON scalars and `JsonElement`; object and array results remain owned `JsonElement`
 values. A stored `Document` carries its exact UTF-8 content, identity and version.
 
+Top-level UNION [ALL] uses existing row/document result modes: all RAW/VALUE operands give one
+`value` column, identical named projections give typed columns, and other shapes give one
+`document` Json column. Compound ORDER BY/LIMIT/OFFSET and parenthesized operand pages work over
+both transports; INTERSECT/EXCEPT and nested compound positions remain deferred.
 OQL LIMIT/OFFSET accepts literals or JSON parameters in either order. Empty pages retain column
 metadata, and Complete counts returned frames while query AffectedCount remains -1. Invalid
 counts retain CD00007 and the operand location over both transports.
