@@ -137,7 +137,7 @@ public sealed partial class SqlTableRewriteTests
             database.SchemaProvisioner.RewriteRolledBack = null;
             SqlPlanExecutor.RewriteStage = null;
         }
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         await ReclaimAsync(database, timeout.Token);
         await database.RewriteTableAsync(Table(database), timeout.Token);
     }

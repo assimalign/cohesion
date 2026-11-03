@@ -30,6 +30,11 @@ until no storage-level transaction is active (`Storage.HasActiveTransactions`), 
 uncollected operational failures suppress foreground retries; the worker retains failure policy.
 Undo and prune releases can checkpoint while the rolled-back writer still holds model locks.
 
+The test-only context snapshot barrier waits at most 30 seconds for the reclamation run monitor
+and copies contexts while excluding the next pass; it does not drain other background contexts.
+Callers must hold neither the data gate nor a catalog monitor because reclamation can wait for
+the gate while holding its run monitor and access the catalog later.
+
 Table reclamation takes the data interlock without model locks, commits each 32-page batch without
 awaiting durability under its allocation-accounting monitor, then ensures its captured journal LSN
 is durable after gate release and before removing the intent. A post-admission size-due exit runs
@@ -3543,8 +3548,10 @@ completion includes pages reclaimed by that process (after a crash it counts rem
 
 Context-count assertions in SQL tests capture the coordinator's unchanged open-context snapshot
 through an internal, test-only barrier under reclamation's existing run lock (#1764, #1782).
-The lock waits for any discovery pin to end and excludes the next discovery until the copy is
-complete; a separate idle poll would leave a race before enumeration. Pending reclamations may
+CaptureOpenContextsForTesting waits up to 30 seconds for an in-flight pass, then excludes the
+next discovery until the copy is complete; it does not promise that reclamation has drained.
+A separate idle poll would leave a race before enumeration. Callers hold neither a data gate
+nor a catalog monitor, since the run lock precedes both in reclamation. Pending reclamations may
 remain behind live readers, and every application context (including leaked builders and statement
 pins) is still counted. The hook adds no work to production paths and uses only SQL's own test grant.
 
@@ -10568,3 +10575,6 @@ The function argument view snapshots only Count; the function context view snaps
 TransactionTimestamp. Neither view retains a ref struct, span, context, or cancellation token.
 The SQL value view reads Type and IsNull without decoding its payload. Internal-only plan or
 metrics state stays hidden rather than being promoted to a public debugger projection.
+
+Reclamation's pre-admission due check reads its data storage, rather than the engine-wide wake
+signal; a request for another database or catalog cannot keep this owner queued (#1283).

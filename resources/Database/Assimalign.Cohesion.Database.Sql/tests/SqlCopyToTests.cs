@@ -60,7 +60,7 @@ public sealed class SqlCopyToTests
         Encoding.UTF8.GetString(destination.ToArray()).ShouldBe(expected.ToString());
         destination.CanWrite.ShouldBeTrue();
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 
     // Independent oracle follows commands/copyto.c:1443-1708. SELECT CAST supplies the
@@ -134,7 +134,7 @@ public sealed class SqlCopyToTests
         await Should.ThrowAsync<OperationCanceledException>(async () => await session.CopyToAsync("COPY t TO STDOUT", Stream.Null, canceled.Token));
         (await session.CopyToAsync("COPY t TO STDOUT", Stream.Null)).ShouldBe(1);
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - COPY: binding and transaction refusals release all ownership")]
@@ -158,7 +158,7 @@ public sealed class SqlCopyToTests
         error.Diagnostics.ShouldContain(d => d.Code == code);
         if (session.CurrentTransaction is not null) { await session.ExecuteAsync("ROLLBACK"); }
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         await session.ExecuteAsync("INSERT INTO t VALUES(1,2)");
     }
 
@@ -183,7 +183,7 @@ public sealed class SqlCopyToTests
         {
             await output.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
             reader.LastStatementMetrics!.RecordsExamined.ShouldBe(3);
-            database.TableReclamation.GetOpenContextsAtIdleForTesting().Count.ShouldBe(1);
+            database.TableReclamation.CaptureOpenContextsForTesting().Count.ShouldBe(1);
             (await writer.ExecuteAsync(truncate ? "TRUNCATE t" : "UPDATE t SET id=id+10").AsTask().WaitAsync(TimeSpan.FromSeconds(30)))
                 .AffectedCount.ShouldBe(truncate ? 0 : 3);
             await writer.ExecuteAsync("INSERT INTO t VALUES(99)");
@@ -198,7 +198,7 @@ public sealed class SqlCopyToTests
             Encoding.UTF8.GetString(output.ToArray()).ShouldBe("1\n2\n3\n");
         }
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - COPY: destination exceptions release snapshot and permit session reuse")]
@@ -215,7 +215,7 @@ public sealed class SqlCopyToTests
         // Act / Assert
         await Should.ThrowAsync<IOException>(async () => await session.CopyToAsync("COPY t TO STDOUT", output));
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         (await session.CopyToAsync("COPY t TO STDOUT", Stream.Null)).ShouldBe(1);
     }
 
@@ -240,7 +240,7 @@ public sealed class SqlCopyToTests
         // Assert
         await Should.ThrowAsync<OperationCanceledException>(async () => await copying);
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         output.CanWrite.ShouldBeTrue();
     }
 
@@ -302,7 +302,7 @@ public sealed class SqlCopyToTests
         // Assert
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - COPY: application domain casts match SELECT and late failures release the snapshot")]
@@ -326,7 +326,7 @@ public sealed class SqlCopyToTests
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05007");
         Encoding.UTF8.GetString(output.ToArray()).ShouldBe(("\"custom," + new string('x', 20000))[..16384]);
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         await session.ExecuteAsync("DELETE FROM t WHERE v=2");
         (await session.CopyToAsync("COPY t TO STDOUT", Stream.Null)).ShouldBe(1);
     }
@@ -349,7 +349,7 @@ public sealed class SqlCopyToTests
         // Assert
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05045");
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - COPY: minimum-of-three allocation per row stays constant at two sizes")]
@@ -416,6 +416,6 @@ public sealed class SqlCopyToTests
         // Assert
         overlaps.ShouldBeGreaterThanOrEqualTo(8); writes.ShouldBe(overlaps); canceled.ShouldBeGreaterThanOrEqualTo(4);
         database.Coordinator.PairedTransactionCount.ShouldBe(0);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 }

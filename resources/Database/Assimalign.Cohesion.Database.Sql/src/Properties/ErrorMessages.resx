@@ -1062,4 +1062,7 @@
     <value>The pending joint migration's table ownership classification does not match its source and target.</value>
   </data>
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
+  <data name="ReclamationContextBarrierTimeout" xml:space="preserve">
+    <value>Timed out waiting for the reclamation context snapshot barrier.</value>
+  </data>
 </root>
