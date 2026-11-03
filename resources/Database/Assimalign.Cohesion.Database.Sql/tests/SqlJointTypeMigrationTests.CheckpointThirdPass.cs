@@ -102,6 +102,61 @@ public sealed partial class SqlJointTypeMigrationTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint copy retries an ungated bracket or cancels inside its busy delay (#1283)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApplyAsync_OutsideBracketAtCopyCheckpoint_ShouldRetryOrCancel(bool cancel)
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(guard.Token);
+        var storage = new CrashCaptureSqlStorageStrategy();
+        var builder = Builder(storage);
+        builder.Options.CheckpointJournalSize = 0;
+        builder.Options.CheckpointInterval = TimeSpan.FromDays(1);
+        await using var engine = await builder.BuildAsync(guard.Token);
+        var database = await engine.CreateDatabaseAsync("typed", guard.Token);
+        var source = WideCheckpointDeclaration(false);
+        var target = WideCheckpointDeclaration(true);
+        await database.ApplySchemaAsync(source, guard.Token);
+        SeedRaw(database, [1, new string('x', 4000)], 4096);
+        database.Coordinator.Checkpoint(guard.Token);
+        using var outside = database.DataStorage.BeginTransaction("OutsideTest");
+        int busy = 0, checkpoints = 0;
+        long peak = 0;
+        storage.DurableStorageChanged = catalog =>
+        { if (!catalog) { peak = Math.Max(peak, database.DataStorage.Journal.Length); } };
+        SqlPlanExecutor.RewriteStage = (stage, _) =>
+        {
+            if (stage == "CheckpointBusy" && Interlocked.Increment(ref busy) == 1)
+            {
+                if (cancel) { cancellation.Cancel(); }
+                else { outside.Rollback(); }
+            }
+            if (stage == "CopyCheckpointed") { Interlocked.Increment(ref checkpoints); }
+        };
+        try
+        {
+            // Act
+            if (cancel) { await Should.ThrowAsync<OperationCanceledException>(async () => await database.ApplySchemaAsync(target, cancellation.Token)); }
+            else { await database.ApplySchemaAsync(target, guard.Token); }
+            // Assert: retry preserves the copied schema; cancellation preserves its predecessor.
+            busy.ShouldBeGreaterThan(0);
+            checkpoints.ShouldBe(cancel ? 0 : 1);
+            peak.ShouldBeLessThanOrEqualTo(SqlSchemaProvisioner.JointCopyCheckpointBytes + 128L * 2 * (Page.Size + 46) + 152);
+            database.Catalog.SchemaState!.ContentHash.ShouldBe(cancel ? source.Hash : target.Hash);
+            database.Catalog.PendingMigration.ShouldBeNull();
+            database.IsOffline.ShouldBeFalse();
+            _output.WriteLine($"outside cancel={cancel}: busy={busy}; checkpoints={checkpoints}; pre-truncation peak={peak}");
+        }
+        finally
+        {
+            SqlPlanExecutor.RewriteStage = null;
+            storage.DurableStorageChanged = null;
+            if (outside.IsActive) { outside.Rollback(); }
+        }
+    }
+
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_gate")]
     private static extern ref SemaphoreSlim AdmissionSemaphore(TransactionCheckpointInterlock interlock);
 

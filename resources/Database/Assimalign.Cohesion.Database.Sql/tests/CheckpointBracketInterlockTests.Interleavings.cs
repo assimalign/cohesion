@@ -59,8 +59,10 @@ public sealed partial class CheckpointBracketInterlockTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Free-running catalog, statement, reclamation and checkpoint contention (#1283)")]
-    public async Task TryCheckpoint_FreeRunningInterleavings_ShouldExerciseContentionAndDrain()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Free-running catalog, statement, reclamation and checkpoint contention (#1283)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TryCheckpoint_FreeRunningInterleavings_ShouldExerciseContentionAndDrain(bool cancelAtCeiling)
     {
         // Arrange: no per-iteration barriers or forced handoff. Duration is a minimum;
         // counters decide completion and the ceiling only diagnoses a stuck workload.
@@ -131,8 +133,23 @@ public sealed partial class CheckpointBracketInterlockTests
                 if (all.IsCompleted) { await all; }
                 await Task.Delay(10, guard.Token);
             }
+            if (cancelAtCeiling) { guard.Cancel(); guard.Token.ThrowIfCancellationRequested(); }
         }
-        finally { Volatile.Write(ref stop, 1); await all.WaitAsync(guard.Token); }
+        catch (OperationCanceledException) when (cancelAtCeiling && guard.IsCancellationRequested) { }
+        finally
+        {
+            Volatile.Write(ref stop, 1);
+            // The workload guard may already have fired. Drain actors before engine disposal
+            // with an independent hang guard, including their cancellation/fault completions.
+            try { await all.WaitAsync(TimeSpan.FromSeconds(30)); }
+            catch (OperationCanceledException) when (guard.IsCancellationRequested)
+            {
+                all.IsCompleted.ShouldBeTrue();
+                if (all.Exception is { } failures)
+                { failures.Flatten().InnerExceptions.ShouldAllBe(error => error is OperationCanceledException); }
+                if (!cancelAtCeiling) { throw; }
+            }
+        }
         // Assert
         writes.ShouldAllBe(count => count >= 32);
         schemas.ShouldBeGreaterThanOrEqualTo(8);
@@ -140,8 +157,8 @@ public sealed partial class CheckpointBracketInterlockTests
         dataDeferrals.ShouldBeGreaterThan(0); catalogDeferrals.ShouldBeGreaterThan(0);
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
         recorder.Events.ShouldContain(e => e.EventId == 21 && Equals(e.Payload![1], "SqlCatalog"));
-        database.Coordinator.TryCheckpoint(TimeSpan.Zero, guard.Token).ShouldBeTrue();
-        catalogGate.TryCheckpoint(TimeSpan.Zero, guard.Token).ShouldBeTrue();
+        database.Coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None).ShouldBeTrue();
+        catalogGate.TryCheckpoint(TimeSpan.Zero, CancellationToken.None).ShouldBeTrue();
         _output.WriteLine($"free-running writes={string.Join(',', writes)}; schemas={schemas}; retired={retired}; reclaimed={database.TableReclamation.ReclaimedPages}; deferrals={dataDeferrals}/{catalogDeferrals}");
     }
 }

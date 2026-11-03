@@ -8714,6 +8714,10 @@ the stated J overshoot; a checkpoint-disabled negative control must violate the 
 Reclamation-backlog tests prove event-21 SqlTableReclamation deferral at the gate, release the
 batch, then require zero CheckpointBusy callbacks, a completed copy checkpoint and the peak bound,
 including after failed preparation and cancellation after a completed copy checkpoint.
+Separate ungated OutsideTest brackets force CheckpointBusy: their first refusal either rolls
+back the blocker and retries the same checkpoint or cancels its delay. Both paths assert the
+pre-truncation peak and schema hash. Free-running contention also injects a canceled workload
+guard and drains every actor under an independent cleanup guard before disposing the engine.
 
 One engine reserve E survives copying, discard and successful publication. Let P be the
 larger of the old owners' measured page count and the prepared page bound (initially the
