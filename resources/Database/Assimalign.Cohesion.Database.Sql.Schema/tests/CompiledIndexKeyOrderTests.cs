@@ -10,7 +10,25 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
 public sealed class CompiledIndexKeyOrderTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql.Schema] - Directed indexes: v11 snapshots order, round trips and rebuilds on change (#1631)")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Schema] - Schema v12: omitted and zero-filled orders share identity and plan no changes (#1787)")]
+    public void Serialize_DefaultOrders_ShouldShareIdentityAndPlanNoOperations()
+    {
+        // Arrange
+        var omitted = Schema(new("ix", ["a", "b"]));
+        var zeros = Schema(new("ix", ["a", "b"], KeyOrders: new CompiledSchemaIndexKeyOrder[2]));
+
+        // Act
+        var restored = SqlCompiledSchemaSerializer.Deserialize(omitted.CanonicalDocument);
+        var plan = SqlSchemaMigrationPlanner.Plan(restored, zeros);
+
+        // Assert
+        default(CompiledSchemaIndexKeyOrder).ShouldBe(CompiledSchemaIndexKeyOrder.AscendingNullsFirst);
+        restored.Tables[0].Indexes[0].KeyOrders.ShouldBe([CompiledSchemaIndexKeyOrder.AscendingNullsFirst, CompiledSchemaIndexKeyOrder.AscendingNullsFirst]);
+        restored.Hash.ShouldBe(zeros.Hash);
+        plan.Operations.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Schema] - Directed indexes: v12 snapshots order, round trips and rebuilds on change (#1631)")]
     public void Serialize_KeyOrders_ShouldRoundTripAndAffectMigration()
     {
         // Arrange
@@ -24,13 +42,13 @@ public sealed class CompiledIndexKeyOrderTests
         var plan = SqlSchemaMigrationPlanner.Plan(before, after);
 
         // Assert
-        SqlCompiledSchema.CurrentFormat.ShouldBe("cohesion/database-schema/v11");
+        SqlCompiledSchema.CurrentFormat.ShouldBe("cohesion/database-schema/v12");
         restored.Tables[0].Indexes[0].KeyOrders.ShouldBe([CompiledSchemaIndexKeyOrder.DescendingNullsLast, CompiledSchemaIndexKeyOrder.AscendingNullsFirst]);
         restored.Hash.ShouldBe(before.Hash);
         after.Hash.ShouldNotBe(before.Hash);
         plan.Operations.Select(operation => operation.Kind).ShouldBe([SqlSchemaMigrationOperationKind.DropIndex, SqlSchemaMigrationOperationKind.AddIndex]);
         Should.Throw<SqlSchemaValidationException>(() => SqlCompiledSchemaSerializer.Deserialize(
-            before.CanonicalDocument.Replace("database-schema/v11", "database-schema/v10", StringComparison.Ordinal)))
+            before.CanonicalDocument.Replace("database-schema/v12", "database-schema/v11", StringComparison.Ordinal)))
             .Errors.ShouldHaveSingleItem().Declaration.ShouldBe("schema.format");
     }
 

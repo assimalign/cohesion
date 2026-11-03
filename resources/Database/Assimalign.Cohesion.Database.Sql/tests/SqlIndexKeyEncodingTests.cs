@@ -92,7 +92,7 @@ public sealed class SqlIndexKeyEncodingTests
         if (left is null || right is null)
         {
             if (left is null && right is null) { return 0; }
-            return (left is null ? -1 : 1) * (((int)order & 1) != 0 ? 1 : -1);
+            return (left is null ? -1 : 1) * (order is SqlCatalogIndexKeyOrder.AscendingNullsFirst or SqlCatalogIndexKeyOrder.DescendingNullsFirst ? 1 : -1);
         }
         return SqlValueComparer.Compare(left, right, collation) * (((int)order & 2) != 0 ? -1 : 1);
     }

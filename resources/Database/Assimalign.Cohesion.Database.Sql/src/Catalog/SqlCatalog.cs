@@ -2161,7 +2161,7 @@ public sealed partial class SqlCatalog
         for (int i = 0; i < calls; i++) { functionCalls.Add(reader.ReadString(out _)); }
         var keyOrders = new SqlCatalogIndexKeyOrder[columnCount];
         for (int i = 0; i < columnCount; i++) { keyOrders[i] = (SqlCatalogIndexKeyOrder)reader.ReadInt8(); }
-        if (keyOrders.Any(order => (uint)order > 3 || isPrimaryKey && order != SqlCatalogIndexKeyOrder.AscendingNullsLast) ||
+        if (keyOrders.Any(order => (uint)order > 3 || isPrimaryKey && order != SqlCatalogIndexKeyOrder.AscendingNullsFirst) ||
             !reader.IsAtEnd || dependencies < 0 || calls < 0 || (isPrimaryKey && (!isUnique || predicate is not null)) ||
             predicate is null && (dependencies != 0 || calls != 0) || predicate is not null && string.IsNullOrWhiteSpace(predicate))
         {
