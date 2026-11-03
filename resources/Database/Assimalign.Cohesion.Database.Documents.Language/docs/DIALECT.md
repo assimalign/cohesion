@@ -844,6 +844,7 @@ literals bind directly to Decimal, including `1.0`; CLR Single/Double constants 
 are refused. WHEN has at most 32 levels and 128 predicate nodes (a negated presence test counts
 as NOT plus the test). Binding failures use CD01028, unsupported constants CD02027, restricted
 expression failures CD03027 and predicate size failures CD03028, all located before catalog writes.
+An element-relative projection or WHEN path beginning with a subscript (v[0]) is CD03027.
 Multiple array keys and UNIQUE array indexes use CD03025. INCLUDE MISSING is a leading scalar-key suffix.
 PATH/PATHS render normalized array keys with a canonical `v` binding and a quoted source root.
 Source, projection and WHEN path segments containing punctuation, keywords, Unicode or quotes

@@ -2810,6 +2810,8 @@ original array to preserve its element multiplicity.
 
 OQL accepts one `DISTINCT ARRAY v.p FOR v IN arr [WHEN cond] END` key among 1..32 ordered keys.
 The source is a document path and the projection is the variable itself or a path rooted in it.
+An element-relative path must begin with a property; a leading subscript such as v[0] is refused
+at planning with located CD03027, including in WHEN, before any catalog mutation.
 WHEN binds only element paths, scalar literal comparisons, IS NULL/MISSING, AND, OR and NOT;
 negated tests normalize to NOT(test). Numeric text converts directly to Decimal, including scale
 and exponent spellings within its domain. CLR Single/Double literals in a directly constructed
