@@ -15,14 +15,14 @@ namespace Assimalign.Cohesion.Database.Graph.Catalog.Tests;
 
 public sealed class GraphCatalogConstraintTests
 {
-    [Theory(DisplayName = "Cohesion Test [Graph.Catalog] - Codec: v2 is symmetric for all record kinds and refuses v1")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Catalog] - Codec: v3 is symmetric for all record kinds and refuses v2")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
-    public void Codec_VersionTwo_ShouldRoundTripAndRefuseEarlierCatalogs(int kind)
+    public void Codec_VersionThree_ShouldRoundTripAndRefuseEarlierCatalogs(int kind)
     {
         // Arrange
         Guid id = Guid.NewGuid();
@@ -38,9 +38,9 @@ public sealed class GraphCatalogConstraintTests
 
         // Act / Assert
         byte[] bytes = GraphCatalogCodec.Encode(record, new TransactionSequence(7));
-        bytes[17].ShouldBe((byte)2);
+        bytes[17].ShouldBe((byte)3);
         GraphCatalogCodec.Decode(bytes).ShouldBe(record);
-        bytes[17] = 1;
+        bytes[17] = 2;
         var failure = Should.Throw<GraphCatalogException>(() => GraphCatalogCodec.Decode(bytes));
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
         failure.Message.ShouldContain("Recreate the database", Case.Sensitive);

@@ -13,6 +13,11 @@ optional injected payload is allocated inside that measured bracket, testing bot
 regressions and the 128-byte SET/DELETE headroom. Recovery's `seed directory` and `verify directory`
 modes retain their existing process-crash behavior.
 
+The typed-allocations mode takes the same arguments and publishes required Int64 properties
+for both measured labels before warmup. It uses the same measurement and injected controls.
+The fixture reports its process architecture alongside the minima; the test launches the
+matching runtime host and checks that architecture under native and --arch x64 execution.
+
 The diagram shows the fixture and test dependencies described above.
 
 ```mermaid
