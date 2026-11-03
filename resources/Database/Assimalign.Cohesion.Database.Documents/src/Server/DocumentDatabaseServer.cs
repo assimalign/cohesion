@@ -72,13 +72,14 @@ public sealed class DocumentDatabaseServer : DatabaseServer
     /// </summary>
     /// <param name="engine">The Document engine the server fronts. The composition root owns and disposes the engine.</param>
     /// <param name="options">
-    /// The composition options. Requires a configured <see cref="DocumentDatabaseServerOptions.Listener"/>.
+    /// The composition options. Requires a listener, or the model's assigned platform endpoint when managed.
     /// The server keeps a copy, so a later change to this object does not reach it.
     /// </param>
     /// <returns>The server.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="engine"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The drain timeout or peer-close linger is not positive and finite within the runtime timer range.</exception>
     /// <exception cref="ArgumentException">Thrown when the options carry no listener or a non-positive session limit or an invalid timer duration.</exception>
+    /// <exception cref="InvalidOperationException">The managed platform endpoint is missing, invalid or has no registered listener factory (CK07101).</exception>
     public static DocumentDatabaseServer Create(DocumentDatabaseEngine engine, DocumentDatabaseServerOptions options)
     {
         ArgumentNullException.ThrowIfNull(engine);
