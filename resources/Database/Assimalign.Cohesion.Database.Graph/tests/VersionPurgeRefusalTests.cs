@@ -21,14 +21,14 @@ public sealed class VersionPurgeRefusalTests
     [Fact(DisplayName = "Cohesion Test [Graph] - A lane rechecks due after a foreground pull checkpoint (#1283)")]
     public async Task RunIteration_PullCheckpointBeforeLaneBody_ShouldCheckpointOnce()
     {
-        // Arrange: keep automatic timers asleep and dispatch one selected due lane.
+        // Arrange: freeze interval due time; the real-time pump still polls.
+        // Drain setup writes before arming the single size crossing below.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
         var database = await engine.CreateDatabaseAsync("single-crossing", guard.Token);
         var worker = engine.Workers.OfType<GraphCheckpointWorker>().Single();
         var gate = Assimalign.Cohesion.Database.Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage);
-        database.DataStorage.CheckpointJournalSize = 1;
         database.DataStorage.OnCheckpointNeeded = () => { };
         var source = System.Diagnostics.Tracing.EventSource.GetSources().Single(s => s.Name == "Assimalign.Cohesion.Database.Storage");
         using var recorder = new Assimalign.Cohesion.Testing.EventSourceRecorder(source, System.Diagnostics.Tracing.EventLevel.Verbose);
@@ -42,6 +42,9 @@ public sealed class VersionPurgeRefusalTests
         };
         try
         {
+            database.Coordinator.TryCheckpoint(TimeSpan.FromSeconds(30), guard.Token).ShouldBeTrue();
+            int successesBefore = recorder.Events.Count(e => e.EventId == 6 && Equals(e.Payload![0], database.DataStorage.Name.ToString()) && Equals(e.Payload[1], "Success"));
+            database.DataStorage.CheckpointJournalSize = 1;
             using (var bracket = database.DataStorage.BeginTransaction("OutsideTest")) { bracket.Commit(); }
             database.DataStorage.IsCheckpointDue(TimeSpan.MaxValue).ShouldBeTrue();
             // Act
@@ -49,7 +52,7 @@ public sealed class VersionPurgeRefusalTests
             worker.WaitForCheckpoints(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             // Assert: the lane consumes the pull's completed work without another fsync/truncation.
             lanes.ShouldBe(1);
-            recorder.Events.Count(e => e.EventId == 6 && Equals(e.Payload![0], database.DataStorage.Name.ToString()) && Equals(e.Payload[1], "Success")).ShouldBe(1);
+            recorder.Events.Count(e => e.EventId == 6 && Equals(e.Payload![0], database.DataStorage.Name.ToString()) && Equals(e.Payload[1], "Success")).ShouldBe(successesBefore + 1);
             recorder.Events.ShouldNotContain(e => e.EventId == 0);
         }
         finally { worker.BeforeCheckpoint = null; }
