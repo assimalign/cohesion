@@ -1329,11 +1329,14 @@ independent instances with a plain storage checkpoint; data storage binds the co
 writer-anchor checkpoint. All gate releases, including undo and pruning, service deferred work.
 Synchronous nested scopes share their entering thread's acquisition; the outermost disposal
 runs any deferred checkpoint after its brackets and page latches ended. Canceled acquisition
-owns nothing, repeated disposal (including value copies) is inert, and a scope cannot checkpoint its own gate.
+owns nothing, a copy disposed after its thread released admission is inert, and a scope cannot
+checkpoint its own gate.
 The value-type lease records its entering thread. Cross-thread disposal emits event 22, asserts in
 Debug and throws before changing admission; a refused disposal leaves the scope held.
-Inert coordinated leases and ended value copies return before the thread-affinity check. The live
-coordinator binds after construction initializes every callback dependency; it binds once; a second live bind throws, and disposal unbinds only its own registration.
+Inert coordinated leases and copies disposed after their thread released admission return before the
+thread-affinity check. An ended nested copy is still refused on another thread while its entering
+thread holds admission. The live coordinator binds after construction initializes every callback
+dependency; it binds once; a second live bind throws, and disposal unbinds only its own registration.
 A short state monitor makes the final pending-work check atomic with gate release, closing the
 failed-wait handoff race; it is never held across model or storage work. A checkpoint running at
 a bracket exit publishes Checkpoint as its holder, so it cannot misattribute later deferrals to
@@ -1347,7 +1350,7 @@ interlock, accounting monitor, then storage/page latches, releasing the interloc
 retirement. No raw body waits for a model lock inside the gate. The uncontended synchronous and asynchronous internal gate
 paths allocate zero bytes in the minimum of three warmed rounds, as does its SemaphoreSlim
 control. Public synchronous scopes allocate no bytes after warming the nesting-identity set;
-identities make copies and repeated disposal idempotent without a heap object per call.
+identities make copies and repeated disposal on the entering thread idempotent without a heap object per call.
 
 Every release also pulls the storage's size-only due predicate (TimeSpan.MaxValue), arming the
 existing deferral before a possibly starved worker gets its first attempt. A releasing holder
