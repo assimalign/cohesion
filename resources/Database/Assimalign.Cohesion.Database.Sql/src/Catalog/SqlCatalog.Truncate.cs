@@ -210,6 +210,7 @@ public sealed partial class SqlCatalog
                     mismatch = column.Type != keptColumn.Type ? nameof(SqlCatalogColumn.Type)
                         : column.Collation != keptColumn.Collation ? nameof(SqlCatalogColumn.Collation)
                         : !string.Equals(column.DomainName, keptColumn.DomainName, StringComparison.OrdinalIgnoreCase) ? nameof(SqlCatalogColumn.DomainName) : null;
+                    if (mismatch is not null) { mismatch = nameof(SqlCatalogTable.Columns) + "[" + column.Name + "]." + mismatch; }
                 }
                 if (mismatch is not null)
                 { throw new SqlCatalogException("CS05060", string.Format(CultureInfo.CurrentCulture,
@@ -377,8 +378,13 @@ public sealed partial class SqlCatalog
             {
                 // The durable publication cannot be dismantled after an in-memory failure.
                 // Fence both file sets and let recovery rebuild the catalog and directory.
-                _storage.TakeOffline(StorageOfflineCause.ProvisioningFailure, ErrorMessages.JointPublicationUnconfirmed, failure);
-                throw new TransactionCommitUnconfirmedException(ErrorMessages.JointPublicationUnconfirmed, failure);
+                try { _storage.TakeOffline(StorageOfflineCause.ProvisioningFailure, ErrorMessages.StoragePublicationFailed, failure); }
+                catch (Exception fence)
+                {
+                    // If fencing itself fails, no caller may continue against the committed storage.
+                    Environment.FailFast(nameof(PublishStorageReplacementAsync), fence);
+                }
+                throw new TransactionCommitUnconfirmedException(ErrorMessages.StoragePublicationFailed, _storage.OfflineError ?? failure);
             }
             finally
             {
