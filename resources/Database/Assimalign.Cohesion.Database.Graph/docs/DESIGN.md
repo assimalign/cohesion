@@ -3,13 +3,15 @@
 ## Open graph types (#1806, GQ-T1)
 
 GraphType, GraphNodeType, GraphEdgeType and GraphPropertyType are sealed, immutable public
-declarations in the Graph namespace, implemented in the Catalog component. Collections are
+declarations beside GraphSchema in the Graph namespace. Collections are
 copied, read-only and ordinally ordered. Identifying labels, relationship types, implied labels
 and property names compare ordinally and case-sensitively. Property types use the existing graph
 scalar domain and TypeOf numeric promotion; Required defaults to false. Empty element and graph
 types are permitted. Null/repeated elements or properties, repeated implied labels and implying
 one's own identifying label are argument errors. Edge references use node identifying-label
-strings and resolve against the complete resulting type, allowing ADD/ALTER fragments.
+strings and resolve against the complete resulting type, allowing ADD/ALTER fragments. An implied
+label cannot be any node type's identifying label (CG03011), matching Neo4j's
+labelIdentifyingAndImplied check in GraphType.scala:114-127 in the local clone cited below.
 
 GraphSchema supplies GetGraphTypeAsync, SetGraphTypeAsync, AddGraphTypeAsync,
 AlterGraphTypeAsync and DropGraphTypeAsync. An absent type reads as null; a set empty type is a non-null
@@ -24,6 +26,13 @@ and budgets, and run through schema autocommit. They refuse explicit transaction
 with CG04025. Invalid constructor arguments precede admission; admitted failures retain the
 ordinary transaction-abort policy. CG03011 identifies invalid element operations or references.
 Missing-name diagnostics quote at most 256 UTF-16 code units without splitting a surrogate pair.
+Existing schema-owned identifying labels, implied labels and relationship types refuse graph-type
+publication through the same RequireMutableDefinition ownership check and DatabaseObjectLockedException
+as named constraints. Independent property-type constraints and declared key types must agree with
+the node declaration on the same label/property; both publication orders refuse conflicts with
+CG03009. Removing the type preserves those independent rules. Typed and text DROP LABEL and
+DROP RELATIONSHIP TYPE refuse a token still declared by the current type with the existing
+CG03003 in-use condition, including identifying and implied labels without any member nodes.
 
 A node carrying an identifying label must carry every implied label and satisfy its property
 types and NOT NULL rules. Missing implied labels are refused, never synthesized. Multiple matching
@@ -38,8 +47,15 @@ a stale writer reports CG04007. The existing database writer lock serializes DDL
 commit or rollback. Edge properties and endpoints are persisted declarations only in GQ-T1;
 their enforcement, text ALTER and SHOW CURRENT GRAPH TYPE are GQ-T2. Closedness is GQ-T3.
 
-Before publishing any resulting type, schema operations stream only each identifying label's
-owner postings under latest visibility and the writer lock. A violation stops at the first node
+Before publication, structural comparison by identifying label selects only new or strengthened
+node declarations for owner-posting validation under latest visibility and the writer lock.
+Unchanged declarations, removed elements, nullable-property relaxations, removed property rules
+and removed implied labels scan no members. Scalar declarations currently use exact types after
+CLR normalization, without scalar subtyping; changing the scalar type requires validation.
+Edge-only ALTER scans nothing in GQ-T1. Skipping these scans preserves deployment availability
+when previously validated typed owners have grown beyond the work budget, and avoids holding
+the writer lock over unaffected postings. Every node write continues to enforce the published
+rule. A violation stops at the first node
 with CG03010 and leaves the previous type in force. Empty owners decode no unrelated nodes.
 Descriptor work and selected postings consume CG05004's engine work budget; descriptor containers
 and bounded posting cursors consume CG05020's memory grant. Each decoded node's labels and
@@ -47,7 +63,9 @@ property payload have a temporary value grant, released before advancing to the 
 Loading previous type definitions
 reserves candidate-directory capacity before copying keys and conservatively charges 32 times
 each candidate's encoded length plus 512 bytes before decoding its strings, objects, collection
-and mutation buffers. Invisible versions are charged too. ADD/ALTER fragments reserve 512 bytes
+and mutation buffers. Invisible versions are charged too. Publication reuses this first load
+and its found references; each physical candidate is decoded and granted once per mutation.
+ADD/ALTER fragments reserve 512 bytes
 per element and preflight record sizes before allocating mutation maps and copied result arrays; resulting descriptors charge
 their names, implied labels and properties before retention. Each element must fit one catalog
 record (CG02009). The codec measures strict UTF-8 lengths before allocating an exact-sized payload
@@ -57,7 +75,7 @@ growing for the new variants. Ordinary-write allocation guards are tightened to 
 lower fresh-process baselines, retaining 128 bytes of headroom and the injected-regression controls.
 Publication reserves 512 bytes for the singleton type route and
 1 KiB before discovering each new label, relationship type or property token, covering catalog
-directory and transaction-version entries. Each token lookup also consumes work; duplicate or
+directory and transaction-version entries. Each token lookup and selective DROP name consumes work; duplicate or
 existing tokens need no new-token memory grant. Property-token reservation runs inside catalog
 discovery after its final existence check, following the actual insertion decision.
 There is no graph-wide data materialization. Successful publication
@@ -68,8 +86,14 @@ work units and 256 MiB retained memory. Every grant unwinds on success, cancella
 Catalog v3 adds kind 6 (current-type marker), 7 (node declaration) and 8 (edge declaration).
 The private fixed GUID 672bf6e9-3491-4306-a153-2a0f4c0370ed routes only these kinds; it is never
 a graph token identity. Membership remains label-derived and graph entity format stays 5.
-The old type's records are tombstoned, then the marker, ordinal nodes and ordinal edges are
-inserted through the existing physical apply brackets in one logical transaction. The publication
+Only changed or removed kind-7/8 records are tombstoned; only new or changed declarations are
+inserted through the existing physical apply brackets in one logical transaction. Structural
+comparison covers every encoded field. The kind-6 marker changes only between absent and present
+types. Unchanged records retain their physical identity and version chain: an unrelated ADD
+causes no false CG04007 conflict for a Snapshot writer to an unchanged identifying label.
+Added, changed and removed selected rules still conflict. Typed-label validation decodes each
+candidate once and pins the same immutable declaration for both visibility checks and enforcement.
+The publication
 boundaries are token discovery, old-record tombstones, marker, each node, each edge, and the
 logical commit. Recovery scrubs every abandoned creator and restores its deleters; committed
 replacement publishes the complete type. No independently committed metadata or mutable type
@@ -91,9 +115,10 @@ fragment replacement/default rules above are Cohesion's explicit API contract fo
 
 | Code | Graph-type condition |
 | --- | --- |
-| CG03003 | A node write violates a property-type or NOT NULL rule |
+| CG03003 | A node write violates a property-type or NOT NULL rule, or a declared token is still in use |
+| CG03009 | A node declaration conflicts with an independent property-type constraint or declared key type |
 | CG03010 | Existing member data violates a proposed graph type |
-| CG03011 | ADD/ALTER/DROP names or edge node-type references are invalid |
+| CG03011 | ADD/ALTER/DROP names or edge node-type references are invalid, or identifying/implied labels overlap |
 | CG03012 | A node write omits a required implied label |
 | CG04025 | A schema mutation is attempted inside an explicit transaction |
 | CG05004 / CG05020 | Schema work / retained-memory budget is exhausted |

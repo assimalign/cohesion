@@ -108,7 +108,9 @@ IF NOT EXISTS suppresses an existing rule of the same kind with that name, or an
 rule over the same owner/property/type, even with another name; a cross-kind name collision
 still reports CG03008 and incompatible rules CG03009. IF EXISTS suppresses an absent drop.
 A real create/drop reports affected count 1, a conditional no-op 0. Nonempty definitions
-cannot be dropped (CG03003); dropping an empty definition removes its child rules and indexes.
+cannot be dropped (CG03003); a label used as an identifying or implied label of the current
+graph type, or a declared relationship type, also refuses DROP with CG03003 even without
+members. Dropping an unused empty definition removes its child rules and indexes.
 
 Generated names are `index_<sha256>` or `constraint_<sha256>`, with all 64 lowercase hexadecimal
 digest characters. SHA-256 hashes UTF-8 concatenated fields, each prefixed by its invariant

@@ -251,6 +251,7 @@ public sealed partial class GraphCatalog
 
     internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot)
     {
+        if (property.Type is { } scalar) { EnsureGraphPropertyCompatible(property.DefinitionId, property.Name, scalar, snapshot); }
         if (property.Type is { } type && GetConstraints(property.DefinitionId, snapshot)
             .Any(item => item.PropertyKey == property.Name && item.Type is { } expected && expected != type))
         {
@@ -367,6 +368,8 @@ public sealed partial class GraphCatalog
         {
             throw ConstraintConflict(constraint.PropertyKey);
         }
+        if (constraint.Type is { } scalar)
+        { EnsureGraphPropertyCompatible(constraint.DefinitionId, constraint.PropertyKey, scalar, latest); }
         EnsureUnchanged(5, constraint.DefinitionId, constraint.Name, context);
         // A constraint introduces a known property key, independently of the rule's lifetime.
         // Keep unnamed rules untouched, and roll back new key discovery with a failed creation.
@@ -733,9 +736,14 @@ public sealed partial class GraphCatalog
     }
 
     private Found? Find(byte kind, Guid parent, string name, TransactionSnapshot snapshot, Action<long>? reserve = null)
+        => Find(kind, parent, name, snapshot, null, out _, reserve);
+
+    private Found? Find(byte kind, Guid parent, string name, TransactionSnapshot snapshot,
+        TransactionSnapshot? comparison, out Found? compared, Action<long>? reserve = null)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(snapshot);
+        compared = null;
         lock (_sync)
         {
             var key = (kind, parent, name);
@@ -781,6 +789,12 @@ public sealed partial class GraphCatalog
                 {
                     result = new Found(reference, record);
                 }
+                if (comparison is not null && comparison.IsVisible(writer) &&
+                    (deleter == TransactionSequence.None || !comparison.IsVisible(deleter)) &&
+                    (compared is null || writer > compared.Value.Reference.Writer))
+                {
+                    compared = new Found(reference, record);
+                }
             }
             return result;
         }
@@ -823,9 +837,9 @@ public sealed partial class GraphCatalog
         }
     }
 
-    private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, Guid Id);
+    internal readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, Guid Id);
 
-    private readonly record struct Found(Reference Reference, CatalogRecord Record);
+    internal readonly record struct Found(Reference Reference, CatalogRecord Record);
 
     private sealed class DebugView
     {

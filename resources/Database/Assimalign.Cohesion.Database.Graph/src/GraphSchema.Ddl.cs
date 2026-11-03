@@ -42,6 +42,7 @@ public sealed partial class GraphSchema
                     if (relationship)
                     {
                         EnsureMutable(name, type!.Value.Owner, type.Value.OwningSchema, "DROP RELATIONSHIP TYPE");
+                        RefuseGraphTypeUse(op, name, true, memory);
                         if (_database.Store.StreamRelationshipTypes([name], latest, token, op.QueryBudget.Consume, memory.Add).Any())
                         { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.DropRelationshipTypeAsyncDatabase); }
                         await _database.Catalog.DeleteRelationshipTypeAsync(type.Value.Id, op.Context, token).ConfigureAwait(false);
@@ -49,6 +50,7 @@ public sealed partial class GraphSchema
                     else
                     {
                         EnsureMutable(name, label!.Value.Owner, label.Value.OwningSchema, "DROP LABEL");
+                        RefuseGraphTypeUse(op, name, false, memory);
                         if (_database.Store.StreamLabels([name], latest, token, op.QueryBudget.Consume, memory.Add).Any())
                         { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.GraphSchemaDropLabelAsyncDatabase); }
                         foreach (var index in _database.Catalog.GetIndexes(label.Value.Id, op.Context.Snapshot))

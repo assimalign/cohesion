@@ -245,7 +245,7 @@ public sealed class GraphTypeTests
     public async Task SetGraphTypeAsync_DiscoveryBudget_ShouldRollbackPartialTokensAsync(bool memory)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create("types", new() { QueryWorkBudget = memory ? 100 : 6,
+        await using var engine = GraphDatabaseEngine.Create("types", new() { QueryWorkBudget = memory ? 100 : 11,
             QueryMemoryBudget = memory ? 7000 : 1048576 });
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -372,7 +372,9 @@ public sealed class GraphTypeTests
         var schema = GraphSchema.Open(database, ddl);
         await using var transaction = await writer.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
         await database.CreateNodeAsync(writer, ["Person"], cancellationToken: token);
+        using var waits = GraphTypeReviewRegressionTests.RecordLockWaits();
         var queued = schema.SetGraphTypeAsync(PersonType(), token).AsTask();
+        GraphTypeReviewRegressionTests.AssertWriterWait(waits);
         queued.IsCompleted.ShouldBeFalse();
 
         // Act
@@ -501,7 +503,7 @@ public sealed class GraphTypeTests
         var database = await engine.CreateDatabaseAsync("source", token);
         await using var session = await database.CreateSessionAsync(token);
         var schema = GraphSchema.Open(database, session);
-        await schema.SetGraphTypeAsync(GraphType.Create([GraphNodeType.Create("Old")]), token);
+        if (boundary != "marker") { await schema.SetGraphTypeAsync(GraphType.Create([GraphNodeType.Create("Old")]), token); }
         int captured = 0;
         database.Catalog.AfterGraphTypeMutation = stage =>
         {
@@ -540,14 +542,21 @@ public sealed class GraphTypeTests
             await using var reader = await image.CreateSessionAsync(token);
             var recoveredSchema = GraphSchema.Open(image, reader);
             var recovered = await recoveredSchema.GetGraphTypeAsync(token);
-            if (boundary == "committed-drop") { recovered.ShouldBeNull(); }
+            if (boundary is "committed-drop" or "marker") { recovered.ShouldBeNull(); }
             else
             {
                 recovered.ShouldNotBeNull().NodeTypes.Select(item => item.IdentifyingLabel).ShouldBe(boundary is "committed" or "commit-record" ? ["Person", "Place"] : ["Old"]);
                 recovered.EdgeTypes.Count.ShouldBe(boundary is "committed" or "commit-record" ? 1 : 0);
             }
-            (await recoveredSchema.GetLabelsAsync(token)).Select(item => item.Name).ShouldBe(boundary is "committed" or "commit-record" ? ["Entity", "Old", "Person", "Place"] : ["Old"]);
+            (await recoveredSchema.GetLabelsAsync(token)).Select(item => item.Name).ShouldBe(boundary is "committed" or "commit-record" ? ["Entity", "Old", "Person", "Place"] : boundary == "marker" ? [] : ["Old"]);
             (await recoveredSchema.GetRelationshipTypesAsync(token)).Select(item => item.Name).ShouldBe(boundary is "committed" or "commit-record" ? ["VISITS"] : []);
+            var context = await image.Coordinator.BeginAsync(IsolationLevel.Snapshot, token);
+            try
+            {
+                foreach (string property in new[] { "age", "name", "count" })
+                { image.Catalog.HasPropertyKey(property, context.Snapshot).ShouldBe(boundary is "committed" or "commit-record", property); }
+            }
+            finally { await image.Coordinator.RollbackAsync(context, token); }
             await reader.DisposeAsync();
             await image.DisposeAsync();
         }

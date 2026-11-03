@@ -260,6 +260,7 @@ public sealed partial class GraphSchema
             var label = Label(name, op);
             EnsureMutable(label.Name, label.Owner, label.OwningSchema, "DROP LABEL");
             using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+            RefuseGraphTypeUse(op, name, false, memory);
             if (_database.Store.StreamLabels([name], _database.LatestSnapshot(op.Context), cancellationToken, op.QueryBudget.Consume, memory.Add).Any()) { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.GraphSchemaDropLabelAsyncDatabase); }
             foreach (var index in _database.Catalog.GetIndexes(label.Id, op.Context.Snapshot))
             {
@@ -299,6 +300,7 @@ public sealed partial class GraphSchema
             EnsureMutable(type.Name, type.Owner, type.OwningSchema, "DROP RELATIONSHIP TYPE");
             var latest = _database.LatestSnapshot(op.Context);
             using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+            RefuseGraphTypeUse(op, name, true, memory);
             if (_database.Store.StreamRelationshipTypes([name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add).Any())
             { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.DropRelationshipTypeAsyncDatabase); }
             await _database.Catalog.DeleteRelationshipTypeAsync(type.Id, op.Context, cancellationToken).ConfigureAwait(false);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,40 +16,94 @@ public sealed partial class GraphCatalog
     internal Action<string>? AfterGraphTypeMutation { get; set; }
 
     internal GraphType? GetGraphType(TransactionSnapshot snapshot, Action<long>? reserve = null)
-        => Find(6, Guid.Empty, "CURRENT", snapshot) is null ? null : GraphType.Create(
-            List(7, GraphTypeId, snapshot, reserve).Select(item => item.Record.NodeType!),
-            List(8, GraphTypeId, snapshot, reserve).Select(item => item.Record.EdgeType!));
+        => LoadGraphType(snapshot, reserve, out _);
+
+    internal GraphType? LoadGraphType(TransactionSnapshot snapshot, Action<long>? reserve, out IReadOnlyList<Found> records)
+    {
+        var marker = Find(6, Guid.Empty, "CURRENT", snapshot, reserve);
+        if (marker is null) { records = []; return null; }
+        var nodes = List(7, GraphTypeId, snapshot, reserve);
+        var edges = List(8, GraphTypeId, snapshot, reserve);
+        records = new[] { marker.Value }.Concat(nodes).Concat(edges).ToArray();
+        return GraphType.Create(nodes.Select(item => item.Record.NodeType!), edges.Select(item => item.Record.EdgeType!));
+    }
 
     internal GraphNodeType? GetNodeTypeForWrite(string label, TransactionSnapshot snapshot, TransactionSnapshot latest)
     {
-        var previous = Find(7, GraphTypeId, label, snapshot);
-        if (previous?.Reference != Find(7, GraphTypeId, label, latest)?.Reference) { throw Conflict(); }
+        // One physical read/decode per candidate pins the immutable declaration for both
+        // visibility decisions and the ensuing validation. No mutable metadata cache.
+        var previous = Find(7, GraphTypeId, label, snapshot, latest, out var current);
+        if (previous?.Reference != current?.Reference) { throw Conflict(); }
         return previous?.Record.NodeType;
     }
 
-    internal async ValueTask SetGraphTypeAsync(GraphType? type, TransactionContext context, CancellationToken token, Action<long>? reserve = null)
+    internal void EnsureGraphTypeDefinitionMutable(string name, bool relationship, TransactionSnapshot snapshot)
+    {
+        Guid? id = relationship ? FindRelationshipType(name, snapshot)?.Id : FindLabel(name, snapshot)?.Id;
+        if (id is { } existing) { RequireMutableDefinition(existing, snapshot, "ALTER"); }
+    }
+
+    internal void EnsureNodeTypeCompatible(GraphNodeType node, TransactionSnapshot snapshot)
+    {
+        if (FindLabel(node.IdentifyingLabel, snapshot) is not { } label) { return; }
+        var keys = GetPropertyKeys(label.Id, snapshot);
+        foreach (var property in node.Properties)
+        {
+            if (keys.Any(key => key.Name == property.Name && key.Type is { } type && type != property.Type))
+            { throw ConstraintConflict(property.Name); }
+        }
+    }
+
+    private void EnsureGraphPropertyCompatible(Guid definition, string property, Types.DatabaseType type, TransactionSnapshot snapshot)
+    {
+        if (FindLabel(definition, snapshot) is not { } label) { return; }
+        var node = Find(7, GraphTypeId, label.Name, snapshot)?.Record.NodeType;
+        if (node?.Properties.Any(item => item.Name == property && item.Type != type) == true)
+        { throw ConstraintConflict(property); }
+    }
+
+    internal async ValueTask SetGraphTypeAsync(GraphType? type, IReadOnlyList<Found> previous,
+        TransactionContext context, CancellationToken token)
     {
         EnsureActive(context);
-        var previous = List(6, null, context.Snapshot).Concat(List(7, GraphTypeId, context.Snapshot, reserve))
-            .Concat(List(8, GraphTypeId, context.Snapshot, reserve)).ToArray();
-        // GraphSchema owns the writer lock. Still preserve the catalog's stale-snapshot contract.
-        foreach (var record in previous) { EnsureUnchanged(record.Record.Kind, record.Record.Parent, record.Record.Name, context); }
-        foreach (byte kind in new byte[] { 6, 7, 8 })
+        // The sole caller holds the writer lock and has refreshed its ReadCommitted
+        // snapshot before loading these records. Reuse that load and its decode grants.
+        var nodes = type?.NodeTypes.ToDictionary(item => item.IdentifyingLabel, StringComparer.Ordinal) ?? [];
+        var edges = type?.EdgeTypes.ToDictionary(item => item.RelationshipType, StringComparer.Ordinal) ?? [];
+        var removed = new List<Found?>();
+        foreach (var old in previous)
         {
-            if (!List(kind, kind == 6 ? null : GraphTypeId, Latest(context), reserve).Select(item => item.Reference).SequenceEqual(
-                previous.Where(item => item.Record.Kind == kind).Select(item => item.Reference))) { throw Conflict(); }
+            bool unchanged = old.Record.Kind switch
+            {
+                6 => type is not null,
+                7 => nodes.TryGetValue(old.Record.Name, out var node) && GraphTypeChanges.Same(old.Record.NodeType!, node),
+                8 => edges.TryGetValue(old.Record.Name, out var edge) && GraphTypeChanges.Same(old.Record.EdgeType!, edge),
+                _ => false,
+            };
+            if (unchanged)
+            {
+                if (old.Record.Kind == 7) { nodes.Remove(old.Record.Name); }
+                if (old.Record.Kind == 8) { edges.Remove(old.Record.Name); }
+            }
+            else { removed.Add(old); }
         }
-        await DeleteAsync(previous.Select(item => (Found?)item), context, token).ConfigureAwait(false);
-        AfterGraphTypeMutation?.Invoke("tombstones");
+        if (removed.Count != 0)
+        {
+            await DeleteAsync(removed, context, token).ConfigureAwait(false);
+            AfterGraphTypeMutation?.Invoke("tombstones");
+        }
         if (type is null) { return; }
-        await SaveAsync(new CatalogRecord(graphType: GraphType.Create()), null, context, token).ConfigureAwait(false);
-        AfterGraphTypeMutation?.Invoke("marker");
-        foreach (var node in type.NodeTypes)
+        if (previous.Count == 0)
+        {
+            await SaveAsync(new CatalogRecord(graphType: GraphType.Create()), null, context, token).ConfigureAwait(false);
+            AfterGraphTypeMutation?.Invoke("marker");
+        }
+        foreach (var node in nodes.Values)
         {
             await SaveAsync(new CatalogRecord(nodeType: node), null, context, token).ConfigureAwait(false);
             AfterGraphTypeMutation?.Invoke("node:" + node.IdentifyingLabel);
         }
-        foreach (var edge in type.EdgeTypes)
+        foreach (var edge in edges.Values)
         {
             await SaveAsync(new CatalogRecord(edgeType: edge), null, context, token).ConfigureAwait(false);
             AfterGraphTypeMutation?.Invoke("edge:" + edge.RelationshipType);

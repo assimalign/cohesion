@@ -471,7 +471,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1738, GQ-D1) | CG03008 | Schema — database-wide index/constraint name is already used |
 | New (#1738, GQ-D1) | CG03009 | Constraints — duplicate constraint kind or incompatible property type rule |
 | New (#1738, GQ-D1; #1806, GQ-T1) | CG03010 | Constraints — existing data violates a newly created named constraint or proposed graph type |
-| New (#1806, GQ-T1) | CG03011 | Schema — graph-type ADD/ALTER/DROP element name is invalid or an edge references an absent node type |
+| New (#1806, GQ-T1) | CG03011 | Schema — graph-type ADD/ALTER/DROP element name is invalid, an edge references an absent node type, or identifying and implied labels overlap |
 | New (#1806, GQ-T1) | CG03012 | Constraints — a node write omits an implied label required by its node type |
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |

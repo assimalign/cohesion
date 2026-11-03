@@ -26,16 +26,17 @@ public sealed partial class GraphSchema
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>Completion after commit.</returns>
     /// <exception cref="ArgumentNullException">The type is null.</exception>
-    /// <exception cref="DatabaseException">References are invalid (CG03011), existing data violates the type (CG03010), a budget is exhausted (CG05004/CG05020), or DDL is in an explicit transaction (CG04025).</exception>
+    /// <exception cref="DatabaseException">An element is oversized (CG02009), references are invalid (CG03011), rules conflict (CG03009), existing data violates the type (CG03010), a budget is exhausted (CG05004/CG05020), or DDL is in an explicit transaction (CG04025).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The snapshot is stale (CG04007).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">Commit durability could not be confirmed.</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (CG06012).</exception>
     /// <exception cref="ObjectDisposedException">The database is disposed.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    /// <exception cref="DatabaseObjectLockedException">A referenced definition is schema-owned.</exception>
     public ValueTask SetGraphTypeAsync(GraphType type, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(type);
-        return ChangeGraphTypeAsync(_ => type, cancellationToken, type);
+        return ChangeGraphTypeAsync((_, _) => type, cancellationToken, type);
     }
 
     /// <summary>Adds new element types, preserving existing declarations.</summary>
@@ -43,16 +44,17 @@ public sealed partial class GraphSchema
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>Completion after validation and commit.</returns>
     /// <exception cref="ArgumentNullException">The additions are null.</exception>
-    /// <exception cref="DatabaseException">An element already exists or a reference is absent (CG03011); validation, budgets, session state or explicit-transaction policy refuses the operation.</exception>
+    /// <exception cref="DatabaseException">An element is oversized (CG02009), a rule conflicts (CG03009), an element already exists or a reference is absent (CG03011); validation, budgets, session state or explicit-transaction policy refuses the operation.</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The snapshot is stale.</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">Commit durability could not be confirmed.</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (CG06012).</exception>
     /// <exception cref="ObjectDisposedException">The database is disposed.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    /// <exception cref="DatabaseObjectLockedException">A referenced definition is schema-owned.</exception>
     public ValueTask AddGraphTypeAsync(GraphType additions, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(additions);
-        return ChangeGraphTypeAsync(previous => MergeGraphTypes(previous, additions, alter: false), cancellationToken, additions);
+        return ChangeGraphTypeAsync((previous, _) => MergeGraphTypes(previous, additions, alter: false), cancellationToken, additions);
     }
 
     /// <summary>Replaces the complete declarations of existing element types, preserving unmentioned types.</summary>
@@ -60,16 +62,17 @@ public sealed partial class GraphSchema
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>Completion after validation and commit.</returns>
     /// <exception cref="ArgumentNullException">The alterations are null.</exception>
-    /// <exception cref="DatabaseException">An element or reference is absent (CG03011); validation, budgets, session state or explicit-transaction policy refuses the operation.</exception>
+    /// <exception cref="DatabaseException">An element is oversized (CG02009), a rule conflicts (CG03009), an element or reference is absent (CG03011); validation, budgets, session state or explicit-transaction policy refuses the operation.</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The snapshot is stale.</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">Commit durability could not be confirmed.</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (CG06012).</exception>
     /// <exception cref="ObjectDisposedException">The database is disposed.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    /// <exception cref="DatabaseObjectLockedException">A referenced definition is schema-owned.</exception>
     public ValueTask AlterGraphTypeAsync(GraphType alterations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(alterations);
-        return ChangeGraphTypeAsync(previous => MergeGraphTypes(previous, alterations, alter: true), cancellationToken, alterations);
+        return ChangeGraphTypeAsync((previous, _) => MergeGraphTypes(previous, alterations, alter: true), cancellationToken, alterations);
     }
 
     /// <summary>Removes the current type and its rules, retaining tokens and independent schema constraints.</summary>
@@ -82,7 +85,7 @@ public sealed partial class GraphSchema
     /// <exception cref="ObjectDisposedException">The database is disposed.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
     public ValueTask DropGraphTypeAsync(CancellationToken cancellationToken = default)
-        => ChangeGraphTypeAsync(_ => null, cancellationToken);
+        => ChangeGraphTypeAsync((_, _) => null, cancellationToken);
 
     /// <summary>Removes selected element types; referenced node types require dropping their edges in the same operation.</summary>
     /// <param name="nodeTypes">Identifying labels of node types to remove.</param>
@@ -99,28 +102,61 @@ public sealed partial class GraphSchema
     public ValueTask DropGraphTypeAsync(IReadOnlyList<string> nodeTypes, IReadOnlyList<string> edgeTypes,
         CancellationToken cancellationToken = default)
     {
-        var nodes = CopyNames(nodeTypes);
-        var edges = CopyNames(edgeTypes);
-        return ChangeGraphTypeAsync(previous =>
+        var nodes = CopyNames(nodeTypes, nameof(nodeTypes));
+        var edges = CopyNames(edgeTypes, nameof(edgeTypes));
+        return ChangeGraphTypeAsync((previous, budget) =>
         {
             if (nodes.Count == 0 && edges.Count == 0) { return previous; }
+            var existingNodes = (previous?.NodeTypes ?? []).ToDictionary(item => item.IdentifyingLabel, StringComparer.Ordinal);
+            var existingEdges = (previous?.EdgeTypes ?? []).ToDictionary(item => item.RelationshipType, StringComparer.Ordinal);
             foreach (string node in nodes)
-            { if (previous?.NodeTypes.Any(item => item.IdentifyingLabel == node) != true) { throw InvalidGraphTypeChange("DROP", node); } }
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                budget.Consume();
+                if (!existingNodes.Remove(node)) { throw InvalidGraphTypeChange("DROP", node); }
+            }
             foreach (string edge in edges)
-            { if (previous?.EdgeTypes.Any(item => item.RelationshipType == edge) != true) { throw InvalidGraphTypeChange("DROP", edge); } }
-            return GraphType.Create(previous?.NodeTypes.Where(item => !nodes.Contains(item.IdentifyingLabel)),
-                previous?.EdgeTypes.Where(item => !edges.Contains(item.RelationshipType)));
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                budget.Consume();
+                if (!existingEdges.Remove(edge)) { throw InvalidGraphTypeChange("DROP", edge); }
+            }
+            return GraphType.Create(existingNodes.Values, existingEdges.Values);
         }, cancellationToken);
     }
 
-    private static HashSet<string> CopyNames(IReadOnlyList<string> names)
+    private void RefuseGraphTypeUse(GraphOperation op, string name, bool relationship, GraphMemoryOwner memory)
     {
-        ArgumentNullException.ThrowIfNull(names);
+        var type = _database.Catalog.GetGraphType(op.Context.Snapshot, memory.Add);
+        if (type is null) { return; }
+        if (relationship)
+        {
+            foreach (var edge in type.EdgeTypes)
+            {
+                op.QueryBudget!.Consume();
+                if (edge.RelationshipType == name)
+                { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.DropRelationshipTypeAsyncDatabase); }
+            }
+        }
+        else
+        {
+            foreach (var node in type.NodeTypes)
+            {
+                op.QueryBudget!.Consume();
+                if (node.IdentifyingLabel == name || node.ImpliedLabels.Contains(name, StringComparer.Ordinal))
+                { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.GraphSchemaDropLabelAsyncDatabase); }
+            }
+        }
+    }
+
+    private static HashSet<string> CopyNames(IReadOnlyList<string> names, string paramName)
+    {
+        ArgumentNullException.ThrowIfNull(names, paramName);
         var result = new HashSet<string>(StringComparer.Ordinal);
         foreach (string name in names)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(name);
-            if (!result.Add(name)) { throw new ArgumentException(ErrorMessages.GraphTypeDuplicate, nameof(names)); }
+            ArgumentException.ThrowIfNullOrWhiteSpace(name, paramName);
+            if (!result.Add(name)) { throw new ArgumentException(ErrorMessages.GraphTypeDuplicate, paramName); }
         }
         return result;
     }
@@ -153,7 +189,7 @@ public sealed partial class GraphSchema
             ErrorMessages.GraphTypeChangeInvalid, operation, name[..length]));
     }
 
-    private ValueTask ChangeGraphTypeAsync(Func<GraphType?, GraphType?> change, CancellationToken token, GraphType? input = null)
+    private ValueTask ChangeGraphTypeAsync(Func<GraphType?, GraphPlanExecutor.ExpansionBudget, GraphType?> change, CancellationToken token, GraphType? input = null)
         => WriteAsync(async op =>
         {
             using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
@@ -178,8 +214,8 @@ public sealed partial class GraphSchema
                     GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge));
                 }
             }
-            var previous = _database.Catalog.GetGraphType(op.Context.Snapshot, memory.Add);
-            var type = change(previous);
+            var previous = _database.Catalog.LoadGraphType(op.Context.Snapshot, memory.Add, out var records);
+            var type = change(previous, op.QueryBudget);
             if (ReferenceEquals(type, previous)) { return; }
             if (type is not null)
             {
@@ -203,9 +239,25 @@ public sealed partial class GraphSchema
                     if (!names.Contains(edge.SourceNodeType) || !names.Contains(edge.TargetNodeType))
                     { throw DatabaseException.CreateGraphFailure("CG03011", string.Format(CultureInfo.CurrentCulture, ErrorMessages.GraphTypeReferenceMissing, edge.RelationshipType)); }
                 }
+                foreach (var node in type.NodeTypes)
+                {
+                    foreach (string implied in node.ImpliedLabels)
+                    {
+                        op.QueryBudget.Consume();
+                        if (names.Contains(implied)) { throw InvalidGraphTypeChange("SET", implied); }
+                    }
+                    _database.Catalog.EnsureGraphTypeDefinitionMutable(node.IdentifyingLabel, false, op.Context.Snapshot);
+                    foreach (string implied in node.ImpliedLabels)
+                    { _database.Catalog.EnsureGraphTypeDefinitionMutable(implied, false, op.Context.Snapshot); }
+                    _database.Catalog.EnsureNodeTypeCompatible(node, op.Context.Snapshot);
+                }
+                foreach (var edge in type.EdgeTypes)
+                { _database.Catalog.EnsureGraphTypeDefinitionMutable(edge.RelationshipType, true, op.Context.Snapshot); }
+                var oldNodes = (previous?.NodeTypes ?? []).ToDictionary(item => item.IdentifyingLabel, StringComparer.Ordinal);
                 var latest = _database.LatestSnapshot(op.Context);
                 foreach (var nodeType in type.NodeTypes)
                 {
+                    if (!GraphTypeChanges.RequiresValidation(oldNodes.GetValueOrDefault(nodeType.IdentifyingLabel), nodeType)) { continue; }
                     using var cursorMemory = new GraphMemoryOwner(op.QueryBudget.Memory);
                     foreach (var node in _database.Store.StreamLabels([nodeType.IdentifyingLabel], latest, token, op.QueryBudget.Consume, cursorMemory.Add))
                     {
@@ -249,6 +301,6 @@ public sealed partial class GraphSchema
                     }
                 }
             }
-            await _database.Catalog.SetGraphTypeAsync(type, op.Context, token, memory.Add).ConfigureAwait(false);
+            await _database.Catalog.SetGraphTypeAsync(type, records, op.Context, token).ConfigureAwait(false);
         }, token);
 }
