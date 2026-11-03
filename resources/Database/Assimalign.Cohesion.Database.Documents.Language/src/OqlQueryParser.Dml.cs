@@ -145,7 +145,7 @@ public sealed partial class OqlQueryParser
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause(verb + " VALUES " + Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
             }
         }
-        else if (Is("SELECT"))
+        else if (Is("SELECT") || IsParenthesizedQuery())
         {
             select = ParseQuery();
             RefuseNestedCompound(select);

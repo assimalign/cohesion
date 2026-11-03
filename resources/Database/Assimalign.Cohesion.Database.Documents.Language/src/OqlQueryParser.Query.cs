@@ -11,28 +11,6 @@ public sealed partial class OqlQueryParser
     private OqlQueryExpression ParseQuery()
     {
         var start = Current;
-        var query = ParseQueryCore();
-        if (!Failed && query is OqlSetOperationExpression)
-        {
-            var pending = new Stack<(OqlQueryExpression Query, int Depth)>();
-            pending.Push((query, 1));
-            while (pending.TryPop(out var item))
-            {
-                if (item.Depth > 128)
-                { Error("CD00005", ErrorMessages.OqlQueryParserParseExpressionVoid, start); break; }
-                if (item.Query is OqlSetOperationExpression compound)
-                {
-                    pending.Push((compound.Left, item.Depth + 1));
-                    pending.Push((compound.Right, item.Depth + 1));
-                }
-            }
-        }
-        return query;
-    }
-
-    private OqlQueryExpression ParseQueryCore()
-    {
-        var start = Current;
         var query = ParseQueryTerm();
         List<(string Name, Lexeme Start, Lexeme End)> deferred = [];
         int operations = 0;
@@ -53,8 +31,15 @@ public sealed partial class OqlQueryParser
             { deferred.Add((operatorToken.Text.ToUpperInvariant(), operatorToken, Previous)); }
             // The final grammar admits only ALL; explicit DISTINCT is not SQL++ syntax.
             var right = ParseQueryTerm();
+            // Leaves have zero operators. Include parenthesized subtrees without counting
+            // their leaf as another level, and locate the operator that exceeds the bound.
+            int depth = 1 + System.Math.Max(_queryOperationDepths.GetValueOrDefault(query), _queryOperationDepths.GetValueOrDefault(right));
+            if (!Failed && depth > 128)
+            { Error("CD00005", ErrorMessages.OqlQueryParserParseExpressionVoid, operatorToken); break; }
             query = new OqlSetOperationExpression(query, right, operation, all, location: Span(start, Previous));
+            _queryOperationDepths[query] = depth;
         }
+        var tailStart = Current;
         List<OqlOrdering> ordering = [];
         if (Take("ORDER"))
         {
@@ -106,13 +91,15 @@ public sealed partial class OqlQueryParser
         if (ordering.Count == 0 && limit is null && offset is null) { return query; }
         if (query.OrderBy.Count > 0 || query.Limit is not null || query.Offset is not null)
         {
-            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("outer ordering or paging on a lone parenthesized query", Profile.Language, Span(start, Previous)));
+            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("outer ordering or paging on a lone parenthesized query", Profile.Language, Span(tailStart, Previous)));
             return query;
         }
         if (query is OqlSetOperationExpression compound)
         {
-            return new OqlSetOperationExpression(compound.Left, compound.Right, compound.Operation,
+            var result = new OqlSetOperationExpression(compound.Left, compound.Right, compound.Operation,
                 compound.IsAll, ordering.AsReadOnly(), limit, offset, Span(start, Previous));
+            _queryOperationDepths[result] = _queryOperationDepths[compound];
+            return result;
         }
         var select = (OqlSelectExpression)query;
         return new OqlSelectExpression(select.Collection, select.Alias, select.Projections, select.Predicate,
@@ -144,16 +131,32 @@ public sealed partial class OqlQueryParser
 
     private void RefuseNestedCompound(OqlQueryExpression query)
     {
-        if (query is OqlSetOperationExpression)
+        if (!Failed && query is OqlSetOperationExpression)
         { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("compound query in a nested query position", Profile.Language, query.Location!)); }
     }
 
-    private bool IsParenthesizedQuery()
+    private bool IsParenthesizedQuery(bool expressionOperand = false)
     {
         int index = _position;
         if (_tokens[index].Type != TokenType.LeftParen) { return false; }
         while (_tokens[index].Type == TokenType.LeftParen) { index++; }
-        return IsWord(_tokens[index], "SELECT");
+        if (!IsWord(_tokens[index], "SELECT")) { return false; }
+        if (!expressionOperand) { return true; }
+        // A parenthesized subquery can also begin a larger scalar expression or IN list.
+        // Only enter query grammar if this term is followed by a query tail or its boundary.
+        int depth = 0;
+        for (index = _position; index < _tokens.Count - 1; index++)
+        {
+            if (_tokens[index].Type == TokenType.LeftParen) { depth++; }
+            else if (_tokens[index].Type == TokenType.RightParen && --depth == 0)
+            {
+                var next = _tokens[index + 1];
+                return next.Type is TokenType.RightParen or TokenType.Eof ||
+                    IsWord(next, "UNION") || IsWord(next, "INTERSECT") || IsWord(next, "EXCEPT") ||
+                    IsWord(next, "ORDER") || IsWord(next, "LIMIT") || IsWord(next, "OFFSET");
+            }
+        }
+        return true;
     }
 
     private bool IsSetOperator() => Is("UNION") || Is("INTERSECT") || Is("EXCEPT");

@@ -11,6 +11,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Transactions;
@@ -20,9 +21,11 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 public sealed class DocumentSetOperationTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents] - UNION: a generated concatenation and distinct oracle preserves first representatives")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExecuteAsync_GeneratedValues_ShouldMatchOracleAsync(bool all)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ExecuteAsync_GeneratedValues_ShouldMatchOracleAsync(bool all, bool named)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("set-oracle", new());
@@ -30,23 +33,28 @@ public sealed class DocumentSetOperationTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var random = new Random(1803);
         string[] palette = ["null", "true", "false", "1", "1.0", "2", "-1", "1.25", "\"a\"", "[]", "[1,null]", "[1.0,null]", "{}", "{\"a\":1,\"b\":2}", "{\"b\":2.0,\"a\":1.0}"];
+        if (named) { palette = ["{}", "{\"a\":null}", "{\"b\":null}", "{\"a\":1}", "{\"a\":1.0}", "{\"a\":1,\"b\":2}", "{\"b\":2.0,\"a\":1.0}", "{\"a\":[1,null],\"b\":{\"x\":2}}", "{\"b\":{\"x\":2.0},\"a\":[1.0,null]}"]; }
         for (int trial = 0; trial < 64; trial++)
         {
             string[] left = Enumerable.Range(0, random.Next(25)).Select(_ => palette[random.Next(palette.Length)]).ToArray();
             string[] right = Enumerable.Range(0, random.Next(25)).Select(_ => palette[random.Next(palette.Length)]).ToArray();
             using var a = JsonDocument.Parse("[" + string.Join(",", left) + "]");
             using var b = JsonDocument.Parse("[" + string.Join(",", right) + "]");
-            var expected = a.RootElement.EnumerateArray().Concat(b.RootElement.EnumerateArray()).Select(Canonical);
-            if (!all) { expected = expected.Distinct(StringComparer.Ordinal); }
+            using var projected = JsonDocument.Parse("[" + string.Join(",", a.RootElement.EnumerateArray().Select(value => Project(value, named, false))
+                .Concat(b.RootElement.EnumerateArray().Select(value => Project(value, named, true)))) + "]");
+            IEnumerable<JsonElement> expected = projected.RootElement.EnumerateArray();
+            if (!all) { expected = expected.DistinctBy(Canonical, StringComparer.Ordinal); }
             // Act
-            await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT RAW a FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT RAW b FROM @b AS b",
+            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT b.b AS b,b.a AS a FROM @b AS b"
+                : "SELECT RAW a FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT RAW b FROM @b AS b";
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync(text,
                 new Dictionary<string, object?> { ["a"] = a.RootElement, ["b"] = b.RootElement }, CancellationToken.None);
             var actual = new List<string>();
             await foreach (var row in result.GetRowsAsync(CancellationToken.None))
-            { using var value = JsonDocument.Parse(row.GetBytes(0)); actual.Add(Canonical(value.RootElement)); }
+            { using var value = JsonDocument.Parse(row.GetBytes(0)); actual.Add(value.RootElement.GetRawText()); }
             // Assert
-            result.Columns.Single().Name.ShouldBe("value");
-            actual.ToArray().ShouldBe(expected.ToArray());
+            result.Columns.Single().Name.ShouldBe(named ? "document" : "value");
+            actual.ToArray().ShouldBe(expected.Select(value => value.GetRawText()).ToArray());
         }
     }
 
@@ -58,6 +66,7 @@ public sealed class DocumentSetOperationTests
     [InlineData("SELECT 1 AS a FROM [1] AS x UNION SELECT 1.0 AS a FROM [1] AS y", 1)]
     [InlineData("SELECT RAW {a:1,b:[2]} FROM [1] AS x UNION SELECT b,a FROM [{a:1.0,b:[2.0]}] AS y", 1)]
     [InlineData("SELECT 1 AS a FROM [1] AS x UNION SELECT 1 AS b FROM [1] AS y", 2)]
+    [InlineData("SELECT RAW x FROM [2] AS x WHERE x IN ((SELECT RAW 2 FROM [1] AS seed))", 1)]
     public async Task ExecuteAsync_EqualityMatrix_ShouldUseValueSemanticsAsync(string text, int expected)
     {
         // Arrange
@@ -122,6 +131,7 @@ public sealed class DocumentSetOperationTests
     [InlineData("SELECT RAW 1 FROM [1] AS a UNION SELECT RAW 2 FROM [1] AS b ORDER BY anything LIMIT 0", "CD01037")]
     [InlineData("SELECT 1 AS n FROM [1] AS a UNION SELECT 2 AS n FROM [1] AS b ORDER BY a.n LIMIT 0", "CD01038")]
     [InlineData("SELECT 1 AS n FROM [1] AS a UNION SELECT 2 AS n FROM [1] AS b ORDER BY META().id LIMIT 0", "CD01038")]
+    [InlineData("SELECT 1 AS n FROM [1] AS a UNION SELECT 2 AS n FROM [1] AS b ORDER BY (SELECT RAW 1 FROM [1] AS z) LIMIT 0", "CK00001")]
     public async Task ExecuteAsync_InvalidOrder_ShouldRefuseBeforeReadingAsync(string text, string code)
     {
         // Arrange
@@ -133,6 +143,37 @@ public sealed class DocumentSetOperationTests
         // Assert
         error.Diagnostics.Single().Code.ShouldBe(code);
         error.Diagnostics.Single().Start.ShouldNotBeNull();
+        session.LastQueryDocumentsRead.ShouldBe(0);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - UNION: hand-built nested ASTs retain eager capability backstops")]
+    [InlineData("INSERT")]
+    [InlineData("UPSERT")]
+    [InlineData("SUBQUERY")]
+    [InlineData("FROM")]
+    public async Task Plan_DirectNestedCompound_ShouldRefuseBeforeCatalogAccessAsync(string position)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("set-ast-refusal", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
+        var compound = (OqlQueryExpression)DocumentQueryRequest.FromOql("SELECT k FROM absent UNION SELECT k FROM absent").Statement.OqlExpression;
+        var subquery = new OqlSubqueryExpression(compound);
+        OqlExpression expression = position switch
+        {
+            "INSERT" => new OqlInsertExpression("items", null, [], compound, "k", null),
+            "UPSERT" => new OqlUpsertExpression("items", null, [], compound, "k", null),
+            "FROM" => new OqlSelectExpression("", "q", [new OqlProjection(new OqlStarExpression(), null)], null, [], null, [], false, false, source: subquery),
+            _ => new OqlSelectExpression("absent", null, [new OqlProjection(subquery, null)], null, [], null, [], false, false),
+        };
+        // Act / Assert
+        await database.RunAsync(session, operation =>
+        {
+            var error = Should.Throw<DatabaseException>(() => new DocumentPlanner(database.Catalog, operation.Context.Snapshot, null).Plan(expression));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+            return ValueTask.FromResult(true);
+        }, CancellationToken.None);
         session.LastQueryDocumentsRead.ShouldBe(0);
     }
 
@@ -223,6 +264,38 @@ public sealed class DocumentSetOperationTests
             error.Diagnostics.Single().Code.ShouldBe("CD05020");
         }
         (await ValuesAsync(session, "SELECT RAW 1 FROM [1] AS x UNION SELECT RAW 1 FROM [1] AS y")).ShouldBe(new[] { "1" });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - UNION: plain collection operands follow standalone SELECT work accounting")]
+    [InlineData("", "")]
+    [InlineData("ALL ", "")]
+    [InlineData("ALL ", " ORDER BY n")]
+    [InlineData("ALL ", " LIMIT 1")]
+    public async Task ExecuteAsync_PlainCollectionScans_ShouldUseSelectWorkRuleAsync(string modifier, string tail)
+    {
+        // Arrange: scaled version of two unindexed collections with millions of residual evaluations.
+        var builder = DocumentDatabaseEngine.CreateBuilder("set-plain-work");
+        builder.Options.StatementWorkBudget = 50;
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        foreach (string name in new[] { "a", "b" })
+        {
+            var collection = await session.CreateCollectionAsync(name, CancellationToken.None);
+            for (int index = 0; index < 100; index++)
+            { await collection.PutAsync(session, index.ToString("D3", CultureInfo.InvariantCulture), Encoding.UTF8.GetBytes("{\"id\":" + index + ",\"status\":\"" + (index == 99 ? "stuck" : "ok") + "\"}"), cancellationToken: CancellationToken.None); }
+        }
+        const string left = "SELECT x.id AS n FROM a x WHERE x.status = 'stuck'";
+        const string right = "SELECT y.id AS n FROM b y WHERE y.status = 'stuck'";
+        // Act / Assert
+        (await ValuesAsync(session, left)).ShouldBe(new[] { "99" });
+        (await ValuesAsync(session, right)).ShouldBe(new[] { "99" });
+        var values = await ValuesAsync(session, left + " UNION " + modifier + right + tail);
+        values.ShouldBe(modifier.Length == 0 || tail.Contains("LIMIT", StringComparison.Ordinal) ? new[] { "99" } : new[] { "99", "99" });
+        session.LastQueryDocumentsRead.ShouldBe(200);
+        // An expression source in a sibling does not turn the plain operand into a nested scan.
+        (await ValuesAsync(session, left + " UNION ALL SELECT 1 AS n FROM [1] AS z")).ShouldBe(new[] { "99", "1" });
+        (await ValuesAsync(session, "(" + left + " ORDER BY n) UNION ALL (" + right + " ORDER BY n)")).ShouldBe(new[] { "99", "99" });
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - UNION: EXPLAIN visits both operands without executing their sources")]
@@ -385,4 +458,8 @@ public sealed class DocumentSetOperationTests
         JsonValueKind.Array => "[" + string.Join(",", value.EnumerateArray().Select(Canonical)) + "]",
         _ => value.GetRawText(),
     };
+
+    private static string Project(JsonElement value, bool named, bool reverse)
+        => !named ? value.GetRawText() : "{" + string.Join(",", (reverse ? new[] { "b", "a" } : new[] { "a", "b" })
+            .Where(name => value.TryGetProperty(name, out _)).Select(name => "\"" + name + "\":" + value.GetProperty(name).GetRawText())) + "}";
 }

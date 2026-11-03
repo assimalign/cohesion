@@ -1023,14 +1023,19 @@ records precedence, equality, deferred positions and every default.
 
 The executor reuses the source pull pipeline. UNION ALL streams each operand without an
 operand-result buffer; local grouping, DISTINCT and ordering retain their own blocking semantics.
+Unordered RAW/typed-column ALL consumers pass cells directly, building a complete JSON row only
+when a parent needs it for equality, ordering or whole-document output. Each distinct insertion
+uses one set probe; a duplicate releases its speculative key reservation.
 UNION keeps first representatives in input order using the existing grouping structural comparator
 on complete row values. Named MISSING members are omitted before comparison; RAW MISSING is NULL.
 Different arity or member order needs no special rejection. The equality set reserves 128 bytes,
 then 160 bytes plus the existing JSON ownership/token estimate per independent retained key.
 Compound sorting separately owns row values, cells, keys and stable ordinals. Result retention
 owns independent cells; scoped reservations release on success, cancellation and every refusal.
-All use the operation's StatementMemoryBudget and CD05018. Processing, comparisons, expression
-work and sorting share the nested execution context's StatementWorkBudget and CD05020. Sorter
+All use the operation's StatementMemoryBudget and CD05018. Processing, comparisons and sorting
+share the nested execution context's StatementWorkBudget and CD05020. Each top-level operand
+follows standalone SELECT's expression accounting: its own subqueries, expression sources or
+key joins enable it; plain collection scans remain uncharged even beside a charged operand. Sorter
 wrapper exceptions are unwrapped so a coded budget refusal stays coded.
 
 Static types widen across operand descriptors; heterogeneous columns retain the Null descriptor
@@ -1046,8 +1051,12 @@ SELECT/set family; nested-query and DML-source properties are retyped now but co
 in those positions remains a CK00001 gate for OQ-S2. The mixed statement envelope stays
 OqlExpression for queries, writes, DDL and transactions. No protocol or persisted format changes.
 
-DocumentSetOperationTests includes a deterministic generated concatenation/deduplication oracle,
-NULL/MISSING/numeric/structural equality, independent operand scopes, streaming/empty windows,
+DocumentSetOperationTests includes a deterministic 256-case generated concatenation/deduplication oracle,
+using canonical equality keys while comparing each first representative's original numeric scale
+and member order. Half the cases project named members, including omitted MISSING members;
+the same seed and generator run 64 of these cases over TCP. Release guards enforce allocation
+ceilings for RAW/typed UNION ALL and a work-counter ceiling for distinct insertion over three warmed rounds.
+Further cases cover NULL/MISSING/numeric/structural equality, independent operand scopes, streaming/empty windows,
 static headers, cancellation and exact budget release. A controlled commit between operands
 proves one statement view under Snapshot and ReadCommitted. Conformance cases and InMemory/TCP wire
 probes exercise the same contract; the engine-linked NativeAOT consumer checks both transports.
@@ -1242,7 +1251,7 @@ columns retain long values. JSON numeric equality and wire digits are unchanged 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, expression/derived FROM, UNNEST, key JOIN/NEST, quantified predicates, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
+CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, UNION [ALL], IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; general joins, deferred document mutations
 and server statements are rejected with `CK00001`. Expression subqueries execute as described above.
 The parser advertises only clauses this executor supports.

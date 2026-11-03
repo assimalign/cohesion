@@ -19,6 +19,7 @@ public sealed partial class OqlQueryParser : QueryParser
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
     private readonly HashSet<int> _parameterFormPositions = [];
+    private readonly Dictionary<OqlQueryExpression, int> _queryOperationDepths = [];
     private bool[] _comprehensionTails = [];
     private int _position;
     private int _depth;
@@ -54,6 +55,7 @@ public sealed partial class OqlQueryParser : QueryParser
         _tokens.Clear();
         _diagnostics.Clear();
         _parameterFormPositions.Clear();
+        _queryOperationDepths.Clear();
         _position = 0;
         _depth = 0;
         int line = 1;
@@ -323,7 +325,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 if (index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "DISTINCT"))
                 {
                     var modifier = _tokens[++index];
-                    _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value, Profile.Language, Span(token, modifier)));
+                    _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + " DISTINCT", Profile.Language, Span(token, modifier)));
                 }
                 else if (index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "ALL")) { index++; }
                 continue;

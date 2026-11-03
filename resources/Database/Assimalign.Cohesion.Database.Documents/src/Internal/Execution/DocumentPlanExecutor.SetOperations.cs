@@ -34,7 +34,7 @@ internal static partial class DocumentPlanExecutor
         long seen = 0;
         if (plan.Limit != 0)
         {
-            await foreach (var row in StreamSetRowsAsync(database, operation, plan, parameters, nested, paged, cancellationToken).ConfigureAwait(false))
+            await foreach (var row in StreamSetRowsAsync(database, operation, plan, parameters, nested, paged, false, cancellationToken).ConfigureAwait(false))
             {
                 nested.ConsumeWork(cancellationToken);
                 if (!staticTypes)
@@ -91,9 +91,10 @@ internal static partial class DocumentPlanExecutor
 
     private static async IAsyncEnumerable<SetRow> StreamSetRowsAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentSetOperationPlan plan, IReadOnlyDictionary<string, object?>? parameters, DocumentNestedExecutionContext nested,
-        bool applyPage, [EnumeratorCancellation] CancellationToken cancellationToken)
+        bool applyPage, bool needsValue, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (plan.Limit == 0) { yield break; }
+        bool needsInputValue = needsValue || !plan.Query.IsAll || plan.Query.OrderBy.Count > 0 || plan.Shape == DocumentSetResultShape.Document;
         var memory = operation.GetStatementMemory(cancellationToken);
         using var distinctMemory = memory.Reserve();
         SortedSet<JsonElement>? seen = null;
@@ -171,39 +172,46 @@ internal static partial class DocumentPlanExecutor
         {
             nested.ConsumeWork(cancellationToken);
             if (seen is null) { return true; }
-            if (seen.Contains(row.Value)) { return false; }
+            long before = distinctMemory.Bytes;
             distinctMemory.Charge(160L + memory.ValueBytes(row.Value));
-            seen.Add(row.Value.Clone());
-            return true;
+            if (seen.Add(row.Value)) { return true; }
+            distinctMemory.Rewind(before);
+            return false;
         }
         SetRow Shape(SetRow row) => plan.Shape == DocumentSetResultShape.Document ? new SetRow(row.Value, [row.Value]) : row;
         async IAsyncEnumerable<SetRow> UnionInputAsync()
         {
-            await foreach (var row in StreamQueryRowsAsync(database, operation, plan.Left, parameters, nested, cancellationToken).ConfigureAwait(false))
+            await foreach (var row in StreamQueryRowsAsync(database, operation, plan.Left, parameters, nested, needsInputValue, cancellationToken).ConfigureAwait(false))
             { yield return row; }
-            await foreach (var row in StreamQueryRowsAsync(database, operation, plan.Right, parameters, nested, cancellationToken).ConfigureAwait(false))
+            await foreach (var row in StreamQueryRowsAsync(database, operation, plan.Right, parameters, nested, needsInputValue, cancellationToken).ConfigureAwait(false))
             { yield return row; }
         }
     }
 
     private static async IAsyncEnumerable<SetRow> StreamQueryRowsAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentStatementPlan plan, IReadOnlyDictionary<string, object?>? parameters, DocumentNestedExecutionContext nested,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        bool needsValue, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (plan is DocumentSetOperationPlan compound)
         {
-            await foreach (var row in StreamSetRowsAsync(database, operation, compound, parameters, nested, true, cancellationToken).ConfigureAwait(false))
+            await foreach (var row in StreamSetRowsAsync(database, operation, compound, parameters, nested, true, needsValue, cancellationToken).ConfigureAwait(false))
             { yield return row; }
             yield break;
         }
         var logical = SourceLogical(plan);
         if (logical.Limit == 0) { yield break; }
-        var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken, nested);
+        // Each top-level operand follows standalone SELECT: only its own subqueries,
+        // expression sources or key bindings opt it into expression work accounting.
+        var operandContext = DocumentPlanner.HasSubquery(logical.Query, cancellationToken) ? nested : null;
+        var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken, operandContext);
         if (!Streams(logical))
         {
             // Blocking stages belong to the operand's own semantics, not UNION ALL.
-            await using var result = (DatabaseResultSet)await ExecuteNestedQueryAsync(database, operation, plan, parameters, cancellationToken, nested).ConfigureAwait(false);
+            await using var result = (DatabaseResultSet)await (operandContext is not null
+                ? ExecuteNestedQueryAsync(database, operation, plan, parameters, cancellationToken, operandContext)
+                : plan is DocumentPlan select ? ExecuteSelectAsync(database, operation, select, parameters, cancellationToken)
+                : ValueTask.FromResult(ExecuteSystemCollection(database, operation, (DocumentSystemCollectionPlan)plan, parameters, cancellationToken))).ConfigureAwait(false);
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 using var active = evaluator.Memory.Reserve();
@@ -211,18 +219,18 @@ internal static partial class DocumentPlanExecutor
                 var cells = new object?[result.Columns.Count];
                 for (int index = 0; index < cells.Length; index++)
                 { cells[index] = row.IsMissing(index) ? DocumentMissing.Instance : row.GetValue(index); active.Retain(cells[index]); }
-                var value = SourceObject(logical, cells);
-                active.Retain(value);
+                var value = needsValue ? SourceObject(logical, cells) : default;
+                if (needsValue) { active.Retain(value); }
                 yield return new SetRow(value, cells);
             }
             yield break;
         }
-        await foreach (var row in SourceMatchesAsync(database, operation, plan, evaluator, parameters, nested, cancellationToken).ConfigureAwait(false))
+        await foreach (var row in SourceMatchesAsync(database, operation, plan, evaluator, parameters, operandContext, cancellationToken).ConfigureAwait(false))
         {
             using var active = evaluator.Memory.Reserve();
-            var cells = await SourceProjectionAsync(logical, row, evaluator, nested, active).ConfigureAwait(false);
+            var cells = await SourceProjectionAsync(logical, row, evaluator, operandContext, active).ConfigureAwait(false);
             active.Charge(384L + cells.Sum(cell => 64L + 3L * evaluator.Memory.ValueBytes(cell)));
-            yield return new SetRow(SourceObject(logical, cells), cells);
+            yield return new SetRow(needsValue ? SourceObject(logical, cells) : default, cells);
         }
     }
 

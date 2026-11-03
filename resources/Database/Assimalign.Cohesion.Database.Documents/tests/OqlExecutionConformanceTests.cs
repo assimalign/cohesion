@@ -109,6 +109,7 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT 1 AS n FROM items UNION SELECT 1 AS n FROM items", [[1m]]),
                 new("SELECT 1 AS n FROM items UNION ALL SELECT 2 AS n FROM items ORDER BY n DESC LIMIT 2 OFFSET 1", [[2m], [2m]]),
                 new("(SELECT 1 AS n FROM items LIMIT 1) UNION ALL (SELECT 2 AS n FROM items LIMIT 1) ORDER BY n", [[1m], [2m]]),
+                new("SELECT MISSING AS a FROM items UNION SELECT NULL AS a FROM items", [[null], [null]], Missing: [(0, 0)]),
             ],
             [OqlClauses.Select] =
             [

@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -12,6 +14,39 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentSetOperationWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - UNION: TCP runs the generated RAW and named-row first-representative oracle")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task QueryAsync_GeneratedValues_ShouldMatchOracleOverTcpAsync(bool all, bool named)
+    {
+        // Arrange: the first 16 trials of the engine's 64-trial generator, with the same seed.
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp: true);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        var random = new Random(1803);
+        string[] palette = ["null", "true", "false", "1", "1.0", "2", "-1", "1.25", "\"a\"", "[]", "[1,null]", "[1.0,null]", "{}", "{\"a\":1,\"b\":2}", "{\"b\":2.0,\"a\":1.0}"];
+        if (named) { palette = ["{}", "{\"a\":null}", "{\"b\":null}", "{\"a\":1}", "{\"a\":1.0}", "{\"a\":1,\"b\":2}", "{\"b\":2.0,\"a\":1.0}", "{\"a\":[1,null],\"b\":{\"x\":2}}", "{\"b\":{\"x\":2.0},\"a\":[1.0,null]}"]; }
+        for (int trial = 0; trial < 16; trial++)
+        {
+            string[] left = Enumerable.Range(0, random.Next(25)).Select(_ => palette[random.Next(palette.Length)]).ToArray();
+            string[] right = Enumerable.Range(0, random.Next(25)).Select(_ => palette[random.Next(palette.Length)]).ToArray();
+            using var a = JsonDocument.Parse("[" + string.Join(",", left) + "]");
+            using var b = JsonDocument.Parse("[" + string.Join(",", right) + "]");
+            using var projected = JsonDocument.Parse("[" + string.Join(",", a.RootElement.EnumerateArray().Select(value => Project(value, named, false))
+                .Concat(b.RootElement.EnumerateArray().Select(value => Project(value, named, true)))) + "]");
+            IEnumerable<JsonElement> expected = projected.RootElement.EnumerateArray();
+            if (!all) { expected = expected.DistinctBy(Canonical, StringComparer.Ordinal); }
+            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT b.b AS b,b.a AS a FROM @b AS b"
+                : "SELECT RAW a FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT RAW b FROM @b AS b";
+            // Act
+            var result = await connection.QueryAsync(text, new Dictionary<string, object?> { ["a"] = a.RootElement, ["b"] = b.RootElement }, harness.Token);
+            // Assert: canonical keys choose equality; the comparison retains original numeric scale and member order.
+            result.Columns.Single().Name.ShouldBe(named ? "document" : "value");
+            result.Documents.Select(value => value.GetRawText()).ShouldBe(expected.Select(value => value.GetRawText()));
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - UNION: static headers values pages MISSING and diagnostics cross both transports")]
     [InlineData(false)]
     [InlineData(true)]
@@ -92,4 +127,16 @@ public sealed class DocumentSetOperationWireTests
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("SELECT RAW 1 FROM [1] AS x UNION SELECT RAW 1 FROM [1] AS y", cancellationToken: harness.Token)).Count.ShouldBe(1);
     }
+
+    private static string Canonical(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Number => value.GetDecimal().ToString("G29", CultureInfo.InvariantCulture),
+        JsonValueKind.Object => "{" + string.Join(",", value.EnumerateObject().OrderBy(property => property.Name, StringComparer.Ordinal).Select(property => property.Name + ":" + Canonical(property.Value))) + "}",
+        JsonValueKind.Array => "[" + string.Join(",", value.EnumerateArray().Select(Canonical)) + "]",
+        _ => value.GetRawText(),
+    };
+
+    private static string Project(JsonElement value, bool named, bool reverse)
+        => !named ? value.GetRawText() : "{" + string.Join(",", (reverse ? new[] { "b", "a" } : new[] { "a", "b" })
+            .Where(name => value.TryGetProperty(name, out _)).Select(name => "\"" + name + "\":" + value.GetProperty(name).GetRawText())) + "}";
 }

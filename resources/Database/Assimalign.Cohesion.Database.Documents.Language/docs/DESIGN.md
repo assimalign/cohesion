@@ -267,6 +267,11 @@ scan leaves these clauses to the query parser, including their ALL modifier, whi
 DISTINCT remains one complete capability refusal. Contextual identifiers and AS labels stay names.
 An unparenthesized local tail followed by a set operator remains CD00002. Additional outer tails
 on a lone already-paged parenthesized term are explicitly CK00001 rather than overwriting state.
+That refusal locates the outer tail. Both flat and parenthesized trees admit exactly 128 operators
+along a path; CD00005 locates the operator that would introduce level 129. Parentheses retain
+their separate 128-level expression guard. All nested entry points recognize parenthesized query
+terms; a deferred operator owns its one CK00001 without an additional nested-position refusal.
+Expression lookahead retains scalar operators and IN lists following a parenthesized subquery.
 
 The [set-operation dialect](DIALECT.md#set-operations-1803-oq-s1) records value equality, T3-30's
 static header choice, result-member ORDER BY binding, paging, first-representative order, budgets

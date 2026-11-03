@@ -74,6 +74,16 @@ public sealed class OqlSetOperationParserTests
     [InlineData("SELECT * FROM (SELECT a FROM c UNION SELECT b FROM d) AS q")]
     [InlineData("INSERT INTO c (KEY k) SELECT k FROM c UNION SELECT k FROM d")]
     [InlineData("UPSERT INTO c (KEY k) SELECT k FROM c UNION SELECT k FROM d")]
+    [InlineData("SELECT RAW ((SELECT RAW 1 FROM c) UNION (SELECT RAW 2 FROM d)) FROM e")]
+    [InlineData("SELECT x FROM e WHERE x IN ((SELECT RAW 1 FROM c) UNION (SELECT RAW 2 FROM d))")]
+    [InlineData("SELECT * FROM ((SELECT a FROM c) UNION (SELECT b FROM d)) AS q")]
+    [InlineData("INSERT INTO c (KEY k) (SELECT k FROM d) UNION SELECT k FROM e")]
+    [InlineData("UPSERT INTO c (KEY k) (SELECT k FROM d) UNION SELECT k FROM e")]
+    [InlineData("SELECT RAW (SELECT RAW a FROM c INTERSECT SELECT RAW b FROM d) FROM e")]
+    [InlineData("SELECT x FROM e WHERE x IN (SELECT RAW a FROM c INTERSECT SELECT RAW b FROM d)")]
+    [InlineData("SELECT * FROM (SELECT a FROM c INTERSECT SELECT b FROM d) AS q")]
+    [InlineData("INSERT INTO c (KEY k) SELECT k FROM d INTERSECT SELECT k FROM e")]
+    [InlineData("UPSERT INTO c (KEY k) SELECT k FROM d INTERSECT SELECT k FROM e")]
     public void Parse_DeferredCompoundPosition_ShouldReportOneCapability(string text)
     {
         // Arrange / Act
@@ -82,11 +92,38 @@ public sealed class OqlSetOperationParserTests
         statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Write sources: a lone parenthesized query is a query term")]
+    [InlineData("INSERT")]
+    [InlineData("UPSERT")]
+    public void Parse_ParenthesizedWriteSource_ShouldAdmitSingleBlock(string verb)
+    {
+        // Arrange / Act
+        var statement = Parse(verb + " INTO c (KEY k) (SELECT k FROM d)");
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var source = statement.OqlExpression is OqlInsertExpression insert ? insert.Select : statement.OqlExpression.ShouldBeOfType<OqlUpsertExpression>().Select;
+        source.ShouldBeOfType<OqlSelectExpression>().Collection.ShouldBe("d");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Subqueries: a parenthesized term can still begin an expression or IN list")]
+    [InlineData("SELECT RAW ((SELECT RAW 1 FROM c) = [1]) FROM d")]
+    [InlineData("SELECT RAW 1 FROM c WHERE TRUE IN ((SELECT RAW 1 FROM d) = [1])")]
+    [InlineData("SELECT RAW 1 FROM c WHERE [1] IN ((SELECT RAW 1 FROM d), [2])")]
+    public void Parse_ParenthesizedSubqueryOperand_ShouldKeepExpressionGrammar(string text)
+    {
+        // Arrange / Act
+        var statement = Parse(text);
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Query expressions: the public variant family is closed and has two sealed leaves")]
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "The untrimmed test host enumerates every shipped AST variant to verify family closure.")]
     public void QueryExpression_Variants_ShouldBeClosed()
     {
         // Arrange / Act
-        var variants = new[] { typeof(OqlSelectExpression), typeof(OqlSetOperationExpression) };
+        var variants = typeof(OqlQueryExpression).Assembly.GetTypes()
+            .Where(type => type.IsSubclassOf(typeof(OqlQueryExpression))).ToArray();
         // Assert
         variants.Select(type => type.Name).Order().ShouldBe(new[] { nameof(OqlSelectExpression), nameof(OqlSetOperationExpression) });
         variants.ShouldAllBe(type => type.IsSealed && type.BaseType == typeof(OqlQueryExpression));
@@ -109,4 +146,43 @@ public sealed class OqlSetOperationParserTests
     }
 
     private static OqlQueryStatement Parse(string text) => (OqlQueryStatement)new OqlQueryParser().Parse(text);
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Query tails: an outer refusal locates only its tail")]
+    [InlineData("(SELECT a FROM c LIMIT 1) LIMIT 2", "LIMIT 2")]
+    [InlineData("(SELECT a FROM c ORDER BY a) ORDER BY a", "ORDER BY a")]
+    public void Parse_DuplicateOuterTail_ShouldLocateTail(string text, string tail)
+    {
+        // Arrange / Act
+        var statement = Parse(text);
+        // Assert
+        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CK00001");
+        diagnostic.Start.ShouldBe(text.LastIndexOf(tail, StringComparison.Ordinal));
+        diagnostic.End.ShouldBe(text.Length);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Set operations: exactly 128 operators are admitted and the 129th is located")]
+    [InlineData(128, false)]
+    [InlineData(129, false)]
+    [InlineData(128, true)]
+    [InlineData(129, true)]
+    public void Parse_OperatorDepthBoundary_ShouldLocateOffendingOperator(int operators, bool parenthesized)
+    {
+        // Arrange
+        const string term = "SELECT a FROM c";
+        string text = string.Join(" UNION ALL ", Enumerable.Repeat(term, operators + 1));
+        if (parenthesized)
+        { text = "(" + string.Join(" UNION ALL ", Enumerable.Repeat(term, 129)) + ")" + (operators == 129 ? " UNION ALL " + term : ""); }
+        // Act
+        var statement = Parse(text);
+        // Assert
+        if (operators == 128) { statement.Diagnostics.ShouldBeEmpty(); }
+        else
+        {
+            var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("CD00005");
+            diagnostic.Start.ShouldBe(text.LastIndexOf("UNION", StringComparison.Ordinal));
+            diagnostic.End.ShouldBe(diagnostic.Start + "UNION".Length);
+        }
+    }
 }

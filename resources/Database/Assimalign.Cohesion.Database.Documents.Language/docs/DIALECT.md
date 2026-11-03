@@ -802,7 +802,9 @@ For example, `(SELECT x AS n FROM [3,1,2] AS x ORDER BY x LIMIT 2) UNION ALL
 (SELECT y AS n FROM [5,4] AS y ORDER BY y DESC LIMIT 1) ORDER BY n DESC OFFSET 1 LIMIT 2`
 returns named rows with n = 2, then n = 1. An additional outer tail on a lone parenthesized
 query that already has its own tail is explicitly deferred with CK00001; its inner tail is never
-silently replaced. Query parentheses and chains share the 128-level language nesting bound.
+silently replaced; the refusal spans only the outer tail. A chain or parenthesized query tree
+admits exactly 128 operators along a path; CD00005 locates the operator that would add level 129.
+Query parentheses retain the separate 128-level expression nesting bound.
 
 Rows are values, with no equal-arity requirement. UNION reuses DISTINCT/grouping structural
 equality: numeric 1 and 1.0 compare equal, object member order does not matter, arrays remain
@@ -835,13 +837,20 @@ which has no named result members. Subqueries within compound ORDER BY remain CK
 UNION ALL pulls one operand row at a time without retaining operand results. An operand's own
 GROUP BY, DISTINCT or ORDER BY still owns its necessary blocking stages. UNION's distinct keys,
 compound sort buffers and retained output share StatementMemoryBudget (CD05018); row processing,
-equality comparisons and sorting consume StatementWorkBudget (CD05020). Fixed-type unordered
-pages stop pulling as soon as the window is complete. EXPLAIN reports Union/UnionAll and both
+equality comparisons and sorting consume StatementWorkBudget (CD05020). Each top-level operand
+follows standalone SELECT's work rule: only its own subqueries, expression sources or
+key joins enable expression charges; plain collection scans remain uncharged beside charged siblings.
+Fixed-type unordered pages stop pulling as soon as the window is complete. EXPLAIN reports Union/UnionAll and both
 operand trees, header shape, order-key count and resolved paging, without executing sources.
 
 This run supports top-level compounds and parenthesized set operands. Compound expression
 subqueries, derived FROM and INSERT/UPSERT sources have the new query-expression AST type but
-retain CK00001 until OQ-S2. Existing single-block subqueries and source bindings inside operands
+retain one CK00001 until OQ-S2, including forms whose first query term is parenthesized.
+INTERSECT/EXCEPT's operator refusal already owns that construct and is not reported again for
+its nested position. A lone parenthesized SELECT remains a valid INSERT/UPSERT source.
+Additional parentheses around an IN query retain query membership; a following scalar operator
+or comma instead keeps the expression/list grammar.
+Existing single-block subqueries and source bindings inside operands
 keep their independent scopes. No disk, catalog or wire format changes are needed.
 
 The syntax and duplicate rules follow [Couchbase set operations](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/union.html).
@@ -849,7 +858,9 @@ The pinned grammar is [dql.ebnf:12-32](https://github.com/couchbaselabs/docs-dev
 equal precedence is [n1ql.y:387](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/parser/n1ql/n1ql.y#L387).
 OqlSetOperationParserTests, DocumentSetOperationTests, OqlExecutionConformanceTests,
 DocumentSetOperationWireTests and the NativeAOT guard cover this contract, including a deterministic
-128-case concatenation/deduplication oracle, equality, budgets and both transports.
+256-case concatenation/deduplication oracle over RAW values and named members, comparing original
+first representatives after canonical-key deduplication. The same generator runs 64 cases over TCP;
+the wider conformance corpus checks equality, budgets and both transports.
 
 ## ORDER BY null placement (#1730)
 

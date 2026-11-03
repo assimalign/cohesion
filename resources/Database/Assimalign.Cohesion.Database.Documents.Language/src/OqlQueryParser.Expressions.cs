@@ -35,7 +35,7 @@ public sealed partial class OqlQueryParser
                         left = new OqlInExpression(left, ParseExpression(4), negated, Span(start, Previous));
                         continue;
                     }
-                    if (Is("SELECT"))
+                    if (Is("SELECT") || IsParenthesizedQuery(expressionOperand: true))
                     {
                         var parenthesis = Previous;
                         var queryStart = Current;
@@ -260,7 +260,7 @@ public sealed partial class OqlQueryParser
         }
         if (Take(TokenType.LeftParen))
         {
-            if (Is("SELECT"))
+            if (Is("SELECT") || IsParenthesizedQuery(expressionOperand: true))
             {
                 var query = ParseQuery();
                 RefuseNestedCompound(query);
