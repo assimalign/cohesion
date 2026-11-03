@@ -28,7 +28,7 @@ public sealed class CheckpointBracketLoadTests
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
         var database = await engine.CreateDatabaseAsync("load-" + Guid.NewGuid().ToString("N"), CancellationToken.None);
-        
+
         var sessions = new GraphDatabaseSession[4];
         try
         {
