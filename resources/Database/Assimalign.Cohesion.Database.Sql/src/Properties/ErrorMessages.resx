@@ -580,7 +580,7 @@
   <data name="PublishTableCoreAsyncSqlCatalog4" xml:space="preserve"><value>Index '{0}' does not describe a new index on '{1}.{2}'.</value></data>
   <data name="EnsurePhysicalLayoutKeptSqlCatalog" xml:space="preserve"><value>Table '{0}.{1}' cannot be created with dropped columns.</value></data>
   <data name="EnsurePhysicalLayoutKeptSqlCatalog2" xml:space="preserve"><value>The frozen missing value of column '{0}' cannot be changed by replacement publication.</value></data>
-  <data name="EnsurePhysicalLayoutKeptSqlCatalog3" xml:space="preserve"><value>The replacement definition of '{0}.{1}' does not keep the physical column layout of the current one: it may only append columns.</value></data>
+  <data name="KeptTableLayoutMismatch" xml:space="preserve"><value>Kept table '{0}.{1}' must preserve existing physical column names, ordinals and dropped ordinals; this replacement does not keep the physical column layout.</value></data>
   <data name="CatalogAddConstraintAsyncSqlCatalog" xml:space="preserve"><value>Constraint or index '{0}' already exists on '{1}.{2}'.</value></data>
   <data name="DropConstraintCoreAsyncSqlCatalog" xml:space="preserve"><value>Constraint '{0}' does not exist on '{1}.{2}'.</value></data>
   <data name="SqlCatalogReadOwnershipSqlCatalog" xml:space="preserve"><value>The persisted object ownership metadata is invalid.</value></data>
@@ -1070,5 +1070,8 @@
   </data>
   <data name="KeptTableShapeMismatch" xml:space="preserve">
     <value>Kept table '{0}.{1}' has a different {2}; publication requires identical physical metadata.</value>
+  </data>
+  <data name="StoragePublicationFailed" xml:space="preserve">
+    <value>Storage replacement publication failed after its catalog commit; recovery decides the outcome.</value>
   </data>
 </root>

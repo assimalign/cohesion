@@ -1329,13 +1329,14 @@ independent instances with a plain storage checkpoint; data storage binds the co
 writer-anchor checkpoint. All gate releases, including undo and pruning, service deferred work.
 Synchronous nested scopes share their entering thread's acquisition; the outermost disposal
 runs any deferred checkpoint after its brackets and page latches ended. Canceled acquisition
-owns nothing, a copy disposed after its thread released admission is inert, and a scope cannot
-checkpoint its own gate.
-The value-type lease records its entering thread. Cross-thread disposal emits event 22, asserts in
-Debug and throws before changing admission; a refused disposal leaves the scope held.
-Inert coordinated leases and copies disposed after their thread released admission return before the
-thread-affinity check. An ended nested copy is still refused on another thread while its entering
-thread holds admission. The live coordinator binds after construction initializes every callback
+owns nothing, and a scope cannot checkpoint its own gate. Disposal is inert when its entering
+thread does not hold admission at disposal.
+The value-type lease records its entering thread. While that thread holds admission, cross-thread
+disposal emits event 22, asserts in Debug and throws; a refused disposal leaves admission unchanged.
+Inert coordinated leases and disposals whose entering thread does not hold admission at disposal
+return before the thread-affinity check. Otherwise, disposal on another thread is refused,
+including an ended nested copy and a stale copy after its entering thread releases and re-enters
+admission. The live coordinator binds after construction initializes every callback
 dependency; it binds once; a second live bind throws, and disposal unbinds only its own registration.
 A short state monitor makes the final pending-work check atomic with gate release, closing the
 failed-wait handoff race; it is never held across model or storage work. A checkpoint running at
@@ -1709,7 +1710,7 @@ events check `EventKeywords.None`.
 | 19 | `LockWaitBlocked` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `blockers` | `LockManager`, once per wait still queued when the slow-lock-wait threshold passes, from a one-shot timer the wait arms only while a listener takes warnings (#1390). `blockers` names each transaction the request waits for: a holder as `<sequence>:<modes held>` (modes joined by `+`), the owner of a conflicting request queued ahead of it as `<sequence>:queued <mode>`. Each is followed by what that transaction has queued itself: `" waiting for <mode> on <resource> (<its blockers>)"`, one level deep, so a cycle of two shows in one report and each waiter of a longer chain reports its own step. Bounded (#1390 review): 16 blockers, 4 queued requests of each and 4 blockers of each of those, the rest counted as `... (+N more)` and ` and N more requests` |
 | 20 | `TransactionIsolationChanged` | Verbose | Transactions | `database`, `transactionSequence`, `isolationLevel` | successful `ReplaceIsolationLevel`, only when the effective level changes; no rate or gauge transition |
 | 21 | `CheckpointBlocked` | Verbose | Checkpoints | `database`, `bracketClass`, `owner` | each deferred checkpoint, attributed to the gate holder or the next admitted handoff |
-| 22 | `CheckpointLeaseThreadMismatch` | Error | Checkpoints | `database`, `enteringThread`, `disposingThread` | live cross-thread disposal refused; scope remains held |
+| 22 | `CheckpointLeaseThreadMismatch` | Error | Checkpoints | `database`, `enteringThread`, `disposingThread` | cross-thread disposal while its entering thread holds admission is refused, including a stale copy after re-entry; leaves admission unchanged |
 
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow

@@ -207,7 +207,7 @@ internal sealed partial class SqlSchemaProvisioner
     private async ValueTask DiscardMismatchedIntentAsync(SqlCompiledSchema schema, int stepCount, CancellationToken cancellationToken)
     {
         await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false);
-        TraceOutcome("Restarted");
+        TraceOutcome("Restarted", stepCount);
         EndTrace();
         BeginTrace(schema, "Replan");
         TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: stepCount);

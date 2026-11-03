@@ -3575,7 +3575,8 @@ table, object name, original one-based execution position and total. Its transac
 before the first cheap step, so a crash after any publication can resume by database name alone.
 Cancellation and compensation retain that target for retry; a different target is refused until
 the recorded migration completes. The prior applied marker stays untrusted while an
-intent exists; only the transaction recording the fully reconciled target clears the intent.
+intent exists; only the transaction recording the fully reconciled target clears the intent,
+except a route conversion (#1777).
 
 ```mermaid
 stateDiagram-v2
@@ -7665,10 +7666,14 @@ bounded peer-sent names) are in the area's
 
 Each admitted Apply/Verify owns its Start/Stop on the same async flow, including the O(1)
 already-applied skip. **Decision:** use the Informational pair with `Skipped`, accepting two
-small events per repeated Build so a trace has one explicit outcome for every admitted call.
-The skip still performs no catalog walk, serialization or hashing. Start precedes planning, so
-its count is -1; Stop carries the rendered execution-step count (zero for skip/verify, -1 if
-planning failed). A handoff stops with `Deferred` before the worker is scheduled. Admission
+small events per repeated Build so a trace has one explicit call outcome for every admitted call.
+An Apply that discards an interrupted intent of the other route closes its first pair with
+`Restarted` and opens a second pair with mode `Replan`, whose Start follows planning; that
+second pair carries the call's outcome. The skip still performs no catalog walk, serialization
+or hashing. The initial Start precedes planning; both it and the Replan Start carry count -1.
+The Restarted Stop carries the new plan's rendered execution-step count. The final Stop carries
+the rendered execution-step count (zero for skip/verify, -1 if planning failed).
+A handoff stops with `Deferred` before the worker is scheduled. Admission
 refusals and a repeated internal request for an already scheduled target are not new operations.
 Cancellation closes the pair without a failure event. Stop is written only if Start was written.
 A listener attached after entry can see a failure without an unmatched Stop.
@@ -8861,7 +8866,11 @@ failed checkpoint at the journal size cap retains JournalSizeLimit. 49a step fai
 uses ProvisioningFailure; interrupted open-time recovery still uses RecoveryInterrupted.
 These are the existing StorageOfflineCause conditions. Pre-publication joint failures never request
 ProvisioningFailure; a failure of in-memory publication after the catalog commit does, fencing both
-file sets until recovery. It propagates as an unconfirmed commit, so callers retain published trees
+file sets until recovery. If taking storage offline itself throws, Environment.FailFast terminates
+the process with that fence exception, so storage can never remain online after a post-commit fault.
+The offline reason describes storage replacement publication for TRUNCATE, ALTER-rewrite and
+joint migration alike. It propagates as an unconfirmed commit whose inner exception is the
+storage's OfflineError (or the original failure if absent), so callers retain published trees
 and owner intents for recovery instead of dismantling a durable publication.
 This is the explicit availability exception: an unknown WAL/commit outcome
 cannot be safely retried online (PostgreSQL src/backend/access/transam/xlog.c:2525-2532
@@ -8873,7 +8882,7 @@ place; recovery alone decides the schema. Joint cleanup never turns it into "sch
 
 After a crash, recovery reclaims abandoned owners. A matching Build retains the kind-9 target
 and replans preparation from the old marker. An old/different/no-target Build or plain open
-discards the intent and opens the old schema without fencing. After publication it opens the
+discards the intent and opens the current catalog without fencing. After publication it opens the
 new schema. Rollback after success plans an ordinary reverse migration: every unproven conversion,
 length/precision/scale narrowing and rounding requires destructive opt-in, refused with CS03105
 before any step otherwise. The planner's conservative exact whitelist includes integer widening,
@@ -8937,16 +8946,22 @@ These markers allocate after publication-space and catalog-checkpoint admission 
 canceled admission installs none, and a failed transaction removes this attempt's markers, leaving
 current descriptions on the read fast path. Weak keys cannot retain table histories forever.
 Publication checks physical layout, exact types and ObjectId under the catalog lock for every kept
-description. CS05060 names the mismatched physical field. Kept columns retain their declared spelling
-while preserving physical ordinals and facets. Before commit, the index directory refuses any prepared
+description. CS05060 names the mismatched physical field and, for a column-level mismatch, its column.
+Kept columns retain their declared spelling while preserving physical ordinals and facets.
+Before commit, the index directory refuses any prepared
 key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
 Registered domains are outside the schema hash. A matching interrupted intent is discarded and
 replanned when registration changes switch between ordinary deferred and joint migration, or switch
 an existing joint table between KeepOwner and RewriteOwner. The old schema remains online until the
-new plan publishes. An ordinary replan uses its new script's step total, even when unrelated DDL
+new plan publishes. An ordinary deferred intent that now needs a joint migration is converted.
+Its committed inline steps stay. From then on the job follows joint-intent policy: a failure,
+a plain open or an old-target Build discards it, and nothing resumes it by name. Discard before
+saving the joint intent preserves availability: retaining the ordinary intent through a persistent
+pre-save refusal would otherwise fail every open. An ordinary replan uses its new script's step
+total, even when unrelated DDL
 invalidated the stored schema snapshot and the new script is longer than the recorded joint job.
 Discard ends the current provisioning trace with outcome Restarted and starts mode Replan.
-Joint intents with malformed ownership choices still fail CS06059.
+Joint intents with malformed ownership choices still fail CS06059 when the replan is joint.
 The lock order is table X -> apply gate -> tree/page latches for building, and snapshot gate -> catalog monitor
 -> index directory monitor for publication; the directory never calls back into the catalog.
 Maintenance selects one physical manager per call, preserving the global 64-leaf budget.

@@ -203,6 +203,7 @@ public sealed partial class SqlJointTypeMigrationTests
 
         // Assert
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05060");
+        failure.Message.ShouldContain("Kept table 'dbo.items' must preserve existing physical column names, ordinals and dropped ordinals", Case.Sensitive);
         Table(database).ShouldBeSameAs(old);
     }
 

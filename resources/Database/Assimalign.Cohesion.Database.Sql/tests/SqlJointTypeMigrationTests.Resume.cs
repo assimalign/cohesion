@@ -103,6 +103,7 @@ public sealed partial class SqlJointTypeMigrationTests
         using var release = new ManualResetEventSlim();
         var captured = new TaskCompletionSource<CrashCaptureSqlStorageStrategy>(TaskCreationOptions.RunContinuationsAsynchronously);
         int recordedSteps = 0;
+        ulong[] abandonedOwners = [];
         SqlSchema Declaration(bool changed) => SqlSchema.Create("typed", schema =>
         {
             schema.AllowDestructiveChanges();
@@ -127,14 +128,28 @@ public sealed partial class SqlJointTypeMigrationTests
         await using (var engine = await first.BuildAsync(guard.Token))
         {
             var database = await engine.OpenDatabaseAsync("typed", guard.Token);
-            database.SchemaProvisioner.BeforeDeferredStep = (_, token) =>
+            ulong firstPreparedOwner = database.Catalog.NextReservedIdentity;
+            void CaptureIntent(CancellationToken token)
             {
                 var intent = database.Catalog.PendingMigration.ShouldNotBeNull();
                 intent.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)).ShouldBe(initiallyJoint);
                 recordedSteps = intent.StepCount;
+                if (initiallyJoint)
+                {
+                    abandonedOwners = Enumerable.Range(0, checked((int)(database.Catalog.NextReservedIdentity - firstPreparedOwner)))
+                        .Select(offset => firstPreparedOwner + (ulong)offset).ToArray();
+                    abandonedOwners.ShouldNotBeEmpty();
+                    abandonedOwners.ShouldContain(owner => database.DataStorage.HasOwnerPages(owner));
+                }
                 captured.TrySetResult(storage.CaptureDurableImages());
                 release.Wait(token);
-            };
+            }
+            if (initiallyJoint)
+            {
+                // Capture after admission and copying, with durable owners that have real pages.
+                database.SchemaProvisioner.JointStage = stage => { if (stage == "TablePrepared") { CaptureIntent(guard.Token); } };
+            }
+            else { database.SchemaProvisioner.BeforeDeferredStep = (_, token) => CaptureIntent(token); }
             try
             {
                 await database.SchemaProvisioner.ApplyAsync(target, guard.Token, deferDataScalingSteps: true);
@@ -164,11 +179,19 @@ public sealed partial class SqlJointTypeMigrationTests
         await DrainReclamationAsync(current, guard.Token);
 
         // Assert.
-        if (!initiallyJoint || staleSnapshot)
-        {
-            recorder.Events.ShouldContain(e => e.EventId == 14 && Equals(e.Payload![5], "Restarted"));
-            recorder.Events.ShouldContain(e => e.EventId == 13 && Equals(e.Payload![4], "Replan"));
-        }
+        var trace = recorder.Events.Where(e => e.EventId is 13 or 14).ToArray();
+        int restarted = Array.FindIndex(trace, e => e.EventId == 14 && Equals(e.Payload![5], "Restarted"));
+        restarted.ShouldBeGreaterThan(0);
+        trace[restarted - 1].EventId.ShouldBe(13);
+        trace[restarted - 1].Payload![4].ShouldBe("Apply");
+        trace[restarted - 1].Payload![5].ShouldBe(-1);
+        trace[restarted].Payload![4].ShouldBeOfType<int>().ShouldBeGreaterThan(0);
+        trace[restarted + 1].EventId.ShouldBe(13);
+        trace[restarted + 1].Payload![4].ShouldBe("Replan");
+        trace[restarted + 1].Payload![5].ShouldBe(-1);
+        trace[restarted + 2].EventId.ShouldBe(14);
+        trace[restarted + 2].Payload![4].ShouldBe(trace[restarted].Payload![4]);
+        trace[restarted + 2].Payload![5].ShouldBe(initiallyJoint ? "Deferred" : "Applied");
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
         current.OfflineError.ShouldBeNull();
         current.Catalog.PendingMigration.ShouldBeNull();
@@ -178,6 +201,7 @@ public sealed partial class SqlJointTypeMigrationTests
         Table(current).Columns[0].Type.Precision.ShouldBe(staleSnapshot ? 10 : 8);
         if (staleSnapshot) { current.SchemaProvisioner.LastPlan!.Operations.Count.ShouldBeGreaterThan(recordedSteps); }
         current.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
+        foreach (ulong owner in abandonedOwners) { current.DataStorage.HasOwnerPages(owner).ShouldBeFalse(); }
         await using var reader = await current.CreateSessionAsync(guard.Token);
         (await RowsAsync(reader, "SELECT v,w,x FROM items", guard.Token)).Single().ShouldBe(new object?[] { 12m, 13m, 14m });
     }
@@ -212,7 +236,10 @@ public sealed partial class SqlJointTypeMigrationTests
             SqlSchemaProvisioner.IsCommitUnconfirmed(failure).ShouldBeTrue();
             database.CatalogStorage.IsOffline.ShouldBeTrue();
             database.DataStorage.IsOffline.ShouldBeTrue();
-            failure.InnerException.ShouldBeSameAs(injected);
+            failure.ShouldBeOfType<TransactionCommitUnconfirmedException>();
+            failure.InnerException.ShouldBeSameAs(database.CatalogStorage.OfflineError);
+            database.CatalogStorage.OfflineError!.InnerException.ShouldBeSameAs(injected);
+            database.CatalogStorage.OfflineError.Message.ShouldContain("Storage replacement publication failed after its catalog commit", Case.Sensitive);
         }
         await using var reopened = await Builder(crash!).BuildAsync(guard.Token);
         var current = await reopened.OpenDatabaseAsync("typed", guard.Token);

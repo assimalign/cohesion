@@ -2567,7 +2567,7 @@ public sealed partial class SqlCatalog
         if (!kept)
         {
             throw new SqlCatalogException("CS05060",
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog3, table.Schema, table.Name));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeptTableLayoutMismatch, table.Schema, table.Name));
         }
     }
 

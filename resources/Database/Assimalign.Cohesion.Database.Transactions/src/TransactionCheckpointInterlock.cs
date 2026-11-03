@@ -333,8 +333,8 @@ public sealed class TransactionCheckpointInterlock
         internal Lease(TransactionCheckpointInterlock? owner, int thread, long identity)
         { _owner = owner; _thread = thread; _identity = identity; }
         /// <summary>Services due work and releases this scope on its entering thread.</summary>
-        /// <remarks>A refused disposal leaves admission unchanged. A copy disposed after its thread released admission is inert.</remarks>
-        /// <exception cref="StorageTransactionException">A copy was disposed on another thread while its entering thread still held admission.</exception>
+        /// <remarks>Disposal is inert when its entering thread does not hold admission at disposal. Otherwise, disposal on another thread is refused and leaves admission unchanged, including a stale copy after re-entry.</remarks>
+        /// <exception cref="StorageTransactionException">The lease or a copy of it was disposed on another thread while its entering thread held admission.</exception>
         public void Dispose() => _owner?.ExitRaw(_thread, _identity);
         private sealed class DebugView
         {

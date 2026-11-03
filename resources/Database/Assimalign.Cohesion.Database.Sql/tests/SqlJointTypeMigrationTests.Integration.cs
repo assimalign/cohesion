@@ -193,7 +193,7 @@ public sealed partial class SqlJointTypeMigrationTests
 
         // Assert.
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05060");
-        failure.Message.ShouldContain(identity ? "ObjectId" : "Type", Case.Sensitive);
+        failure.Message.ShouldContain(identity ? "ObjectId" : "Columns[v].Type", Case.Sensitive);
         Table(database).ShouldBeSameAs(old);
         database.Catalog.IsTruncatedTable(old).ShouldBeFalse();
     }
