@@ -135,7 +135,8 @@ internal sealed class SqlTableReclamation
                     // later owner or poll may keep a due checkpoint busy. The
                     // interval predicate also covers an already pending attempt
                     // after the worker has consumed its wake signal.
-                    if (_database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
+                    if (_database.Engine.CheckpointNeededSignal.IsSet ||
+                        _database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
                     {
                         SqlDatabaseEventSource.Log.TableReclamationYielded(_database, pending.ObjectId);
                         return;

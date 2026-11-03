@@ -10579,6 +10579,3 @@ The function argument view snapshots only Count; the function context view snaps
 TransactionTimestamp. Neither view retains a ref struct, span, context, or cancellation token.
 The SQL value view reads Type and IsNull without decoding its payload. Internal-only plan or
 metrics state stays hidden rather than being promoted to a public debugger projection.
-
-Reclamation's pre-admission due check reads its data storage, rather than the engine-wide wake
-signal; a request for another database or catalog cannot keep this owner queued (#1283).
