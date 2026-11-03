@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal static partial class DocumentPlanExecutor
 {
     private static DocumentExpressionEvaluator SourceEvaluator(DocumentDatabase database, DocumentOperation operation,
-        DocumentLogicalPlan logical, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext nested, string? writeVerb = null)
+        DocumentLogicalPlan logical, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext? nested, string? writeVerb = null)
     {
         var query = logical.Query;
         return new DocumentExpressionEvaluator(DocumentSourceName.Of(query), parameters, cancellationToken, writeVerb: writeVerb, transactionStart: operation.TransactionStart,
@@ -87,21 +87,23 @@ internal static partial class DocumentPlanExecutor
     }
 
     private static async ValueTask<object?[]> SourceProjectionAsync(DocumentLogicalPlan logical, DocumentEvaluationContext row,
-        DocumentExpressionEvaluator evaluator, DocumentNestedExecutionContext nested, DocumentAggregateMemory.Reservation retained)
+        DocumentExpressionEvaluator evaluator, DocumentNestedExecutionContext? nested, DocumentAggregateMemory.Reservation retained)
     {
         var memory = evaluator.Memory;
         retained.Charge(192L + logical.Projections.Count * 32L);
         var values = new object?[logical.Projections.Count];
         for (int index = 0; index < values.Length; index++)
         {
-            long before = memory.Bytes - nested.RetainedBytes;
+            long before = memory.Bytes - (nested?.RetainedBytes ?? 0);
             object? value;
             try
             {
-                value = await evaluator.EvaluateProjectionAsync(logical.Projections[index].Expression, row, null,
-                    DocumentRowWriter.WritesBareValue(logical.Query), nested).ConfigureAwait(false);
+                value = nested is null
+                    ? evaluator.EvaluateProjection(logical.Projections[index].Expression, row, null, DocumentRowWriter.WritesBareValue(logical.Query))
+                    : await evaluator.EvaluateProjectionAsync(logical.Projections[index].Expression, row, null,
+                        DocumentRowWriter.WritesBareValue(logical.Query), nested).ConfigureAwait(false);
             }
-            finally { memory.Release(memory.Bytes - nested.RetainedBytes - before); }
+            finally { memory.Release(memory.Bytes - (nested?.RetainedBytes ?? 0) - before); }
             if (logical.Query.IsValue && value is DocumentMissing) { value = null; }
             retained.Retain(value);
             values[index] = value is JsonElement json ? json.Clone() : value;
@@ -113,7 +115,7 @@ internal static partial class DocumentPlanExecutor
     // let LIMIT test its window before pulling even one additional inner row.
     private static async IAsyncEnumerable<DocumentEvaluationContext> SourceMatchesAsync(DocumentDatabase database,
         DocumentOperation operation, DocumentStatementPlan plan, DocumentExpressionEvaluator evaluator,
-        IReadOnlyDictionary<string, object?>? parameters, DocumentNestedExecutionContext nested,
+        IReadOnlyDictionary<string, object?>? parameters, DocumentNestedExecutionContext? nested,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var logical = SourceLogical(plan);
@@ -129,10 +131,11 @@ internal static partial class DocumentPlanExecutor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 operation.EnsureActive();
-                long before = evaluator.Memory.Bytes - nested.RetainedBytes;
+                long before = evaluator.Memory.Bytes - (nested?.RetainedBytes ?? 0);
                 bool matches;
-                try { matches = await evaluator.MatchesAsync(logical.Query.Predicate, expanded.Current, null, nested).ConfigureAwait(false); }
-                finally { evaluator.Memory.Release(evaluator.Memory.Bytes - nested.RetainedBytes - before); }
+                try { matches = nested is null ? evaluator.Matches(logical.Query.Predicate, expanded.Current)
+                    : await evaluator.MatchesAsync(logical.Query.Predicate, expanded.Current, null, nested).ConfigureAwait(false); }
+                finally { evaluator.Memory.Release(evaluator.Memory.Bytes - (nested?.RetainedBytes ?? 0) - before); }
                 if (!matches || paged && seen++ < logical.Offset) { continue; }
                 emitted++;
                 yield return expanded.Current;
@@ -142,7 +145,7 @@ internal static partial class DocumentPlanExecutor
 
     private static async IAsyncEnumerable<DocumentEvaluationContext> ExpandSourceAsync(OqlSelectExpression query,
         DocumentEvaluationContext source, DocumentExpressionEvaluator evaluator, DocumentOperation operation,
-        [EnumeratorCancellation] CancellationToken cancellationToken, DocumentNestedExecutionContext nested, DocumentJoinPlan? plan = null)
+        [EnumeratorCancellation] CancellationToken cancellationToken, DocumentNestedExecutionContext? nested, DocumentJoinPlan? plan = null)
     {
         if (query.Bindings.Count == 0)
         { cancellationToken.ThrowIfCancellationRequested(); operation.EnsureActive(); yield return source; yield break; }
@@ -160,19 +163,19 @@ internal static partial class DocumentPlanExecutor
                 var binding = query.Bindings[next];
                 if (binding is OqlJoinExpression join)
                 {
-                    long beforeKey = evaluator.Memory.Bytes - nested.RetainedBytes;
+                    long beforeKey = evaluator.Memory.Bytes - (nested?.RetainedBytes ?? 0);
                     object? key;
-                    try { key = await evaluator.EvaluateAsync(join.Expression, row, null, nested).ConfigureAwait(false); }
-                    finally { evaluator.Memory.Release(evaluator.Memory.Bytes - nested.RetainedBytes - beforeKey); }
+                    try { key = await evaluator.EvaluateAsync(join.Expression, row, null, nested!).ConfigureAwait(false); }
+                    finally { evaluator.Memory.Release(evaluator.Memory.Bytes - (nested?.RetainedBytes ?? 0) - beforeKey); }
                     if (key is not (null or DocumentMissing or string))
                     { throw new DocumentPlanningException("CD02028", ErrorMessages.JoinKeyInvalid, join.Expression.Location); }
-                    var match = LookupJoinKey(plan!, join, key, nested, retained, cancellationToken);
+                    var match = LookupJoinKey(plan!, join, key, nested!, retained, cancellationToken);
                     if (match is not null || join.IsLeft)
                     {
                         object? value = match is { } document ? document : DocumentMissing.UnmatchedSource;
                         if (join.IsNest && key is string)
                         {
-                            try { value = nested.Nest(plan!.Collections[join].Id, (string)key, match, retained, cancellationToken); }
+                            try { value = nested!.Nest(plan!.Collections[join].Id, (string)key, match, retained, cancellationToken); }
                             catch (DocumentPlanningException exception) when (exception.Diagnostics[0].Start is null && join.Expression.Location is not null)
                             { throw exception.At(join.Expression.Location); }
                         }
@@ -184,10 +187,11 @@ internal static partial class DocumentPlanExecutor
                 else
                 {
                     long start = retained.Bytes;
-                    long before = evaluator.Memory.Bytes - nested.RetainedBytes;
+                    long before = evaluator.Memory.Bytes - (nested?.RetainedBytes ?? 0);
                     object? value;
-                    try { value = await evaluator.EvaluateAsync(binding.Expression, row, null, nested).ConfigureAwait(false); }
-                    finally { evaluator.Memory.Release(evaluator.Memory.Bytes - nested.RetainedBytes - before); }
+                    try { value = nested is null ? evaluator.Evaluate(binding.Expression, row)
+                        : await evaluator.EvaluateAsync(binding.Expression, row, null, nested).ConfigureAwait(false); }
+                    finally { evaluator.Memory.Release(evaluator.Memory.Bytes - (nested?.RetainedBytes ?? 0) - before); }
                     if (value is JsonElement { ValueKind: JsonValueKind.Array } array && array.GetArrayLength() > 0)
                     {
                         // Path views borrow the current input or an active parent frame;
@@ -230,26 +234,26 @@ internal static partial class DocumentPlanExecutor
 
     private static async IAsyncEnumerable<DocumentEvaluationContext> SourceInputAsync(DocumentDatabase database,
         DocumentOperation operation, DocumentStatementPlan plan, DocumentExpressionEvaluator evaluator,
-        IReadOnlyDictionary<string, object?>? parameters, DocumentNestedExecutionContext nested,
+        IReadOnlyDictionary<string, object?>? parameters, DocumentNestedExecutionContext? nested,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (plan is DocumentJoinPlan join) { plan = join.Input; }
         if (plan is DocumentFromPlan { Input: not null } derived)
         {
-            await foreach (var row in StreamSourceRowsAsync(database, operation, derived.Input, parameters, nested, cancellationToken).ConfigureAwait(false))
+            await foreach (var row in StreamSourceRowsAsync(database, operation, derived.Input, parameters, nested!, cancellationToken).ConfigureAwait(false))
             { yield return new DocumentEvaluationContext(row); }
             yield break;
         }
         if (plan is DocumentFromPlan expression)
         {
             var memory = evaluator.Memory;
-            long before = memory.Bytes - nested.RetainedBytes;
+            long before = memory.Bytes - (nested?.RetainedBytes ?? 0);
             object? value;
             var sourceEvaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken,
                 transactionStart: operation.TransactionStart, functions: database.Engine.Functions,
                 databaseName: database.Name, operation: operation, nested: nested);
-            try { value = await sourceEvaluator.EvaluateAsync(expression.Logical.Query.Source!, default, null, nested).ConfigureAwait(false); }
-            finally { memory.Release(memory.Bytes - nested.RetainedBytes - before); }
+            try { value = await sourceEvaluator.EvaluateAsync(expression.Logical.Query.Source!, default, null, nested!).ConfigureAwait(false); }
+            finally { memory.Release(memory.Bytes - (nested?.RetainedBytes ?? 0) - before); }
             using var retained = memory.Reserve();
             retained.Retain(value);
             // Couchbase ExpressionScan: arrays expand, MISSING has no rows; every
@@ -289,7 +293,8 @@ internal static partial class DocumentPlanExecutor
         {
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
-            var document = nested.ReadDocument(entry);
+            operation.Session.LastQueryDocumentsRead++;
+            var document = database.ReadDocument(entry);
             using var rowMemory = evaluator.Memory.Reserve();
             rowMemory.Charge(128L + document.Content.Length);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });

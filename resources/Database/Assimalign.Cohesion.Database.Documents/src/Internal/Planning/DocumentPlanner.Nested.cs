@@ -15,6 +15,14 @@ internal sealed partial class DocumentPlanner
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (expression is null) { return false; }
+        if (expression is OqlSetOperationExpression compound)
+        {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (HasSubquery(compound.Left, cancellationToken) || HasSubquery(compound.Right, cancellationToken)) { return true; }
+            for (int index = 0; index < compound.OrderBy.Count; index++)
+            { if (HasSubquery(compound.OrderBy[index].Expression, cancellationToken)) { return true; } }
+            return false;
+        }
         if (expression is OqlSubqueryExpression) { return true; }
         if (expression is OqlSelectExpression query)
         {
@@ -97,7 +105,7 @@ internal sealed partial class DocumentPlanner
         string? unboundValuesName = null;
         bool valuesAliasExplicit = false;
         int subqueryDepth = 0;
-        if (expression is OqlSelectExpression query) { VisitQuery(query, empty, free); }
+        if (expression is OqlQueryExpression query) { VisitRootQuery(query); }
         else
         {
             string? name = expression switch
@@ -123,7 +131,7 @@ internal sealed partial class DocumentPlanner
             }
             foreach (var child in NestedChildren(expression))
             {
-                if (child is OqlSelectExpression select) { VisitQuery(select, empty, free); }
+                if (child is OqlQueryExpression select) { VisitQuery(RequireQueryBlock(select), empty, free); }
                 else
                 {
                     bool values = expression is OqlInsertExpression or OqlUpsertExpression && child is not OqlReturningExpression;
@@ -134,6 +142,13 @@ internal sealed partial class DocumentPlanner
             }
         }
         return new DocumentNestedPlan(PlanCore(expression, queries), queries);
+
+        void VisitRootQuery(OqlQueryExpression query)
+        {
+            if (query is OqlSetOperationExpression compound)
+            { VisitRootQuery(compound.Left); VisitRootQuery(compound.Right); }
+            else { VisitQuery((OqlSelectExpression)query, empty, free); }
+        }
 
         void VisitQuery(OqlSelectExpression select, Dictionary<string, bool> outer, HashSet<string> free)
         {
@@ -193,11 +208,11 @@ internal sealed partial class DocumentPlanner
                 foreach (var declaration in nestedOrder ?? local) { enclosing[declaration.Key] = declaration.Value; }
                 var outerNames = new HashSet<string>(StringComparer.Ordinal);
                 subqueryDepth++;
-                try { VisitQuery(subquery.Query, enclosing, outerNames); }
+                try { VisitQuery(RequireQueryBlock(subquery.Query), enclosing, outerNames); }
                 finally { subqueryDepth--; }
                 foreach (var dependency in outerNames)
                 { if (!(nestedOrder ?? local).ContainsKey(dependency)) { free.Add(dependency); } }
-                var select = subquery.Query;
+                var select = RequireQueryBlock(subquery.Query);
                 if (select.Source is null && enclosing.TryGetValue(select.Collection, out bool keyspace) && !keyspace)
                 {
                     select = new OqlSelectExpression("", DocumentSourceName.Of(select), select.Projections,
@@ -265,6 +280,13 @@ internal sealed partial class DocumentPlanner
                 foreach (var projection in returning.Projections) { yield return projection.Expression; }
                 break;
             case OqlSubqueryExpression subquery: yield return subquery.Query; break;
+            case OqlSetOperationExpression compound:
+                yield return compound.Left;
+                yield return compound.Right;
+                foreach (var order in compound.OrderBy) { yield return order.Expression; }
+                if (compound.Limit is not null) { yield return compound.Limit; }
+                if (compound.Offset is not null) { yield return compound.Offset; }
+                break;
             case OqlSelectExpression query:
                 if (query.Source is not null) { yield return query.Source; }
                 foreach (var projection in query.Projections) { yield return projection.Expression; }
@@ -292,10 +314,16 @@ internal sealed partial class DocumentPlanner
         void AddQuery(DocumentStatementPlan queryPlan, int? parent)
         {
             int offset = nodes.Count;
-            foreach (var node in DescribeNodes(queryPlan))
+            foreach (var node in queryPlan is DocumentSetOperationPlan ? DescribeNodes(queryPlan).Take(1) : DescribeNodes(queryPlan))
             {
                 nodes.Add(new DatabasePlanNode { NodeId = offset + node.NodeId, ParentId = node.ParentId is int id ? offset + id : parent,
                     Operator = node.Operator, Target = node.Target, Index = node.Index, Detail = node.Detail, EstimatedRows = node.EstimatedRows });
+            }
+            if (queryPlan is DocumentSetOperationPlan compound)
+            {
+                AddQuery(compound.Left, offset);
+                AddQuery(compound.Right, offset);
+                return;
             }
             OqlExpression query = queryPlan switch
             {

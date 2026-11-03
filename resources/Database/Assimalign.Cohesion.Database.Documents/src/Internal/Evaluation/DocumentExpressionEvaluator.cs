@@ -128,6 +128,13 @@ internal sealed partial class DocumentExpressionEvaluator
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
+            case OqlSetOperationExpression compound:
+                ValidateInputs(compound.Left);
+                ValidateInputs(compound.Right);
+                foreach (var order in compound.OrderBy) { ValidateInputs(order.Expression); }
+                ValidateInputs(compound.Limit);
+                ValidateInputs(compound.Offset);
+                break;
             case OqlSubqueryExpression subquery:
                 ValidateInputs(subquery.Query);
                 break;

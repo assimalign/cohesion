@@ -63,6 +63,7 @@ public static class OqlLanguageProfile
         OqlClauses.Returning,
         OqlClauses.Values,
         OqlClauses.Select,
+        OqlClauses.Union,
         OqlClauses.Subquery,
         OqlClauses.Distinct,
         OqlClauses.SelectValue,
