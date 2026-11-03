@@ -34,7 +34,7 @@ internal static class TcpServerSmoke
             if (!configureListener) { return; }
             TOptions concrete = options.Listen(endpoint);
             if (!ReferenceEquals(concrete, options)) { throw new InvalidOperationException("Listen changed the options instance."); }
-            listener = concrete.Listener;
+            listener = concrete.Listener ?? throw new InvalidOperationException("The server builder did not configure its listener.");
         }
         DatabaseEngine engine = model switch
         {
@@ -61,12 +61,13 @@ internal static class TcpServerSmoke
         using var other = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         other.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         int assignedPort = explicitListener ? ((IPEndPoint)other.LocalEndPoint!).Port : port;
-        using var environment = AppEnvironment.Enter(AppEnvironmentScope.Create(new Dictionary<string, string>
+        using var environment = usePlatformEndpoint ? AppEnvironment.Enter(AppEnvironmentScope.Create(new Dictionary<string, string>
         {
+            [AppEnvironment.Variables.Gateway] = "test",
             [AppEnvironment.Variables.Endpoint(Endpoints[model], "HOST")] = "127.0.0.1",
             [AppEnvironment.Variables.Endpoint(Endpoints[model], "PORT")] = assignedPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
             [AppEnvironment.Variables.Endpoint(Endpoints[model], "SCHEME")] = "cohesion-db",
-        }, token));
+        }, token)) : null;
         var (engine, listener) = Create(model, new Uri($"cohesion-db://127.0.0.1:{port}"), !usePlatformEndpoint || explicitListener);
         await using var owned = engine;
         await engine.CreateDatabaseAsync("app", token);

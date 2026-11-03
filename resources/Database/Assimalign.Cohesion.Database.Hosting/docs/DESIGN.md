@@ -67,6 +67,10 @@ Event 15 still reports the original Web host failure exactly once.
 Shutdown drains model servers before stopping health; async disposal owns the private Web host.
 The Web.Hosting/Web.Health dependencies and their App.Database assemblies remain private.
 
+| Code | Condition | Carrier |
+| --- | --- | --- |
+| CK07102 | HTTP health listener socket bind failed | DatabaseException.Diagnostics; original Web host failure and socket cause retained |
+
 The existing /healthz, /readyz and /livez routes and /cohesion/v1 aliases retain their health and
 transport-peer policies: namespaced routes admit loopback peers only; bare routes admit remote
 probes; forwarded headers never grant access. Readiness remains unavailable until the outer host

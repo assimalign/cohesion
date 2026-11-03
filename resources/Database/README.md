@@ -8,8 +8,9 @@ A Database application becomes a managed resource instance with
 through the selected platform, publishes the instance and restores added actions before servers
 start. The [integration design](Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md)
 records lifecycle details and the remaining platform allocation/readiness gaps. A model server
-without an explicit listener consumes its named runtime endpoint (sql, documents, graph, kv or
-blob); explicit Listen wins. Managed HTTP health binds the platform's http endpoint. Unmanaged
+without an explicit listener consumes its named runtime endpoint when COHESION_GATEWAY is nonempty (sql, documents, graph, kv or
+blob); explicit Listen wins. Managed HTTP health binds the platform's plain http endpoint at a
+bindable host, reporting and skipping unsuitable assignments. Unmanaged
 applications opt in with builder.AddHealthEndpoint(uri). The in-process platform still allocates
 only http, so wire addresses remain explicit there.
 

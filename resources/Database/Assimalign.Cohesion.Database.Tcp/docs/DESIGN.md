@@ -2,30 +2,21 @@
 
 ## Named platform endpoints (#1790, EN-A1)
 
-Server creation snapshots options before validation. When that snapshot has no Listener,
-DatabaseServerOptions reads the current AppEnvironment scope with TryGetEndpoint: SQL uses sql,
-Documents documents, Graph graph, KeyValuePair kv, and Blob blob. An explicit Listener, including
-Listen(Uri), wins without reading the platform endpoint. Missing or malformed contract values
-retain CK08001. A DNS bind host retains CK07101. No endpoint is invented and no server is added.
-Custom model names have no platform fallback. Without assigned values, unmanaged behavior is unchanged.
+The [root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790-en-a1)
+owns resolution, precedence, transport and ownership. Fallback requires a nonempty COHESION_GATEWAY.
+Values come from the current AppEnvironment flow: the scope when inside one, otherwise the process
+environment. Explicit Listener/Listen(Uri) wins; unmanaged applications must supply a listener.
+The shared stateless binder retains IdnHost and literal-address validation. Its two consumer
+EndpointHostUnsupported resources are checked for identical text to keep CK07101 consistent.
 
-This follows Web.Hosting's HttpServerConfiguration.GetPlatformEndPoint
-(resources/Web/Assimalign.Cohesion.Web.Hosting/src/Internal/HttpServerConfiguration.cs:853-874):
-read the scoped runtime contract, not process environment variables or configuration. The root
-privately references Connections.Tcp; the existing App.Database runtime-private membership already
-carries it. Models keep their generic Connections surface and gain no transport reference, public
-member or hosting dependency. The common stateless binder lives in Database/shared/EndpointBinding,
-compiled by Database and Database.Tcp, preserving Listen's IdnHost/literal-address policy.
-As with Listen(Uri), a scheme is endpoint metadata, not transport selection: this default is plain
-TCP and does not configure TLS. A secured or different transport needs an explicit Listener.
-The listener is inert until server start; the server owns its bind, drain and terminal disposal.
-The caller's original options remain unchanged and can be reused in another environment scope.
-TCP construction is behind a non-inlined internal factory, so generic-listener and missing-listener
-paths remain usable without deploying TCP.
+Two AddServer calls on one engine, or servers on two engines of the same model, need explicit
+distinct listeners. The root contract exposes no listener or assignment origin for Build validation,
+so a coded Build refusal awaits an approved composition seam; currently Start reports
+AddressAlreadyInUse and rolls back the first bind.
 
-The in-process platform currently assigns only http. Five-model tests assign the named runtime
-values directly and complete handshake/Ping, including under NativeAOT; named platform allocation
-and per-endpoint outputs remain ApplicationModel escalation E-AM1. No wire or store format changes.
+The smoke helper enters a platform scope only on its platform path and requires Listen to supply
+its listener on the explicit path. Removing Listen's assignment must fail the #1391 test and the
+NativeAOT sample's first loop; a platform default cannot satisfy that guard.
 
 ## Shared server options and TCP composition (#1391, D7 B)
 

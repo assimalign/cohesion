@@ -25,6 +25,30 @@ namespace Assimalign.Cohesion.Database.Tcp.Tests;
 
 public sealed class DatabaseTcpTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Tcp] - Invalid limits are checked before platform listener creation (#1790)")]
+    [InlineData(0, true)] [InlineData(1, true)] [InlineData(2, true)] [InlineData(3, true)] [InlineData(4, true)]
+    [InlineData(0, false)] [InlineData(1, false)] [InlineData(2, false)] [InlineData(3, false)] [InlineData(4, false)]
+    public async Task Create_InvalidLimitsWithPlatformEndpoint_ShouldValidateBeforeAllocatingListener(int model, bool invalidSessions)
+    {
+        // Arrange: an unsupported host would refuse with CK07101 if resolution ran first.
+        using var environment = AppEnvironment.Enter(AppEnvironmentScope.Create(new Dictionary<string, string>
+        {
+            [AppEnvironment.Variables.Gateway] = "test",
+            [AppEnvironment.Variables.Endpoint(TcpServerSmoke.Endpoints[model], "HOST")] = "example.test",
+            [AppEnvironment.Variables.Endpoint(TcpServerSmoke.Endpoints[model], "PORT")] = "5740",
+            [AppEnvironment.Variables.Endpoint(TcpServerSmoke.Endpoints[model], "SCHEME")] = "tcp",
+        }, CancellationToken.None));
+        await using var engine = NewEngine(model);
+
+        // Act
+        var failure = Should.Throw<ArgumentException>(() => NewServer(model, engine, null,
+            invalidSessions ? 0 : 100, invalidSessions ? null : TimeSpan.Zero));
+
+        // Assert
+        failure.ParamName.ShouldBe(invalidSessions ? "MaxSessions" : "ShutdownDrainTimeout");
+        failure.Message.ShouldStartWith(invalidSessions ? "CK08002:" : "CK08003:", Case.Sensitive);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Tcp] - Named platform endpoints serve every model and explicit listeners win (#1790)")]
     [InlineData(0, false)] [InlineData(1, false)] [InlineData(2, false)] [InlineData(3, false)] [InlineData(4, false)]
     [InlineData(0, true)] [InlineData(1, true)] [InlineData(2, true)] [InlineData(3, true)] [InlineData(4, true)]
@@ -48,6 +72,7 @@ public sealed class DatabaseTcpTests
         // Arrange: http is deliberately present; a wire server must never consume it.
         using var environment = AppEnvironment.Enter(AppEnvironmentScope.Create(new Dictionary<string, string>
         {
+            [AppEnvironment.Variables.Gateway] = "test",
             [AppEnvironment.Variables.Endpoint("http", "HOST")] = "127.0.0.1",
             [AppEnvironment.Variables.Endpoint("http", "PORT")] = "5741",
             [AppEnvironment.Variables.Endpoint("http", "SCHEME")] = "http",
@@ -74,6 +99,7 @@ public sealed class DatabaseTcpTests
         // Arrange
         using var environment = AppEnvironment.Enter(AppEnvironmentScope.Create(new Dictionary<string, string>
         {
+            [AppEnvironment.Variables.Gateway] = "test",
             [AppEnvironment.Variables.Endpoint("sql", "HOST")] = host,
             [AppEnvironment.Variables.Endpoint("sql", "PORT")] = "5740",
             [AppEnvironment.Variables.Endpoint("sql", "SCHEME")] = "tcp",
