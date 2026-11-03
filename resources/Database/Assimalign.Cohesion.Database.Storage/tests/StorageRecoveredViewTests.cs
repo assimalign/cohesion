@@ -146,6 +146,7 @@ public sealed class StorageRecoveredViewTests
             probe.ProbeRetainedPageBytes.ShouldBe(Page.Size);
             probe.ProbeIndexedRecordCount.ShouldBeGreaterThan(0);
             Should.Throw<NotSupportedException>(() => probe.BeginTransaction());
+            Should.Throw<NotSupportedException>(() => probe.BeginTransaction("ProbeTest", 42));
             Should.Throw<NotSupportedException>(() => probe.BeginTransaction(42));
             Should.Throw<NotSupportedException>(() => probe.Log.AppendBegin(42));
             probe.Data.CanWrite.ShouldBeFalse();

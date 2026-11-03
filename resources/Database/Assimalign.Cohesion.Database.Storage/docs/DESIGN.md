@@ -1969,7 +1969,7 @@ uncommitted extensions, commit selection, images, deltas and base-LSN checks hav
 There is no separate undo algorithm: recovery is already redo-only and overwrites stolen bytes.
 The owner/free-space scan consumes recovered headers one page at a time. Unchanged pages read only
 the requested header bytes, so a body I/O fault unrelated to any gate cannot introduce a refusal. The read-only
-buffer pool caches only pages subsequently read by a gate; its write guard, both transaction-begin overloads,
+buffer pool caches only pages subsequently read by a gate; its write guard, all transaction-begin overloads,
 the data stream and journal append/truncation guards reject mutation.
 
 Let R be retained applicable page records, D distinct indexed pages, P file pages, T journal transaction identities, G the
@@ -3157,4 +3157,4 @@ Concrete eligible types carry their own concise display and private nested Debug
 
 Size-only checkpoint hints (TimeSpan.MaxValue) short-circuit elapsed-time sampling after the
 journal-size trigger. Failed physical-bracket registration completes the unreturned transaction;
-probe write refusal still precedes construction in both BeginTransaction overloads (#1283, #1744).
+probe write refusal still precedes construction in all BeginTransaction overloads (#1283, #1744).
