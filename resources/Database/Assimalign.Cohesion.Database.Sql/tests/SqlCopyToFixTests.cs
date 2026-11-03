@@ -247,7 +247,7 @@ public sealed class SqlCopyToFixTests
             (await copy.WaitAsync(timeout.Token)).ShouldBe(1);
             Encoding.UTF8.GetString(output.ToArray()).ShouldBe("id,fresh\n1,7\n");
             while (database.SchemaProvisioner.Deferred is not null)
-            { timeout.Token.ThrowIfCancellationRequested(); await Task.Yield(); }
+            { await Task.Delay(1, timeout.Token); }
             database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         }
         finally { release.Set(); }
