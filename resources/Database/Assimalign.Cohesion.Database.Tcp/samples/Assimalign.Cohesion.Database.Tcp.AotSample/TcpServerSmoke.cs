@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -23,12 +24,14 @@ namespace Assimalign.Cohesion.Database.Tcp.AotSample;
 internal static class TcpServerSmoke
 {
     internal static readonly string[] Models = ["SQL", "Graph", "Documents", "Blob", "KeyValuePair"];
+    internal static readonly string[] Endpoints = ["sql", "graph", "documents", "blob", "kv"];
 
-    internal static (DatabaseEngine Engine, IDuplexConnectionListener Listener) Create(int model, Uri endpoint)
+    internal static (DatabaseEngine Engine, IDuplexConnectionListener? Listener) Create(int model, Uri endpoint, bool configureListener = true)
     {
         IDuplexConnectionListener? listener = null;
         void Configure<TOptions>(TOptions options) where TOptions : DatabaseServerOptions
         {
+            if (!configureListener) { return; }
             TOptions concrete = options.Listen(endpoint);
             if (!ReferenceEquals(concrete, options)) { throw new InvalidOperationException("Listen changed the options instance."); }
             listener = concrete.Listener;
@@ -42,23 +45,35 @@ internal static class TcpServerSmoke
             4 => KeyValueDatabaseEngine.CreateBuilder("tcp-" + Models[model]).AddServer(options => Configure(options)).Build(),
             _ => throw new ArgumentOutOfRangeException(nameof(model)),
         };
-        return (engine, listener ?? throw new InvalidOperationException("The server builder did not configure its listener."));
+        return (engine, listener);
     }
 
-    internal static async Task<(IPEndPoint Endpoint, ProtocolMessageType[] Responses)> RunAsync(int model, CancellationToken token)
+    internal static async Task<(IPEndPoint Endpoint, ProtocolMessageType[] Responses)> RunAsync(int model, CancellationToken token,
+        bool usePlatformEndpoint = false, bool explicitListener = false)
     {
         // Keep the selected positive endpoint reserved throughout engine/database setup. Resource
         // endpoint URIs require a positive port; release only immediately before the listener bind.
         using var reservation = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         reservation.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         int port = ((IPEndPoint)reservation.LocalEndPoint!).Port;
-        var (engine, listener) = Create(model, new Uri($"cohesion-db://127.0.0.1:{port}"));
+        // Keep the unused platform port occupied when testing explicit precedence. If the
+        // fallback takes precedence by mistake, binding must fail instead of passing by chance.
+        using var other = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        other.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        int assignedPort = explicitListener ? ((IPEndPoint)other.LocalEndPoint!).Port : port;
+        using var environment = AppEnvironment.Enter(AppEnvironmentScope.Create(new Dictionary<string, string>
+        {
+            [AppEnvironment.Variables.Endpoint(Endpoints[model], "HOST")] = "127.0.0.1",
+            [AppEnvironment.Variables.Endpoint(Endpoints[model], "PORT")] = assignedPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [AppEnvironment.Variables.Endpoint(Endpoints[model], "SCHEME")] = "cohesion-db",
+        }, token));
+        var (engine, listener) = Create(model, new Uri($"cohesion-db://127.0.0.1:{port}"), !usePlatformEndpoint || explicitListener);
         await using var owned = engine;
         await engine.CreateDatabaseAsync("app", token);
         var server = engine.Servers.Single();
         reservation.Dispose();
         await server.StartAsync(token);
-        var endpoint = (IPEndPoint)listener.EndPoint;
+        var endpoint = (IPEndPoint?)listener?.EndPoint ?? new IPEndPoint(IPAddress.Loopback, port);
         await using var transport = await new TcpConnectionFactory().ConnectAsync(endpoint, token);
         var family = model switch
         {

@@ -3,7 +3,11 @@
 Reference Assimalign.Cohesion.Database.Tcp and import Assimalign.Cohesion.Database to call
 options.Listen(endpoint) on SQL, Documents, Graph, Blob or KeyValue server options. The generic
 extension returns the concrete options type. App.Database includes this package publicly;
-Connections.Tcp remains an implementation dependency. No engine selects a transport itself.
+Connections.Tcp remains an implementation dependency. Explicit listeners win. When omitted, server
+creation uses the model's named platform endpoint (sql, documents, graph, kv or blob) through
+AppEnvironment.TryGetEndpoint, with plain TCP and the same address validation as Listen(Uri).
+Without a valid assignment, the existing missing-listener refusal remains. The in-process platform
+assigns only http today; dependents still receive wire addresses as literal settings.
 
 Use an absolute resolved endpoint URI with an explicit positive port. IP literals, localhost and
 wildcards bind directly; DNS hosts and port zero are refused. The server owns the listener after

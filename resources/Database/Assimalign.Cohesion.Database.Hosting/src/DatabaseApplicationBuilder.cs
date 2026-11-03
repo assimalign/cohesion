@@ -48,6 +48,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     private readonly List<(DatabaseEngine? Instance, string Name, Func<DatabaseApplicationContext, DatabaseEngine>? Factory)> _engines = [];
     private readonly List<(IHostService? Instance, Func<DatabaseApplicationContext, IHostService>? Factory)> _serviceRegistrations = [];
     private readonly PhysicalFileSystem? _contentRoot;
+    private Uri? _healthEndpoint;
     private int _buildAttempted;
 
     /// <summary>Initializes a builder with host settings.</summary>
@@ -234,6 +235,26 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         return this;
     }
 
+    /// <summary>Configures the application's HTTP health listener.</summary>
+    /// <param name="endpoint">A plain HTTP endpoint with a literal IP address or localhost.</param>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    /// The last call replaces the previous endpoint. When the runtime environment names a gateway
+    /// and assigns an http endpoint, that platform endpoint wins. Without either configuration,
+    /// no health listener is created. The listener starts before model servers and stops after
+    /// they drain. Namespaced health routes accept loopback peers only.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="endpoint"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="endpoint"/> is not an endpoint URI.</exception>
+    /// <exception cref="InvalidOperationException">Build has begun, or the scheme or host is unsupported.</exception>
+    public DatabaseApplicationBuilder AddHealthEndpoint(Uri endpoint)
+    {
+        EnsureMutable();
+        _ = DatabaseAdminEndpointService.GetBindEndPoint(endpoint);
+        _healthEndpoint = endpoint;
+        return this;
+    }
+
     /// <summary>Consumes this builder and constructs one complete application.</summary>
     /// <param name="cancellationToken">Cancels construction, recovery and inline provisioning through engine factories.</param>
     /// <returns>The application owning factory products and borrowing supplied instances.</returns>
@@ -296,6 +317,22 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             // is built first, so service registration closes whatever fails later.
             var loggerFactory = (LoggerFactory)Logging.Build();
             ownership.Infrastructure.Add(loggerFactory);
+            DatabaseApplicationContext? context = null;
+            Uri? healthEndpoint = _healthEndpoint;
+            if (!string.IsNullOrWhiteSpace(AppEnvironment.GetValue(AppEnvironment.Variables.Gateway))
+                && AppEnvironment.TryGetEndpoint("http", out Uri? platformEndpoint))
+            {
+                healthEndpoint = platformEndpoint;
+            }
+
+            if (healthEndpoint is not null)
+            {
+                _ = DatabaseAdminEndpointService.GetBindEndPoint(healthEndpoint);
+                // Register through the same container lifecycle aggregate as application services.
+                // Its factory runs after context and the frozen engine/server registry exist.
+                Services.AddSingleton<IHostService>(_ => new DatabaseAdminEndpointService(healthEndpoint, context!));
+            }
+
             ServiceProvider services = BuildServiceProvider(loggerFactory);
             ownership.Infrastructure.Add(services);
             DatabaseApplicationOptions options = SnapshotOptions(_options);
@@ -304,7 +341,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             // must not leave the snapshot disagreeing with the context.
             options.Environment = Environment.Name;
             options.ContentRootPath = Environment.ContentRootPath;
-            var context = new DatabaseApplicationContext(Environment, Configuration, services, loggerFactory, cancellationToken);
+            context = new DatabaseApplicationContext(Environment, Configuration, services, loggerFactory, cancellationToken);
 
             var products = new HashSet<object>(ReferenceEqualityComparer.Instance);
             var engines = new List<DatabaseEngine>(_engines.Count);
@@ -439,6 +476,9 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         }
         catch (Exception exception)
         {
+            // Endpoint validation may fail before the provider closes registration. Build is
+            // still consumed, so the container must refuse late mutation on this path too.
+            ((ServiceContainer)Services.Container).MakeReadOnly();
             var failures = new List<Exception>();
             Task.Run(() => ownership.DisposeAsync(failures)).GetAwaiter().GetResult();
             if (failures.Count > 0)

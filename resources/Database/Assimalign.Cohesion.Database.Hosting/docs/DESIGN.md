@@ -26,6 +26,37 @@ flowchart LR
 
 COHRES001–004 remain enforced. [Database.Hosting.ApplicationModel](../../Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md) supplies the managed-resource registration on `builder.Services`; the runtime itself references no ApplicationModel package.
 
+## Platform binding and HTTP health (#1790, EN-A1)
+
+Each model server's options snapshot defaults a missing listener from its named runtime endpoint
+(sql, documents, graph, kv or blob); an explicit Listener or Listen(Uri) wins. The common root
+owns that resolution before the model validates its snapshot, because Hosting receives an already
+constructed server. It privately uses Connections.Tcp and shares the stateless binder with
+Database.Tcp. Hosting adds no model reference or public composition seam. See the
+[root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790-en-a1).
+
+The concrete builder's AddHealthEndpoint(Uri) configures one plain HTTP listener; the last call
+wins. Registration validates an endpoint URI, literal IP address or localhost and refuses HTTPS
+without a certificate source. At Build, a nonempty runtime COHESION_GATEWAY plus a valid http
+endpoint assignment overrides that explicit value (T3-28). A malformed or missing assignment is
+unset under Core's TryGetEndpoint contract; absent an explicit value, no listener is composed.
+A valid assignment with an unsupported scheme or DNS bind host fails Build. An unmanaged host
+creates no listener unless AddHealthEndpoint is called, even if http values are present.
+
+Build registers the internal DatabaseAdminEndpointService as a singleton IHostService factory in
+Services, before closing the container. The factory runs after the engine/server registry exists,
+last among container services, before the reopen service and model servers. It starts a private
+Web host and awaits its bind, so a bind failure fails the outer start and rolls back prior services.
+Shutdown drains model servers before stopping health; async disposal owns the private Web host.
+The Web.Hosting/Web.Health dependencies and their App.Database assemblies remain private.
+
+The existing /healthz, /readyz and /livez routes and /cohesion/v1 aliases retain their health and
+transport-peer policies: namespaced routes admit loopback peers only; bare routes admit remote
+probes; forwarded headers never grant access. Readiness remains unavailable until the outer host
+is Started, after every model server confirmed accept. Liveness omits that readiness-only gate.
+Other /cohesion/v1 paths remain forbidden. No gateway readiness semantics, health contributors,
+resource actions, event identities, wire messages or store formats change in this run.
+
 ## Build and configuration
 
 Build consumes the builder before user code runs, even if construction fails. Registration methods and the service container reject late mutation, and so does the logging builder once Build built its factory. The `Options` host settings are copied at Build and cannot alter the application later. The root builder has no live `Engines` property. `DatabaseApplicationOptions` holds host policy only: its borrowed `Engines`, `Servers` and `Services` lists, the `DatabaseApplication(options)` constructor and `CreateBuilder(options)` were deleted (owner decision 54 of 2026-10-09), so there is one registration path per kind of thing (`AddEngine`, `AddService`, and a server on its engine's builder).

@@ -252,27 +252,21 @@ public sealed partial class DatabaseHostingEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - AdminEndpointFailed: Should report a real listener bind failure once")]
     public async Task AdminEndpoint_OccupiedPort_ShouldReportFailureOnce()
     {
-        // Arrange: no host composes the admin endpoint since the resource integration was removed
-        // (#1759), so the test registers it as an owned service of a real application.
+        // Arrange
         using var occupied = new TcpListener(IPAddress.Loopback, 0);
         occupied.Start();
         var endpoint = new Uri($"http://127.0.0.1:{((IPEndPoint)occupied.LocalEndpoint).Port}");
         var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
-        builder.AddService(context => new DatabaseAdminEndpointService(endpoint, context));
+        builder.AddHealthEndpoint(endpoint);
         var application = builder.Build();
         using var recorder = new HostingEventRecorder(EventLevel.Error);
 
-        // Act: the background service may fail synchronously or after Start returned. Stop joins
-        // its task in either case; disposal retains the existing failure behavior.
+        // Act: the health service awaits its nested host's bind; the outer start must fail.
         try
         {
-            try { await ((IHost)application).StartAsync(CancellationToken.None); }
-            catch (Exception) { }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            while (!recorder.Events.Any(entry => entry.EventId == 15))
-            {
-                await Task.Delay(10, timeout.Token);
-            }
+            await Should.ThrowAsync<Exception>(() => ((IHost)application).StartAsync(timeout.Token));
+            application.Context.State.ShouldBe(HostState.Failed);
         }
         finally
         {

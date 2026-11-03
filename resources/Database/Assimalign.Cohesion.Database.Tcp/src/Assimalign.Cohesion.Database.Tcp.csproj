@@ -6,4 +6,7 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Database" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
   </ItemGroup>
+  <ItemGroup>
+    <CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="EndpointBinding" />
+  </ItemGroup>
 </Project>

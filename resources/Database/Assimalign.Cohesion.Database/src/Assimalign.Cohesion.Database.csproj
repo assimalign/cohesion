@@ -31,6 +31,11 @@
 			time because App.Database declares Web via CohesionFrameworkPrivateAssembly
 			in resources/Database/Assimalign.Cohesion.Database.Runtime/Directory.Build.props.
 		-->
+		<!-- Missing model listeners default to platform endpoints; TCP stays runtime-private. -->
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="EndpointBinding" />
 	</ItemGroup>
 </Project>

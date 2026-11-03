@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -24,6 +25,79 @@ namespace Assimalign.Cohesion.Database.Tcp.Tests;
 
 public sealed class DatabaseTcpTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Tcp] - Named platform endpoints serve every model and explicit listeners win (#1790)")]
+    [InlineData(0, false)] [InlineData(1, false)] [InlineData(2, false)] [InlineData(3, false)] [InlineData(4, false)]
+    [InlineData(0, true)] [InlineData(1, true)] [InlineData(2, true)] [InlineData(3, true)] [InlineData(4, true)]
+    public async Task Create_PlatformEndpoint_ShouldServeHandshakeAndPing(int model, bool explicitListener)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Act
+        var result = await TcpServerSmoke.RunAsync(model, timeout.Token, usePlatformEndpoint: true, explicitListener);
+
+        // Assert
+        result.Responses.ShouldBe([ProtocolMessageType.Authenticate, ProtocolMessageType.Ready, ProtocolMessageType.Pong]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Tcp] - A missing or malformed named endpoint retains the missing-listener refusal (#1790)")]
+    [InlineData(0, "")] [InlineData(1, "")] [InlineData(2, "")] [InlineData(3, "")] [InlineData(4, "")]
+    [InlineData(0, "0")] [InlineData(1, "65536")] [InlineData(2, "bad")] [InlineData(3, "-1")] [InlineData(4, "5740")]
+    public async Task Create_IncompletePlatformEndpoint_ShouldRequireListener(int model, string port)
+    {
+        // Arrange: http is deliberately present; a wire server must never consume it.
+        using var environment = AppEnvironment.Enter(AppEnvironmentScope.Create(new Dictionary<string, string>
+        {
+            [AppEnvironment.Variables.Endpoint("http", "HOST")] = "127.0.0.1",
+            [AppEnvironment.Variables.Endpoint("http", "PORT")] = "5741",
+            [AppEnvironment.Variables.Endpoint("http", "SCHEME")] = "http",
+            [AppEnvironment.Variables.Endpoint(TcpServerSmoke.Endpoints[model], "HOST")] = "127.0.0.1",
+            [AppEnvironment.Variables.Endpoint(TcpServerSmoke.Endpoints[model], "PORT")] = port,
+            [AppEnvironment.Variables.Endpoint(TcpServerSmoke.Endpoints[model], "SCHEME")] = port == "5740" ? "" : "cohesion-db",
+        }, CancellationToken.None));
+        await using var engine = NewEngine(model);
+
+        // Act
+        var failure = Should.Throw<ArgumentException>(() => NewServer(model, engine, null, 100));
+
+        // Assert
+        failure.ParamName.ShouldBe("Listener");
+        failure.Message.ShouldStartWith("CK08001:", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Tcp] - Platform binding reuses Listen host validation (#1790)")]
+    [InlineData("localhost", "127.0.0.1")]
+    [InlineData("::1", "::1")]
+    [InlineData("example.test", null)]
+    public async Task Create_PlatformHost_ShouldUseLiteralAddressPolicy(string host, string? address)
+    {
+        // Arrange
+        using var environment = AppEnvironment.Enter(AppEnvironmentScope.Create(new Dictionary<string, string>
+        {
+            [AppEnvironment.Variables.Endpoint("sql", "HOST")] = host,
+            [AppEnvironment.Variables.Endpoint("sql", "PORT")] = "5740",
+            [AppEnvironment.Variables.Endpoint("sql", "SCHEME")] = "tcp",
+        }, CancellationToken.None));
+        await using var engine = SqlDatabaseEngine.Create("platform-host", new());
+        var options = new SqlDatabaseServerOptions();
+
+        // Act / Assert
+        if (address is null)
+        {
+            Should.Throw<InvalidOperationException>(() => SqlDatabaseServer.Create(engine, options))
+                .Message.ShouldStartWith("CK07101:", Case.Sensitive);
+        }
+        else
+        {
+            var resolved = new PlatformServerOptions();
+            resolved.Validate();
+            resolved.Listener.ShouldNotBeNull().EndPoint.ShouldBe(new IPEndPoint(IPAddress.Parse(address), 5740));
+            await resolved.Listener.DisposeAsync();
+            await using var server = SqlDatabaseServer.Create(engine, options);
+            options.Listener.ShouldBeNull(); // The server owns a snapshot, not the caller's options.
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Tcp] - Concrete builder options bind and serve every model over TCP (#1391)")]
     [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)]
     public async Task Listen_ModelBuilder_ShouldServeHandshakeAndPing(int model)
@@ -104,6 +178,11 @@ public sealed class DatabaseTcpTests
         { Listener = blobListener, AuthenticationTimeout = TimeSpan.Zero })).ParamName.ShouldBe("AuthenticationTimeout");
         await using var blobServer = BlobDatabaseServer.Create(blobs, new()
         { Listener = blobListener, AuthenticationTimeout = Timeout.InfiniteTimeSpan, IdleTimeout = Timeout.InfiniteTimeSpan });
+    }
+
+    private sealed class PlatformServerOptions : DatabaseServerOptions
+    {
+        public void Validate() => ValidateCommon("SQL", "platform-host");
     }
 
     private static DatabaseEngine NewEngine(int model) => model switch

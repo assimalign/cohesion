@@ -52,6 +52,10 @@ builder.Services.AddResource("orders-db", resource => resource
 ```
 
 A gateway declares it generically with `builder.AddResource("Database", "orders-db")`. The
-in-process platform currently reports an HTTP endpoint unrelated to the Database wire listener;
-dependents configure that listener's endpoint as a literal setting. Gateway readiness currently
+in-process platform currently reports an HTTP endpoint serving Database health, including
+/cohesion/v1/readyz and /cohesion/v1/livez for loopback peers. Hosting binds that platform http
+assignment automatically when the runtime names a gateway. An unmanaged application opts in with
+builder.AddHealthEndpoint(uri). Model servers use sql, documents, graph, kv or blob assignments
+when their options omit a listener; an explicit Listen wins. The platform assigns only http today,
+so dependents still configure the wire address as a literal setting. Gateway readiness currently
 means publication, which precedes Database accept; see the design's open questions.

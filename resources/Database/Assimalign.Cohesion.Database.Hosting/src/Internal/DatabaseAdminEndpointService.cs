@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 [global::System.Diagnostics.DebuggerDisplay("DatabaseAdminEndpointService")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseAdminEndpointService.DebugView))]
-internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostService, IDisposable
+internal sealed class DatabaseAdminEndpointService : IHostService, IDisposable, IAsyncDisposable
 {
     private static readonly string[] _databaseHealthTags = [HealthTags.Ready, HealthTags.Live];
 
@@ -28,27 +28,11 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         Uri endpoint,
         DatabaseApplicationContext applicationContext)
     {
-        Uri.ThrowIfNotEndpoint(endpoint);
+        IPEndPoint bindEndPoint = GetBindEndPoint(endpoint);
         _endpoint = endpoint;
         ArgumentNullException.ThrowIfNull(applicationContext);
-
-        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAdminEndpointServiceFailure, endpoint.Scheme));
-        }
-
-        // An https endpoint's certificate came from the retired resource context (#1759). With no
-        // source left for it, an https endpoint is refused rather than served without one.
-        if (string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(ErrorMessages.DatabaseAdminEndpointServiceFailure2);
-        }
-
-        IPAddress address = ResolveBindAddress(endpoint.IdnHost);
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
+        builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = bindEndPoint));
 
         _application = builder.Build();
         IWebApplicationPipelineBuilder pipeline = _application;
@@ -93,11 +77,12 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
 
     internal IWebApplicationPipelineBuilder Pipeline => _application;
 
-    public new void Dispose()
+    public ServiceId Id { get; } = ServiceId.New();
+
+    public void Dispose()
     {
         try
         {
-            base.Dispose();
             ((IDisposable)_application).Dispose();
         }
         catch (Exception exception)
@@ -108,7 +93,21 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         }
     }
 
-    protected override async Task ExecuteAsync(CancellationToken cancellationToken)
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await ((IAsyncDisposable)_application).DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            // Disposal is an infrastructure boundary; report and preserve its failure.
+            DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Dispose", exception);
+            throw;
+        }
+    }
+
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -119,35 +118,12 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Start", exception);
             throw;
         }
-
-        try
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        finally
-        {
-            try
-            {
-                await ((IHost)_application).StopAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Stop", exception);
-                throw;
-            }
-        }
     }
 
-    async Task IHostService.StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            // Stop the nested listener inside the outer host's shutdown budget before
-            // cancelling the parking loop. ExecuteAsync's finally remains a fallback for
-            // disposal and failed-start compensation, where no service-stop token exists.
             await ((IHost)_application).StopAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -155,10 +131,24 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Stop", exception);
             throw;
         }
-        finally
+    }
+
+    internal static IPEndPoint GetBindEndPoint(Uri endpoint)
+    {
+        Uri.ThrowIfNotEndpoint(endpoint);
+        if (string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
         {
-            await base.StopAsync(cancellationToken).ConfigureAwait(false);
+            // The retired resource context supplied the certificate. No current source exists.
+            throw new InvalidOperationException(ErrorMessages.DatabaseAdminEndpointServiceFailure2);
         }
+
+        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAdminEndpointServiceFailure, endpoint.Scheme));
+        }
+
+        return new IPEndPoint(ResolveBindAddress(endpoint.IdnHost), endpoint.Port);
     }
 
     private static IHealthCheckService CreateHealthService(DatabaseApplicationContext applicationContext)
