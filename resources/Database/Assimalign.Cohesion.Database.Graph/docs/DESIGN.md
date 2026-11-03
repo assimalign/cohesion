@@ -17,10 +17,13 @@ GraphType with empty collections. SET replaces the whole type. ADD introduces ne
 and refuses existing names. ALTER replaces complete declarations of existing elements and cannot
 introduce names. Unmentioned elements survive ADD/ALTER. Selective DROP requires existing names
 and refuses dangling edge references; node and referencing edge types can be dropped together.
-Dropping the complete absent type succeeds. These operations leave independent named constraints
-and property metadata intact. They run through schema autocommit and refuse explicit transactions
+Dropping the complete absent type succeeds. Empty ADD, ALTER and selective DROP fragments preserve
+the current state, including absence, without validating or rewriting unaffected members. All
+mutations preserve independent named constraints and property metadata, follow schema admission
+and budgets, and run through schema autocommit. They refuse explicit transactions
 with CG04025. Invalid constructor arguments precede admission; admitted failures retain the
 ordinary transaction-abort policy. CG03011 identifies invalid element operations or references.
+Missing-name diagnostics quote at most 256 UTF-16 code units without splitting a surrogate pair.
 
 A node carrying an identifying label must carry every implied label and satisfy its property
 types and NOT NULL rules. Missing implied labels are refused, never synthesized. Multiple matching
@@ -45,12 +48,15 @@ Loading previous type definitions
 reserves candidate-directory capacity before copying keys and conservatively charges 32 times
 each candidate's encoded length plus 512 bytes before decoding its strings, objects, collection
 and mutation buffers. Invisible versions are charged too. ADD/ALTER fragments reserve 512 bytes
-per element before allocating mutation maps and copied result arrays; resulting descriptors charge
+per element and preflight record sizes before allocating mutation maps and copied result arrays; resulting descriptors charge
 their names, implied labels and properties before retention. Each element must fit one catalog
 record (CG02009). The codec measures strict UTF-8 lengths before allocating an exact-sized payload
 buffer, so an oversized declaration does not first allocate its encoded bytes. Ordinary catalog
 definitions and graph-type variants share one object slot, keeping property/index records from
-growing for the new variants. There is no graph-wide data materialization. Successful publication
+growing for the new variants. Publication reserves 512 bytes for the singleton type route and
+1 KiB before discovering each new label, relationship type or property token, covering catalog
+directory and transaction-version entries. Each token lookup also consumes work; duplicate or
+existing tokens need no new-token memory grant. There is no graph-wide data materialization. Successful publication
 discovers label/type/property tokens in the same logical transaction; dropping a type retains
 those discoveries. Failed operations roll all new tokens back. The defaults remain 1,000,000
 work units and 256 MiB retained memory. Every grant unwinds on success, cancellation or failure.

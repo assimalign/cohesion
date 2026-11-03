@@ -49,6 +49,30 @@ public sealed class GraphTypeTests
         Should.Throw<ArgumentException>(() => GraphNodeType.Create("Person", properties: [null!]));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Graph] - Graph types: empty add alter and selective-drop fragments preserve absence and existing declarations")]
+    public async Task ChangeGraphTypeAsync_EmptyFragments_ShouldPreserveCurrentStateAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("types", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var schema = GraphSchema.Open(database, session);
+
+        // Act / Assert
+        await EmptyChanges();
+        (await schema.GetGraphTypeAsync(CancellationToken.None)).ShouldBeNull();
+        await schema.SetGraphTypeAsync(GraphType.Create([GraphNodeType.Create("N")]), CancellationToken.None);
+        await EmptyChanges();
+        (await schema.GetGraphTypeAsync(CancellationToken.None))!.NodeTypes.ShouldHaveSingleItem().IdentifyingLabel.ShouldBe("N");
+
+        async Task EmptyChanges()
+        {
+            await schema.AddGraphTypeAsync(GraphType.Create(), CancellationToken.None);
+            await schema.AlterGraphTypeAsync(GraphType.Create(), CancellationToken.None);
+            await schema.DropGraphTypeAsync([], [], CancellationToken.None);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - Graph types: set add alter selective drop and reopen preserve complete declarations")]
     public async Task SetGraphTypeAsync_ReopenAndMutations_ShouldRoundTripAsync()
     {
@@ -176,7 +200,7 @@ public sealed class GraphTypeTests
     public async Task SetGraphTypeAsync_BudgetExhaustion_ShouldPreserveTypeAsync(bool memory)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create("types", new() { QueryWorkBudget = memory ? 100 : 3, QueryMemoryBudget = memory ? 4096 : 1048576 });
+        await using var engine = GraphDatabaseEngine.Create("types", new() { QueryWorkBudget = memory ? 100 : 6, QueryMemoryBudget = memory ? 4096 : 1048576 });
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var schema = GraphSchema.Open(database, session);
@@ -213,6 +237,40 @@ public sealed class GraphTypeTests
         session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
         session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
         (await schema.GetGraphTypeAsync(CancellationToken.None)).ShouldNotBeNull().NodeTypes.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Graph types: token discovery consumes work and memory before publication")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SetGraphTypeAsync_DiscoveryBudget_ShouldRollbackPartialTokensAsync(bool memory)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("types", new() { QueryWorkBudget = memory ? 100 : 6,
+            QueryMemoryBudget = memory ? 7000 : 1048576 });
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var schema = GraphSchema.Open(database, session);
+        await schema.SetGraphTypeAsync(GraphType.Create(), CancellationToken.None);
+        var stages = new List<string>();
+        database.Catalog.AfterGraphTypeMutation = stage => stages.Add(stage);
+
+        // Act
+        DatabaseException error;
+        try
+        {
+            error = await Should.ThrowAsync<DatabaseException>(async () => await schema.SetGraphTypeAsync(GraphType.Create([
+                GraphNodeType.Create("N", ["I1", "I2", "I3", "I4"], [GraphPropertyType.Create("p", DatabaseType.String)])]), CancellationToken.None));
+        }
+        finally { database.Catalog.AfterGraphTypeMutation = null; }
+
+        // Assert: actual partial discovery precedes refusal, and none of it survives.
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(memory ? "CG05020" : "CG05004");
+        stages.Count.ShouldBeGreaterThan(1);
+        session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
+        session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
+        (await schema.GetLabelsAsync(CancellationToken.None)).ShouldBeEmpty();
+        (await schema.GetGraphTypeAsync(CancellationToken.None)).ShouldNotBeNull().NodeTypes.ShouldBeEmpty();
+        await schema.SetGraphTypeAsync(GraphType.Create(), CancellationToken.None);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Graph types: all mutations refuse explicit transactions with CG04025")]
@@ -367,6 +425,27 @@ public sealed class GraphTypeTests
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02009");
         (await schema.GetGraphTypeAsync(CancellationToken.None)).ShouldNotBeNull().NodeTypes.ShouldBeEmpty();
         (await schema.GetLabelsAsync(CancellationToken.None)).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Graph types: missing drop-name diagnostics remain bounded without splitting a surrogate pair")]
+    public async Task DropGraphTypeAsync_LongMissingName_ShouldBoundDiagnosticAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("types", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var schema = GraphSchema.Open(database, session);
+        await schema.SetGraphTypeAsync(GraphType.Create(), CancellationToken.None);
+        string name = new string('x', 255) + "😀" + new string('x', 100000);
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await schema.DropGraphTypeAsync([name], [], CancellationToken.None));
+
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03011");
+        error.Message.Length.ShouldBeLessThan(512);
+        error.Message.ShouldNotContain("\ud83d", Case.Sensitive);
+        (await schema.GetGraphTypeAsync(CancellationToken.None)).ShouldNotBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Graph types: cancellation during owner validation preserves the previous type")]

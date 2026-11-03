@@ -88,7 +88,7 @@ public sealed partial class GraphSchema
     /// <param name="nodeTypes">Identifying labels of node types to remove.</param>
     /// <param name="edgeTypes">Relationship types of edge types to remove.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
-    /// <returns>Completion after commit; an empty current type remains set.</returns>
+    /// <returns>Completion after commit. Removing the last elements leaves an empty type set; empty name lists preserve the current state.</returns>
     /// <exception cref="ArgumentException">A collection is null or contains a blank or repeated name.</exception>
     /// <exception cref="DatabaseException">An element is absent or an edge would have a dangling reference (CG03011); validation, budgets, session state or explicit-transaction policy refuses the operation.</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The snapshot is stale.</exception>
@@ -103,6 +103,7 @@ public sealed partial class GraphSchema
         var edges = CopyNames(edgeTypes);
         return ChangeGraphTypeAsync(previous =>
         {
+            if (nodes.Count == 0 && edges.Count == 0) { return previous; }
             foreach (string node in nodes)
             { if (previous?.NodeTypes.Any(item => item.IdentifyingLabel == node) != true) { throw InvalidGraphTypeChange("DROP", node); } }
             foreach (string edge in edges)
@@ -124,8 +125,9 @@ public sealed partial class GraphSchema
         return result;
     }
 
-    private static GraphType MergeGraphTypes(GraphType? previous, GraphType changes, bool alter)
+    private static GraphType? MergeGraphTypes(GraphType? previous, GraphType changes, bool alter)
     {
+        if (changes.NodeTypes.Count == 0 && changes.EdgeTypes.Count == 0) { return previous; }
         var nodes = (previous?.NodeTypes ?? []).ToDictionary(item => item.IdentifyingLabel, StringComparer.Ordinal);
         var edges = (previous?.EdgeTypes ?? []).ToDictionary(item => item.RelationshipType, StringComparer.Ordinal);
         foreach (var node in changes.NodeTypes)
@@ -142,12 +144,21 @@ public sealed partial class GraphSchema
     }
 
     private static DatabaseException InvalidGraphTypeChange(string operation, string name)
-        => DatabaseException.CreateGraphFailure("CG03011", string.Format(CultureInfo.CurrentCulture, ErrorMessages.GraphTypeChangeInvalid, operation, name));
+    {
+        // A missing DROP name is caller input, with no catalog-record bound. Keep diagnostics
+        // bounded and preserve a surrogate pair at the truncation boundary.
+        int length = Math.Min(name.Length, 256);
+        if (length < name.Length && char.IsHighSurrogate(name[length - 1]) && char.IsLowSurrogate(name[length])) { length--; }
+        return DatabaseException.CreateGraphFailure("CG03011", string.Format(CultureInfo.CurrentCulture,
+            ErrorMessages.GraphTypeChangeInvalid, operation, name[..length]));
+    }
 
     private ValueTask ChangeGraphTypeAsync(Func<GraphType?, GraphType?> change, CancellationToken token, GraphType? input = null)
         => WriteAsync(async op =>
         {
             using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+            op.QueryBudget.Consume();
+            memory.Add(512); // Current-type publication and its singleton catalog route.
             // Admit fragment capacity before ADD/ALTER allocate their dictionaries and copied
             // result arrays. Existing declarations are covered by the catalog decode grant.
             if (input is not null)
@@ -157,16 +168,19 @@ public sealed partial class GraphSchema
                     token.ThrowIfCancellationRequested();
                     op.QueryBudget.Consume();
                     memory.Add(512);
+                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(nodeType: node));
                 }
                 foreach (var edge in input.EdgeTypes)
                 {
                     token.ThrowIfCancellationRequested();
                     op.QueryBudget.Consume();
                     memory.Add(512);
+                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge));
                 }
             }
             var previous = _database.Catalog.GetGraphType(op.Context.Snapshot, memory.Add);
             var type = change(previous);
+            if (ReferenceEquals(type, previous)) { return; }
             if (type is not null)
             {
                 var names = new HashSet<string>(StringComparer.Ordinal);
@@ -203,25 +217,35 @@ public sealed partial class GraphSchema
                 // Discover tokens in the same logical transaction, independently of type enforcement.
                 foreach (var node in type.NodeTypes)
                 {
+                    op.QueryBudget.Consume();
+                    if (_database.Catalog.FindLabel(node.IdentifyingLabel, op.Context.Snapshot) is null) { memory.Add(1024); }
                     await EnsureDefinitionAsync(op, node.IdentifyingLabel, false, token).ConfigureAwait(false);
                     _database.Catalog.AfterGraphTypeMutation?.Invoke("label:" + node.IdentifyingLabel);
                     foreach (string label in node.ImpliedLabels)
                     {
+                        op.QueryBudget.Consume();
+                        if (_database.Catalog.FindLabel(label, op.Context.Snapshot) is null) { memory.Add(1024); }
                         await EnsureDefinitionAsync(op, label, false, token).ConfigureAwait(false);
                         _database.Catalog.AfterGraphTypeMutation?.Invoke("label:" + label);
                     }
                     foreach (var property in node.Properties)
                     {
+                        op.QueryBudget.Consume();
+                        if (!_database.Catalog.HasPropertyKey(property.Name, op.Context.Snapshot)) { memory.Add(1024); }
                         await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token).ConfigureAwait(false);
                         _database.Catalog.AfterGraphTypeMutation?.Invoke("property:" + property.Name);
                     }
                 }
                 foreach (var edge in type.EdgeTypes)
                 {
+                    op.QueryBudget.Consume();
+                    if (_database.Catalog.FindRelationshipType(edge.RelationshipType, op.Context.Snapshot) is null) { memory.Add(1024); }
                     await EnsureDefinitionAsync(op, edge.RelationshipType, true, token).ConfigureAwait(false);
                     _database.Catalog.AfterGraphTypeMutation?.Invoke("type:" + edge.RelationshipType);
                     foreach (var property in edge.Properties)
                     {
+                        op.QueryBudget.Consume();
+                        if (!_database.Catalog.HasPropertyKey(property.Name, op.Context.Snapshot)) { memory.Add(1024); }
                         await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token).ConfigureAwait(false);
                         _database.Catalog.AfterGraphTypeMutation?.Invoke("property:" + property.Name);
                     }
