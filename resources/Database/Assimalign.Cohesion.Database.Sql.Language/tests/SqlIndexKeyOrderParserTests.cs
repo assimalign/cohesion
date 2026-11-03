@@ -10,8 +10,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 public sealed class SqlIndexKeyOrderParserTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Index key order: defaults and explicit NULL placement round trip (#1631)")]
-    [InlineData("a ASC NULLS LAST,b DESC NULLS FIRST,c ASC NULLS FIRST,d DESC NULLS LAST", "a, b DESC, c NULLS FIRST, d DESC NULLS LAST")]
-    [InlineData("a,b DESC,c NULLS FIRST,d DESC NULLS LAST", "a, b DESC, c NULLS FIRST, d DESC NULLS LAST")]
+    [InlineData("a ASC NULLS FIRST,b DESC NULLS LAST,c ASC NULLS LAST,d DESC NULLS FIRST", "a, b DESC, c NULLS LAST, d DESC NULLS FIRST")]
+    [InlineData("a,b DESC,c NULLS LAST,d DESC NULLS FIRST", "a, b DESC, c NULLS LAST, d DESC NULLS FIRST")]
     public void Parse_KeyOptions_ShouldNormalizeAndRoundTrip(string columns, string expected)
     {
         // Arrange
@@ -24,9 +24,10 @@ public sealed class SqlIndexKeyOrderParserTests
         var restored = parser.Parse(text).ShouldBeOfType<SqlQueryStatement>();
 
         // Assert
+        default(SqlIndexKeyOrder).ShouldBe(SqlIndexKeyOrder.AscendingNullsFirst);
         statement.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
-        index.KeyOrders.ShouldBe([SqlIndexKeyOrder.AscendingNullsLast, SqlIndexKeyOrder.DescendingNullsFirst,
-            SqlIndexKeyOrder.AscendingNullsFirst, SqlIndexKeyOrder.DescendingNullsLast]);
+        index.KeyOrders.ShouldBe([SqlIndexKeyOrder.AscendingNullsFirst, SqlIndexKeyOrder.DescendingNullsLast,
+            SqlIndexKeyOrder.AscendingNullsLast, SqlIndexKeyOrder.DescendingNullsFirst]);
         text.ShouldBe("CREATE UNIQUE INDEX ix ON t (" + expected + ") WHERE a > 0");
         restored.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
         restored.SqlExpression.ShouldBeOfType<SqlCreateIndexExpression>().KeyOrders.ShouldBe(index.KeyOrders);

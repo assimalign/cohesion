@@ -122,7 +122,7 @@ public sealed class OqlSubqueryParserTests
         var subquery = select.Projections.Single().Expression.ShouldBeOfType<OqlSubqueryExpression>();
         // Assert
         subquery.Query.IsValue.ShouldBeTrue();
-        subquery.Query.Collection.ShouldBe("d");
+        subquery.Query.ShouldBeOfType<OqlSelectExpression>().Collection.ShouldBe("d");
         subquery.Location!.Start.ShouldBe(7);
         subquery.Location.End.ShouldBe(text.IndexOf(')') + 1);
         Should.Throw<ArgumentNullException>(() => new OqlSubqueryExpression(null!));

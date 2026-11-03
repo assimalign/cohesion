@@ -21,7 +21,8 @@
   <data name="BuilderBuildServiceProviderFailure2" xml:space="preserve"><value>Database hosting requires closed factory or instance service registrations.</value></data>
   <data name="ApplicationBuilderReserveNameFailure" xml:space="preserve"><value>Duplicate database engine name '{0}'.</value></data>
   <data name="ContextGetEngineKeyNotFound" xml:space="preserve"><value>No database engine named '{0}' is registered.</value></data>
-  <data name="DatabaseAdminEndpointServiceFailure" xml:space="preserve"><value>The ambient Database endpoint 'admin' must use http or https, not '{0}'.</value></data>
-  <data name="DatabaseAdminEndpointServiceFailure2" xml:space="preserve"><value>The Database https endpoint 'admin' requires its certificate Secret mount (default 'tls').</value></data>
-  <data name="ServiceResolveBindAddressFailure" xml:space="preserve"><value>The ambient Database admin endpoint host '{0}' is not a bindable IP address.</value></data>
+  <data name="DatabaseAdminEndpointServiceFailure" xml:space="preserve"><value>The Database health endpoint must use http, not '{0}'.</value></data>
+  <data name="DatabaseAdminEndpointServiceFailure2" xml:space="preserve"><value>The Database health endpoint does not support https without a certificate source.</value></data>
+  <data name="ServiceResolveBindAddressFailure" xml:space="preserve"><value>The Database health endpoint host '{0}' is not a literal IP address or localhost.</value></data>
+  <data name="HealthEndpointBindFailed" xml:space="preserve"><value>The Database health endpoint '{0}' could not bind.</value></data>
 </root>

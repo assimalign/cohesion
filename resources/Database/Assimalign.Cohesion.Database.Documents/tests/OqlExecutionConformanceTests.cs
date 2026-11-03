@@ -104,6 +104,13 @@ public sealed class OqlExecutionConformanceTests
             [
                 InsertCase(),
             ],
+            [OqlClauses.Union] =
+            [
+                new("SELECT 1 AS n FROM items UNION SELECT 1 AS n FROM items", [[1m]]),
+                new("SELECT 1 AS n FROM items UNION ALL SELECT 2 AS n FROM items ORDER BY n DESC LIMIT 2 OFFSET 1", [[2m], [2m]]),
+                new("(SELECT 1 AS n FROM items LIMIT 1) UNION ALL (SELECT 2 AS n FROM items LIMIT 1) ORDER BY n", [[1m], [2m]]),
+                new("SELECT MISSING AS a FROM items UNION SELECT NULL AS a FROM items", [[null], [null]], Missing: [(0, 0)]),
+            ],
             [OqlClauses.Select] =
             [
                 new("SELECT RAW g FROM items ORDER BY items.g", [[1m], [2m], [3m]],
@@ -259,6 +266,8 @@ public sealed class OqlExecutionConformanceTests
             [
                 new("SELECT name FROM items WHERE category IN ('b', 'z')", [["gamma"]]),
                 new("SELECT name FROM items d WHERE 'green' IN d.tags", [["beta"]]),
+                new("SELECT name FROM items WHERE category IN ((SELECT RAW 'b' FROM [1] AS seed))", []),
+                new("SELECT name FROM items WHERE category NOT IN ((SELECT RAW 'a' FROM [1] AS seed))", [["alpha"], ["beta"], ["gamma"], ["delta"]]),
             ],
             [OqlClauses.Between] =
             [
@@ -630,6 +639,7 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Update => expression is OqlUpdateExpression,
         OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
+        OqlClauses.Union => expression is OqlSetOperationExpression { Operation: OqlSetOperation.Union },
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
         OqlClauses.Subquery => Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.HasSubquery(expression),
         OqlClauses.Exists => expression is OqlSelectExpression exists && exists.Projections.Any(p => p.Expression is OqlUnaryExpression { Operator: "EXISTS" }),

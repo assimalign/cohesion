@@ -29,7 +29,7 @@ public sealed class SqlCatalogIndex
     /// <param name="predicate">Canonical predicate text, or null for an unconditional index.</param>
     /// <param name="predicateColumns">The columns referenced by the predicate.</param>
     /// <param name="predicateFunctionCalls">Resolved function identities in predicate preorder.</param>
-    /// <param name="keyOrders">Effective per-column orders, or null for ASC NULLS LAST on every column.</param>
+    /// <param name="keyOrders">Effective per-column orders, or null for ASC NULLS FIRST on every column.</param>
     /// <param name="isPrimaryKey">Whether this index is the physical enforcement of the table's primary key.</param>
     /// <exception cref="SqlCatalogException">Keys are empty, key orders are invalid, a primary key is partial or directed, or predicate metadata is inconsistent.</exception>
     public SqlCatalogIndex(
@@ -72,7 +72,7 @@ public sealed class SqlCatalogIndex
             predicate is not null && string.IsNullOrWhiteSpace(predicate))
         { throw new SqlCatalogException("CS03084", ErrorMessages.PartialPredicateMetadataInvalid); }
         if (keyOrders is not null && (keyOrders.Count != columnNames.Count ||
-            keyOrders.Any(order => (uint)order > 3 || isPrimaryKey && order != SqlCatalogIndexKeyOrder.AscendingNullsLast)))
+            keyOrders.Any(order => (uint)order > 3 || isPrimaryKey && order != SqlCatalogIndexKeyOrder.AscendingNullsFirst)))
         { throw new SqlCatalogException("CS03085", ErrorMessages.IndexKeyOrderInvalid); }
         KeyOrders = Array.AsReadOnly(keyOrders?.ToArray() ?? new SqlCatalogIndexKeyOrder[columnNames.Count]);
         IsPrimaryKey = isPrimaryKey;

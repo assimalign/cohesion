@@ -18,7 +18,7 @@ public sealed class OqlImplicitAliasProvenanceTests
         // Assert
         statement.Diagnostics.ShouldBeEmpty();
         var query = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>();
-        if (query.Projections[0].Expression is OqlSubqueryExpression nested) { query = nested.Query; }
+        if (query.Projections[0].Expression is OqlSubqueryExpression nested) { query = nested.Query.ShouldBeOfType<OqlSelectExpression>(); }
         query.IsAliasImplicit.ShouldBe(implicitFrom);
         var unnest = query.Unnest.ShouldHaveSingleItem();
         (unnest.Alias is null).ShouldBe(implicitUnnest);

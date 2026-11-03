@@ -132,7 +132,7 @@ internal sealed partial class SqlPlanner
                 if (!string.Equals(table.Columns[ordinal].Name, index.ColumnNames[start + i], StringComparison.OrdinalIgnoreCase))
                 { forward = backward = false; break; }
                 var keyOrder = index.KeyOrders[start + i];
-                bool descending = ((int)keyOrder & 2) != 0, nullsFirst = ((int)keyOrder & 1) != 0;
+                bool descending = ((int)keyOrder & 2) != 0, nullsFirst = ((int)keyOrder & 1) == 0;
                 bool noNulls = start + i < equalityPrefix || !table.Columns[ordinal].IsNullable || SqlPredicateImplication.RejectsNull(where, ordinal) ||
                     index.Predicate is not null && SqlPredicateImplication.RejectsNull(
                         SqlPartialIndexPredicate.Bind(table, index, _catalog.DefaultCollation, _functions, _cancellationToken), ordinal);

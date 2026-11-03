@@ -81,9 +81,9 @@ public static partial class SqlExpressionRenderer
             (query.IfNotExists ? "IF NOT EXISTS " : "") + Identifier(query.IndexName) +
             " ON " + SequenceName(query.Table) + " (" + string.Join(", ", query.Columns.Select((column, i) => Identifier(column) + (query.KeyOrders[i] switch
             {
-                SqlIndexKeyOrder.AscendingNullsFirst => " NULLS FIRST",
-                SqlIndexKeyOrder.DescendingNullsFirst => " DESC",
-                SqlIndexKeyOrder.DescendingNullsLast => " DESC NULLS LAST",
+                SqlIndexKeyOrder.AscendingNullsLast => " NULLS LAST",
+                SqlIndexKeyOrder.DescendingNullsLast => " DESC",
+                SqlIndexKeyOrder.DescendingNullsFirst => " DESC NULLS FIRST",
                 _ => "",
             }))) + ")" +
             (query.Predicate is null ? "" : " WHERE " + Render(query.Predicate));

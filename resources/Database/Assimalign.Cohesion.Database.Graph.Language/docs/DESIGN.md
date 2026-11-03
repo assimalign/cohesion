@@ -100,6 +100,12 @@ evaluation stays inside the already-bound logical database.
 
 ## Schema DDL (#1738, GQ-D2)
 
+GQ-T1 (#1806) adds a typed, open GraphSchema API in the engine and catalog v3. Its node
+rules apply to existing INSERT/CREATE, MERGE and SET/REMOVE syntax; no parser, keyword,
+SHOW-column or wire contract changes here. GraphTypeTests supplies the engine conformance
+matrix, and the existing graph-type text refusal corpus stays in force. GQ-T2 supplies text
+ALTER and edge enforcement; GQ-T3 supplies opt-in closedness. See Graph DESIGN and DIALECT.
+
 Read-only unknown-property warnings (#1249, GQ-D3) are engine diagnostics, using the existing
 property/member AST and source spans. The parser corpus admits the same syntax independently of
 database contents. Graph DESIGN describes snapshot token resolution and statement-wide

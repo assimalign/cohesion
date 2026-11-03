@@ -160,8 +160,9 @@ cross-model matrix and the existing reader, lock, cancellation and lifecycle sui
 
 Each SqlCatalogIndex carries an immutable KeyOrders vector, one effective order per key
 column. CREATE INDEX accepts ASC/DESC and explicit NULL placement, including partial indexes;
-constraint column lists remain column-only. Omitted order is ASC NULLS LAST, and DESC defaults
-to NULLS FIRST (PostgreSQL src/backend/commands/indexcmds.c:2255-2270). Canonical DDL omits
+constraint column lists remain column-only. Omitted order is ASC NULLS FIRST, and DESC defaults
+to NULLS LAST (#1787, SQ-K4), matching ORDER BY and deliberately differing from PostgreSQL
+src/backend/commands/indexcmds.c:2263-2270. Canonical DDL omits
 ASC and each direction's default NULL placement. Both INDEXES metadata views expose nullable
 DIRECTION and NULL_PLACEMENT, emitting DESC and only the non-default NULL placement.
 
@@ -172,8 +173,14 @@ storage type. Non-NULL ascending values keep their previous bytes, except floati
 zero and NaN: SQL canonicalizes signed zeros and moves NaN below negative infinity to match
 SqlValueComparer. The shared Indexing/Types encodings and page layouts are unchanged, so their
 format versions do not change. Row storage retains the original values. SQL catalog/record-space
-format 32 and mandatory index extension 3 fence these SQL-specific keys and metadata. Compiled
-schema v11 carries the same effective orders; no earlier-format reader or upgrade is added.
+format 36 and mandatory index extension 3 fence these SQL-specific keys and metadata. Compiled
+schema v12 carries the same effective orders. All three enums use AscendingNullsFirst = 0,
+AscendingNullsLast = 1, DescendingNullsFirst = 2 and DescendingNullsLast = 3; bit 0 means NULLS
+LAST and bit 1 means DESC. Null and zero-filled key vectors, PRIMARY KEY and UNIQUE-constraint
+indexes use ASC NULLS FIRST. Format 35 and earlier databases and v11 and earlier artifacts are
+refused through the existing recovered read-only gate before any write; no upgrade is added.
+A format-35 refusal preserves every file byte for byte on both clean and crash opens,
+including repeated refusals after disposing the engine (#1744).
 
 All maintenance, build, rewrite, conflict and undo paths use the same key transform. Direction
 never changes key equality; creation-order arbitration and the existing partial-index NULL-key
@@ -202,6 +209,10 @@ earlier SQL data-storage formats retain CS06041. Constraint key options retain C
 
 ## ORDER BY from index order (#1631, SQ-K3)
 
+SQ-K4 preserves query results identically up to tie order (Sql.Language DIALECT, index ordering).
+Equal ordering keys have unspecified tie order; complete tie groups retain the same multiset
+of rows under forward and backward scans, including NULL keys.
+
 Single-table SELECT compares bound source columns (including pass-through aliases and ordinals)
 with a contiguous prefix of the index suffix after equality-bound leading columns (including IS NULL). Every requested
 key must match its column's resolved collation and direction, or every direction must be
@@ -222,8 +233,9 @@ on the existing sorter. Queries with scalar subqueries, volatile projections, re
 joins, groups or windows retain their existing sorting operators. DISTINCT can omit sorting but
 still consumes all candidates before duplicate elimination and pagination.
 
-ORDER BY keeps its existing defaults, ASC NULLS FIRST and DESC NULLS LAST. Index DDL defaults
-remain PostgreSQL's ASC NULLS LAST and DESC NULLS FIRST. NULL placement is irrelevant for a key
+ORDER BY keeps its existing defaults, ASC NULLS FIRST and DESC NULLS LAST. Index DDL now
+uses these same defaults (#1787). A default nullable index serves both default scan directions;
+LIMIT 10 visits ten heap rows with no retained sort. NULL placement is irrelevant for a key
 that cannot be NULL in returned rows: declared NOT NULL (including primary keys), an equality-bound
 prefix, a mandatory local NULL-rejecting conjunct, or a proven partial-index predicate supplies
 the proof. Ordering reuses SQ-P2's shared NULL-rejection rule: strict comparisons against any
@@ -262,7 +274,7 @@ an unindexed forced-sort table. Work counters demonstrate 1,024 -> 10 heap visit
 retained sort rows for LIMIT 7 OFFSET 3. Counter-driven nonparallel readers overlap committing key
 changes and physical rollback in both directions under Snapshot and READ COMMITTED. InMemory and
 TCP carry the same descriptions and rows. No new diagnostics, public APIs, formats or wire types
-are added; catalog 32 and compiled schema v11 from SQ-K1 remain current.
+are added by SQ-K3; SQ-K4 advances catalog 36 and compiled schema v12 for the new defaults.
 
 ## Anonymous savepoint adapters (#1726, XT-3)
 
@@ -287,8 +299,8 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Current catalog/record-space format 35 refuses all earlier files before writable data recovery;
-compiled-schema v11 adds CompiledSchemaIndex.Predicate and refuses earlier artifacts.
+extension 3. Current catalog/record-space format 36 refuses all earlier files before writable data recovery;
+compiled-schema v12 retains CompiledSchemaIndex.Predicate (introduced in v10) and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
 NULL-containing keys and enforces non-NULL uniqueness only inside its predicate. Ordinary
@@ -3420,7 +3432,7 @@ emit no DDL. Principals/grants remain explicitly refused. TYPE plans use the joi
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
 on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
 Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
-has the same canonical document and hash. The document now uses `cohesion/database-schema/v11`
+has the same canonical document and hash. The document now uses `cohesion/database-schema/v12`
 for normalized decimal identities; typed defaults keep the shape introduced in B2.
 The engine validates one literal before writing anything and
 resolves its column's effective type, including a domain's base type. Preflight calls the same
@@ -3431,7 +3443,7 @@ Build with `CS03101` before either file set exists; finite and underflow checks 
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
-`cohesion/database-schema/v11`; B2 introduced `defaultLiteral` in v4. Null defaults
+`cohesion/database-schema/v12`; B2 introduced `defaultLiteral` in v4. Null defaults
 are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
 same schema renderer and preserves the same text and hash.
@@ -4682,7 +4694,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 35 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 36 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -8278,8 +8290,8 @@ Domain base types and function parameter/result type text retain CHAR(n), and re
 restores padding and comparison semantics. String and Character both accept collations.
 SQL record-space format **12** supersedes 11 because CHAR index equality now ignores trailing
 spaces. Catalog records retain their existing shapes; no old-format reader is added.
-Applied/pending compiled documents use **cohesion/database-schema/v11**, shared with the SDK;
-v6 and earlier documents are refused before hashes are compared. Rebuild artifacts and recreate
+Applied/pending compiled documents advanced to **cohesion/database-schema/v6** in #1437, shared with the SDK;
+v5 and earlier documents were refused before hashes were compared. Rebuild artifacts and recreate
 databases. INFORMATION_SCHEMA.COLUMNS reports CHARACTER with length; the COHESION_SCHEMA type,
 domain and function views expose CHAR(n) through their existing name/signature columns.
 
@@ -8291,10 +8303,10 @@ two questions for the planner: *what objects exist* (with stable identities) and
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
 SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
-format **29** introduced kind 18 ownership; current format **35** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+format **29** introduced kind 18 ownership; current format **36** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
-Earlier database formats are refused by the existing format gate; compiled-schema v11 is current.
+Earlier database formats are refused by the existing format gate; compiled-schema v12 is current.
 All new types and sequence entry points are internal, accessible to the owning Sql test assembly.
 There is no new SQL syntax, function, session state, public API or wire message in this run.
 
@@ -8618,7 +8630,7 @@ Typed-schema worker handoff and joint crash/wire convergence are described in SQ
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 35); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 36); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -8891,10 +8903,10 @@ domain conversions require opt-in because application casts are unknown to the s
 existing metadata-only gating stays unchanged.
 
 Kind 9 identifies joint jobs with Joint/ step kinds; kind 6 and kind 14 keep their encodings.
-SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 35
+SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 36
 also fences the separate tree owners and classification steps described below; every earlier
 format is refused by the existing read-only gate, with no upgrade reader.
-Compiled-schema v11 stays current. There is no new public interface, reference or wire message.
+Compiled-schema v12 stays current. There is no new public interface, reference or wire message.
 Deterministic row-decoding counters prove zero Build visits with 1 and 1,024 stored rows.
 Crash images, counter-driven nonparallel admission stress, rollback Builds, all six data refusal
 categories, lifecycle/fault injection, old snapshots and both wire transports cover the boundary.
@@ -8923,6 +8935,10 @@ and the worker use this same metadata classification. The joint X-lock protocol 
 owned sequences, then every touched table, in ascending identity order, through publication.
 The existing 49a index build also takes table X; SQ-A5 should retain this lock matrix.
 
+Index comparison includes every effective key-order value. A direction-only or NULL-placement-only
+change rebuilds an independently owned tree while retaining its heap; joint TYPE rewrites use
+the same compiled-to-catalog key-order mapping (#1787).
+
 Kept heaps preserve their dropped physical ordinals, frozen missing values, identity metadata
 and default-assignment flags. Retained published trees are reused. New or same-name replacement
 trees build through the deferred 64-version index builder with original row locations and MVCC
@@ -8947,6 +8963,8 @@ canceled admission installs none, and a failed transaction removes this attempt'
 current descriptions on the read fast path. Weak keys cannot retain table histories forever.
 Publication checks physical layout, exact types and ObjectId under the catalog lock for every kept
 description. CS05060 names the mismatched physical field and, for a column-level mismatch, its column.
+Layout refusals distinguish a joint kept table from a generic ALTER replacement; both preserve
+the published layout and retain CS05060.
 Kept columns retain their declared spelling while preserving physical ordinals and facets.
 Before commit, the index directory refuses any prepared
 key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
@@ -9147,7 +9165,7 @@ pending chunk in the same transaction. Open validates the envelope and ordering,
 gates the target document's format before checking its hash or resuming. Catalog persistence knows no SQL executor,
 worker, or hosting lifecycle.
 
-The compiled document is now `cohesion/database-schema/v11` (#1108), matching Sdk.Database.
+The compiled document advanced to `cohesion/database-schema/v7` in #1108, matching Sdk.Database.
 Applied-schema records (kind 6) and pending targets (kind 9) both retain the complete versioned
 document, so their field layout does not change. The SQL record-space gate is now 20 (#1121).
 SQL checks those document formats before opening
@@ -9174,7 +9192,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 35 requires the complete table extension 8 record,
+after the existing constraints. Current format 36 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -9252,7 +9270,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 35 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
+  which this catalog always writes. Current format 36 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -10452,6 +10470,8 @@ Listener, Authenticator, MaxSessions, AuthenticationTimeout, IdleTimeout and Shu
 Defaults stay 100 sessions, ten seconds for authentication, thirty minutes idle and thirty seconds
 for shutdown. TerminalDrainLinger remains on the model leaves, default two seconds. Each model
 still snapshots every value before validation and owns the transferred listener through stop.
+Timers and MaxSessions are validated before platform listener resolution, so invalid options
+allocate no fallback listener (#1790). See the root DESIGN for managed endpoint admission.
 No public Database interface is added; the count remains five.
 
 Database.Tcp replaces Database.Sql.Tcp. Its root-namespace extension
@@ -10523,7 +10543,7 @@ and SDK extraction therefore retain identical ArgumentException text and the `va
 without a resource lookup on successful rendering. SQL explanatory message fragments also use
 resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
 for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
-`cohesion/database-schema/v11`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+`cohesion/database-schema/v12`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
 
 
 The shared Types module also binds modifier-refusal templates to each consumer's own generated

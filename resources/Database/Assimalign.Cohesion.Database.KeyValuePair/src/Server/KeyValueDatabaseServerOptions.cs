@@ -24,9 +24,9 @@ public sealed class KeyValueDatabaseServerOptions : DatabaseServerOptions
 
     internal void ValidateFor(DatabaseName engineName)
     {
-        ValidateCommon("KeyValuePair", engineName);
         ValidateTimeout(ShutdownDrainTimeout, nameof(ShutdownDrainTimeout), "KeyValuePair", engineName);
         ValidateTimeout(TerminalDrainLinger, nameof(TerminalDrainLinger), "KeyValuePair", engineName);
+        ValidateCommon("KeyValuePair", engineName);
     }
 
     /// <summary>

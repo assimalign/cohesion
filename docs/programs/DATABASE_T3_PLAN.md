@@ -213,8 +213,15 @@ The largest risk in the tier is IX-V3, HNSW repair under MVCC. Every index kind 
 | Batch | Runs | Bumps |
 |---|---|---|
 | B1 | EN-G1, SQ-T4, SQ-A4, OQ-K1, EN-C1 | SQL 35 (A4), after EN-G1 |
-| B2 | SQ-K4, SQ-L1, OQ-S1, GQ-T1, EN-A1 | SQL 36 (K4), Graph catalog (T1) |
-| B3 | SQ-A5, EN-X1, SQ-H3, OQ-S2, GQ-N1, EN-P1 | SQL (A5) |
+| B2 | SQ-K4, OQ-S1, GQ-T1, EN-A1 | SQL 36 (K4), Graph catalog (T1) |
+| B3 | SQ-L1 (moved from B2), SQ-A5, EN-X1, SQ-H3, OQ-S2, GQ-N1, EN-P1 | SQL (A5) |
+
+SQ-L1 left batch 2 after four review rounds. Each round closed the previous round's findings and
+introduced new ones; the last one left a crash in joined DML over a wide GROUP BY key and two result
+changes (correlated DML re-ran derived tables, and unordered DISTINCT changed volatile call counts).
+It returns in batch 3, split into smaller runs. Each run is held to "results never change"
+against the pre-change commit, and each covers joined DML. The batch 2 attempt stays on a local
+branch as reference.
 | B4 | SQ-A6, SQ-L2, EN-C2, IX-B1, SQ-J3, IX-R1 (#1644) | B-tree format (B1), Graph catalog (R1) |
 | B5 | SQ-A7, SQ-L3, IX-S1 after A7, SQ-CT1, OQ-M1 with OQ-W1 | SQL (A7, then S1 in merge order) |
 | B6 | SQ-A8, SQ-L4, EN-A2, IX-T1, GQ-T2 | Graph catalog (T2) |

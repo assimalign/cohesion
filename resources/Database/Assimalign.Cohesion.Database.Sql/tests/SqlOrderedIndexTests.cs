@@ -111,7 +111,7 @@ public sealed class SqlOrderedIndexTests
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t(a INT,b INT,n TEXT COLLATE case_insensitive)");
-        await Execute(session, "CREATE INDEX ix ON t(a,b DESC,n DESC)");
+        await Execute(session, "CREATE INDEX ix ON t(a NULLS LAST,b DESC NULLS FIRST,n DESC NULLS FIRST)");
 
         // Act / Assert
         (Plan(database, sql + " LIMIT 2").Access is SqlOrderedIndexPath).ShouldBe(matches);
@@ -129,9 +129,9 @@ public sealed class SqlOrderedIndexTests
         await Execute(session, "CREATE INDEX ix ON t(k)");
 
         // Act / Assert
-        var expected = await Rows(session, "SELECT id FROM t ORDER BY k+0 ASC NULLS LAST LIMIT 7 OFFSET 3");
+        var expected = await Rows(session, "SELECT id FROM t ORDER BY k+0 ASC NULLS FIRST LIMIT 7 OFFSET 3");
         var sorted = session.LastStatementMetrics!;
-        var actual = await Rows(session, "SELECT id FROM t ORDER BY k ASC NULLS LAST LIMIT 7 OFFSET 3");
+        var actual = await Rows(session, "SELECT id FROM t ORDER BY k ASC NULLS FIRST LIMIT 7 OFFSET 3");
         var ordered = session.LastStatementMetrics!;
         actual.ShouldBe(expected);
         sorted.RecordsExamined.ShouldBe(1024);
@@ -141,21 +141,21 @@ public sealed class SqlOrderedIndexTests
         ordered.AccessPath.ShouldBe("ordered:ix:forward");
         _output.WriteLine($"Top-N before/after: records {sorted.RecordsExamined}/{ordered.RecordsExamined}; retained sort rows {sorted.PeakOrderedRows}/{ordered.PeakOrderedRows}.");
 
-        await Rows(session, "SELECT id FROM t WHERE k>=1010 ORDER BY k ASC NULLS LAST");
+        await Rows(session, "SELECT id FROM t WHERE k>=1010 ORDER BY k ASC NULLS FIRST");
         session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix:forward");
         session.LastStatementMetrics.RecordsExamined.ShouldBe(14);
-        await Rows(session, "SELECT id FROM t ORDER BY k ASC NULLS LAST");
+        await Rows(session, "SELECT id FROM t ORDER BY k ASC NULLS FIRST");
         session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
         session.LastStatementMetrics.PeakOrderedRows.ShouldBe(1024);
 
         // A mostly qualifying inequality keeps the ordered walk profitable after selectivity costing.
-        expected = await Rows(session, "SELECT id FROM t WHERE id>=18 ORDER BY k+0 DESC NULLS FIRST LIMIT 7 OFFSET 3");
-        actual = await Rows(session, "SELECT id FROM t WHERE id>=18 ORDER BY k DESC NULLS FIRST LIMIT 7 OFFSET 3");
+        expected = await Rows(session, "SELECT id FROM t WHERE id>=18 ORDER BY k+0 DESC NULLS LAST LIMIT 7 OFFSET 3");
+        actual = await Rows(session, "SELECT id FROM t WHERE id>=18 ORDER BY k DESC NULLS LAST LIMIT 7 OFFSET 3");
         actual.ShouldBe(expected);
         session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix:backward");
         session.LastStatementMetrics.RecordsExamined.ShouldBe(28);
         session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
-        var explain = await Rows(session, "EXPLAIN SELECT id FROM t ORDER BY k DESC NULLS FIRST LIMIT 7 OFFSET 3");
+        var explain = await Rows(session, "EXPLAIN SELECT id FROM t ORDER BY k DESC NULLS LAST LIMIT 7 OFFSET 3");
         explain.ShouldContain(row => Equals(row[2], "OrderedIndexScan") && (row[5] as string ?? "").Contains("direction=backward; sort_removed=true", StringComparison.Ordinal));
     }
 
@@ -189,7 +189,7 @@ public sealed class SqlOrderedIndexTests
         await Execute(session, "CREATE TABLE t(id INT,k INT)");
         await Execute(session, "INSERT INTO t VALUES(1,3),(2,1),(3,2)");
         await Execute(session, "CREATE INDEX ix ON t(k)");
-        var plan = Plan(database, "SELECT id FROM t ORDER BY k ASC NULLS LAST LIMIT 2");
+        var plan = Plan(database, "SELECT id FROM t ORDER BY k LIMIT 2");
         plan.Access.ShouldBeOfType<SqlOrderedIndexPath>();
         await Execute(session, "DROP INDEX ix ON t");
         await Execute(session, "CREATE INDEX ix ON t(id DESC)");

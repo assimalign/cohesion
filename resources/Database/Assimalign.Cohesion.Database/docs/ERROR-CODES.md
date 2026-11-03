@@ -64,6 +64,7 @@ error and has no production diagnostic code.
 | COHDBP001 | CK07001 | Diagnostic truncation notice |
 | COHDBP002 | CK07002 | Transaction status refusal |
 | COHDBTCP001 | CK07101 | TCP listener host/address refusal |
+| New (#1790) | CK07102 | HTTP health listener bind failure; structured diagnostic retains the socket cause |
 | COHDBO001 | CK08001 | Listener option refusal |
 | COHDBO002 | CK08002 | Session count refusal |
 | COHDBO003 | CK08003 | Server timeout refusal |
@@ -363,7 +364,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
 | New (#1729, OQ-G2) | CD00012 | Language/syntax — GROUP AS without preceding GROUP BY terms |
 | New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
-| New (#1731, OQ-Q1) | CD00014 | Language/syntax — direct IN subquery requires SELECT RAW or SELECT VALUE |
+| New (#1731, OQ-Q1) | CD00014 | Language/syntax — IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand; nested compounds currently retain CK00001) |
 | New (#1731, OQ-Q2) | CD00015 | Language/syntax — derived FROM subquery has no alias |
 | Retired (#1767) | CD00016 | Reserved — former JOIN/NEST statement-wide explicit-alias requirement |
 | COHDOC002 | CD01002 | Binding/names |
@@ -385,6 +386,8 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1731, OQ-Q2) | CD01034 | Binding/names — unbound variable in a FROM expression without an input-row scope |
 | New (#1732) | CD01035 | Binding/names — unbound/self/forward key source reference or ambiguous/invalid joined META receiver |
 | New (#1767) | CD01036 | Binding/names — VALUES references its destination binding without a source row or local declaration |
+| New (#1803, OQ-S1) | CD01037 | Binding/names — ORDER BY over an all-RAW/VALUE compound has no named result members |
+| New (#1803, OQ-S1) | CD01038 | Binding/names — compound ORDER BY uses an unbound result member, source metadata or star |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -470,7 +473,9 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1735, GQ-M2 fixes) | CG03007 | Constraints — MERGE relationship variable is already declared before the clause |
 | New (#1738, GQ-D1) | CG03008 | Schema — database-wide index/constraint name is already used |
 | New (#1738, GQ-D1) | CG03009 | Constraints — duplicate constraint kind or incompatible property type rule |
-| New (#1738, GQ-D1) | CG03010 | Constraints — existing data violates a newly created named constraint |
+| New (#1738, GQ-D1; #1806, GQ-T1) | CG03010 | Constraints — existing data violates a newly created named constraint or proposed graph type |
+| New (#1806, GQ-T1) | CG03011 | Schema — graph-type ADD/ALTER/DROP element name is invalid, an edge references an absent node type, or identifying and implied labels overlap |
+| New (#1806, GQ-T1) | CG03012 | Constraints — a node write omits an implied label required by its node type |
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
@@ -495,7 +500,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
 | COHDBG018 | CG06018 | Storage/durability |
-| New (#1738, GQ-D1) | CG06019 | Format — graph catalog record version differs from v2; recreate database, no legacy reader |
+| New (#1738, GQ-D1; #1806, GQ-T1) | CG06019 | Format — graph catalog record version differs from v3; recreate database, no legacy reader |
 | COHDBG005 | CG07005 | Protocol/transport |
 | COHDBG016 | CG07016 | Protocol/transport |
 | COHDBG021 | CG08021 | Configuration |
@@ -581,9 +586,9 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
-| CD05018 | Retained SELECT sources/groups, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
+| CD05018 | Retained SELECT sources/groups, compound equality/sort/output state, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
-| CD05020 | Shared expression/lookup work budget exhausted across a statement's subqueries, expression sources and key joins (#1731, #1732) | — |
+| CD05020 | Shared expression/lookup/set-operation work budget exhausted across a statement's subqueries, expression sources, key joins and compounds (#1731, #1732) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

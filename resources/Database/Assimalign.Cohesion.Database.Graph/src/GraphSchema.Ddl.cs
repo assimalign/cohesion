@@ -42,6 +42,7 @@ public sealed partial class GraphSchema
                     if (relationship)
                     {
                         EnsureMutable(name, type!.Value.Owner, type.Value.OwningSchema, "DROP RELATIONSHIP TYPE");
+                        RefuseGraphTypeUse(op, name, true, memory);
                         if (_database.Store.StreamRelationshipTypes([name], latest, token, op.QueryBudget.Consume, memory.Add).Any())
                         { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.DropRelationshipTypeAsyncDatabase); }
                         await _database.Catalog.DeleteRelationshipTypeAsync(type.Value.Id, op.Context, token).ConfigureAwait(false);
@@ -49,6 +50,7 @@ public sealed partial class GraphSchema
                     else
                     {
                         EnsureMutable(name, label!.Value.Owner, label.Value.OwningSchema, "DROP LABEL");
+                        RefuseGraphTypeUse(op, name, false, memory);
                         if (_database.Store.StreamLabels([name], latest, token, op.QueryBudget.Consume, memory.Add).Any())
                         { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.GraphSchemaDropLabelAsyncDatabase); }
                         foreach (var index in _database.Catalog.GetIndexes(label.Value.Id, op.Context.Snapshot))
@@ -168,9 +170,9 @@ public sealed partial class GraphSchema
 
     private async ValueTask CreateConstraintCoreAsync(GraphOperation op, GraphConstraintMetadata constraint, CancellationToken cancellationToken)
     {
-        await _database.Catalog.CreateConstraintAsync(constraint, op.Context, cancellationToken).ConfigureAwait(false);
-        var latest = _database.LatestSnapshot(op.Context);
         using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+        await _database.Catalog.CreateConstraintAsync(constraint, op.Context, cancellationToken, op.QueryBudget.Consume, memory.Add).ConfigureAwait(false);
+        var latest = _database.LatestSnapshot(op.Context);
         if (_database.Catalog.FindLabel(constraint.DefinitionId, latest) is { } label)
         {
             foreach (var node in _database.Store.StreamLabels([label.Name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add))

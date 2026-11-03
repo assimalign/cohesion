@@ -32,7 +32,7 @@ internal static class SqlIndexKeyEncoding
         // are strictly between 0 and 255, both before and after complementing.
         if (component[0] == 0)
         {
-            component[0] = ((int)order & 1) != 0 ? (byte)0 : (byte)255;
+            component[0] = ((int)order & 1) == 0 ? (byte)0 : (byte)255;
         }
         else if (((int)order & 2) != 0)
         {
@@ -96,7 +96,7 @@ internal static class SqlIndexKeyEncoding
 
         var rangeOrder = seek.Index.KeyOrders[seek.EqualityValues.Count];
         bool descending = ((int)rangeOrder & 2) != 0;
-        bool nullsFirst = ((int)rangeOrder & 1) != 0;
+        bool nullsFirst = ((int)rangeOrder & 1) == 0;
         if ((descending ? seek.Upper : seek.Lower) is { } lower)
         {
             byte[] lowerKey = AppendComponent(prefix, rangeType, lower.Value, rangeCollation, rangeOrder);

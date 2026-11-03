@@ -104,7 +104,7 @@ public sealed class OqlKeywordDispositionTests
         ["WITH"] = Rejects("WITH x AS (SELECT a FROM c) SELECT a FROM x", "WITH"),
         ["LETTING"] = Rejects("SELECT a FROM c GROUP BY a LETTING x = 1", "LETTING"),
         ["JOIN"] = Parses("SELECT * FROM c AS a JOIN d AS b ON META(b).id = a.k"),
-        ["UNION"] = Rejects("SELECT a FROM c UNION SELECT a FROM d", "UNION"),
+        ["UNION"] = Parses("SELECT a FROM c UNION SELECT a FROM d"),
         ["INTERSECT"] = Rejects("SELECT a FROM c INTERSECT SELECT a FROM d", "INTERSECT"),
         ["EXCEPT"] = Rejects("SELECT a FROM c EXCEPT SELECT a FROM d", "EXCEPT"),
         // SQL++ words
