@@ -15,20 +15,20 @@ public sealed partial class GraphCatalog
     internal static readonly Guid GraphTypeId = new("672bf6e9-3491-4306-a153-2a0f4c0370ed");
     internal Action<string>? AfterGraphTypeMutation { get; set; }
 
-    internal GraphType? GetGraphType(TransactionSnapshot snapshot, Action<long>? reserve = null)
+    internal GraphTypeDeclaration? GetGraphType(TransactionSnapshot snapshot, Action<long>? reserve = null)
         => LoadGraphType(snapshot, reserve, out _);
 
-    internal GraphType? LoadGraphType(TransactionSnapshot snapshot, Action<long>? reserve, out IReadOnlyList<Found> records)
+    internal GraphTypeDeclaration? LoadGraphType(TransactionSnapshot snapshot, Action<long>? reserve, out IReadOnlyList<Found> records)
     {
         var marker = Find(6, Guid.Empty, "CURRENT", snapshot, reserve);
         if (marker is null) { records = []; return null; }
         var nodes = List(7, GraphTypeId, snapshot, reserve);
         var edges = List(8, GraphTypeId, snapshot, reserve);
         records = new[] { marker.Value }.Concat(nodes).Concat(edges).ToArray();
-        return GraphType.Create(nodes.Select(item => item.Record.NodeType!), edges.Select(item => item.Record.EdgeType!));
+        return GraphTypeDeclaration.Create(nodes.Select(item => item.Record.NodeType!), edges.Select(item => item.Record.EdgeType!));
     }
 
-    internal GraphNodeType? GetNodeTypeForWrite(string label, TransactionSnapshot snapshot, TransactionSnapshot latest)
+    internal GraphNodeTypeDeclaration? GetNodeTypeForWrite(string label, TransactionSnapshot snapshot, TransactionSnapshot latest)
     {
         // One physical read/decode per candidate pins the immutable declaration for both
         // visibility decisions and the ensuing validation. No mutable metadata cache.
@@ -43,7 +43,7 @@ public sealed partial class GraphCatalog
         if (id is { } existing) { RequireMutableDefinition(existing, snapshot, "ALTER"); }
     }
 
-    internal void EnsureNodeTypeCompatible(GraphNodeType node, TransactionSnapshot snapshot)
+    internal void EnsureNodeTypeCompatible(GraphNodeTypeDeclaration node, TransactionSnapshot snapshot)
     {
         if (FindLabel(node.IdentifyingLabel, snapshot) is not { } label) { return; }
         var keys = GetPropertyKeys(label.Id, snapshot);
@@ -62,7 +62,7 @@ public sealed partial class GraphCatalog
         { throw ConstraintConflict(property); }
     }
 
-    internal async ValueTask SetGraphTypeAsync(GraphType? type, IReadOnlyList<Found> previous,
+    internal async ValueTask SetGraphTypeAsync(GraphTypeDeclaration? type, IReadOnlyList<Found> previous,
         TransactionContext context, CancellationToken token)
     {
         EnsureActive(context);
@@ -95,7 +95,7 @@ public sealed partial class GraphCatalog
         if (type is null) { return; }
         if (previous.Count == 0)
         {
-            await SaveAsync(new CatalogRecord(graphType: GraphType.Create()), null, context, token).ConfigureAwait(false);
+            await SaveAsync(new CatalogRecord(graphType: GraphTypeDeclaration.Create()), null, context, token).ConfigureAwait(false);
             AfterGraphTypeMutation?.Invoke("marker");
         }
         foreach (var node in nodes.Values)

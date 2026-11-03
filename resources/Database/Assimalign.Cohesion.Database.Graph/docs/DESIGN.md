@@ -3,7 +3,10 @@
 ## Open graph types (#1806, GQ-T1)
 
 GraphType, GraphNodeType, GraphEdgeType and GraphPropertyType are sealed, immutable public
-declarations beside GraphSchema in the Graph namespace. Collections are
+declarations beside GraphSchema in the Graph namespace. Their immutable internal catalog
+declarations own validation and persistence; the engine projects them into public API values.
+Catalog codecs and write validation retain those internal declarations, preserving the
+engine → Catalog dependency and the existing architecture guard. Collections are
 copied, read-only and ordinally ordered. Identifying labels, relationship types, implied labels
 and property names compare ordinally and case-sensitively. Property types use the existing graph
 scalar domain and TypeOf numeric promotion; Required defaults to false. Empty element and graph

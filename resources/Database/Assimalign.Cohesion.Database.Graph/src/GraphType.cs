@@ -2,14 +2,19 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Graph.Internal;
+
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>An immutable, open, database-scoped graph type.</summary>
 /// <remarks>Membership derives from labels. Unmentioned labels, relationship types and properties remain writable.</remarks>
 public sealed class GraphType
 {
-    private GraphType(IReadOnlyList<GraphNodeType> nodeTypes, IReadOnlyList<GraphEdgeType> edgeTypes)
-        => (NodeTypes, EdgeTypes) = (nodeTypes, edgeTypes);
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
+    internal GraphTypeDeclaration Declaration { get; }
+
+    private GraphType(GraphTypeDeclaration declaration, IReadOnlyList<GraphNodeType> nodeTypes, IReadOnlyList<GraphEdgeType> edgeTypes)
+        => (Declaration, NodeTypes, EdgeTypes) = (declaration, nodeTypes, edgeTypes);
 
     /// <summary>Gets node types in ordinal identifying-label order.</summary>
     public IReadOnlyList<GraphNodeType> NodeTypes { get; }
@@ -24,21 +29,15 @@ public sealed class GraphType
     /// <remarks>Edge references are checked by schema mutation against the resulting complete type, allowing ADD/ALTER fragments.</remarks>
     public static GraphType Create(IEnumerable<GraphNodeType>? nodeTypes = null, IEnumerable<GraphEdgeType>? edgeTypes = null)
     {
-        GraphNodeType[] nodes = (nodeTypes ?? []).ToArray();
-        GraphEdgeType[] edges = (edgeTypes ?? []).ToArray();
-        if (nodes.Any(item => item is null) || edges.Any(item => item is null) ||
-            nodes.Select(item => item.IdentifyingLabel).Distinct(StringComparer.Ordinal).Count() != nodes.Length ||
-            edges.Select(item => item.RelationshipType).Distinct(StringComparer.Ordinal).Count() != edges.Length)
-        { throw new ArgumentException(ErrorMessages.GraphTypeDuplicate); }
-        return new(Array.AsReadOnly(nodes.OrderBy(item => item.IdentifyingLabel, StringComparer.Ordinal).ToArray()),
-            Array.AsReadOnly(edges.OrderBy(item => item.RelationshipType, StringComparer.Ordinal).ToArray()));
+        var nodes = GraphTypeDeclaration.CopyItems(nodeTypes, item => item.IdentifyingLabel);
+        var edges = GraphTypeDeclaration.CopyItems(edgeTypes, item => item.RelationshipType);
+        return new(GraphTypeDeclaration.Create(nodes.Select(item => item.Declaration), edges.Select(item => item.Declaration)), nodes, edges);
     }
 
+    internal static GraphType FromDeclaration(GraphTypeDeclaration declaration)
+        => new(declaration, Array.AsReadOnly(declaration.NodeTypes.Select(GraphNodeType.FromDeclaration).ToArray()),
+            Array.AsReadOnly(declaration.EdgeTypes.Select(GraphEdgeType.FromDeclaration).ToArray()));
+
     internal static IReadOnlyList<GraphPropertyType> CopyProperties(IEnumerable<GraphPropertyType>? properties)
-    {
-        GraphPropertyType[] items = (properties ?? []).ToArray();
-        if (items.Any(item => item is null) || items.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count() != items.Length)
-        { throw new ArgumentException(ErrorMessages.GraphTypeDuplicate, nameof(properties)); }
-        return Array.AsReadOnly(items.OrderBy(item => item.Name, StringComparer.Ordinal).ToArray());
-    }
+        => GraphTypeDeclaration.CopyItems(properties, item => item.Name, nameof(properties));
 }

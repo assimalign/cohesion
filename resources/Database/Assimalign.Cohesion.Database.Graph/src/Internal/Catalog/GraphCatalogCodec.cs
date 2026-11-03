@@ -142,19 +142,19 @@ internal static class GraphCatalogCodec
             {
                 if (id != GraphCatalog.GraphTypeId || kind == 6 && name != "CURRENT")
                 { throw new ArgumentException(ErrorMessages.GraphTypeRecordInvalid); }
-                if (kind == 6) { result = new CatalogRecord(graphType: GraphType.Create()); }
+                if (kind == 6) { result = new CatalogRecord(graphType: GraphTypeDeclaration.Create()); }
                 else if (kind == 7)
                 {
                     int count = ReadCount(reader);
                     var labels = new string[count];
                     for (int i = 0; i < count; i++) { labels[i] = ReadString(reader)!; }
-                    result = new CatalogRecord(nodeType: GraphNodeType.Create(name, labels, ReadProperties(reader)));
+                    result = new CatalogRecord(nodeType: GraphNodeTypeDeclaration.Create(name, labels, ReadProperties(reader)));
                 }
                 else
                 {
                     string source = ReadString(reader)!;
                     string target = ReadString(reader)!;
-                    result = new CatalogRecord(edgeType: GraphEdgeType.Create(name, source, target, ReadProperties(reader)));
+                    result = new CatalogRecord(edgeType: GraphEdgeTypeDeclaration.Create(name, source, target, ReadProperties(reader)));
                 }
             }
             else
@@ -218,7 +218,7 @@ internal static class GraphCatalogCodec
         writer.Write(bytes);
     }
 
-    private static void WriteProperties(BinaryWriter writer, System.Collections.Generic.IReadOnlyList<GraphPropertyType> properties)
+    private static void WriteProperties(BinaryWriter writer, System.Collections.Generic.IReadOnlyList<GraphPropertyTypeDeclaration> properties)
     {
         writer.Write(properties.Count);
         foreach (var property in properties)
@@ -246,7 +246,7 @@ internal static class GraphCatalogCodec
         { return size + StringSize(edge.SourceNodeType) + StringSize(edge.TargetNodeType) + PropertySize(edge.Properties); }
         return size;
 
-        static long PropertySize(System.Collections.Generic.IReadOnlyList<GraphPropertyType> properties)
+        static long PropertySize(System.Collections.Generic.IReadOnlyList<GraphPropertyTypeDeclaration> properties)
         {
             long size = 4;
             foreach (var property in properties) { size += StringSize(property.Name) + 2; }
@@ -255,17 +255,17 @@ internal static class GraphCatalogCodec
         static long StringSize(string? value) => 4L + (value is null ? 0 : _utf8.GetByteCount(value));
     }
 
-    private static GraphPropertyType[] ReadProperties(BinaryReader reader)
+    private static GraphPropertyTypeDeclaration[] ReadProperties(BinaryReader reader)
     {
         int count = ReadCount(reader);
-        var properties = new GraphPropertyType[count];
+        var properties = new GraphPropertyTypeDeclaration[count];
         for (int i = 0; i < count; i++)
         {
             string name = ReadString(reader)!;
             var type = (DatabaseType)reader.ReadByte();
             byte required = reader.ReadByte();
             if (required > 1) { throw new ArgumentException(ErrorMessages.GraphTypeRecordInvalid); }
-            properties[i] = GraphPropertyType.Create(name, type, required == 1);
+            properties[i] = GraphPropertyTypeDeclaration.Create(name, type, required == 1);
         }
         return properties;
     }

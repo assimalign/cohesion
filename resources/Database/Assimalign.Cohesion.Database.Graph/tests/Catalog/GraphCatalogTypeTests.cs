@@ -19,12 +19,12 @@ public sealed class GraphCatalogTypeTests
     public void Codec_GraphTypeKind_ShouldRoundTripAndRefuseV2(byte kind)
     {
         // Arrange
-        var property = GraphPropertyType.Create("p", DatabaseType.Int64, true);
+        var property = GraphPropertyTypeDeclaration.Create("p", DatabaseType.Int64, true);
         CatalogRecord record = kind switch
         {
-            6 => new(graphType: GraphType.Create()),
-            7 => new(nodeType: GraphNodeType.Create("N", ["I"], [property])),
-            _ => new(edgeType: GraphEdgeType.Create("T", "N", "M", [property])),
+            6 => new(graphType: GraphTypeDeclaration.Create()),
+            7 => new(nodeType: GraphNodeTypeDeclaration.Create("N", ["I"], [property])),
+            _ => new(edgeType: GraphEdgeTypeDeclaration.Create("T", "N", "M", [property])),
         };
 
         // Act
@@ -61,8 +61,8 @@ public sealed class GraphCatalogTypeTests
     public void Decode_MalformedGraphType_ShouldRefuse(int damage)
     {
         // Arrange
-        byte[] bytes = GraphCatalogCodec.Encode(new CatalogRecord(nodeType: GraphNodeType.Create("N", ["I"],
-            [GraphPropertyType.Create("p", DatabaseType.Int64, true)])), new TransactionSequence(7));
+        byte[] bytes = GraphCatalogCodec.Encode(new CatalogRecord(nodeType: GraphNodeTypeDeclaration.Create("N", ["I"],
+            [GraphPropertyTypeDeclaration.Create("p", DatabaseType.Int64, true)])), new TransactionSequence(7));
         if (damage == 0) { bytes = bytes[..^1]; }
         else if (damage == 1) { bytes[^1] = 2; }
         else if (damage == 2) { bytes[^2] = 254; }

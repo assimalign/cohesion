@@ -547,7 +547,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         }
     }
 
-    internal static void ValidateNodeType(GraphNodeType type, IReadOnlyList<string> labels,
+    internal static void ValidateNodeType(GraphNodeTypeDeclaration type, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?>? properties, bool deferRequired, bool existingData)
     {
         if (!deferRequired)

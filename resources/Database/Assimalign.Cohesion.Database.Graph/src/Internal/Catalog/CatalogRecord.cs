@@ -22,7 +22,7 @@ internal sealed record CatalogRecord
 
     public CatalogRecord(GraphLabelMetadata? label = null, GraphRelationshipTypeMetadata? relationshipType = null,
         GraphPropertyKeyMetadata? property = null, GraphIndexMetadata? index = null, GraphConstraintMetadata? constraint = null,
-        GraphType? graphType = null, GraphNodeType? nodeType = null, GraphEdgeType? edgeType = null)
+        GraphTypeDeclaration? graphType = null, GraphNodeTypeDeclaration? nodeType = null, GraphEdgeTypeDeclaration? edgeType = null)
     {
         _property = constraint is { } rule
             ? new GraphPropertyKeyMetadata(rule.DefinitionId, rule.PropertyKey, rule.Type) : property;
@@ -37,11 +37,11 @@ internal sealed record CatalogRecord
     public GraphIndexMetadata? Index => _property is null ? _index : null;
     public GraphConstraintMetadata? Constraint => _property is { } property && _index is { } index
         ? new GraphConstraintMetadata(index.LabelId, index.Name, index.PropertyKey, property.Type) : null;
-    public GraphType? GraphType => _definition as GraphType;
-    public GraphNodeType? NodeType => _definition as GraphNodeType;
-    public GraphEdgeType? EdgeType => _definition as GraphEdgeType;
+    public GraphTypeDeclaration? GraphType => _definition as GraphTypeDeclaration;
+    public GraphNodeTypeDeclaration? NodeType => _definition as GraphNodeTypeDeclaration;
+    public GraphEdgeTypeDeclaration? EdgeType => _definition as GraphEdgeTypeDeclaration;
 
-    internal byte Kind => _definition is GraphType ? (byte)6 : _definition is GraphNodeType ? (byte)7 : _definition is GraphEdgeType ? (byte)8
+    internal byte Kind => _definition is GraphTypeDeclaration ? (byte)6 : _definition is GraphNodeTypeDeclaration ? (byte)7 : _definition is GraphEdgeTypeDeclaration ? (byte)8
         : Label is not null ? (byte)1 : RelationshipType is not null ? (byte)2
         : _property is not null ? _index is not null ? (byte)5 : (byte)3 : (byte)4;
     internal Guid Id => Kind >= 6 ? GraphCatalog.GraphTypeId : Label?.Id ?? RelationshipType?.Id ?? _property?.DefinitionId ?? _index!.Value.LabelId;
@@ -65,8 +65,8 @@ internal sealed record CatalogRecord
         public global::Assimalign.Cohesion.Database.Graph.Catalog.GraphPropertyKeyMetadata? Property => _target.Property;
         public global::Assimalign.Cohesion.Database.Graph.Catalog.GraphIndexMetadata? Index => _target.Index;
         public global::Assimalign.Cohesion.Database.Graph.Catalog.GraphConstraintMetadata? Constraint => _target.Constraint;
-        public GraphType? GraphType => _target.GraphType;
-        public GraphNodeType? NodeType => _target.NodeType;
-        public GraphEdgeType? EdgeType => _target.EdgeType;
+        public GraphTypeDeclaration? GraphType => _target.GraphType;
+        public GraphNodeTypeDeclaration? NodeType => _target.NodeType;
+        public GraphEdgeTypeDeclaration? EdgeType => _target.EdgeType;
     }
 }

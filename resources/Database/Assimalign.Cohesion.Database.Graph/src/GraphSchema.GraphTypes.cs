@@ -19,7 +19,7 @@ public sealed partial class GraphSchema
     /// <exception cref="ObjectDisposedException">The database is disposed.</exception>
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
     public ValueTask<GraphType?> GetGraphTypeAsync(CancellationToken cancellationToken = default)
-        => _database.RunAsync(_session, op => new ValueTask<GraphType?>(_database.Catalog.GetGraphType(op.Context.Snapshot)), cancellationToken);
+        => _database.RunAsync(_session, op => new ValueTask<GraphType?>(_database.Catalog.GetGraphType(op.Context.Snapshot) is { } type ? GraphType.FromDeclaration(type) : null), cancellationToken);
 
     /// <summary>Atomically replaces the current open graph type after validating existing member nodes.</summary>
     /// <param name="type">The complete replacement, including any edge declarations.</param>
@@ -204,17 +204,18 @@ public sealed partial class GraphSchema
                     token.ThrowIfCancellationRequested();
                     op.QueryBudget.Consume();
                     memory.Add(512);
-                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(nodeType: node));
+                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(nodeType: node.Declaration));
                 }
                 foreach (var edge in input.EdgeTypes)
                 {
                     token.ThrowIfCancellationRequested();
                     op.QueryBudget.Consume();
                     memory.Add(512);
-                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge));
+                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge.Declaration));
                 }
             }
-            var previous = _database.Catalog.LoadGraphType(op.Context.Snapshot, memory.Add, out var records);
+            var loaded = _database.Catalog.LoadGraphType(op.Context.Snapshot, memory.Add, out var records);
+            var previous = loaded is null ? null : GraphType.FromDeclaration(loaded);
             var type = change(previous, op.QueryBudget);
             if (ReferenceEquals(type, previous)) { return; }
             if (type is not null)
@@ -224,7 +225,7 @@ public sealed partial class GraphSchema
                 {
                     token.ThrowIfCancellationRequested();
                     op.QueryBudget.Consume();
-                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(nodeType: node));
+                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(nodeType: node.Declaration));
                     memory.Add(512L + node.IdentifyingLabel.Length * 2L + node.ImpliedLabels.Sum(label => 48L + label.Length * 2L)
                         + node.Properties.Sum(property => 128L + property.Name.Length * 2L));
                     names.Add(node.IdentifyingLabel);
@@ -233,7 +234,7 @@ public sealed partial class GraphSchema
                 {
                     token.ThrowIfCancellationRequested();
                     op.QueryBudget.Consume();
-                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge));
+                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge.Declaration));
                     memory.Add(512L + (edge.RelationshipType.Length + edge.SourceNodeType.Length + edge.TargetNodeType.Length) * 2L
                         + edge.Properties.Sum(property => 128L + property.Name.Length * 2L));
                     if (!names.Contains(edge.SourceNodeType) || !names.Contains(edge.TargetNodeType))
@@ -249,7 +250,7 @@ public sealed partial class GraphSchema
                     _database.Catalog.EnsureGraphTypeDefinitionMutable(node.IdentifyingLabel, false, op.Context.Snapshot);
                     foreach (string implied in node.ImpliedLabels)
                     { _database.Catalog.EnsureGraphTypeDefinitionMutable(implied, false, op.Context.Snapshot); }
-                    _database.Catalog.EnsureNodeTypeCompatible(node, op.Context.Snapshot);
+                    _database.Catalog.EnsureNodeTypeCompatible(node.Declaration, op.Context.Snapshot);
                 }
                 foreach (var edge in type.EdgeTypes)
                 { _database.Catalog.EnsureGraphTypeDefinitionMutable(edge.RelationshipType, true, op.Context.Snapshot); }
@@ -257,13 +258,13 @@ public sealed partial class GraphSchema
                 var latest = _database.LatestSnapshot(op.Context);
                 foreach (var nodeType in type.NodeTypes)
                 {
-                    if (!GraphTypeChanges.RequiresValidation(oldNodes.GetValueOrDefault(nodeType.IdentifyingLabel), nodeType)) { continue; }
+                    if (!GraphTypeChanges.RequiresValidation(oldNodes.GetValueOrDefault(nodeType.IdentifyingLabel)?.Declaration, nodeType.Declaration)) { continue; }
                     using var cursorMemory = new GraphMemoryOwner(op.QueryBudget.Memory);
                     foreach (var node in _database.Store.StreamLabels([nodeType.IdentifyingLabel], latest, token, op.QueryBudget.Consume, cursorMemory.Add))
                     {
                         using var nodeMemory = new GraphMemoryOwner(op.QueryBudget.Memory);
                         nodeMemory.RetainValue(GraphDatabase.Materialize(node), token);
-                        GraphDatabase.ValidateNodeType(nodeType, node.Labels, node.Properties, false, existingData: true);
+                        GraphDatabase.ValidateNodeType(nodeType.Declaration, node.Labels, node.Properties, false, existingData: true);
                     }
                 }
                 // Discover tokens in the same logical transaction, independently of type enforcement.
@@ -301,6 +302,6 @@ public sealed partial class GraphSchema
                     }
                 }
             }
-            await _database.Catalog.SetGraphTypeAsync(type, records, op.Context, token).ConfigureAwait(false);
+            await _database.Catalog.SetGraphTypeAsync(type?.Declaration, records, op.Context, token).ConfigureAwait(false);
         }, token);
 }

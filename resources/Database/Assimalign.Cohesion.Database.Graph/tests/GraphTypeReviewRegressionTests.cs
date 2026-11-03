@@ -296,13 +296,13 @@ public sealed class GraphTypeReviewRegressionTests
         database.Catalog.BeforeRecordRead = () => reads++;
 
         // Act
-        GraphNodeType? rule;
-        try { rule = database.Catalog.GetNodeTypeForWrite("N", transaction.Context.Snapshot, database.LatestSnapshot(transaction.Context)); }
+        string? selectedLabel;
+        try { selectedLabel = database.Catalog.GetNodeTypeForWrite("N", transaction.Context.Snapshot, database.LatestSnapshot(transaction.Context))?.IdentifyingLabel; }
         finally { database.Catalog.BeforeRecordRead = null; }
 
         // Assert
         reads.ShouldBe(1);
-        rule.ShouldNotBeNull().IdentifyingLabel.ShouldBe("N");
+        selectedLabel.ShouldBe("N");
         await transaction.RollbackAsync(CancellationToken.None);
     }
 

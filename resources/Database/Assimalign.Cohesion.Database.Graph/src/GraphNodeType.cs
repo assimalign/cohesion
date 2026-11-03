@@ -2,13 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Graph.Internal;
+
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>An immutable node type selected by its identifying label.</summary>
 public sealed class GraphNodeType
 {
-    private GraphNodeType(string identifyingLabel, IReadOnlyList<string> impliedLabels, IReadOnlyList<GraphPropertyType> properties)
-        => (IdentifyingLabel, ImpliedLabels, Properties) = (identifyingLabel, impliedLabels, properties);
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
+    internal GraphNodeTypeDeclaration Declaration { get; }
+
+    private GraphNodeType(GraphNodeTypeDeclaration declaration, IReadOnlyList<GraphPropertyType> properties)
+        => (Declaration, IdentifyingLabel, ImpliedLabels, Properties) = (declaration, declaration.IdentifyingLabel, declaration.ImpliedLabels, properties);
 
     /// <summary>Gets the ordinal label identifying members of this type.</summary>
     public string IdentifyingLabel { get; }
@@ -26,11 +31,10 @@ public sealed class GraphNodeType
     public static GraphNodeType Create(string identifyingLabel, IEnumerable<string>? impliedLabels = null,
         IEnumerable<GraphPropertyType>? properties = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(identifyingLabel);
-        string[] labels = (impliedLabels ?? []).ToArray();
-        foreach (string label in labels) { ArgumentException.ThrowIfNullOrWhiteSpace(label); }
-        if (labels.Contains(identifyingLabel, StringComparer.Ordinal) || labels.Distinct(StringComparer.Ordinal).Count() != labels.Length)
-        { throw new ArgumentException(ErrorMessages.GraphTypeDuplicate, nameof(impliedLabels)); }
-        return new(identifyingLabel, Array.AsReadOnly(labels.Order(StringComparer.Ordinal).ToArray()), GraphType.CopyProperties(properties));
+        var copied = GraphType.CopyProperties(properties);
+        return new(GraphNodeTypeDeclaration.Create(identifyingLabel, impliedLabels, copied.Select(item => item.Declaration)), copied);
     }
+
+    internal static GraphNodeType FromDeclaration(GraphNodeTypeDeclaration declaration)
+        => new(declaration, Array.AsReadOnly(declaration.Properties.Select(GraphPropertyType.FromDeclaration).ToArray()));
 }

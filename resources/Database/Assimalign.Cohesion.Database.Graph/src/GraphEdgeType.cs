@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+
+using Assimalign.Cohesion.Database.Graph.Internal;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
@@ -7,8 +10,11 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <remarks>GQ-T1 persists this declaration. Edge property and endpoint enforcement is supplied by GQ-T2.</remarks>
 public sealed class GraphEdgeType
 {
-    private GraphEdgeType(string relationshipType, string sourceNodeType, string targetNodeType, IReadOnlyList<GraphPropertyType> properties)
-        => (RelationshipType, SourceNodeType, TargetNodeType, Properties) = (relationshipType, sourceNodeType, targetNodeType, properties);
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
+    internal GraphEdgeTypeDeclaration Declaration { get; }
+
+    private GraphEdgeType(GraphEdgeTypeDeclaration declaration, IReadOnlyList<GraphPropertyType> properties)
+        => (Declaration, RelationshipType, SourceNodeType, TargetNodeType, Properties) = (declaration, declaration.RelationshipType, declaration.SourceNodeType, declaration.TargetNodeType, properties);
 
     /// <summary>Gets the ordinal relationship type identifying members.</summary>
     public string RelationshipType { get; }
@@ -29,9 +35,10 @@ public sealed class GraphEdgeType
     public static GraphEdgeType Create(string relationshipType, string sourceNodeType, string targetNodeType,
         IEnumerable<GraphPropertyType>? properties = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(relationshipType);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourceNodeType);
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetNodeType);
-        return new(relationshipType, sourceNodeType, targetNodeType, GraphType.CopyProperties(properties));
+        var copied = GraphType.CopyProperties(properties);
+        return new(GraphEdgeTypeDeclaration.Create(relationshipType, sourceNodeType, targetNodeType, copied.Select(item => item.Declaration)), copied);
     }
+
+    internal static GraphEdgeType FromDeclaration(GraphEdgeTypeDeclaration declaration)
+        => new(declaration, Array.AsReadOnly(declaration.Properties.Select(GraphPropertyType.FromDeclaration).ToArray()));
 }

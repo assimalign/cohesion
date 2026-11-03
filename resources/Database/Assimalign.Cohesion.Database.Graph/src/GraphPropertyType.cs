@@ -2,13 +2,18 @@ using System;
 
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Internal;
+
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>An immutable scalar property declaration in a graph element type.</summary>
 public sealed class GraphPropertyType
 {
-    private GraphPropertyType(string name, DatabaseType type, bool required)
-        => (Name, Type, Required) = (name, type, required);
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
+    internal GraphPropertyTypeDeclaration Declaration { get; }
+
+    private GraphPropertyType(GraphPropertyTypeDeclaration declaration)
+        => (Declaration, Name, Type, Required) = (declaration, declaration.Name, declaration.Type, declaration.Required);
 
     /// <summary>Gets the ordinal, case-sensitive property name.</summary>
     public string Name { get; }
@@ -25,12 +30,10 @@ public sealed class GraphPropertyType
     /// <exception cref="ArgumentException">The name is blank or the scalar type is unsupported.</exception>
     public static GraphPropertyType Create(string name, DatabaseType type, bool required = false)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (!Supports(type)) { throw new ArgumentException(ErrorMessages.GraphTypeScalarInvalid, nameof(type)); }
-        return new(name, type, required);
+        return new(GraphPropertyTypeDeclaration.Create(name, type, required));
     }
 
-    internal static bool Supports(DatabaseType type) => type is DatabaseType.Boolean or DatabaseType.Int8 or
-        DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or
-        DatabaseType.Float64 or DatabaseType.Decimal or DatabaseType.String;
+    internal static GraphPropertyType FromDeclaration(GraphPropertyTypeDeclaration declaration) => new(declaration);
+
+    internal static bool Supports(DatabaseType type) => GraphPropertyTypeDeclaration.Supports(type);
 }
