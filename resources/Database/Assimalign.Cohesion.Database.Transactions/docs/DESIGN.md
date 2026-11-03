@@ -1352,7 +1352,10 @@ existing deferral before a possibly starved worker gets its first attempt. A rel
 runs the sharp checkpoint before the next admission. No new admission condition is introduced.
 A successful checkpoint consumes requests received during that checkpoint under the state monitor,
 atomically with release. A busy outside bracket retains the request but foreground retries wait
-for another worker request; the worker still observes bracket closure on its next attempt. A
+for another worker request or completion of the captured outside blockers. The refusal carries
+an internal Storage-owned predicate over those physical brackets, shared as a stateless source
+contract through Exception.Data. Intervening statement brackets do not re-arm a busy retry.
+This adds no public member, interface or friend grant. A
 non-busy deferred failure suppresses foreground retries until the worker collects that exact
 failure; reporting and the offline policy remain in DatabaseCheckpointWorker.Settle.
 Undo and prune releases can perform this checkpoint while the rolled-back writer still owns its

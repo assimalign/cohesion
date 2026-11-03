@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Internal;
 using PhysicalStorage = Assimalign.Cohesion.Database.Storage.Storage;
 using Assimalign.Cohesion.Database.Transactions.Internal;
 
@@ -38,6 +39,7 @@ public sealed class TransactionCheckpointInterlock
     private int _rawDepth;
     private int _pending;
     private bool _busy;
+    private Func<bool>? _checkpointBlocked;
     private bool _checkpointSucceeded;
     private bool _retryRequested;
     private readonly HashSet<long> _leases = new();
@@ -186,11 +188,12 @@ public sealed class TransactionCheckpointInterlock
         try { _checkpoint(); }
         catch (StorageTransactionException exception) when (exception.Code != StorageTransactionErrorCode.ForeignStorage)
         {
-            lock (_state) { _pending = 1; _busy = true; }
+            Func<bool>? blocked = StorageCheckpointRetryContext.Read(exception);
+            lock (_state) { _pending = 1; _busy = true; _checkpointBlocked = blocked; }
             throw;
         }
         // This sharp checkpoint covered requests received while it ran too.
-        lock (_state) { _pending = 0; _busy = false; _retryRequested = false; _checkpointSucceeded = true; }
+        lock (_state) { _pending = 0; _busy = false; _checkpointBlocked = null; _retryRequested = false; _checkpointSucceeded = true; }
     }
 
     internal void Wait(CancellationToken cancellationToken = default, string bracketClass = "Maintenance", long owner = 0)
@@ -246,11 +249,15 @@ public sealed class TransactionCheckpointInterlock
         // MaxValue selects size only. InfiniteTimeSpan is negative and makes every
         // written journal interval-due. No storage work runs under the state monitor.
         bool due = allowCheckpoint && _storage.IsCheckpointDue(TimeSpan.MaxValue);
+        // Query the Storage-owned refusal snapshot outside state. It observes only
+        // the original blockers, so intervening statements cannot cause busy storms.
+        Func<bool>? blockers = Volatile.Read(ref _checkpointBlocked);
+        bool stillBlocked = Volatile.Read(ref _busy) && (blockers is null || blockers());
         lock (_state)
         {
             // Claim the request or release atomically with TryCheckpoint's second
             // look. No deferral can land after the final check but before release.
-            if (!allowCheckpoint || _failure is not null || (_busy && !_retryRequested) || (_pending == 0 && !due))
+            if (!allowCheckpoint || _failure is not null || (_busy && !_retryRequested && stillBlocked) || (_pending == 0 && !due))
             {
                 ReleaseUnderState();
                 return;
@@ -274,6 +281,7 @@ public sealed class TransactionCheckpointInterlock
         {
             _pending = 0;
             _busy = false;
+            _checkpointBlocked = null;
             _retryRequested = false;
             _checkpointSucceeded = false;
         }
@@ -292,7 +300,7 @@ public sealed class TransactionCheckpointInterlock
         }
         catch (StorageOfflineException)
         {
-            lock (_state) { _pending = 0; }
+            lock (_state) { _pending = 0; _busy = false; _checkpointBlocked = null; }
             TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, "StorageOffline");
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)

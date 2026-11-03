@@ -2218,7 +2218,10 @@ The earlier worker-only arming left an unbounded gap between the size trigger an
 TryCheckpoint. Releasing interlock holders now pull IsCheckpointDue(TimeSpan.MaxValue), so a
 size crossing services the existing deferral before the next admission without waiting for worker
 scheduling. Timeout.InfiniteTimeSpan is negative and must never select this size-only predicate. Busy
-outside brackets and uncollected operational failures suppress repeat foreground attempts; the
+outside brackets suppress repeat foreground attempts until the worker re-requests or those
+captured blockers complete. The internal CheckpointRetry shared-source module carries this
+Storage-owned predicate on the refusal, independently of diagnostics. Uncollected failures also
+suppress foreground attempts; the
 worker retains retries, reporting and its offline policy. The four-trigger assertion stays intact.
 
 Every refused storage checkpoint emits event 19 once per active physical bracket, including

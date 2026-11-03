@@ -11,4 +11,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="CheckpointRetry" />
+	</ItemGroup>
 </Project>

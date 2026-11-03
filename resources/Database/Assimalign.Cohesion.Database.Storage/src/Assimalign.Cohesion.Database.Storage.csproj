@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Database.Storage</RootNamespace>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -6,5 +6,8 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="CheckpointRetry" />
 	</ItemGroup>
 </Project>

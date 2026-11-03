@@ -113,7 +113,11 @@ public partial class TransactionCoordinatorRecoveryTests
         // Assert
         attempts.ShouldBe(2);
         outside.Rollback();
-        coordinator.Checkpoint(guard.Token);
+        using (gate.Enter("AfterOutsideCompletion")) { }
+        attempts.ShouldBe(3);
+        storage.IsCheckpointDue(TimeSpan.MaxValue).ShouldBeFalse();
+        for (int i = 0; i < 10; i++) { using (gate.Enter("AfterSuccessfulRetry")) { } }
+        attempts.ShouldBe(3);
     }
 
     [Fact(DisplayName = "Cohesion Test [Transactions] - Deferred I/O failure suppresses foreground retries until worker collection (#1283)")]
