@@ -603,6 +603,7 @@ public sealed partial class SqlCatalog
                 // retires this record only after the data-file frees are durable.
                 var reclamationLocation = _storage.InsertRow(transaction, slot.Table.ObjectId,
                     SqlReclamationRecord.Encode(slot.Table.ObjectId, schema, name));
+                var retireTrees = StageIndexRetirements(transaction, _registrations.Where(registration => registration.ObjectId == slot.Table.ObjectId), 1);
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
                 ulong next = _nextObjectId;
                 var owned = StageOwnedSequences(transaction, slot.Table, null, ref next);
@@ -619,6 +620,7 @@ public sealed partial class SqlCatalog
                 }
 
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(schema, name));
+                retireTrees();
                 owned();
                 _registrationsLocation = registrationsLocation;
                 _pendingReclamations.Add(slot.Table.ObjectId, new SqlReclamationIntent(reclamationLocation.PageId, reclamationLocation.SlotIndex));
@@ -1109,7 +1111,10 @@ public sealed partial class SqlCatalog
             {
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remainingRegistrations));
+                var retireTrees = StageIndexRetirements(transaction, _registrations.Where(registration => registration.ObjectId == tableObjectId &&
+                    registration.Definition.Name.Equals(name, StringComparison.OrdinalIgnoreCase)));
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Index(table.Schema, table.Name, slot.Index.Name));
+                retireTrees();
                 _registrationsLocation = registrationsLocation;
             }
 
@@ -1142,9 +1147,14 @@ public sealed partial class SqlCatalog
     }
 
     /// <summary>
-    /// Loads the persisted index registrations.
+    /// Loads the persisted logical index registrations.
     /// </summary>
-    /// <returns>The stored registrations, empty when none were saved.</returns>
+    /// <remarks>
+    /// ObjectId identifies the logical table. A tree's physical page owner lives in its root
+    /// header and can differ from that table identity. These registrations alone are not safe
+    /// inputs for re-attaching trees: the SQL engine resolves physical owners before attachment.
+    /// </remarks>
+    /// <returns>The stored logical registrations, empty when none were saved.</returns>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public IReadOnlyList<BTreeIndexRegistration> GetIndexRegistrations()
     {
@@ -1580,9 +1590,12 @@ public sealed partial class SqlCatalog
                 foreach (var index in droppedIndexes) { _storage.DeleteRow(transaction, index.Location.PageId, index.Location.SlotIndex); }
             }
             var registrationsLocation = remaining is null ? _registrationsLocation : UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remaining));
+            var retireTrees = StageIndexRetirements(transaction, remaining is null ? [] : _registrations.Where(registration =>
+                !remaining.Any(current => current.RootPageId == registration.RootPageId)));
             ulong next = _nextObjectId;
             var owned = StageOwnedSequences(transaction, slot.Table, updated, ref next);
             CommitCatalogChange(transaction, next, publication: publication, actualObject: SqlObjectIdentity.Table(updated.Schema, updated.Name));
+            retireTrees();
             owned();
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
             if (remaining is not null)

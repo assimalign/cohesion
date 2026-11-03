@@ -55,7 +55,7 @@ public sealed partial class SqlJointTypeMigrationTests
         if (keptIntent)
         {
             await database.Catalog.SavePendingMigrationAsync(new(target.Hash, target.CanonicalDocument,
-                [new("Joint/AlterColumn", "items", "Value", 1)], 1), guard.Token);
+                [new("Joint/AlterColumn", "items", "Value", 1), new("Joint/RewriteOwner", "items", "items", 2)], 2), guard.Token);
         }
         var intent = database.Catalog.PendingMigration;
         int writes = 0, decoded = 0;
@@ -92,7 +92,7 @@ public sealed partial class SqlJointTypeMigrationTests
             var database = await seed.OpenDatabaseAsync("typed", guard.Token);
             var target = Target().Compile();
             await database.Catalog.SavePendingMigrationAsync(new(target.Hash, target.CanonicalDocument,
-                [new("Joint/AlterColumn", "items", "Value", 1)], 1), guard.Token);
+                [new("Joint/AlterColumn", "items", "Value", 1), new("Joint/RewriteOwner", "items", "items", 2)], 2), guard.Token);
             storage = storage.CaptureDurableImages();
         }
         storage.MigrationAvailableBytes = 0;

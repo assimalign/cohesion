@@ -1425,7 +1425,9 @@ Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPage
 ## Cross-model index-purge conformance (#1195)
 
 The root integration suite proves SQL, KeyValuePair, Documents and Graph compose the shared
-coordinator's bounded index-prune callback against real storage. Documents and Graph tests
+coordinator's bounded index-prune callback against real storage. SQL's probe attaches to a
+published SQL index's physical pages, preserving coverage when its internal logical directory
+composes separately owned trees (#1777). Documents and Graph tests
 reattach their index managers before the pass, covering replacement after DDL rollback.
 The coordinator owns the horizon/apply gate; models supply their current manager without new
 interfaces, model-specific vacuum loops or root access to index-page internals. Blob has no

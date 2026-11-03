@@ -192,7 +192,7 @@ internal sealed partial class SqlSchemaProvisioner
                         JointStage?.Invoke("Handoff");
                         if (deferDataScalingSteps && joint.JointPlan!.Touched.Any(table => _database.DataStorage.HasOwnerPages(table.ObjectId)))
                         {
-                            PublishProgress(joint.Intent.Steps[0], joint.Intent.StepCount, running: false);
+                            PublishProgress(joint.Intent.Steps[0], joint.ProvisioningStepCount, running: false);
                             TraceOutcome("Deferred");
                             return new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, 0, WasAlreadyApplied: false);
                         }

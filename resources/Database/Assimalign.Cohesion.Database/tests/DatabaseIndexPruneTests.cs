@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.KeyValuePair;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
 
 using Shouldly;
@@ -37,11 +39,26 @@ public sealed class DatabaseIndexPruneTests
         var database = await engine.CreateDatabaseAsync("db");
         TransactionCoordinator coordinator;
         BTreeIndexManager indexes;
+        BTreeIndex? index = null;
         switch (database)
         {
             case SqlDatabase sql:
                 coordinator = Coordinator(sql);
-                indexes = Indexes(sql);
+                await using (var session = await sql.CreateSessionAsync())
+                {
+                    await session.ExecuteAsync("CREATE TABLE prune_probe(v BIGINT)");
+                    await session.ExecuteAsync("CREATE INDEX prune_probe ON prune_probe(v)");
+                }
+                // Attach a probe handle to the published tree. The owning SQL
+                // directory must prune these same pages through its callback;
+                // this does not depend on that directory's private CLR type.
+                var registrations = Catalog(sql).GetIndexRegistrations();
+                indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+                {
+                    Storage = Storage(coordinator), ExistingIndexes = registrations,
+                    TransactionSource = _ => throw new InvalidOperationException("The probe uses explicit storage brackets."),
+                });
+                indexes.TryGetIndex(registrations.Single().ObjectId, "prune_probe", out index).ShouldBeTrue();
                 break;
             case KeyValueDatabase keyValue:
                 coordinator = Coordinator(keyValue);
@@ -62,10 +79,13 @@ public sealed class DatabaseIndexPruneTests
             default: throw new InvalidOperationException("Unknown B-tree model.");
         }
 
-        var setup = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var index = await coordinator.ApplyStatementAsync<BTreeIndex>(setup,
-            _ => indexes.CreateIndexAsync(setup, ulong.MaxValue - 1, new IndexDefinition("prune-probe")));
-        await coordinator.CommitAsync(setup);
+        if (index is null)
+        {
+            var setup = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+            index = await coordinator.ApplyStatementAsync<BTreeIndex>(setup,
+                _ => indexes.CreateIndexAsync(setup, ulong.MaxValue - 1, new IndexDefinition("prune-probe")));
+            await coordinator.CommitAsync(setup);
+        }
         var creator = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await coordinator.CommitAsync(creator);
         var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
@@ -104,8 +124,8 @@ public sealed class DatabaseIndexPruneTests
     private static extern TransactionCoordinator Coordinator(DocumentDatabase database);
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Coordinator")]
     private static extern TransactionCoordinator Coordinator(GraphDatabase database);
-    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_IndexManager")]
-    private static extern BTreeIndexManager Indexes(SqlDatabase database);
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Catalog")]
+    private static extern SqlCatalog Catalog(SqlDatabase database);
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_IndexManager")]
     private static extern BTreeIndexManager Indexes(KeyValueDatabase database);
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Catalog")]

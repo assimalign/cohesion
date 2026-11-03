@@ -86,7 +86,21 @@ internal sealed partial class SqlSchemaProvisioner
     {
         var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
         SqlJointMigrationPlan plan;
-        try { JointStage?.Invoke("Planning"); plan = executor.PlanJointMigration(schema, script, cancellationToken); }
+        try
+        {
+            JointStage?.Invoke("Planning");
+            plan = executor.PlanJointMigration(schema, script, cancellationToken);
+            if (_catalog.PendingMigration is { } recorded)
+            {
+                var choices = recorded.Steps.Where(step => step.Kind is "Joint/KeepOwner" or "Joint/RewriteOwner").ToArray();
+                var existing = plan.Tables.Where(table => table.Previous is not null).ToArray();
+                if (choices.Length != existing.Length || existing.Any(table => choices.Count(step =>
+                    step.Table.Equals(table.Shape.Name, StringComparison.OrdinalIgnoreCase) &&
+                    step.ObjectName.Equals(table.Shape.Name, StringComparison.OrdinalIgnoreCase) &&
+                    step.Kind == (table.KeepsOwner ? "Joint/KeepOwner" : "Joint/RewriteOwner")) != 1))
+                { throw new SqlCatalogException("CS06059", ErrorMessages.JointClassificationInvalid); }
+            }
+        }
         catch (Exception refusal)
         {
             // Storage, corruption and lifecycle identities take precedence (#1364).
@@ -102,14 +116,19 @@ internal sealed partial class SqlSchemaProvisioner
             { throw PlanningRefusal(schema, script.Steps.Count, refusal); }
             throw;
         }
-        var intent = new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument,
-            script.Steps.Select((step, index) => new SqlCatalogMigrationStep("Joint/" + step.Kind,
-                step.Operation.ParentName ?? step.Operation.ObjectName, step.Operation.ObjectName, index + 1)).ToArray(), script.Steps.Count);
+        var steps = script.Steps.Select((step, index) => new SqlCatalogMigrationStep("Joint/" + step.Kind,
+            step.Operation.ParentName ?? step.Operation.ObjectName, step.Operation.ObjectName, index + 1)).ToList();
+        foreach (var table in plan.Tables.Where(table => table.Previous is not null))
+        {
+            steps.Add(new SqlCatalogMigrationStep(table.KeepsOwner ? "Joint/KeepOwner" : "Joint/RewriteOwner",
+                table.Shape.Name, table.Shape.Name, steps.Count + 1));
+        }
+        var intent = new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument, steps.ToArray(), steps.Count);
         TransactionContext? locks = null;
         IDisposable? metadata = null;
         bool saved = false;
         bool spaceRefused = false;
-        var failed = new DatabaseProvisioningProgress("JointMigration", schema.Name, 1, intent.StepCount, false,
+        var failed = new DatabaseProvisioningProgress("JointMigration", schema.Name, 1, script.Steps.Count, false,
             failureCode: SqlProvisioningCodes.JointFailed);
         var failures = new System.Collections.Generic.List<Exception>(3);
         try
@@ -166,7 +185,7 @@ internal sealed partial class SqlSchemaProvisioner
             Exception cause = failures.Count == 1 ? failure : new AggregateException(failures);
             var coded = JointFailure(cause);
             EnsureFailureTrace(schema);
-            TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: intent.StepCount);
+            TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: script.Steps.Count);
             TraceFailure(coded);
             if (ReferenceEquals(cause, failure) && (failure is OperationCanceledException or OutOfMemoryException)) { throw; }
             throw coded;
@@ -183,11 +202,11 @@ internal sealed partial class SqlSchemaProvisioner
             cancellationToken.ThrowIfCancellationRequested();
             epoch = _database.TableReclamation.EnterStatement();
             BeginDeferredTrace(migration, 0);
-            PublishProgress(migration.Intent.Steps[0], migration.Intent.StepCount, running: true, 0);
+            PublishProgress(migration.Intent.Steps[0], migration.ProvisioningStepCount, running: true, 0);
             var statement = new SqlStatementContext(migration.Locks, _database.Coordinator, migration.Schema.Name,
                 _database.Name, provisioningProgress: (processed, total) =>
                 {
-                    PublishProgress(migration.Intent.Steps[0], migration.Intent.StepCount, true, processed, total);
+                    PublishProgress(migration.Intent.Steps[0], migration.ProvisioningStepCount, true, processed, total);
                     TraceDeferredProgress(migration, migration.Intent.Steps[0], processed, total);
                     DeferredProgress?.Invoke(processed, total);
                 }, checkpointCopy: true);
@@ -226,7 +245,7 @@ internal sealed partial class SqlSchemaProvisioner
                 // Publication may already be durable. Leave trees and intent to recovery;
                 // neither discard nor reclamation may decide the commit's outcome here.
                 _database.ReportProvisioning(new DatabaseProvisioningProgress("JointMigration", migration.Schema.Name,
-                    1, migration.Intent.StepCount, false, failureCode: SqlProvisioningCodes.JointUnconfirmed));
+                    1, migration.ProvisioningStepCount, false, failureCode: SqlProvisioningCodes.JointUnconfirmed));
                 var unconfirmed = CodedMigrationFailure(SqlProvisioningCodes.JointUnconfirmed,
                     ErrorMessages.JointPublicationUnconfirmed, failure);
                 FailDeferredTrace(migration, 0, unconfirmed);
