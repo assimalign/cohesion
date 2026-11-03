@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Transactions;
@@ -200,12 +201,19 @@ public sealed partial class SqlCatalog
             foreach (var table in kept)
             {
                 var previous = _tables[(table.Schema, table.Name)].Table;
-                if (previous.ObjectId != table.ObjectId || previous.Columns.Count != table.Columns.Count ||
-                    previous.Columns.Where((column, ordinal) => column.Type != table.Columns[ordinal].Type ||
-                        column.Collation != table.Columns[ordinal].Collation ||
-                        !string.Equals(column.DomainName, table.Columns[ordinal].DomainName, StringComparison.OrdinalIgnoreCase)).Any())
-                { throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                    ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog3, table.Schema, table.Name)); }
+                string? mismatch = previous.ObjectId != table.ObjectId ? nameof(SqlCatalogTable.ObjectId)
+                    : previous.Columns.Count != table.Columns.Count ? nameof(SqlCatalogTable.Columns) + ".Count" : null;
+                for (int ordinal = 0; mismatch is null && ordinal < previous.Columns.Count; ordinal++)
+                {
+                    var column = previous.Columns[ordinal];
+                    var keptColumn = table.Columns[ordinal];
+                    mismatch = column.Type != keptColumn.Type ? nameof(SqlCatalogColumn.Type)
+                        : column.Collation != keptColumn.Collation ? nameof(SqlCatalogColumn.Collation)
+                        : !string.Equals(column.DomainName, keptColumn.DomainName, StringComparison.OrdinalIgnoreCase) ? nameof(SqlCatalogColumn.DomainName) : null;
+                }
+                if (mismatch is not null)
+                { throw new SqlCatalogException("CS05060", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.KeptTableShapeMismatch, table.Schema, table.Name, mismatch)); }
                 EnsurePhysicalLayoutKept(previous, table);
             }
             var allReplacements = replacements.Concat(kept).ToArray();
@@ -364,6 +372,13 @@ public sealed partial class SqlCatalog
                 Volatile.Write(ref _storageBindingGeneration, bindingGeneration);
                 _snapshot = null;
                 return default;
+            }
+            catch (Exception failure) when (committed)
+            {
+                // The durable publication cannot be dismantled after an in-memory failure.
+                // Fence both file sets and let recovery rebuild the catalog and directory.
+                _storage.TakeOffline(StorageOfflineCause.ProvisioningFailure, ErrorMessages.JointPublicationUnconfirmed, failure);
+                throw new TransactionCommitUnconfirmedException(ErrorMessages.JointPublicationUnconfirmed, failure);
             }
             finally
             {

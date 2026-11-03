@@ -333,8 +333,8 @@ public sealed class TransactionCheckpointInterlock
         internal Lease(TransactionCheckpointInterlock? owner, int thread, long identity)
         { _owner = owner; _thread = thread; _identity = identity; }
         /// <summary>Services due work and releases this scope on its entering thread.</summary>
-        /// <remarks>A refused disposal leaves the scope held. Repeated disposal of an ended scope is inert.</remarks>
-        /// <exception cref="StorageTransactionException">A live scope was disposed on another thread.</exception>
+        /// <remarks>A refused disposal leaves admission unchanged. A copy disposed after its thread released admission is inert.</remarks>
+        /// <exception cref="StorageTransactionException">A copy was disposed on another thread while its entering thread still held admission.</exception>
         public void Dispose() => _owner?.ExitRaw(_thread, _identity);
         private sealed class DebugView
         {

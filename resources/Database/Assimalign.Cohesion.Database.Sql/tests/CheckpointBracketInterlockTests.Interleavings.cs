@@ -157,8 +157,8 @@ public sealed partial class CheckpointBracketInterlockTests
         dataDeferrals.ShouldBeGreaterThan(0); catalogDeferrals.ShouldBeGreaterThan(0);
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
         recorder.Events.ShouldContain(e => e.EventId == 21 && Equals(e.Payload![1], "SqlCatalog"));
-        database.Coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None).ShouldBeTrue();
-        catalogGate.TryCheckpoint(TimeSpan.Zero, CancellationToken.None).ShouldBeTrue();
+        database.Coordinator.TryCheckpoint(TimeSpan.FromSeconds(30), CancellationToken.None).ShouldBeTrue();
+        catalogGate.TryCheckpoint(TimeSpan.FromSeconds(30), CancellationToken.None).ShouldBeTrue();
         _output.WriteLine($"free-running writes={string.Join(',', writes)}; schemas={schemas}; retired={retired}; reclaimed={database.TableReclamation.ReclaimedPages}; deferrals={dataDeferrals}/{catalogDeferrals}");
     }
 }

@@ -7646,8 +7646,8 @@ bounded peer-sent names) are in the area's
 | 10 | `StatementPlanned` | Verbose | `Statements` | `database`, `accessPath` (cut to 256 characters), `recordsExamined` |
 | 11 | `StatementTooComplex` | Warning | — | `database`, `depth` (-1 when an execution stack backstop has no measured depth) |
 | 12 | `DdlSelfCommitted` | Verbose | `Statements` | `database`, `commandType` |
-| 13 | `ProvisioningStart` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `mode` (`Apply`/`Verify`), `stepCount` (-1 before planning) |
-| 14 | `ProvisioningStop` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `stepCount`, `outcome` (`Applied`, `Skipped`, `Deferred`, `Verified`, `Error`, `Cancelled`), `durationMilliseconds` |
+| 13 | `ProvisioningStart` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `mode` (`Apply`/`Verify`/`Replan`), `stepCount` (-1 before planning) |
+| 14 | `ProvisioningStop` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `stepCount`, `outcome` (`Applied`, `Skipped`, `Deferred`, `Verified`, `Restarted`, `Error`, `Cancelled`), `durationMilliseconds` |
 | 15 | `ProvisioningFailed` | Error | — | `engineName`, `database`, `schema`, `position`, `kind`, `code`, `exceptionType` (no message) |
 | 16 | `ExtensionRegistered` | Verbose | — | `kind` (`Scalar`, `Aggregate`, `Type`, `Cast`), `name` (cut to 256 characters per identifier; a cast is `source -> target`) |
 | 17 | *(retired)* | — | — | `IndexRegistrationsSaved` reported a separate registration save; B2 publishes an index's registration atomically with its description (#1355), so the id is retired, never reused |
@@ -8859,8 +8859,11 @@ checkpoints, write-ahead flushing and version purge retain PageWriteBackFailures
 CheckpointFailures, WriteAheadFlushFailures and VersionPurgeFailures. A second consecutive
 failed checkpoint at the journal size cap retains JournalSizeLimit. 49a step failure still
 uses ProvisioningFailure; interrupted open-time recovery still uses RecoveryInterrupted.
-These are the existing StorageOfflineCause conditions; the joint path never requests
-ProvisioningFailure. This is the explicit availability exception: an unknown WAL/commit outcome
+These are the existing StorageOfflineCause conditions. Pre-publication joint failures never request
+ProvisioningFailure; a failure of in-memory publication after the catalog commit does, fencing both
+file sets until recovery. It propagates as an unconfirmed commit, so callers retain published trees
+and owner intents for recovery instead of dismantling a durable publication.
+This is the explicit availability exception: an unknown WAL/commit outcome
 cannot be safely retried online (PostgreSQL src/backend/access/transam/xlog.c:2525-2532
 raises PANIC on WAL write failure). Admission reduces predictable space failures; it does
 not clear or weaken a latch. Other corruption/recovery fences retain their existing policy.
@@ -8934,9 +8937,16 @@ These markers allocate after publication-space and catalog-checkpoint admission 
 canceled admission installs none, and a failed transaction removes this attempt's markers, leaving
 current descriptions on the read fast path. Weak keys cannot retain table histories forever.
 Publication checks physical layout, exact types and ObjectId under the catalog lock for every kept
-description. Kept columns retain their declared spelling while preserving physical ordinals and facets.
-Registered domains are outside the schema hash; if a matching interrupted intent's classification
-changes, its unpublished intent is discarded and replanned while the old schema remains online.
+description. CS05060 names the mismatched physical field. Kept columns retain their declared spelling
+while preserving physical ordinals and facets. Before commit, the index directory refuses any prepared
+key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
+Registered domains are outside the schema hash. A matching interrupted intent is discarded and
+replanned when registration changes switch between ordinary deferred and joint migration, or switch
+an existing joint table between KeepOwner and RewriteOwner. The old schema remains online until the
+new plan publishes. An ordinary replan uses its new script's step total, even when unrelated DDL
+invalidated the stored schema snapshot and the new script is longer than the recorded joint job.
+Discard ends the current provisioning trace with outcome Restarted and starts mode Replan.
+Joint intents with malformed ownership choices still fail CS06059.
 The lock order is table X -> apply gate -> tree/page latches for building, and snapshot gate -> catalog monitor
 -> index directory monitor for publication; the directory never calls back into the catalog.
 Maintenance selects one physical manager per call, preserving the global 64-leaf budget.

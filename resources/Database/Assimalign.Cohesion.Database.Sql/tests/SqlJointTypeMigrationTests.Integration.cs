@@ -68,9 +68,9 @@ public sealed partial class SqlJointTypeMigrationTests
     private sealed record DomainFlipItem(string V);
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Matching interrupted joint intent replans after a domain-only classification flip (#1777)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task BuildAsync_DomainClassificationChanged_ShouldDiscardIntentAndReplan(bool initiallyKeeps)
+    [InlineData(false, "OwnersDurable")]
+    [InlineData(true, "AfterTreeBuild")]
+    public async Task BuildAsync_DomainClassificationChanged_ShouldDiscardIntentAndReplan(bool initiallyKeeps, string interruptedStage)
     {
         // Arrange: the schema hash excludes the registered domain's VARCHAR facet.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -104,16 +104,21 @@ public sealed partial class SqlJointTypeMigrationTests
         var first = Builder(storage);
         first.Types.Add(SqlType.CreateDomain("native_value", SqlType.VarChar(initiallyKeeps ? 8 : 4)));
         CrashCaptureSqlStorageStrategy? crash = null;
+        ulong[] abandonedOwners = [];
+        ulong firstPreparedOwner = 0;
         await using (var engine = await first.BuildAsync(guard.Token))
         {
             var database = await engine.OpenDatabaseAsync("typed", guard.Token);
+            firstPreparedOwner = database.Catalog.NextReservedIdentity;
             database.SchemaProvisioner.JointStage = stage =>
             {
-                if (stage != "IntentDurable") { return; }
+                if (stage != interruptedStage) { return; }
                 database.Catalog.PendingMigration!.Steps.Single(step => step.Table == "items" && step.Kind is "Joint/KeepOwner" or "Joint/RewriteOwner").Kind
                     .ShouldBe(initiallyKeeps ? "Joint/KeepOwner" : "Joint/RewriteOwner");
+                abandonedOwners = Enumerable.Range(0, checked((int)(database.Catalog.NextReservedIdentity - firstPreparedOwner))).Select(offset => firstPreparedOwner + (ulong)offset).ToArray();
+                abandonedOwners.ShouldNotBeEmpty();
                 crash = storage.CaptureDurableImages();
-                throw new InvalidOperationException("interrupted after intent commit");
+                throw new InvalidOperationException("interrupted after owner or tree preparation");
             };
             await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(target, guard.Token));
         }
@@ -122,10 +127,20 @@ public sealed partial class SqlJointTypeMigrationTests
         var resumedBuilder = Builder(crash!);
         resumedBuilder.Types.Add(SqlType.CreateDomain("native_value", SqlType.VarChar(initiallyKeeps ? 4 : 8)));
         resumedBuilder.AddDatabase("typed", declaration => { declaration.Schema(targetDeclaration); declaration.RunMigrationsInline = true; });
+        using var recorder = new Assimalign.Cohesion.Testing.EventSourceRecorder(SqlDatabaseEventSource.Log, System.Diagnostics.Tracing.EventLevel.Informational);
         await using var resumed = await resumedBuilder.BuildAsync(guard.Token);
         var current = await resumed.OpenDatabaseAsync("typed", guard.Token);
 
+        await DrainReclamationAsync(current, guard.Token);
+
         // Assert: the old schema survived until a fresh plan could publish.
+        recorder.Events.ShouldContain(e => e.EventId == 14 && Equals(e.Payload![5], "Restarted"));
+        recorder.Events.ShouldContain(e => e.EventId == 13 && Equals(e.Payload![4], "Replan"));
+        recorder.Events.ShouldContain(e => e.EventId == 14 && Equals(e.Payload![5], "Applied") && Equals(e.Payload[4], 2));
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+        foreach (ulong oldOwner in abandonedOwners) { current.DataStorage.HasOwnerPages(oldOwner).ShouldBeFalse(); }
+        current.DataStorage.HasOwnerPages(heap).ShouldBe(!initiallyKeeps);
+        current.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
         current.Catalog.PendingMigration.ShouldBeNull();
         current.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
         current.OfflineError.ShouldBeNull();
@@ -178,6 +193,7 @@ public sealed partial class SqlJointTypeMigrationTests
 
         // Assert.
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05060");
+        failure.Message.ShouldContain(identity ? "ObjectId" : "Type", Case.Sensitive);
         Table(database).ShouldBeSameAs(old);
         database.Catalog.IsTruncatedTable(old).ShouldBeFalse();
     }
