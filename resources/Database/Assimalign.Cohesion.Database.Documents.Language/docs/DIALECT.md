@@ -849,11 +849,11 @@ retain one CK00001 until OQ-S2, including forms whose first query term is parent
 INTERSECT/EXCEPT's operator refusal already owns that construct and is not reported again for
 its nested position. A lone parenthesized SELECT is now a valid INSERT/UPSERT source, where
 it previously failed CD00002 (for example, INSERT INTO c (KEY k) (SELECT k FROM d)).
-IN with extra query parentheses, including NOT IN, now tests query membership where it previously
-compared against a one-element list containing the query array. A non-RAW/VALUE query in that
-position now receives CD00014. This follows PostgreSQL's a_expr IN_P select_with_parens
-(src/backend/parser/gram.y:15632-15645) and the SQL dialect's redundant-parenthesis rule.
-A scalar operator or comma following any leading wrapper's matching close instead keeps the
+Inside IN or NOT IN, a compound whose first operand is parenthesized is a query, subject to the
+same membership rules and current nested-compound capability gate as a directly written query.
+Redundant wrappers around a single query, with no set operator or query tail after it, retain the
+signed-off value-list grammar: one item containing the subquery array, with no CD00014.
+A scalar operator or comma following any leading wrapper's matching close also keeps the
 expression/list grammar, including through redundant nested wrappers.
 Existing single-block subqueries and source bindings inside operands
 keep their independent scopes. No disk, catalog or wire format changes are needed.
@@ -865,9 +865,10 @@ OqlSetOperationParserTests, DocumentSetOperationTests, OqlExecutionConformanceTe
 DocumentSetOperationWireTests and the NativeAOT guard cover this contract, including a deterministic
 384-case concatenation/deduplication oracle over RAW values, whole documents and matching named
 projections with typed columns. Canonical keys choose the first representative; Json cells retain
-original member order and numeric scale, while numeric cells compare by value. A fixed typed-column
-trial pins the surviving left and right representatives. The same generator runs 96 cases over TCP;
-the wider conformance corpus checks equality, budgets and both transports.
+original member order and numeric scale, while generated numeric cells compare by value. A fixed
+typed-column trial pins the surviving left and right representatives through Json text and Decimal
+scale (3.00 and 4.50). The same generator runs 96 cases over TCP; the wider conformance corpus
+checks equality, budgets and both transports.
 
 ## ORDER BY null placement (#1730)
 

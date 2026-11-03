@@ -35,7 +35,7 @@ public sealed partial class OqlQueryParser
                         left = new OqlInExpression(left, ParseExpression(4), negated, Span(start, Previous));
                         continue;
                     }
-                    if (Is("SELECT") || IsParenthesizedQuery(expressionOperand: true))
+                    if (Is("SELECT") || IsParenthesizedQuery(expressionOperand: true, requireQueryContinuation: true))
                     {
                         var parenthesis = Previous;
                         var queryStart = Current;

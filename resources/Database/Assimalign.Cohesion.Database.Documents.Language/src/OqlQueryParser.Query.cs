@@ -135,7 +135,7 @@ public sealed partial class OqlQueryParser
         { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("compound query in a nested query position", Profile.Language, query.Location!)); }
     }
 
-    private bool IsParenthesizedQuery(bool expressionOperand = false)
+    private bool IsParenthesizedQuery(bool expressionOperand = false, bool requireQueryContinuation = false)
     {
         int index = _position;
         if (_tokens[index].Type != TokenType.LeftParen) { return false; }
@@ -148,20 +148,23 @@ public sealed partial class OqlQueryParser
         // (SqlQueryParser.SetOperations.cs; PostgreSQL gram.y:15645,15899,15916).
         int nesting = wrappers;
         int remaining = wrappers;
+        // IN keeps the signed-off value-list reading when redundant wrappers alone follow.
+        bool hasQueryContinuation = false;
         for (; index < _tokens.Count - 1; index++)
         {
             if (_tokens[index].Type == TokenType.LeftParen) { nesting++; }
             else if (_tokens[index].Type == TokenType.RightParen && --nesting < remaining)
             {
                 var next = _tokens[index + 1];
-                bool continuation = next.Type is TokenType.RightParen or TokenType.Eof ||
-                    IsWord(next, "UNION") || IsWord(next, "INTERSECT") || IsWord(next, "EXCEPT") ||
+                bool queryContinuation = IsWord(next, "UNION") || IsWord(next, "INTERSECT") || IsWord(next, "EXCEPT") ||
                     IsWord(next, "ORDER") || IsWord(next, "LIMIT") || IsWord(next, "OFFSET");
+                bool continuation = next.Type is TokenType.RightParen or TokenType.Eof || queryContinuation;
                 if (!continuation) { return false; }
-                if (--remaining == 0) { return true; }
+                hasQueryContinuation |= queryContinuation;
+                if (--remaining == 0) { return !requireQueryContinuation || hasQueryContinuation; }
             }
         }
-        return true;
+        return !requireQueryContinuation || hasQueryContinuation;
     }
 
     private bool IsSetOperator() => Is("UNION") || Is("INTERSECT") || Is("EXCEPT");

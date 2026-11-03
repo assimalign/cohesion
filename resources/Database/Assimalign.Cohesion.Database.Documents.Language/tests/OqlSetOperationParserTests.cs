@@ -134,26 +134,120 @@ public sealed class OqlSetOperationParserTests
         diagnostic.Start.ShouldBe(text.IndexOf("[0]", StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Subqueries: redundant query wrappers keep the subquery AST")]
-    public void Parse_RedundantSubqueryWrappers_ShouldRemainQuery()
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Subqueries: two and three redundant wrappers retain the complete subquery span")]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Parse_RedundantSubqueryWrappers_ShouldRemainQuery(int wrappers)
     {
-        // Arrange / Act
-        var statement = Parse("SELECT RAW (((SELECT RAW 1 FROM c))) FROM d");
+        // Arrange
+        string text = "SELECT RAW " + new string('(', wrappers + 1) + "SELECT RAW 1 FROM c" + new string(')', wrappers + 1) + " FROM d";
+        // Act
+        var statement = Parse(text);
         // Assert
         statement.Diagnostics.ShouldBeEmpty();
-        statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Projections.Single().Expression
-            .ShouldBeOfType<OqlSubqueryExpression>().Query.ShouldBeOfType<OqlSelectExpression>().Collection.ShouldBe("c");
+        var subquery = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Projections.Single().Expression
+            .ShouldBeOfType<OqlSubqueryExpression>();
+        var query = subquery.Query.ShouldBeOfType<OqlSelectExpression>();
+        query.Collection.ShouldBe("c");
+        query.IsValue.ShouldBeTrue();
+        query.Projections.Single().Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBeOfType<JsonElement>().GetInt32().ShouldBe(1);
+        subquery.Location!.Start.ShouldBe(text.IndexOf('('));
+        subquery.Location.End.ShouldBe(text.LastIndexOf(')') + 1);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: redundant query wrappers require RAW for membership")]
-    [InlineData("IN")]
-    [InlineData("NOT IN")]
-    public void Parse_ParenthesizedNamedMembership_ShouldRefuseNonRawQuery(string operation)
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: redundant single-query wrappers keep a one-item value list and the item's complete span")]
+    [InlineData(1, "IN", false)]
+    [InlineData(2, "IN", false)]
+    [InlineData(3, "IN", false)]
+    [InlineData(1, "NOT IN", false)]
+    [InlineData(2, "NOT IN", false)]
+    [InlineData(3, "NOT IN", false)]
+    [InlineData(1, "IN", true)]
+    [InlineData(2, "IN", true)]
+    [InlineData(3, "IN", true)]
+    [InlineData(1, "NOT IN", true)]
+    [InlineData(2, "NOT IN", true)]
+    [InlineData(3, "NOT IN", true)]
+    public void Parse_RedundantInSubqueryWrappers_ShouldKeepValueListAndSpan(int wrappers, string operation, bool raw)
+    {
+        // Arrange
+        string text = "SELECT x FROM c WHERE x " + operation + " (" + new string('(', wrappers) + "SELECT " + (raw ? "RAW " : "") + "a FROM d" + new string(')', wrappers) + ")";
+        // Act
+        var statement = Parse(text);
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var membership = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Predicate.ShouldBeOfType<OqlInExpression>();
+        membership.Array.ShouldBeNull();
+        membership.Negated.ShouldBe(operation == "NOT IN");
+        var subquery = membership.Values.ShouldHaveSingleItem().ShouldBeOfType<OqlSubqueryExpression>();
+        var query = subquery.Query.ShouldBeOfType<OqlSelectExpression>();
+        query.Collection.ShouldBe("d");
+        query.IsValue.ShouldBe(raw);
+        query.Projections.Single().Expression.ShouldBeOfType<OqlPathExpression>().Segments.ShouldHaveSingleItem().Name.ShouldBe("a");
+        subquery.Location!.Start.ShouldBe(text.IndexOf('(') + 1);
+        subquery.Location.End.ShouldBe(text.LastIndexOf(')'));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: a parenthesis-led compound retains membership and the nested capability gate")]
+    [InlineData(1, "IN")]
+    [InlineData(2, "IN")]
+    [InlineData(3, "IN")]
+    [InlineData(1, "NOT IN")]
+    [InlineData(2, "NOT IN")]
+    [InlineData(3, "NOT IN")]
+    public void Parse_ParenthesizedCompoundMembership_ShouldRetainArray(int wrappers, string operation)
+    {
+        // Arrange
+        string text = "SELECT x FROM c WHERE x " + operation + " (" + new string('(', wrappers) + "SELECT RAW a FROM d" + new string(')', wrappers) + " UNION SELECT RAW b FROM e)";
+        // Act
+        var statement = Parse(text);
+        // Assert
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        var membership = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Predicate.ShouldBeOfType<OqlInExpression>();
+        membership.Values.ShouldBeEmpty();
+        membership.Negated.ShouldBe(operation == "NOT IN");
+        var subquery = membership.Array.ShouldBeOfType<OqlSubqueryExpression>();
+        var compound = subquery.Query.ShouldBeOfType<OqlSetOperationExpression>();
+        compound.Operation.ShouldBe(OqlSetOperation.Union);
+        compound.Left.ShouldBeOfType<OqlSelectExpression>().Collection.ShouldBe("d");
+        compound.Right.ShouldBeOfType<OqlSelectExpression>().Collection.ShouldBe("e");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: a query tail after a parenthesized term retains membership")]
+    [InlineData("IN", "LIMIT 1")]
+    [InlineData("NOT IN", "OFFSET 1")]
+    public void Parse_ParenthesizedQueryWithTail_ShouldRetainMembershipAndSpan(string operation, string tail)
+    {
+        // Arrange
+        string text = "SELECT x FROM c WHERE x " + operation + " ((SELECT RAW a FROM d) " + tail + ")";
+        // Act
+        var statement = Parse(text);
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var membership = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Predicate.ShouldBeOfType<OqlInExpression>();
+        membership.Values.ShouldBeEmpty();
+        membership.Negated.ShouldBe(operation == "NOT IN");
+        var subquery = membership.Array.ShouldBeOfType<OqlSubqueryExpression>();
+        var query = subquery.Query.ShouldBeOfType<OqlSelectExpression>();
+        query.Collection.ShouldBe("d");
+        (query.Limit ?? query.Offset).ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBeOfType<JsonElement>().GetInt32().ShouldBe(1);
+        subquery.Location!.Start.ShouldBe(text.IndexOf('('));
+        subquery.Location.End.ShouldBe(text.LastIndexOf(')') + 1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: direct named queries require RAW and compounds retain the nested capability gate")]
+    [InlineData("IN", "SELECT a FROM d", "CD00014")]
+    [InlineData("NOT IN", "SELECT a FROM d", "CD00014")]
+    [InlineData("IN", "SELECT a FROM d UNION SELECT b FROM e", "CK00001")]
+    [InlineData("NOT IN", "SELECT a FROM d UNION SELECT b FROM e", "CK00001")]
+    [InlineData("IN", "(SELECT a FROM d) UNION SELECT b FROM e", "CK00001")]
+    [InlineData("NOT IN", "(SELECT a FROM d) UNION SELECT b FROM e", "CK00001")]
+    public void Parse_NamedMembership_ShouldRetainDiagnostic(string operation, string query, string code)
     {
         // Arrange / Act
-        var statement = Parse("SELECT x FROM c WHERE x " + operation + " ((SELECT a FROM d))");
+        var statement = Parse("SELECT x FROM c WHERE x " + operation + " (" + query + ")");
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00014");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Query expressions: the public variant family is closed and has two sealed leaves")]

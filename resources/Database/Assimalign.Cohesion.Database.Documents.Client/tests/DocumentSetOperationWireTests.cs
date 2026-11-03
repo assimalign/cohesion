@@ -60,7 +60,10 @@ public sealed class DocumentSetOperationWireTests
                     ? new[] { DatabaseType.Json, DatabaseType.Decimal } : new[] { DatabaseType.Null, DatabaseType.Null });
                 cells.ShouldBe(expected.Select(value => (value.GetProperty("a").GetRawText(), value.GetProperty("b").GetDecimal())));
                 if (trial == 0 && !all)
-                { cells.ShouldBe(new[] { ("{\"z\":1,\"a\":2}", 3m), ("{\"r\":4,\"q\":5}", 4.5m) }); }
+                {
+                    cells.ShouldBe(new[] { ("{\"z\":1,\"a\":2}", 3m), ("{\"r\":4,\"q\":5}", 4.5m) });
+                    result.Select(row => ((decimal)row[1]!).ToString(CultureInfo.InvariantCulture)).ShouldBe(new[] { "3.00", "4.50" });
+                }
             }
             else
             {

@@ -363,7 +363,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
 | New (#1729, OQ-G2) | CD00012 | Language/syntax — GROUP AS without preceding GROUP BY terms |
 | New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
-| New (#1731, OQ-Q1) | CD00014 | Language/syntax — direct IN subquery requires SELECT RAW or SELECT VALUE |
+| New (#1731, OQ-Q1) | CD00014 | Language/syntax — IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand; nested compounds currently retain CK00001) |
 | New (#1731, OQ-Q2) | CD00015 | Language/syntax — derived FROM subquery has no alias |
 | Retired (#1767) | CD00016 | Reserved — former JOIN/NEST statement-wide explicit-alias requirement |
 | COHDOC002 | CD01002 | Binding/names |

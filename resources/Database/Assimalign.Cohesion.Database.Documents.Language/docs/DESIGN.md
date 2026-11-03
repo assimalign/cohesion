@@ -273,6 +273,8 @@ their separate 128-level expression guard. All nested entry points recognize par
 terms; a deferred operator owns its one CK00001 without an additional nested-position refusal.
 Expression lookahead checks each leading wrapper at its matching close, innermost first, retaining
 scalar operators and IN lists following a parenthesized subquery through redundant nested wrappers.
+IN additionally requires a set operator or query tail after a leading parenthesized term to select
+query membership; redundant wrappers alone retain a one-item value list and no CD00014.
 Array subscripts currently require a named path; a subscript on a subquery result remains CD00002.
 
 The [set-operation dialect](DIALECT.md#set-operations-1803-oq-s1) records value equality, T3-30's
@@ -783,7 +785,9 @@ inside either bound can still group a Boolean expression. CASE is a primary expr
 OqlInExpression retains either a nonempty Values list or an Array expression; even
 `x IN (d.tags)` compares x with the whole array as one structural item. The array operand
 parses above comparison precedence, so `x IN d.tags AND p` is a conjunction. A nested SELECT
-uses the approved RAW/VALUE array operand exception; a non-RAW direct SELECT gives CD00014.
+uses the approved RAW/VALUE array operand exception for a direct SELECT or a compound whose
+first operand is parenthesized; a non-RAW query gives CD00014, subject to the nested-compound
+capability gate.
 The other public nodes are OqlBetweenExpression, OqlLikeExpression and OqlCaseExpression.
 Negated predicates preserve unknown results. Structural equality returns NULL for otherwise equal
 arrays/objects containing NULL, so IN and simple CASE do not match them. A definite structural
@@ -853,7 +857,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
 | `CD00011` | ALL/DISTINCT on a scalar or star call, at the quantifier |
 | `CD00013` | NULLS without FIRST or LAST, at the expected option |
-| `CD00014` | Direct IN subquery requires SELECT RAW or SELECT VALUE |
+| `CD00014` | IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand; nested compounds currently retain CK00001) |
 | `CD00015` | Derived FROM subquery requires an alias |
 | `CD00016` | Retired and reserved: former joined-statement explicit-alias requirement (#1767) |
 | `CD01033` | FROM expression requires an explicit alias or implicit field name |

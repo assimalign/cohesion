@@ -586,7 +586,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD05020` | Shared expression/lookup/set-operation work budget exhausted across nested queries, expression sources, key joins and compounds |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
-| `CD00014` | Direct IN subquery requires RAW/VALUE |
+| `CD00014` | IN subquery requires RAW/VALUE (direct SELECT or compound, including a parenthesized first operand; nested compounds currently retain CK00001) |
 | `CD00015` | Derived FROM subquery requires an alias |
 | `CD00016` | Retired and reserved: former joined-statement explicit-alias requirement (#1767) |
 | `CD01033` | FROM expression has no explicit alias or implicit field name |
@@ -816,10 +816,13 @@ reference, persisted format or wire shape. EXPLAIN records captured names beside
 
 Subqueries preserve zero/multiple-row SQL++ arrays, including RAW/VALUE null normalization and
 object-star preservation (nonobject roots wrap under document). Star deliberately follows this
-engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Direct non-RAW
-IN subqueries retain the conservative CD00014 guard (owner sign-off, 2026-11-02); this is a deliberate
-SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope; inner declarations
-shadow them. Qualified stars outside joined SELECT projections retain their CK00001 refusal.
+engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Non-RAW IN
+subqueries retain the conservative CD00014 guard (owner sign-off, 2026-11-02): a direct SELECT or
+compound query, including a parenthesized first operand, requires RAW/VALUE, subject to the current
+nested-compound CK00001 gate. Redundant wrappers alone keep the value-list interpretation.
+This is a deliberate SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope;
+inner declarations shadow them. Qualified stars outside joined SELECT projections retain their
+CK00001 refusal.
 FROM references to explicit outer aliases use per-row expression scans. Unqualified fields
 otherwise bind to the inner source, as in Couchbase. EXISTS uses
 Couchbase coll_exists.go:40-53; the array
@@ -1055,8 +1058,9 @@ OqlExpression for queries, writes, DDL and transactions. No protocol or persiste
 DocumentSetOperationTests includes a deterministic 384-case generated concatenation/deduplication oracle
 covering RAW values, whole documents with omitted MISSING members, and matching named projections
 with typed columns. Canonical keys choose each first representative; Json cells preserve numeric
-scale and member order, while numeric cells compare by value. A fixed typed-column trial pins both
-left and right representatives. The same seed and generator run 96 cases over TCP. Release guards
+scale and member order, while generated numeric cells compare by value. A fixed typed-column trial
+pins both left and right representatives through Json text and Decimal scale (3.00 and 4.50).
+The same seed and generator run 96 cases over TCP. Release guards
 enforce allocation ceilings for RAW/typed UNION ALL; Debug and Release enforce the same deterministic
 work-counter ceiling for distinct insertion. Execution also covers exactly 128 operators and duplicate
 admission at the measured memory ceiling, with a new-key refusal control and complete release.

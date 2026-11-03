@@ -64,7 +64,11 @@ public sealed class DocumentSetOperationTests
             await foreach (var row in result.GetRowsAsync(CancellationToken.None))
             {
                 if (mode == "columns")
-                { cells.Add((row.GetValue(0).ShouldBeOfType<JsonElement>().GetRawText(), Convert.ToDecimal(row.GetValue(1), CultureInfo.InvariantCulture))); }
+                {
+                    if (trial == 0 && !all)
+                    { ((decimal)row.GetValue(1)!).ToString(CultureInfo.InvariantCulture).ShouldBe(cells.Count == 0 ? "3.00" : "4.50"); }
+                    cells.Add((row.GetValue(0).ShouldBeOfType<JsonElement>().GetRawText(), Convert.ToDecimal(row.GetValue(1), CultureInfo.InvariantCulture)));
+                }
                 else { using var value = JsonDocument.Parse(row.GetBytes(0)); actual.Add(value.RootElement.GetRawText()); }
             }
             // Assert
@@ -93,8 +97,8 @@ public sealed class DocumentSetOperationTests
     [InlineData("SELECT 1 AS a FROM [1] AS x UNION SELECT 1.0 AS a FROM [1] AS y", 1)]
     [InlineData("SELECT RAW {a:1,b:[2]} FROM [1] AS x UNION SELECT b,a FROM [{a:1.0,b:[2.0]}] AS y", 1)]
     [InlineData("SELECT 1 AS a FROM [1] AS x UNION SELECT 1 AS b FROM [1] AS y", 2)]
-    [InlineData("SELECT RAW x FROM [2] AS x WHERE x IN ((SELECT RAW 2 FROM [1] AS seed))", 1)]
-    [InlineData("SELECT RAW x FROM [2,3] AS x WHERE x NOT IN ((SELECT RAW 2 FROM [1] AS seed))", 1)]
+    [InlineData("SELECT RAW x FROM [2] AS x WHERE x IN ((SELECT RAW 2 FROM [1] AS seed))", 0)]
+    [InlineData("SELECT RAW x FROM [2,3] AS x WHERE x NOT IN ((SELECT RAW 2 FROM [1] AS seed))", 2)]
     public async Task ExecuteAsync_EqualityMatrix_ShouldUseValueSemanticsAsync(string text, int expected)
     {
         // Arrange

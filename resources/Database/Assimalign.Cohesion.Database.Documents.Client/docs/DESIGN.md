@@ -97,7 +97,8 @@ remain CK00001 until OQ-S2.
 The deterministic engine oracle also runs its first 16 trials for each RAW/whole-document/typed-column
 and ALL/distinct combination over TCP (96 comparisons). Matching named projections exercise typed
 headers; Json cells preserve first representatives' member order and numeric scale, while numeric
-cells compare by value. A fixed typed-column trial pins which left and right rows supply the cells.
+cells compare by value. A fixed typed-column trial pins which left and right rows supply the cells
+through Json text and Decimal scale (3.00 and 4.50) over TCP.
 
 ## Ordering wire conformance (#1730, #1632)
 
