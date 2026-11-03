@@ -17,11 +17,15 @@ public sealed class StorageCheckpointAttributionDocumentationTests
         // Arrange
         string[] design = File.ReadAllLines(DesignPath());
         string[] engines = ["SQL", "Documents", "Graph", "KeyValuePair", "Blob"];
+        const string header = "| Engine | Deferred holders (count) | Busy refusals | Journal peak (bytes) | Peak / 65,536 | 4× bound (bytes) |";
         // Act / Assert: each measured row retains attribution, refusals and the enforced byte bound.
-        design.ShouldContain("| Engine | Deferred holders (count) | Busy refusals | Journal peak (bytes) | Peak / 65,536 | 4× bound (bytes) |");
+        int table = Array.IndexOf(design, header);
+        table.ShouldBeGreaterThanOrEqualTo(0);
+        var rows = design.Skip(table + 2).TakeWhile(line => line.StartsWith("| ", StringComparison.Ordinal)).ToArray();
+        rows.Length.ShouldBe(engines.Length);
         foreach (string engine in engines)
         {
-            string row = design.Where(line => line.StartsWith($"| {engine} |", StringComparison.Ordinal)).ShouldHaveSingleItem();
+            string row = rows.Where(line => line.StartsWith($"| {engine} |", StringComparison.Ordinal)).ShouldHaveSingleItem();
             string[] cells = row.Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             cells.Length.ShouldBe(6);
             cells[1].ShouldNotBeNullOrWhiteSpace();
