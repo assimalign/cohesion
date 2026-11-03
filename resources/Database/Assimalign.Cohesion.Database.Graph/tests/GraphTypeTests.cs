@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -13,12 +14,84 @@ using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 [Collection(nameof(GraphConcurrencyCollection))]
 public sealed class GraphTypeTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph] - Graph type publication defers and services its checkpoint through catalog apply (#1283, #1806)")]
+    public async Task SetGraphTypeAsync_CatalogWriteInFlight_ShouldDeferAndReleaseCheckpoint()
+    {
+        // Arrange: arm the storage callback after the marker, so the held bracket
+        // belongs to the new graph-type node record rather than a label definition.
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        await using var engine = GraphDatabaseEngine.Create("type-checkpoint", new()
+        {
+            CheckpointJournalSize = 0,
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = await engine.CreateDatabaseAsync("graph", ceiling.Token);
+        await using var session = await database.CreateSessionAsync(ceiling.Token);
+        var schema = GraphSchema.Open(database, session);
+        await schema.GetGraphTypeAsync(ceiling.Token);
+        var storage = database.DataStorage;
+        var source = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Transactions");
+        using var recorder = new EventSourceRecorder(source, EventLevel.Verbose);
+        Action? original = storage.OnCheckpointNeeded;
+        bool serviced = false;
+        database.Catalog.AfterGraphTypeMutation = stage =>
+        {
+            if (stage == "marker")
+            {
+                storage.OnCheckpointNeeded = () =>
+                {
+                    storage.OnCheckpointNeeded = original;
+                    entered.Set();
+                    release.Wait(ceiling.Token);
+                };
+                storage.CheckpointJournalSize = 1;
+            }
+            if (stage == "node:N") { serviced = !storage.IsCheckpointDue(TimeSpan.FromHours(1)); }
+        };
+        var writing = Task.Factory.StartNew(() =>
+            schema.SetGraphTypeAsync(GraphType.Create([GraphNodeType.Create("N")]), ceiling.Token).GetAwaiter().GetResult(),
+            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        try
+        {
+            entered.Wait(ceiling.Token);
+
+            // Act: the worker requests a checkpoint while the physical catalog write holds admission.
+            database.Coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeFalse();
+            release.Set();
+            await writing.WaitAsync(ceiling.Token);
+
+            // Assert: apply disposal serviced the deferred request before returning to publication.
+            serviced.ShouldBeTrue();
+            database.Coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token).ShouldBeTrue();
+            (await schema.GetGraphTypeAsync(ceiling.Token))!.NodeTypes.ShouldHaveSingleItem().IdentifyingLabel.ShouldBe("N");
+            recorder.Events.ShouldContain(e => e.EventId == 21 && Equals(e.Payload![0], (string)storage.Name) &&
+                Equals(e.Payload[1], "Statement"));
+            recorder.Events.ShouldNotContain(e => e.EventId == 0);
+        }
+        finally
+        {
+            release.Set();
+            try { await writing.WaitAsync(ceiling.Token); }
+            finally
+            {
+                database.Catalog.AfterGraphTypeMutation = null;
+                storage.OnCheckpointNeeded = original;
+                storage.CheckpointJournalSize = 0;
+            }
+        }
+    }
+
     private static GraphType PersonType() => GraphType.Create([
         GraphNodeType.Create("Person", ["Entity"], [GraphPropertyType.Create("name", DatabaseType.String, true), GraphPropertyType.Create("age", DatabaseType.Int64)]),
         GraphNodeType.Create("Place")], [GraphEdgeType.Create("VISITS", "Person", "Place", [GraphPropertyType.Create("count", DatabaseType.Int64, true)])]);
