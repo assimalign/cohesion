@@ -30,8 +30,9 @@ COHRES001–004 remain enforced. [Database.Hosting.ApplicationModel](../../Assim
 
 When COHESION_GATEWAY is nonempty, each model server's options snapshot defaults a missing listener from its named runtime endpoint
 (sql, documents, graph, kv or blob); an explicit Listener or Listen(Uri) wins. The common root
-owns that resolution before the model validates its snapshot, because Hosting receives an already
-constructed server. It privately uses Connections.Tcp and shares the stateless binder with
+owns that resolution, because Hosting receives an already constructed server. It runs inside the
+model's validation, after the model's timer checks and the session-limit check, and before the
+missing-listener refusal, so an invalid snapshot never allocates a platform listener. It privately uses Connections.Tcp and shares the stateless binder with
 Database.Tcp. Hosting adds no model reference or public composition seam. See the
 [root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790-en-a1).
 
