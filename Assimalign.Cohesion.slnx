@@ -1686,6 +1686,9 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Storage/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Storage/fixtures/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Storage/fixtures/Assimalign.Cohesion.Database.Storage.FormatProbeFixture/Assimalign.Cohesion.Database.Storage.FormatProbeFixture.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Storage/src/Assimalign.Cohesion.Database.Storage.csproj" />
 	</Folder>
