@@ -212,6 +212,11 @@ internal sealed partial class SqlSchemaProvisioner
                 }
                 finally { EndJointPreparation(preparation); }
             }
+            if (_catalog.PendingMigration is { } jointIntent && jointIntent.Steps.Any(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))
+            {
+                // A route flip must not carry the joint job's total into the ordinary script.
+                await DiscardMismatchedIntentAsync(schema, script.Steps.Count, cancellationToken).ConfigureAwait(false);
+            }
             TraceStage("Prepare", SqlProvisioningCodes.StepFailed, stepCount: script.Steps.Count);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
             var deferred = deferDataScalingSteps ? FindDeferredSteps(script) : [];

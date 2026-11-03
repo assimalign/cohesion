@@ -8941,9 +8941,10 @@ description. CS05060 names the mismatched physical field. Kept columns retain th
 while preserving physical ordinals and facets. Before commit, the index directory refuses any prepared
 key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
 Registered domains are outside the schema hash. A matching interrupted intent is discarded and
-replanned when registration changes switch an ordinary deferred migration to joint, or switch an
-existing joint table between KeepOwner and RewriteOwner. The old schema remains online until the
-new plan publishes. A joint-to-ordinary flip replans the per-step script from the live catalog.
+replanned when registration changes switch between ordinary deferred and joint migration, or switch
+an existing joint table between KeepOwner and RewriteOwner. The old schema remains online until the
+new plan publishes. An ordinary replan uses its new script's step total, even when unrelated DDL
+invalidated the stored schema snapshot and the new script is longer than the recorded joint job.
 Discard ends the current provisioning trace with outcome Restarted and starts mode Replan.
 Joint intents with malformed ownership choices still fail CS06059.
 The lock order is table X -> apply gate -> tree/page latches for building, and snapshot gate -> catalog monitor

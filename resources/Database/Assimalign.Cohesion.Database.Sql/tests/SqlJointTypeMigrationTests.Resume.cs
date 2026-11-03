@@ -89,23 +89,25 @@ public sealed partial class SqlJointTypeMigrationTests
         database.IsOffline.ShouldBeFalse();
     }
 
-    private sealed record OptionalDomainItem(decimal? V);
-    private sealed record RequiredDomainItem(decimal V);
+    private sealed record OptionalDomainItem(decimal? V, decimal? W, decimal? X);
+    private sealed record RequiredDomainItem(decimal V, decimal? W, decimal? X);
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Same-hash ordinary and joint intents replan after domain registration changes (#1777)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task BuildAsync_DomainMigrationKindChanged_ShouldReplanAndKeepRows(bool initiallyJoint)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task BuildAsync_DomainMigrationKindChanged_ShouldReplanAndKeepRows(bool initiallyJoint, bool staleSnapshot)
     {
         // Arrange: NOT NULL is ordinary at scale 2 and joint at scale 1.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         using var release = new ManualResetEventSlim();
         var captured = new TaskCompletionSource<CrashCaptureSqlStorageStrategy>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int recordedSteps = 0;
         SqlSchema Declaration(bool changed) => SqlSchema.Create("typed", schema =>
         {
             schema.AllowDestructiveChanges();
-            if (changed) { schema.Table<RequiredDomainItem>("items", table => table.Column(row => row.V, "native_value")); }
-            else { schema.Table<OptionalDomainItem>("items", table => table.Column(row => row.V, "native_value")); }
+            if (changed) { schema.Table<RequiredDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); }); }
+            else { schema.Table<OptionalDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); }); }
         });
         var targetDeclaration = Declaration(true);
         var target = targetDeclaration.Compile();
@@ -117,7 +119,7 @@ public sealed partial class SqlJointTypeMigrationTests
             var database = await seed.CreateDatabaseAsync("typed", guard.Token);
             await database.ApplySchemaAsync(Declaration(false).Compile(), guard.Token);
             await using var writer = await database.CreateSessionAsync(guard.Token);
-            await writer.ExecuteAsync("INSERT INTO items VALUES(12)", cancellationToken: guard.Token);
+            await writer.ExecuteAsync("INSERT INTO items VALUES(12,13,14)", cancellationToken: guard.Token);
             storage = storage.CaptureDurableImages();
         }
         var first = Builder(storage);
@@ -129,13 +131,23 @@ public sealed partial class SqlJointTypeMigrationTests
             {
                 var intent = database.Catalog.PendingMigration.ShouldNotBeNull();
                 intent.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)).ShouldBe(initiallyJoint);
+                recordedSteps = intent.StepCount;
                 captured.TrySetResult(storage.CaptureDurableImages());
                 release.Wait(token);
             };
             try
             {
                 await database.SchemaProvisioner.ApplyAsync(target, guard.Token, deferDataScalingSteps: true);
-                storage = await captured.Task.WaitAsync(guard.Token);
+                var image = await captured.Task.WaitAsync(guard.Token);
+                if (staleSnapshot)
+                {
+                    // Unrelated DDL is legal while the worker holds only its table locks.
+                    // It makes resume reconstruct every domain column from the live catalog.
+                    await using var unrelated = await database.CreateSessionAsync(guard.Token);
+                    await unrelated.ExecuteAsync("CREATE TABLE unrelated(id INT)", cancellationToken: guard.Token);
+                    image = storage.CaptureDurableImages();
+                }
+                storage = image;
             }
             finally { release.Set(); }
             await WaitDoneAsync(database, guard.Token);
@@ -143,7 +155,7 @@ public sealed partial class SqlJointTypeMigrationTests
 
         // Act: Build opens the crash image with the same target and opposite route.
         var resumedBuilder = Builder(storage);
-        resumedBuilder.Types.Add(SqlType.CreateDomain("native_value", SqlType.Decimal(8, initiallyJoint ? 2 : 1)));
+        resumedBuilder.Types.Add(SqlType.CreateDomain("native_value", SqlType.Decimal(staleSnapshot ? 10 : 8, initiallyJoint ? 2 : 1)));
         resumedBuilder.AddDatabase("typed", declaration => { declaration.Schema(targetDeclaration); declaration.RunMigrationsInline = !initiallyJoint; });
         using var recorder = new Assimalign.Cohesion.Testing.EventSourceRecorder(SqlDatabaseEventSource.Log, System.Diagnostics.Tracing.EventLevel.Informational);
         await using var resumed = await resumedBuilder.BuildAsync(guard.Token);
@@ -152,7 +164,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await DrainReclamationAsync(current, guard.Token);
 
         // Assert.
-        if (!initiallyJoint)
+        if (!initiallyJoint || staleSnapshot)
         {
             recorder.Events.ShouldContain(e => e.EventId == 14 && Equals(e.Payload![5], "Restarted"));
             recorder.Events.ShouldContain(e => e.EventId == 13 && Equals(e.Payload![4], "Replan"));
@@ -163,9 +175,11 @@ public sealed partial class SqlJointTypeMigrationTests
         current.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
         Table(current).Columns[0].IsNullable.ShouldBeFalse();
         Table(current).Columns[0].Type.Scale.ShouldBe(initiallyJoint ? 2 : 1);
+        Table(current).Columns[0].Type.Precision.ShouldBe(staleSnapshot ? 10 : 8);
+        if (staleSnapshot) { current.SchemaProvisioner.LastPlan!.Operations.Count.ShouldBeGreaterThan(recordedSteps); }
         current.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
         await using var reader = await current.CreateSessionAsync(guard.Token);
-        (await RowsAsync(reader, "SELECT v FROM items", guard.Token)).Single()[0].ShouldBe(12m);
+        (await RowsAsync(reader, "SELECT v,w,x FROM items", guard.Token)).Single().ShouldBe(new object?[] { 12m, 13m, 14m });
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - A post-commit publication fault fences storage and leaves durable state to recovery (#1777)")]
