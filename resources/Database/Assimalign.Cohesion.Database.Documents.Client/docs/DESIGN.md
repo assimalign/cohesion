@@ -94,8 +94,10 @@ refusals over InMemory and TCP. Memory/work refusals retain CD05018/CD05020; rol
 subsequent query prove connection reuse. The NativeAOT consumer checks headers, value equality,
 pages and EXPLAIN on both transports. INTERSECT/EXCEPT and compound nested/DML positions
 remain CK00001 until OQ-S2.
-The deterministic engine oracle also runs its first 16 trials for each RAW/named and ALL/distinct
-combination over TCP (64 comparisons), preserving first representatives' numeric scale and member order.
+The deterministic engine oracle also runs its first 16 trials for each RAW/whole-document/typed-column
+and ALL/distinct combination over TCP (96 comparisons). Matching named projections exercise typed
+headers; Json cells preserve first representatives' member order and numeric scale, while numeric
+cells compare by value. A fixed typed-column trial pins which left and right rows supply the cells.
 
 ## Ordering wire conformance (#1730, #1632)
 

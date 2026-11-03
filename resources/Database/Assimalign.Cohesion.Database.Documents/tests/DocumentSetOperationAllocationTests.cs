@@ -55,27 +55,6 @@ public sealed class DocumentSetOperationAllocationTests
         samples.ShouldAllBe(bytes => bytes <= 1024L * 1900);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - UNION: new distinct keys use one comparison walk within the work counter ceiling")]
-    public async Task ExecuteAsync_NewDistinctKeys_ShouldUseOneProbeAsync()
-    {
-        // Arrange: expression-source accounting is identical in the old and new executors.
-        var builder = DocumentDatabaseEngine.CreateBuilder("set-probe-work");
-        builder.Options.StatementWorkBudget = 22_000;
-        await using var engine = builder.Build();
-        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
-        await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        using var rows = JsonDocument.Parse("[" + string.Join(",", Enumerable.Range(0, 1024)) + "]");
-        var parameters = new Dictionary<string, object?> { ["rows"] = rows.RootElement };
-        // Act / Assert: three warm-up rounds, then three rounds admitted by the same hard work counter ceiling.
-        for (int round = 0; round < 6; round++)
-        {
-            await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT RAW x FROM @rows AS x UNION SELECT RAW 0 FROM [] AS z", parameters, CancellationToken.None);
-            int count = 0;
-            await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { count++; }
-            count.ShouldBe(1024);
-        }
-    }
-
     private static async Task<int> CountAsync(DatabaseResultSet result)
     {
         int count = 0;

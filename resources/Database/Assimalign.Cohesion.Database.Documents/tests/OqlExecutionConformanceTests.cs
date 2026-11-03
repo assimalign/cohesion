@@ -266,6 +266,8 @@ public sealed class OqlExecutionConformanceTests
             [
                 new("SELECT name FROM items WHERE category IN ('b', 'z')", [["gamma"]]),
                 new("SELECT name FROM items d WHERE 'green' IN d.tags", [["beta"]]),
+                new("SELECT name FROM items WHERE category IN ((SELECT RAW 'b' FROM [1] AS seed))", [["gamma"]]),
+                new("SELECT name FROM items WHERE category NOT IN ((SELECT RAW 'a' FROM [1] AS seed))", [["gamma"]]),
             ],
             [OqlClauses.Between] =
             [

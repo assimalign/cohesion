@@ -172,11 +172,9 @@ internal static partial class DocumentPlanExecutor
         {
             nested.ConsumeWork(cancellationToken);
             if (seen is null) { return true; }
-            long before = distinctMemory.Bytes;
+            if (!seen.Add(row.Value)) { return false; }
             distinctMemory.Charge(160L + memory.ValueBytes(row.Value));
-            if (seen.Add(row.Value)) { return true; }
-            distinctMemory.Rewind(before);
-            return false;
+            return true;
         }
         SetRow Shape(SetRow row) => plan.Shape == DocumentSetResultShape.Document ? new SetRow(row.Value, [row.Value]) : row;
         async IAsyncEnumerable<SetRow> UnionInputAsync()

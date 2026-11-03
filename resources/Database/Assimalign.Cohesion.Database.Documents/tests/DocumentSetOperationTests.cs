@@ -21,40 +21,67 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 public sealed class DocumentSetOperationTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents] - UNION: a generated concatenation and distinct oracle preserves first representatives")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task ExecuteAsync_GeneratedValues_ShouldMatchOracleAsync(bool all, bool named)
+    [InlineData(false, "raw")]
+    [InlineData(true, "raw")]
+    [InlineData(false, "document")]
+    [InlineData(true, "document")]
+    [InlineData(false, "columns")]
+    [InlineData(true, "columns")]
+    public async Task ExecuteAsync_GeneratedValues_ShouldMatchOracleAsync(bool all, string mode)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("set-oracle", new());
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        bool named = mode != "raw";
         var random = new Random(1803);
         string[] palette = ["null", "true", "false", "1", "1.0", "2", "-1", "1.25", "\"a\"", "[]", "[1,null]", "[1.0,null]", "{}", "{\"a\":1,\"b\":2}", "{\"b\":2.0,\"a\":1.0}"];
         if (named) { palette = ["{}", "{\"a\":null}", "{\"b\":null}", "{\"a\":1}", "{\"a\":1.0}", "{\"a\":1,\"b\":2}", "{\"b\":2.0,\"a\":1.0}", "{\"a\":[1,null],\"b\":{\"x\":2}}", "{\"b\":{\"x\":2.0},\"a\":[1.0,null]}"]; }
+        if (mode == "columns") { palette = ["{\"a\":{\"x\":1,\"y\":2},\"b\":1}", "{\"a\":{\"y\":2.0,\"x\":1.0},\"b\":1.0}", "{\"a\":[1,null],\"b\":-1}", "{\"a\":[1.0,null],\"b\":-1.0}", "{\"a\":{},\"b\":1.25}"]; }
         for (int trial = 0; trial < 64; trial++)
         {
             string[] left = Enumerable.Range(0, random.Next(25)).Select(_ => palette[random.Next(palette.Length)]).ToArray();
             string[] right = Enumerable.Range(0, random.Next(25)).Select(_ => palette[random.Next(palette.Length)]).ToArray();
+            // Pin a left representative, duplicates within/across inputs, then a right representative.
+            if (mode == "columns" && trial == 0)
+            {
+                left = ["{\"a\":{\"z\":1,\"a\":2},\"b\":3.00}", "{\"a\":{\"a\":2.0,\"z\":1.0},\"b\":3}"];
+                right = [left[1], "{\"a\":{\"r\":4,\"q\":5},\"b\":4.50}", "{\"a\":{\"q\":5.0,\"r\":4.0},\"b\":4.5}"];
+            }
             using var a = JsonDocument.Parse("[" + string.Join(",", left) + "]");
             using var b = JsonDocument.Parse("[" + string.Join(",", right) + "]");
             using var projected = JsonDocument.Parse("[" + string.Join(",", a.RootElement.EnumerateArray().Select(value => Project(value, named, false))
-                .Concat(b.RootElement.EnumerateArray().Select(value => Project(value, named, true)))) + "]");
+                .Concat(b.RootElement.EnumerateArray().Select(value => Project(value, named, mode == "document")))) + "]");
             IEnumerable<JsonElement> expected = projected.RootElement.EnumerateArray();
             if (!all) { expected = expected.DistinctBy(Canonical, StringComparer.Ordinal); }
             // Act
-            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT b.b AS b,b.a AS a FROM @b AS b"
+            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a UNION " + (all ? "ALL " : "") + (mode == "columns" ? "SELECT b.a AS a,b.b AS b FROM @b AS b" : "SELECT b.b AS b,b.a AS a FROM @b AS b")
                 : "SELECT RAW a FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT RAW b FROM @b AS b";
             await using var result = (DatabaseResultSet)await session.ExecuteAsync(text,
                 new Dictionary<string, object?> { ["a"] = a.RootElement, ["b"] = b.RootElement }, CancellationToken.None);
             var actual = new List<string>();
+            var cells = new List<(string Json, decimal Number)>();
             await foreach (var row in result.GetRowsAsync(CancellationToken.None))
-            { using var value = JsonDocument.Parse(row.GetBytes(0)); actual.Add(value.RootElement.GetRawText()); }
+            {
+                if (mode == "columns")
+                { cells.Add((row.GetValue(0).ShouldBeOfType<JsonElement>().GetRawText(), Convert.ToDecimal(row.GetValue(1), CultureInfo.InvariantCulture))); }
+                else { using var value = JsonDocument.Parse(row.GetBytes(0)); actual.Add(value.RootElement.GetRawText()); }
+            }
             // Assert
-            result.Columns.Single().Name.ShouldBe(named ? "document" : "value");
-            actual.ToArray().ShouldBe(expected.Select(value => value.GetRawText()).ToArray());
+            if (mode == "columns")
+            {
+                result.Columns.Select(column => column.Name).ShouldBe(new[] { "a", "b" });
+                result.Columns.Select(column => column.Type).ShouldBe(expected.Any()
+                    ? new[] { DatabaseType.Json, DatabaseType.Decimal } : new[] { DatabaseType.Null, DatabaseType.Null });
+                cells.ShouldBe(expected.Select(value => (value.GetProperty("a").GetRawText(), value.GetProperty("b").GetDecimal())));
+                if (trial == 0 && !all)
+                { cells.ShouldBe(new[] { ("{\"z\":1,\"a\":2}", 3m), ("{\"r\":4,\"q\":5}", 4.5m) }); }
+            }
+            else
+            {
+                result.Columns.Single().Name.ShouldBe(named ? "document" : "value");
+                actual.ToArray().ShouldBe(expected.Select(value => value.GetRawText()).ToArray());
+            }
         }
     }
 
@@ -67,6 +94,7 @@ public sealed class DocumentSetOperationTests
     [InlineData("SELECT RAW {a:1,b:[2]} FROM [1] AS x UNION SELECT b,a FROM [{a:1.0,b:[2.0]}] AS y", 1)]
     [InlineData("SELECT 1 AS a FROM [1] AS x UNION SELECT 1 AS b FROM [1] AS y", 2)]
     [InlineData("SELECT RAW x FROM [2] AS x WHERE x IN ((SELECT RAW 2 FROM [1] AS seed))", 1)]
+    [InlineData("SELECT RAW x FROM [2,3] AS x WHERE x NOT IN ((SELECT RAW 2 FROM [1] AS seed))", 1)]
     public async Task ExecuteAsync_EqualityMatrix_ShouldUseValueSemanticsAsync(string text, int expected)
     {
         // Arrange
@@ -243,6 +271,83 @@ public sealed class DocumentSetOperationTests
                 memory.Bytes.ShouldBe(0);
                 return true;
             }, CancellationToken.None);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - UNION: duplicates need no distinct-key headroom")]
+    public async Task ExecuteAsync_DuplicateAtMemoryBoundary_ShouldProbeBeforeChargingAsync()
+    {
+        // Arrange: measure the modeled peak for one key, then leave exactly that much headroom.
+        const long budget = 64 * 1024;
+        var builder = DocumentDatabaseEngine.CreateBuilder("set-duplicate-boundary");
+        builder.Options.StatementMemoryBudget = budget;
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        const string control = "SELECT RAW 1 FROM [1] AS x UNION SELECT RAW 1 FROM [1] AS y WHERE FALSE OFFSET 1000";
+        long peak = await database.RunAsync(session, async operation =>
+        {
+            var memory = operation.GetStatementMemory(CancellationToken.None);
+            await using (var result = (DatabaseResultSet)await DocumentPlanExecutor.ExecuteAsync(database, operation,
+                DocumentQueryRequest.FromOql(control).Statement, null, CancellationToken.None))
+            { (await CountAsync(result)).ShouldBe(0); }
+            memory.Bytes.ShouldBe(0);
+            return memory.PeakBytes;
+        }, CancellationToken.None);
+        peak.ShouldBeLessThan(budget);
+        // Act / Assert: a duplicate fits at the same peak; a new key still refuses and releases.
+        await database.RunAsync(session, async operation =>
+        {
+            var memory = operation.GetStatementMemory(CancellationToken.None);
+            using (var padding = memory.Reserve())
+            {
+                padding.Charge(budget - peak);
+                await using (var result = (DatabaseResultSet)await DocumentPlanExecutor.ExecuteAsync(database, operation,
+                    DocumentQueryRequest.FromOql(control.Replace(" WHERE FALSE", "", StringComparison.Ordinal)).Statement, null, CancellationToken.None))
+                { (await CountAsync(result)).ShouldBe(0); }
+                memory.Bytes.ShouldBe(padding.Bytes);
+                memory.PeakBytes.ShouldBe(budget);
+                var error = await Should.ThrowAsync<DatabaseException>(async () => await DocumentPlanExecutor.ExecuteAsync(database, operation,
+                    DocumentQueryRequest.FromOql(control.Replace("SELECT RAW 1 FROM [1] AS y WHERE FALSE", "SELECT RAW 2 FROM [1] AS y", StringComparison.Ordinal)).Statement,
+                    null, CancellationToken.None));
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05018");
+                memory.Bytes.ShouldBe(padding.Bytes);
+            }
+            memory.Bytes.ShouldBe(0);
+            return true;
+        }, CancellationToken.None);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - UNION ALL: exactly 128 operators execute every operand in order")]
+    public async Task ExecuteAsync_OperatorDepthBoundary_ShouldExecute128OperatorsAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("set-depth", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string text = string.Join(" UNION ALL ", Enumerable.Range(0, 129).Select(index => "SELECT " + index.ToString(CultureInfo.InvariantCulture) + " AS n FROM [1] AS x"));
+        // Act / Assert
+        (await ValuesAsync(session, text)).ShouldBe(Enumerable.Range(0, 129).Select(index => index.ToString(CultureInfo.InvariantCulture)).ToArray());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - UNION: new distinct keys use one comparison walk within the work counter ceiling")]
+    public async Task ExecuteAsync_NewDistinctKeys_ShouldUseOneProbeAsync()
+    {
+        // Arrange: expression-source accounting is identical in the old and new executors.
+        var builder = DocumentDatabaseEngine.CreateBuilder("set-probe-work");
+        builder.Options.StatementWorkBudget = 22_000;
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        using var rows = JsonDocument.Parse("[" + string.Join(",", Enumerable.Range(0, 1024)) + "]");
+        var parameters = new Dictionary<string, object?> { ["rows"] = rows.RootElement };
+        // Act / Assert: the same deterministic work ceiling applies in Debug and Release.
+        for (int round = 0; round < 3; round++)
+        {
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT RAW x FROM @rows AS x UNION SELECT RAW 0 FROM [] AS z", parameters, CancellationToken.None);
+            int count = 0;
+            await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { count++; }
+            count.ShouldBe(1024);
         }
     }
 

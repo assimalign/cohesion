@@ -1025,7 +1025,8 @@ The executor reuses the source pull pipeline. UNION ALL streams each operand wit
 operand-result buffer; local grouping, DISTINCT and ordering retain their own blocking semantics.
 Unordered RAW/typed-column ALL consumers pass cells directly, building a complete JSON row only
 when a parent needs it for equality, ordering or whole-document output. Each distinct insertion
-uses one set probe; a duplicate releases its speculative key reservation.
+uses one set probe before charging a new key; duplicates need no key reservation or size estimate.
+A failed charge aborts the statement, so an uncharged inserted key cannot outlive the refusal.
 UNION keeps first representatives in input order using the existing grouping structural comparator
 on complete row values. Named MISSING members are omitted before comparison; RAW MISSING is NULL.
 Different arity or member order needs no special rejection. The equality set reserves 128 bytes,
@@ -1051,11 +1052,14 @@ SELECT/set family; nested-query and DML-source properties are retyped now but co
 in those positions remains a CK00001 gate for OQ-S2. The mixed statement envelope stays
 OqlExpression for queries, writes, DDL and transactions. No protocol or persisted format changes.
 
-DocumentSetOperationTests includes a deterministic 256-case generated concatenation/deduplication oracle,
-using canonical equality keys while comparing each first representative's original numeric scale
-and member order. Half the cases project named members, including omitted MISSING members;
-the same seed and generator run 64 of these cases over TCP. Release guards enforce allocation
-ceilings for RAW/typed UNION ALL and a work-counter ceiling for distinct insertion over three warmed rounds.
+DocumentSetOperationTests includes a deterministic 384-case generated concatenation/deduplication oracle
+covering RAW values, whole documents with omitted MISSING members, and matching named projections
+with typed columns. Canonical keys choose each first representative; Json cells preserve numeric
+scale and member order, while numeric cells compare by value. A fixed typed-column trial pins both
+left and right representatives. The same seed and generator run 96 cases over TCP. Release guards
+enforce allocation ceilings for RAW/typed UNION ALL; Debug and Release enforce the same deterministic
+work-counter ceiling for distinct insertion. Execution also covers exactly 128 operators and duplicate
+admission at the measured memory ceiling, with a new-key refusal control and complete release.
 Further cases cover NULL/MISSING/numeric/structural equality, independent operand scopes, streaming/empty windows,
 static headers, cancellation and exact budget release. A controlled commit between operands
 proves one statement view under Snapshot and ReadCommitted. Conformance cases and InMemory/TCP wire

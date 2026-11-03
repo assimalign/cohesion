@@ -14,36 +14,59 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentSetOperationWireTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents.Client] - UNION: TCP runs the generated RAW and named-row first-representative oracle")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task QueryAsync_GeneratedValues_ShouldMatchOracleOverTcpAsync(bool all, bool named)
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - UNION: TCP runs the generated RAW document and typed-column first-representative oracle")]
+    [InlineData(false, "raw")]
+    [InlineData(true, "raw")]
+    [InlineData(false, "document")]
+    [InlineData(true, "document")]
+    [InlineData(false, "columns")]
+    [InlineData(true, "columns")]
+    public async Task QueryAsync_GeneratedValues_ShouldMatchOracleOverTcpAsync(bool all, string mode)
     {
         // Arrange: the first 16 trials of the engine's 64-trial generator, with the same seed.
         await using var harness = await DocumentClientTestHarness.StartAsync(tcp: true);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        bool named = mode != "raw";
         var random = new Random(1803);
         string[] palette = ["null", "true", "false", "1", "1.0", "2", "-1", "1.25", "\"a\"", "[]", "[1,null]", "[1.0,null]", "{}", "{\"a\":1,\"b\":2}", "{\"b\":2.0,\"a\":1.0}"];
         if (named) { palette = ["{}", "{\"a\":null}", "{\"b\":null}", "{\"a\":1}", "{\"a\":1.0}", "{\"a\":1,\"b\":2}", "{\"b\":2.0,\"a\":1.0}", "{\"a\":[1,null],\"b\":{\"x\":2}}", "{\"b\":{\"x\":2.0},\"a\":[1.0,null]}"]; }
+        if (mode == "columns") { palette = ["{\"a\":{\"x\":1,\"y\":2},\"b\":1}", "{\"a\":{\"y\":2.0,\"x\":1.0},\"b\":1.0}", "{\"a\":[1,null],\"b\":-1}", "{\"a\":[1.0,null],\"b\":-1.0}", "{\"a\":{},\"b\":1.25}"]; }
         for (int trial = 0; trial < 16; trial++)
         {
             string[] left = Enumerable.Range(0, random.Next(25)).Select(_ => palette[random.Next(palette.Length)]).ToArray();
             string[] right = Enumerable.Range(0, random.Next(25)).Select(_ => palette[random.Next(palette.Length)]).ToArray();
+            // Pin a left representative, duplicates within/across inputs, then a right representative.
+            if (mode == "columns" && trial == 0)
+            {
+                left = ["{\"a\":{\"z\":1,\"a\":2},\"b\":3.00}", "{\"a\":{\"a\":2.0,\"z\":1.0},\"b\":3}"];
+                right = [left[1], "{\"a\":{\"r\":4,\"q\":5},\"b\":4.50}", "{\"a\":{\"q\":5.0,\"r\":4.0},\"b\":4.5}"];
+            }
             using var a = JsonDocument.Parse("[" + string.Join(",", left) + "]");
             using var b = JsonDocument.Parse("[" + string.Join(",", right) + "]");
             using var projected = JsonDocument.Parse("[" + string.Join(",", a.RootElement.EnumerateArray().Select(value => Project(value, named, false))
-                .Concat(b.RootElement.EnumerateArray().Select(value => Project(value, named, true)))) + "]");
+                .Concat(b.RootElement.EnumerateArray().Select(value => Project(value, named, mode == "document")))) + "]");
             IEnumerable<JsonElement> expected = projected.RootElement.EnumerateArray();
             if (!all) { expected = expected.DistinctBy(Canonical, StringComparer.Ordinal); }
-            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT b.b AS b,b.a AS a FROM @b AS b"
+            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a UNION " + (all ? "ALL " : "") + (mode == "columns" ? "SELECT b.a AS a,b.b AS b FROM @b AS b" : "SELECT b.b AS b,b.a AS a FROM @b AS b")
                 : "SELECT RAW a FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT RAW b FROM @b AS b";
             // Act
             var result = await connection.QueryAsync(text, new Dictionary<string, object?> { ["a"] = a.RootElement, ["b"] = b.RootElement }, harness.Token);
-            // Assert: canonical keys choose equality; the comparison retains original numeric scale and member order.
-            result.Columns.Single().Name.ShouldBe(named ? "document" : "value");
-            result.Documents.Select(value => value.GetRawText()).ShouldBe(expected.Select(value => value.GetRawText()));
+            // Assert: canonical keys choose equality; JSON keeps member order and numeric cells compare by value.
+            if (mode == "columns")
+            {
+                var cells = result.Select(row => (row[0].ShouldBeOfType<JsonElement>().GetRawText(), Convert.ToDecimal(row[1], CultureInfo.InvariantCulture))).ToArray();
+                result.Columns.Select(column => column.Name).ShouldBe(new[] { "a", "b" });
+                result.Columns.Select(column => column.Type).ShouldBe(expected.Any()
+                    ? new[] { DatabaseType.Json, DatabaseType.Decimal } : new[] { DatabaseType.Null, DatabaseType.Null });
+                cells.ShouldBe(expected.Select(value => (value.GetProperty("a").GetRawText(), value.GetProperty("b").GetDecimal())));
+                if (trial == 0 && !all)
+                { cells.ShouldBe(new[] { ("{\"z\":1,\"a\":2}", 3m), ("{\"r\":4,\"q\":5}", 4.5m) }); }
+            }
+            else
+            {
+                result.Columns.Single().Name.ShouldBe(named ? "document" : "value");
+                result.Documents.Select(value => value.GetRawText()).ShouldBe(expected.Select(value => value.GetRawText()));
+            }
         }
     }
 

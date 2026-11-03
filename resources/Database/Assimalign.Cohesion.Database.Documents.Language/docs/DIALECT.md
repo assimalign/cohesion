@@ -863,8 +863,10 @@ The pinned grammar is [dql.ebnf:12-32](https://github.com/couchbaselabs/docs-dev
 equal precedence is [n1ql.y:387](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/parser/n1ql/n1ql.y#L387).
 OqlSetOperationParserTests, DocumentSetOperationTests, OqlExecutionConformanceTests,
 DocumentSetOperationWireTests and the NativeAOT guard cover this contract, including a deterministic
-256-case concatenation/deduplication oracle over RAW values and named members, comparing original
-first representatives after canonical-key deduplication. The same generator runs 64 cases over TCP;
+384-case concatenation/deduplication oracle over RAW values, whole documents and matching named
+projections with typed columns. Canonical keys choose the first representative; Json cells retain
+original member order and numeric scale, while numeric cells compare by value. A fixed typed-column
+trial pins the surviving left and right representatives. The same generator runs 96 cases over TCP;
 the wider conformance corpus checks equality, budgets and both transports.
 
 ## ORDER BY null placement (#1730)
