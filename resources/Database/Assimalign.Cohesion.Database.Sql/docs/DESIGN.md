@@ -8953,6 +8953,8 @@ canceled admission installs none, and a failed transaction removes this attempt'
 current descriptions on the read fast path. Weak keys cannot retain table histories forever.
 Publication checks physical layout, exact types and ObjectId under the catalog lock for every kept
 description. CS05060 names the mismatched physical field and, for a column-level mismatch, its column.
+Layout refusals distinguish a joint kept table from a generic ALTER replacement; both preserve
+the published layout and retain CS05060.
 Kept columns retain their declared spelling while preserving physical ordinals and facets.
 Before commit, the index directory refuses any prepared
 key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
