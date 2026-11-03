@@ -158,10 +158,7 @@ extension cannot. Directions still must all match or all reverse.
 Equal ordering keys have unspecified tie order; use a unique final key to pin paginated row identity.
 
 Costing credits the avoided sort and top-N work against random base-row fetches; a large full
-ordered scan can lose to heap-scan-plus-sort. The default nullable-index corpus captures 35 ORDER BY/pagination results before and after
-index creation for each of four effective orders (140 identical results). LIMIT 10 visits ten heap
-rows in either matching direction; live catalog reconstruction and SDK scripts plan zero index
-rebuilds for v12 defaults. Both directions retain the statement's MVCC snapshot
+ordered scan can lose to heap-scan-plus-sort. Both directions retain the statement's MVCC snapshot
 and full WHERE check. Non-DISTINCT LIMIT/OFFSET stops after enough qualifying entries; DISTINCT
 consumes all candidates before duplicate elimination. Subqueries, volatile projections, recursive
 queries, joins, grouping, windows and JSON ordering retain their existing sort path. EXPLAIN
@@ -1936,7 +1933,7 @@ introduced the Joint/ kind-9 meaning. Every earlier format is refused (#1152).
 Compiled-schema v12 remains current; record encodings and wire messages are unchanged.
 SQL format 27 introduced the per-column TYPE default-assignment flag in table extension 7; older files
 refuse without an upgrade reader. Compiled-schema v8 was unchanged by SQ-A.
-The current compiled-schema v12 remains unchanged by SQ-A3.
+Compiled-schema v11 was unchanged by SQ-A3.
 CS02064 names a missing assignment pathway for the value, USING result or default (42804).
 Reference anchors: PostgreSQL tablecmds.c:14949-14998,15142-15199,15269-15304,15612-15624 and
 utils/adt/varchar.c:620-648 in the local clone.
@@ -3605,7 +3602,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
 | `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`; update and delete rules report the stored `RESTRICT`, `CASCADE`, `NO ACTION`, `SET NULL` or `SET DEFAULT` action. Omitted SQL actions default to `NO ACTION` |
 | `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Explicit checks; `CHECK_CLAUSE` is the persisted canonical predicate (see [Persisted definitions are canonical](#persisted-definitions-are-canonical)) |
-| `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY`, `PREDICATE` | Cohesion extension: one row per index key column |
+| `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY`, `PREDICATE`, `DIRECTION`, `NULL_PLACEMENT` | Cohesion extension: one row per index key column; DIRECTION is DESC or NULL; NULL_PLACEMENT is LAST only for ASC NULLS LAST, FIRST only for DESC NULLS FIRST, otherwise NULL |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table, view or index; `OWNER` is `Adhoc` or `Schema` |
 | `COHESION_SCHEMA.FUNCTIONS` | `FUNCTION_NAME`, `FUNCTION_KIND`, `PARAMETER_TYPES`, `PARAMETER_COUNT`, `RETURN_TYPE`, `VOLATILITY`, `NULL_BEHAVIOR`, `IS_BUILT_IN`, `IS_SQL_DEFINED` | Cohesion extension (E2): one row per function overload of the engine's catalog, built-ins first in registration order, then one row per special form. `FUNCTION_KIND` is `SCALAR`, `AGGREGATE` or `SPECIAL FORM`; `PARAMETER_TYPES` lists the parameter types (`TEXT ...` for a variadic tail, `*` for an aggregate called as `name(*)`, empty for none); `VOLATILITY` is `IMMUTABLE`, `STABLE` or `VOLATILE` for a scalar and NULL for an aggregate, which is never folded or admitted in a CHECK; `NULL_BEHAVIOR` is `RETURNS NULL ON NULL INPUT` or `CALLED ON NULL INPUT`. A special form's type, count, volatility and NULL-behavior columns are NULL. Native rows are frozen at engine build; SQL-defined rows come from the statement catalog image |
 | `COHESION_SCHEMA.TYPES` | `TYPE_NAME`, `BASE_TYPE`, `IS_DOMAIN`, `IS_SQL_DEFINED` | Native types and domains plus SQL domains in the catalog image |
@@ -3945,7 +3942,7 @@ also records extraction NULL and negative-index behavior.
 
 SQL format 33 fences the new contextual function names and quoted ordinary-call
 rendering. Format 32 and earlier files are refused before expression loading; compiled
-schema v12 and JSONB storage bytes are unchanged. Quoted names such as `"json_value"`
+schema v11 and JSONB storage bytes were unchanged. Quoted names such as `"json_value"`
 remain ordinary function calls (PostgreSQL gram.y:16017-16027,16576-16633).
 
 The three contextual functions are measured profile clauses. Their names and clause

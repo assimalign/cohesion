@@ -314,7 +314,7 @@ only its metadata floor, as SQL DESIGN and DIALECT.md specify.
 The owner-keeping conformance corpus (#1777) covers index/constraint-only tables within those
 plans: unpublished trees, current-row constraint checks and atomic mixed publication share the
 same executor in Build and ApplySchemaAsync. SQL format 35 fences physical tree ownership;
-grammar, AST and compiled-schema v12 are unchanged.
+grammar, AST and compiled-schema v11 were unchanged.
 
 ## TRUNCATE (#1716, SQ-T1)
 

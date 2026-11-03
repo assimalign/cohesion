@@ -1,5 +1,10 @@
 # Assimalign.Cohesion.Database.Documents.Language — Design
 
+## Path navigation boundary (#1817)
+
+Array subscripts attach to named paths today. DIALECT's precedence table describes that
+boundary; direct postfix subscripts on parenthesized expressions and subqueries remain #1817.
+
 ## Savepoint grammar and rendering (#1726, XT-4)
 
 OqlTransactionExpression carries the parser-owned decoded SavepointName and canonical quoted

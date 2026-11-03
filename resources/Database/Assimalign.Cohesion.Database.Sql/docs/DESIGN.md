@@ -179,6 +179,8 @@ AscendingNullsLast = 1, DescendingNullsFirst = 2 and DescendingNullsLast = 3; bi
 LAST and bit 1 means DESC. Null and zero-filled key vectors, PRIMARY KEY and UNIQUE-constraint
 indexes use ASC NULLS FIRST. Format 35 and earlier databases and v11 and earlier artifacts are
 refused through the existing recovered read-only gate before any write; no upgrade is added.
+A format-35 refusal preserves every file byte for byte on both clean and crash opens,
+including repeated refusals after disposing the engine (#1744).
 
 All maintenance, build, rewrite, conflict and undo paths use the same key transform. Direction
 never changes key equality; creation-order arbitration and the existing partial-index NULL-key
@@ -206,6 +208,10 @@ Malformed persisted order vectors retain CS06059; unsupported index extensions r
 earlier SQL data-storage formats retain CS06041. Constraint key options retain CS00003.
 
 ## ORDER BY from index order (#1631, SQ-K3)
+
+SQ-K4 preserves query results identically up to tie order (Sql.Language DIALECT, index ordering).
+Equal ordering keys have unspecified tie order; complete tie groups retain the same multiset
+of rows under forward and backward scans, including NULL keys.
 
 Single-table SELECT compares bound source columns (including pass-through aliases and ordinals)
 with a contiguous prefix of the index suffix after equality-bound leading columns (including IS NULL). Every requested
@@ -8284,8 +8290,8 @@ Domain base types and function parameter/result type text retain CHAR(n), and re
 restores padding and comparison semantics. String and Character both accept collations.
 SQL record-space format **12** supersedes 11 because CHAR index equality now ignores trailing
 spaces. Catalog records retain their existing shapes; no old-format reader is added.
-Applied/pending compiled documents use **cohesion/database-schema/v12**, shared with the SDK;
-v6 and earlier documents are refused before hashes are compared. Rebuild artifacts and recreate
+Applied/pending compiled documents advanced to **cohesion/database-schema/v6** in #1437, shared with the SDK;
+v5 and earlier documents were refused before hashes were compared. Rebuild artifacts and recreate
 databases. INFORMATION_SCHEMA.COLUMNS reports CHARACTER with length; the COHESION_SCHEMA type,
 domain and function views expose CHAR(n) through their existing name/signature columns.
 
@@ -8624,7 +8630,7 @@ Typed-schema worker handoff and joint crash/wire convergence are described in SQ
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 36); earlier SQL files are refused without an upgrade reader. Compiled-schema v12, dense row encoding,
+(format 28 added sequence records; the current format is 36); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -8929,6 +8935,10 @@ and the worker use this same metadata classification. The joint X-lock protocol 
 owned sequences, then every touched table, in ascending identity order, through publication.
 The existing 49a index build also takes table X; SQ-A5 should retain this lock matrix.
 
+Index comparison includes every effective key-order value. A direction-only or NULL-placement-only
+change rebuilds an independently owned tree while retaining its heap; joint TYPE rewrites use
+the same compiled-to-catalog key-order mapping (#1787).
+
 Kept heaps preserve their dropped physical ordinals, frozen missing values, identity metadata
 and default-assignment flags. Retained published trees are reused. New or same-name replacement
 trees build through the deferred 64-version index builder with original row locations and MVCC
@@ -8953,6 +8963,8 @@ canceled admission installs none, and a failed transaction removes this attempt'
 current descriptions on the read fast path. Weak keys cannot retain table histories forever.
 Publication checks physical layout, exact types and ObjectId under the catalog lock for every kept
 description. CS05060 names the mismatched physical field and, for a column-level mismatch, its column.
+Layout refusals distinguish a joint kept table from a generic ALTER replacement; both preserve
+the published layout and retain CS05060.
 Kept columns retain their declared spelling while preserving physical ordinals and facets.
 Before commit, the index directory refuses any prepared
 key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
@@ -9153,7 +9165,7 @@ pending chunk in the same transaction. Open validates the envelope and ordering,
 gates the target document's format before checking its hash or resuming. Catalog persistence knows no SQL executor,
 worker, or hosting lifecycle.
 
-The compiled document is now `cohesion/database-schema/v12` (#1108), matching Sdk.Database.
+The compiled document advanced to `cohesion/database-schema/v7` in #1108, matching Sdk.Database.
 Applied-schema records (kind 6) and pending targets (kind 9) both retain the complete versioned
 document, so their field layout does not change. The SQL record-space gate is now 20 (#1121).
 SQL checks those document formats before opening

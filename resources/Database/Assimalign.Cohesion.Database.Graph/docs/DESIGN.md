@@ -2,6 +2,10 @@
 
 ## Open graph types (#1806, GQ-T1)
 
+Graph-type marker, node and edge publication and tombstones reuse the catalog SaveAsync/DeleteAsync
+helpers. Each physical write enters the data coordinator's checkpoint interlock; its release
+services a deferred checkpoint before another write is admitted (#1283).
+
 GraphType, GraphNodeType, GraphEdgeType and GraphPropertyType are sealed, immutable public
 declarations beside GraphSchema in the Graph namespace. Their immutable internal catalog
 declarations own validation and persistence; the engine projects them into public API values.

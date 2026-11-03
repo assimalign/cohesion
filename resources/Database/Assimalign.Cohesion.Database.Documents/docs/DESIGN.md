@@ -1031,6 +1031,12 @@ cover values, nested scopes, grouping, registered calls, cancellation and both t
 
 #### Set-operation execution (#1803, OQ-S1)
 
+Every supported compound operand retains standalone implicit-source alias and nested-subquery
+correlation rules, including explicit-alias capture versus an independent collection read.
+Index DDL still refuses element-rooted relative paths with CD03027, and VALUES subqueries still
+refuse unbound destination capture with CD01036; compounds in those deferred query positions
+retain CK00001 until OQ-S2 (#1767).
+
 DocumentSetOperationPlan binds two independent query plans and chooses T3-30's result shape
 before document reads: all RAW/VALUE leaves give `value`; identical ordered named projections
 give typed columns; otherwise the existing whole-document mode gives one `document` Json column.

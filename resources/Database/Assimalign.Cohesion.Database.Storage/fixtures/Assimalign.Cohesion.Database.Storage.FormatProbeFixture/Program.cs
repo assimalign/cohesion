@@ -100,8 +100,8 @@ internal static class Program
         if (model == "Sql")
         {
             var catalog = SqlStorage.Open(Open("catalog", ".dat"), Open("catalog", ".log"), Open("catalog", ".bak"), checkpointOnOpen: false);
-            if (legacy || mode == "format34-owner")
-            { await SqlCatalog.Open(catalog).SetRecordSpaceFormatVersionAsync(mode == "format34-owner" ? 34 : 33, CancellationToken.None); }
+            if (legacy || mode is "format34-owner" or "format35")
+            { await SqlCatalog.Open(catalog).SetRecordSpaceFormatVersionAsync(mode == "format34-owner" ? 34 : mode == "format35" ? 35 : 33, CancellationToken.None); }
             LeaveUncommitted(catalog, "catalog");
             dataSet = "sql";
             storage = SqlStorage.Open(Open(dataSet, ".dat"), Open(dataSet, ".log"), Open(dataSet, ".bak"), checkpointOnOpen: false);

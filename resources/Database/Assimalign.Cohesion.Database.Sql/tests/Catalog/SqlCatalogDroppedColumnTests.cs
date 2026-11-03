@@ -136,9 +136,12 @@ public sealed class SqlCatalogDroppedColumnTests
             Replacement([current.Columns[0], current.Columns[1]], [2]),
         })
         {
-            (await Should.ThrowAsync<SqlCatalogException>(async () =>
-                await catalog.PublishTableAsync(renumbered, [], [], replaceExisting: true)))
-                .Message.ShouldContain("does not keep the physical column layout");
+            var failure = await Should.ThrowAsync<SqlCatalogException>(async () =>
+                await catalog.PublishTableAsync(renumbered, [], [], replaceExisting: true));
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05060");
+            failure.Message.ShouldStartWith("Replacement table 'dbo.t' must preserve existing physical column names, ordinals and dropped ordinals");
+            failure.Message.ShouldNotContain("Kept table", Case.Sensitive);
+            failure.Message.ShouldContain("does not keep the physical column layout");
             catalog.TryGetTable("dbo", "t", out var unchanged).ShouldBeTrue();
             unchanged.ShouldBeSameAs(current);
         }

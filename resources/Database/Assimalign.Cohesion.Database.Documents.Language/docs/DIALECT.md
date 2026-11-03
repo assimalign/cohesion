@@ -119,7 +119,7 @@ all of that tier. ESCAPE is a suffix of LIKE and parses its value with the same 
 
 | Precedence | Operators | Grouping |
 | --- | --- | --- |
-| 1 | Path member and array navigation: . and [] | Left |
+| 1 | Named-path member and array navigation: . and [] | Left |
 | 2 | Unary + and - | Right |
 | 3 | * / % | Left |
 | 4 | + - | Left |
@@ -130,6 +130,10 @@ all of that tier. ESCAPE is a suffix of LIKE and parses its value with the same 
 | 9 | NOT | Right |
 | 10 | AND | Left |
 | 11 | OR | Left |
+
+Subscripts currently require a named path. Applying [] directly to a parenthesized expression
+or subquery is deferred to [#1817](https://github.com/assimalign/cohesion/issues/1817); bind the
+value to a name before subscripting it.
 
 The string operator &#124;&#124; is an addition in #1731 and uses the existing CONCAT function
 and its literal-kind validation. Two strings concatenate; MISSING wins over NULL, NULL propagates,
