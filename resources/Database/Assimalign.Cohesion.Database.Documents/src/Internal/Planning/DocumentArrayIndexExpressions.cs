@@ -11,10 +11,10 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 // The language assembly owns syntax; only the engine binds it to catalog-owned values.
 internal static class DocumentArrayIndexExpressions
 {
-    internal static DocumentIndexKey BindKey(OqlExpression expression, string? sourceName = null)
+    internal static DocumentIndexKey BindKey(OqlExpression expression)
     {
         if (expression is OqlPathExpression scalar)
-        { return DocumentIndexKey.Scalar(Path(scalar, sourceName)); }
+        { return DocumentIndexKey.Scalar(Path(scalar)); }
         if (expression is not OqlComprehensionExpression { IsFirst: false, Collection: OqlPathExpression source } array)
         { throw new DocumentPlanningException("CD03027", ErrorMessages.ArrayIndexExpressionInvalid, expression.Location); }
         if (string.IsNullOrEmpty(array.Variable))
@@ -22,15 +22,15 @@ internal static class DocumentArrayIndexExpressions
         string projection = RelativePath(array.Projection, array.Variable);
         DocumentIndexPredicate? when = null;
         if (array.Predicate is not null) { when = BindPredicate(array.Predicate, array.Variable); }
-        return DocumentIndexKey.DistinctArray(Path(source, sourceName), projection, when);
+        return DocumentIndexKey.DistinctArray(Path(source), projection, when);
     }
 
-    private static string Path(OqlPathExpression path, string? sourceName = null)
+    private static string Path(OqlPathExpression path)
     {
         if (path.Segments.Count == 0 || path.Segments.Any(segment =>
             (segment.Name is null) == (segment.Index is null) || segment.Index < 0))
         { throw new DocumentPlanningException("CD03027", ErrorMessages.ArrayIndexExpressionInvalid, path.Location); }
-        return DocumentPlanner.IndexPath(path, sourceName)
+        return DocumentPlanner.IndexPath(path, null)
             ?? throw new DocumentPlanningException("CD03027", ErrorMessages.ArrayIndexExpressionInvalid, path.Location);
     }
 

@@ -355,9 +355,9 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.CreateIndex] =
             [
-                new("CREATE INDEX qualified ON items (items.amount)", [["amount"]],
+                new("CREATE INDEX document_relative ON items (items.amount)", [["items.amount"]],
                     VerificationStatement: "SELECT PATH FROM COHESION_SCHEMA.INDEXES"),
-                new("CREATE INDEX self_named ON items (items.items.amount)", [["\"items\".items.amount"]],
+                new("CREATE INDEX self_named ON items (items.amount)", [["items.amount"]],
                     ["UPDATE items SET items.items = {amount:99}"],
                     "SELECT PATH FROM COHESION_SCHEMA.INDEXES"),
                 new("CREATE INDEX inclusive ON items (amount INCLUDE MISSING)", [["amount INCLUDE MISSING", true]],

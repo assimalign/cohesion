@@ -64,7 +64,7 @@ public sealed class DocumentImplicitAliasFixTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE COLLECTION items", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('a', {g:1,items:{g:9}})", cancellationToken: CancellationToken.None);
-        if (indexed) { await session.ExecuteAsync("CREATE INDEX ix ON items(items.items.g)", cancellationToken: CancellationToken.None); }
+        if (indexed) { await session.ExecuteAsync("CREATE INDEX ix ON items(items.g)", cancellationToken: CancellationToken.None); }
         // Act
         var result = await session.ExecuteAsync("UPDATE items SET g = 5 WHERE items.g = 1" +
             (nested ? " AND EXISTS (SELECT RAW 1 FROM [1] AS s)" : ""), cancellationToken: CancellationToken.None);
@@ -93,12 +93,13 @@ public sealed class DocumentImplicitAliasFixTests
         rows.ShouldContain(row => row.GetString(2) == "IndexSeek" && row.GetString(4) == "by_status");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Implicit aliases: index DDL normalizes root and self-named field keys")]
-    [InlineData("items.g", "items.g = 1", "g", "a")]
-    [InlineData("items.items.g", "items.items.g = 9", "\"items\".items.g", "a")]
-    [InlineData("DISTINCT ARRAY v FOR v IN items.tags END", "ANY v IN items.tags SATISFIES v = 'x' END", "DISTINCT ARRAY v FOR v IN \"tags\" END", "a")]
-    [InlineData("DISTINCT ARRAY v FOR v IN items.items.tags END", "ANY v IN items.items.tags SATISFIES v = 'z' END", "DISTINCT ARRAY v FOR v IN \"items\".items.tags END", "a")]
-    public async Task ExecuteAsync_QualifiedIndexDdl_ShouldNormalizeStoredKeysAsync(string key, string predicate, string canonical, string expected)
+    [Theory(DisplayName = "Cohesion Test [Documents] - Implicit aliases: index DDL keeps keys relative to the document")]
+    [InlineData("g", "items.g = 1", "g", "a")]
+    [InlineData("items.g", "items.items.g = 9", "items.g", "a")]
+    [InlineData("['items'].g", "items.items.g = 9", "items.g", "a")]
+    [InlineData("DISTINCT ARRAY v FOR v IN tags END", "ANY v IN items.tags SATISFIES v = 'x' END", "DISTINCT ARRAY v FOR v IN \"tags\" END", "a")]
+    [InlineData("DISTINCT ARRAY v FOR v IN items.tags END", "ANY v IN items.items.tags SATISFIES v = 'z' END", "DISTINCT ARRAY v FOR v IN \"items\".tags END", "a")]
+    public async Task ExecuteAsync_DocumentRelativeIndexDdl_ShouldPreserveStoredKeysAsync(string key, string predicate, string canonical, string expected)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("index-ddl-alias", new());
@@ -164,7 +165,7 @@ public sealed class DocumentImplicitAliasFixTests
             "SELECT RAW META().id FROM items JOIN tags ON META(tags).id = 'x'", cancellationToken: CancellationToken.None));
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD01035");
-        error.Diagnostics[0].Message!.ShouldContain("explicit receiver argument", Case.Sensitive);
+        error.Diagnostics[0].Message!.ShouldContain("receiver naming a FROM, JOIN or NEST source, and id or version", Case.Sensitive);
         (await DocumentSubqueryTests.RowsAsync(session, "SELECT RAW META(items).id FROM items JOIN tags ON META(tags).id = 'x'"))
             .ShouldHaveSingleItem().GetString(0).ShouldBe("a");
     }
@@ -213,11 +214,15 @@ public sealed class DocumentImplicitAliasFixTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Implicit aliases: VALUES subqueries cannot capture a destination without a source row")]
-    [InlineData("INSERT", "", "items.g")]
-    [InlineData("UPSERT", "", "items.g")]
-    [InlineData("INSERT", " AS d", "d.g")]
-    [InlineData("UPSERT", " AS d", "META(d).id")]
-    [InlineData("INSERT", "", "(SELECT RAW items.g FROM [1] AS t)")]
+    [InlineData("INSERT", "", "(SELECT RAW items.g FROM [1] AS s)")]
+    [InlineData("UPSERT", "", "(SELECT RAW items.g FROM [1] AS s)")]
+    [InlineData("INSERT", " AS d", "(SELECT RAW d.g FROM [1] AS s)")]
+    [InlineData("UPSERT", " AS d", "(SELECT RAW META(d).id FROM [1] AS s)")]
+    [InlineData("INSERT", "", "(SELECT RAW (SELECT RAW items.g FROM [1] AS t) FROM [1] AS s)")]
+    [InlineData("INSERT", " AS d", "(SELECT RAW COUNT(*) FROM d)")]
+    [InlineData("UPSERT", " AS d", "(SELECT RAW COUNT(*) FROM d)")]
+    [InlineData("INSERT", " AS d", "(SELECT RAW (SELECT RAW COUNT(*) FROM d) FROM [1] AS s)")]
+    [InlineData("UPSERT", " AS d", "(SELECT RAW (SELECT RAW COUNT(*) FROM d) FROM [1] AS s)")]
     public async Task ExecuteAsync_ValuesDestinationCapture_ShouldRefuseDuringPlanningAsync(string verb, string alias, string value)
     {
         // Arrange
@@ -225,9 +230,10 @@ public sealed class DocumentImplicitAliasFixTests
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await SeedAsync(session);
+        await session.ExecuteAsync("CREATE COLLECTION d", cancellationToken: CancellationToken.None);
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(verb + " INTO items" + alias +
-            " (KEY, VALUE) VALUES ('k', {v:(SELECT RAW " + value + " FROM [1] AS s)})", cancellationToken: CancellationToken.None));
+            " (KEY, VALUE) VALUES ('k', {v:" + value + "})", cancellationToken: CancellationToken.None));
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD01036");
         error.Diagnostics[0].Start.ShouldNotBeNull();
@@ -253,6 +259,28 @@ public sealed class DocumentImplicitAliasFixTests
         var rows = await DocumentSubqueryTests.RowsAsync(session, "SELECT RAW items.v FROM items WHERE META().id = 'k'");
         if (expected is int number) { rows.ShouldHaveSingleItem().GetValue(0).ShouldBe((decimal)number); }
         else { rows.ShouldHaveSingleItem().GetValue(0).ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("[7]"); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Implicit aliases: direct VALUES paths keep their context diagnostic beside subqueries")]
+    [InlineData("INSERT", false)]
+    [InlineData("INSERT", true)]
+    [InlineData("UPSERT", false)]
+    [InlineData("UPSERT", true)]
+    public async Task ExecuteAsync_DirectValuesDestinationPath_ShouldKeepContextDiagnosticAsync(string verb, bool nested)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("values-context", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session);
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(verb +
+            " INTO items (KEY, VALUE) VALUES ('k', {v:items.g" +
+            (nested ? ",w:(SELECT RAW 1 FROM [1] AS s)" : "") + "})", cancellationToken: CancellationToken.None));
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05001");
+        session.LastQuerySubqueriesExecuted.ShouldBe(0);
+        (await DocumentSubqueryTests.RowsAsync(session, "SELECT RAW META().id FROM items")).ShouldHaveSingleItem().GetString(0).ShouldBe("a");
     }
 
     private static async Task SeedAsync(DocumentDatabaseSession session)

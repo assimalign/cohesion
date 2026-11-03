@@ -192,14 +192,21 @@ following the pinned [SQL++ implicit-alias rule](https://github.com/couchbaselab
 Own and captured paths use the same normalization: SELECT items.g FROM items GROUP BY g,
 SELECT DISTINCT g FROM items ORDER BY items.g and SELECT RAW g FROM items ORDER BY items.g
 all execute with g semantics. UPDATE items SET items.g = 1 writes g; SET items = 1 is root
-replacement and fails with CD02016. CREATE INDEX key paths use the same implicit alias:
-ON items(items.g) indexes g, and ON items(items.items.g) indexes the self-named field items.g.
-The rule also applies to the source path of a DISTINCT ARRAY key; its element variable still owns
-projection and WHEN paths. This follows the SQL++ expression model for
-[index keys](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/createindex.html#index-key)
-and the implicit-alias precedence above. Catalog paths store the normalized document-relative key.
-The introspection PATH/PATHS expressions add a collection receiver for a self-named leading field,
-so copying the rendered key into CREATE INDEX preserves its meaning.
+replacement and fails with CD02016. CREATE INDEX paths remain document-relative: the collection
+name is not an alias in index keys. ON items(items.g) indexes the document's field items.g,
+reached by WHERE items.items.g = 9; WHERE items.g = 9 means g and uses an index on (g).
+DISTINCT ARRAY source paths follow the same rule; projection and WHEN paths remain relative to
+the element variable. Couchbase uses a [keyspace formalizer for index keys](https://github.com/couchbase/query/blob/6d40d1dd/algebra/index_create.go#L93-L95),
+which maps the keyspace to SELF without registering its name as an alias
+([formalizer.go:24](https://github.com/couchbase/query/blob/6d40d1dd/expression/formalizer.go#L24),
+[181-182](https://github.com/couchbase/query/blob/6d40d1dd/expression/formalizer.go#L181-L182),
+[478-479](https://github.com/couchbase/query/blob/6d40d1dd/expression/formalizer.go#L478-L479)).
+The [identifier evaluates as a document field](https://github.com/couchbase/query/blob/6d40d1dd/expression/identifier.go#L71-L87);
+sarging keeps index-key fields distinct from query aliases
+([formalizer.go:361-378](https://github.com/couchbase/query/blob/6d40d1dd/expression/formalizer.go#L361-L378),
+[481](https://github.com/couchbase/query/blob/6d40d1dd/expression/formalizer.go#L481)).
+Catalog PATH/PATHS preserve the document-relative keys for CREATE INDEX replay and agree with
+the typed DocumentCatalog.CreateIndexAsync path API.
 META on an UNNEST variable, comprehension variable or unknown name is refused with CD05001
 before evaluation. A standalone ORDER BY projection alias keeps precedence, including
 SELECT x AS items FROM items ORDER BY items.
@@ -235,8 +242,10 @@ correlates to that value. The same distinction applies to implicit versus explic
 collection bindings and inferred UNNEST and FROM-expression names, including grouped captures.
 For example, UNNEST tags leaves an inner bare FROM tags naming the collection; UNNEST tags AS tags
 allows that inner FROM to iterate the outer value. Explicit paths can capture either kind of name.
-The parser retains the inferred-name provenance described by the
-[SQL++ AS clause](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/from.html#as-clause).
+The parser retains inferred-name provenance following Couchbase's explicit-only alias registration
+([from_unnest.go:132-133](https://github.com/couchbase/query/blob/6d40d1dd/algebra/from_unnest.go#L132-L133),
+[from_expression.go:229-230](https://github.com/couchbase/query/blob/6d40d1dd/algebra/from_expression.go#L229-L230))
+and [HasAlias lookup](https://github.com/couchbase/query/blob/6d40d1dd/algebra/from_expression.go#L124-L131).
 This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
 Qualified stars (`d.*`) retain their CK00001 refusal outside joined SELECT projections; see
 [key JOIN and NEST](#key-join-and-nest-1732-oq-j1).
@@ -245,6 +254,9 @@ Subqueries execute in UPDATE/DELETE predicates, SET and VALUES expressions, INSE
 sources and RETURNING. VALUES has no destination row to capture: a subquery referring to its
 destination binding without a local declaration is refused during planning with CD01036. Local
 aliases and comprehensions may shadow that name, and a bare FROM may read the destination collection.
+A bare FROM naming an explicit destination alias is also refused with CD01036, including in nested
+subqueries, unless an enclosing local binding shadows that alias. Direct VALUES document paths
+remain invalid with CD05001, whether or not another member contains a subquery.
 Every nested read sees statement-start data, including writes from earlier
 statements in an explicit transaction, and excludes this statement's writes. Mutation predicates,
 values and SELECT inputs finish staging before writes. RETURNING with subqueries also stages

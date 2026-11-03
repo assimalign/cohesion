@@ -43,7 +43,7 @@ public sealed class DocumentImplicitAliasTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE COLLECTION items", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('a', {g:1})", cancellationToken: CancellationToken.None);
-        if (indexed) { await session.ExecuteAsync("CREATE INDEX ix ON items(items.items.g)", cancellationToken: CancellationToken.None); }
+        if (indexed) { await session.ExecuteAsync("CREATE INDEX ix ON items(items.g)", cancellationToken: CancellationToken.None); }
 
         // Act
         var result = await session.ExecuteAsync(

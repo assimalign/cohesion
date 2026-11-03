@@ -645,8 +645,8 @@ enforces ownership on the collection: index DDL checks that collection's owner.
 The index metadata has no independent ownership, so the ownership source reports
 collections and does not invent an index owner. Index paths retain the catalog's
 canonical document-path spelling; physical generation IDs and B+Tree pages remain
-internal. PATH/PATHS render an extra collection receiver when a leading self-named field needs it
-to preserve CREATE INDEX replay; stored canonical paths remain document-relative.
+internal. PATH/PATHS preserve document-relative keys, including leading fields named after the
+collection, so CREATE INDEX replay and the typed catalog API retain the same meaning.
 There is no collection schema or inferred document-field catalog.
 
 The sources are document shaped: `SELECT *` returns one JSON document per entry,
@@ -792,7 +792,10 @@ DML predicates, SET/VALUES expressions and INSERT/UPSERT SELECT materialize all 
 before mutation. VALUES has no destination source row: an otherwise unbound destination name
 inside a VALUES subquery is refused eagerly with CD01036, including in nested captures and META.
 Local source, comprehension and quantifier bindings can shadow that name; a bare FROM may still
-read the destination collection. The destination remains available to RETURNING.
+read the destination collection. A bare FROM naming an explicit destination alias is refused too,
+including in nested subqueries, unless an enclosing local binding shadows it. Direct VALUES paths
+retain CD05001 even beside an unrelated subquery; CD01036 applies only below a subquery.
+The destination remains available to RETURNING.
 RETURNING containing subqueries stages before writes too. UPDATE/INSERT/UPSERT
 reserve each actual version from the existing durable allocator, evaluate the post-image with that
 version, then pass the reserved version into the existing internal collection write path. DELETE
@@ -1549,14 +1552,16 @@ array subscripts, and bracket-string property names. Planning converts those seg
 catalog's lossless canonical path without changing their case or treating a property name's
 punctuation as structure.
 
-The indexed collection supplies the same implicit alias as a query: ON items(items.g) stores the
-canonical path g, and ON items(items.items.g) stores items.g. DISTINCT ARRAY source paths follow
-the same rule; projection and WHEN paths remain relative to their element variable. This follows
-the SQL++ expression contract for [CREATE INDEX keys](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/createindex.html#index-key)
-with the implicit-alias precedence in the language dialect. Canonical catalog keys and their encoding
-are unchanged, so no persisted format changes. Whole-source keys without a field path retain CD03027.
-Introspection renders a receiver before a self-named leading field, preserving scalar and array
-key DDL round trips under the same alias rule.
+CREATE INDEX paths remain document-relative: the collection name is not an alias in index keys.
+ON items(items.g) stores items.g, matching DocumentCatalog.CreateIndexAsync with that path.
+Queries reach this index through WHERE items.items.g = 9; WHERE items.g = 9 means g and uses (g).
+DISTINCT ARRAY source paths follow the same rule; projection and WHEN paths remain relative to
+their element variable. Couchbase's algebra/index_create.go:93-95 uses the keyspace formalizer;
+expression/formalizer.go:24, 181-182 and 478-479 maps the keyspace to SELF without registering its
+name as an alias, and expression/identifier.go:71-87 reads the identifier as a document field.
+Sarging preserves that distinction at expression/formalizer.go:361-363, 378 and 481 (6d40d1dd;
+the language dialect links each source). Catalog paths, encoding and introspection retain the same
+document-relative spelling, including self-named fields, with no persisted format change.
 
 The executor takes the logical database's exclusive writer lock, enforces schema ownership using
 the specific `CREATE INDEX` or `DROP INDEX` operation name, and delegates the transactional

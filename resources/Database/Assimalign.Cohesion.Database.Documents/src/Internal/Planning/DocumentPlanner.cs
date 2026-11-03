@@ -140,8 +140,7 @@ internal sealed partial class DocumentPlanner
 
         if (create.Keys.Count is < 1 or > 32)
         { throw new DocumentPlanningException("CD03022", ErrorMessages.IndexPathCount, create.Location); }
-        string name = DocumentSourceName.Of(create.Collection, null);
-        var keys = create.Keys.Select(key => DocumentArrayIndexExpressions.BindKey(key, name)).ToArray();
+        var keys = create.Keys.Select(DocumentArrayIndexExpressions.BindKey).ToArray();
         if (keys.Count(key => key.ArraySource is not null) > 1 || create.IsUnique && keys.Any(key => key.ArraySource is not null))
         { throw new DocumentPlanningException("CD03025", ErrorMessages.ArrayIndexDefinitionInvalid, create.Location); }
         if (keys.Distinct().Count() != keys.Length)

@@ -492,6 +492,9 @@ collection name is its implicit alias for paths, synthetic stars, GROUP AS wrapp
 binding checks (#1767). A reserved COHESION_SCHEMA source uses its last segment as written.
 The parser derives that name locally, keeping Language independent of the engine. Other quoted
 stored names remain opaque, including dots.
+OqlSelectExpression.Alias can be null for an unresolved implicit collection binding; planner
+copies carry the resolved source name with IsAliasImplicit = true. Consumers use that provenance
+flag to distinguish inferred names from explicit correlation aliases.
 
 The explicit FROM alias (or unaliased collection name) and its UNNEST bindings form one list with unique ordinal names. Quantifier
 variables may shadow outer variables and document fields. Duplicate names in one binding

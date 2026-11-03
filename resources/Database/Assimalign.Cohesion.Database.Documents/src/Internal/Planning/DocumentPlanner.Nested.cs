@@ -95,6 +95,8 @@ internal sealed partial class DocumentPlanner
         var empty = new Dictionary<string, bool>(StringComparer.Ordinal);
         var free = new HashSet<string>(StringComparer.Ordinal);
         string? unboundValuesName = null;
+        bool valuesAliasExplicit = false;
+        int subqueryDepth = 0;
         if (expression is OqlSelectExpression query) { VisitQuery(query, empty, free); }
         else
         {
@@ -107,6 +109,7 @@ internal sealed partial class DocumentPlanner
                 _ => null,
             };
             var local = new Dictionary<string, bool>(StringComparer.Ordinal);
+            valuesAliasExplicit = expression is OqlInsertExpression { Alias: not null } or OqlUpsertExpression { Alias: not null };
             if (name is not null)
             {
                 local[name] = expression switch
@@ -134,6 +137,10 @@ internal sealed partial class DocumentPlanner
 
         void VisitQuery(OqlSelectExpression select, Dictionary<string, bool> outer, HashSet<string> free)
         {
+            if (unboundValuesName is not null && valuesAliasExplicit && select.Source is null &&
+                select.Collection == unboundValuesName && !outer.ContainsKey(select.Collection))
+            { throw new DocumentPlanningException("CD01036", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.ValuesDestinationUnbound, unboundValuesName), select.Location); }
             bool capturesSource = select.Source is null && outer.TryGetValue(select.Collection, out bool keyspace) && !keyspace;
             var source = new Dictionary<string, bool>(StringComparer.Ordinal)
             { [DocumentSourceName.Of(select)] = select.IsAliasImplicit && !capturesSource };
@@ -168,7 +175,7 @@ internal sealed partial class DocumentPlanner
             if (node is null) { return; }
             if (node is OqlPathExpression path && path.Segments.Count > 0 && path.Segments[0].Name is string name)
             {
-                if (name == unboundValuesName && !local.ContainsKey(name) && !outer.ContainsKey(name))
+                if (subqueryDepth > 0 && name == unboundValuesName && !local.ContainsKey(name) && !outer.ContainsKey(name))
                 { throw new DocumentPlanningException("CD01036", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.ValuesDestinationUnbound, name), node.Location); }
                 if (outer.ContainsKey(name) && !local.ContainsKey(name))
@@ -185,7 +192,9 @@ internal sealed partial class DocumentPlanner
                 var enclosing = new Dictionary<string, bool>(outer, StringComparer.Ordinal);
                 foreach (var declaration in nestedOrder ?? local) { enclosing[declaration.Key] = declaration.Value; }
                 var outerNames = new HashSet<string>(StringComparer.Ordinal);
-                VisitQuery(subquery.Query, enclosing, outerNames);
+                subqueryDepth++;
+                try { VisitQuery(subquery.Query, enclosing, outerNames); }
+                finally { subqueryDepth--; }
                 foreach (var dependency in outerNames)
                 { if (!(nestedOrder ?? local).ContainsKey(dependency)) { free.Add(dependency); } }
                 var select = subquery.Query;

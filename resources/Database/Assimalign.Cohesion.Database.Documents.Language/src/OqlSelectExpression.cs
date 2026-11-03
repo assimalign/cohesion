@@ -65,7 +65,7 @@ public sealed class OqlSelectExpression : OqlExpression
     public OqlExpression? Source => ((_from as Sources)?.From ?? _from) as OqlExpression;
     /// <summary>Gets all source bindings in their evaluation order.</summary>
     public IReadOnlyList<OqlSourceBindingExpression> Bindings => (_from as Sources)?.Bindings ?? Unnest;
-    /// <summary>Gets the iteration variable, including an inferred expression-source name, or null for the implicit collection binding.</summary>
+    /// <summary>Gets the iteration variable, including an inferred expression-source name, or null for an unresolved implicit collection binding. Planner copies carry the resolved name with <see cref="IsAliasImplicit"/> set to true.</summary>
     public string? Alias { get; }
     /// <summary>Gets whether the source name is implicit rather than an explicit correlation alias.</summary>
     public bool IsAliasImplicit { get; }

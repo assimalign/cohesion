@@ -10,27 +10,14 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal static class DocumentIndexRendering
 {
     // The canonical local name is independent of the name used in CREATE INDEX.
-    internal static string Key(DocumentIndexKey key, string? sourceName = null) => key.ArraySource is null ?
-        Qualifier(key.Path, sourceName) is string prefix ? Path(key.Path, prefix) : key.Path :
-        $"DISTINCT ARRAY {Element(key.Path)} FOR v IN {Path(key.ArraySource, Qualifier(key.ArraySource, sourceName) ?? string.Empty)}" +
+    internal static string Key(DocumentIndexKey key) => key.ArraySource is null ? key.Path :
+        $"DISTINCT ARRAY {Element(key.Path)} FOR v IN {Path(key.ArraySource, string.Empty)}" +
         (key.When is null ? string.Empty : $" WHEN {Predicate(key.When)}") + " END";
 
-    internal static string Key(DocumentIndexMetadata index, int ordinal, string? sourceName = null) => Key(index.Keys[ordinal], sourceName) +
+    internal static string Key(DocumentIndexMetadata index, int ordinal) => Key(index.Keys[ordinal]) +
         (ordinal == 0 && index.IncludeMissing ? " INCLUDE MISSING" : string.Empty);
 
     private static string Element(string path) => path.Length == 0 ? "v" : Path(path, "v");
-
-    // Catalog paths are document-relative. Render an extra receiver when the first
-    // field would otherwise become the collection alias on CREATE INDEX replay.
-    private static string? Qualifier(string path, string? sourceName)
-    {
-        if (sourceName is not null)
-        {
-            foreach (var segment in DocumentIndexKeys.ParsePath(path))
-            { return segment is string name && name == sourceName ? Quote(sourceName) : null; }
-        }
-        return null;
-    }
 
     private static string Path(string path, string prefix)
     {
