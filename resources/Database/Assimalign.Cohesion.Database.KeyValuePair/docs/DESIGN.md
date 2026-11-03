@@ -16,6 +16,19 @@ asserted read-only at the strategy boundary, and is disposed before writable han
 The probe reports no Storage lifecycle events, page-read counts, checksum-failure events or gauge changes. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
 source-shared journal analysis, common replay rules, retained-byte bound and gate inventory.
 
+## Checkpoint bracket attribution (#1283, EN-C1)
+
+Catalog writes now enter their file set's TransactionCheckpointInterlock, shared with the catalog
+checkpointer. The catalog monitor precedes that independent gate and storage/page latches;
+checkpoint bodies never acquire the data apply gate. Deferred catalog checkpoints run at the
+writer's lease disposal under the catalog monitor, so readers wait for its flush and fsync.
+Releases pull the size-only due predicate too, so the catalog services the existing deferral
+before the next admission without waiting for the checkpoint worker's first attempt. Statements retain
+the data coordinator's interlock. The four-writer load asserts the exact journal high-water mark
+and complete deferral attribution, with rates used only as diagnostics. Forced append barriers
+cover both the format-record and index-registration writes: each attributes KeyValuePairCatalog,
+services the request on scope exit, and leaves the independent data checkpoint available.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The explicit transaction binds its kernel coordinator/context to the root base, so incomplete

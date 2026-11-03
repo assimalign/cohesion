@@ -3151,6 +3151,12 @@ Identical resource keys `IndexPathCount` are stored once with their unchanged va
 
 ## Checkpoint progress observations (#1284)
 
+The checkpoint lane rechecks the storage's due predicate after dispatch. A foreground holder
+that already serviced the size crossing leaves no redundant sharp checkpoint for the lane;
+one crossing produces one checkpoint. The deterministic lane-handoff regression counts the
+completed storage checkpoints.
+
+
 The shared checkpointer records the closed flag and storage due flags used by this model's
 predicate before deciding whether to attempt work. The linked pace helper asserts due attempts,
 worker completions and bounded recorded trigger/lane waits; statement-completed checkpoints do

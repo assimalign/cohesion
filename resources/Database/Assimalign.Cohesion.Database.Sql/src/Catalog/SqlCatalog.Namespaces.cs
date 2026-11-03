@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
@@ -138,7 +140,8 @@ public sealed partial class SqlCatalog
             }
             var indexes = _indexes.Values.Where(slot => identities.Contains(slot.Index.TableObjectId)).ToArray();
             var registrations = _registrations.Where(registration => !identities.Contains(registration.ObjectId)).ToArray();
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             var pending = new Dictionary<ulong, (PageId PageId, int SlotIndex)>();
             var retireTrees = StageIndexRetirements(transaction, _registrations.Where(registration => identities.Contains(registration.ObjectId)), objects.Length);
             foreach (var slot in objects)

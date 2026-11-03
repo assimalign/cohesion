@@ -28,6 +28,40 @@ public sealed class JournalBufferTests
 {
     private static readonly byte[] _image = CreateImage();
 
+    [Theory(DisplayName = "Cohesion Test [Storage] - Journal peak: include buffered and direct frames, preserve truncation history, seed a recovered prefix (#1283)")]
+    [InlineData(32)]
+    [InlineData(1024)]
+    public void PeakLength_AppendsAndTruncation_ShouldRetainTheExactHighWaterMark(int payloadLength)
+    {
+        // Arrange: one case buffers both frames; the other drains a direct frame.
+        var medium = new RecordingHandle();
+        using var journal = StorageJournal.Create(new StorageStream(medium));
+        journal.MaximumBufferBytes = 256;
+        journal.AppendBegin(1);
+        journal.AppendOperation(1, new byte[payloadLength]);
+        long peak = journal.Length;
+        journal.PeakLength.ShouldBe(peak);
+        medium.Writes.ShouldBe(payloadLength == 32 ? 0 : 2);
+
+        // Act: truncation leaves a smaller journal but must not erase its peak.
+        journal.Checkpoint([]);
+        journal.PeakLength.ShouldBe(peak);
+        journal.AppendCommit(2);
+        journal.PeakLength.ShouldBe(Math.Max(peak, journal.Length));
+        journal.Checkpoint(Enumerable.Range(1, 128).Select(value => (long)value).ToArray());
+        peak = Math.Max(peak, journal.Length);
+        journal.PeakLength.ShouldBe(peak);
+        using var recovered = StorageJournal.Create(new MemoryStream(medium.ToArray()));
+        recovered.ReadAll();
+
+        // Assert: recovery seeds the current verified prefix; another truncation retains history.
+        recovered.PeakLength.ShouldBe(recovered.Length);
+        recovered.Length.ShouldBe(journal.Length);
+        journal.Checkpoint([]);
+        journal.Length.ShouldBeLessThan(peak);
+        journal.PeakLength.ShouldBe(peak);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Journal buffer: a large checkpoint uses a direct pooled frame")]
     public void Checkpoint_FrameLargerThanBuffer_ShouldKeepAppendBufferBounded()
     {

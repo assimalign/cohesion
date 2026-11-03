@@ -3,6 +3,8 @@ using System;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
@@ -44,7 +46,8 @@ public sealed partial class SqlCatalog
             int count = (int)Int128.Min(allocationReservationSize, distance / step + 1);
             long last = (long)(next + (Int128)(count - 1) * increment);
             var record = EncodeAllocation(kind, id, last, isCalled: true);
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)id));
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)id));
             var location = UpsertRecord(transaction, counter.Location, record);
             ReservationCommitting?.Invoke();
             transaction.Commit();

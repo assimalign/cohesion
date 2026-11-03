@@ -2302,25 +2302,69 @@ runs it as it ends, before it releases the gate, and the worker moves on. A boun
 trade the busy database against the others (a short one rarely catches the end of a long
 statement, a long one lets the others overshoot); the deferral needs no trade.
 
-**Concurrent-writer attribution (#1283).** The load measurement in `BlobCheckpointGrowthTests`
-is skipped by default; `COHESION_DB_PROBES=1` enables three counter-driven rounds with and without
-CPU competition. Windows constrains the process to up to three CPUs; Linux affinity is per-thread,
-so this probe enforces and claims no workload affinity there. Existing events show Blob overshoot
-with no `BracketOpen` skips, while an outside-bracket control
-verifies that signal on normal, failed and cancelled statement exits. A deterministic lane control
-now guards the consumed size wake: collecting a deferred lane outcome rechecks whether the journal
-is due in that pass and attempts at most one new checkpoint, while failures and busy-storage
-outcomes retain their retry delay. The observed 544 MB growth remains unattributed and #1283 stays
-open: an outside-gate raw bracket can prevent truncation until it ends, and checkpoint flush time
-is another investigation path. The model remains a sharp checkpoint with a soft trigger; choosing
-a bounded admission pause or a fuzzy checkpoint remains a later owner decision.
+**Concurrent-writer attribution (#1283, EN-C1).** Four continuous short-transaction writers,
+with a 64 KiB trigger and the Windows process pinned to three CPUs, observed baseline peaks of
+85,457 bytes (SQL), 92,296 (Documents), 79,494 (Graph), 110,449 (KeyValuePair), and 89,753 (Blob).
+That run did not reproduce the historical 544 MB peak. The always-on five-engine regression now
+requires at least two seconds, four completed autonomous checkpoints and 32 writes from every
+writer, continuing until those counters move with a 45-second ceiling. It asserts an exact
+append-locked journal high-water mark of at most four triggers; rates remain diagnostic only.
+Linux affinity is per thread and the test makes no affinity claim there.
 
-Normal Blob chunk writes and metadata updates use the coordinator's apply gate; the suspected raw
-outside bracket was not found on that path. SQL's background table reclamation does open raw data
-brackets outside the gate, and SQL and KeyValuePair catalog writes use independent raw brackets;
-these remain investigation paths. The opt-in Blob listener also counts process-wide first-chance
-`StorageTransactionException` occurrences, since a busy checkpoint throws before `CheckpointStart`;
-this is test-only measurement, alongside the existing deferred `BracketOpen` event.
+Final isolated Release measurements retain the per-engine attribution. These use the same
+four writers, 65,536-byte trigger and three-CPU Windows affinity; all peaks remain below 4×.
+
+| Engine | Deferred holders (count) | Busy refusals | Journal peak (bytes) | Peak / 65,536 | 4× bound (bytes) |
+|---|---|---|---|---|---|
+| SQL | Checkpoint=394,Statement=227 | 0 | 81,713 | 1.247× | 262,144 |
+| Documents | Checkpoint=457,Statement=6 | 0 | 65,833 | 1.005× | 262,144 |
+| Graph | Checkpoint=56,Statement=10 | 0 | 71,057 | 1.084× | 262,144 |
+| KeyValuePair | Checkpoint=439,Statement=227 | 0 | 83,020 | 1.267× | 262,144 |
+| Blob | Checkpoint=132,Statement=5 | 0 | 65,873 | 1.005× | 262,144 |
+
+The earlier worker-only arming left an unbounded gap between the size trigger and its first
+TryCheckpoint. Releasing interlock holders now pull IsCheckpointDue(TimeSpan.MaxValue), so a
+size crossing services the existing deferral before the next admission without waiting for worker
+scheduling. Timeout.InfiniteTimeSpan is negative and must never select this size-only predicate. Busy
+outside brackets suppress repeat foreground attempts until the worker re-requests or all active
+physical brackets complete. Storage.HasActiveTransactions is a lock-free engine-plumbing read:
+a checkpoint is refused while true. The releasing interlock still holds admission after ending
+its own brackets, so the read covers exactly the remaining ungated blockers, including replacements.
+Busy exceptions carry no executable state or bracket references and cannot retain disposed storage.
+Uncollected failures also suppress foreground attempts; the worker retains retries, reporting and
+its offline policy. The four-trigger assertion stays intact.
+
+Every refused storage checkpoint emits event 19 once per active physical bracket, including
+untouched brackets, with its operation class, optional owner, physical sequence and a shared
+refusal identity. Unnamed brackets are Raw; sequence-adopting brackets are Adopted. Equal adopted
+sequences remain separate physical brackets. The registry reuses
+its capacity and is maintained under the existing transaction lock; completion and failed begin
+mark the bracket completed and remove entries there, including a failed admission whose trigger
+callback already captured a busy refusal. Event 19 snapshots those entries under the lock and emits
+them afterwards, so a slow in-process listener cannot hold up bracket begin or completion. Event 20
+reports the journal high-water mark since open, maintained for
+both buffered and direct frames even with no listener. A final checkpoint after the writers end
+collects that mark; autonomous progress is required before that collection.
+
+The coordinator and all remaining normal-operation raw brackets now share
+TransactionCheckpointInterlock per storage: SQL catalog writes (including allocation, definitions,
+scripts, renames, TRUNCATE and joint publication), KeyValuePair catalog writes, and SQL table
+reclamation. Catalog file sets have independent gates; they never acquire the data gate during
+a checkpoint. Blob chunk and catalog writes already used ApplyStatementAsync and retain that
+route. Transactions event 21 attributes every event-15 deferral to its holder class and optional
+owner. A semaphore permit reserved for a descheduled waiter is attributed when that admission
+publishes its class; it is not reported as an unidentified raw bracket. Maintenance, undo and
+checkpoint holders are distinguished from statements. The catalog/reclamation stress parks both
+real bracket classes while a statement queues and proves both deferred checkpoints complete.
+
+Reclamation yields before admission for due or worker-signaled work. A post-admission size-due exit
+runs the checkpoint at disposal; each committed batch awaits durability after gate release and
+before removing its retirement intent. The model remains
+sharp, with a soft size trigger and unchanged crash recovery and formats. EN-C2 owns the approved
+bounded admission pause near the journal limit (T3-27); EN-C1 adds no pause, fuzzy checkpoint or
+segmented journal. PostgreSQL's concurrent-insertion exclusion around checkpoint state capture
+is confined to its redo-point work (local src/backend/access/transam/xlog.c:7791-7795); that fuzzy
+model is not copied into Cohesion's steal/no-force journal.
 
 **Readers can progress during a checkpoint (#1269).** The #1254 review measured point-read
 stalls of 166–267 ms while the checkpoint held the lifecycle, transaction and pool locks.
@@ -2915,6 +2959,8 @@ session enables.
 | 4 | `JournalTailLost` | Warning | — | `database`, `strayLsn`, `redoLsn` (before the open moved it) | `OpenExisting`: a page outlived the journal records that stamped it (a lost journal tail under `None`, or a journal older than the data file); the open raises the LSN floor and the redo point to it |
 | 5 | `CheckpointStart` | Informational | `Checkpoints` | `database`, `activeTransactions` (the logical writers the anchor lists), `journalLength` | `Checkpoint`, after the active-transaction check (a refused checkpoint writes nothing) |
 | 6 | `CheckpointStop` | Informational | `Checkpoints` | `database`, `status` (`Success`, or `Error` for a checkpoint that threw), `checkpointLsn`, `durationMilliseconds` | the end of `Checkpoint`, on every path, from a `finally` |
+| 19 | `CheckpointBusy` | Verbose | Checkpoints | `database`, `bracketClass`, `owner`, `transactionSequence`, `refusal` | once for each physical bracket blocking a refused checkpoint |
+| 20 | `CheckpointJournalPeak` | Verbose | Checkpoints | `database`, `peakLength` | exact journal high-water mark since open, before an admitted checkpoint |
 | 7 | `PagesWrittenBack` | Verbose | `WriteBack` | `database`, `pages`, `durationMilliseconds` | `WriteBackDirtyPages`, when the pass wrote a page |
 | 8 | `PendingCommitsFlushed` | Verbose | `GroupCommit` | `database`, `durableLsn` | the gate's `FlushPending` (a flush worker's `FlushPendingCommits`), when it flushed |
 | 9 | `GroupCommitWindowMissed` | Verbose | `GroupCommit` | `database`, `lsn`, `windowMilliseconds` | the gate's `AwaitDurable`: the window passed before a group flush covered the commit, so the committer requested the journal flush itself (a no-op when another flush covered it first; a zero window does this on every grouped commit); not for a wait the storage going offline abandoned |

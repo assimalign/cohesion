@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
@@ -96,7 +98,8 @@ public sealed partial class SqlCatalog
                 if (dependency.StartsWith("C:", StringComparison.Ordinal) && !_tables.Values.Any(slot => slot.Table.Columns.Any(column => SqlObjectIdentity.Column(slot.Table.ObjectId, column.Name).Equals(dependency, StringComparison.OrdinalIgnoreCase))))
                 { throw new SqlCatalogException("CS03033", ErrorMessages.ViewDependencyChanged); }
             }
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             var orphan = StageOrphanSequenceName(transaction, view.Schema, view.Name);
             var location = UpsertRecord(transaction, previous?.Location, record);
             CommitCatalogChange(transaction, publication: publication, actualObject: key, createsObject: true);
@@ -166,7 +169,8 @@ public sealed partial class SqlCatalog
             }
             var dropped = _views.Where(pair => pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase) || Reaches(pair.Key, key, new(StringComparer.OrdinalIgnoreCase))).ToArray();
             if (!cascade && dropped.Length > 1) { RefuseViewDependency(dropped.First(pair => !pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).Value.Value, slot.Value.Schema + "." + slot.Value.Name); }
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             foreach (var pair in dropped) { _storage.DeleteRow(transaction, pair.Value.Location.PageId, pair.Value.Location.SlotIndex); }
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.View(slot.Value.Schema, slot.Value.Name));
             foreach (var pair in dropped) { _views.Remove(pair.Key); }
