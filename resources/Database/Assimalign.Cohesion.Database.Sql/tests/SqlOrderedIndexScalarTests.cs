@@ -106,7 +106,7 @@ public sealed class SqlOrderedIndexScalarTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t(a INT,k TEXT COLLATE case_insensitive)");
         await Execute(session, "INSERT INTO t VALUES(0,'a'),(0,'A'),(0,'b'),(0,'B'),(0,'c'),(0,NULL)");
-        await Execute(session, "CREATE INDEX ix ON t(a,k)");
+        await Execute(session, "CREATE INDEX ix ON t(a,k NULLS LAST)");
 
         // Act
         var rows = await Rows(session, "SELECT DISTINCT k FROM t WHERE a=0 ORDER BY k ASC NULLS LAST LIMIT 2 OFFSET 1");
@@ -133,7 +133,7 @@ public sealed class SqlOrderedIndexScalarTests
         await Execute(session, "CREATE INDEX ix ON t(k)");
 
         // Act
-        var rows = await Rows(session, "SELECT k FROM t ORDER BY k ASC NULLS LAST LIMIT take_ordered(0)");
+        var rows = await Rows(session, "SELECT k FROM t ORDER BY k LIMIT take_ordered(0)");
 
         // Assert
         rows.Select(row => row[0]).ShouldBe([1, 2]);
@@ -157,7 +157,7 @@ public sealed class SqlOrderedIndexScalarTests
         await Execute(session, "INSERT INTO t VALUES(" + string.Join(',', Enumerable.Repeat("1", columns.Length)) + ")");
 
         // Act
-        var rows = await Rows(session, "SELECT c0 FROM t ORDER BY " + string.Join(',', columns.Select(name => name + (reverse ? " DESC NULLS FIRST" : " ASC NULLS LAST"))) + " LIMIT 1");
+        var rows = await Rows(session, "SELECT c0 FROM t ORDER BY " + string.Join(',', columns.Select(name => name + (reverse ? " DESC NULLS LAST" : " ASC NULLS FIRST"))) + " LIMIT 1");
 
         // Assert
         rows.ShouldHaveSingleItem()[0].ShouldBe(1);

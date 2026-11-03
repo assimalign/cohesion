@@ -24,9 +24,10 @@ The parser and renderer corpus covers both TO forms with no modifier or WORK and
 ## Index key order grammar (#1631, SQ-K1)
 
 SqlCreateIndexExpression.KeyOrders retains effective per-column direction and NULL placement.
-The parser accepts ASC/DESC before NULLS FIRST/LAST, once each. Defaults follow PostgreSQL
-src/backend/commands/indexcmds.c:2255-2270: ASC NULLS LAST and DESC NULLS FIRST. Rendering
-omits default options. Constraint column lists retain their column-only grammar and coded
+The parser accepts ASC/DESC before NULLS FIRST/LAST, once each. Defaults are ASC NULLS FIRST
+and DESC NULLS LAST (#1787, SQ-K4), matching ORDER BY. This deliberately differs from PostgreSQL
+src/backend/commands/indexcmds.c:2263-2270. Rendering omits these default options. Zero is
+AscendingNullsFirst in all three key-order enums; bit 0 means NULLS LAST and bit 1 means DESC. Constraint column lists retain their column-only grammar and coded
 syntax refusal (PostgreSQL src/backend/parser/gram.y:4321,8422-8495). The profile gains one
 clause; parser completeness and positive/negative and live execution corpora cover it. SQ-K1
 changes no ORDER BY grammar or result wire types. SQ-K3 adds engine order matching, forward/
@@ -35,11 +36,11 @@ directions and zero retained sort rows (see DIALECT). NULL placement is ignored 
 keys proven non-NULL by declarations, equality prefixes, mandatory local NULL rejection or a
 proven partial predicate. Strict comparison NULL rejection shares SQ-P2's rule, including
 parameter operands; OR/NOT and outer NULL extension provide no proof. The live corpus also
-covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 32 and compiled v11 fence the
+covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 36 and compiled v12 fence the
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
-The current record-space format is 35; index predicates are persisted by Sql, independently
+The current record-space format is 36; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -167,7 +168,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 35's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 36's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -313,7 +314,7 @@ only its metadata floor, as SQL DESIGN and DIALECT.md specify.
 The owner-keeping conformance corpus (#1777) covers index/constraint-only tables within those
 plans: unpublished trees, current-row constraint checks and atomic mixed publication share the
 same executor in Build and ApplySchemaAsync. SQL format 35 fences physical tree ownership;
-grammar, AST and compiled-schema v11 are unchanged.
+grammar, AST and compiled-schema v12 are unchanged.
 
 ## TRUNCATE (#1716, SQ-T1)
 

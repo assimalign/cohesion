@@ -51,7 +51,7 @@ public sealed class SqlOrderedIndexVisibilityTests
         await Execute(writer, "INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 96).Select(i => $"({i},{i})")));
         await Execute(writer, "CREATE INDEX ix ON t(k DESC)");
         // The pause hook qualifies every fixture row; it is not a selective inequality.
-        string sql = "SELECT id FROM t WHERE pause_ordered(id) IS NOT NULL ORDER BY k " + (reverse ? "ASC NULLS LAST" : "DESC NULLS FIRST") + " LIMIT 20";
+        string sql = "SELECT id FROM t WHERE pause_ordered(id) IS NOT NULL ORDER BY k " + (reverse ? "ASC NULLS FIRST" : "DESC NULLS LAST") + " LIMIT 20";
         var elapsed = Stopwatch.StartNew();
         int rounds = 0, committed = 0, rolledBack = 0;
 

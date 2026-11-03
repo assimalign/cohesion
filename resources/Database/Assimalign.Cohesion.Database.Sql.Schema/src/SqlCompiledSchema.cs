@@ -54,7 +54,11 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// </para>
 /// <para>
 /// <b>Format <c>v11</c> (#1631).</b> Indexes carry effective per-column key orders.
-/// Runtime and SDK reject v10 and every earlier artifact.
+/// Format v11 added the vector; earlier artifacts are refused.
+/// </para>
+/// <para>
+/// <b>Format <c>v12</c> (#1787).</b> Zero key order and omitted vectors mean ASC NULLS FIRST.
+/// DESC defaults to NULLS LAST, matching ORDER BY. Runtime and SDK reject v11 and earlier artifacts.
 /// </para>
 /// <para>
 /// <see cref="CanonicalDocument"/> and <see cref="Hash"/> are computed once, the first time either
@@ -66,7 +70,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
-    public const string CurrentFormat = "cohesion/database-schema/v11";
+    public const string CurrentFormat = "cohesion/database-schema/v12";
 
     // Computed once, on first read: the schema is immutable. Two threads that race the first read
     // compute the same strings, so the race costs only the duplicate work.

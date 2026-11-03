@@ -54,7 +54,10 @@ public sealed class SqlDirectedIndexWireTests
 
         // Assert
         rows.Select(row => row[0]).ShouldBe([2, 1]);
-        metadata.Select(row => new object?[] { row[0], row[1] }).ShouldBe(new object?[][] { ["DESC", "LAST"], [null, "FIRST"] });
+        metadata.Select(row => new object?[] { row[0], row[1] }).ShouldBe(new object?[][] { ["DESC", null], [null, null] });
+        await connection.ExecuteAsync("CREATE INDEX ix_override ON t(a DESC NULLS FIRST,b NULLS LAST)", cancellationToken: SqlClientTestHarness.Timeout(30));
+        var overrides = await connection.QueryAsync("SELECT DIRECTION,NULL_PLACEMENT FROM COHESION_SCHEMA.INDEXES WHERE INDEX_NAME='ix_override' ORDER BY ORDINAL_POSITION", cancellationToken: SqlClientTestHarness.Timeout(30));
+        overrides.Select(row => new object?[] { row[0], row[1] }).ShouldBe(new object?[][] { ["DESC", "FIRST"], [null, "LAST"] });
         failure.Diagnostics.ShouldContain(d => d.Code == "CS00003");
         failure.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT id FROM t WHERE a=1 ORDER BY b ASC NULLS FIRST", cancellationToken: SqlClientTestHarness.Timeout(30)))

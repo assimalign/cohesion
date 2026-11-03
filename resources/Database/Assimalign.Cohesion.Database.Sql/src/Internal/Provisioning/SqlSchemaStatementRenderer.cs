@@ -171,9 +171,9 @@ internal static class SqlSchemaStatementRenderer
 
             builder.Append(Identifier(index.Columns[columnIndex])).Append(index.KeyOrders[columnIndex] switch
             {
-                CompiledSchemaIndexKeyOrder.AscendingNullsFirst => " NULLS FIRST",
-                CompiledSchemaIndexKeyOrder.DescendingNullsFirst => " DESC",
-                CompiledSchemaIndexKeyOrder.DescendingNullsLast => " DESC NULLS LAST",
+                CompiledSchemaIndexKeyOrder.AscendingNullsLast => " NULLS LAST",
+                CompiledSchemaIndexKeyOrder.DescendingNullsLast => " DESC",
+                CompiledSchemaIndexKeyOrder.DescendingNullsFirst => " DESC NULLS FIRST",
                 _ => "",
             });
         }

@@ -55,7 +55,8 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 35 separates joint index tree ownership from its logical table (#1777);
+    /// the catalog: 36 makes zero key order ASC NULLS FIRST, matching ORDER BY (#1787);
+    /// 35 separates joint index tree ownership from its logical table (#1777);
     /// 34 distinguishes Joint/ kind-9 intents from per-step 49a jobs (#1447);
     /// 33 fences the SQL/JSON contextual function names and their quoted ordinary-call rendering (#1722); 32 adds directed index keys (#1631); 31 adds partial predicates (#1630); 30 adds ON UPDATE (#1723); 29 adds owned identities (#1717); 28 adds standalone sequences and shared durable allocation (#1717);
     /// 27 records TYPE default assignment coercion separately from ordinary defaults (#1447);
@@ -94,7 +95,7 @@ internal static class SqlRowCodec
     /// </summary>
     // Format 30 adds foreign-key ON UPDATE metadata to table extension 8; rows and
     // format-29 identity/owned-sequence records are unchanged (#1723, SQ-F1).
-    internal const int RecordSpaceFormatVersion = 35;
+    internal const int RecordSpaceFormatVersion = 36;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

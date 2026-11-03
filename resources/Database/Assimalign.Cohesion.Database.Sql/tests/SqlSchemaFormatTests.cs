@@ -16,6 +16,54 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlSchemaFormatTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Schema v12: unclean v11 applied and pending artifacts refuse before any file write (#1787)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenDatabaseAsync_V11RecordedSchema_ShouldPreserveEveryDurableImage(bool pending)
+    {
+        // Arrange
+        var storage = new CrashCaptureSqlStorageStrategy();
+        await using (var engine = SqlDatabaseEngine.Create("v11-refusal", new() { StorageStrategy = storage }))
+        {
+            var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+            var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", false, [],
+                [new("t", "Tests:Row", [new("a", DatabaseType.Int32, true)], null, [new("ix", ["a"])], [])], []);
+            await database.ApplySchemaAsync(schema, CancellationToken.None);
+            string document = schema.CanonicalDocument.Replace(SqlCompiledSchema.CurrentFormat, "cohesion/database-schema/v11", StringComparison.Ordinal);
+            string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(document)));
+            if (pending)
+            {
+                await database.Catalog.SavePendingMigrationAsync(new SqlCatalogPendingMigration(hash, document,
+                    [new SqlCatalogMigrationStep("AddIndex", "t", "ix", 1)], 1), CancellationToken.None);
+            }
+            else
+            {
+                await database.Catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(hash, document, database.Catalog.DdlGeneration), CancellationToken.None);
+            }
+            storage = storage.CaptureDurableImages();
+        }
+        var catalog = storage.GetDurableImage("app", catalog: true);
+        var data = storage.GetDurableImage("app");
+
+        // Act
+        await using (var refusing = SqlDatabaseEngine.Create("v11-refusal", new() { StorageStrategy = storage }))
+        {
+            var error = await Should.ThrowAsync<SqlSchemaValidationException>(async () =>
+                await refusing.OpenDatabaseAsync("app", CancellationToken.None));
+            error.Errors.ShouldHaveSingleItem().Declaration.ShouldBe("schema.format");
+        }
+
+        // Assert: check through disposal, including both journals and backups.
+        var afterCatalog = storage.GetDurableImage("app", catalog: true);
+        var afterData = storage.GetDurableImage("app");
+        afterCatalog.Data.ShouldBe(catalog.Data);
+        afterCatalog.Journal.ShouldBe(catalog.Journal);
+        afterCatalog.Backup.ShouldBe(catalog.Backup);
+        afterData.Data.ShouldBe(data.Data);
+        afterData.Journal.ShouldBe(data.Journal);
+        afterData.Backup.ShouldBe(data.Backup);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Schema v7 temporal defaults require rebuilding (#1422)")]
     [InlineData("'12'")]
     [InlineData("'2.03:04:05.1234567'")]
@@ -33,7 +81,7 @@ public sealed class SqlSchemaFormatTests
         var detail = error.Errors.ShouldHaveSingleItem();
         detail.Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
         detail.Declaration.ShouldBe("schema.format");
-        error.Message.ShouldContain("cohesion/database-schema/v11");
+        error.Message.ShouldContain("cohesion/database-schema/v12");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Schema format: v4 SDK artifacts cannot enter Apply or Verify")]
@@ -164,7 +212,7 @@ public sealed class SqlSchemaFormatTests
         detail.Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
         detail.Declaration.ShouldBe("schema.format");
         error.Message.ShouldContain("cohesion/database-schema/v4", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v11", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v12", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         error.Message.ShouldContain("recreate", Case.Sensitive);
     }

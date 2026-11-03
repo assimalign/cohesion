@@ -113,7 +113,7 @@ public sealed partial class SqlQueryParser
                 { RequireSchemaClause(ref lexer, SqlClauses.IndexKeyOrder); }
                 bool descending = IsKeyword(ref lexer, "DESC");
                 if (descending || IsKeyword(ref lexer, "ASC")) { Advance(ref lexer); }
-                bool nullsFirst = descending;
+                bool nullsFirst = !descending;
                 if (IsWord(ref lexer, "NULLS"))
                 {
                     Advance(ref lexer);
@@ -121,7 +121,7 @@ public sealed partial class SqlQueryParser
                     else if (IsWord(ref lexer, "LAST")) { nullsFirst = false; Advance(ref lexer); }
                     else { AddExpectedDiagnostic(ref lexer, "FIRST or LAST"); }
                 }
-                keyOrders.Add((SqlIndexKeyOrder)((descending ? 2 : 0) | (nullsFirst ? 1 : 0)));
+                keyOrders.Add((SqlIndexKeyOrder)((descending ? 2 : 0) | (nullsFirst ? 0 : 1)));
                 if (lexer.Current.Type != TokenType.Comma)
                 {
                     break;
