@@ -83,7 +83,7 @@ internal sealed class DocumentCheckpointWorker : DatabaseCheckpointWorker<Docume
     /// checkpoint never waits on the database's own statements either.
     /// </remarks>
     protected override bool Checkpoint(DocumentDatabase database, TimeSpan interval, CancellationToken cancellationToken)
-        => database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
+        => !database.DataStorage.IsCheckpointDue(interval) || database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
 
     private sealed class DebugView
     {
