@@ -8,6 +8,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
@@ -17,6 +18,59 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlIndexDefaultOrderTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Key-order casts share the complete name/value table across all three enums (#1787)")]
+    public void KeyOrders_ThreeEnums_ShouldShareNameAndValueTable()
+    {
+        // Arrange
+        (string Name, int Value)[] expected =
+        [
+            ("AscendingNullsFirst", 0), ("AscendingNullsLast", 1),
+            ("DescendingNullsFirst", 2), ("DescendingNullsLast", 3),
+        ];
+
+        // Act / Assert
+        Enum.GetValues<SqlIndexKeyOrder>().Select(value => (value.ToString(), (int)value)).ShouldBe(expected);
+        Enum.GetValues<SqlCatalogIndexKeyOrder>().Select(value => (value.ToString(), (int)value)).ShouldBe(expected);
+        Enum.GetValues<CompiledSchemaIndexKeyOrder>().Select(value => (value.ToString(), (int)value)).ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Nullable duplicate-key differential results are identical up to tie order (#1787)")]
+    [InlineData("")]
+    [InlineData(" DESC")]
+    [InlineData(" NULLS LAST")]
+    [InlineData(" DESC NULLS FIRST")]
+    public async Task ExecuteAsync_DuplicateKeys_ShouldPreserveMultisetsPerKey(string indexOrder)
+    {
+        // Arrange: four rows per key, including NULL. The page boundaries retain
+        // complete tie groups; identity within a partially selected tie is unspecified.
+        await using var engine = SqlDatabaseEngine.Create("index-ties", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await Execute(session, "CREATE TABLE t(k INT,id INT)");
+        await Execute(session, "INSERT INTO t VALUES " + string.Join(',', Enumerable.Range(0, 16)
+            .Select(id => $"({(id % 4 == 0 ? "NULL" : (id % 4).ToString())},{id})")));
+        string[] orders = ["", " DESC", " NULLS LAST", " DESC NULLS FIRST"];
+        var queries = (from order in orders from window in new[] { "", " LIMIT 8 OFFSET 4" }
+            select "SELECT k,id FROM t ORDER BY k" + order + window).ToArray();
+        var before = new object?[queries.Length][][];
+        for (int i = 0; i < queries.Length; i++) { before[i] = await Rows(session, queries[i]); }
+
+        // Act
+        await Execute(session, "CREATE INDEX ix ON t(k" + indexOrder + ")");
+
+        // Assert: DIALECT specifies ordering keys, while tied rows form a multiset.
+        for (int i = 0; i < queries.Length; i++)
+        {
+            var after = await Rows(session, queries[i]);
+            after.Select(row => row[0]).ShouldBe(before[i].Select(row => row[0]), queries[i]);
+            foreach (object? key in new object?[] { null, 1, 2, 3 })
+            {
+                after.Where(row => Equals(row[0], key)).Select(row => (int)row[1]!).Order()
+                    .ShouldBe(before[i].Where(row => Equals(row[0], key)).Select(row => (int)row[1]!).Order(), queries[i]);
+            }
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Index defaults: nullable orderings preserve sorted results and stop at LIMIT (#1787)")]
     [InlineData("", "", " DESC")]
     [InlineData(" DESC", " DESC", "")]

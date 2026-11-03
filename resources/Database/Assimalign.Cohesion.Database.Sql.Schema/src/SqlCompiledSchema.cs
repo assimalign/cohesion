@@ -54,7 +54,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// </para>
 /// <para>
 /// <b>Format <c>v11</c> (#1631).</b> Indexes carry effective per-column key orders.
-/// Format v11 added the vector; earlier artifacts are refused.
+/// Earlier artifacts are refused.
 /// </para>
 /// <para>
 /// <b>Format <c>v12</c> (#1787).</b> Zero key order and omitted vectors mean ASC NULLS FIRST.

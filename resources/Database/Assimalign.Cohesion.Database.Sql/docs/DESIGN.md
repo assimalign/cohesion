@@ -209,6 +209,10 @@ earlier SQL data-storage formats retain CS06041. Constraint key options retain C
 
 ## ORDER BY from index order (#1631, SQ-K3)
 
+SQ-K4 preserves query results identically up to tie order (Sql.Language DIALECT, index ordering).
+Equal ordering keys have unspecified tie order; complete tie groups retain the same multiset
+of rows under forward and backward scans, including NULL keys.
+
 Single-table SELECT compares bound source columns (including pass-through aliases and ordinals)
 with a contiguous prefix of the index suffix after equality-bound leading columns (including IS NULL). Every requested
 key must match its column's resolved collation and direction, or every direction must be
@@ -8930,6 +8934,10 @@ Joint/RewriteOwner for each existing target. Empty Build, RunMigrationsInline, A
 and the worker use this same metadata classification. The joint X-lock protocol is unchanged:
 owned sequences, then every touched table, in ascending identity order, through publication.
 The existing 49a index build also takes table X; SQ-A5 should retain this lock matrix.
+
+Index comparison includes every effective key-order value. A direction-only or NULL-placement-only
+change rebuilds an independently owned tree while retaining its heap; joint TYPE rewrites use
+the same compiled-to-catalog key-order mapping (#1787).
 
 Kept heaps preserve their dropped physical ordinals, frozen missing values, identity metadata
 and default-assignment flags. Retained published trees are reused. New or same-name replacement

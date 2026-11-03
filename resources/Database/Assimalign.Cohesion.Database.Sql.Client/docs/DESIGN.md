@@ -57,7 +57,7 @@ orders, fully reversed scans, partial-index implication, LIMIT/OFFSET and Ordere
 with direction and sort_removed=true on both transports. No client API or wire format change is
 needed; existing result and plan columns carry the behavior.
 SQ-K4 (#1787) aligns index defaults with ORDER BY: ASC NULLS FIRST and DESC NULLS LAST.
-Both transports report NULL placement cells for those defaults, LAST for ASC NULLS LAST and
+Both transports report NULL in NULL_PLACEMENT for those defaults, LAST for ASC NULLS LAST and
 FIRST for DESC NULLS FIRST through the existing metadata columns.
 
 
