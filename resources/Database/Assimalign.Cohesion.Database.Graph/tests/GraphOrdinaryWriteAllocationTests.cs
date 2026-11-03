@@ -22,7 +22,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
     public GraphOrdinaryWriteAllocationTests(ITestOutputHelper output) { _output = output; }
 
 #if !DEBUG
-    [Fact(DisplayName = "Cohesion Test [Graph] - ordinary CREATE SET DELETE retain pre-MERGE-fix allocation minima (#1735)")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - ordinary CREATE SET DELETE retain catalog v3 allocation minima (#1735, #1806)")]
     public async Task Execute_OrdinaryWrites_ShouldRetainBaseAllocations()
     {
         // Arrange / Act: a fresh process warms its own engine/session and measures on one thread.
@@ -31,7 +31,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
         // Do not treat the old offset as allocation headroom or attribute it to workers.
         var minima = await MeasureAsync(-1);
 
-        // Assert: isolated third-pass minima plus exactly 128 B of headroom.
+        // Assert: catalog v3 fresh-process minima plus exactly 128 B of headroom.
         _output.WriteLine($"ordinary writes bytes/statement: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
         CheckCeilings(minima);
     }
@@ -64,9 +64,11 @@ public sealed class GraphOrdinaryWriteAllocationTests
 
     private static void CheckCeilings(long[] minima)
     {
-        minima[0].ShouldBeLessThanOrEqualTo(38_952 + 128);
-        minima[1].ShouldBeLessThanOrEqualTo(66_888 + 128);
-        minima[2].ShouldBeLessThanOrEqualTo(50_088 + 128);
+        // Five fresh processes agreed; each fixture takes the minimum over five warmed
+        // 100-statement rounds. Shared catalog definition slots lower all three baselines.
+        minima[0].ShouldBeLessThanOrEqualTo(38_728 + 128);
+        minima[1].ShouldBeLessThanOrEqualTo(66_568 + 128);
+        minima[2].ShouldBeLessThanOrEqualTo(50_032 + 128);
     }
 
     private static async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024)

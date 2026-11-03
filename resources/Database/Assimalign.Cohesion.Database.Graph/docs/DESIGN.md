@@ -53,7 +53,9 @@ their names, implied labels and properties before retention. Each element must f
 record (CG02009). The codec measures strict UTF-8 lengths before allocating an exact-sized payload
 buffer, so an oversized declaration does not first allocate its encoded bytes. Ordinary catalog
 definitions and graph-type variants share one object slot, keeping property/index records from
-growing for the new variants. Publication reserves 512 bytes for the singleton type route and
+growing for the new variants. Ordinary-write allocation guards are tightened to the v3 layout's
+lower fresh-process baselines, retaining 128 bytes of headroom and the injected-regression controls.
+Publication reserves 512 bytes for the singleton type route and
 1 KiB before discovering each new label, relationship type or property token, covering catalog
 directory and transaction-version entries. Each token lookup also consumes work; duplicate or
 existing tokens need no new-token memory grant. Property-token reservation runs inside catalog
