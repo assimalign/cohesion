@@ -11,13 +11,14 @@ using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Graph.Protocol;
 using Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
-if (args.Length != 2 && !(args.Length == 3 && args[0] == "allocations"))
-{ throw new ArgumentException("Usage: seed|verify directory; allocations injectedKind [injectedBytes]"); }
-if (args[0] == "allocations")
+if (args.Length != 2 && !(args.Length == 3 && args[0] is "allocations" or "typed-allocations"))
+{ throw new ArgumentException("Usage: seed|verify directory; allocations|typed-allocations injectedKind [injectedBytes]"); }
+if (args[0] is "allocations" or "typed-allocations")
 {
     int injectedKind = int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
     int injectedBytes = args.Length == 3 ? int.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 1024;
-    Console.WriteLine("allocations=" + string.Join(",", GraphWriteAllocations.Measure(injectedKind, injectedBytes)));
+    Console.WriteLine("architecture=" + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+    Console.WriteLine("allocations=" + string.Join(",", GraphWriteAllocations.Measure(injectedKind, injectedBytes, args[0] == "typed-allocations")));
     return;
 }
 await using var engine = GraphDatabaseEngine.Create("graph-engine", new()

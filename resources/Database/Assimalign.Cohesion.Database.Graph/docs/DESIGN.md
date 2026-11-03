@@ -73,6 +73,9 @@ buffer, so an oversized declaration does not first allocate its encoded bytes. O
 definitions and graph-type variants share one object slot, keeping property/index records from
 growing for the new variants. Ordinary-write allocation guards are tightened to the v3 layout's
 lower fresh-process baselines, retaining 128 bytes of headroom and the injected-regression controls.
+Ordinary and typed-label write minima agree on win-arm64 and win-x64; typed writes have their
+own allocation guard and injected control. Child measurement processes use the testhost's
+runtime root and assert the matching architecture, including under --arch x64.
 Publication reserves 512 bytes for the singleton type route and
 1 KiB before discovering each new label, relationship type or property token, covering catalog
 directory and transaction-version entries. Each token lookup and selective DROP name consumes work; duplicate or

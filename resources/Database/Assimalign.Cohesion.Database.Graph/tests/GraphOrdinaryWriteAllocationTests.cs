@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -22,6 +23,27 @@ public sealed class GraphOrdinaryWriteAllocationTests
     public GraphOrdinaryWriteAllocationTests(ITestOutputHelper output) { _output = output; }
 
 #if !DEBUG
+    [Theory(DisplayName = "Cohesion Test [Graph] - typed label writes retain one-decode allocations and 128 B headroom (#1806)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_TypedWrites_ShouldGuardDeclarationDecode(bool injected)
+    {
+        // Arrange / Act
+        var minima = await MeasureAsync(injected ? 0 : -1, injected ? 129 : 1024, typed: true);
+
+        // Assert
+        _output.WriteLine($"typed writes bytes/statement: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
+        if (injected) { Should.Throw<ShouldAssertException>(() => CheckTypedCeilings(minima)); }
+        else { CheckTypedCeilings(minima); }
+    }
+
+    private static void CheckTypedCeilings(long[] minima)
+    {
+        minima[0].ShouldBeLessThanOrEqualTo(40_072 + 128);
+        minima[1].ShouldBeLessThanOrEqualTo(67_896 + 128);
+        minima[2].ShouldBeLessThanOrEqualTo(50_032 + 128);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - ordinary CREATE SET DELETE retain catalog v3 allocation minima (#1735, #1806)")]
     public async Task Execute_OrdinaryWrites_ShouldRetainBaseAllocations()
     {
@@ -64,20 +86,23 @@ public sealed class GraphOrdinaryWriteAllocationTests
 
     private static void CheckCeilings(long[] minima)
     {
-        // Five fresh processes agreed; each fixture takes the minimum over five warmed
-        // 100-statement rounds. Shared catalog definition slots lower all three baselines.
+        // Native ARM64 and --arch x64 agree; each fixture takes the minimum over five
+        // warmed 100-statement rounds. Keep exactly 128 B above those baselines.
         minima[0].ShouldBeLessThanOrEqualTo(38_728 + 128);
         minima[1].ShouldBeLessThanOrEqualTo(66_568 + 128);
         minima[2].ShouldBeLessThanOrEqualTo(50_032 + 128);
     }
 
-    private static async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024)
+    private static async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024, bool typed = false)
     {
         string fixture = Path.Combine(AppContext.BaseDirectory, "GraphRecoveryFixture", "Assimalign.Cohesion.Database.Graph.RecoveryFixture.dll");
-        var start = new ProcessStartInfo("dotnet")
+        // PATH can select arm64 even when --arch x64 runs an x64 testhost.
+        string host = Path.GetFullPath(Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", "..",
+            OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"));
+        var start = new ProcessStartInfo(host)
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         start.ArgumentList.Add(fixture);
-        start.ArgumentList.Add("allocations");
+        start.ArgumentList.Add(typed ? "typed-allocations" : "allocations");
         start.ArgumentList.Add(injectedKind.ToString(CultureInfo.InvariantCulture));
         start.ArgumentList.Add(injectedBytes.ToString(CultureInfo.InvariantCulture));
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start graph allocation fixture.");
@@ -93,6 +118,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
             throw;
         }
         process.ExitCode.ShouldBe(0, await output + await error);
+        (await output).ShouldContain("architecture=" + RuntimeInformation.ProcessArchitecture, Case.Sensitive);
         string line = (await output).Split('\n').Single(value => value.StartsWith("allocations=", StringComparison.Ordinal));
         return line["allocations=".Length..].Trim().Split(',').Select(value => long.Parse(value, CultureInfo.InvariantCulture)).ToArray();
     }

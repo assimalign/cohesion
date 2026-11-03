@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
 internal static class GraphWriteAllocations
 {
-    internal static long[] Measure(int injectedKind, int injectedBytes = 1024)
+    internal static long[] Measure(int injectedKind, int injectedBytes = 1024, bool typed = false)
     {
         var engine = GraphDatabaseEngine.Create("allocation", new()
         {
@@ -19,6 +19,12 @@ internal static class GraphWriteAllocations
             var schema = GraphSchema.Open(database, session);
             schema.SaveLabelAsync(new(new Guid("00000000-0000-0000-0000-000000000001"), "Counter"), CancellationToken.None).GetAwaiter().GetResult();
             schema.SaveLabelAsync(new(new Guid("00000000-0000-0000-0000-000000000002"), "Temporary"), CancellationToken.None).GetAwaiter().GetResult();
+            if (typed)
+            {
+                schema.SetGraphTypeAsync(GraphType.Create([
+                    GraphNodeType.Create("Counter", properties: [GraphPropertyType.Create("c", Types.DatabaseType.Int64, true)]),
+                    GraphNodeType.Create("Temporary", properties: [GraphPropertyType.Create("id", Types.DatabaseType.Int64, true)])]), CancellationToken.None).GetAwaiter().GetResult();
+            }
             session.ExecuteAsync("CREATE (:Counter {c:0})", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
             string[] queries = ["CREATE (:Temporary {id:1})", "MATCH (n:Counter) SET n.c=n.c+1", "MATCH (n:Temporary) DELETE n"];
             var minima = new[] { long.MaxValue, long.MaxValue, long.MaxValue };
