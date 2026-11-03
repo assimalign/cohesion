@@ -271,7 +271,9 @@ That refusal locates the outer tail. Both flat and parenthesized trees admit exa
 along a path; CD00005 locates the operator that would introduce level 129. Parentheses retain
 their separate 128-level expression guard. All nested entry points recognize parenthesized query
 terms; a deferred operator owns its one CK00001 without an additional nested-position refusal.
-Expression lookahead retains scalar operators and IN lists following a parenthesized subquery.
+Expression lookahead checks each leading wrapper at its matching close, innermost first, retaining
+scalar operators and IN lists following a parenthesized subquery through redundant nested wrappers.
+Array subscripts currently require a named path; a subscript on a subquery result remains CD00002.
 
 The [set-operation dialect](DIALECT.md#set-operations-1803-oq-s1) records value equality, T3-30's
 static header choice, result-member ORDER BY binding, paging, first-representative order, budgets

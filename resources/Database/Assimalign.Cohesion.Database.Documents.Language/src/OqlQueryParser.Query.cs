@@ -139,21 +139,26 @@ public sealed partial class OqlQueryParser
     {
         int index = _position;
         if (_tokens[index].Type != TokenType.LeftParen) { return false; }
-        while (_tokens[index].Type == TokenType.LeftParen) { index++; }
+        int wrappers = 0;
+        while (_tokens[index].Type == TokenType.LeftParen) { index++; wrappers++; }
         if (!IsWord(_tokens[index], "SELECT")) { return false; }
         if (!expressionOperand) { return true; }
         // A parenthesized subquery can also begin a larger scalar expression or IN list.
-        // Only enter query grammar if this term is followed by a query tail or its boundary.
-        int depth = 0;
-        for (index = _position; index < _tokens.Count - 1; index++)
+        // Check each leading wrapper at its matching close, innermost first, as SQL does
+        // (SqlQueryParser.SetOperations.cs; PostgreSQL gram.y:15645,15899,15916).
+        int nesting = wrappers;
+        int remaining = wrappers;
+        for (; index < _tokens.Count - 1; index++)
         {
-            if (_tokens[index].Type == TokenType.LeftParen) { depth++; }
-            else if (_tokens[index].Type == TokenType.RightParen && --depth == 0)
+            if (_tokens[index].Type == TokenType.LeftParen) { nesting++; }
+            else if (_tokens[index].Type == TokenType.RightParen && --nesting < remaining)
             {
                 var next = _tokens[index + 1];
-                return next.Type is TokenType.RightParen or TokenType.Eof ||
+                bool continuation = next.Type is TokenType.RightParen or TokenType.Eof ||
                     IsWord(next, "UNION") || IsWord(next, "INTERSECT") || IsWord(next, "EXCEPT") ||
                     IsWord(next, "ORDER") || IsWord(next, "LIMIT") || IsWord(next, "OFFSET");
+                if (!continuation) { return false; }
+                if (--remaining == 0) { return true; }
             }
         }
         return true;

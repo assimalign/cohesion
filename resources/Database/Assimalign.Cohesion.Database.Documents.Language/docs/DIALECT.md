@@ -847,9 +847,14 @@ This run supports top-level compounds and parenthesized set operands. Compound e
 subqueries, derived FROM and INSERT/UPSERT sources have the new query-expression AST type but
 retain one CK00001 until OQ-S2, including forms whose first query term is parenthesized.
 INTERSECT/EXCEPT's operator refusal already owns that construct and is not reported again for
-its nested position. A lone parenthesized SELECT remains a valid INSERT/UPSERT source.
-Additional parentheses around an IN query retain query membership; a following scalar operator
-or comma instead keeps the expression/list grammar.
+its nested position. A lone parenthesized SELECT is now a valid INSERT/UPSERT source, where
+it previously failed CD00002 (for example, INSERT INTO c (KEY k) (SELECT k FROM d)).
+IN with extra query parentheses, including NOT IN, now tests query membership where it previously
+compared against a one-element list containing the query array. A non-RAW/VALUE query in that
+position now receives CD00014. This follows PostgreSQL's a_expr IN_P select_with_parens
+(src/backend/parser/gram.y:15632-15645) and the SQL dialect's redundant-parenthesis rule.
+A scalar operator or comma following any leading wrapper's matching close instead keeps the
+expression/list grammar, including through redundant nested wrappers.
 Existing single-block subqueries and source bindings inside operands
 keep their independent scopes. No disk, catalog or wire format changes are needed.
 

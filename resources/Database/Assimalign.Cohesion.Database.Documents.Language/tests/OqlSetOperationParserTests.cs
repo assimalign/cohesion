@@ -75,6 +75,7 @@ public sealed class OqlSetOperationParserTests
     [InlineData("INSERT INTO c (KEY k) SELECT k FROM c UNION SELECT k FROM d")]
     [InlineData("UPSERT INTO c (KEY k) SELECT k FROM c UNION SELECT k FROM d")]
     [InlineData("SELECT RAW ((SELECT RAW 1 FROM c) UNION (SELECT RAW 2 FROM d)) FROM e")]
+    [InlineData("SELECT RAW (((SELECT RAW 1 FROM c) UNION (SELECT RAW 2 FROM d)) + 1) FROM e")]
     [InlineData("SELECT x FROM e WHERE x IN ((SELECT RAW 1 FROM c) UNION (SELECT RAW 2 FROM d))")]
     [InlineData("SELECT * FROM ((SELECT a FROM c) UNION (SELECT b FROM d)) AS q")]
     [InlineData("INSERT INTO c (KEY k) (SELECT k FROM d) UNION SELECT k FROM e")]
@@ -106,6 +107,9 @@ public sealed class OqlSetOperationParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Subqueries: a parenthesized term can still begin an expression or IN list")]
+    [InlineData("SELECT RAW (((SELECT RAW 1 FROM [1] AS a) + 1)) FROM [1] AS x")]
+    [InlineData("SELECT c.id FROM c WHERE (((SELECT RAW COUNT(*) FROM c.items AS i) = [2]))")]
+    [InlineData("SELECT RAW 1 FROM c WHERE TRUE IN (((SELECT RAW 1 FROM d) = [1]))")]
     [InlineData("SELECT RAW ((SELECT RAW 1 FROM c) = [1]) FROM d")]
     [InlineData("SELECT RAW 1 FROM c WHERE TRUE IN ((SELECT RAW 1 FROM d) = [1])")]
     [InlineData("SELECT RAW 1 FROM c WHERE [1] IN ((SELECT RAW 1 FROM d), [2])")]
@@ -114,7 +118,42 @@ public sealed class OqlSetOperationParserTests
         // Arrange / Act
         var statement = Parse(text);
         // Assert
+        statement.Diagnostics.Select(diagnostic => diagnostic.Code + "@" + diagnostic.Start + ": " + diagnostic.Message).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Subqueries: subscripts still require a named path")]
+    public void Parse_SubqueryResultSubscript_ShouldRetainExistingSyntaxRefusal()
+    {
+        // Arrange: a subquery result is not a named path.
+        const string text = "SELECT c.id FROM c WHERE (((SELECT RAW COUNT(*) FROM c.items AS i)[0] > 2))";
+        // Act
+        var statement = Parse(text);
+        // Assert
+        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CD00002");
+        diagnostic.Start.ShouldBe(text.IndexOf("[0]", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Subqueries: redundant query wrappers keep the subquery AST")]
+    public void Parse_RedundantSubqueryWrappers_ShouldRemainQuery()
+    {
+        // Arrange / Act
+        var statement = Parse("SELECT RAW (((SELECT RAW 1 FROM c))) FROM d");
+        // Assert
         statement.Diagnostics.ShouldBeEmpty();
+        statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Projections.Single().Expression
+            .ShouldBeOfType<OqlSubqueryExpression>().Query.ShouldBeOfType<OqlSelectExpression>().Collection.ShouldBe("c");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: redundant query wrappers require RAW for membership")]
+    [InlineData("IN")]
+    [InlineData("NOT IN")]
+    public void Parse_ParenthesizedNamedMembership_ShouldRefuseNonRawQuery(string operation)
+    {
+        // Arrange / Act
+        var statement = Parse("SELECT x FROM c WHERE x " + operation + " ((SELECT a FROM d))");
+        // Assert
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00014");
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Query expressions: the public variant family is closed and has two sealed leaves")]
