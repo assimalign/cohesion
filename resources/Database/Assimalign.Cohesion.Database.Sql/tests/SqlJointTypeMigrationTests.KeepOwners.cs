@@ -400,7 +400,8 @@ public sealed partial class SqlJointTypeMigrationTests
             waits.ShouldBeGreaterThanOrEqualTo(8);
             cancellations.ShouldBeGreaterThanOrEqualTo(8);
             await using var after = await database.CreateSessionAsync(guard.Token);
-            await Should.ThrowAsync<DatabaseException>(async () => await after.ExecuteAsync("INSERT INTO items VALUES(9,1)", cancellationToken: guard.Token));
+            var retry = await Should.ThrowAsync<DatabaseException>(async () => await after.ExecuteAsync("INSERT INTO items VALUES(9,1)", cancellationToken: guard.Token));
+            retry.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03038");
             await after.ExecuteAsync("INSERT INTO items VALUES(1,1)", cancellationToken: guard.Token);
         }
         finally { release.Set(); await applying; }

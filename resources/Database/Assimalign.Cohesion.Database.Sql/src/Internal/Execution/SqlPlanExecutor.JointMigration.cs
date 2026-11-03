@@ -134,7 +134,7 @@ internal sealed partial class SqlPlanExecutor
             if (keepsOwner)
             {
                 // Frozen missing tails and physical ordinals belong to the kept heap.
-                var columns = table.Columns.Select((column, ordinal) => new SqlCatalogColumn(old!.Columns[ordinal].Name, old.Columns[ordinal].Type,
+                var columns = table.Columns.Select((column, ordinal) => new SqlCatalogColumn(column.Name, old!.Columns[ordinal].Type,
                     column.IsNullable, old.Columns[ordinal].DefaultLiteral, old.Columns[ordinal].Collation, old.Columns[ordinal].DomainName,
                     old.Columns[ordinal].DefaultFunctionCalls, old.Columns[ordinal].Identity, old.Columns[ordinal].MissingValueLiteral)
                     { RecastDefault = old.Columns[ordinal].RecastDefault }).ToArray();
@@ -324,7 +324,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 marker = await statement.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
                 stage("Publishing");
-                _indexManager.PreparePublication(statement.Transaction);
+                _indexManager.PreparePublication();
                 try
                 {
                     await _catalog.PublishStorageReplacementAsync(previous, null, prepared, descriptions, PublishedRegistrations(descriptions, includePrepared: true),

@@ -130,31 +130,12 @@ internal sealed class SqlIndexManager
 
     // Catalog monitor -> directory monitor; no reverse acquisition or tree/page
     // latch under this monitor. Capacity is reserved before the catalog commit.
-    internal void PreparePublication(TransactionContext transaction)
+    internal void PreparePublication()
     {
-        // Detach normal same-name trees BEFORE the irrevocable catalog commit.
-        // A separately attached old alias preserves the old schema on any failure,
-        // including an observer failure after the physical directory removal.
-        var old = _normal.ExportRegistrations().Where(registration =>
-        {
-            lock (_sync) { return _prepared.ContainsKey(Key(registration.ObjectId, registration.Definition.Name)); }
-        }).Select(registration =>
-        {
-            var manager = CreatePhysical([registration]);
-            manager.TryGetIndex(registration.ObjectId, registration.Definition.Name, out var tree);
-            return new Entry(manager, registration, tree);
-        }).ToArray();
         lock (_sync)
         {
-            _alternate.EnsureCapacity(_alternate.Count + old.Length + _prepared.Count);
-            _maintenance.EnsureCapacity(_maintenance.Count + old.Length + _prepared.Count);
-            foreach (var entry in old)
-            {
-                var registration = entry.Registration;
-                _alternate.Add(Key(registration.ObjectId, registration.Definition.Name), entry);
-                _maintenance.Add(entry.Manager);
-                _normal.DropIndexAsync(transaction, registration.ObjectId, registration.Definition.Name).GetAwaiter().GetResult();
-            }
+            _alternate.EnsureCapacity(_alternate.Count + _prepared.Count);
+            _maintenance.EnsureCapacity(_maintenance.Count + _prepared.Count);
         }
     }
 

@@ -246,7 +246,8 @@ public sealed partial class SqlJointTypeMigrationTests
         database.IndexManager.ExportRegistrations().ShouldBe([registration]);
         database.Catalog.SchemaState!.ContentHash.ShouldBe(source.Hash);
         (await RowsAsync(writer, "SELECT i.w,r.v FROM items i CROSS JOIN rewrite r WHERE i.v=7", guard.Token)).Single().ShouldBe(new object?[] { 8, 1L });
-        await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync("INSERT INTO items VALUES(7,9)", cancellationToken: guard.Token));
+        var retry = await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync("INSERT INTO items VALUES(7,9)", cancellationToken: guard.Token));
+        retry.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03037");
         database.Catalog.IsTruncatedTable(old).ShouldBeFalse();
     }
 
@@ -289,7 +290,8 @@ public sealed partial class SqlJointTypeMigrationTests
 
             // Assert
             stale.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS04006");
-            await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync(invalid, cancellationToken: guard.Token));
+            var retry = await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync(invalid, cancellationToken: guard.Token));
+            retry.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(unique ? "CS03037" : "CS03038");
             await writer.ExecuteAsync("INSERT INTO items VALUES(2,2)", cancellationToken: guard.Token);
         }
         finally { release.Set(); await applying; await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }

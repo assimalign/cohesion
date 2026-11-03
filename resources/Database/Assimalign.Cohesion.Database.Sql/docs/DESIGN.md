@@ -8930,9 +8930,13 @@ Published aliases swap under the catalog monitor after its commit, using preallo
 old resolved handles remain protected by statement/transaction reclamation fences. The catalog
 also retains old kept-table descriptions through weak read-version markers while their physical
 owner is live or pending reclamation, so joins in older snapshots can scan that unchanged layout.
-These markers allocate after publication-space admission and before commit, so a space refusal
-leaves current descriptions on the read fast path. Weak keys cannot retain table histories forever.
-Publication checks EnsurePhysicalLayoutKept under the catalog lock for every kept description.
+These markers allocate after publication-space and catalog-checkpoint admission and before commit;
+canceled admission installs none, and a failed transaction removes this attempt's markers, leaving
+current descriptions on the read fast path. Weak keys cannot retain table histories forever.
+Publication checks physical layout, exact types and ObjectId under the catalog lock for every kept
+description. Kept columns retain their declared spelling while preserving physical ordinals and facets.
+Registered domains are outside the schema hash; if a matching interrupted intent's classification
+changes, its unpublished intent is discarded and replanned while the old schema remains online.
 The lock order is table X -> apply gate -> tree/page latches for building, and snapshot gate -> catalog monitor
 -> index directory monitor for publication; the directory never calls back into the catalog.
 Maintenance selects one physical manager per call, preserving the global 64-leaf budget.

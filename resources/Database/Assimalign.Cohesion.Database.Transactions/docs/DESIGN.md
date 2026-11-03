@@ -1323,7 +1323,8 @@ B+Tree entries retain their own physical layout and existing stamp implementatio
 
 **Raw bracket admission (#1283, EN-C1).** TransactionCheckpointInterlock is one sealed concrete
 coordination primitive per storage, shared by the coordinator and synchronous catalog or
-reclamation scopes. Its weak-key registry does not retain closed storages. Catalog file sets use
+reclamation scopes. SQL's ReserveJointTreeOwner uses the catalog monitor, catalog interlock and
+attributed SqlCatalog bracket, just like publication and intent discard. Its weak-key registry does not retain closed storages. Catalog file sets use
 independent instances with a plain storage checkpoint; data storage binds the coordinator's
 writer-anchor checkpoint. All gate releases, including undo and pruning, service deferred work.
 Synchronous nested scopes share their entering thread's acquisition; the outermost disposal
@@ -1371,6 +1372,14 @@ event 19 independently lists every raw physical bracket that refuses truncation.
 keep the existing identity-preserving handoff to the next worker attempt. This introduces no
 format, language, error identity or admission-pause policy.
 
+The merged raw-site audit covers every BeginTransaction call under Database src and shared:
+SQL catalog (including ReserveJointTreeOwner), key/value catalog, reclamation, statement apply,
+undo and prune enter the matching storage interlock. RecordSpaceVersionStore recovery, SQL and
+key/value constructor index scrubs, DocumentCatalog.RecoverIndexesAsync and GraphStore.RecoverIndexesAsync
+run before sessions and remain ungated. KeepDeferredWritersInFlight adopts failed undo writers at
+disposal solely to retain their checkpoint anchors. Storage's protected InsertRecord/DeleteRecord/
+UpdateRecord one-shot wrappers and standalone BTreeIndex pruning retain caller-owned exclusion;
+engine pruning invokes the latter under the data gate. No Blob normal-operation raw site exists.
 The ordering is deliberately the same as in both original engines:
 
 1. Open storage with its automatic open-time checkpoint deferred, allowing
