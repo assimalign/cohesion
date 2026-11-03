@@ -77,7 +77,7 @@ public sealed class StorageFormatException : StorageException
     /// Creates the refusal of a journal frame whose checksum verifies but whose frame
     /// version this engine does not read.
     /// </summary>
-    /// <param name="frameNumber">The frame's position in this scan, counting from 1; lazy page replay counts within that page.</param>
+    /// <param name="frameNumber">The frame's position in this scan, counting from 1.</param>
     /// <param name="foundVersion">The frame version found.</param>
     /// <param name="supportedVersion">The only frame version this engine reads.</param>
     internal static StorageFormatException ForJournalFrame(long frameNumber, int foundVersion, int supportedVersion)
@@ -91,4 +91,10 @@ public sealed class StorageFormatException : StorageException
             foundVersion,
             supportedVersion);
     }
+
+    // Lazy replay trusts the preflight's immutable prefix. Describe its exact
+    // location without claiming this later byte was verified or is a newer format.
+    internal static StorageFormatException ForJournalPageFrame(PageId page, long offset, int foundVersion, int supportedVersion)
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RecoveryPageFrameVersion,
+            ErrorCode, (long)page, offset, foundVersion, supportedVersion), foundVersion, supportedVersion);
 }

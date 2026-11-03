@@ -1961,15 +1961,15 @@ survives. Each requested page is reconstructed in one scratch page in file order
 Replay coalesces consecutive frames for that page only while each gap is at most 4 KiB and the
 span is at most 256 KiB; otherwise it reads exactly one frame. Thus scattered replay reads only
 the page's frame bytes, while clustered replay amortizes read calls. Replay rechecks magic,
-body-length bounds, indexed length and decoded page identity; version errors name the page-local
-frame number. It borrows each payload until Apply returns and uses the indexed scan's verified
+body-length bounds, indexed length and decoded page identity; version errors name the page and
+absolute frame byte offset without calling the later replay bytes a newer format. It borrows each payload until Apply returns and uses the indexed scan's verified
 length, with no per-record length queries. `StorageRecovery.GetPlans`,
 `ShouldApply` and `Apply` are shared with physical recovery: protected anchors, page zero, absent
 uncommitted extensions, commit selection, images, deltas and base-LSN checks have one implementation.
 There is no separate undo algorithm: recovery is already redo-only and overwrites stolen bytes.
 The owner/free-space scan consumes recovered headers one page at a time. Unchanged pages read only
 the requested header bytes, so a body I/O fault unrelated to any gate cannot introduce a refusal. The read-only
-buffer pool caches only pages subsequently read by a gate; its write guard, both transaction-begin overloads,
+buffer pool caches only pages subsequently read by a gate; its write guard, all transaction-begin overloads,
 the data stream and journal append/truncation guards reject mutation.
 
 Let R be retained applicable page records, D distinct indexed pages, P file pages, T journal transaction identities, G the
@@ -1990,7 +1990,7 @@ SQL's private block overlay has been removed in favor of this one mechanism.
 
 A probe is invisible to Storage lifecycle telemetry: no HeaderReadFallback, RecoveryStart,
 RecoveryStop, JournalTailLost, open/close counting or current-storages gauge transition. Only the
-real writable open reports recovery. Probe pool reads neither increment page-reads nor emit PageChecksumFailed; checksum verification and refusal still run. An engine refuses a strategy result whose Data.CanWrite is
+real writable open reports recovery. Probe pool reads do not increment page-reads. A checksum failure still emits PageChecksumFailed (Error), the only signal for that corrupt page: refusal prevents a writable open and a second count. An engine refuses a strategy result whose Data.CanWrite is
 true at its probe boundary with a resource-backed internal invariant exception. Making probe mode
 explicit in the protected Storage construction API would widen a shipped boundary, so this pass
 uses the existing read-only Data contract and the engine assertion instead.
@@ -3154,3 +3154,7 @@ structured diagnostic carrier exists. Standard .NET guards retain their argument
 Storage debugger views filter nonpublic implementation state and expose only reviewed public/protected value reads. StorageStream has an empty projection: inspection does not invoke delegated stream/handle properties. Pool/free-space counts that acquire locks, journal getters that initialize storage, disposed-page guards and pointer-backed SlottedPage reads are omitted. Public identity/value/count reads and existing volatile flags remain observable without page I/O or mutation.
 
 Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.
+
+Size-only checkpoint hints (TimeSpan.MaxValue) short-circuit elapsed-time sampling after the
+journal-size trigger. Failed physical-bracket registration completes the unreturned transaction;
+probe write refusal still precedes construction in all BeginTransaction overloads (#1283, #1744).

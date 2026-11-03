@@ -234,7 +234,7 @@ separate charges for independently owned values, wrappers and the final array.
 CREATE INDEX accepts `DISTINCT ARRAY v.p FOR v IN arr [WHEN cond] END` among scalar keys.
 The parser reuses `OqlComprehensionExpression` inside the immutable
 `OqlCreateIndexExpression.Keys`; an index comprehension denotes DISTINCT and is never FIRST.
-The scalar Paths view is empty for array indexes. The engine binds the document source path,
+The scalar Paths view is empty for array indexes. Element-relative paths beginning with a subscript (v[0]) are refused by engine planning with CD03027 before catalog writes. The engine binds the document source path,
 element-relative projection and bounded WHEN to catalog-owned descriptors without adding a
 catalog reference here. ALL remains one CK00001. Malformed bindings and missing END retain
 CD00002; unsupported WITHIN/multiple bindings retain their existing capability refusals.

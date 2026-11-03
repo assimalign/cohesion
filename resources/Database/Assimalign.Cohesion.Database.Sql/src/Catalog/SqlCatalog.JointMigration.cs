@@ -10,8 +10,6 @@ using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
-using Assimalign.Cohesion.Database.Transactions;
-
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
@@ -24,14 +22,22 @@ public sealed partial class SqlCatalog
     private readonly ConditionalWeakTable<SqlCatalogTable, object> _keptReadVersions = new();
     private readonly Dictionary<TransactionSequence, ulong[]> _indexRetirementsPublishing = new();
 
-    private void PrepareKeptReadVersions(IReadOnlyList<SqlCatalogTable> kept)
+    private SqlCatalogTable[] PrepareKeptReadVersions(IReadOnlyList<SqlCatalogTable> kept)
     {
-        foreach (var table in kept)
+        if (kept.Count == 0) { return []; }
+        var added = kept.Select(table => _tables[(table.Schema, table.Name)].Table)
+            .Where(previous => !_keptReadVersions.TryGetValue(previous, out _)).ToArray();
+        try
         {
-            var previous = _tables[(table.Schema, table.Name)].Table;
-            _keptReadVersions.GetValue(previous, static _ => new object());
+            foreach (var previous in added)
+            { _keptReadVersions.Add(previous, new object()); }
+            return added;
         }
-        // Allocate after space admission and before commit.
+        catch
+        {
+            foreach (var previous in added) { _keptReadVersions.Remove(previous); }
+            throw;
+        }
     }
 
     private bool IsKeptReadVersion(SqlCatalogTable table)
@@ -46,7 +52,9 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             token.ThrowIfCancellationRequested();
             ulong owner = _nextObjectId;
-            using var transaction = _storage.BeginTransaction();
+            using var admission = TransactionCheckpointInterlock.ForStorage(_storage)
+                .Enter("SqlCatalog", unchecked((long)owner), token);
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)owner));
             var location = _storage.InsertRow(transaction, owner, SqlReclamationRecord.Encode(owner, table.Schema, table.Name));
             var counter = PersistCounter(transaction, checked(owner + 1), _ddlGeneration);
             var intent = new SqlReclamationIntent(location.PageId, location.SlotIndex);

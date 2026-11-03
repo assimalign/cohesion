@@ -14,7 +14,7 @@ The journal-only pre-scan stops at the first full image of an existing page abov
 probe. The writable open defers checkpointing, physical recovery has no writes, and all format
 gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
 asserted read-only at the strategy boundary, and is disposed before writable handles open.
-The probe reports no Storage lifecycle events, page-read counts, checksum-failure events or gauge changes. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
+The probe reports no Storage lifecycle events, page-read counts or gauge changes. A corrupt page still emits PageChecksumFailed (Error): the probe refuses the open, so no writable replay can double-count that corruption. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
 source-shared journal analysis with the open cancellation token, common replay rules, retained-byte bound and gate inventory.
 
 ## Checkpoint bracket attribution (#1283, EN-C1)
@@ -29,6 +29,11 @@ earlier, with no new admission condition. Busy retries wait for a fresh worker r
 until no storage-level transaction is active (`Storage.HasActiveTransactions`), and
 uncollected operational failures suppress foreground retries; the worker retains failure policy.
 Undo and prune releases can checkpoint while the rolled-back writer still holds model locks.
+
+The test-only context snapshot barrier waits at most 30 seconds for the reclamation run monitor
+and copies contexts while excluding the next pass; it does not drain other background contexts.
+Callers must hold neither the data gate nor a catalog monitor because reclamation can wait for
+the gate while holding its run monitor and access the catalog later.
 
 Table reclamation takes the data interlock without model locks, commits each 32-page batch without
 awaiting durability under its allocation-accounting monitor, then ensures its captured journal LSN
@@ -282,7 +287,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Current catalog/record-space format 35 refuses all earlier files before data recovery;
+extension 3. Current catalog/record-space format 35 refuses all earlier files before writable data recovery;
 compiled-schema v11 adds CompiledSchemaIndex.Predicate and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
@@ -3543,8 +3548,10 @@ completion includes pages reclaimed by that process (after a crash it counts rem
 
 Context-count assertions in SQL tests capture the coordinator's unchanged open-context snapshot
 through an internal, test-only barrier under reclamation's existing run lock (#1764, #1782).
-The lock waits for any discovery pin to end and excludes the next discovery until the copy is
-complete; a separate idle poll would leave a race before enumeration. Pending reclamations may
+CaptureOpenContextsForTesting waits up to 30 seconds for an in-flight pass, then excludes the
+next discovery until the copy is complete; it does not promise that reclamation has drained.
+A separate idle poll would leave a race before enumeration. Callers hold neither a data gate
+nor a catalog monitor, since the run lock precedes both in reclamation. Pending reclamations may
 remain behind live readers, and every application context (including leaked builders and statement
 pins) is still counted. The hook adds no work to production paths and uses only SQL's own test grant.
 
@@ -8923,9 +8930,13 @@ Published aliases swap under the catalog monitor after its commit, using preallo
 old resolved handles remain protected by statement/transaction reclamation fences. The catalog
 also retains old kept-table descriptions through weak read-version markers while their physical
 owner is live or pending reclamation, so joins in older snapshots can scan that unchanged layout.
-These markers allocate after publication-space admission and before commit, so a space refusal
-leaves current descriptions on the read fast path. Weak keys cannot retain table histories forever.
-Publication checks EnsurePhysicalLayoutKept under the catalog lock for every kept description.
+These markers allocate after publication-space and catalog-checkpoint admission and before commit;
+canceled admission installs none, and a failed transaction removes this attempt's markers, leaving
+current descriptions on the read fast path. Weak keys cannot retain table histories forever.
+Publication checks physical layout, exact types and ObjectId under the catalog lock for every kept
+description. Kept columns retain their declared spelling while preserving physical ordinals and facets.
+Registered domains are outside the schema hash; if a matching interrupted intent's classification
+changes, its unpublished intent is discarded and replanned while the old schema remains online.
 The lock order is table X -> apply gate -> tree/page latches for building, and snapshot gate -> catalog monitor
 -> index directory monitor for publication; the directory never calls back into the catalog.
 Maintenance selects one physical manager per call, preserving the global 64-leaf budget.

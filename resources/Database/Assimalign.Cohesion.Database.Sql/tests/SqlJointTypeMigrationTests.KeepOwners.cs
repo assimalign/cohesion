@@ -400,7 +400,8 @@ public sealed partial class SqlJointTypeMigrationTests
             waits.ShouldBeGreaterThanOrEqualTo(8);
             cancellations.ShouldBeGreaterThanOrEqualTo(8);
             await using var after = await database.CreateSessionAsync(guard.Token);
-            await Should.ThrowAsync<DatabaseException>(async () => await after.ExecuteAsync("INSERT INTO items VALUES(9,1)", cancellationToken: guard.Token));
+            var retry = await Should.ThrowAsync<DatabaseException>(async () => await after.ExecuteAsync("INSERT INTO items VALUES(9,1)", cancellationToken: guard.Token));
+            retry.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03038");
             await after.ExecuteAsync("INSERT INTO items VALUES(1,1)", cancellationToken: guard.Token);
         }
         finally { release.Set(); await applying; }
@@ -516,7 +517,8 @@ public sealed partial class SqlJointTypeMigrationTests
         after.FindColumn("tail")!.MissingValueLiteral.ShouldBe("11");
         after.FindColumn("tail")!.IsNullable.ShouldBeFalse();
         (await RowsAsync(writer, "SELECT tail FROM items", guard.Token)).Single()[0].ShouldBe(11);
-        await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync("INSERT INTO items VALUES(9,NULL)", cancellationToken: guard.Token));
+        var violation = await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync("INSERT INTO items VALUES(9,NULL)", cancellationToken: guard.Token));
+        violation.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03024");
         await writer.ExecuteAsync("INSERT INTO items(v) VALUES(9)", cancellationToken: guard.Token);
         (await RowsAsync(writer, "SELECT tail FROM items WHERE v=9", guard.Token)).Single()[0].ShouldBe(11);
     }
@@ -621,7 +623,8 @@ public sealed partial class SqlJointTypeMigrationTests
         // Assert
         database.IndexManager.ExportRegistrations().Single().RootPageId.ShouldBe(before.RootPageId);
         (await RowsAsync(writer, "SELECT w FROM items WHERE v=7", guard.Token)).Single()[0].ShouldBe(8);
-        await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync("INSERT INTO items VALUES(7,9)", cancellationToken: guard.Token));
+        var violation = await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync("INSERT INTO items VALUES(7,9)", cancellationToken: guard.Token));
+        violation.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03037");
         await writer.ExecuteAsync("INSERT INTO items VALUES(9,10)", cancellationToken: guard.Token);
     }
 

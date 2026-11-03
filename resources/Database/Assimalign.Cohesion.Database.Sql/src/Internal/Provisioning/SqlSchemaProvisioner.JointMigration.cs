@@ -96,9 +96,16 @@ internal sealed partial class SqlSchemaProvisioner
                 var existing = plan.Tables.Where(table => table.Previous is not null).ToArray();
                 if (choices.Length != existing.Length || existing.Any(table => choices.Count(step =>
                     step.Table.Equals(table.Shape.Name, StringComparison.OrdinalIgnoreCase) &&
-                    step.ObjectName.Equals(table.Shape.Name, StringComparison.OrdinalIgnoreCase) &&
-                    step.Kind == (table.KeepsOwner ? "Joint/KeepOwner" : "Joint/RewriteOwner")) != 1))
+                    step.ObjectName.Equals(table.Shape.Name, StringComparison.OrdinalIgnoreCase)) != 1))
                 { throw new SqlCatalogException("CS06059", ErrorMessages.JointClassificationInvalid); }
+                if (existing.Any(table => choices.Single(step => step.Table.Equals(table.Shape.Name, StringComparison.OrdinalIgnoreCase)).Kind !=
+                    (table.KeepsOwner ? "Joint/KeepOwner" : "Joint/RewriteOwner")))
+                {
+                    // Registered domains are outside the schema hash. The old schema
+                    // is still online: discard unpublished work and plan with today's types.
+                    await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false);
+                    plan = executor.PlanJointMigration(schema, script, cancellationToken);
+                }
             }
         }
         catch (Exception refusal)

@@ -133,7 +133,6 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         _applyGate = TransactionCheckpointInterlock.ForStorage(storage);
         _versionStore = new RecordSpaceVersionStore(storage, records, _applyGate);
         _log = new GatedJournalLog(this);
-        _applyGate.ConfigureCheckpoint(this, () => _log.CheckpointUnderGate(_storage), () => _insideApply.Value);
 
         // The manager over the gated journal log: the statement apply admits a bracket
         // only for a context the manager still holds open, and the version-purge pass
@@ -152,6 +151,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             database);
         locks.EnterEngineMode(_manager.IsTracked, () => _insideApply.Value, database);
         _lockManager = locks;
+        // Publish callbacks only after every field they can observe is initialized.
+        _applyGate.ConfigureCheckpoint(this, () => _log.CheckpointUnderGate(_storage), () => _insideApply.Value);
     }
 
     /// <summary>

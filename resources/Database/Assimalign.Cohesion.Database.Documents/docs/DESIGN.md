@@ -13,7 +13,7 @@ The journal-only pre-scan stops at the first full image of an existing page abov
 probe. The writable open defers checkpointing, physical recovery has no writes, and all format
 gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
 asserted read-only at the strategy boundary, and is disposed before writable handles open.
-The probe reports no Storage lifecycle events, page-read counts, checksum-failure events or gauge changes. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
+The probe reports no Storage lifecycle events, page-read counts or gauge changes. A corrupt page still emits PageChecksumFailed (Error): the probe refuses the open, so no writable replay can double-count that corruption. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
 source-shared journal analysis, common replay rules, retained-byte bound and gate inventory.
 
 ## Named savepoint integration (#1726, XT-4)
@@ -2810,6 +2810,8 @@ original array to preserve its element multiplicity.
 
 OQL accepts one `DISTINCT ARRAY v.p FOR v IN arr [WHEN cond] END` key among 1..32 ordered keys.
 The source is a document path and the projection is the variable itself or a path rooted in it.
+An element-relative path must begin with a property; a leading subscript such as v[0] is refused
+at planning with located CD03027, including in WHEN, before any catalog mutation.
 WHEN binds only element paths, scalar literal comparisons, IS NULL/MISSING, AND, OR and NOT;
 negated tests normalize to NOT(test). Numeric text converts directly to Decimal, including scale
 and exponent spellings within its domain. CLR Single/Double literals in a directly constructed

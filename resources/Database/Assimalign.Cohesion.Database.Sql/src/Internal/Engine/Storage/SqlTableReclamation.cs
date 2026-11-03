@@ -51,10 +51,19 @@ internal sealed class SqlTableReclamation
     // Tests wait for an in-flight discovery pin to roll back and capture while
     // still excluding the next discovery. Waiting for HasWork alone leaves a
     // gap before enumeration and can wait forever behind a leaked builder.
-    // This hook uses only the existing run lock and costs nothing when unused.
-    internal IReadOnlyList<TransactionContext> GetOpenContextsAtIdleForTesting()
+    // Call without a data apply gate or catalog monitor: reclamation holds this
+    // run lock while waiting for the data gate and later accesses the catalog.
+    // The snapshot excludes reclamation pins, not other background/application work.
+    internal IReadOnlyList<TransactionContext> CaptureOpenContextsForTesting(Action? waiting = null)
     {
-        lock (_runLock) { return _database.Coordinator.GetOpenContexts(); }
+        if (!Monitor.TryEnter(_runLock))
+        {
+            waiting?.Invoke();
+            if (!Monitor.TryEnter(_runLock, TimeSpan.FromSeconds(30)))
+            { throw new TimeoutException(ErrorMessages.ReclamationContextBarrierTimeout); }
+        }
+        try { return _database.Coordinator.GetOpenContexts(); }
+        finally { Monitor.Exit(_runLock); }
     }
 
     internal void Request()

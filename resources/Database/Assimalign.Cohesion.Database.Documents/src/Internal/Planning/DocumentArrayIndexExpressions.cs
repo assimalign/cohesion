@@ -41,6 +41,10 @@ internal static class DocumentArrayIndexExpressions
         Path(path);
         if (path.Segments[0].Name != variable)
         { throw new DocumentPlanningException("CD01028", ErrorMessages.ArrayIndexBindingInvalid, path.Location); }
+        // The catalog path grammar starts with a property. An element subscript
+        // would produce a leading [n] and must be refused here with a located code.
+        if (path.Segments.Count > 1 && path.Segments[1].Index is not null)
+        { throw new DocumentPlanningException("CD03027", ErrorMessages.ArrayIndexExpressionInvalid, path.Location); }
         return DocumentPlanner.IndexPath(path, variable) ?? string.Empty;
     }
 

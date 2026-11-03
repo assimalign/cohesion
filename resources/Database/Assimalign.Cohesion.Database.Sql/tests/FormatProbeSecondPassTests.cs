@@ -16,6 +16,35 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(FormatProbeFixTests))]
 public sealed class FormatProbeSecondPassTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Unclean format 34 refuses before alternate-owner validation and preserves every byte (#1744, #1777)")]
+    public async Task Open_Format34WithInvalidAlternateOwner_ShouldRefuseRecoveredFormatWithoutWrites()
+    {
+        // Arrange: the catalog marker and poisoned root are committed in unclean journals.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-sql-format34-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await FormatProbeCrash.SeedAsync("Sql", root, legacy: false, "format34-owner");
+            FormatProbeCrash.AssertUncommittedImages(root);
+            var before = FormatProbeCrash.Snapshot(root);
+
+            // Act: repeat the refusal to prove that the first attempt did not scrub or checkpoint.
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                await using (var engine = SqlDatabaseEngine.Create("format34-probe", new() { RootPath = root }))
+                {
+                    var failure = await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync("probe", CancellationToken.None));
+
+                    // Assert: physical-owner attachment would report corruption instead.
+                    failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
+                    failure.Message.ShouldContain("34", Case.Sensitive);
+                    failure.Message.ShouldContain("35", Case.Sensitive);
+                }
+                FormatProbeCrash.AssertUnchanged(root, before);
+            }
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Open: each required pre-scan receives the open cancellation token (#1744)")]
     [InlineData(false)]
     [InlineData(true)]

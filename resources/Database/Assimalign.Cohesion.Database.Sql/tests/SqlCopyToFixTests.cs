@@ -132,7 +132,7 @@ public sealed class SqlCopyToFixTests
             database.TableReclamation.AfterBatch = null;
         }
         (database.TableReclamation.ReclaimedPages - before).ShouldBe(pages.Count);
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         _output.WriteLine($"Retired pages reclaimed={pages.Count}; retired rows read={retiredReads}.");
     }
 
@@ -172,7 +172,7 @@ public sealed class SqlCopyToFixTests
         using var after = new MemoryStream();
         await session.CopyToAsync("COPY t TO STDOUT", after, timeout.Token);
         Encoding.UTF8.GetString(after.ToArray()).ShouldBe("1\n2\n");
-        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - COPY: an admitted ordinary statement excludes an export")]
@@ -246,7 +246,9 @@ public sealed class SqlCopyToFixTests
             // Assert
             (await copy.WaitAsync(timeout.Token)).ShouldBe(1);
             Encoding.UTF8.GetString(output.ToArray()).ShouldBe("id,fresh\n1,7\n");
-            database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
+            while (database.SchemaProvisioner.Deferred is not null)
+            { timeout.Token.ThrowIfCancellationRequested(); await Task.Yield(); }
+            database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         }
         finally { release.Set(); }
     }

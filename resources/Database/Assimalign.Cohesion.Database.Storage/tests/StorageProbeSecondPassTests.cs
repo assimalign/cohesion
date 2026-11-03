@@ -160,7 +160,7 @@ public sealed class StorageProbeSecondPassTests
         failure.Code.ShouldBe("CK06003");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Probe: version refusal reports the page-local frame number (#1744)")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Probe: version refusal reports the page and absolute frame offset (#1744)")]
     public void Read_ChangedIndexedVersion_ShouldNamePageFrame()
     {
         // Arrange: page two starts in the second slot of the flat index.
@@ -176,7 +176,11 @@ public sealed class StorageProbeSecondPassTests
         var failure = Should.Throw<StorageFormatException>(() => probe.ReadExactly(new byte[Page.Size]));
 
         // Assert.
-        failure.Message.ShouldBe(StorageFormatException.ForJournalFrame(1, 0, StorageRecoveryJournal.currentVersion).Message);
+        failure.Message.ShouldContain("Page 2", Case.Sensitive);
+        failure.Message.ShouldContain($"byte offset {offset}", Case.Sensitive);
+        failure.FoundVersion.ShouldBe(0);
+        failure.SupportedVersion.ShouldBe(StorageRecoveryJournal.currentVersion);
+        failure.Message.ShouldNotContain("newer", Case.Insensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Probe: oversized page frames cannot enter the packed index (#1744)")]
@@ -198,7 +202,7 @@ public sealed class StorageProbeSecondPassTests
         failure.PageId.ShouldBe((PageId)1L);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Storage] - Probe pool: page reads and checksum failures stay out of telemetry (#1744)")]
+    [Theory(DisplayName = "Cohesion Test [Storage] - Probe pool: page reads stay suppressed and checksum failures remain visible (#1744)")]
     [InlineData(false)]
     [InlineData(true)]
     public void Pin_ReadOnlyPool_ShouldNotReportPageReads(bool corrupt)
@@ -219,8 +223,15 @@ public sealed class StorageProbeSecondPassTests
 
         // Assert.
         (StorageEventSource.Log.PageReads - before).ShouldBe(0);
-        recorder.Events.Where(e => e.PayloadNames?.IndexOf("database") is >= 0
-            && Equals(e.Payload![e.PayloadNames.IndexOf("database")], name)).ShouldBeEmpty();
+        var events = recorder.Events.Where(e => e.PayloadNames?.IndexOf("database") is >= 0
+            && Equals(e.Payload![e.PayloadNames.IndexOf("database")], name)).ToArray();
+        if (corrupt)
+        {
+            var checksum = events.ShouldHaveSingleItem();
+            checksum.EventName.ShouldBe("PageChecksumFailed");
+            checksum.Level.ShouldBe(EventLevel.Error);
+        }
+        else { events.ShouldBeEmpty(); }
     }
 
     private static byte[] Journal(int pages, int deltas)
