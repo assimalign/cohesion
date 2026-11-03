@@ -231,8 +231,7 @@ public sealed partial class GraphSchema
                     foreach (var property in node.Properties)
                     {
                         op.QueryBudget.Consume();
-                        if (!_database.Catalog.HasPropertyKey(property.Name, op.Context.Snapshot)) { memory.Add(1024); }
-                        await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token).ConfigureAwait(false);
+                        await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token, memory.Add).ConfigureAwait(false);
                         _database.Catalog.AfterGraphTypeMutation?.Invoke("property:" + property.Name);
                     }
                 }
@@ -245,8 +244,7 @@ public sealed partial class GraphSchema
                     foreach (var property in edge.Properties)
                     {
                         op.QueryBudget.Consume();
-                        if (!_database.Catalog.HasPropertyKey(property.Name, op.Context.Snapshot)) { memory.Add(1024); }
-                        await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token).ConfigureAwait(false);
+                        await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token, memory.Add).ConfigureAwait(false);
                         _database.Catalog.AfterGraphTypeMutation?.Invoke("property:" + property.Name);
                     }
                 }

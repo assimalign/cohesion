@@ -241,9 +241,10 @@ public sealed partial class GraphCatalog
     // private identity keeps them outside every definition's metadata and avoids reserving
     // a public GUID or adding a second registry/record format. Add and undo maintain the
     // same database-wide name directory as declared keys.
-    internal ValueTask DiscoverPropertyKeyAsync(string name, TransactionContext context, CancellationToken token)
+    internal ValueTask DiscoverPropertyKeyAsync(string name, TransactionContext context, CancellationToken token, Action<long>? reserve = null)
     {
         if (HasPropertyKey(name, context.Snapshot)) { return default; }
+        reserve?.Invoke(1024);
         return SaveAsync(new CatalogRecord(property: new GraphPropertyKeyMetadata(Guid.NewGuid(), name)),
             null, context, token);
     }

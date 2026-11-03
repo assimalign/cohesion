@@ -56,7 +56,9 @@ definitions and graph-type variants share one object slot, keeping property/inde
 growing for the new variants. Publication reserves 512 bytes for the singleton type route and
 1 KiB before discovering each new label, relationship type or property token, covering catalog
 directory and transaction-version entries. Each token lookup also consumes work; duplicate or
-existing tokens need no new-token memory grant. There is no graph-wide data materialization. Successful publication
+existing tokens need no new-token memory grant. Property-token reservation runs inside catalog
+discovery after its final existence check, following the actual insertion decision.
+There is no graph-wide data materialization. Successful publication
 discovers label/type/property tokens in the same logical transaction; dropping a type retains
 those discoveries. Failed operations roll all new tokens back. The defaults remain 1,000,000
 work units and 256 MiB retained memory. Every grant unwinds on success, cancellation or failure.
