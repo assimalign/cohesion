@@ -64,6 +64,7 @@ error and has no production diagnostic code.
 | COHDBP001 | CK07001 | Diagnostic truncation notice |
 | COHDBP002 | CK07002 | Transaction status refusal |
 | COHDBTCP001 | CK07101 | TCP listener host/address refusal |
+| New (#1790) | CK07102 | HTTP health listener bind failure; structured diagnostic retains the socket cause |
 | COHDBO001 | CK08001 | Listener option refusal |
 | COHDBO002 | CK08002 | Session count refusal |
 | COHDBO003 | CK08003 | Server timeout refusal |

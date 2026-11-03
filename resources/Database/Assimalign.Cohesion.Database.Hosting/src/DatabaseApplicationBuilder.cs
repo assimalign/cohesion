@@ -151,7 +151,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// stay owned by their callers. <see cref="Build"/> creates the
     /// application's lifecycle list from <see cref="AddService(IHostService)"/> registrations first,
     /// then this provider's <see cref="IHostService"/> registrations, each in registration order,
-    /// then the reopen service and servers. Stop reverses that order, draining servers first.
+    /// with the health listener appended last when configured, then the reopen service and
+    /// servers. Stop reverses that order, draining servers first.
     /// Unkeyed IHostService registrations must be singletons. Build invokes their factories once
     /// directly and the application disposes their products before engines, in reverse order;
     /// instance registrations are borrowed. Keyed registrations are not lifecycle services.
@@ -240,7 +241,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <returns>This builder.</returns>
     /// <remarks>
     /// The last call replaces the previous endpoint. When the runtime environment names a gateway
-    /// and assigns an http endpoint, that platform endpoint wins. Without either configuration,
+    /// and assigns a plain HTTP endpoint with a bindable host, that platform endpoint wins.
+    /// Unsupported platform assignments are reported and skipped. Without either configuration,
     /// no health listener is created. The listener starts before model servers and stops after
     /// they drain. Namespaced health routes accept loopback peers only.
     /// </remarks>
@@ -322,7 +324,18 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             if (!string.IsNullOrWhiteSpace(AppEnvironment.GetValue(AppEnvironment.Variables.Gateway))
                 && AppEnvironment.TryGetEndpoint("http", out Uri? platformEndpoint))
             {
-                healthEndpoint = platformEndpoint;
+                if (DatabaseAdminEndpointService.CanBindPlatformEndpoint(platformEndpoint))
+                {
+                    if (healthEndpoint is not null && healthEndpoint != platformEndpoint)
+                    {
+                        DatabaseHostingEventSource.Log.HealthEndpointOverridden(healthEndpoint, platformEndpoint);
+                    }
+                    healthEndpoint = platformEndpoint;
+                }
+                else
+                {
+                    DatabaseHostingEventSource.Log.HealthEndpointAssignmentSkipped(platformEndpoint);
+                }
             }
 
             if (healthEndpoint is not null)

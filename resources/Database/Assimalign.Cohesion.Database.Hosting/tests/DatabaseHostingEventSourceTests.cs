@@ -265,7 +265,10 @@ public sealed partial class DatabaseHostingEventSourceTests
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await Should.ThrowAsync<Exception>(() => ((IHost)application).StartAsync(timeout.Token));
+            DatabaseException failure = await Should.ThrowAsync<DatabaseException>(() => ((IHost)application).StartAsync(timeout.Token));
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK07102");
+            failure.InnerException.ShouldBeOfType<HostStartupException>().InnerException
+                .ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.AddressAlreadyInUse);
             application.Context.State.ShouldBe(HostState.Failed);
         }
         finally
@@ -318,6 +321,8 @@ public sealed partial class DatabaseHostingEventSourceTests
                 log.ApplicationStopped(application.Context, started);
                 log.ApplicationDisposeFailed(application.Context, 1, failure);
                 log.AdminEndpointFailed(endpoint, "Start", failure);
+                log.HealthEndpointAssignmentSkipped(endpoint);
+                log.HealthEndpointOverridden(endpoint, endpoint);
             }
             return started;
         }

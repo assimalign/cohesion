@@ -1,9 +1,11 @@
 using System;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
@@ -113,6 +115,16 @@ internal sealed class DatabaseAdminEndpointService : IHostService, IDisposable, 
         {
             await ((IHost)_application).StartAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch (Exception exception) when (exception is SocketException or HostStartupException { InnerException: SocketException })
+        {
+            // Binding is awaited before model servers start; preserve the transport cause while
+            // giving the Database caller a structured diagnostic for the failed health bind.
+            DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Start", exception);
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.HealthEndpointBindFailed, _endpoint.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped));
+            throw new DatabaseException(message,
+                [new Diagnostic { Code = "CK07102", Message = message, Severity = DiagnosticSeverity.Error }], exception);
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Start", exception);
@@ -132,6 +144,11 @@ internal sealed class DatabaseAdminEndpointService : IHostService, IDisposable, 
             throw;
         }
     }
+
+    internal static bool CanBindPlatformEndpoint(Uri endpoint)
+        => string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(endpoint.IdnHost, "localhost", StringComparison.OrdinalIgnoreCase)
+                || IPAddress.TryParse(endpoint.IdnHost, out _));
 
     internal static IPEndPoint GetBindEndPoint(Uri endpoint)
     {

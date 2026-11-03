@@ -87,27 +87,48 @@ public sealed class DatabaseHealthEndpointTests
         application.Context.HostedServices.OfType<DatabaseAdminEndpointService>().ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Health: unsupported platform assignments fail before engine construction (#1790)")]
-    [InlineData("https", "127.0.0.1")]
-    [InlineData("tcp", "127.0.0.1")]
-    [InlineData("http", "example.test")]
-    public void Build_UnsupportedPlatformHealthEndpoint_ShouldRefuseBeforeEngines(string scheme, string host)
+    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Health: unsupported platform assignments keep explicit health or omit the listener (#1790)")]
+    [InlineData("https", "127.0.0.1", false)]
+    [InlineData("https", "127.0.0.1", true)]
+    [InlineData("tcp", "127.0.0.1", false)]
+    [InlineData("tcp", "127.0.0.1", true)]
+    [InlineData("http", "example.test", false)]
+    [InlineData("http", "example.test", true)]
+    public async Task Build_UnsupportedPlatformHealthEndpoint_ShouldKeepApplicationAvailable(string scheme, string host, bool explicitHealth)
     {
         // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var reservation = new TcpListener(IPAddress.Loopback, 0);
+        reservation.Start();
+        var endpoint = new Uri($"http://127.0.0.1:{((IPEndPoint)reservation.LocalEndpoint).Port}");
         using var environment = AppEnvironment.Enter(AppEnvironmentScope.Create(new Dictionary<string, string>
         {
             [AppEnvironment.Variables.Gateway] = "test",
             [AppEnvironment.Variables.Endpoint("http", "HOST")] = host,
             [AppEnvironment.Variables.Endpoint("http", "PORT")] = "5740",
             [AppEnvironment.Variables.Endpoint("http", "SCHEME")] = scheme,
-        }, CancellationToken.None));
+        }, guard.Token));
         int constructions = 0;
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine("never", _ => { constructions++; return new RecordingEngine(); });
+        builder.AddEngine("recording-engine", _ => { constructions++; return new RecordingEngine(); });
+        if (explicitHealth) { builder.AddHealthEndpoint(endpoint); }
 
-        // Act / Assert
-        Should.Throw<InvalidOperationException>(() => builder.Build());
-        constructions.ShouldBe(0);
+        // Act
+        await using DatabaseApplication application = builder.Build();
+        reservation.Stop();
+        await ((IHost)application).StartAsync(guard.Token);
+
+        // Assert
+        constructions.ShouldBe(1);
+        application.Context.State.ShouldBe(HostState.Started);
+        application.Context.HostedServices.OfType<DatabaseAdminEndpointService>().Count().ShouldBe(explicitHealth ? 1 : 0);
+        if (explicitHealth)
+        {
+            using var client = new HttpClient { BaseAddress = endpoint };
+            using HttpResponseMessage response = await client.GetAsync("/readyz", guard.Token);
+            response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+        await ((IHost)application).StopAsync(guard.Token);
         Should.Throw<InvalidOperationException>(() => builder.Services.AddSingleton(new object()));
     }
 
