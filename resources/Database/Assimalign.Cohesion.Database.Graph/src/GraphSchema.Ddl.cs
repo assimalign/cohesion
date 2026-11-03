@@ -170,9 +170,9 @@ public sealed partial class GraphSchema
 
     private async ValueTask CreateConstraintCoreAsync(GraphOperation op, GraphConstraintMetadata constraint, CancellationToken cancellationToken)
     {
-        await _database.Catalog.CreateConstraintAsync(constraint, op.Context, cancellationToken).ConfigureAwait(false);
-        var latest = _database.LatestSnapshot(op.Context);
         using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+        await _database.Catalog.CreateConstraintAsync(constraint, op.Context, cancellationToken, op.QueryBudget.Consume, memory.Add).ConfigureAwait(false);
+        var latest = _database.LatestSnapshot(op.Context);
         if (_database.Catalog.FindLabel(constraint.DefinitionId, latest) is { } label)
         {
             foreach (var node in _database.Store.StreamLabels([label.Name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add))

@@ -24,16 +24,17 @@ public sealed class GraphOrdinaryWriteAllocationTests
 
 #if !DEBUG
     [Theory(DisplayName = "Cohesion Test [Graph] - typed label writes retain one-decode allocations and 128 B headroom (#1806)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Execute_TypedWrites_ShouldGuardDeclarationDecode(bool injected)
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task Execute_TypedWrites_ShouldGuardDeclarationDecode(int injectedKind)
     {
         // Arrange / Act
-        var minima = await MeasureAsync(injected ? 0 : -1, injected ? 129 : 1024, typed: true);
+        var minima = await MeasureAsync(injectedKind, 129, typed: true);
 
         // Assert
         _output.WriteLine($"typed writes bytes/statement: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
-        if (injected) { Should.Throw<ShouldAssertException>(() => CheckTypedCeilings(minima)); }
+        if (injectedKind >= 0) { Should.Throw<ShouldAssertException>(() => CheckTypedCeilings(minima)); }
         else { CheckTypedCeilings(minima); }
     }
 

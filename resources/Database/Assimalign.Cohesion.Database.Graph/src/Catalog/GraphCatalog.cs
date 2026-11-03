@@ -249,9 +249,10 @@ public sealed partial class GraphCatalog
             null, context, token);
     }
 
-    internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot)
+    internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot,
+        Action? consume = null, Action<long>? reserve = null)
     {
-        if (property.Type is { } scalar) { EnsureGraphPropertyCompatible(property.DefinitionId, property.Name, scalar, snapshot); }
+        if (property.Type is { } scalar) { EnsureGraphPropertyCompatible(property.DefinitionId, property.Name, scalar, snapshot, consume, reserve); }
         if (property.Type is { } type && GetConstraints(property.DefinitionId, snapshot)
             .Any(item => item.PropertyKey == property.Name && item.Type is { } expected && expected != type))
         {
@@ -265,17 +266,21 @@ public sealed partial class GraphCatalog
     /// <param name="cancellationToken">Cancels the mutation.</param>
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The property metadata is invalid.</exception>
-    /// <exception cref="GraphCatalogException">The owning definition is absent, or a named type rule conflicts (CG03009).</exception>
+    /// <exception cref="GraphCatalogException">The owning definition is absent, or a named type rule or graph-type declaration conflicts (CG03009).</exception>
     /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
     public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken = default)
+        => SavePropertyKeyAsync(property, context, cancellationToken, null, null);
+
+    internal ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken,
+        Action? consume, Action<long>? reserve)
     {
         EnsureActive(context);
         var record = new CatalogRecord(property: property);
         GraphCatalogCodec.Validate(record);
         RequireMutableDefinition(property.DefinitionId, context.Snapshot, "ALTER");
         EnsureParentUnchanged(property.DefinitionId, context);
-        EnsurePropertyKeyCompatible(property, Latest(context));
+        EnsurePropertyKeyCompatible(property, Latest(context), consume, reserve);
         return SaveAsync(record, EnsureUnchanged(3, property.DefinitionId, property.Name, context), context, cancellationToken);
     }
 
@@ -352,7 +357,11 @@ public sealed partial class GraphCatalog
     /// <exception cref="GraphCatalogException">The name is taken, the owner is missing, a constraint conflicts, or the snapshot is stale.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
     /// <exception cref="GraphElementTooLargeException">The encoded metadata exceeds one record.</exception>
-    public async ValueTask CreateConstraintAsync(GraphConstraintMetadata constraint, TransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask CreateConstraintAsync(GraphConstraintMetadata constraint, TransactionContext context, CancellationToken cancellationToken = default)
+        => CreateConstraintAsync(constraint, context, cancellationToken, null, null);
+
+    internal async ValueTask CreateConstraintAsync(GraphConstraintMetadata constraint, TransactionContext context, CancellationToken cancellationToken,
+        Action? consume, Action<long>? reserve)
     {
         EnsureActive(context);
         var record = new CatalogRecord(constraint: constraint);
@@ -369,7 +378,7 @@ public sealed partial class GraphCatalog
             throw ConstraintConflict(constraint.PropertyKey);
         }
         if (constraint.Type is { } scalar)
-        { EnsureGraphPropertyCompatible(constraint.DefinitionId, constraint.PropertyKey, scalar, latest); }
+        { EnsureGraphPropertyCompatible(constraint.DefinitionId, constraint.PropertyKey, scalar, latest, consume, reserve); }
         EnsureUnchanged(5, constraint.DefinitionId, constraint.Name, context);
         // A constraint introduces a known property key, independently of the rule's lifetime.
         // Keep unnamed rules untouched, and roll back new key discovery with a failed creation.

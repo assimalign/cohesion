@@ -96,6 +96,28 @@ internal sealed class GraphOperation
     internal GraphEvaluationContext EvaluationContext => new(TransactionStart, Database, this);
     internal GraphUpdates Updates { get; }
 
+#if DEBUG
+    private bool _writerLockHeld;
+#endif
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    internal void WriterLockAcquired()
+    {
+#if DEBUG
+        _writerLockHeld = true;
+#endif
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    internal void AssertGraphTypePublication()
+    {
+#if DEBUG
+        System.Diagnostics.Debug.Assert(_transaction is null);
+        System.Diagnostics.Debug.Assert(Context.IsolationLevel == IsolationLevel.ReadCommitted);
+        System.Diagnostics.Debug.Assert(_writerLockHeld && Context.State == TransactionState.Active && Volatile.Read(ref _finished) == 0);
+#endif
+    }
+
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)
     {
         if (_context.IsolationLevel == IsolationLevel.ReadCommitted)

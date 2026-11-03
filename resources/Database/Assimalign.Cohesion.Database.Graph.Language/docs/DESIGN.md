@@ -1,10 +1,5 @@
 # Assimalign.Cohesion.Database.Graph.Language — Design
 
-Typed and text token drops share the graph-type dependency check: DROP LABEL refuses identifying
-and implied labels, and DROP RELATIONSHIP TYPE refuses a declared edge relationship type with
-the existing CG03003 in-use condition (#1806). GraphTypeReviewRegressionTests is the execution
-conformance corpus for both surfaces; grammar and rendering remain unchanged.
-
 ## Savepoint grammar and rendering (#1726, XT-4)
 
 Standalone named controls retain TransactionCommand and SavepointName. The name reuses the

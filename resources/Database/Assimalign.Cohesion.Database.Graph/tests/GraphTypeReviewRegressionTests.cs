@@ -28,7 +28,7 @@ public sealed class GraphTypeReviewRegressionTests
     public async Task ChangeGraphTypeAsync_UnaffectedMembers_ShouldAvoidScanAsync(string change)
     {
         // Arrange: each owner grows beyond a statement's work budget after publication.
-        await using var engine = GraphDatabaseEngine.Create("types", new() { QueryWorkBudget = 32 });
+        await using var engine = GraphDatabaseEngine.Create("types", new() { QueryWorkBudget = 32, StorageStrategy = new FaultInjectingJournalStorageStrategy() });
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var schema = GraphSchema.Open(database, session);
@@ -67,7 +67,23 @@ public sealed class GraphTypeReviewRegressionTests
         if (change != "relax") { stages.ShouldNotContain("node:N"); }
         if (change is "add" or "same" or "relax") { stages.ShouldNotContain("edge:R"); }
         if (change == "same") { stages.ShouldNotContain("tombstones"); }
-        (await schema.GetGraphTypeAsync(CancellationToken.None)).ShouldNotBeNull();
+        var expected = change switch
+        {
+            "add" => GraphType.Create(Original().NodeTypes.Append(GraphNodeType.Create("Empty")), Original().EdgeTypes),
+            "relax" => GraphType.Create([GraphNodeType.Create("N", properties: [GraphPropertyType.Create("p", DatabaseType.Int64)]), Original().NodeTypes[1]], Original().EdgeTypes),
+            "drop" => GraphType.Create([Original().NodeTypes[0]]),
+            "edge" => GraphType.Create(Original().NodeTypes, [GraphEdgeType.Create("R", "N", "N")]),
+            _ => Original(),
+        };
+        GraphTypeSecondReviewTests.AssertDeclarations((await schema.GetGraphTypeAsync(CancellationToken.None))!, expected);
+        if (change == "relax")
+        {
+            await session.DisposeAsync();
+            await database.DisposeAsync();
+            database = await engine.OpenDatabaseAsync("graph", CancellationToken.None);
+            await using var reopened = await database.CreateSessionAsync(CancellationToken.None);
+            GraphTypeSecondReviewTests.AssertDeclarations((await GraphSchema.Open(database, reopened).GetGraphTypeAsync(CancellationToken.None))!, expected);
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Snapshot writes conflict only for their added changed or removed node rule (#1806)")]
@@ -83,6 +99,7 @@ public sealed class GraphTypeReviewRegressionTests
         await using var ddl = await database.CreateSessionAsync(CancellationToken.None);
         await using var writer = await database.CreateSessionAsync(CancellationToken.None);
         var schema = GraphSchema.Open(database, ddl);
+        await schema.SaveLabelAsync(new(Guid.NewGuid(), "N"), CancellationToken.None);
         if (change != "add") { await schema.SetGraphTypeAsync(GraphType.Create([GraphNodeType.Create("N")]), CancellationToken.None); }
         await using var transaction = await writer.BeginTransactionAsync(IsolationLevel.Snapshot, CancellationToken.None);
         switch (change)
@@ -168,6 +185,7 @@ public sealed class GraphTypeReviewRegressionTests
 
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03011");
+        error.Message.ShouldBe("Label 'B' is both an identifying and an implied label.");
         (await schema.GetGraphTypeAsync(CancellationToken.None))!.NodeTypes.Select(node => node.IdentifyingLabel).ShouldBe(["A", "B"]);
     }
 
@@ -362,10 +380,10 @@ public sealed class GraphTypeReviewRegressionTests
         var schema = GraphSchema.Open(database, session);
         var names = Enumerable.Range(0, 30).Select(i => "N" + i).ToArray();
         await schema.SetGraphTypeAsync(GraphType.Create(names.Select(name => GraphNodeType.Create(name))), CancellationToken.None);
-        engine.EngineOptions.QueryWorkBudget = 32;
+        engine.EngineOptions.QueryWorkBudget = 20;
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await schema.DropGraphTypeAsync(names.Take(15).ToArray(), [], CancellationToken.None));
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await schema.DropGraphTypeAsync(names, [], CancellationToken.None));
 
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05004");

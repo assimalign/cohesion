@@ -25,12 +25,19 @@ internal sealed class GraphNodeTypeDeclaration
     /// <exception cref="ArgumentException">A name is blank, a label is repeated or identifies this type, or a property is null or repeated.</exception>
     public static GraphNodeTypeDeclaration Create(string identifyingLabel, IEnumerable<string>? impliedLabels = null,
         IEnumerable<GraphPropertyTypeDeclaration>? properties = null)
+        => FromValidatedLabels(identifyingLabel, CopyLabels(identifyingLabel, impliedLabels), properties);
+
+    internal static IReadOnlyList<string> CopyLabels(string identifyingLabel, IEnumerable<string>? impliedLabels)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(identifyingLabel);
         string[] labels = (impliedLabels ?? []).ToArray();
-        foreach (string label in labels) { ArgumentException.ThrowIfNullOrWhiteSpace(label); }
+        foreach (string label in labels) { ArgumentException.ThrowIfNullOrWhiteSpace(label, nameof(impliedLabels)); }
         if (labels.Contains(identifyingLabel, StringComparer.Ordinal) || labels.Distinct(StringComparer.Ordinal).Count() != labels.Length)
         { throw new ArgumentException(ErrorMessages.GraphTypeDuplicate, nameof(impliedLabels)); }
-        return new(identifyingLabel, Array.AsReadOnly(labels.Order(StringComparer.Ordinal).ToArray()), GraphTypeDeclaration.CopyProperties(properties));
+        return Array.AsReadOnly(labels.Order(StringComparer.Ordinal).ToArray());
     }
+
+    internal static GraphNodeTypeDeclaration FromValidatedLabels(string identifyingLabel, IReadOnlyList<string> impliedLabels,
+        IEnumerable<GraphPropertyTypeDeclaration>? properties)
+        => new(identifyingLabel, impliedLabels, GraphTypeDeclaration.CopyProperties(properties));
 }

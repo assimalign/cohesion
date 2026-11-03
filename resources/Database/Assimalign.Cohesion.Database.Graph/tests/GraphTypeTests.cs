@@ -245,7 +245,9 @@ public sealed class GraphTypeTests
     public async Task SetGraphTypeAsync_DiscoveryBudget_ShouldRollbackPartialTokensAsync(bool memory)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create("types", new() { QueryWorkBudget = memory ? 100 : 11,
+        // Twelve units now precede discovery, including five ownership checks. Preserve
+        // the four completed token discoveries before the next token exhausts work.
+        await using var engine = GraphDatabaseEngine.Create("types", new() { QueryWorkBudget = memory ? 100 : 16,
             QueryMemoryBudget = memory ? 7000 : 1048576 });
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -266,6 +268,7 @@ public sealed class GraphTypeTests
         // Assert: actual partial discovery precedes refusal, and none of it survives.
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(memory ? "CG05020" : "CG05004");
         stages.Count.ShouldBeGreaterThan(1);
+        if (!memory) { stages.ShouldBe(["label:N", "label:I1", "label:I2", "label:I3"]); }
         session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
         session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
         (await schema.GetLabelsAsync(CancellationToken.None)).ShouldBeEmpty();
@@ -316,6 +319,7 @@ public sealed class GraphTypeTests
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var ddl = await database.CreateSessionAsync(CancellationToken.None);
         await using var stale = await database.CreateSessionAsync(CancellationToken.None);
+        await GraphSchema.Open(database, ddl).SaveLabelAsync(new(Guid.NewGuid(), "Person"), CancellationToken.None);
         await using var transaction = await stale.BeginTransactionAsync(IsolationLevel.Snapshot, CancellationToken.None);
         await GraphSchema.Open(database, ddl).SetGraphTypeAsync(PersonType(), CancellationToken.None);
         (await GraphSchema.Open(database, stale).GetGraphTypeAsync(CancellationToken.None)).ShouldBeNull();

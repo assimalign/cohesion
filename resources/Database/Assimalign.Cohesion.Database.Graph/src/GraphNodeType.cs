@@ -31,8 +31,9 @@ public sealed class GraphNodeType
     public static GraphNodeType Create(string identifyingLabel, IEnumerable<string>? impliedLabels = null,
         IEnumerable<GraphPropertyType>? properties = null)
     {
+        var labels = GraphNodeTypeDeclaration.CopyLabels(identifyingLabel, impliedLabels);
         var copied = GraphType.CopyProperties(properties);
-        return new(GraphNodeTypeDeclaration.Create(identifyingLabel, impliedLabels, copied.Select(item => item.Declaration)), copied);
+        return new(GraphNodeTypeDeclaration.FromValidatedLabels(identifyingLabel, labels, copied.Select(item => item.Declaration)), copied);
     }
 
     internal static GraphNodeType FromDeclaration(GraphNodeTypeDeclaration declaration)

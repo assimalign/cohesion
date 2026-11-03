@@ -168,7 +168,7 @@ public sealed partial class GraphSchema
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The owning definition does not exist (<c>CG03003</c>, a caller error that a retry repeats); the property type is not supported by graph storage, or existing graph data violates the
-    /// property (both <c>CG03003</c>); a named type rule conflicts (<c>CG03009</c>); the session is closed, another statement holds it, or its
+    /// property (both <c>CG03003</c>); a named type rule or graph-type declaration conflicts (<c>CG03009</c>); the session is closed, another statement holds it, or its
     /// transaction refuses statements (<c>CG04007</c>); or the transaction ended while the
     /// statement waited for the writer lock.
     /// </exception>
@@ -187,13 +187,12 @@ public sealed partial class GraphSchema
             var type = _database.Catalog.FindRelationshipType(definition.DefinitionId, latest) ?? default;
             if (label.Id != Guid.Empty) { EnsureMutable(label.Name, label.Owner, label.OwningSchema, "ALTER LABEL"); }
             if (type.Id != Guid.Empty) { EnsureMutable(type.Name, type.Owner, type.OwningSchema, "ALTER RELATIONSHIP TYPE"); }
-            _database.Catalog.EnsurePropertyKeyCompatible(definition, latest);
             using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+            await _database.Catalog.SavePropertyKeyAsync(definition, op.Context, cancellationToken, op.QueryBudget.Consume, memory.Add).ConfigureAwait(false);
             if (label.Id != Guid.Empty)
             { foreach (var node in _database.Store.StreamLabels([label.Name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add)) { Validate(node.Properties); } }
             else if (type.Id != Guid.Empty)
             { foreach (var edge in _database.Store.StreamRelationshipTypes([type.Name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add)) { Validate(edge.Properties); } }
-            await _database.Catalog.SavePropertyKeyAsync(definition, op.Context, cancellationToken).ConfigureAwait(false);
             void Validate(IReadOnlyDictionary<string, object?> properties)
             {
                 bool present = properties.TryGetValue(definition.Name, out var value) && value is not null;

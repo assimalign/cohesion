@@ -35,6 +35,9 @@ public sealed class GraphEdgeType
     public static GraphEdgeType Create(string relationshipType, string sourceNodeType, string targetNodeType,
         IEnumerable<GraphPropertyType>? properties = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relationshipType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceNodeType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetNodeType);
         var copied = GraphType.CopyProperties(properties);
         return new(GraphEdgeTypeDeclaration.Create(relationshipType, sourceNodeType, targetNodeType, copied.Select(item => item.Declaration)), copied);
     }

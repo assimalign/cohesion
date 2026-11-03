@@ -43,30 +43,57 @@ public sealed partial class GraphCatalog
         if (id is { } existing) { RequireMutableDefinition(existing, snapshot, "ALTER"); }
     }
 
-    internal void EnsureNodeTypeCompatible(GraphNodeTypeDeclaration node, TransactionSnapshot snapshot)
+    internal void EnsureNodeTypeCompatible(GraphNodeTypeDeclaration node, TransactionSnapshot snapshot, Action consume, Action<long> reserve)
     {
+        if (node.Properties.Count == 0) { return; }
         if (FindLabel(node.IdentifyingLabel, snapshot) is not { } label) { return; }
-        var keys = GetPropertyKeys(label.Id, snapshot);
+        var keys = List(3, label.Id, snapshot, reserve).Select(item => item.Record.Property!.Value)
+            .Select(item => (item.Name, item.Type))
+            .Concat(List(5, label.Id, snapshot, reserve).Select(item => (item.Record.Constraint!.Value.PropertyKey, item.Record.Constraint.Value.Type))).ToArray();
         foreach (var property in node.Properties)
         {
-            if (keys.Any(key => key.Name == property.Name && key.Type is { } type && type != property.Type))
-            { throw ConstraintConflict(property.Name); }
+            foreach (var key in keys)
+            {
+                consume();
+                if (key.Item1 == property.Name && key.Type is { } type && type != property.Type)
+                { throw ConstraintConflict(property.Name); }
+            }
         }
     }
 
-    private void EnsureGraphPropertyCompatible(Guid definition, string property, Types.DatabaseType type, TransactionSnapshot snapshot)
+    private void EnsureGraphPropertyCompatible(Guid definition, string property, Types.DatabaseType type, TransactionSnapshot snapshot,
+        Action? consume = null, Action<long>? reserve = null)
     {
         if (FindLabel(definition, snapshot) is not { } label) { return; }
-        var node = Find(7, GraphTypeId, label.Name, snapshot)?.Record.NodeType;
-        if (node?.Properties.Any(item => item.Name == property && item.Type != type) == true)
-        { throw ConstraintConflict(property); }
+        var node = Find(7, GraphTypeId, label.Name, snapshot, reserve)?.Record.NodeType;
+        if (node is null) { return; }
+        foreach (var item in node.Properties)
+        {
+            consume?.Invoke();
+            if (item.Name == property && item.Type != type) { throw ConstraintConflict(property); }
+        }
+    }
+
+    internal void RefuseGraphTypeUse(string name, bool relationship, TransactionSnapshot snapshot, Action consume, Action<long> reserve)
+    {
+        consume();
+        if (Find(relationship ? (byte)8 : (byte)7, GraphTypeId, name, snapshot, reserve) is not null)
+        { throw InUse(); }
+        if (relationship) { return; }
+        foreach (var node in List(7, GraphTypeId, snapshot, reserve))
+        {
+            consume();
+            if (node.Record.NodeType!.ImpliedLabels.Contains(name, StringComparer.Ordinal)) { throw InUse(); }
+        }
+        GraphCatalogException InUse() => new("CG03003", relationship ? ErrorMessages.DropRelationshipTypeAsyncDatabase : ErrorMessages.GraphSchemaDropLabelAsyncDatabase) { IsCallerError = true };
     }
 
     internal async ValueTask SetGraphTypeAsync(GraphTypeDeclaration? type, IReadOnlyList<Found> previous,
         TransactionContext context, CancellationToken token)
     {
+        System.Diagnostics.Debug.Assert(context.IsolationLevel == IsolationLevel.ReadCommitted);
         EnsureActive(context);
-        // The sole caller holds the writer lock and has refreshed its ReadCommitted
+        // The sole caller asserts autocommit and writer-lock ownership, and refreshed its ReadCommitted
         // snapshot before loading these records. Reuse that load and its decode grants.
         var nodes = type?.NodeTypes.ToDictionary(item => item.IdentifyingLabel, StringComparer.Ordinal) ?? [];
         var edges = type?.EdgeTypes.ToDictionary(item => item.RelationshipType, StringComparer.Ordinal) ?? [];

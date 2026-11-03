@@ -336,4 +336,5 @@
     <value>An internal statement lookup could not find its expected key.</value>
   </data>
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
+  <data name="GraphTypeLabelOverlap" xml:space="preserve"><value>Label '{0}' is both an identifying and an implied label.</value></data>
 </root>

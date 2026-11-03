@@ -29,13 +29,23 @@ and budgets, and run through schema autocommit. They refuse explicit transaction
 with CG04025. Invalid constructor arguments precede admission; admitted failures retain the
 ordinary transaction-abort policy. CG03011 identifies invalid element operations or references.
 Missing-name diagnostics quote at most 256 UTF-16 code units without splitting a surrogate pair.
-Existing schema-owned identifying labels, implied labels and relationship types refuse graph-type
-publication through the same RequireMutableDefinition ownership check and DatabaseObjectLockedException
-as named constraints. Independent property-type constraints and declared key types must agree with
+Ownership applies to the change set: new, changed and removed declarations check their identifying
+labels, implied labels and relationship types through RequireMutableDefinition and
+DatabaseObjectLockedException, as named constraints do. Removed implied labels are checked too.
+Removing a rule over a schema-owned definition is refused, including selective and full DROP or
+replacement SET; unrelated changes preserve unchanged declarations even after schema adoption.
+Independent property-type constraints and declared key types must agree with
 the node declaration on the same label/property; both publication orders refuse conflicts with
-CG03009. Removing the type preserves those independent rules. Typed and text DROP LABEL and
+CG03009. This deliberately departs from Neo4j's assertNoConflictingGraphTypeDependence
+(`community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/Operations.java:2442-2462`, local
+clone `54a7dcf7c25`): Neo4j refuses any designated independent constraint on a label with graph-type-dependent
+constraints, regardless of property or type, with IncompatibleGraphTypeDependenceException (22NB2).
+Cohesion permits agreeing independent rules and refuses only conflicting types (CG03009).
+Removing the type preserves those independent rules. Typed and text DROP LABEL and
 DROP RELATIONSHIP TYPE refuse a token still declared by the current type with the existing
 CG03003 in-use condition, including identifying and implied labels without any member nodes.
+Token DROP uses keyed kind-8 relationship and kind-7 identifying-label lookups; only implied-label
+dependencies scan kind 7, and neither label lookup scans edge declarations.
 
 A node carrying an identifying label must carry every implied label and satisfy its property
 types and NOT NULL rules. Missing implied labels are refused, never synthesized. Multiple matching
@@ -48,26 +58,33 @@ type and NOT NULL violations retain CG03003. Snapshot writes
 compare the selected node-type record against latest visibility, including an absent old rule;
 a stale writer reports CG04007. The existing database writer lock serializes DDL and data through
 commit or rollback. Edge properties and endpoints are persisted declarations only in GQ-T1;
-their enforcement, text ALTER and SHOW CURRENT GRAPH TYPE are GQ-T2. Closedness is GQ-T3.
+their enforcement, text ALTER and SHOW CURRENT GRAPH TYPE are GQ-T2. GQ-T2 must add the
+CG03009 cross-check against independent relationship keys/constraints, edge RequiresValidation
+selection, and the write-time selected-record reference check. Closedness is GQ-T3.
 
 Before publication, structural comparison by identifying label selects only new or strengthened
 node declarations for owner-posting validation under latest visibility and the writer lock.
 Unchanged declarations, removed elements, nullable-property relaxations, removed property rules
-and removed implied labels scan no members. Scalar declarations currently use exact types after
+and removed implied labels scan no members for open types only. GQ-T3 closedness makes removal a
+tightening and must extend validation selection accordingly. Scalar declarations currently use exact types after
 CLR normalization, without scalar subtyping; changing the scalar type requires validation.
 Edge-only ALTER scans nothing in GQ-T1. Skipping these scans preserves deployment availability
 when previously validated typed owners have grown beyond the work budget, and avoids holding
 the writer lock over unaffected postings. Every node write continues to enforce the published
 rule. A violation stops at the first node
 with CG03010 and leaves the previous type in force. Empty owners decode no unrelated nodes.
-Descriptor work and selected postings consume CG05004's engine work budget; descriptor containers
+Compatibility and ownership checks cover only new, changed and removed declarations; compatibility
+reads keys/constraints only for new or changed node types. Each compared key consumes one work
+unit, and both publication orders reserve the kind-7 decode grant before decoding. Forward checks
+also reserve kind-3/5 candidate and decode buffers. Descriptor work and selected postings consume CG05004's engine work budget; descriptor containers
 and bounded posting cursors consume CG05020's memory grant. Each decoded node's labels and
 property payload have a temporary value grant, released before advancing to the next member.
 Loading previous type definitions
 reserves candidate-directory capacity before copying keys and conservatively charges 32 times
 each candidate's encoded length plus 512 bytes before decoding its strings, objects, collection
 and mutation buffers. Invisible versions are charged too. Publication reuses this first load
-and its found references; each physical candidate is decoded and granted once per mutation.
+and its found references; each physical graph-type candidate is decoded and granted once per mutation.
+Debug assertions require ReadCommitted autocommit publication with the writer lock held.
 ADD/ALTER fragments reserve 512 bytes
 per element and preflight record sizes before allocating mutation maps and copied result arrays; resulting descriptors charge
 their names, implied labels and properties before retention. Each element must fit one catalog

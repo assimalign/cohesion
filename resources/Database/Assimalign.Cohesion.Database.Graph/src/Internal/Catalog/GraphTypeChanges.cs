@@ -23,8 +23,9 @@ internal static class GraphTypeChanges
     {
         if (previous is null) { return true; }
         if (Same(previous, next)) { return false; }
-        // Exact scalar types have no subtype relation. Removing a rule or making it
-        // nullable relaxes the declaration; a different scalar type requires validation.
+        // Exact scalar types have no subtype relation. For open types, removing a rule
+        // or making it nullable relaxes the declaration. GQ-T3 closedness makes removal
+        // a tightening; its validation selection must account for that change.
         return next.ImpliedLabels.Except(previous.ImpliedLabels).Any() || next.Properties.Any(property =>
             !previous.Properties.Any(old => old.Name == property.Name && old.Type == property.Type
                 && (!property.Required || old.Required)));
