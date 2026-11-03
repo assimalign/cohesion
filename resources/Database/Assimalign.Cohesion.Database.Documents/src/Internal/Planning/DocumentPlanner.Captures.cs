@@ -93,7 +93,7 @@ internal sealed partial class DocumentPlanner
         bool Same(OqlExpression expression, DocumentBindingScope? local, DocumentBindingScope? nestedOrder = null)
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (expression is OqlSubqueryExpression subquery) { return SameQuery(subquery.Query, nestedOrder ?? local); }
+            if (expression is OqlSubqueryExpression subquery) { return SameQuery(RequireQueryBlock(subquery.Query), nestedOrder ?? local); }
             if (expression is OqlPathExpression { Segments.Count: > 0 } path) { return SameName(path.Segments[0].Name, local); }
             if (expression is OqlComprehensionExpression comprehension)
             {
@@ -158,7 +158,7 @@ internal sealed partial class DocumentPlanner
             // inner binding's identity so shadowed names cannot prove a group key.
             if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes,
                 rightScope: expression is OqlSubqueryExpression ? nestedOrder ?? local : local))) { return; }
-            if (expression is OqlSubqueryExpression subquery) { VisitQuery(subquery.Query, nestedOrder ?? local); return; }
+            if (expression is OqlSubqueryExpression subquery) { VisitQuery(RequireQueryBlock(subquery.Query), nestedOrder ?? local); return; }
             if (expression is OqlMetaExpression meta)
             {
                 if (meta.Arguments.Count == 1 && meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } receiver &&

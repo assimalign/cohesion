@@ -127,7 +127,7 @@ public sealed partial class OqlQueryParser
         if (RejectOptions()) { return Build([], null); }
         Expect(TokenType.RightParen, "')'");
         List<(OqlExpression Key, OqlExpression Value)> values = [];
-        OqlSelectExpression? select = null;
+        OqlQueryExpression? select = null;
         if (valuesHeader)
         {
             Expect("VALUES");
@@ -147,7 +147,8 @@ public sealed partial class OqlQueryParser
         }
         else if (Is("SELECT"))
         {
-            select = ParseSelect();
+            select = ParseQuery();
+            RefuseNestedCompound(select);
         }
         else
         {
@@ -164,7 +165,7 @@ public sealed partial class OqlQueryParser
             return true;
         }
 
-        OqlExpression Build(IReadOnlyList<(OqlExpression Key, OqlExpression Value)> rows, OqlSelectExpression? source)
+        OqlExpression Build(IReadOnlyList<(OqlExpression Key, OqlExpression Value)> rows, OqlQueryExpression? source)
             => upsert
                 ? new OqlUpsertExpression(collection, alias, rows, source, keyName, valueName, Span(start, Previous), returning)
                 : new OqlInsertExpression(collection, alias, rows, source, keyName, valueName, Span(start, Previous), returning);

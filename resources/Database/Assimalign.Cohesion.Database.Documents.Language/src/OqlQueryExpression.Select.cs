@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// <summary>A query over a collection, derived query, or expression.</summary>
 [global::System.Diagnostics.DebuggerDisplay("OqlSelectExpression")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlSelectExpression.DebugView))]
-public sealed class OqlSelectExpression : OqlExpression
+public sealed class OqlSelectExpression : OqlQueryExpression
 {
     private readonly object _from;
 
@@ -36,7 +36,7 @@ public sealed class OqlSelectExpression : OqlExpression
         IReadOnlyList<OqlOrdering> orderBy, bool isDistinct, bool isValue, OqlExpression? limit = null,
         OqlExpression? offset = null, Location? location = null, IReadOnlyList<OqlUnnestExpression>? unnest = null,
         IReadOnlyList<string?>? groupAliases = null, string? groupAs = null, OqlExpression? source = null, IReadOnlyList<OqlSourceBindingExpression>? bindings = null,
-        bool isAliasImplicit = false) : base(location)
+        bool isAliasImplicit = false) : base(orderBy, isValue, limit, offset, location)
     {
         _from = bindings is null || !bindings.Any(binding => binding is OqlJoinExpression)
             ? source is null ? collection : source : new Sources(source is null ? collection : source, bindings);
@@ -46,18 +46,12 @@ public sealed class OqlSelectExpression : OqlExpression
         Predicate = predicate;
         GroupBy = groupAliases is null && groupAs is null ? groupBy : new Grouping(groupBy, groupAliases ?? [], groupAs);
         Having = having;
-        OrderBy = orderBy;
         IsDistinct = isDistinct;
-        IsValue = isValue;
-        Limit = limit;
-        Offset = offset;
         Unnest = bindings is null ? unnest ?? [] : bindings.OfType<OqlUnnestExpression>().ToArray();
     }
 
     /// <summary>Gets whether duplicate projected values are eliminated.</summary>
     public bool IsDistinct { get; }
-    /// <summary>Gets whether the projection returns one bare value (VALUE or RAW).</summary>
-    public bool IsValue { get; }
 
     /// <summary>Gets the collection name, or an empty string for an expression source.</summary>
     public string Collection => ((_from as Sources)?.From ?? _from) as string ?? string.Empty;
@@ -83,12 +77,6 @@ public sealed class OqlSelectExpression : OqlExpression
     public string? GroupAs => (GroupBy as Grouping)?.GroupAs;
     /// <summary>Gets the optional group predicate.</summary>
     public OqlExpression? Having { get; }
-    /// <summary>Gets the ordering expressions, from primary to final key.</summary>
-    public IReadOnlyList<OqlOrdering> OrderBy { get; }
-    /// <summary>Gets the optional maximum row count.</summary>
-    public OqlExpression? Limit { get; }
-    /// <summary>Gets the optional number of rows to skip.</summary>
-    public OqlExpression? Offset { get; }
 
     private sealed record Sources(object From, IReadOnlyList<OqlSourceBindingExpression> Bindings);
 

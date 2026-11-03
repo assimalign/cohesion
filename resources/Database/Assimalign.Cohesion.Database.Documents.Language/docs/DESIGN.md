@@ -103,6 +103,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `SAVEPOINT` | Yes | Named scopes, newest duplicate wins; requires an explicit block |
 | `RELEASE [SAVEPOINT]` | Yes | Cohesion extension; releases the target and descendants |
 | `SELECT` | Yes | One or more projected expressions, optional `AS` labels; a lone `*` returns the stored document |
+| `UNION` | Yes | Query-value union, distinct by default; ALL streams both operands |
+| `INTERSECT` / `EXCEPT` | No | Parsed at UNION precedence; one CK00001 until OQ-S2 |
 | `DISTINCT` | Yes | Optional quantifier directly after SELECT; ALL is the default |
 | `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
 | `OBJECT CONSTRUCTOR` | Yes | Named members in braces; last non-MISSING member wins |
@@ -244,6 +246,34 @@ text binds to Decimal; direct AST Single/Double values are refused. WHEN permits
 literal comparisons, NULL/MISSING tests, AND/OR/NOT, within 32 levels and 128 predicate nodes.
 The [dialect](DIALECT.md#index-ddl-1135) records matching ANY and UNNEST access, residuals,
 canonical catalog rendering and the measured fetch bound/limit. The existing v3 format is unchanged.
+
+### Query-expression variants and set operations (#1803, OQ-S1)
+
+OqlQueryExpression is a closed abstract base with a private protected constructor, nonvirtual
+state accessors and two sealed leaves: OqlSelectExpression and OqlSetOperationExpression.
+The base owns ORDER BY, LIMIT, OFFSET and the all-RAW/VALUE flag. Ordinary SELECT nodes keep
+their original empty-order collection representation, and parser tail copies carry optional grouping
+metadata through its existing key list without allocating an empty grouping wrapper. The compound
+subquery scan uses explicit loops so no capturing closure enters ordinary planning. OqlSubqueryExpression.Query
+and INSERT/UPSERT Select now use this family. Query statement roots hold either leaf through
+the existing OqlExpression statement envelope, which also carries DML, DDL and transactions.
+This is an intentional public API break under the concrete-first rule; no interface or
+cross-assembly visibility grant is added.
+
+The parser separates a SELECT block, query terms and the query's tail. Its loop builds equal-
+precedence, left-associated UNION/INTERSECT/EXCEPT nodes; parentheses recurse into a complete
+query. INTERSECT/EXCEPT retain located CK00001 without changing the final grammar. The capability
+scan leaves these clauses to the query parser, including their ALL modifier, while explicit
+DISTINCT remains one complete capability refusal. Contextual identifiers and AS labels stay names.
+An unparenthesized local tail followed by a set operator remains CD00002. Additional outer tails
+on a lone already-paged parenthesized term are explicitly CK00001 rather than overwriting state.
+
+The [set-operation dialect](DIALECT.md#set-operations-1803-oq-s1) records value equality, T3-30's
+static header choice, result-member ORDER BY binding, paging, first-representative order, budgets
+and the OQ-S2 position gates. Compound ORDER BY over RAW/VALUE is CD01037; a member not declared
+by any named operand is CD01038, except wildcard shapes whose members remain open. Subqueries in
+compound ordering remain a located CK00001. Parser and execution corpora, both wire transports
+and the NativeAOT consumer cover the same behavior without a format change.
 
 ### Projection semantics (#1128)
 
@@ -392,7 +422,8 @@ a name:
 A statement whose first word is unsupported, such as `MERGE INTO c ...`, is one construct:
 the scan reports that word and nothing after it. Each
 operand of a set operation starts its own `SELECT`, which is not reported as a subquery, and a
-set operation with `ALL` or `DISTINCT` (`UNION ALL`) is one construct spanning both words.
+set operation with `ALL` or `DISTINCT` is one construct spanning both words. UNION [ALL] executes;
+INTERSECT/EXCEPT [ALL] are parsed and then refused, and explicit DISTINCT retains its refusal.
 `OqlKeywordDispositionTests` enumerates the profile's keywords plus the table. Every word needs
 a supported parse case or a case with exactly one `CK00001` naming its construct, and for a
 table entry that diagnostic must also name the construct the table records. A word added
@@ -699,8 +730,8 @@ an index can target a nested object field or array element. The path is relative
 there is no iteration alias in an index statement. Index and collection names follow the same
 identifier quoting and case-preservation rules as query collection names.
 
-`OqlQueryStatement` wraps one top-level `OqlExpression`: `OqlSelectExpression`,
-`OqlExplainExpression` (one SELECT, INSERT, UPSERT, UPDATE or DELETE), `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlDeleteExpression`,
+`OqlQueryStatement` wraps one top-level `OqlExpression`: `OqlSelectExpression`, `OqlSetOperationExpression`,
+`OqlExplainExpression` (one query, INSERT, UPSERT, UPDATE or DELETE), `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlDeleteExpression`,
 `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`, `OqlCreateIndexExpression`, or
 `OqlDropIndexExpression`. Collection nodes retain `Name` and `IfNotExists`/`IfExists`.
 Index creation retains its target as an `OqlPathExpression`, rather than flattening the path during
@@ -820,6 +851,8 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00016` | Retired and reserved: former joined-statement explicit-alias requirement (#1767) |
 | `CD01033` | FROM expression requires an explicit alias or implicit field name |
 | `CD01034` | Unbound FROM expression variable; there is no implicit input-row scope |
+| `CD01037` | ORDER BY on a compound whose operands are all RAW/VALUE |
+| `CD01038` | Compound ORDER BY uses an unbound result member, source metadata or star |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and

@@ -10,6 +10,10 @@ versioned UTF-8 JSON documents. Each session is bound to one database. The engin
 supports document CRUD, OQL queries, KEY/VALUE INSERT and UPSERT, SET/UNSET UPDATE, DELETE and collection/index DDL, secondary B+Tree indexes,
 snapshot and read-committed transactions, durable file or in-memory storage, and a wire server.
 
+OQL executes top-level UNION [ALL] with independent operand scopes, parenthesized local pages,
+compound ordering/paging and statically chosen RAW/typed/document headers (T3-30). UNION ALL
+streams operands; distinct keys, sorts and output share statement memory and work budgets.
+INTERSECT/EXCEPT and compounds in nested/DML positions remain CK00001 for OQ-S2.
 OQL accepts ALL/DISTINCT aggregate arguments and ARRAY_AGG, BOOL_AND, BOOL_OR, aggregate EVERY,
 STDDEV and VARIANCE alongside COUNT/SUM/AVG/MIN/MAX. Retained distinct values and arrays consume
 the statement memory budget, shared with SELECT source/group staging, GROUP AS wrappers and DML pending buffers. Scratch reservations release at expression and sort boundaries. GROUP BY supports term aliases; GROUP AS retains input binding wrappers for projection, HAVING, ordering and ARRAY/FIRST or quantified expressions. OQL executes 34 SQL++ scalar functions, including Unicode string operations, exact math,

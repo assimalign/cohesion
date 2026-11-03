@@ -3,7 +3,7 @@
 This package parses the Documents engine's executable SQL++ profile, retaining the OQL name, into typed statement and
 expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `OqlQueryParser`,
 `OqlQueryStatement`, `OqlTransactionExpression`, `OqlTransactionCommand`, `OqlTransactionIsolation`,
-`OqlSelectExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
+`OqlQueryExpression`, `OqlSelectExpression`, `OqlSetOperationExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access. GROUP BY terms accept aliases with or without AS; GROUP AS retains binding-wrapper arrays, including group-term aliases, for SELECT, HAVING and ORDER BY. LETTING remains unavailable.
 One immutable standard-function table declares META, eleven aggregates and 34 SQL++ scalars, with
@@ -15,6 +15,10 @@ explicit SNAPSHOT and READ COMMITTED are supported. Wire sessions negotiate tran
 pool return rolls back open or failed work and discards peers that cannot certify a clean session.
 OQL collection/index DDL is refused in an explicit transaction (CD04105). See DIALECT.md for
 exact spellings, fault recovery and named savepoint scope semantics.
+Top-level UNION [ALL] combines query values with Couchbase's equal, left-associative set precedence.
+Parentheses own operand ordering and paging; the compound owns its final ORDER BY/LIMIT/OFFSET.
+The closed query-expression family covers SELECT and compounds. INTERSECT/EXCEPT and compound
+subquery/DML positions retain CK00001 until OQ-S2; DIALECT records T3-30 headers and diagnostics.
 SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
 Int64 values and CD00007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
 or a preceding dot keeps them usable, and AS labels still accept them.

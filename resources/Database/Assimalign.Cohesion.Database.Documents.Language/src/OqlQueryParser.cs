@@ -112,9 +112,9 @@ public sealed partial class OqlQueryParser : QueryParser
         {
             var start = Current;
             _position++;
-            if (Is("SELECT"))
+            if (Is("SELECT") || IsParenthesizedQuery())
             {
-                expression = new OqlExplainExpression(ParseSelect(), Span(start, _tokens[_position - 1]));
+                expression = new OqlExplainExpression(ParseQuery(), Span(start, _tokens[_position - 1]));
             }
             else if (Is("INSERT"))
             {
@@ -142,9 +142,9 @@ public sealed partial class OqlQueryParser : QueryParser
         {
             expression = ParseTransaction();
         }
-        else if (Is("SELECT"))
+        else if (Is("SELECT") || Current.Type == TokenType.LeftParen)
         {
-            expression = ParseSelect();
+            expression = ParseQuery();
         }
         else if (Is("INSERT"))
         {
@@ -315,6 +315,19 @@ public sealed partial class OqlQueryParser : QueryParser
             if (value == "DISTINCT" && index > 0 && (IsWord(_tokens[index - 1], "IS") ||
                 index > 1 && IsWord(_tokens[index - 1], "NOT") && IsWord(_tokens[index - 2], "IS"))) { continue; }
             if (IsDistinctFromToken(index)) { continue; }
+
+            // Set clauses are parsed even while INTERSECT/EXCEPT execution is deferred.
+            // Their modifier belongs to the same construct, including refused DISTINCT.
+            if (value is "UNION" or "INTERSECT" or "EXCEPT" && index > 0 && EndsOperand(index - 1))
+            {
+                if (index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "DISTINCT"))
+                {
+                    var modifier = _tokens[++index];
+                    _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value, Profile.Language, Span(token, modifier)));
+                }
+                else if (index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "ALL")) { index++; }
+                continue;
+            }
 
             // SELECT and call-head quantifiers are parsed by their respective grammar rules.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")

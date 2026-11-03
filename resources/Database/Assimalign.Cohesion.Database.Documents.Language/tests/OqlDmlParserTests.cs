@@ -178,7 +178,7 @@ public sealed class OqlDmlParserTests
         else
         {
             insert.Select!.Location!.Start.ShouldBe(query.IndexOf("SELECT", StringComparison.Ordinal));
-            insert.Select.Projections[0].Expression.ShouldBeOfType<OqlMetaExpression>().Member.ShouldBe("id");
+            insert.Select.ShouldBeOfType<OqlSelectExpression>().Projections[0].Expression.ShouldBeOfType<OqlMetaExpression>().Member.ShouldBe("id");
         }
     }
 
@@ -235,7 +235,7 @@ public sealed class OqlDmlParserTests
         else
         {
             insert.Select!.Location!.Start.ShouldBe(query.IndexOf("SELECT", StringComparison.Ordinal));
-            insert.Select.Projections[0].Expression.ShouldBeOfType<OqlMetaExpression>().Member.ShouldBe("id");
+            insert.Select.ShouldBeOfType<OqlSelectExpression>().Projections[0].Expression.ShouldBeOfType<OqlMetaExpression>().Member.ShouldBe("id");
         }
     }
 

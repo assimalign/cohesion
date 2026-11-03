@@ -582,8 +582,8 @@ CD00007 for the same count rule at parse and plan time:
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
 | `CD05015` | A query/RETURNING constructor, SELECT projection or result formatter exceeds the 256-level serialized result limit, including the row wrapper |
-| `CD05018` | Retained statement source rows, ordered candidate buckets, key-lookup caches, groups, RETURNING results or aggregate values exceed the statement memory budget |
-| `CD05020` | Shared expression/lookup work budget exhausted across nested queries, expression sources and key joins |
+| `CD05018` | Retained statement source rows, ordered candidate buckets, key-lookup caches, groups, compound state, RETURNING results or aggregate values exceed the statement memory budget |
+| `CD05020` | Shared expression/lookup/set-operation work budget exhausted across nested queries, expression sources, key joins and compounds |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
 | `CD00014` | Direct IN subquery requires RAW/VALUE |
@@ -593,6 +593,8 @@ CD00007 for the same count rule at parse and plan time:
 | `CD01034` | Unbound variable in a FROM expression without an input-row scope |
 | `CD01035` | Invalid key-join binding scope or ambiguous/invalid joined META receiver |
 | `CD01036` | VALUES references its destination binding without a source row or local declaration |
+| `CD01037` | ORDER BY over an all-RAW/VALUE compound has no named result members |
+| `CD01038` | Compound ORDER BY references an unbound result member, metadata or star |
 | `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
 | `CD01032` | Direct ordering AST has an invalid null placement |
 | `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
@@ -1008,6 +1010,48 @@ estimate and rollback boundary. Ordinary SELECT retains its existing memory poli
 DocumentQueryTests.Comprehensions, OqlExecutionConformanceTests and DocumentComprehensionWireTests
 cover values, nested scopes, grouping, registered calls, cancellation and both transports.
 
+#### Set-operation execution (#1803, OQ-S1)
+
+DocumentSetOperationPlan binds two independent query plans and chooses T3-30's result shape
+before document reads: all RAW/VALUE leaves give `value`; identical ordered named projections
+give typed columns; otherwise the existing whole-document mode gives one `document` Json column.
+Wildcard operands keep document mode and open result-member names. Compound ORDER BY addresses
+members from either operand, independent of input collection bindings. CD01037 rejects ordering
+on all-RAW/VALUE compounds and CD01038 rejects an unbound member or source-only metadata/star.
+The [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#set-operations-1803-oq-s1)
+records precedence, equality, deferred positions and every default.
+
+The executor reuses the source pull pipeline. UNION ALL streams each operand without an
+operand-result buffer; local grouping, DISTINCT and ordering retain their own blocking semantics.
+UNION keeps first representatives in input order using the existing grouping structural comparator
+on complete row values. Named MISSING members are omitted before comparison; RAW MISSING is NULL.
+Different arity or member order needs no special rejection. The equality set reserves 128 bytes,
+then 160 bytes plus the existing JSON ownership/token estimate per independent retained key.
+Compound sorting separately owns row values, cells, keys and stable ordinals. Result retention
+owns independent cells; scoped reservations release on success, cancellation and every refusal.
+All use the operation's StatementMemoryBudget and CD05018. Processing, comparisons, expression
+work and sorting share the nested execution context's StatementWorkBudget and CD05020. Sorter
+wrapper exceptions are unwrapped so a coded budget refusal stays coded.
+
+Static types widen across operand descriptors; heterogeneous columns retain the Null descriptor
+through later operators, independently of genuinely all-null columns. Dynamic value/named types observe the pre-page
+stream and promote Int64/Decimal as ordinary SELECT does while retaining only the requested page.
+Fixed-type unordered pages stop before another operand row is pulled. LIMIT 0 preserves eager
+binding and parameter validation, then opens no operand, invokes no callback and skips every
+blocking stage. Returned values are independently owned; no borrowed source frame escapes.
+
+EXPLAIN's Union/UnionAll parent has both complete operand trees, a static shape, order-key count
+and resolved limit/offset, without source evaluation. OqlQueryExpression is the public closed
+SELECT/set family; nested-query and DML-source properties are retyped now but compound execution
+in those positions remains a CK00001 gate for OQ-S2. The mixed statement envelope stays
+OqlExpression for queries, writes, DDL and transactions. No protocol or persisted format changes.
+
+DocumentSetOperationTests includes a deterministic generated concatenation/deduplication oracle,
+NULL/MISSING/numeric/structural equality, independent operand scopes, streaming/empty windows,
+static headers, cancellation and exact budget release. A controlled commit between operands
+proves one statement view under Snapshot and ReadCommitted. Conformance cases and InMemory/TCP wire
+probes exercise the same contract; the engine-linked NativeAOT consumer checks both transports.
+
 #### Result paging (#1129)
 
 Both stored and system collections resolve LIMIT/OFFSET in planning, before collection lookup
@@ -1069,7 +1113,7 @@ transition function; src/backend/utils/adt/float.c:2937-2955 explains why stable
 avoid naive floating squared-sum subtraction. Cohesion uses its own grouping comparator and exact
 integer squared-sum subtraction, where cancellation loses no digits; no reference-engine code was copied.
 
-The operation-owned counter applies StatementMemoryBudget to catalog identities and sort staging,
+The operation-owned counter applies StatementMemoryBudget to compound equality/sort/output state, catalog identities and sort staging,
 retained SELECT source rows (including JSON, IDs, raw star bytes and expanded bindings), group
 keys and membership, native accumulator state, DISTINCT sets, array inputs, scratch expressions,
 and projected output. It reuses CD05018 for retained statement memory exhaustion (#1753, #1097).
@@ -1503,6 +1547,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | Operators | Meaning |
 | --- | --- |
 | `Select`, `Project`, `ProjectValue`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
+| `Union`, `UnionAll` | Set-operation parent with both complete operand trees, result shape, order-key count and resolved paging |
 | `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
 | `CollectionScan` | Candidate retrieval from the named collection |
