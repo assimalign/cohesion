@@ -777,7 +777,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         public override SqlStorage CreateStorage(string databaseName, bool catalog)
             => _inner.StorageExists(databaseName, catalog) ? _inner.OpenStorage(databaseName, catalog) : _inner.CreateStorage(databaseName, catalog);
 
-        public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default) => _inner.OpenStorage(databaseName, catalog);
+        public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default, bool readOnly = false) => _inner.OpenStorage(databaseName, catalog, cancellationToken, readOnly);
 
         public override void DropStorage(string databaseName) => _inner.DropStorage(databaseName);
 

@@ -88,6 +88,7 @@
   <data name="StorageRecoveryRunFailure" xml:space="preserve"><value>Recovery cannot rebuild page {0}: the committed {1} at LSN {2} has no full page image before it in the journal, so the page's chain of records has a gap.</value></data>
   <data name="StorageRecoveryRunFailure2" xml:space="preserve"><value>Recovery cannot rebuild page {0}: the committed {1} at LSN {2} follows LSN {3}, but the page rebuilt so far carries LSN {4}, so the page's chain of records has a gap.</value></data>
   <data name="StorageRecoveryMalformedFailure" xml:space="preserve"><value>Recovery cannot apply the {0} of page {1} at LSN {2}: {3}.</value></data>
+  <data name="RecoveryProbeReadOnly" xml:space="preserve"><value>A recovered probe is read-only.</value></data>
   <data name="SlottedPageReadSlotFailure" xml:space="preserve"><value>slot {0} addresses bytes {1}..{2}, outside the page body</value></data>
   <data name="SlottedPageTryReadSlotFailure" xml:space="preserve"><value>the header records {0} slots; a page holds at most {1}</value></data>
   <data name="SlottedPageUpdateSlotFailure" xml:space="preserve"><value>slot {0} addresses bytes {1}..{2}, outside the record area that ends at {3}</value></data>
@@ -111,4 +112,7 @@
   <data name="ExceptionDescribeStorageOffline4" xml:space="preserve"><value>a write</value></data>
   <data name="MixedThreadMutableScopes" xml:space="preserve"><value>Nested mutable scopes for a page must use the same thread. Dispose the existing scopes before opening a writer on another thread.</value></data>
   <data name="PinnedDirtyPages" xml:space="preserve"><value>Dirty pages remain pinned. Release their handles before a full flush or checkpoint.</value></data>
+  <data name="RecoveryIndexCountMismatch" xml:space="preserve"><value>The journal's page record count changed while building its recovered view.</value></data>
+  <data name="RecoveryIndexFrameBounds" xml:space="preserve"><value>A recovered page's journal frame has an invalid magic, length or offset.</value></data>
+  <data name="RecoveryIndexPageMismatch" xml:space="preserve"><value>A recovered page's journal frame names a different page.</value></data>
 </root>

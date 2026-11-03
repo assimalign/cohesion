@@ -298,12 +298,12 @@ public sealed class DocumentEngineTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Format: earlier index records refuse engine open without writes and dispose the coordinator (#1530)")]
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Format: earlier index records refuse the constructor recheck without writes and dispose the coordinator (#1530)")]
     [InlineData((byte)4, (byte)1)]
     [InlineData((byte)5, (byte)1)]
     [InlineData((byte)4, (byte)2)]
     [InlineData((byte)5, (byte)2)]
-    public async Task OpenDatabaseAsync_EarlierIndexRecord_ShouldRefuseWithoutWritesAndDisposeCoordinator(byte kind, byte version)
+    public async Task Constructor_EarlierIndexRecord_ShouldRefuseWithoutWritesAndDisposeCoordinator(byte kind, byte version)
     {
         // Arrange: hand-build the complete v1 layout, independently of the current catalog codec.
         string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-catalog-format-" + Guid.NewGuid().ToString("N"));
@@ -348,11 +348,11 @@ public sealed class DocumentEngineTests
                 StorageStream.FromFile(journalPath, FileMode.Open, FileShare.None), StorageStream.FromFile(backupPath, FileMode.Open, FileShare.None), checkpointOnOpen: false);
             await using var engine = DocumentDatabaseEngine.Create("document-engine", new()
             {
-                StorageStrategy = new OpenedDocumentStorageStrategy(openedStorage)
+                RootPath = root
             });
 
             // Act.
-            var failure = await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync("legacy", CancellationToken.None));
+            var failure = Should.Throw<DatabaseException>(() => new DocumentDatabase("legacy", engine, openedStorage, recover: true));
 
             // Assert: the manager's disposed guard must fire, even though storage has also closed.
             failure.Message.ShouldStartWith($"Database 'legacy' cannot be opened. Document catalog kind {kind} format: found {version}, supported 3.", Case.Sensitive);
@@ -367,6 +367,7 @@ public sealed class DocumentEngineTests
             var disposed = await Should.ThrowAsync<ObjectDisposedException>(async () =>
                 await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None));
             disposed.ObjectName.ShouldBe(typeof(TransactionManager).FullName);
+            openedStorage.Dispose(); // The direct constructor's caller owns the rejected storage.
             await engine.DisposeAsync();
             Directory.GetFiles(root).Order(StringComparer.Ordinal).ShouldBe(before.Keys.Order(StringComparer.Ordinal));
             foreach (var (path, bytes) in before)

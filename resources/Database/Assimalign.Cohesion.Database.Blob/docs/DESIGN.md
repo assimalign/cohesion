@@ -1,5 +1,22 @@
 # Blob engine design
 
+## Refused opens preserve every file (#1744)
+
+The preflight decodes owner-zero catalog metadata through Storage's recovered read-only view,
+including the catalog record version refusal. Chunk pages have no independent open-time format
+gate. Cache has no persisted-format open gate.
+A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
+committed and uncommitted crash records. Acceptance discards the probe, opens the original files
+and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
+its journal before the gate reads it. No format version or diagnostic identity changes.
+The journal-only pre-scan stops at the first full image of an existing page above zero and delegates to the recovered probe; only the no-image path runs full analysis. When that analysis finds no applicable page records (in the data set), the engine skips the full recovered
+probe. The writable open defers checkpointing, physical recovery has no writes, and all format
+gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
+asserted read-only at the strategy boundary, and is disposed before writable handles open.
+Blob catalog decoding precedes AnalyzeAndScrub and CompleteRecovery on the clean writable path; a successful recovered probe suppresses that duplicate constructor decode. BlobCatalog.Open still decodes the catalog after scrub. A failed constructor gate disposes its coordinator before propagating the refusal.
+The probe reports no Storage lifecycle events, page-read counts, checksum-failure events or gauge changes. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
+source-shared journal analysis, common replay rules, retained-byte bound and gate inventory.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The explicit transaction binds its kernel coordinator/context to the root base, so incomplete

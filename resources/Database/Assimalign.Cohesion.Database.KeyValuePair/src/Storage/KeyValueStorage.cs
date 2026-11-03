@@ -97,6 +97,7 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// <param name="checkpointOnOpen">Whether to checkpoint the recovered journal.</param>
     /// <param name="durability">The explicit policy, or null to derive it from the backing.</param>
     /// <returns>The opened storage.</returns>
+    /// <remarks>A read-only data stream opens a recovered probe: original bytes never change and mutations are refused (#1744).</remarks>
     public static KeyValueStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability)
     {
         var storage = new KeyValueStorage(data, journal, backup);

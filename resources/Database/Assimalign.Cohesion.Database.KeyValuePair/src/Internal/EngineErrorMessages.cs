@@ -7,6 +7,7 @@ namespace Assimalign.Cohesion.Database;
 // Forward only to this assembly's build-generated accessor; no cross-assembly internal access.
 internal static class EngineErrorMessages
 {
+    internal static string RecoveryProbeRequired => ModelErrorMessages.RecoveryProbeRequired;
     internal static string BuilderStateEnsureMutableFailure => ModelErrorMessages.BuilderStateEnsureMutableFailure;
     internal static string DatabaseDeclarationsDeclareFailure => ModelErrorMessages.DatabaseDeclarationsDeclareFailure;
     internal static string DatabaseDeclarationsRefuseDropFailure => ModelErrorMessages.DatabaseDeclarationsRefuseDropFailure;

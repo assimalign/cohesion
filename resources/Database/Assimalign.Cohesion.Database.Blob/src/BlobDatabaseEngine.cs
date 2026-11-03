@@ -83,6 +83,9 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// </summary>
     internal const string DataFileSet = "blob";
 
+    // Deterministic work observation at the model gate; no diagnostic or public seam.
+    internal Action? FormatCheckStarting { get; set; }
+
     private readonly BlobDatabaseEngineOptions _options;
     private readonly Dictionary<string, BlobDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
@@ -653,6 +656,17 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             BlobStorage? storage = null;
             try
             {
+                bool formatsChecked = false;
+                if (!create && (_options.StorageStrategy is not null || DatabaseRecoveryPreflight.Required(directory, _memory, name, DataFileSet)))
+                {
+                    using var probe = _options.StorageStrategy is { } probeStrategy
+                        ? probeStrategy.OpenStorage(name, null, readOnly: true)
+                        : OpenStorage(directory, _memory, name, create: false, null, readOnly: true);
+                    DatabaseRecoveryPreflight.AssertRecovered(probe);
+                    FormatCheckStarting?.Invoke();
+                    BlobDatabase.EnsureFormats(probe);
+                    formatsChecked = true;
+                }
                 storage = _options.StorageStrategy is { } strategy
                     ? create ? strategy.CreateStorage(name, _options.Durability) : strategy.OpenStorage(name, _options.Durability)
                     : OpenStorage(directory, _memory, name, create, _options.Durability);
@@ -673,7 +687,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
 
                 // A created database reports the name it was created with; an opened one the
                 // spelling its storage header kept from its creation, whatever spelling opened it.
-                var database = new BlobDatabase(create ? name : DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, recover: !create);
+                var database = new BlobDatabase(create ? name : DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, recover: !create, formatsChecked);
                 _databases.Add(name, database);
                 return new ValueTask<DatabaseInstance>(database);
             }
@@ -723,7 +737,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
 
     // A database's files: in its directory, or, for an in-memory engine, the memory the engine
     // keeps for it, created empty or opened again with the bytes its last storage left.
-    private static BlobStorage OpenStorage(string? directory, DatabaseMemoryFiles? memory, string name, bool create, StorageCommitDurability? durability)
+    private static BlobStorage OpenStorage(string? directory, DatabaseMemoryFiles? memory, string name, bool create, StorageCommitDurability? durability, bool readOnly = false)
     {
         StorageStream? data = null, journal = null, backup = null;
         try
@@ -732,7 +746,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             {
                 bool found = memory is not null && (create
                     ? memory.TryCreate(name, DataFileSet, out data, out journal, out backup)
-                    : memory.TryOpen(name, DataFileSet, out data, out journal, out backup));
+                    : memory.TryOpen(name, DataFileSet, out data, out journal, out backup, readOnly));
                 if (!found)
                 {
                     throw create
@@ -744,12 +758,12 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             {
                 var mode = create ? FileMode.CreateNew : FileMode.Open;
                 var files = DatabaseFileNames.GetFiles(directory, DataFileSet);
-                data = StorageStream.FromFile(files.Data, mode, FileShare.Read);
-                journal = StorageStream.FromFile(files.Journal, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
-                backup = StorageStream.FromFile(files.Backup, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
+                data = readOnly ? new StorageStream(new FileStream(files.Data, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Data, mode, FileShare.Read);
+                journal = readOnly ? new StorageStream(new FileStream(files.Journal, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Journal, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
+                backup = readOnly ? new StorageStream(new FileStream(files.Backup, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Backup, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
             }
 
-            return create ? BlobStorage.Create(data!, journal!, backup!, name, durability) : BlobStorage.Open(data!, journal!, backup!, checkpointOnOpen: false, durability);
+            return create ? BlobStorage.Create(data!, journal!, backup!, name, durability) : BlobStorage.Open(data!, journal!, backup!, checkpointOnOpen: false, readOnly ? null : durability);
         }
         catch { data?.Dispose(); journal?.Dispose(); backup?.Dispose(); throw; }
     }

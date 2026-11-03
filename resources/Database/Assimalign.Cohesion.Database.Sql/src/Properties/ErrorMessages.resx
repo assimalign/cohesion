@@ -1058,4 +1058,5 @@
   <data name="JointIndexShapeInvalid" xml:space="preserve">
     <value>A prepared migration source index has invalid page geometry or ownership.</value>
   </data>
+  <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
 </root>

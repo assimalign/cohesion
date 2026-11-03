@@ -64,6 +64,9 @@ using Assimalign.Cohesion.Database.Storage.Units;
 public abstract class Storage : IAsyncDisposable, IDisposable
 {
     private readonly StorageBufferPool _bufferPool;
+    private readonly StorageRecoveredStream? _recoveredView;
+    internal long ProbeRetainedPageBytes => _recoveredView is null ? 0 : _recoveredView.RetainedPageBytes + (long)_bufferPool.Count * Page.Size;
+    internal long ProbeIndexedRecordCount => _recoveredView?.IndexedRecordCount ?? 0;
     private readonly StorageFreeSpaceMap _freeSpaceMap;
     private readonly Dictionary<long, StorageTransaction> _pageWriteLocks = new();
     private readonly object _transactionLock = new();
@@ -233,10 +236,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(backup);
 
         _model = model;
-        Data = data;
+        _recoveredView = data.CanWrite ? null : new StorageRecoveredStream(data);
+        Data = _recoveredView is null ? data : new StorageStream(_recoveredView);
         Journal = journal;
         Backup = backup;
-        _bufferPool = new StorageBufferPool(bufferPoolCapacity) { WriteGuard = ThrowIfOffline };
+        _bufferPool = new StorageBufferPool(bufferPoolCapacity) { WriteGuard = GuardWrite, IsReadOnly = _recoveredView is not null };
         _freeSpaceMap = new StorageFreeSpaceMap();
     }
 
@@ -1053,7 +1057,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     private void CountOpen()
     {
-        if (Interlocked.CompareExchange(ref _gaugeState, 1, 0) == 0)
+        if (_recoveredView is null && Interlocked.CompareExchange(ref _gaugeState, 1, 0) == 0)
         {
             StorageEventSource.Log.CountStorageOpened();
         }
@@ -1080,7 +1084,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     private void AttachJournal()
     {
-        var journal = StorageJournal.Create(Journal, leaveOpen: true);
+        var journal = _recoveredView is null ? StorageJournal.Create(Journal, leaveOpen: true) : StorageJournal.OpenReadOnly(Journal);
         journal.WentOffline = _groupCommitGate.Abandon;
         journal.Offline = RaiseOffline;
         journal.ConfigureCheckpointTrigger(CheckpointJournalSize, _onCheckpointNeeded);
@@ -1131,6 +1135,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// A header half could not be read and the journal cannot prove coverage of the other slot,
     /// or neither half could be read. Checksum damage without a valid slot is corruption instead.
     /// </exception>
+    /// <remarks>With a read-only data stream, recovery is a lazy in-memory view; no original stream is written and no checkpoint runs.</remarks>
     /// <param name="cancellationToken">Cancels journal replay and page reconstruction between records.</param>
     /// <exception cref="OperationCanceledException">Recovery was canceled; the journal remains available for retry.</exception>
     protected unsafe void OpenExisting(bool checkpointOnOpen = true, CancellationToken cancellationToken = default)
@@ -1156,7 +1161,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 ExceptionDispatchInfo.Capture(headerReadFailure).Throw();
             }
 
-            StorageEventSource.Log.HeaderReadFallback(this, _headerSlot, header.Generation, header.LsnFloor, headerReadFailure);
+            if (_recoveredView is null) { StorageEventSource.Log.HeaderReadFallback(this, _headerSlot, header.Generation, header.LsnFloor, headerReadFailure); }
         }
         bool journalHadRecords = _journal!.LastLsn > 0;
 
@@ -1169,10 +1174,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // Zero unless the event source is listening: the recovery's start and stop events then
         // bracket the replay and the page scan, and the stop is written whether or not they
         // complete, so its activity always closes.
-        long recoveryStarted = StorageEventSource.Log.RecoveryStart(this);
+        long recoveryStarted = _recoveredView is null ? StorageEventSource.Log.RecoveryStart(this) : 0;
         try
         {
-            var recovery = StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity, cancellationToken);
+            var recovery = _recoveredView is null
+                ? StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity, cancellationToken)
+                : _recoveredView.Initialize(_journal, protectedPages, cancellationToken);
 
             // Sequence assignment resumes above both the journal's highest observed
             // sequence and the header floor persisted at the last checkpoint — the
@@ -1291,27 +1298,27 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 // named a base no record in the journal produced — the following open refused the file
                 // set with a chain gap (#1253 review). Nothing has been appended since open, which
                 // RaiseLsnFloor requires.
-                StorageEventSource.Log.JournalTailLost(this, strayLsn, redoLsn);
+                if (_recoveredView is null) { StorageEventSource.Log.JournalTailLost(this, strayLsn, redoLsn); }
                 _journal.RaiseLsnFloor(strayLsn);
                 redoLsn = strayLsn;
             }
 
             Volatile.Write(ref _redoLsn, redoLsn);
 
-            StorageEventSource.Log.RecoveryStop(this, succeeded: true, recovery.RebuiltPages.Count, recovery.MaxSequence, redoLsn, recoveryStarted);
+            if (_recoveredView is null) { StorageEventSource.Log.RecoveryStop(this, succeeded: true, recovery.RebuiltPages.Count, recovery.MaxSequence, redoLsn, recoveryStarted); }
             recoveryStarted = 0;
         }
         finally
         {
             // A recovery that threw: its stop carries zeros and Error, and the open's exception is the failure.
             // A no-op after the stop above, and while nobody listens.
-            StorageEventSource.Log.RecoveryStop(this, succeeded: false, 0, 0, 0, recoveryStarted);
+            if (_recoveredView is null) { StorageEventSource.Log.RecoveryStop(this, succeeded: false, 0, 0, 0, recoveryStarted); }
         }
 
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap) { WroteOutsideJournal = ForgetShadow };
 
         // Everything the journal described is now in the data file; start it clean.
-        if (journalHadRecords && checkpointOnOpen)
+        if (_recoveredView is null && journalHadRecords && checkpointOnOpen)
         {
             Checkpoint();
         }
@@ -1341,7 +1348,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
-        ThrowIfOffline();
+        GuardWrite();
         long sequence;
         lock (_transactionLock)
         {
@@ -1416,7 +1423,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
-        ThrowIfOffline();
+        GuardWrite();
         lock (_transactionLock)
         {
             // Adopted sequences normally come from ReserveTransactionSequence, but
@@ -2942,6 +2949,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
+    private void GuardWrite()
+    {
+        if (_recoveredView is not null) { throw new NotSupportedException(ErrorMessages.RecoveryProbeReadOnly); }
+        ThrowIfOffline();
+    }
+
     /// <summary>
     /// Flushes state on shutdown: a clean checkpoint when no transactions are active
     /// (so the next open recovers instantly), otherwise flushes according to the
@@ -2960,7 +2973,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </remarks>
     private void ShutdownFlush()
     {
-        if (_pageManager is null || _journal is null)
+        if (_recoveredView is not null || _pageManager is null || _journal is null)
         {
             return;
         }

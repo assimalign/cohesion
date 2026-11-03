@@ -1,5 +1,21 @@
 # Graph engine design
 
+## Refused opens preserve every file (#1744)
+
+GraphStore.EnsureIndexFormat and GraphCatalog.EnsureFormat read graph headers, index registrations
+and roots, and catalog v2 records. The engine validates these through Storage's recovered read-only
+view before acquiring writable file handles.
+A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
+committed and uncommitted crash records. Acceptance discards the probe, opens the original files
+and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
+its journal before the gate reads it. No format version or diagnostic identity changes.
+The journal-only pre-scan stops at the first full image of an existing page above zero and delegates to the recovered probe; only the no-image path runs full analysis. When that analysis finds no applicable page records (in the data set), the engine skips the full recovered
+probe. The writable open defers checkpointing, physical recovery has no writes, and all format
+gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
+asserted read-only at the strategy boundary, and is disposed before writable handles open.
+The probe reports no Storage lifecycle events, page-read counts, checksum-failure events or gauge changes. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
+source-shared journal analysis, common replay rules, retained-byte bound and gate inventory.
+
 ## Unknown entity properties (#1249, #1738, GQ-D3)
 
 Read-only planning reports structured warning CG01023 for a statically named property unknown
@@ -154,8 +170,8 @@ The catalog record codec is v2 for every kind (1 label, 2 relationship type, 3 p
 length-prefixed UTF-8 name. Constraint payload is a length-prefixed UTF-8 property key followed
 by one type byte (255 for existence). Other payload layouts are unchanged. Earlier or future
 versions refuse with CG06019 before logical recovery scrub; no legacy reader or upgrade exists.
-The refusal happens before any logical write; physical redo of the journal runs first until
-[Storage #1744](https://github.com/assimalign/cohesion/issues/1744) is fixed. CG06019 names the database,
+When replay is needed, the refusal happens through Storage's recovered read-only view. With no
+applicable journal pages the writable open gates before any write (#1744). CG06019 names the database,
 including for uncheckpointed v1 images.
 
 The graph entity/tree format remains 5. Internal record variants reuse the existing payload
@@ -2276,7 +2292,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05031` | An internal statement lookup unexpectedly lacks its key; the statement boundary retains the KeyNotFoundException cause and reports a code-free internal-error message. Application function failures retain their existing CG05021 wrapper |
 | `CG05032` | EXCEPT/INTERSECT retained frames, rows and hash state exceed the statement memory budget |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
-| `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
+| `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before any write, through a recovered preflight when replay is needed, preserving every file of clean and crashed databases (#1744) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 | `CK06003` | Storage corruption; `DatabaseCorruptionException` names the database and page, retains the storage cause, and advises restoration from a verified backup. Operations fail as `ExecutionFailure` on the wire. |
 
@@ -3462,8 +3478,8 @@ GraphRecordCodec.FormatVersion is the single fence used by pre-recovery validati
 Format 3 shipped with #1532's typed adjacency and entity revisions. Format 4 (#1534) adds a
 catalog GUID after each node label and a label-postings tree. Format 5 (#1633) requires
 a persisted relationship-type postings tree; format-4 databases must also be recreated.
-The version fence refuses the old labeled-node layout with CG06017 before scrub can write,
-leaving a cleanly closed file set byte-identical. There is no backfill, upgrade path or legacy reader.
+The version fence refuses the old labeled-node layout with CG06017 before any write, using the
+recovered preflight when replay is needed and leaving clean and crashed file sets byte-identical (#1744). There is no backfill, upgrade path or legacy reader.
 Open reconstructs label-name/token and relationship-type-name/token mappings
 and advisory label posting counts from retained records and attaches persisted trees.
 
@@ -3483,9 +3499,8 @@ page when the store attaches it. The store opens after the coordinator's recover
 (zero-stamped, so the scrub never changes them) and the root pages, writing nothing. The Graph
 engine calls it before recovery and refuses a database whose indexes an engine before #1194 wrote
 with "Database 'x' cannot be opened. CK06101: …" (the `IndexFormatException` as its inner
-exception). A cleanly closed database is left byte-identical; a crashed one has had only the
-storage layer's format-agnostic journal redo and undo, and keeps its journal for the engine that
-wrote it. There is no upgrade path (owner decision of 2026-10-02; #1152). The fence runs one way
+exception). Clean and crashed databases are left byte-identical: the gate precedes all writes,
+using Storage's recovered read-only view when replay is needed (#1744). There is no upgrade path (owner decision of 2026-10-02; #1152). The fence runs one way
 only: engines before #1194 check neither the page format nor anything this store changed, so they
 cannot detect a database this engine wrote and must not open one (owner review of #1194).
 

@@ -244,4 +244,5 @@
   <data name="FunctionArityInvalid" xml:space="preserve"><value>Invalid argument count for OQL function '{0}'.</value></data>
   <data name="TextTransactionStatusRequired" xml:space="preserve"><value>Text transaction control requires the negotiated transaction-status capability.</value></data>
   <data name="QualifiedStarDeferred" xml:space="preserve"><value>Qualified star projections are not supported yet.</value></data>
+  <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
 </root>

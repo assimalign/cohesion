@@ -329,4 +329,5 @@
   <data name="StatementKeyMissing" xml:space="preserve">
     <value>An internal statement lookup could not find its expected key.</value>
   </data>
+  <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
 </root>

@@ -1,5 +1,22 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Refused opens preserve every file (#1744)
+
+The catalog preflight loads catalog metadata, checks the record-space marker and recorded schema
+formats, then reads every registered index root through a recovered view of the data set. Every
+SqlStorageStrategy must honor readOnly on OpenStorage; the optional creation-metadata probe no
+longer controls whether the format preflight runs. SQL's private block overlay is deleted.
+A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
+committed and uncommitted crash records. Acceptance discards the probe, opens the original files
+and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
+its journal before the gate reads it. No format version or diagnostic identity changes.
+The journal-only pre-scan stops at the first full image of an existing page above zero and delegates to the recovered probe; only the no-image path runs full analysis. When that analysis finds no applicable page records (in both sets), the engine skips the full recovered
+probe. The writable open defers checkpointing, physical recovery has no writes, and all format
+gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
+asserted read-only at the strategy boundary, and is disposed before writable handles open.
+The probe reports no Storage lifecycle events, page-read counts, checksum-failure events or gauge changes. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
+source-shared journal analysis with the open cancellation token, common replay rules, retained-byte bound and gate inventory.
+
 ## Bounded COPY TO (#1724, SQ-C1)
 
 SqlDatabaseSession.CopyToAsync owns a caller-supplied Stream through ordinary session admission,
@@ -4691,9 +4708,9 @@ project reference or InternalsVisibleTo change is required.
   refused before the data set opens, preserving its files for the engine that wrote
   them. A populated data set without a catalog, or beside creation-only metadata, is
   refused by the read-only probe before any data file is opened for write.
-  Every catalog, regardless of size, first opens through read-only source handles with private
-  write overlays. Physical redo and torn-journal truncation affect only the overlays. The header,
-  catalog marker and recorded schema formats are checked before either real file set opens for
+  Every catalog, regardless of size, first opens through Storage's recovered read-only view, backed by read-only source
+  handles. The header, catalog marker, recorded schema formats and data-set index roots are
+  checked before either real file set opens for
   writing, so every format refusal leaves all original files byte-identical. This lets the engine
   that wrote them recover and export their data with its original journals.
   `SqlDataStorageFormatTests` pins both cases: clean images stay byte-identical,

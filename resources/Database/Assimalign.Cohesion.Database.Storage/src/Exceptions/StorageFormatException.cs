@@ -77,7 +77,7 @@ public sealed class StorageFormatException : StorageException
     /// Creates the refusal of a journal frame whose checksum verifies but whose frame
     /// version this engine does not read.
     /// </summary>
-    /// <param name="frameNumber">The frame's position in the journal, counting from 1.</param>
+    /// <param name="frameNumber">The frame's position in this scan, counting from 1; lazy page replay counts within that page.</param>
     /// <param name="foundVersion">The frame version found.</param>
     /// <param name="supportedVersion">The only frame version this engine reads.</param>
     internal static StorageFormatException ForJournalFrame(long frameNumber, int foundVersion, int supportedVersion)
