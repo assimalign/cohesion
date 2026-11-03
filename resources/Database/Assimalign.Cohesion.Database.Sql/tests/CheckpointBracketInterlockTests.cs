@@ -17,12 +17,12 @@ using Assimalign.Cohesion.Testing;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(SqlLockWaitCollection.Name)]
-public sealed class CheckpointBracketInterlockTests
+public sealed partial class CheckpointBracketInterlockTests
 {
     private readonly ITestOutputHelper _output;
     public CheckpointBracketInterlockTests(ITestOutputHelper output) { _output = output; }
     [Fact(DisplayName = "Cohesion Test [Sql] - Reclamation rechecks checkpoint priority after waiting for writer admission (#1283)")]
-    public async Task RunBatch_TriggerCrossedWhileWaitingForAdmission_ShouldYieldBeforeOpeningABracket()
+    public async Task RunBatch_TriggerCrossedWhileWaitingForAdmission_ShouldCheckpointBeforeReclamation()
     {
         // Arrange: a real retired owner, with reclamation paused before its first due check.
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
@@ -90,9 +90,10 @@ public sealed class CheckpointBracketInterlockTests
             release.Set();
             await Task.WhenAll(holder, reclaiming).WaitAsync(ceiling.Token);
 
-            // Assert: no reclamation bracket opened; its early exit also released the gate.
-            Volatile.Read(ref commits).ShouldBe(0);
-            database.TableReclamation.ReclaimedPages.ShouldBe(reclaimed);
+            // Assert: the releasing writer checkpointed before reclamation was admitted.
+            database.DataStorage.IsCheckpointDue(TimeSpan.MaxValue).ShouldBeFalse();
+            Volatile.Read(ref commits).ShouldBeGreaterThan(0);
+            database.TableReclamation.ReclaimedPages.ShouldBeGreaterThan(reclaimed);
             database.TableReclamation.BeforeBatch = null;
             database.DataStorage.CheckpointJournalSize = 0;
             database.Coordinator.Checkpoint(ceiling.Token);

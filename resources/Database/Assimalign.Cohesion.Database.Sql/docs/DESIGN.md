@@ -2,15 +2,25 @@
 
 ## Checkpoint bracket attribution (#1283, EN-C1)
 
-SQL catalog brackets now enter their file set's TransactionCheckpointInterlock; the catalog
-checkpointer uses that same gate. The catalog metadata monitor precedes this independent gate,
-then storage/page latches; catalog checkpoints never acquire metadata monitors or the data gate.
-Table reclamation enters the data coordinator's interlock after its existing due-check yield,
-rechecks priority after admission, releases the interlock before catalog retirement, and never
-takes model locks inside it. A parked writer makes the journal due while reclamation waits; the
-regression proves that it opens no bracket and can reclaim after the checkpoint completes. The non-parallel
-CheckpointBracketInterlockTests schedule catalog writes, reclamation and queued statements until
-at least eight overlaps have completed after 250 ms, with a 45-second ceiling.
+SQL catalog brackets enter their file set's TransactionCheckpointInterlock, shared with its
+checkpointer. The catalog metadata monitor precedes this independent gate, then storage/page
+latches. Deferred catalog checkpoints run at lease disposal under that metadata monitor; catalog
+readers therefore wait for a flush and fsync. Catalog checkpoints never acquire the data gate.
+Data and catalog releases pull the size-only due predicate, servicing a sharp checkpoint before
+another admission even if the worker has not been scheduled. This arms the existing deferral
+earlier, with no new admission condition. Busy retries wait for a fresh worker request or
+completion of the physical brackets captured by the refusal, and
+uncollected operational failures suppress foreground retries; the worker retains failure policy.
+Undo and prune releases can checkpoint while the rolled-back writer still holds model locks.
+
+Table reclamation takes the data interlock without model locks, commits each 32-page batch without
+awaiting durability under its allocation-accounting monitor, then ensures its captured journal LSN
+is durable after gate release and before removing the intent. A post-admission size-due exit runs
+the pulled checkpoint at disposal. The copy checkpoint waits for an in-flight reclamation batch at
+the gate. CheckpointBusy can arise only from ungated brackets (open-time scrubs, dispose-time
+adoption and raw tests). Deterministic ordering checks cover nested data/catalog work and fsync
+outside admission. A non-parallel free-running stress continues for at least a second and until
+statement, catalog, reclamation and checkpoint-contention counters progress, with a 45-second ceiling.
 
 ## Bounded COPY TO (#1724, SQ-C1)
 
@@ -3457,8 +3467,9 @@ schema application. Cost depends on schema metadata, not the dropped table's row
 maintenance failures. It runs one batch of at most 32 data/index pages per pending table per pass,
 after deferred undo, and wakes on a drop, database open, or at most 25 ms while pending. The
 engine's Build-complete gate prevents a batch during schema/script reconciliation. The provisioning
-worker remains independent: its old snapshot can postpone reclamation, but reclamation never
-takes its apply gate or table reservations. DROP against a pending table waits through the existing
+worker remains independent: its old snapshot can postpone reclamation. Reclamation takes the
+data apply gate for a bounded batch without table reservations. It awaits batch-commit durability
+after lease exit; a size-due release can still run a sharp checkpoint under the gate. DROP against a pending table waits through the existing
 admission/lock-manager path; ordinary ownership and dependency refusals still apply afterwards.
 
 Reclamation yields before every owner's bracket when the data journal is due for a checkpoint
@@ -8696,11 +8707,13 @@ The 16 MiB threshold is 1/16 of the engine's default 256 MiB: twice the previous
 while bounding the WAL reserve independently of a large database. Checkpoints flush the shared
 pool and stall every database writer under the apply gate, including untouched tables; they
 can also increase subsequent full-page images. This deliberate stall cost buys bounded copy
-WAL. Busy storage brackets, including reclamation outside the apply gate, retry the same
-checkpoint after a cancellation-aware delay until it succeeds. No checkpoint is skipped.
-Peak-WAL tests sample at durable commit, before truncation, and assert the stated J overshoot;
-a checkpoint-disabled negative control must violate the bound. Reclamation-backlog tests hold
-a real bracket open before inline apply, including a retry after failed preparation.
+WAL. The copy checkpoint waits for reclamation's bounded batch at the apply gate. Ungated
+storage brackets retry the same checkpoint after a cancellation-aware delay until it succeeds.
+No checkpoint is skipped. Peak-WAL tests sample at durable commit, before truncation, and assert
+the stated J overshoot; a checkpoint-disabled negative control must violate the bound.
+Reclamation-backlog tests prove event-21 SqlTableReclamation deferral at the gate, release the
+batch, then require zero CheckpointBusy callbacks, a completed copy checkpoint and the peak bound,
+including after failed preparation and cancellation after a completed copy checkpoint.
 
 One engine reserve E survives copying, discard and successful publication. Let P be the
 larger of the old owners' measured page count and the prepared page bound (initially the
@@ -8710,9 +8723,9 @@ One reclamation bracket frees at most 32 pages. Before opening each bracket, rec
 yields to a due or pending checkpoint, including between owners in the same pass. Only the
 single in-flight bracket can add WAL past C. The size due accessor counts bytes appended since
 the last completed checkpoint, excluding its own record, so even C=1 permits progress.
-A due reclamation bracket sets CheckpointNeededSignal after commit closes it: the worker can
-retry its refused attempt immediately. Because the next bracket yields while due persists,
-this sends one retry wake per checkpoint cycle; yielding polls never send wakes.
+A size-due reclamation release runs the checkpoint before another admission. Pre-admission
+yields leave interval-due or pending-wake work to the worker. A still-due batch also wakes the
+worker after gate release, so busy or failed checkpoints retain its existing retry policy.
 Verbose event 27, TableReclamationYielded, makes each stalled drain poll observable.
 Its complete two-image/page and framing bound is
 U=32*2*(B+46)+152=527384 bytes, independent of O, poll cadence and refused attempts. Define

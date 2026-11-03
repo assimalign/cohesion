@@ -124,6 +124,7 @@ internal sealed class SqlTableReclamation
                         return;
                     }
                     int reclaimed;
+                    long commitLsn;
                     // Lock/latch order: reclamation run lock -> data checkpoint interlock ->
                     // allocation accounting -> storage transaction/page latches. No catalog,
                     // table or row lock is acquired or awaited inside this interlock.
@@ -132,9 +133,8 @@ internal sealed class SqlTableReclamation
                         .Enter("SqlTableReclamation", unchecked((long)pending.ObjectId), token))
                     {
                         // Admission may have waited behind a writer that crossed the trigger.
-                        // Preserve reclamation's due-checkpoint priority after that wait too.
-                        if (_database.Engine.CheckpointNeededSignal.IsSet ||
-                            _database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
+                        // Disposal services a size-due checkpoint before the next admission.
+                        if (_database.DataStorage.IsCheckpointDue(TimeSpan.MaxValue))
                         {
                             SqlDatabaseEventSource.Log.TableReclamationYielded(_database, pending.ObjectId);
                             return;
@@ -145,10 +145,14 @@ internal sealed class SqlTableReclamation
                         token.ThrowIfCancellationRequested();
                         lock (_allocationCountLock)
                         {
-                            bracket.Commit();
+                            bracket.Commit(awaitDurability: false);
+                            commitLsn = _database.DataStorage.WriteAheadJournal.LastLsn;
                             Interlocked.Add(ref _reclaimedPages, reclaimed);
                         }
                     }
+                    // Statements can join the durability group after gate release. Only
+                    // intent removal requires the reclaimed pages to be durable.
+                    _database.DataStorage.EnsureCommitDurable(commitLsn);
                     // The crossing append can wake a checkpoint while this bracket is
                     // still active. Retry after it closes. Due persists until checkpoint,
                     // so the next bracket check yields: exactly one retry wake per cycle.
