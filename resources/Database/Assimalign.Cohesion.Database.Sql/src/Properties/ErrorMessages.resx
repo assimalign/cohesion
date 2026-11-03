@@ -1065,4 +1065,10 @@
   <data name="ReclamationContextBarrierTimeout" xml:space="preserve">
     <value>Timed out waiting for the reclamation context snapshot barrier.</value>
   </data>
+  <data name="PreparedIndexShadowsHeapTree" xml:space="preserve">
+    <value>Internal invariant: a prepared index cannot replace a heap-owned tree without replacing its heap.</value>
+  </data>
+  <data name="KeptTableShapeMismatch" xml:space="preserve">
+    <value>Kept table '{0}.{1}' has a different {2}; publication requires identical physical metadata.</value>
+  </data>
 </root>

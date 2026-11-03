@@ -90,6 +90,11 @@ internal sealed partial class SqlSchemaProvisioner
         {
             JointStage?.Invoke("Planning");
             plan = executor.PlanJointMigration(schema, script, cancellationToken);
+            if (_catalog.PendingMigration is { } ordinary && !ordinary.Steps.Any(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))
+            {
+                await DiscardMismatchedIntentAsync(schema, script.Steps.Count, cancellationToken).ConfigureAwait(false);
+                plan = executor.PlanJointMigration(schema, script, cancellationToken);
+            }
             if (_catalog.PendingMigration is { } recorded)
             {
                 var choices = recorded.Steps.Where(step => step.Kind is "Joint/KeepOwner" or "Joint/RewriteOwner").ToArray();
@@ -103,7 +108,7 @@ internal sealed partial class SqlSchemaProvisioner
                 {
                     // Registered domains are outside the schema hash. The old schema
                     // is still online: discard unpublished work and plan with today's types.
-                    await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false);
+                    await DiscardMismatchedIntentAsync(schema, script.Steps.Count, cancellationToken).ConfigureAwait(false);
                     plan = executor.PlanJointMigration(schema, script, cancellationToken);
                 }
             }
@@ -197,6 +202,15 @@ internal sealed partial class SqlSchemaProvisioner
             if (ReferenceEquals(cause, failure) && (failure is OperationCanceledException or OutOfMemoryException)) { throw; }
             throw coded;
         }
+    }
+
+    private async ValueTask DiscardMismatchedIntentAsync(SqlCompiledSchema schema, int stepCount, CancellationToken cancellationToken)
+    {
+        await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false);
+        TraceOutcome("Restarted");
+        EndTrace();
+        BeginTrace(schema, "Replan");
+        TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: stepCount);
     }
 
     private async Task RunJointMigrationAsync(SqlDeferredMigration migration, CancellationToken cancellationToken)

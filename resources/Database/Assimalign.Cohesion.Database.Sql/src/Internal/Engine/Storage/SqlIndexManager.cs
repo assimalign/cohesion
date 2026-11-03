@@ -134,6 +134,9 @@ internal sealed class SqlIndexManager
     {
         lock (_sync)
         {
+            if (_prepared.Count != 0 && _normal.ExportRegistrations().Any(registration =>
+                _prepared.ContainsKey(Key(registration.ObjectId, registration.Definition.Name))))
+            { throw new InvalidOperationException(ErrorMessages.PreparedIndexShadowsHeapTree); }
             _alternate.EnsureCapacity(_alternate.Count + _prepared.Count);
             _maintenance.EnsureCapacity(_maintenance.Count + _prepared.Count);
         }
