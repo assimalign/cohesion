@@ -639,6 +639,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>Gets whether a storage-level transaction is active; a checkpoint is refused while true.</summary>
+    /// <remarks>Engine plumbing for checkpoint retry admission. A transaction may begin immediately after this read.</remarks>
+    public bool HasActiveTransactions => Volatile.Read(ref _activeTransactionCount) != 0;
+
     /// <summary>
     /// Gets the number of storage-level transactions begun and not yet completed (diagnostics and
     /// tests): a checkpoint runs only while it is zero.
@@ -1379,6 +1383,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // return the count, and every later checkpoint would refuse to run.
             lock (_transactionLock)
             {
+                transaction.MarkCompleted();
                 _activeBrackets.Remove(transaction);
                 _activeTransactionCount--;
             }
@@ -1661,25 +1666,15 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 if (_activeTransactionCount > 0)
                 {
                     long refusal = ++_checkpointRefusals;
-                    var blockers = new StorageTransaction[_activeBrackets.Count];
                     if (StorageEventSource.Log.IsEnabled(EventLevel.Verbose, StorageEventSource.Keywords.Checkpoints))
-                    { busy = new (string Class, long Owner, long Sequence)[blockers.Length]; busyRefusal = refusal; }
-                    int index = 0;
-                    foreach (var bracket in _activeBrackets)
                     {
-                        blockers[index] = bracket.Key;
-                        if (busy is not null) { busy[index] = (bracket.Value.Class, bracket.Value.Owner, bracket.Key.Sequence); }
-                        index++;
+                        busy = new (string Class, long Owner, long Sequence)[_activeBrackets.Count];
+                        busyRefusal = refusal;
+                        int index = 0;
+                        foreach (var bracket in _activeBrackets)
+                        { busy[index++] = (bracket.Value.Class, bracket.Value.Owner, bracket.Key.Sequence); }
                     }
-                    var exception = new StorageTransactionException(ErrorMessages.StorageCheckpointFailure);
-                    // The refusal owns its physical snapshot. New gated statement brackets
-                    // cannot invalidate this backoff; completing these blockers can.
-                    StorageCheckpointRetryContext.Attach(exception, () =>
-                    {
-                        foreach (var blocker in blockers) { if (blocker.IsActive) { return true; } }
-                        return false;
-                    });
-                    throw exception;
+                    throw new StorageTransactionException(ErrorMessages.StorageCheckpointFailure);
                 }
 
                 // Zero unless the event source is listening. A refused checkpoint (above) changed

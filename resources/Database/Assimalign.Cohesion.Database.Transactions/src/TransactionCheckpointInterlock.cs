@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Storage.Internal;
 using PhysicalStorage = Assimalign.Cohesion.Database.Storage.Storage;
 using Assimalign.Cohesion.Database.Transactions.Internal;
 
@@ -39,7 +38,6 @@ public sealed class TransactionCheckpointInterlock
     private int _rawDepth;
     private int _pending;
     private bool _busy;
-    private Func<bool>? _checkpointBlocked;
     private bool _checkpointSucceeded;
     private bool _retryRequested;
     private readonly HashSet<long> _leases = new();
@@ -188,12 +186,11 @@ public sealed class TransactionCheckpointInterlock
         try { _checkpoint(); }
         catch (StorageTransactionException exception) when (exception.Code != StorageTransactionErrorCode.ForeignStorage)
         {
-            Func<bool>? blocked = StorageCheckpointRetryContext.Read(exception);
-            lock (_state) { _pending = 1; _busy = true; _checkpointBlocked = blocked; }
+            lock (_state) { _pending = 1; _busy = true; }
             throw;
         }
         // This sharp checkpoint covered requests received while it ran too.
-        lock (_state) { _pending = 0; _busy = false; _checkpointBlocked = null; _retryRequested = false; _checkpointSucceeded = true; }
+        lock (_state) { _pending = 0; _busy = false; _retryRequested = false; _checkpointSucceeded = true; }
     }
 
     internal void Wait(CancellationToken cancellationToken = default, string bracketClass = "Maintenance", long owner = 0)
@@ -249,10 +246,9 @@ public sealed class TransactionCheckpointInterlock
         // MaxValue selects size only. InfiniteTimeSpan is negative and makes every
         // written journal interval-due. No storage work runs under the state monitor.
         bool due = allowCheckpoint && _storage.IsCheckpointDue(TimeSpan.MaxValue);
-        // Query the Storage-owned refusal snapshot outside state. It observes only
-        // the original blockers, so intervening statements cannot cause busy storms.
-        Func<bool>? blockers = Volatile.Read(ref _checkpointBlocked);
-        bool stillBlocked = Volatile.Read(ref _busy) && (blockers is null || blockers());
+        // Our own brackets have ended while admission is still held. Only ungated
+        // brackets remain, including any replacement for an earlier busy blocker.
+        bool stillBlocked = Volatile.Read(ref _busy) && _storage.HasActiveTransactions;
         lock (_state)
         {
             // Claim the request or release atomically with TryCheckpoint's second
@@ -281,7 +277,6 @@ public sealed class TransactionCheckpointInterlock
         {
             _pending = 0;
             _busy = false;
-            _checkpointBlocked = null;
             _retryRequested = false;
             _checkpointSucceeded = false;
         }
@@ -300,7 +295,7 @@ public sealed class TransactionCheckpointInterlock
         }
         catch (StorageOfflineException)
         {
-            lock (_state) { _pending = 0; _busy = false; _checkpointBlocked = null; }
+            lock (_state) { _pending = 0; _busy = false; }
             TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, "StorageOffline");
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -312,6 +307,7 @@ public sealed class TransactionCheckpointInterlock
 
     private void ExitRaw(int thread, long identity)
     {
+        if (identity == 0 || Volatile.Read(ref _rawThread) != thread) { return; }
         if (thread != Environment.CurrentManagedThreadId)
         {
             TransactionEventSource.Log.CheckpointLeaseThreadMismatch(_storage, thread, Environment.CurrentManagedThreadId);
@@ -320,7 +316,6 @@ public sealed class TransactionCheckpointInterlock
         }
         // Value copies and repeated Dispose calls share the identity, without an
         // allocation per lease. Capacity follows maximum nesting, not operation count.
-        if (identity == 0 || Volatile.Read(ref _rawThread) != thread) { return; }
         if (!_leases.Remove(identity)) { return; }
         if (--_rawDepth != 0) { return; }
         Volatile.Write(ref _rawThread, 0);
@@ -338,7 +333,8 @@ public sealed class TransactionCheckpointInterlock
         internal Lease(TransactionCheckpointInterlock? owner, int thread, long identity)
         { _owner = owner; _thread = thread; _identity = identity; }
         /// <summary>Services due work and releases this scope on its entering thread.</summary>
-        /// <exception cref="StorageTransactionException">Disposed on another thread.</exception>
+        /// <remarks>A refused disposal leaves the scope held. Repeated disposal of an ended scope is inert.</remarks>
+        /// <exception cref="StorageTransactionException">A live scope was disposed on another thread.</exception>
         public void Dispose() => _owner?.ExitRaw(_thread, _identity);
         private sealed class DebugView
         {

@@ -467,11 +467,11 @@ internal sealed class TransactionEventSource : EventSource
     [NonEvent]
     internal void CheckpointLeaseThreadMismatch(Storage.Storage storage, long enteringThread, long disposingThread)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        if (IsEnabled(EventLevel.Error, Keywords.Checkpoints))
         { CheckpointLeaseThreadMismatch(storage.Name, enteringThread, disposingThread); }
     }
 
-    [Event(22, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' checkpoint lease entered on thread {1} disposed on thread {2}.")]
+    [Event(22, Level = EventLevel.Error, Keywords = Keywords.Checkpoints, Message = "Database '{0}' checkpoint lease entered on thread {1} disposed on thread {2}.")]
     private void CheckpointLeaseThreadMismatch(string database, long enteringThread, long disposingThread)
         => WriteEvent(22, database, enteringThread, disposingThread);
 

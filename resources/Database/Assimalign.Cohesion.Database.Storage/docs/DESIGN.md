@@ -2214,23 +2214,38 @@ writer, continuing until those counters move with a 45-second ceiling. It assert
 append-locked journal high-water mark of at most four triggers; rates remain diagnostic only.
 Linux affinity is per thread and the test makes no affinity claim there.
 
+Final isolated Release measurements retain the per-engine attribution. These use the same
+four writers, 65,536-byte trigger and three-CPU Windows affinity; all peaks remain below 4×.
+
+| Engine | Deferred holders (count) | Busy refusals | Journal peak (bytes) | Peak / 65,536 | 4× bound (bytes) |
+|---|---|---|---|---|---|
+| SQL | Checkpoint=394,Statement=227 | 0 | 81,713 | 1.247× | 262,144 |
+| Documents | Checkpoint=457,Statement=6 | 0 | 65,833 | 1.005× | 262,144 |
+| Graph | Checkpoint=56,Statement=10 | 0 | 71,057 | 1.084× | 262,144 |
+| KeyValuePair | Checkpoint=439,Statement=227 | 0 | 83,020 | 1.267× | 262,144 |
+| Blob | Checkpoint=132,Statement=5 | 0 | 65,873 | 1.005× | 262,144 |
+
 The earlier worker-only arming left an unbounded gap between the size trigger and its first
 TryCheckpoint. Releasing interlock holders now pull IsCheckpointDue(TimeSpan.MaxValue), so a
 size crossing services the existing deferral before the next admission without waiting for worker
 scheduling. Timeout.InfiniteTimeSpan is negative and must never select this size-only predicate. Busy
-outside brackets suppress repeat foreground attempts until the worker re-requests or those
-captured blockers complete. The internal CheckpointRetry shared-source module carries this
-Storage-owned predicate on the refusal, independently of diagnostics. Uncollected failures also
-suppress foreground attempts; the
-worker retains retries, reporting and its offline policy. The four-trigger assertion stays intact.
+outside brackets suppress repeat foreground attempts until the worker re-requests or all active
+physical brackets complete. Storage.HasActiveTransactions is a lock-free engine-plumbing read:
+a checkpoint is refused while true. The releasing interlock still holds admission after ending
+its own brackets, so the read covers exactly the remaining ungated blockers, including replacements.
+Busy exceptions carry no executable state or bracket references and cannot retain disposed storage.
+Uncollected failures also suppress foreground attempts; the worker retains retries, reporting and
+its offline policy. The four-trigger assertion stays intact.
 
 Every refused storage checkpoint emits event 19 once per active physical bracket, including
 untouched brackets, with its operation class, optional owner, physical sequence and a shared
 refusal identity. Unnamed brackets are Raw; sequence-adopting brackets are Adopted. Equal adopted
 sequences remain separate physical brackets. The registry reuses
 its capacity and is maintained under the existing transaction lock; completion and failed begin
-remove entries there. Event 19 snapshots those entries under the lock and emits them afterwards,
-so a slow in-process listener cannot hold up bracket begin or completion. Event 20 reports the journal high-water mark since open, maintained for
+mark the bracket completed and remove entries there, including a failed admission whose trigger
+callback already captured a busy refusal. Event 19 snapshots those entries under the lock and emits
+them afterwards, so a slow in-process listener cannot hold up bracket begin or completion. Event 20
+reports the journal high-water mark since open, maintained for
 both buffered and direct frames even with no listener. A final checkpoint after the writers end
 collects that mark; autonomous progress is required before that collection.
 

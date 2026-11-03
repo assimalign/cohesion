@@ -1330,8 +1330,9 @@ Synchronous nested scopes share their entering thread's acquisition; the outermo
 runs any deferred checkpoint after its brackets and page latches ended. Canceled acquisition
 owns nothing, repeated disposal (including value copies) is inert, and a scope cannot checkpoint its own gate.
 The value-type lease records its entering thread. Cross-thread disposal emits event 22, asserts in
-Debug and throws before changing admission. The live coordinator binds once; a second live bind
-throws, and disposal unbinds only its own registration.
+Debug and throws before changing admission; a refused disposal leaves the scope held.
+Inert coordinated leases and ended value copies return before the thread-affinity check. The live
+coordinator binds once; a second live bind throws, and disposal unbinds only its own registration.
 A short state monitor makes the final pending-work check atomic with gate release, closing the
 failed-wait handoff race; it is never held across model or storage work. A checkpoint running at
 a bracket exit publishes Checkpoint as its holder, so it cannot misattribute later deferrals to
@@ -1352,10 +1353,11 @@ existing deferral before a possibly starved worker gets its first attempt. A rel
 runs the sharp checkpoint before the next admission. No new admission condition is introduced.
 A successful checkpoint consumes requests received during that checkpoint under the state monitor,
 atomically with release. A busy outside bracket retains the request but foreground retries wait
-for another worker request or completion of the captured outside blockers. The refusal carries
-an internal Storage-owned predicate over those physical brackets, shared as a stateless source
-contract through Exception.Data. Intervening statement brackets do not re-arm a busy retry.
-This adds no public member, interface or friend grant. A
+for another worker request or completion of every active physical bracket. Release reads
+Storage.HasActiveTransactions while holding admission after its own brackets ended, so it sees
+exactly the ungated blockers, including replacements. This typed engine-plumbing read allocates
+nothing and puts no executable state or bracket references in a held exception. It adds one
+public read-only member and no interface or friend grant. A
 non-busy deferred failure suppresses foreground retries until the worker collects that exact
 failure; reporting and the offline policy remain in DatabaseCheckpointWorker.Settle.
 Undo and prune releases can perform this checkpoint while the rolled-back writer still owns its
@@ -1695,7 +1697,7 @@ events check `EventKeywords.None`.
 | 19 | `LockWaitBlocked` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `blockers` | `LockManager`, once per wait still queued when the slow-lock-wait threshold passes, from a one-shot timer the wait arms only while a listener takes warnings (#1390). `blockers` names each transaction the request waits for: a holder as `<sequence>:<modes held>` (modes joined by `+`), the owner of a conflicting request queued ahead of it as `<sequence>:queued <mode>`. Each is followed by what that transaction has queued itself: `" waiting for <mode> on <resource> (<its blockers>)"`, one level deep, so a cycle of two shows in one report and each waiter of a longer chain reports its own step. Bounded (#1390 review): 16 blockers, 4 queued requests of each and 4 blockers of each of those, the rest counted as `... (+N more)` and ` and N more requests` |
 | 20 | `TransactionIsolationChanged` | Verbose | Transactions | `database`, `transactionSequence`, `isolationLevel` | successful `ReplaceIsolationLevel`, only when the effective level changes; no rate or gauge transition |
 | 21 | `CheckpointBlocked` | Verbose | Checkpoints | `database`, `bracketClass`, `owner` | each deferred checkpoint, attributed to the gate holder or the next admitted handoff |
-| 22 | `CheckpointLeaseThreadMismatch` | Verbose | Checkpoints | `database`, `enteringThread`, `disposingThread` | cross-thread disposal refused before admission changes |
+| 22 | `CheckpointLeaseThreadMismatch` | Error | Checkpoints | `database`, `enteringThread`, `disposingThread` | live cross-thread disposal refused; scope remains held |
 
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow
