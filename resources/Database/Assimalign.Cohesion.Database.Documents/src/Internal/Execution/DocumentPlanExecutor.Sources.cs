@@ -17,9 +17,9 @@ internal static partial class DocumentPlanExecutor
         DocumentLogicalPlan logical, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext nested, string? writeVerb = null)
     {
         var query = logical.Query;
-        return new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb: writeVerb, transactionStart: operation.TransactionStart,
-            starSourceName: query.Source is not null || query.Bindings.Count > 0 ? query.Alias ?? query.Collection : null,
-            functions: database.Engine.Functions, databaseName: database.Name, operation: operation, nested: nested, sourceName: query.Alias ?? query.Collection);
+        return new DocumentExpressionEvaluator(DocumentSourceName.Of(query), parameters, cancellationToken, writeVerb: writeVerb, transactionStart: operation.TransactionStart,
+            starSourceName: query.Source is not null || query.Bindings.Count > 0 ? DocumentSourceName.Of(query) : null,
+            functions: database.Engine.Functions, databaseName: database.Name, operation: operation, nested: nested);
     }
 
     private static DocumentLogicalPlan SourceLogical(DocumentStatementPlan plan) => plan switch

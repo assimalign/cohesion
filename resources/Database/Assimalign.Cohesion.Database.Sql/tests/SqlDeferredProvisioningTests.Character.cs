@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -51,7 +52,8 @@ public sealed partial class SqlDeferredProvisioningTests
         var target = await engine.OpenDatabaseAsync("pending", timeout.Token);
         try
         {
-            target.Catalog.PendingMigration.ShouldNotBeNull().Steps.ShouldHaveSingleItem().Kind.ShouldBe("Joint/AlterColumnType");
+            target.Catalog.PendingMigration.ShouldNotBeNull().Steps.Select(step => step.Kind)
+                .ShouldBe(new[] { "Joint/AlterColumnType", "Joint/RewriteOwner" });
             target.Catalog.TryGetTable("dbo", "chars", out var table).ShouldBeTrue();
             table.FindColumn("Value").ShouldNotBeNull().Type.MaxLength.ShouldBe(2);
         }

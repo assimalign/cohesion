@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
+using Assimalign.Cohesion.Database.Documents.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
@@ -44,17 +45,15 @@ public sealed partial class OqlQueryParser
         }
         if (!Failed && source is OqlSubqueryExpression && alias is null)
         { Error("CD00015", ErrorMessages.DerivedSourceAliasRequired, sourceToken); }
-        bool explicitFromAlias = alias is not null;
-        if (!explicitFromAlias) { RecordUnaliasedSource(sourceToken); }
-        if (source is OqlPathExpression { Segments.Count: > 0 } sourcePath && alias is null)
+        bool implicitAlias = alias is null;
+        if (source is OqlPathExpression { Segments.Count: > 0 } sourcePath && implicitAlias)
         { alias = sourcePath.Segments[^1].Name; }
 
         List<OqlUnnestExpression> unnest = [];
         List<OqlSourceBindingExpression>? bindings = null;
         List<Lexeme>? refusedJoins = null;
-        bool explicitAliases = explicitFromAlias;
         var variables = new HashSet<string>(StringComparer.Ordinal);
-        variables.Add(alias ?? collection);
+        variables.Add(alias ?? OqlSourceName.Implicit(collection));
         while (!Failed && IsSourceBindingClause())
         {
             var bindingStart = Current;
@@ -63,7 +62,6 @@ public sealed partial class OqlQueryParser
             else { Take("INNER"); }
             if (Is("JOIN") || Is("NEST"))
             {
-                _hasKeyJoin = true;
                 bindings ??= new List<OqlSourceBindingExpression>(unnest);
                 var joinToken = Current;
                 bool nest = Take("NEST");
@@ -88,10 +86,9 @@ public sealed partial class OqlQueryParser
                     (refusedJoins ??= []).Add(joinToken);
                     continue;
                 }
-                if (!explicitAliases || string.IsNullOrEmpty(right))
-                { Error("CD00016", ErrorMessages.JoinAliasesRequired, joinToken); break; }
-                if (receiver.Segments[0].Name != right) { UnsupportedKeyJoin(joinToken); break; }
-                if (!variables.Add(right)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, joinToken); break; }
+                string rightName = right ?? OqlSourceName.Implicit(name);
+                if (!variables.Add(rightName)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, joinToken); break; }
+                if (receiver.Segments[0].Name != rightName) { UnsupportedKeyJoin(joinToken); break; }
                 bindings.Add(new OqlJoinExpression(name, right, equality.Right, left, nest, Span(bindingStart, Previous)));
                 continue;
             }
@@ -99,13 +96,14 @@ public sealed partial class OqlQueryParser
             var expression = ParseExpression();
             var variableToken = Current;
             string? variable = null;
-            bool explicitVariable = false;
-            if (Take("AS")) { variableToken = Current; variable = Identifier(); explicitVariable = true; }
+            bool implicitVariable = false;
+            if (Take("AS")) { variableToken = Current; variable = Identifier(); }
             else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsSourceBindingClause() && !IsReturningClause())
-            { variable = Identifier(); explicitVariable = true; }
+            { variable = Identifier(); }
             else if (expression is OqlPathExpression { Segments.Count: > 0 } path)
             {
                 variable = path.Segments[^1].Name;
+                implicitVariable = true;
                 int pathEnd = _position - 1;
                 while (pathEnd > 0 && _tokens[pathEnd].End > path.Location!.End) { pathEnd--; }
                 if (_tokens[pathEnd].Type == TokenType.RightBracket) { pathEnd--; }
@@ -113,10 +111,7 @@ public sealed partial class OqlQueryParser
             }
             if (!Failed && variable is null) { Error("CD00002", ErrorMessages.OqlQueryParserParseSelectVoid3, variableToken); }
             if (!Failed && !variables.Add(variable!)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, variableToken); }
-            explicitAliases &= explicitVariable;
-            if (!explicitVariable) { RecordUnaliasedSource(variableToken); }
-            if (bindings is not null && !explicitVariable) { Error("CD00016", ErrorMessages.JoinAliasesRequired, variableToken); }
-            var expansion = new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous));
+            var expansion = new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous), implicitVariable);
             unnest.Add(expansion);
             bindings?.Add(expansion);
         }
@@ -197,16 +192,11 @@ public sealed partial class OqlQueryParser
         }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
             groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly(),
-            groupAliases?.AsReadOnly(), groupAs, source, bindings?.AsReadOnly());
+            groupAliases?.AsReadOnly(), groupAs, source, bindings?.AsReadOnly(), implicitAlias);
     }
 
     private void UnsupportedKeyJoin(Lexeme token, string suffix = " general ON predicate")
         => _diagnostics.Add(QueryDiagnostics.UnsupportedClause(token.Text.ToUpperInvariant() + suffix, Profile.Language, Span(token, token)));
-
-    private void RecordUnaliasedSource(Lexeme token)
-    {
-        if (_unaliasedSource < 0 || token.Start < _unaliasedSource) { _unaliasedSource = token.Start; }
-    }
 
     private bool IsSourceBindingClause() => IsUnnestClause() || IsJoinClause(_position);
 

@@ -49,6 +49,12 @@ internal sealed class CheckpointProbe : EventListener
     private bool _inPassAtTrigger;
     private readonly bool _countStorageTransactionExceptions;
     private long _storageTransactionExceptions;
+    private readonly Dictionary<string, long> _blockingBrackets = new(StringComparer.Ordinal);
+
+    internal IReadOnlyDictionary<string, long> BlockingBrackets
+    {
+        get { lock (_sync) { return new Dictionary<string, long>(_blockingBrackets, StringComparer.Ordinal); } }
+    }
 
     internal CheckpointProbe(string database, string engine, bool countStorageTransactionExceptions = false)
     {
@@ -58,7 +64,7 @@ internal sealed class CheckpointProbe : EventListener
         if (_countStorageTransactionExceptions)
         {
             // Test-only, process-wide first-chance count: it includes caught busy-storage
-            // refusals, which happen before CheckpointStart and have no storage event.
+            // refusals before CheckpointStart; storage event 19 now identifies their brackets.
             AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
         }
         // Explicitly select the existing providers by name after the engine initialized them.
@@ -67,6 +73,12 @@ internal sealed class CheckpointProbe : EventListener
         {
             EnableEvents(source, EventLevel.Verbose, (EventKeywords)(source.Name == storageSource ? 1 : source.Name == transactionSource ? 4 : 1));
         }
+    }
+
+    protected override void OnEventSourceCreated(EventSource source)
+    {
+        if (source.Name is storageSource or transactionSource or workerSource)
+        { EnableEvents(source, EventLevel.Verbose, (EventKeywords)(source.Name == storageSource ? 1 : source.Name == transactionSource ? 4 : 1)); }
     }
 
     internal void Triggered(long length)
@@ -159,7 +171,17 @@ internal sealed class CheckpointProbe : EventListener
             }
             if (data.EventSource.Name == storageSource)
             {
-                if (data.EventId == 5)
+                if (data.EventId == 19)
+                {
+                    string bracketClass = "busy:" + (string)payload[1]!;
+                    _blockingBrackets.TryGetValue(bracketClass, out long count);
+                    _blockingBrackets[bracketClass] = count + 1;
+                }
+                else if (data.EventId == 20)
+                {
+                    _peak = Math.Max(_peak, (long)payload[1]!);
+                }
+                else if (data.EventId == 5)
                 {
                     long length = (long)payload[2]!;
                     _peak = Math.Max(_peak, length);
@@ -205,6 +227,11 @@ internal sealed class CheckpointProbe : EventListener
             {
                 switch (data.EventId)
                 {
+                    case 21:
+                        string bracketClass = (string)payload[1]!;
+                        _blockingBrackets.TryGetValue(bracketClass, out long count);
+                        _blockingBrackets[bracketClass] = count + 1;
+                        break;
                     case 15:
                         _deferred++;
                         if (_deferredAt == 0)
@@ -235,7 +262,7 @@ internal sealed class CheckpointProbe : EventListener
         internal string Describe(long size)
             => $"{Writes} commits; {Checkpoints} checkpoints in {Elapsed.TotalSeconds:F2}s " +
                 $"({Checkpoints / Elapsed.TotalSeconds:F2}/s; buckets [{string.Join(",", CheckpointsBySecond)}]); " +
-                $"peak >= {Peak} bytes ({(double)Peak / size:F2} triggers); triggers={Triggers}, deferred={Deferred}, " +
+                $"peak = {Peak} bytes ({(double)Peak / size:F2} triggers); triggers={Triggers}, deferred={Deferred}, " +
                 $"BracketOpen={BracketOpen}, StorageTransactionException(process)={StorageTransactionExceptions?.ToString() ?? "not counted"}, " +
                 $"offline={Offline}, failures={Failures}, eventErrors={EventErrors}; " +
                 $"max trigger-to-start={MaxTriggerDelay:F2}ms/{MaxWritesBeforeCheckpoint} commits, " +

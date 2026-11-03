@@ -33,7 +33,7 @@ internal sealed partial class DocumentPlanner
     {
         if (query.GroupBy.Count == 0 || query.GroupAliases.Count != 0 && query.GroupAliases.Count != query.GroupBy.Count)
         { throw new DocumentPlanningException("CD01030", ErrorMessages.GroupBindingInvalid, query.Location); }
-        var names = new HashSet<string>(StringComparer.Ordinal) { query.Alias ?? query.Collection };
+        var names = new HashSet<string>(StringComparer.Ordinal) { DocumentSourceName.Of(query) };
         if (unnestVariables is not null) { names.UnionWith(unnestVariables); }
         DocumentBindingScope? scope = null;
         foreach (var name in query.GroupAliases) { if (name is not null) { Add(name); } }

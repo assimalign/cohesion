@@ -67,7 +67,7 @@ internal sealed partial class SqlSchemaProvisioner
                         return writer.ToArray().Length;
                     }).ToArray();
                     heapPages = _database.DataStorage.GetOwnerPages(previous.ObjectId).Count;
-                    oldPages += heapPages;
+                    if (!item.KeepsOwner) { oldPages += heapPages; }
                     using var units = _database.DataStorage.GetUnitIterator(previous.ObjectId);
                     while (units.Next(out var unit))
                     {
@@ -82,23 +82,28 @@ internal sealed partial class SqlSchemaProvisioner
                     }
                     foreach (var registration in registrations.Where(value => value.ObjectId == previous.ObjectId))
                     {
-                        var size = CountJointIndexPages(registration.RootPageId, previous.ObjectId, token);
+                        var size = CountJointIndexPages(registration.RootPageId, _database.IndexManager.PageOwner(registration), token);
                         trees.Add(registration.Definition.Name, size);
                         actualIndexPages += size.Pages;
-                        oldPages += size.Pages;
+                        if (!item.KeepsOwner || _database.IndexManager.PageOwner(registration) != previous.ObjectId &&
+                            !item.Indexes.Any(index => index.Name.Equals(registration.Definition.Name, StringComparison.OrdinalIgnoreCase) &&
+                                SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(previous.ObjectId))))
+                        { oldPages += size.Pages; }
                     }
                     long newBytes = 29 * rows;
                     for (int column = 0; column < item.Shape.Columns.Count; column++)
                     { newBytes += JointColumnBytes(item, column, columnBytes, nonNullRows, rows); }
-                    replacementPages += recordBytes == 0 ? 0 : DivideUp(heapPages * Math.Max(recordBytes, newBytes), recordBytes);
+                    if (!item.KeepsOwner) { replacementPages += recordBytes == 0 ? 0 : DivideUp(heapPages * Math.Max(recordBytes, newBytes), recordBytes); }
                 }
                 // Empty/new tables allocate no heap until an application writes them.
-                long touchesPerRow = 2;
-                foreach (var index in item.Indexes)
+                long touchesPerRow = item.KeepsOwner ? 0 : 2;
+                int built = 0;
+                foreach (var index in item.Indexes.Where(index => !item.KeepsOwner || !SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(item.Previous!.ObjectId))))
                 {
+                    built++;
                     long pages;
                     int height = 1;
-                    var old = item.Previous is null ? null : _catalog.GetIndexes(item.Previous.ObjectId)
+                    var old = item.Previous is null || item.KeepsOwner ? null : _catalog.GetIndexes(item.Previous.ObjectId)
                         .FirstOrDefault(value => value.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase) &&
                             value.ColumnNames.SequenceEqual(index.ColumnNames, StringComparer.OrdinalIgnoreCase));
                     if (old is not null && trees.TryGetValue(old.Name, out var size))
@@ -129,13 +134,13 @@ internal sealed partial class SqlSchemaProvisioner
                 }
                 maximumChunkTouches = Math.Max(maximumChunkTouches, Math.Min(64, rows) * touchesPerRow);
                 totalTouches += rows * touchesPerRow;
-                chunks += DivideUp(rows, 64);
+                chunks += DivideUp(rows, 64) * (item.KeepsOwner ? built : 1) + (item.KeepsOwner ? built : 0);
             }
             foreach (var table in plan.Dropped)
             {
                 oldPages += _database.DataStorage.GetOwnerPages(table.ObjectId).Count;
                 foreach (var registration in registrations.Where(value => value.ObjectId == table.ObjectId))
-                { oldPages += CountJointIndexPages(registration.RootPageId, table.ObjectId, token).Pages; }
+                { oldPages += CountJointIndexPages(registration.RootPageId, _database.IndexManager.PageOwner(registration), token).Pages; }
             }
             ConfigureJointEngineReserve(plan, intent, Math.Max(oldPages, replacementPages));
             long replacement = Math.Max(0, replacementPages - _database.DataStorage.PageManager.FreePageCount) * Page.Size;
@@ -208,7 +213,18 @@ internal sealed partial class SqlSchemaProvisioner
         checked
         {
             _jointMinimumPages = minimumPages;
-            _jointReclamationOwners = Math.Max(plan.Tables.Length, plan.Tables.Count(table => table.Previous is not null) + plan.Dropped.Length);
+            var retiredHeaps = plan.Tables.Where(table => table.Previous is not null && !table.KeepsOwner)
+                .Select(table => table.Previous!.ObjectId).Concat(plan.Dropped.Select(table => table.ObjectId)).ToHashSet();
+            long retiredTrees = _database.IndexManager.ExportRegistrations().Where(registration =>
+                _database.IndexManager.PageOwner(registration) != registration.ObjectId && (retiredHeaps.Contains(registration.ObjectId) ||
+                plan.Tables.Any(table => table.KeepsOwner && table.Previous!.ObjectId == registration.ObjectId &&
+                    !table.Indexes.Any(index => index.Name.Equals(registration.Definition.Name, StringComparison.OrdinalIgnoreCase) &&
+                        SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(registration.ObjectId))))))
+                .Select(_database.IndexManager.PageOwner).Distinct().LongCount();
+            _jointReclamationOwners = Math.Max(plan.Tables.Count(table => !table.KeepsOwner) +
+                plan.Tables.Where(table => table.KeepsOwner).Sum(table => table.Indexes.Count(index =>
+                    !SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(table.Previous!.ObjectId)))),
+                retiredHeaps.Count + retiredTrees);
             long overshoot = JointBracketBytes(SqlTableReclamation.BatchSize, 0);
             long threshold = _database.Engine.EngineOptions.CheckpointJournalSize;
             _jointReclamationLimit = threshold == 0 ? long.MaxValue : threshold + overshoot;

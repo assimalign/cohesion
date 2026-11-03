@@ -64,7 +64,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private readonly LockManager _lockManager;
     private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
-    private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private readonly TransactionCheckpointInterlock _applyGate;
     private readonly Func<TransactionSequence, CancellationToken, ValueTask<long>>? _indexPruner;
 
     // True in the async flow of a statement apply or undo control holding the apply gate, which is not
@@ -72,11 +72,6 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     // the gate its own caller holds.
     private readonly AsyncLocal<bool> _insideApply = new();
 
-    // 1 when TryCheckpoint found the apply gate held: the statement that releases the gate next
-    // runs the checkpoint first. A failure of that checkpoint is kept for the next TryCheckpoint
-    // to throw, because the statement that ran it must not fail for it.
-    private int _checkpointDeferred;
-    private ExceptionDispatchInfo? _deferredCheckpointFailure;
     private readonly Dictionary<ulong, StorageTransaction> _statementBrackets = new();
     private readonly Dictionary<ulong, TransactionContext> _openContexts = new();
     private readonly object _sync = new();
@@ -93,6 +88,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// indexes, call <see cref="AnalyzeAndScrub"/>, scrub those indexes with its plan,
     /// and call <see cref="CompleteRecovery"/> before admitting any sessions.
     /// </remarks>
+    /// <exception cref="ArgumentNullException">A required dependency is null.</exception>
+    /// <exception cref="InvalidOperationException">Another live coordinator is bound to the storage.</exception>
     public TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records)
         : this(storage, journal, records, TimeProvider.System)
     {
@@ -104,6 +101,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <param name="records">The model's stamped record access.</param>
     /// <param name="indexPruner">Prunes a bounded index batch below the supplied safe horizon.</param>
     /// <exception cref="ArgumentNullException">A required dependency is null.</exception>
+    /// <exception cref="InvalidOperationException">Another live coordinator is bound to the storage.</exception>
     public TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records,
         Func<TransactionSequence, CancellationToken, ValueTask<long>> indexPruner)
         : this(storage, journal, records, TimeProvider.System, indexPruner ?? throw new ArgumentNullException(nameof(indexPruner)))
@@ -132,6 +130,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         // Fully qualified: the coordinator's LockManager property shadows the
         // type name inside this scope.
         var locks = new Transactions.LockManager();
+        _applyGate = TransactionCheckpointInterlock.ForStorage(storage);
         _versionStore = new RecordSpaceVersionStore(storage, records, _applyGate);
         _log = new GatedJournalLog(this);
 
@@ -152,6 +151,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             database);
         locks.EnterEngineMode(_manager.IsTracked, () => _insideApply.Value, database);
         _lockManager = locks;
+        // Publish callbacks only after every field they can observe is initialized.
+        _applyGate.ConfigureCheckpoint(this, () => _log.CheckpointUnderGate(_storage), () => _insideApply.Value);
     }
 
     /// <summary>
@@ -714,7 +715,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             }
             // Admission freezes this writer's ledger and end before prefix work. Other
             // writers retain the apply gate until physical undo actually needs it.
-            await _applyGate.WaitAsync().ConfigureAwait(false);
+            await _applyGate.WaitAsync(bracketClass: "PartialUndo", owner: unchecked((long)context.Sequence.Value)).ConfigureAwait(false);
             _insideApply.Value = true;
             try
             {
@@ -725,15 +726,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             }
             finally
             {
-                try
-                {
-                    if (Volatile.Read(ref _checkpointDeferred) != 0) { RunDeferredCheckpoint(); }
-                }
-                finally
-                {
-                    _insideApply.Value = false;
-                    _applyGate.Release();
-                }
+                try { _applyGate.Release(); }
+                finally { _insideApply.Value = false; }
             }
         }
         finally { undoOwner.ExitApply(undoControl: true); }
@@ -843,7 +837,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(apply);
 
-        await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _applyGate.WaitAsync(cancellationToken, "Statement", unchecked((long)context.Sequence.Value)).ConfigureAwait(false);
         _insideApply.Value = true;
 
         try
@@ -855,7 +849,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
             try
             {
-                var bracket = _storage.BeginTransaction();
+                var bracket = _storage.BeginTransaction("Statement", unchecked((long)context.Sequence.Value));
                 _versionStore.BeginStatement(context.Sequence);
 
                 lock (_sync)
@@ -922,15 +916,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
-            try
-            {
-                if (Volatile.Read(ref _checkpointDeferred) != 0) { RunDeferredCheckpoint(); }
-            }
-            finally
-            {
-                _insideApply.Value = false;
-                _applyGate.Release();
-            }
+            try { _applyGate.Release(); }
+            finally { _insideApply.Value = false; }
         }
     }
 
@@ -1011,7 +998,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <param name="cancellationToken">Cancels the wait for the apply gate.</param>
     /// <exception cref="StorageTransactionException">
     /// A storage-level bracket that does not go through the apply gate is still active, or the
-    /// call came from inside a statement apply of this coordinator.
+    /// call came from inside a statement apply or synchronous raw scope holding this coordinator's gate.
     /// </exception>
     /// <exception cref="OperationCanceledException">The wait for the apply gate was canceled.</exception>
     /// <remarks>
@@ -1027,22 +1014,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     public void Checkpoint(CancellationToken cancellationToken)
     {
         ThrowIfInsideApply();
-        _applyGate.Wait(cancellationToken);
-        try
-        {
-            Volatile.Write(ref _checkpointDeferred, 0);
-            _log.CheckpointUnderGate(_storage);
-        }
-        finally
-        {
-            _applyGate.Release();
-        }
+        _applyGate.Checkpoint(cancellationToken);
     }
 
     /// <summary>
     /// Checkpoints the data storage (see <see cref="Checkpoint()"/>) if the statement apply gate
     /// can be taken within <paramref name="gateTimeout"/>. Otherwise the checkpoint is deferred
-    /// to the statement holding the gate, which runs it before it releases the gate, and the call
+    /// to the operation holding the gate, which runs it before it releases the gate, and the call
     /// returns false at once: it never waits longer than <paramref name="gateTimeout"/>.
     /// </summary>
     /// <param name="gateTimeout">
@@ -1051,7 +1029,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </param>
     /// <param name="cancellationToken">Cancels the wait for the apply gate.</param>
     /// <returns>
-    /// True when the checkpoint ran on this call; false when a statement held the gate, which then
+    /// True when the checkpoint ran on this call; false when an operation held the gate, which then
     /// runs the checkpoint as it ends.
     /// </returns>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -1064,7 +1042,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </exception>
     /// <exception cref="OperationCanceledException">The wait for the apply gate was canceled.</exception>
     /// <exception cref="Exception">
-    /// The failure of a checkpoint a statement ran for an earlier deferred request, thrown once,
+    /// The failure of a checkpoint an operation ran for an earlier deferred request, thrown once,
     /// before this call does anything else.
     /// </exception>
     /// <remarks>
@@ -1076,13 +1054,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// size in six seconds). Any bounded wait fixes that, but trades the busy database against
     /// the others: a short one rarely catches the end of a long statement, a long one lets the
     /// others overshoot. Deferring needs no trade: the worker moves on at once, and the busy
-    /// database is checkpointed the moment its statement ends, before the next statement takes
-    /// the gate, whether the statement ran for a millisecond or a minute.
+    /// database is checkpointed as its gate holder ends, before another operation takes
+    /// the gate. Statements, raw write scopes and maintenance share that interlock.
     /// </para>
     /// <para>
-    /// The deferred checkpoint runs on the thread of the statement that ends, which waits for it
-    /// as the next statement would have waited at the gate. It never fails that statement: a
-    /// storage bracket still open outside the gate leaves the request for the next statement, an
+    /// The deferred checkpoint runs in the releasing operation, which waits for it
+    /// as the next statement would have waited at the gate. It preserves that operation's outcome: a
+    /// storage bracket still open outside the gate leaves the request for the next gate holder, an
     /// offline storage drops it, and any other failure is thrown by the next call of this method,
     /// so the engine's worker records it.
     /// </para>
@@ -1090,65 +1068,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     public bool TryCheckpoint(TimeSpan gateTimeout, CancellationToken cancellationToken)
     {
         ThrowIfInsideApply();
-        Interlocked.Exchange(ref _deferredCheckpointFailure, null)?.Throw();
-
-        if (!_applyGate.Wait(gateTimeout, cancellationToken))
-        {
-            // Set after the failed wait: a statement that releases the gate before this write is
-            // seen leaves the request for the next statement, or for the worker's next look.
-            Volatile.Write(ref _checkpointDeferred, 1);
-            TransactionEventSource.Log.CheckpointDeferred(_storage);
-            return false;
-        }
-
-        try
-        {
-            Volatile.Write(ref _checkpointDeferred, 0);
-            _log.CheckpointUnderGate(_storage);
-            return true;
-        }
-        finally
-        {
-            _applyGate.Release();
-        }
+        return _applyGate.TryCheckpoint(gateTimeout, cancellationToken);
     }
-
-    /// <summary>
-    /// Runs the checkpoint <see cref="TryCheckpoint"/> deferred to the statement that holds the
-    /// apply gate, under that gate, as the statement ends. Never throws: the statement's own
-    /// outcome is already decided.
-    /// </summary>
-    private void RunDeferredCheckpoint()
-    {
-        try
-        {
-            _log.CheckpointUnderGate(_storage);
-            Volatile.Write(ref _checkpointDeferred, 0);
-        }
-        catch (StorageTransactionException exception) when (exception.Code != StorageTransactionErrorCode.ForeignStorage)
-        {
-            // A storage bracket outside the apply gate is open; the next statement to end, or
-            // the worker's next look, retries.
-            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, deferredCheckpointBracketOpen);
-        }
-        catch (StorageOfflineException)
-        {
-            // A durable flush failed and took the storage offline (#1243): nothing more is
-            // written, and every later operation on the database is refused.
-            Volatile.Write(ref _checkpointDeferred, 0);
-            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, deferredCheckpointStorageOffline);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            Volatile.Write(ref _checkpointDeferred, 0);
-            Volatile.Write(ref _deferredCheckpointFailure, ExceptionDispatchInfo.Capture(exception));
-            TransactionEventSource.Log.DeferredCheckpointFailed(_storage, exception);
-        }
-    }
-
-    // The reasons a deferred checkpoint did not run, as the DeferredCheckpointSkipped event names them.
-    private const string deferredCheckpointBracketOpen = "BracketOpen";
-    private const string deferredCheckpointStorageOffline = "StorageOffline";
 
     /// <summary>
     /// Refuses maintenance asked for from inside one of this coordinator's statement applies:
@@ -1249,7 +1170,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             try
             {
-                _applyGate.Wait(cancellationToken);
+                _applyGate.Wait(cancellationToken, "IndexPrune");
                 try
                 {
                     var pending = _indexPruner(bound, cancellationToken);
@@ -1379,8 +1300,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
                 _openContexts.Clear();
             }
-            if (markedEnds is not null)
-            { foreach (var context in markedEnds) { _records.TransactionEnded(context); } }
+            try
+            {
+                if (markedEnds is not null)
+                { foreach (var context in markedEnds) { _records.TransactionEnded(context); } }
+            }
+            finally { _applyGate.UnconfigureCheckpoint(this); }
         }
     }
 

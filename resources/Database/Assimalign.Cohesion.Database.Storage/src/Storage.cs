@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Tracing;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Text;
@@ -64,6 +65,9 @@ using Assimalign.Cohesion.Database.Storage.Units;
 public abstract class Storage : IAsyncDisposable, IDisposable
 {
     private readonly StorageBufferPool _bufferPool;
+    private readonly StorageRecoveredStream? _recoveredView;
+    internal long ProbeRetainedPageBytes => _recoveredView is null ? 0 : _recoveredView.RetainedPageBytes + (long)_bufferPool.Count * Page.Size;
+    internal long ProbeIndexedRecordCount => _recoveredView?.IndexedRecordCount ?? 0;
     private readonly StorageFreeSpaceMap _freeSpaceMap;
     private readonly Dictionary<long, StorageTransaction> _pageWriteLocks = new();
     private readonly object _transactionLock = new();
@@ -86,6 +90,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     private StorageJournal? _journal;
     private long _nextTransactionSequence;
     private int _activeTransactionCount;
+    private readonly Dictionary<StorageTransaction, (string Class, long Owner)> _activeBrackets = new();
+    private long _checkpointRefusals;
 
     // The commit durability (a StorageCommitDurability) and the group-commit window in ticks.
     // Written by their setters only, the durability under _transactionLock (owner decision 26 of
@@ -233,10 +239,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(backup);
 
         _model = model;
-        Data = data;
+        _recoveredView = data.CanWrite ? null : new StorageRecoveredStream(data);
+        Data = _recoveredView is null ? data : new StorageStream(_recoveredView);
         Journal = journal;
         Backup = backup;
-        _bufferPool = new StorageBufferPool(bufferPoolCapacity) { WriteGuard = ThrowIfOffline };
+        _bufferPool = new StorageBufferPool(bufferPoolCapacity) { WriteGuard = GuardWrite, IsReadOnly = _recoveredView is not null };
         _freeSpaceMap = new StorageFreeSpaceMap();
     }
 
@@ -558,7 +565,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             return true;
         }
 
-        return journal.LastLsn > Volatile.Read(ref _lastCheckpointLsn)
+        return interval != TimeSpan.MaxValue && journal.LastLsn > Volatile.Read(ref _lastCheckpointLsn)
             && System.Diagnostics.Stopwatch.GetElapsedTime(Volatile.Read(ref _lastCheckpointTimestamp)) >= interval;
     }
 
@@ -635,6 +642,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             }
         }
     }
+
+    /// <summary>Gets whether a storage-level transaction is active; a checkpoint is refused while true.</summary>
+    /// <remarks>Engine plumbing for checkpoint retry admission. A transaction may begin immediately after this read.</remarks>
+    public bool HasActiveTransactions => Volatile.Read(ref _activeTransactionCount) != 0;
 
     /// <summary>
     /// Gets the number of storage-level transactions begun and not yet completed (diagnostics and
@@ -1053,7 +1064,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     private void CountOpen()
     {
-        if (Interlocked.CompareExchange(ref _gaugeState, 1, 0) == 0)
+        if (_recoveredView is null && Interlocked.CompareExchange(ref _gaugeState, 1, 0) == 0)
         {
             StorageEventSource.Log.CountStorageOpened();
         }
@@ -1080,7 +1091,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     private void AttachJournal()
     {
-        var journal = StorageJournal.Create(Journal, leaveOpen: true);
+        var journal = _recoveredView is null ? StorageJournal.Create(Journal, leaveOpen: true) : StorageJournal.OpenReadOnly(Journal);
         journal.WentOffline = _groupCommitGate.Abandon;
         journal.Offline = RaiseOffline;
         journal.ConfigureCheckpointTrigger(CheckpointJournalSize, _onCheckpointNeeded);
@@ -1131,6 +1142,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// A header half could not be read and the journal cannot prove coverage of the other slot,
     /// or neither half could be read. Checksum damage without a valid slot is corruption instead.
     /// </exception>
+    /// <remarks>With a read-only data stream, recovery is a lazy in-memory view; no original stream is written and no checkpoint runs.</remarks>
     /// <param name="cancellationToken">Cancels journal replay and page reconstruction between records.</param>
     /// <exception cref="OperationCanceledException">Recovery was canceled; the journal remains available for retry.</exception>
     protected unsafe void OpenExisting(bool checkpointOnOpen = true, CancellationToken cancellationToken = default)
@@ -1156,7 +1168,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 ExceptionDispatchInfo.Capture(headerReadFailure).Throw();
             }
 
-            StorageEventSource.Log.HeaderReadFallback(this, _headerSlot, header.Generation, header.LsnFloor, headerReadFailure);
+            if (_recoveredView is null) { StorageEventSource.Log.HeaderReadFallback(this, _headerSlot, header.Generation, header.LsnFloor, headerReadFailure); }
         }
         bool journalHadRecords = _journal!.LastLsn > 0;
 
@@ -1169,10 +1181,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // Zero unless the event source is listening: the recovery's start and stop events then
         // bracket the replay and the page scan, and the stop is written whether or not they
         // complete, so its activity always closes.
-        long recoveryStarted = StorageEventSource.Log.RecoveryStart(this);
+        long recoveryStarted = _recoveredView is null ? StorageEventSource.Log.RecoveryStart(this) : 0;
         try
         {
-            var recovery = StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity, cancellationToken);
+            var recovery = _recoveredView is null
+                ? StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity, cancellationToken)
+                : _recoveredView.Initialize(_journal, protectedPages, cancellationToken);
 
             // Sequence assignment resumes above both the journal's highest observed
             // sequence and the header floor persisted at the last checkpoint — the
@@ -1291,27 +1305,27 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 // named a base no record in the journal produced — the following open refused the file
                 // set with a chain gap (#1253 review). Nothing has been appended since open, which
                 // RaiseLsnFloor requires.
-                StorageEventSource.Log.JournalTailLost(this, strayLsn, redoLsn);
+                if (_recoveredView is null) { StorageEventSource.Log.JournalTailLost(this, strayLsn, redoLsn); }
                 _journal.RaiseLsnFloor(strayLsn);
                 redoLsn = strayLsn;
             }
 
             Volatile.Write(ref _redoLsn, redoLsn);
 
-            StorageEventSource.Log.RecoveryStop(this, succeeded: true, recovery.RebuiltPages.Count, recovery.MaxSequence, redoLsn, recoveryStarted);
+            if (_recoveredView is null) { StorageEventSource.Log.RecoveryStop(this, succeeded: true, recovery.RebuiltPages.Count, recovery.MaxSequence, redoLsn, recoveryStarted); }
             recoveryStarted = 0;
         }
         finally
         {
             // A recovery that threw: its stop carries zeros and Error, and the open's exception is the failure.
             // A no-op after the stop above, and while nobody listens.
-            StorageEventSource.Log.RecoveryStop(this, succeeded: false, 0, 0, 0, recoveryStarted);
+            if (_recoveredView is null) { StorageEventSource.Log.RecoveryStop(this, succeeded: false, 0, 0, 0, recoveryStarted); }
         }
 
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap) { WroteOutsideJournal = ForgetShadow };
 
         // Everything the journal described is now in the data file; start it clean.
-        if (journalHadRecords && checkpointOnOpen)
+        if (_recoveredView is null && journalHadRecords && checkpointOnOpen)
         {
             Checkpoint();
         }
@@ -1334,23 +1348,40 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// record mutations. See <see cref="StorageTransaction"/> for the semantics.
     /// </summary>
     /// <returns>The new transaction scope.</returns>
-    public StorageTransaction BeginTransaction()
+    public StorageTransaction BeginTransaction() => BeginTransaction("Raw");
+
+    /// <summary>Begins a physical bracket with its checkpoint-blocking attribution.</summary>
+    /// <param name="bracketClass">The operation class, for example Statement, Undo or SqlCatalog.</param>
+    /// <param name="owner">An optional logical writer or physical object identity.</param>
+    /// <returns>The new transaction scope.</returns>
+    /// <exception cref="ArgumentException"><paramref name="bracketClass"/> is empty.</exception>
+    /// <exception cref="StorageOfflineException">The storage is offline.</exception>
+    /// <exception cref="InvalidOperationException">The storage has not been initialized or opened.</exception>
+    public StorageTransaction BeginTransaction(string bracketClass, long owner = 0)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(bracketClass);
         if (_journal is null)
         {
             throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
-        ThrowIfOffline();
+        GuardWrite();
         long sequence;
+        StorageTransaction transaction;
         lock (_transactionLock)
         {
             sequence = Interlocked.Increment(ref _nextTransactionSequence);
+            transaction = new StorageTransaction(this, sequence);
 
             // Counted under the same lock the checkpoint holds, so a checkpoint can
             // never truncate the journal between a transaction's begin and its
             // completion (which would discard the full page images its changes chain onto).
-            _activeTransactionCount++;
+            try
+            {
+                _activeBrackets.Add(transaction, (bracketClass, owner));
+                _activeTransactionCount++;
+            }
+            catch { transaction.MarkCompleted(); throw; }
         }
 
         try
@@ -1363,13 +1394,15 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // return the count, and every later checkpoint would refuse to run.
             lock (_transactionLock)
             {
+                transaction.MarkCompleted();
+                _activeBrackets.Remove(transaction);
                 _activeTransactionCount--;
             }
 
             throw;
         }
 
-        return new StorageTransaction(this, sequence);
+        return transaction;
     }
 
     /// <summary>
@@ -1416,31 +1449,37 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
-        ThrowIfOffline();
-        lock (_transactionLock)
+        GuardWrite();
+        var transaction = new StorageTransaction(this, sequence);
+        try
         {
-            // Adopted sequences normally come from ReserveTransactionSequence, but
-            // keep the counter monotonic even for a caller that minted its own —
-            // a later internally assigned sequence must never collide.
-            long observed = Interlocked.Read(ref _nextTransactionSequence);
-            while (sequence > observed)
+            lock (_transactionLock)
             {
-                long previous = Interlocked.CompareExchange(ref _nextTransactionSequence, sequence, observed);
-                if (previous == observed)
+                // Adopted sequences normally come from ReserveTransactionSequence, but
+                // keep the counter monotonic even for a caller that minted its own —
+                // a later internally assigned sequence must never collide.
+                long observed = Interlocked.Read(ref _nextTransactionSequence);
+                while (sequence > observed)
                 {
-                    break;
+                    long previous = Interlocked.CompareExchange(ref _nextTransactionSequence, sequence, observed);
+                    if (previous == observed)
+                    {
+                        break;
+                    }
+
+                    observed = previous;
                 }
 
-                observed = previous;
+                _activeBrackets.Add(transaction, ("Adopted", sequence));
+                _activeTransactionCount++;
             }
-
-            _activeTransactionCount++;
         }
+        catch { transaction.MarkCompleted(); throw; }
 
         // Deliberately no begin record: the reserving caller's transaction log owns
         // the lifecycle records (see the summary above); page images
         // journaled by this bracket carry the sequence, which is all recovery needs.
-        return new StorageTransaction(this, sequence);
+        return transaction;
     }
 
     /// <summary>
@@ -1631,64 +1670,89 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // journal with the monitor released. Eviction never takes
         // the flush gate. Also transaction lock → owner lock → free-space map for commit-time
         // frees; no other path takes them in the opposite order.
-        lock (_transactionLock)
+        (string Class, long Owner, long Sequence)[]? busy = null;
+        long busyRefusal = 0;
+        try
         {
-            ThrowIfOffline();
-
-            if (_activeTransactionCount > 0)
+            lock (_transactionLock)
             {
-                throw new StorageTransactionException(ErrorMessages.StorageCheckpointFailure);
-            }
+                ThrowIfOffline();
 
-            // Zero unless the event source is listening. A refused checkpoint (above) changed
-            // nothing and writes no start; one that starts writes its stop whether or not it
-            // completes, so its activity always closes.
-            long checkpointStarted = StorageEventSource.Log.CheckpointStart(this, activeTransactionSequences.Length);
-            try
-            {
-                // The anchor and both floors reach durable storage before the journal
-                // truncation destroys the records they stand in for.
-                WriteHeader(activeTransactionSequences);
-
-                // The debug consistency check compares every page it shadows with what recovery would
-                // rebuild from the records the truncation is about to discard.
-                _consistency?.Checkpointing(ReadPageForAudit);
-
-                // Read once: a CommitDurability change racing the checkpoint must not make it flush
-                // without an fsync and then publish that LSN to the gate as durable. The setter takes
-                // this checkpoint's transaction lock too (owner decision 26 of 2026-10-06), so the
-                // header write above, its page write-backs and this flush all saw the same value. And
-                // an initialized storage never enters or leaves None, so a commit waiting durably in
-                // the gate never meets a truncation this checkpoint made without flushing the data file.
-                bool durable = RequiresDurableFlush;
-                long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences, forceDurable: durable);
-
-                if (checkpointLsn is not null)
+                if (_activeTransactionCount > 0)
                 {
-                    // Every page now carries an LSN below the checkpoint record's, and the journal holds
-                    // no record of any page: each one's next change journals a full page image first.
-                    // Under the transaction lock with no transaction active, so no transaction sees the
-                    // redo point move.
-                    Volatile.Write(ref _redoLsn, checkpointLsn.Value);
-
-                    if (durable)
+                    long refusal = ++_checkpointRefusals;
+                    if (StorageEventSource.Log.IsEnabled(EventLevel.Verbose, StorageEventSource.Keywords.Checkpoints))
                     {
-                        // Wake any group-commit bookkeeping past the truncation point. The journal's own
-                        // durable LSN, not the checkpoint's: the gate publishes only what an fsync confirmed.
-                        _groupCommitGate.PublishDurable(_journal!.DurableLsn);
+                        busy = new (string Class, long Owner, long Sequence)[_activeBrackets.Count];
+                        busyRefusal = refusal;
+                        int index = 0;
+                        foreach (var bracket in _activeBrackets)
+                        { busy[index++] = (bracket.Value.Class, bracket.Value.Owner, bracket.Key.Sequence); }
                     }
+                    throw new StorageTransactionException(ErrorMessages.StorageCheckpointFailure);
                 }
 
-                MarkCheckpointed();
-                StorageEventSource.Log.CountCheckpoint();
-                StorageEventSource.Log.CheckpointStop(this, succeeded: true, checkpointLsn ?? 0, checkpointStarted);
-                checkpointStarted = 0;
+                // Zero unless the event source is listening. A refused checkpoint (above) changed
+                // nothing and writes no start; one that starts writes its stop whether or not it
+                // completes, so its activity always closes.
+                StorageEventSource.Log.CheckpointJournalPeak(this, _journal?.PeakLength ?? 0);
+                long checkpointStarted = StorageEventSource.Log.CheckpointStart(this, activeTransactionSequences.Length);
+                try
+                {
+                    // The anchor and both floors reach durable storage before the journal
+                    // truncation destroys the records they stand in for.
+                    WriteHeader(activeTransactionSequences);
+
+                    // The debug consistency check compares every page it shadows with what recovery would
+                    // rebuild from the records the truncation is about to discard.
+                    _consistency?.Checkpointing(ReadPageForAudit);
+
+                    // Read once: a CommitDurability change racing the checkpoint must not make it flush
+                    // without an fsync and then publish that LSN to the gate as durable. The setter takes
+                    // this checkpoint's transaction lock too (owner decision 26 of 2026-10-06), so the
+                    // header write above, its page write-backs and this flush all saw the same value. And
+                    // an initialized storage never enters or leaves None, so a commit waiting durably in
+                    // the gate never meets a truncation this checkpoint made without flushing the data file.
+                    bool durable = RequiresDurableFlush;
+                    long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences, forceDurable: durable);
+
+                    if (checkpointLsn is not null)
+                    {
+                        // Every page now carries an LSN below the checkpoint record's, and the journal holds
+                        // no record of any page: each one's next change journals a full page image first.
+                        // Under the transaction lock with no transaction active, so no transaction sees the
+                        // redo point move.
+                        Volatile.Write(ref _redoLsn, checkpointLsn.Value);
+
+                        if (durable)
+                        {
+                            // Wake any group-commit bookkeeping past the truncation point. The journal's own
+                            // durable LSN, not the checkpoint's: the gate publishes only what an fsync confirmed.
+                            _groupCommitGate.PublishDurable(_journal!.DurableLsn);
+                        }
+                    }
+
+                    MarkCheckpointed();
+                    StorageEventSource.Log.CountCheckpoint();
+                    StorageEventSource.Log.CheckpointStop(this, succeeded: true, checkpointLsn ?? 0, checkpointStarted);
+                    checkpointStarted = 0;
+                }
+                finally
+                {
+                    // A checkpoint that threw: its stop carries Error and checkpoint LSN zero, and the caller's
+                    // exception is the failure. A no-op after the stop above, and while nobody listens.
+                    StorageEventSource.Log.CheckpointStop(this, succeeded: false, 0, checkpointStarted);
+                }
             }
-            finally
+        }
+        finally
+        {
+            // Listeners run after the transaction monitor is released. The refusal
+            // snapshot names the brackets observed by this exact attempt.
+            if (busy is not null)
             {
-                // A checkpoint that threw: its stop carries Error and checkpoint LSN zero, and the caller's
-                // exception is the failure. A no-op after the stop above, and while nobody listens.
-                StorageEventSource.Log.CheckpointStop(this, succeeded: false, 0, checkpointStarted);
+                foreach (var bracket in busy)
+                { StorageEventSource.Log.CheckpointBusy(this, bracket.Class, bracket.Owner, bracket.Sequence, busyRefusal); }
             }
         }
     }
@@ -2942,6 +3006,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
+    private void GuardWrite()
+    {
+        if (_recoveredView is not null) { throw new NotSupportedException(ErrorMessages.RecoveryProbeReadOnly); }
+        ThrowIfOffline();
+    }
+
     /// <summary>
     /// Flushes state on shutdown: a clean checkpoint when no transactions are active
     /// (so the next open recovers instantly), otherwise flushes according to the
@@ -2960,7 +3030,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </remarks>
     private void ShutdownFlush()
     {
-        if (_pageManager is null || _journal is null)
+        if (_recoveredView is not null || _pageManager is null || _journal is null)
         {
             return;
         }
@@ -3526,6 +3596,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // guards double completion), so the active count pairs with
             // BeginTransaction's increment. The scope completes in the same step, so a
             // completion that throws after this point is never repeated by Dispose.
+            _activeBrackets.Remove(transaction);
             _activeTransactionCount--;
             transaction.MarkCompleted();
 

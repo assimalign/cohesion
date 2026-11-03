@@ -87,7 +87,7 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
     public async Task NonDurableBacking_WithExplicitDurability_ShouldRejectOpenAndReleaseStorage(
         StorageCommitDurability durability, bool openExisting)
     {
-        var strategy = new NonDurableStorageStrategy();
+        var strategy = new NonDurableStorageStrategy(openExisting);
         await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             StorageStrategy = strategy,
@@ -129,6 +129,8 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
 
     private sealed class NonDurableStorageStrategy : SqlStorageStrategy
     {
+        private readonly bool _exists;
+        internal NonDurableStorageStrategy(bool exists) { _exists = exists; }
         internal List<MemoryStream> Streams { get; } = [];
 
         public override SqlStorage CreateStorage(string databaseName, bool catalog)
@@ -140,9 +142,21 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
             return SqlStorage.Create(data, journal, backup, GetLabel(databaseName, catalog));
         }
 
-        public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default) => CreateStorage(databaseName, catalog);
+        public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default, bool readOnly = false)
+        {
+            if (!readOnly) { return CreateStorage(databaseName, catalog); }
+            using var data = new MemoryStream();
+            using var journal = new MemoryStream();
+            using var backup = new MemoryStream();
+            using (var source = SqlStorage.Create(data, journal, backup, GetLabel(databaseName, catalog)))
+            {
+                if (catalog) { global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalog.Open(source).SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion).GetAwaiter().GetResult(); }
+            }
+            return SqlStorage.Open(new MemoryStream(data.ToArray(), writable: false),
+                new MemoryStream(journal.ToArray(), writable: false), new MemoryStream(backup.ToArray(), writable: false), checkpointOnOpen: false);
+        }
 
-        public override bool StorageExists(string databaseName, bool catalog) => true;
+        public override bool StorageExists(string databaseName, bool catalog) => _exists;
 
         public override void DropStorage(string databaseName) { }
     }

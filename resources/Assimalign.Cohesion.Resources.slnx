@@ -437,6 +437,9 @@
 		<File Path="Database/Assimalign.Cohesion.Database.Storage/docs/DESIGN.md" />
 		<File Path="Database/Assimalign.Cohesion.Database.Storage/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Storage/fixtures/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Storage/fixtures/Assimalign.Cohesion.Database.Storage.FormatProbeFixture/Assimalign.Cohesion.Database.Storage.FormatProbeFixture.csproj" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Storage/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Storage/src/Assimalign.Cohesion.Database.Storage.csproj" />
 	</Folder>

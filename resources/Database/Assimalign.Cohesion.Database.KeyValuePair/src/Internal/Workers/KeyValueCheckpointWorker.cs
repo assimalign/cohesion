@@ -1,6 +1,8 @@
 using System;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 /// <summary>
@@ -99,7 +101,8 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
 
         if (catalogDue || database.CatalogStorage.IsCheckpointDue(interval))
         {
-            database.CatalogStorage.Checkpoint();
+            finished = TransactionCheckpointInterlock.ForStorage(database.CatalogStorage)
+                .TryCheckpoint(TimeSpan.Zero, cancellationToken) && finished;
         }
 
         return finished;

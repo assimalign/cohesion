@@ -41,7 +41,7 @@ public sealed partial class SqlTableRewriteTests
                     LockResource.Object(source), LockMode.Exclusive).ShouldBeTrue();
             }
             finally { await database.Coordinator.RollbackAsync(probe, CancellationToken.None); }
-            database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+            database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
             database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
         }
         await database.RewriteTableAsync(Table(database), timeout.Token);
@@ -114,13 +114,13 @@ public sealed partial class SqlTableRewriteTests
         // Assert: no elapsed-time assertion; the timeout's structured identity decides it.
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04044");
         failure.InnerException.ShouldBeOfType<TransactionLockTimeoutException>();
-        database.Coordinator.GetOpenContexts().ShouldHaveSingleItem();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldHaveSingleItem();
         await transaction.RollbackAsync(timeout.Token);
         await ExecAsync(session, "ALTER TABLE t ADD n INT", timeout.Token);
         await database.RewriteTableAsync(Table(database), timeout.Token);
         // The successful retry retires an owner. Its reclamation fence is an open
         // snapshot context too; finish that work before checking transaction cleanup.
         await ReclaimAsync(database, timeout.Token);
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 }

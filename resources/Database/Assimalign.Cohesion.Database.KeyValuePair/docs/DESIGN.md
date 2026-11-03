@@ -1,5 +1,34 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Refused opens preserve every file (#1744)
+
+The catalog preflight checks the entry-space marker before opening even a read-only data view,
+then validates every primary-index registration against its recovered root. When preflight is
+needed, both sets pass their storage header and journal-frame gates before either opens for writing.
+A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
+committed and uncommitted crash records. Acceptance discards the probe, opens the original files
+and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
+its journal before the gate reads it. No format version or diagnostic identity changes.
+The journal-only pre-scan stops at the first full image of an existing page above zero and delegates to the recovered probe; only the no-image path runs full analysis. When that analysis finds no applicable page records (in both sets), the engine skips the full recovered
+probe. The writable open defers checkpointing, physical recovery has no writes, and all format
+gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
+asserted read-only at the strategy boundary, and is disposed before writable handles open.
+The probe reports no Storage lifecycle events, page-read counts or gauge changes. A corrupt page still emits PageChecksumFailed (Error): the probe refuses the open, so no writable replay can double-count that corruption. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
+source-shared journal analysis, common replay rules, retained-byte bound and gate inventory.
+
+## Checkpoint bracket attribution (#1283, EN-C1)
+
+Catalog writes now enter their file set's TransactionCheckpointInterlock, shared with the catalog
+checkpointer. The catalog monitor precedes that independent gate and storage/page latches;
+checkpoint bodies never acquire the data apply gate. Deferred catalog checkpoints run at the
+writer's lease disposal under the catalog monitor, so readers wait for its flush and fsync.
+Releases pull the size-only due predicate too, so the catalog services the existing deferral
+before the next admission without waiting for the checkpoint worker's first attempt. Statements retain
+the data coordinator's interlock. The four-writer load asserts the exact journal high-water mark
+and complete deferral attribution, with rates used only as diagnostics. Forced append barriers
+cover both the format-record and index-registration writes: each attributes KeyValuePairCatalog,
+services the request on scope exit, and leaves the independent data checkpoint available.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The explicit transaction binds its kernel coordinator/context to the root base, so incomplete
@@ -247,11 +276,9 @@ and explicit-transaction cases are regression guards, not proof of that session 
   registration, and a tree the marker does not describe is refused with
   `DatabaseException` "Database 'x' cannot be opened. CK06101: Index … uses
   B-tree page format 1, but this engine supports only format 2 …", the index
-  manager's `IndexFormatException` as its inner exception. A cleanly closed
-  database is left byte-identical by either refusal; a crashed one has had only
-  the storage layer's format-agnostic journal redo and undo, and keeps its
-  journal for the engine that wrote it (`KeyValueEngineLifecycleTests` pins both
-  refusals). There is no upgrade path (owner decision of 2026-10-02; #1152).
+  manager's `IndexFormatException` as its inner exception. Clean and crashed
+  databases are left byte-identical by either refusal: catalog and tree checks precede all writes,
+  using Storage's recovered read-only views when replay is needed (#1744). There is no upgrade path (owner decision of 2026-10-02; #1152).
   **Below both, each file set has its own storage format (#1251):** the storage refuses
   a data or catalog file set in another storage format with `StorageFormatException`
   (`CK06001`) before its journal is read, and the engine names the database and the

@@ -17,6 +17,7 @@
   <data name="LockManagerDeadlockFailure" xml:space="preserve"><value>Transaction {0} was chosen as the deadlock victim requesting {1} on {2}.</value></data>
   <data name="LockManagerFailEndedFailure" xml:space="preserve"><value>Transaction {0} ended while it waited for {1} on {2}; the request was not granted.</value></data>
   <data name="CoordinatorThrowIfInsideApplyFailure" xml:space="preserve"><value>A checkpoint or version purge cannot run inside a statement apply: the statement holds the apply gate maintenance waits for. Run maintenance after the statement completes.</value></data>
+  <data name="CheckpointInterlockRecursiveWait" xml:space="preserve"><value>An operation cannot wait for the checkpoint interlock held by its own scope. Complete the outer operation first.</value></data>
   <data name="CommitAbortedByDisposal" xml:space="preserve"><value>Transaction {0} aborted: manager disposal began while commit drained a failed statement compensation.</value></data>
   <data name="TransactionManagerCommitAsyncFailure" xml:space="preserve"><value>Transaction {0} aborted: the commit record could not be written.</value></data>
   <data name="TransactionManagerEnterApplyFailure" xml:space="preserve"><value>Transaction {0} ended while its statement was running; the statement was not applied.</value></data>
@@ -43,4 +44,6 @@
   <data name="IsolationTransactionEnding" xml:space="preserve"><value>The transaction is ending or has ended; isolation cannot change.</value></data>
   <data name="IsolationBeginPinRequired" xml:space="preserve"><value>Restoring fixed begin visibility from READ COMMITTED requires an active begin-time snapshot pin.</value></data>
   <data name="IsolationSavepointActive" xml:space="preserve"><value>Isolation cannot change while savepoint tokens are live.</value></data>
+  <data name="CheckpointInterlockAlreadyBound" xml:space="preserve"><value>A live transaction coordinator is already bound to this storage.</value></data>
+  <data name="CheckpointInterlockWrongThread" xml:space="preserve"><value>A checkpoint lease must be disposed on its entering thread.</value></data>
 </root>

@@ -92,4 +92,5 @@
   <data name="AuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
   <data name="DownloadLengthInvalid" xml:space="preserve"><value>The Blob content length does not match its metadata.</value></data>
   <data name="DownloadAcknowledgementInvalid" xml:space="preserve"><value>The Blob chunk acknowledgement is invalid.</value></data>
+  <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
 </root>

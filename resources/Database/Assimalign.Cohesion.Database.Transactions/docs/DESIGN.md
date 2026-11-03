@@ -1321,6 +1321,69 @@ B+Tree entries retain their own physical layout and existing stamp implementatio
 
 ### Recovery and checkpoint interlock
 
+**Raw bracket admission (#1283, EN-C1).** TransactionCheckpointInterlock is one sealed concrete
+coordination primitive per storage, shared by the coordinator and synchronous catalog or
+reclamation scopes. SQL's ReserveJointTreeOwner uses the catalog monitor, catalog interlock and
+attributed SqlCatalog bracket, just like publication and intent discard. Its weak-key registry does not retain closed storages. Catalog file sets use
+independent instances with a plain storage checkpoint; data storage binds the coordinator's
+writer-anchor checkpoint. All gate releases, including undo and pruning, service deferred work.
+Synchronous nested scopes share their entering thread's acquisition; the outermost disposal
+runs any deferred checkpoint after its brackets and page latches ended. Canceled acquisition
+owns nothing, and a scope cannot checkpoint its own gate. Disposal is inert when its entering
+thread does not hold admission at disposal.
+The value-type lease records its entering thread. While that thread holds admission, cross-thread
+disposal emits event 22, asserts in Debug and throws; a refused disposal leaves admission unchanged.
+Inert coordinated leases and disposals whose entering thread does not hold admission at disposal
+return before the thread-affinity check. Otherwise, disposal on another thread is refused,
+including an ended nested copy and a stale copy after its entering thread releases and re-enters
+admission. The live coordinator binds after construction initializes every callback
+dependency; it binds once; a second live bind throws, and disposal unbinds only its own registration.
+A short state monitor makes the final pending-work check atomic with gate release, closing the
+failed-wait handoff race; it is never held across model or storage work. A checkpoint running at
+a bracket exit publishes Checkpoint as its holder, so it cannot misattribute later deferrals to
+the ended bracket.
+
+Lock/latch order is model grants before the data gate; catalog publication takes its metadata
+monitor, its independent catalog interlock, then storage/page latches. Catalog checkpoint bodies
+never acquire the data gate. Deferred catalog checkpoints run at the writer's lease disposal
+while its catalog metadata monitor is still held, so catalog readers wait for the flush and fsync. Reclamation takes its run monitor, the data
+interlock, accounting monitor, then storage/page latches, releasing the interlock before catalog
+retirement. No raw body waits for a model lock inside the gate. The uncontended synchronous and asynchronous internal gate
+paths allocate zero bytes in the minimum of three warmed rounds, as does its SemaphoreSlim
+control. Public synchronous scopes allocate no bytes after warming the nesting-identity set;
+identities make copies and repeated disposal on the entering thread idempotent without a heap object per call.
+
+Every release also pulls the storage's size-only due predicate (TimeSpan.MaxValue), arming the
+existing deferral before a possibly starved worker gets its first attempt. A releasing holder
+runs the sharp checkpoint before the next admission. No new admission condition is introduced.
+A successful checkpoint consumes requests received during that checkpoint under the state monitor,
+atomically with release. A busy outside bracket retains the request but foreground retries wait
+for another worker request or completion of every active physical bracket. Release reads
+Storage.HasActiveTransactions while holding admission after its own brackets ended, so it sees
+exactly the ungated blockers, including replacements. This typed engine-plumbing read allocates
+nothing and puts no executable state or bracket references in a held exception. It adds one
+public read-only member and no interface or friend grant. A
+non-busy deferred failure suppresses foreground retries until the worker collects that exact
+failure; reporting and the offline policy remain in DatabaseCheckpointWorker.Settle.
+Undo and prune releases can perform this checkpoint while the rolled-back writer still owns its
+model locks, so lock waiters absorb its flush cost. Blocker diagnostics snapshot under state and
+write after leaving it, including attributions reserved for an asynchronous handoff.
+
+Event 21 CheckpointBlocked accompanies every event-15 CheckpointDeferred with the actual holder
+class and optional owner. A semaphore handoff can reserve a permit before its waiter runs; that
+attribution is published on admission rather than inventing an unknown physical bracket. Storage
+event 19 independently lists every raw physical bracket that refuses truncation. Deferred failures
+keep the existing identity-preserving handoff to the next worker attempt. This introduces no
+format, language, error identity or admission-pause policy.
+
+The merged raw-site audit covers every BeginTransaction call under Database src and shared:
+SQL catalog (including ReserveJointTreeOwner), key/value catalog, reclamation, statement apply,
+undo and prune enter the matching storage interlock. RecordSpaceVersionStore recovery, SQL and
+key/value constructor index scrubs, DocumentCatalog.RecoverIndexesAsync and GraphStore.RecoverIndexesAsync
+run before sessions and remain ungated. KeepDeferredWritersInFlight adopts failed undo writers at
+disposal solely to retain their checkpoint anchors. Storage's protected InsertRecord/DeleteRecord/
+UpdateRecord one-shot wrappers and standalone BTreeIndex pruning retain caller-owned exclusion;
+engine pruning invokes the latter under the data gate. No Blob normal-operation raw site exists.
 The ordering is deliberately the same as in both original engines:
 
 1. Open storage with its automatic open-time checkpoint deferred, allowing
@@ -1646,6 +1709,8 @@ events check `EventKeywords.None`.
 | 18 | `VersionPurgePass` | Verbose | Purge | `database`, `versionsPurged`, `durationMilliseconds` | `TransactionCoordinator.RunVersionPurgePass`, when the pass ran to its end (a retry failure it rethrows included) |
 | 19 | `LockWaitBlocked` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `blockers` | `LockManager`, once per wait still queued when the slow-lock-wait threshold passes, from a one-shot timer the wait arms only while a listener takes warnings (#1390). `blockers` names each transaction the request waits for: a holder as `<sequence>:<modes held>` (modes joined by `+`), the owner of a conflicting request queued ahead of it as `<sequence>:queued <mode>`. Each is followed by what that transaction has queued itself: `" waiting for <mode> on <resource> (<its blockers>)"`, one level deep, so a cycle of two shows in one report and each waiter of a longer chain reports its own step. Bounded (#1390 review): 16 blockers, 4 queued requests of each and 4 blockers of each of those, the rest counted as `... (+N more)` and ` and N more requests` |
 | 20 | `TransactionIsolationChanged` | Verbose | Transactions | `database`, `transactionSequence`, `isolationLevel` | successful `ReplaceIsolationLevel`, only when the effective level changes; no rate or gauge transition |
+| 21 | `CheckpointBlocked` | Verbose | Checkpoints | `database`, `bracketClass`, `owner` | each deferred checkpoint, attributed to the gate holder or the next admitted handoff |
+| 22 | `CheckpointLeaseThreadMismatch` | Error | Checkpoints | `database`, `enteringThread`, `disposingThread` | cross-thread disposal while its entering thread holds admission is refused, including a stale copy after re-entry; leaves admission unchanged |
 
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow

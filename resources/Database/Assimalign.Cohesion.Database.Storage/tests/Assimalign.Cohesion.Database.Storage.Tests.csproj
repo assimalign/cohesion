@@ -40,6 +40,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+		<Compile Remove="TestObjects\FormatProbeCrash.cs" />
 	</ItemGroup>
 
 </Project>

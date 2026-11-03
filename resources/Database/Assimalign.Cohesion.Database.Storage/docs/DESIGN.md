@@ -1931,6 +1931,104 @@ overwrite the anchor open has just read (the next open would then refuse the fil
 corrupt). Open reads page 0 and both valid chains before recovery and passes their pages to it.
 Recovery never replays onto page 0 either: nothing journals it, so an image of it is damage.
 
+### Read-only recovered format preflight (#1744)
+
+An open over a data stream whose `CanWrite` is false is a recovered read-only view. The existing
+model storage factories own these streams; no new public interface or producer-to-consumer
+visibility grant is needed. When journal analysis finds applicable page records, engines acquire read-only handles for every
+file set, perform all format gates, dispose the probes, then open the originals for physical recovery.
+The frame reader and analysis are source-shared internal code in Storage's JournalFormat module;
+no public API or visibility grant bridges this check. With no applicable records, engines skip the
+full probe and gate the writable open before logical recovery: empty physical plans write nothing,
+checkpointOnOpen is false, and an unwritten store writes nothing on disposal. SQL and KeyValuePair
+skip only when both sets need no recovery; otherwise catalog gates precede the data probe and both
+sets are gated before writable handles open. The preliminary scan stops at the first full image of
+an existing page above zero; only journals without such an image need full analysis. It checks
+cancellation between frames, including SQL's open token, and never masks a
+catalog refusal with a data I/O failure. An anchor-only journal conservatively retains the probe.
+Custom internal strategies without a raw-source precheck conservatively retain it too. Refusal,
+cancellation and probe disposal issue no writes, truncation, checkpoint, backup or sidecar creation.
+A read failure retains its existing I/O/corruption identity. A probe mutation is API misuse and
+throws resource-backed `NotSupportedException`, without a new Database diagnostic.
+
+The header and both valid checkpoint chains are read first. The existing journal analysis verifies
+frames and classifies commits. Analysis counts applicable records per page. Prefix sums allocate one exact flat long[] grouped
+by page, and a streaming pass fills it with locations selected by ShouldApply: a 48-bit offset in
+the low bits and a 16-bit frame length in the high bits. Frames exceeding 65,535 bytes or offsets
+exceeding 48 bits are refused as CK06003. Every range must fill exactly its planned count; overflow
+and underfill also refuse as corruption. No payload, per-record object or growing per-page list
+survives. Each requested page is reconstructed in one scratch page in file order, then checksum-stamped.
+Replay coalesces consecutive frames for that page only while each gap is at most 4 KiB and the
+span is at most 256 KiB; otherwise it reads exactly one frame. Thus scattered replay reads only
+the page's frame bytes, while clustered replay amortizes read calls. Replay rechecks magic,
+body-length bounds, indexed length and decoded page identity; version errors name the page and
+absolute frame byte offset without calling the later replay bytes a newer format. It borrows each payload until Apply returns and uses the indexed scan's verified
+length, with no per-record length queries. `StorageRecovery.GetPlans`,
+`ShouldApply` and `Apply` are shared with physical recovery: protected anchors, page zero, absent
+uncommitted extensions, commit selection, images, deltas and base-LSN checks have one implementation.
+There is no separate undo algorithm: recovery is already redo-only and overwrites stolen bytes.
+The owner/free-space scan consumes recovered headers one page at a time. Unchanged pages read only
+the requested header bytes, so a body I/O fault unrelated to any gate cannot introduce a refusal. The read-only
+buffer pool caches only pages subsequently read by a gate; its write guard, all transaction-begin overloads,
+the data stream and journal append/truncation guards reject mutation.
+
+Let R be retained applicable page records, D distinct indexed pages, P file pages, T journal transaction identities, G the
+number of distinct pages gates read and C the buffer capacity. Storage's retained page bytes are
+at most `8192 * (min(G, C) + 1)`; the extra page is the reconstruction scratch page. The retained
+record index charges exactly 8R bytes for packed frame locations, 28 bytes per dictionary capacity slot
+(8-byte key, 8-byte start/count range, 8-byte entry metadata and 4-byte bucket), and 160 bytes of
+conservative object/array headers. With the pre-sized dictionary's capacity slack this is at most
+`8 * R + 56 * D + 256` bytes (`RetainedIndexBytes`, an allocation-free getter). Existing
+allocator/owner and analysis identity state is unchanged from physical recovery: file-page and
+transaction identities, distinct journal page identities, and pending transaction/page pairs, with no
+page payloads. Scan workspace is a returned 256 KiB journal chunk (or one larger frame), one page-header buffer and an optional 8 KiB page
+for existing owner-scan checksum verification. Model-decoded catalog
+metadata follows the gate-read pages. No journal-size cap refuses an otherwise openable database;
+there is no temporary file and no dependence on query spill. In-memory preflights borrow closed
+MemoryStream buffers through non-writable views; they do not copy whole databases or journals.
+SQL's private block overlay has been removed in favor of this one mechanism.
+
+A probe is invisible to Storage lifecycle telemetry: no HeaderReadFallback, RecoveryStart,
+RecoveryStop, JournalTailLost, open/close counting or current-storages gauge transition. Only the
+real writable open reports recovery. Probe pool reads do not increment page-reads. A checksum failure still emits PageChecksumFailed (Error), the only signal for that corrupt page: refusal prevents a writable open and a second count. An engine refuses a strategy result whose Data.CanWrite is
+true at its probe boundary with a resource-backed internal invariant exception. Making probe mode
+explicit in the protected Storage construction API would widen a shipped boundary, so this pass
+uses the existing read-only Data contract and the engine assertion instead.
+
+The complete database-open gate inventory (source locations on this implementation) is below.
+Paths use `<project>/...` as shorthand for
+`resources/Database/Assimalign.Cohesion.Database.<project>/...`.
+
+| Engine / layer | Gates (recovered read-only view when required) |
+|---|---|
+| Shared Storage, every set | `Storage/src/Storage.cs` ReadHeader (file format and checkpoint chains); `Storage/src/Journal/StorageJournal.cs` DecodeRecord (verified journal frame format) |
+| Shared Indexing | `Indexing/src/BTreeIndexManager.cs` EnsureFormat and `Indexing/src/BTreeIndex.cs` EnsureFormat, reading every registered root |
+| Graph | `Graph/src/Storage/GraphStore.cs` EnsureIndexFormat (entity headers via `Graph/src/Internal/Storage/GraphRecordCodec.cs`, registration version at `Graph/src/Storage/GraphStore.Indexes.cs`, roots); `Graph/src/Catalog/GraphCatalog.cs` EnsureFormat (every catalog record version via `Graph/src/Internal/Catalog/GraphCatalogCodec.cs`) |
+| Documents | `Documents/src/Catalog/DocumentCatalog.cs` EnsureIndexFormat (metadata kind/version headers via `Documents/src/Internal/Catalog/DocumentCatalogCodec.cs` EnsureHeader and EnsureVersion; registrations at `Documents/src/Catalog/DocumentCatalog.Indexes.cs`; roots) |
+| SQL, catalog and data | `Sql/src/SqlDatabaseEngine.cs` OpenCatalog (table-extension and index-record versions in `Sql/src/Catalog/SqlCatalog.cs`); `Sql/src/SqlDatabase.cs` ThrowIfFormatIsNotCurrent; `Sql/src/Internal/Provisioning/SqlSchemaProvisioner.cs` ValidateRecordedFormats; `Sql/src/SqlDatabase.cs` EnsureIndexFormats (data roots); shared storage gates on both sets |
+| KeyValuePair, catalog and data | `KeyValuePair/src/KeyValueDatabase.cs` ThrowIfFormatIsNotCurrent; `KeyValuePair/src/KeyValueDatabase.cs` EnsureIndexFormats (data roots); shared storage gates on both sets |
+| Blob | `Blob/src/BlobDatabase.cs` EnsureFormats, decoding owner-zero records with `Blob/src/Internal/Catalog/BlobCatalogCodec.cs` catalog-version gate |
+| Transactions | No model-specific persisted database-open format gate |
+| Cache | No persisted database-open format gate; it owns no storage file set |
+
+SQL's optional ProbeStorage describes interrupted-creation metadata only. A strategy returning
+null still has to honor the readOnly argument of OpenStorage when the preflight is required.
+When preflight is needed, catalog refusals precede even a read-only data open and data header/root
+refusals precede writable catalog opens. Instance-level checks remain as defense in depth and preserve their existing codes.
+
+The probe adds **no durable boundary**. Its boundaries are read header/chains, analyze/index journal,
+scan recovered headers, gate catalog/registrations/roots, dispose, then hand off to the existing
+physical-recovery boundaries. Cancellation or a read fault before handoff leaves the original
+crash image intact. Acceptance uses the same redo, data flush, logical scrub and checkpoint ordering
+as before; existing crash-boundary suites remain unchanged. Process-exit fixtures leave committed
+and stolen uncommitted physical brackets in every engine and both SQL/KeyValuePair sets. Refusals
+compare every file through engine disposal; current-format cases tear journal-covered root stamps
+and data pages and assert exact committed bytes after recovery and a second reopen. Storage tests
+compare every probe page with real recovery over mixed histories and protected anchors; the
+existing 1,000-history oracle still checks physical writes in order. The unread-journal and many-small-record
+tests assert retained-byte ceilings, per-page replay byte and call ceilings for contiguous and round-robin layouts, and the pre-scan frame ceiling; durations never decide outcomes.
+A missing image is checked before the physical redo cache can evict and write another page.
+
 ### Checkpoints
 
 `Checkpoint()` durably flushes all page state and **truncates** the journal, writing a
@@ -2136,11 +2234,10 @@ shutdown checkpoint would only restamp the header's modification time and rewrit
 the journal's checkpoint record, and under a deferred open-time checkpoint it would
 truncate records the owner never analyzed. Skipping it is crash-equivalent (as if
 the process stopped right after recovery, which the next open already handles), and
-it is what lets an engine refuse a database at open — the SQL engine's data-storage
-format gate — without writing on the way out: a cleanly closed file set stays
-byte-identical, and a crashed one keeps the journal the engine that wrote it needs.
-The open itself still runs recovery, so a crashed file set's data pages do receive
-the format-agnostic physical redo before the owner can decide to refuse it.
+it also avoids writes when an instance-level recheck refuses an open. Engine format
+preflights use the recovered read-only view described above (#1744), whose disposal
+always skips shutdown writes. A refused clean or crashed file set stays byte-identical;
+only an accepted open acquires writable handles and runs physical redo.
 
 With a background checkpointer (#902) checkpoints race live transactions, so the
 emptiness check hardened from "no page write locks" to an **active-transaction count**
@@ -2205,25 +2302,69 @@ runs it as it ends, before it releases the gate, and the worker moves on. A boun
 trade the busy database against the others (a short one rarely catches the end of a long
 statement, a long one lets the others overshoot); the deferral needs no trade.
 
-**Concurrent-writer attribution (#1283).** The load measurement in `BlobCheckpointGrowthTests`
-is skipped by default; `COHESION_DB_PROBES=1` enables three counter-driven rounds with and without
-CPU competition. Windows constrains the process to up to three CPUs; Linux affinity is per-thread,
-so this probe enforces and claims no workload affinity there. Existing events show Blob overshoot
-with no `BracketOpen` skips, while an outside-bracket control
-verifies that signal on normal, failed and cancelled statement exits. A deterministic lane control
-now guards the consumed size wake: collecting a deferred lane outcome rechecks whether the journal
-is due in that pass and attempts at most one new checkpoint, while failures and busy-storage
-outcomes retain their retry delay. The observed 544 MB growth remains unattributed and #1283 stays
-open: an outside-gate raw bracket can prevent truncation until it ends, and checkpoint flush time
-is another investigation path. The model remains a sharp checkpoint with a soft trigger; choosing
-a bounded admission pause or a fuzzy checkpoint remains a later owner decision.
+**Concurrent-writer attribution (#1283, EN-C1).** Four continuous short-transaction writers,
+with a 64 KiB trigger and the Windows process pinned to three CPUs, observed baseline peaks of
+85,457 bytes (SQL), 92,296 (Documents), 79,494 (Graph), 110,449 (KeyValuePair), and 89,753 (Blob).
+That run did not reproduce the historical 544 MB peak. The always-on five-engine regression now
+requires at least two seconds, four completed autonomous checkpoints and 32 writes from every
+writer, continuing until those counters move with a 45-second ceiling. It asserts an exact
+append-locked journal high-water mark of at most four triggers; rates remain diagnostic only.
+Linux affinity is per thread and the test makes no affinity claim there.
 
-Normal Blob chunk writes and metadata updates use the coordinator's apply gate; the suspected raw
-outside bracket was not found on that path. SQL's background table reclamation does open raw data
-brackets outside the gate, and SQL and KeyValuePair catalog writes use independent raw brackets;
-these remain investigation paths. The opt-in Blob listener also counts process-wide first-chance
-`StorageTransactionException` occurrences, since a busy checkpoint throws before `CheckpointStart`;
-this is test-only measurement, alongside the existing deferred `BracketOpen` event.
+Final isolated Release measurements retain the per-engine attribution. These use the same
+four writers, 65,536-byte trigger and three-CPU Windows affinity; all peaks remain below 4×.
+
+| Engine | Deferred holders (count) | Busy refusals | Journal peak (bytes) | Peak / 65,536 | 4× bound (bytes) |
+|---|---|---|---|---|---|
+| SQL | Checkpoint=394,Statement=227 | 0 | 81,713 | 1.247× | 262,144 |
+| Documents | Checkpoint=457,Statement=6 | 0 | 65,833 | 1.005× | 262,144 |
+| Graph | Checkpoint=56,Statement=10 | 0 | 71,057 | 1.084× | 262,144 |
+| KeyValuePair | Checkpoint=439,Statement=227 | 0 | 83,020 | 1.267× | 262,144 |
+| Blob | Checkpoint=132,Statement=5 | 0 | 65,873 | 1.005× | 262,144 |
+
+The earlier worker-only arming left an unbounded gap between the size trigger and its first
+TryCheckpoint. Releasing interlock holders now pull IsCheckpointDue(TimeSpan.MaxValue), so a
+size crossing services the existing deferral before the next admission without waiting for worker
+scheduling. Timeout.InfiniteTimeSpan is negative and must never select this size-only predicate. Busy
+outside brackets suppress repeat foreground attempts until the worker re-requests or all active
+physical brackets complete. Storage.HasActiveTransactions is a lock-free engine-plumbing read:
+a checkpoint is refused while true. The releasing interlock still holds admission after ending
+its own brackets, so the read covers exactly the remaining ungated blockers, including replacements.
+Busy exceptions carry no executable state or bracket references and cannot retain disposed storage.
+Uncollected failures also suppress foreground attempts; the worker retains retries, reporting and
+its offline policy. The four-trigger assertion stays intact.
+
+Every refused storage checkpoint emits event 19 once per active physical bracket, including
+untouched brackets, with its operation class, optional owner, physical sequence and a shared
+refusal identity. Unnamed brackets are Raw; sequence-adopting brackets are Adopted. Equal adopted
+sequences remain separate physical brackets. The registry reuses
+its capacity and is maintained under the existing transaction lock; completion and failed begin
+mark the bracket completed and remove entries there, including a failed admission whose trigger
+callback already captured a busy refusal. Event 19 snapshots those entries under the lock and emits
+them afterwards, so a slow in-process listener cannot hold up bracket begin or completion. Event 20
+reports the journal high-water mark since open, maintained for
+both buffered and direct frames even with no listener. A final checkpoint after the writers end
+collects that mark; autonomous progress is required before that collection.
+
+The coordinator and all remaining normal-operation raw brackets now share
+TransactionCheckpointInterlock per storage: SQL catalog writes (including allocation, definitions,
+scripts, renames, TRUNCATE and joint publication), KeyValuePair catalog writes, and SQL table
+reclamation. Catalog file sets have independent gates; they never acquire the data gate during
+a checkpoint. Blob chunk and catalog writes already used ApplyStatementAsync and retain that
+route. Transactions event 21 attributes every event-15 deferral to its holder class and optional
+owner. A semaphore permit reserved for a descheduled waiter is attributed when that admission
+publishes its class; it is not reported as an unidentified raw bracket. Maintenance, undo and
+checkpoint holders are distinguished from statements. The catalog/reclamation stress parks both
+real bracket classes while a statement queues and proves both deferred checkpoints complete.
+
+Reclamation yields before admission for due or worker-signaled work. A post-admission size-due exit
+runs the checkpoint at disposal; each committed batch awaits durability after gate release and
+before removing its retirement intent. The model remains
+sharp, with a soft size trigger and unchanged crash recovery and formats. EN-C2 owns the approved
+bounded admission pause near the journal limit (T3-27); EN-C1 adds no pause, fuzzy checkpoint or
+segmented journal. PostgreSQL's concurrent-insertion exclusion around checkpoint state capture
+is confined to its redo-point work (local src/backend/access/transam/xlog.c:7791-7795); that fuzzy
+model is not copied into Cohesion's steal/no-force journal.
 
 **Readers can progress during a checkpoint (#1269).** The #1254 review measured point-read
 stalls of 166–267 ms while the checkpoint held the lifecycle, transaction and pool locks.
@@ -2818,6 +2959,8 @@ session enables.
 | 4 | `JournalTailLost` | Warning | — | `database`, `strayLsn`, `redoLsn` (before the open moved it) | `OpenExisting`: a page outlived the journal records that stamped it (a lost journal tail under `None`, or a journal older than the data file); the open raises the LSN floor and the redo point to it |
 | 5 | `CheckpointStart` | Informational | `Checkpoints` | `database`, `activeTransactions` (the logical writers the anchor lists), `journalLength` | `Checkpoint`, after the active-transaction check (a refused checkpoint writes nothing) |
 | 6 | `CheckpointStop` | Informational | `Checkpoints` | `database`, `status` (`Success`, or `Error` for a checkpoint that threw), `checkpointLsn`, `durationMilliseconds` | the end of `Checkpoint`, on every path, from a `finally` |
+| 19 | `CheckpointBusy` | Verbose | Checkpoints | `database`, `bracketClass`, `owner`, `transactionSequence`, `refusal` | once for each physical bracket blocking a refused checkpoint |
+| 20 | `CheckpointJournalPeak` | Verbose | Checkpoints | `database`, `peakLength` | exact journal high-water mark since open, before an admitted checkpoint |
 | 7 | `PagesWrittenBack` | Verbose | `WriteBack` | `database`, `pages`, `durationMilliseconds` | `WriteBackDirtyPages`, when the pass wrote a page |
 | 8 | `PendingCommitsFlushed` | Verbose | `GroupCommit` | `database`, `durableLsn` | the gate's `FlushPending` (a flush worker's `FlushPendingCommits`), when it flushed |
 | 9 | `GroupCommitWindowMissed` | Verbose | `GroupCommit` | `database`, `lsn`, `windowMilliseconds` | the gate's `AwaitDurable`: the window passed before a group flush covered the commit, so the committer requested the journal flush itself (a no-op when another flush covered it first; a zero window does this on every grouped commit); not for a wait the storage going offline abandoned |
@@ -3011,3 +3154,7 @@ structured diagnostic carrier exists. Standard .NET guards retain their argument
 Storage debugger views filter nonpublic implementation state and expose only reviewed public/protected value reads. StorageStream has an empty projection: inspection does not invoke delegated stream/handle properties. Pool/free-space counts that acquire locks, journal getters that initialize storage, disposed-page guards and pointer-backed SlottedPage reads are omitted. Public identity/value/count reads and existing volatile flags remain observable without page I/O or mutation.
 
 Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.
+
+Size-only checkpoint hints (TimeSpan.MaxValue) short-circuit elapsed-time sampling after the
+journal-size trigger. Failed physical-bracket registration completes the unreturned transaction;
+probe write refusal still precedes construction in all BeginTransaction overloads (#1283, #1744).

@@ -51,10 +51,11 @@
    bump.
 7. **Since #1759, a production Database application serves no health endpoint.** [Certain]
    - Nothing outside tests constructs `DatabaseAdminEndpointService`.
-   - `DatabaseCommandClient` posts to a route the admin listener now refuses with 403.
+   - `DatabaseCommandClient` posted to a route the admin listener now refuses with 403. #1785 (#1811)
+     deleted it, with `ResourceCommand` and `ResourceCommandObservation`.
 
-   EN-A1–A3 fix both on the new application model (#1785). Two gaps belong to the ApplicationModel area
-   (§7).
+   EN-A1–A3 fix the health endpoint on the new application model (#1785). Two gaps belong to the
+   ApplicationModel area (§7).
 8. **Cuts (recommended):**
    - defer the SQL clustered index #1634, which rewrites SQL row addressing and is about 5 runs;
    - materialized views, triggers and procedures go to a later program;
@@ -133,7 +134,7 @@ row by its number.
 |---|---|---|---|---|
 | EN-G1 | #1744 | A refused open writes nothing: SQL's probe overlay generalized to Graph, Documents and Key-Value | — | none |
 | SQ-T4 | #1764, #1782 | Reclamation snapshot pins break context-count assertions; one root cause, CI stability | — | none |
-| SQ-A4 | #1777 | Keep table owners for index-only changes in a joint migration | — | maybe a fence |
+| SQ-A4 | #1777 | Keep table owners for index-only changes in a joint migration | — | SQL bump (35) |
 | SQ-A5, SQ-A6 | #1778 | Publish 49a's deferred migrations jointly, with default-only changes (T3-6) | A4 | SQL bump |
 | SQ-A7 | #1779 | Applied-schema history and hold-and-degrade rollback (T3-4, T3-5). Covers any change, not only lossy ones | A5, A6 | SQL bump, new code |
 | SQ-A8 | #1756 | Sdk.Database migration writer for TYPE changes (`sdks/` edits authorized) | K4, A6 | SDK output |
@@ -146,7 +147,7 @@ row by its number.
 | SQ-L2, SQ-L3, SQ-L4 | #1789 | Spillable sort; hash aggregation and DISTINCT; result spooling | EN-X1, L1 | none |
 | EN-C1, EN-C2 | #1283 | Trace the growth to the transactions that block checkpoints, and route raw brackets through the apply gate; bounded admission pause near the journal limit | — | none |
 | EN-P1 | #1264 | `DatabaseRow` NVI with typed accessors; parser and analyzer audit | — | public API |
-| EN-A1 | #1790 | Each model server binds its named platform endpoint when its options set none. The health listener binds `http` when managed. Delete `DatabaseCommandClient` and `ResourceCommandObservation` | #1785 | public API |
+| EN-A1 | #1790 | Each model server binds its named platform endpoint when its options set none. The health listener binds `http` when managed. (#1785 already deleted `DatabaseCommandClient` and `ResourceCommandObservation`) | #1785 | public API |
 | EN-A2 | #1790 | Database health as `IApplicationInstanceHealthContributor`s, plus a readiness contributor for accepting servers | #1785 | none |
 | EN-A3 | #1790 | Read-only `databases` and `health` actions; no write actions (Hosting D3) | #1785 | none |
 | EN-D1 | #1791 | Fold the event-source, extensibility and concrete-types program documents into the project designs, and delete them | — | docs |
@@ -211,8 +212,8 @@ The largest risk in the tier is IX-V3, HNSW repair under MVCC. Every index kind 
 
 | Batch | Runs | Bumps |
 |---|---|---|
-| B1 | EN-G1, SQ-T4, SQ-A4, OQ-K1, EN-C1 | none |
-| B2 | SQ-K4, SQ-L1, OQ-S1, GQ-T1, EN-A1 | SQL (K4), Graph catalog (T1) |
+| B1 | EN-G1, SQ-T4, SQ-A4, OQ-K1, EN-C1 | SQL 35 (A4), after EN-G1 |
+| B2 | SQ-K4, SQ-L1, OQ-S1, GQ-T1, EN-A1 | SQL 36 (K4), Graph catalog (T1) |
 | B3 | SQ-A5, EN-X1, SQ-H3, OQ-S2, GQ-N1, EN-P1 | SQL (A5) |
 | B4 | SQ-A6, SQ-L2, EN-C2, IX-B1, SQ-J3, IX-R1 (#1644) | B-tree format (B1), Graph catalog (R1) |
 | B5 | SQ-A7, SQ-L3, IX-S1 after A7, SQ-CT1, OQ-M1 with OQ-W1 | SQL (A7, then S1 in merge order) |

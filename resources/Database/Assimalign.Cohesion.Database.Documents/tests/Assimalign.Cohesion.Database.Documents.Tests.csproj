@@ -52,5 +52,7 @@
 	</Target>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalTrackingStream.cs" Link="TestObjects\JournalTrackingStream.cs" />
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\FormatProbeCrash.cs" Link="TestObjects\FormatProbeCrash.cs" />
 	</ItemGroup>
+	<Import Project="$(CohesionRepositoryDirectory)resources\Database\FormatProbeTests.targets" />
 </Project>

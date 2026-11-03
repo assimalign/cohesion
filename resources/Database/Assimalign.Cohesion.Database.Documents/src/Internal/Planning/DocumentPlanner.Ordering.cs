@@ -53,8 +53,8 @@ internal sealed partial class DocumentPlanner
         if (index.Paths.Count == 0) { return Refuse("array_index"); }
         bool Matches(OqlExpression expression, string name) => expression is OqlPathExpression field &&
             !IsVariablePath(field, nonSourceNames) &&
-            MatchesOrderPath(field, query.Alias, name);
-        bool Proves(string name, int fact) => ProvesOrderFact(query.Predicate, name, query.Alias, fact, nonSourceNames);
+            MatchesOrderPath(field, DocumentSourceName.Of(query), name);
+        bool Proves(string name, int fact) => ProvesOrderFact(query.Predicate, name, DocumentSourceName.Of(query), fact, nonSourceNames);
         if (!index.IncludeMissing && !Proves(index.Path, 0)) { return Refuse("leading_missing_not_rejected"); }
         int at = 0;
         bool? reverse = null;
