@@ -285,15 +285,15 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             {
                 for (int i = start; i < start + count; i++)
                 {
-                    long offset = offsets[i] & 0x0000FFFFFFFFFFFFL;
-                    int frameLength = (int)((ulong)offsets[i] >> 48);
+                    long offset = offsets[i] & RecoveryOffsetMask;
+                    int frameLength = (int)((ulong)offsets[i] >> RecoveryLengthShift);
                     if (offset < chunkOffset || offset + frameLength > chunkOffset + chunkCount)
                     {
                         long end = offset + frameLength;
                         for (int next = i + 1; next < start + count; next++)
                         {
-                            long nextOffset = offsets[next] & 0x0000FFFFFFFFFFFFL;
-                            long nextEnd = nextOffset + (int)((ulong)offsets[next] >> 48);
+                            long nextOffset = offsets[next] & RecoveryOffsetMask;
+                            long nextEnd = nextOffset + (int)((ulong)offsets[next] >> RecoveryLengthShift);
                             if (nextOffset < end || nextOffset - end > 4096 || nextEnd - offset > readChunkSize) { break; }
                             end = nextEnd;
                         }
@@ -312,7 +312,13 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                     {
                         throw new StorageCorruptionException(ErrorMessages.RecoveryIndexFrameBounds);
                     }
-                    yield return DecodeRecord(chunk.AsMemory((int)(offset - chunkOffset) + framePrefixSize, bodyLength), i - start + 1);
+                    var frame = chunk.AsMemory((int)(offset - chunkOffset) + framePrefixSize, bodyLength);
+                    if (frame.Span[0] != currentVersion)
+                    {
+                        var page = (PageId)BinaryPrimitives.ReadInt64LittleEndian(frame.Span[18..]);
+                        throw StorageFormatException.ForJournalPageFrame(page, offset, frame.Span[0], currentVersion);
+                    }
+                    yield return StorageRecoveryJournal.DecodeRecord(frame);
                 }
             }
             finally { ArrayPool<byte>.Shared.Return(chunk); }

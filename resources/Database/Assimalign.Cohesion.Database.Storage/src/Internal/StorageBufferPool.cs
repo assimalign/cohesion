@@ -232,7 +232,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                 }
                 catch
                 {
-                    if (verifyingChecksum && !IsReadOnly) { StorageEventSource.Log.PageChecksumFailed(this, pageId); }
+                    if (verifyingChecksum) { StorageEventSource.Log.PageChecksumFailed(this, pageId); }
                     throw;
                 }
             }

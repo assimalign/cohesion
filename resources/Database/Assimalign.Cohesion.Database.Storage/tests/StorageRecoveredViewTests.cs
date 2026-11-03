@@ -75,14 +75,18 @@ public sealed class StorageRecoveredViewTests
         probe.RetainedPageBytes.ShouldBe(Page.Size);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Probe: every recovered page equals physical replay across mixed histories (#1744)")]
-    public void Probe_MixedCommittedAndUncommittedHistories_ShouldEqualPhysicalReplay()
+    [Theory(DisplayName = "Cohesion Test [Storage] - Probe: every recovered page equals physical replay across mixed histories (#1744)")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Probe_MixedCommittedAndUncommittedHistories_ShouldEqualPhysicalReplay(int replayMode)
     {
         // Arrange: include repeated images, deltas, committed images, reused sequences,
         // backwards LSNs, a protected anchor and pages whose on-disk bytes are torn.
         for (int seed = 0; seed < 32; seed++)
         {
-            byte[] journalBytes = RecoveryJournalScenario.Create(seed);
+            byte[] journalBytes = RecoveryJournalScenario.Create(seed, replayMode);
+            if (replayMode == 2) { journalBytes.Length.ShouldBeGreaterThan(256 * 1024); }
             byte[] dataBytes = Enumerable.Repeat((byte)0x5a, 10 * Page.Size).ToArray();
             var anchors = new HashSet<long> { 9 };
             using var source = new StorageStream(new MemoryStream(dataBytes, writable: false));

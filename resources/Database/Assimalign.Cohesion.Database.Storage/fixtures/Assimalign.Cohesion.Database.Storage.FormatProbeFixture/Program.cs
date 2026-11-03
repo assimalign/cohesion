@@ -100,10 +100,19 @@ internal static class Program
         if (model == "Sql")
         {
             var catalog = SqlStorage.Open(Open("catalog", ".dat"), Open("catalog", ".log"), Open("catalog", ".bak"), checkpointOnOpen: false);
-            if (legacy) { await SqlCatalog.Open(catalog).SetRecordSpaceFormatVersionAsync(33, CancellationToken.None); }
+            if (legacy || mode == "format34-owner")
+            { await SqlCatalog.Open(catalog).SetRecordSpaceFormatVersionAsync(mode == "format34-owner" ? 34 : 33, CancellationToken.None); }
             LeaveUncommitted(catalog, "catalog");
             dataSet = "sql";
             storage = SqlStorage.Open(Open(dataSet, ".dat"), Open(dataSet, ".log"), Open(dataSet, ".bak"), checkpointOnOpen: false);
+            if (mode == "format34-owner")
+            {
+                var registration = SqlCatalog.Open(catalog).GetIndexRegistrations()[0];
+                using var bracket = storage.BeginTransaction();
+                using (var page = storage.OpenPageForWrite(bracket, (PageId)registration.RootPageId))
+                { var rootPage = page.Page; rootPage.OwnerId = ulong.MaxValue - 1; page.MarkDirty(); }
+                bracket.Commit();
+            }
         }
         else if (model == "KeyValuePair")
         {

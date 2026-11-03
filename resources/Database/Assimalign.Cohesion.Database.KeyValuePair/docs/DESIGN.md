@@ -13,7 +13,7 @@ The journal-only pre-scan stops at the first full image of an existing page abov
 probe. The writable open defers checkpointing, physical recovery has no writes, and all format
 gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
 asserted read-only at the strategy boundary, and is disposed before writable handles open.
-The probe reports no Storage lifecycle events, page-read counts, checksum-failure events or gauge changes. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
+The probe reports no Storage lifecycle events, page-read counts or gauge changes. A corrupt page still emits PageChecksumFailed (Error): the probe refuses the open, so no writable replay can double-count that corruption. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
 source-shared journal analysis, common replay rules, retained-byte bound and gate inventory.
 
 ## Checkpoint bracket attribution (#1283, EN-C1)

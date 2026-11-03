@@ -1961,8 +1961,8 @@ survives. Each requested page is reconstructed in one scratch page in file order
 Replay coalesces consecutive frames for that page only while each gap is at most 4 KiB and the
 span is at most 256 KiB; otherwise it reads exactly one frame. Thus scattered replay reads only
 the page's frame bytes, while clustered replay amortizes read calls. Replay rechecks magic,
-body-length bounds, indexed length and decoded page identity; version errors name the page-local
-frame number. It borrows each payload until Apply returns and uses the indexed scan's verified
+body-length bounds, indexed length and decoded page identity; version errors name the page and
+absolute frame byte offset without calling the later replay bytes a newer format. It borrows each payload until Apply returns and uses the indexed scan's verified
 length, with no per-record length queries. `StorageRecovery.GetPlans`,
 `ShouldApply` and `Apply` are shared with physical recovery: protected anchors, page zero, absent
 uncommitted extensions, commit selection, images, deltas and base-LSN checks have one implementation.
@@ -1990,7 +1990,7 @@ SQL's private block overlay has been removed in favor of this one mechanism.
 
 A probe is invisible to Storage lifecycle telemetry: no HeaderReadFallback, RecoveryStart,
 RecoveryStop, JournalTailLost, open/close counting or current-storages gauge transition. Only the
-real writable open reports recovery. Probe pool reads neither increment page-reads nor emit PageChecksumFailed; checksum verification and refusal still run. An engine refuses a strategy result whose Data.CanWrite is
+real writable open reports recovery. Probe pool reads do not increment page-reads. A checksum failure still emits PageChecksumFailed (Error), the only signal for that corrupt page: refusal prevents a writable open and a second count. An engine refuses a strategy result whose Data.CanWrite is
 true at its probe boundary with a resource-backed internal invariant exception. Making probe mode
 explicit in the protected Storage construction API would widen a shipped boundary, so this pass
 uses the existing read-only Data contract and the engine assertion instead.

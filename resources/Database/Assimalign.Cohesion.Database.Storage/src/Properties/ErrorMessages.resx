@@ -115,4 +115,7 @@
   <data name="RecoveryIndexCountMismatch" xml:space="preserve"><value>The journal's page record count changed while building its recovered view.</value></data>
   <data name="RecoveryIndexFrameBounds" xml:space="preserve"><value>A recovered page's journal frame has an invalid magic, length or offset.</value></data>
   <data name="RecoveryIndexPageMismatch" xml:space="preserve"><value>A recovered page's journal frame names a different page.</value></data>
+  <data name="RecoveryPageFrameVersion" xml:space="preserve">
+    <value>{0}: Page {1} journal frame at byte offset {2} uses journal frame format {3}, but this engine reads only journal frame format {4}.</value>
+  </data>
 </root>

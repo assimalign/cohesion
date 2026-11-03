@@ -14,7 +14,7 @@ The journal-only pre-scan stops at the first full image of an existing page abov
 probe. The writable open defers checkpointing, physical recovery has no writes, and all format
 gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
 asserted read-only at the strategy boundary, and is disposed before writable handles open.
-The probe reports no Storage lifecycle events, page-read counts, checksum-failure events or gauge changes. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
+The probe reports no Storage lifecycle events, page-read counts or gauge changes. A corrupt page still emits PageChecksumFailed (Error): the probe refuses the open, so no writable replay can double-count that corruption. Its frame codec and analysis come from Storage's JournalFormat shared-source module. The Storage DESIGN records the
 source-shared journal analysis with the open cancellation token, common replay rules, retained-byte bound and gate inventory.
 
 ## Checkpoint bracket attribution (#1283, EN-C1)
@@ -282,7 +282,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Current catalog/record-space format 35 refuses all earlier files before data recovery;
+extension 3. Current catalog/record-space format 35 refuses all earlier files before writable data recovery;
 compiled-schema v11 adds CompiledSchemaIndex.Predicate and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated

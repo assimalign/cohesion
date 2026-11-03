@@ -67,11 +67,11 @@ internal sealed class StorageRecoveredStream : Stream
                     throw new StorageCorruptionException(record.PageId, ErrorMessages.RecoveryIndexCountMismatch);
                 }
                 int frameLength = StorageJournal.RecoveryFrameOverhead + record.Payload.Length;
-                if (frameLength > ushort.MaxValue || (ulong)offset > 0x0000FFFFFFFFFFFFUL)
+                if (frameLength > StorageRecoveryJournal.RecoveryMaximumFrameLength || (ulong)offset > (ulong)StorageRecoveryJournal.RecoveryOffsetMask)
                 {
                     throw new StorageCorruptionException(record.PageId, ErrorMessages.RecoveryIndexFrameBounds);
                 }
-                _offsets[range.Start + range.Count] = (long)(((ulong)frameLength << 48) | (ulong)offset);
+                _offsets[range.Start + range.Count] = (long)(((ulong)frameLength << StorageRecoveryJournal.RecoveryLengthShift) | (ulong)offset);
                 _records[pageId] = range with { Count = range.Count + 1 };
                 _recordCount++;
                 _length = Math.Max(_length, (pageId + 1) * Page.Size);

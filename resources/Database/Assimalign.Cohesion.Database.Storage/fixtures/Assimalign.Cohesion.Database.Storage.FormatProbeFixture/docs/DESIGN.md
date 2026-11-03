@@ -30,3 +30,7 @@ workload. The uncommitted bracket first touches those pages, so its own full ima
 journal and must overwrite the stolen 0x55 bytes with checkpointed 0x43 bytes. A separate newly
 allocated page supplies committed crash work. The clean-legacy and clean-index modes checkpoint all
 changes and close the physical stores, allowing refused clean opens to exercise the writable path.
+
+The format34-owner mode commits SQL marker 34 and an invalid alternate root owner, then leaves
+unclean journals. SQL must report its format-35 refusal from the recovered catalog before
+physical-owner attachment, preserving every file byte for byte.

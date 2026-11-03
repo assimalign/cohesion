@@ -13,6 +13,9 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 internal static class StorageRecoveryJournal
 {
+    internal const long RecoveryOffsetMask = 0x0000FFFFFFFFFFFFL;
+    internal const int RecoveryLengthShift = 48;
+    internal const int RecoveryMaximumFrameLength = ushort.MaxValue;
     internal static bool IsPageRecord(JournalRecordType type)
         => type is JournalRecordType.FullPageImage or JournalRecordType.PageDelta or JournalRecordType.CommittedPageImage;
 
