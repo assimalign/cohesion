@@ -274,7 +274,7 @@ internal sealed partial class DocumentPlanner
 
     // Render written placement separately from scan eligibility and consumption.
     private static string OrderingDetail(DocumentLogicalPlan logical) => string.Join(", ", logical.Query.OrderBy.Select(order =>
-        (order.Expression is OqlPathExpression path ? IndexPath(path, logical.Query.Alias) : order.Expression is OqlMetaExpression meta ? "META()." + meta.Member : "expression") +
+        (order.Expression is OqlPathExpression path ? IndexPath(path, DocumentSourceName.Of(logical.Query)) ?? DocumentSourceName.Of(logical.Query) : order.Expression is OqlMetaExpression meta ? "META()." + meta.Member : "expression") +
         (order.Descending ? " DESC" : " ASC") + (order.NullPlacement switch
         { OqlNullPlacement.First => " NULLS FIRST", OqlNullPlacement.Last => " NULLS LAST", _ => "" })));
 

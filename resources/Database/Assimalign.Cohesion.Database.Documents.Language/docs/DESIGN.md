@@ -121,7 +121,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST/JOIN/NEST bindings |
 | `DERIVED FROM` | Yes | Parenthesized SELECT, required alias, optional AS; streams its rows into the outer pipeline |
 | `EXPRESSION FROM` | Yes | Expression with outer captures inside subqueries; AS before an explicit alias; arrays expand and MISSING supplies no rows |
-| `JOIN` / `LEFT JOIN` | Yes | Scalar right-hand document-key equality, with explicit source aliases |
+| `JOIN` / `LEFT JOIN` | Yes | Scalar right-hand document-key equality, with explicit or implicit source aliases |
 | `NEST` / `LEFT NEST` | Yes | The same key lookup, binding arrays; unknown keys follow the lookup-NEST table |
 | `UNNEST` | Yes | Optional INNER; one row per array element, chainable |
 | `LEFT UNNEST` | Yes | Optional OUTER; preserves empty and non-array inputs with a MISSING variable |
@@ -488,9 +488,13 @@ Collection, Variable and IsLeft. The SELECT constructor accepts this list. The p
 to ANY. A path-headed variable resolves before document fields, with the innermost binding
 winning. Quantifier collections evaluate in the enclosing scope, then SATISFIES adds the
 inner variable. Otherwise an unqualified path addresses the FROM document. The unaliased
-collection name keys a synthetic star and is reserved for duplicate binding checks; it does
-not become an implicit path variable.
-The full source name keys an unaliased COHESION_SCHEMA synthetic star too.
+collection name is its implicit alias for paths, synthetic stars, GROUP AS wrappers and duplicate
+binding checks (#1767). A reserved COHESION_SCHEMA source uses its last segment as written.
+The parser derives that name locally, keeping Language independent of the engine. Other quoted
+stored names remain opaque, including dots.
+OqlSelectExpression.Alias can be null for an unresolved implicit collection binding; planner
+copies carry the resolved source name with IsAliasImplicit = true. Consumers use that provenance
+flag to distinguish inferred names from explicit correlation aliases.
 
 The explicit FROM alias (or unaliased collection name) and its UNNEST bindings form one list with unique ordinal names. Quantifier
 variables may shadow outer variables and document fields. Duplicate names in one binding
@@ -510,8 +514,7 @@ object or empty-array operands. LEFT UNNEST preserves those inputs with a MISSIN
 an actual null array element remains NULL. Chaining expands each preceding tuple. With
 UNNEST, star is a synthetic object keyed by FROM and UNNEST variable names, omitting MISSING.
 Without UNNEST, a lone star retains the original stored value and exact bytes.
-An array variable matching the unaliased collection name is a duplicate binding, even though
-the implicit source name does not resolve in paths.
+An array variable matching the unaliased collection name is a duplicate binding.
 
 ANY/SOME return TRUE on the first true SQL++ Truth conversion, otherwise FALSE. EVERY returns
 FALSE on the first not-true conversion, otherwise TRUE. NULL and MISSING SATISFIES results
@@ -583,9 +586,8 @@ Correlation retains the resolved binding for index constraints, ordering proofs 
 equivalence. Captures are constants inside an invocation, and every enclosing grouped query still
 enforces group-key visibility (CD05001), including nested FROM and inner aggregate inputs.
 An enclosing aggregate may capture its source-row inputs; its GROUP AS binding remains unavailable
-there (CD01031). An absent alias uses the collection name only for nested captures and META
-receivers. Own paths retain field meaning, including group keys, DISTINCT equivalence and RAW
-ordering; captured group-key matching normalizes only the captured receiver. Metadata validation
+there (CD01031). An absent alias uses the collection name in every context, including nested captures and META
+receivers. Own and captured paths share group-key, DISTINCT and RAW-order equivalence. Metadata validation
 rejects UNNEST, comprehension and unknown receivers with CD05001 before evaluation.
 Local metadata alone permits identity paging, identified in EXPLAIN by identity_paging=True.
 ORDER BY's standalone alias substitution, direct grouped-row paths and nested projection-alias
@@ -605,7 +607,9 @@ OqlSelectExpression.Source holds an expression or OqlSubqueryExpression for FROM
 the collection-source representation. The existing collection storage slot holds either the
 collection name or expression, preserving ordinary SELECT node size. Collection is empty for an
 expression source, and logical-plan copies preserve Source. The parser permits optional AS for
-derived aliases, requires AS before generic explicit aliases, and diagnoses a missing derived
+derived aliases. IsAliasImplicit distinguishes inferred expression names from explicit aliases,
+and plan copies preserve it when resolving the effective source name. The parser requires AS before
+generic explicit aliases, and diagnoses a missing derived
 alias with CD00015. Unnamed generic expressions without an implicit field name give CD01033
 at binding. The profile advertises DERIVED FROM and EXPRESSION FROM beside FROM, with live
 conformance cases. The [dialect](DIALECT.md#derived-and-expression-from-sources-1731-oq-q2)
@@ -619,11 +623,18 @@ OqlSourceBindingExpression is a closed abstract AST family with nonvirtual expre
 and preservation state. OqlUnnestExpression and OqlJoinExpression are sealed leaves. Bindings
 retains their evaluation order; Unnest remains the array-only view. SELECT's existing source slot
 holds an optional wrapper only for joined queries, preserving ordinary node size and allocations.
-The parser accepts only right-hand META(alias).id equality and keeps JOIN/NEST contextual.
-General forms, ON KEYS and UPDATE/DELETE source joins retain CK00001; explicit aliases avoid #1767.
-A joined statement requires aliases in every SELECT scope. The parser tracks actual join clauses
-and unaliased sources across recursive parsing, then resets this state for its next statement.
-The engine validates the same rule for direct ASTs before source planning. Metadata validation
+OqlJoinExpression.Alias retains the nullable explicit declaration; inherited Variable always
+contains the resolved explicit or implicit name. A null constructor variable selects the collection
+name. OqlUnnestExpression.Alias likewise distinguishes an inferred path name from an explicit
+declaration, while Variable retains the resolved name. This provenance keeps an inner bare FROM a
+collection under any implicit outer FROM, JOIN/NEST or UNNEST name; only explicit aliases correlate.
+No parser text reconstruction or
+engine-facing visibility grant is needed. The parser accepts only right-hand META(alias).id
+equality and keeps JOIN/NEST contextual.
+General forms, ON KEYS and UPDATE/DELETE source joins retain CK00001. Collections supply their
+implicit aliases when omitted; inferred UNNEST aliases are valid in joined statements too. Duplicate
+explicit or implicit names use CD00010 in text and CD01023 in direct ASTs. CD00016 stays retired
+and reserved (#1767). Metadata validation
 processes bindings in declaration order: UNNEST removes a shadowed captured receiver, while JOIN
 and NEST introduce their local receiver after validating the preceding key scope.
 The [dialect](DIALECT.md#key-join-and-nest-1732-oq-j1) records scalar/unknown keys, metadata,
@@ -641,7 +652,7 @@ query        := SELECT [ALL | DISTINCT] select-kind from-clause
 count        := ['+' | '-'] integer-literal | parameter
 from-clause  := FROM (collection [AS? identifier] | subquery [AS] identifier | expression [AS identifier]) source-binding*
 source-binding := unnest | key-join
-key-join     := [INNER | LEFT [OUTER]] (JOIN | NEST) collection [AS] identifier ON META(identifier).id = expression
+key-join     := [INNER | LEFT [OUTER]] (JOIN | NEST) collection [AS? identifier] ON META(identifier).id = expression
 unnest       := [INNER | LEFT [OUTER]] UNNEST expression [AS? identifier]
 aggregate-call := COUNT '(' '*' ')' | aggregate-name '(' [ALL | DISTINCT] expression ')'
 quantified-expression := (ANY | SOME | EVERY) identifier IN expression SATISFIES expression END
@@ -806,7 +817,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00013` | NULLS without FIRST or LAST, at the expected option |
 | `CD00014` | Direct IN subquery requires SELECT RAW or SELECT VALUE |
 | `CD00015` | Derived FROM subquery requires an alias |
-| `CD00016` | Every SELECT source in a joined statement requires an explicit alias |
+| `CD00016` | Retired and reserved: former joined-statement explicit-alias requirement (#1767) |
 | `CD01033` | FROM expression requires an explicit alias or implicit field name |
 | `CD01034` | Unbound FROM expression variable; there is no implicit input-row scope |
 

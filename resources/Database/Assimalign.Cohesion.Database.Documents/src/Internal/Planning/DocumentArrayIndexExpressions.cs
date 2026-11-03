@@ -30,7 +30,8 @@ internal static class DocumentArrayIndexExpressions
         if (path.Segments.Count == 0 || path.Segments.Any(segment =>
             (segment.Name is null) == (segment.Index is null) || segment.Index < 0))
         { throw new DocumentPlanningException("CD03027", ErrorMessages.ArrayIndexExpressionInvalid, path.Location); }
-        return DocumentPlanner.IndexPath(path, null)!;
+        return DocumentPlanner.IndexPath(path, null)
+            ?? throw new DocumentPlanningException("CD03027", ErrorMessages.ArrayIndexExpressionInvalid, path.Location);
     }
 
     internal static string RelativePath(OqlExpression expression, string variable)

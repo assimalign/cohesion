@@ -106,7 +106,11 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Select] =
             [
-                new("SELECT RAW g FROM items ORDER BY items.g", [[3m], [2m], [1m]],
+                new("SELECT RAW g FROM items ORDER BY items.g", [[1m], [2m], [3m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
+                new("SELECT DISTINCT g FROM items ORDER BY items.g", [[1m], [2m], [3m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
+                new("SELECT items.g FROM items GROUP BY g", [[1m], [2m], [3m]],
                     ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
                 new("SELECT RAW g FROM items d ORDER BY d.g", [[1m], [2m], [3m]],
                     ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
@@ -215,6 +219,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Join] =
             [
+                new("SELECT RAW (SELECT RAW i.name FROM items i ORDER BY i.name) FROM [1] AS seed JOIN items ON META(items).id = 'a' GROUP BY 1", [[Json("[\"alpha\",\"beta\",\"delta\",\"gamma\"]")]]),
+                new("SELECT RAW (SELECT RAW i.name FROM items i) FROM [1] AS seed JOIN items AS items ON META(items).id = 'a' GROUP BY items", [[Json("[\"alpha\"]")]]),
                 new("SELECT b.name FROM items AS a JOIN items AS b ON META(b).id = META(a).id ORDER BY b.name", [["alpha"], ["beta"], ["delta"], ["gamma"]]),
                 new("SELECT b.name FROM [{key:'A'}] AS a JOIN items AS b ON META(b).id = LOWER(key)", [["alpha"]]),
             ],
@@ -349,6 +355,11 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.CreateIndex] =
             [
+                new("CREATE INDEX document_relative ON items (items.amount)", [["items.amount"]],
+                    VerificationStatement: "SELECT PATH FROM COHESION_SCHEMA.INDEXES"),
+                new("CREATE INDEX self_named ON items (items.amount)", [["items.amount"]],
+                    ["UPDATE items SET items.items = {amount:99}"],
+                    "SELECT PATH FROM COHESION_SCHEMA.INDEXES"),
                 new("CREATE INDEX inclusive ON items (amount INCLUDE MISSING)", [["amount INCLUDE MISSING", true]],
                     VerificationStatement: "SELECT PATH, INCLUDE_MISSING FROM COHESION_SCHEMA.INDEXES"),
                 new("CREATE INDEX by_score ON items (details.score)", [["by_score", "details.score", false]],

@@ -588,10 +588,11 @@ CD00007 for the same count rule at parse and plan time:
 | `CD00013` | NULLS without FIRST or LAST |
 | `CD00014` | Direct IN subquery requires RAW/VALUE |
 | `CD00015` | Derived FROM subquery requires an alias |
-| `CD00016` | Every SELECT source in a joined statement requires an explicit alias |
+| `CD00016` | Retired and reserved: former joined-statement explicit-alias requirement (#1767) |
 | `CD01033` | FROM expression has no explicit alias or implicit field name |
 | `CD01034` | Unbound variable in a FROM expression without an input-row scope |
 | `CD01035` | Invalid key-join binding scope or ambiguous/invalid joined META receiver |
+| `CD01036` | VALUES references its destination binding without a source row or local declaration |
 | `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
 | `CD01032` | Direct ordering AST has an invalid null placement |
 | `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
@@ -602,7 +603,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03020` | A UNIQUE index found a duplicate valued scalar key (23505) |
 | `CD02021` | A UNIQUE key contains an array or object |
 | `CD03022` | An index has fewer than one or more than 32 paths |
-| `CD01023` | A direct SELECT AST repeats a FROM/UNNEST binding name or supplies an empty binding name |
+| `CD01023` | A direct SELECT AST repeats a FROM/JOIN/NEST/UNNEST binding name, or a SELECT/DML AST supplies an empty binding name |
 | `CD03024` | Index already exists |
 | `CD03025` | Multiple array keys, a UNIQUE array index, or IncludeMissing with a leading array key |
 | `CD03026` | Encoded index definition exceeds the 8,092-byte catalog record limit; refused before building postings |
@@ -644,7 +645,9 @@ enforces ownership on the collection: index DDL checks that collection's owner.
 The index metadata has no independent ownership, so the ownership source reports
 collections and does not invent an index owner. Index paths retain the catalog's
 canonical document-path spelling; physical generation IDs and B+Tree pages remain
-internal. There is no collection schema or inferred document-field catalog.
+internal. PATH/PATHS preserve document-relative keys, including leading fields named after the
+collection, so CREATE INDEX replay and the typed catalog API retain the same meaning.
+There is no collection schema or inferred document-field catalog.
 
 The sources are document shaped: `SELECT *` returns one JSON document per entry,
 and ordinary projection, aliases, parameters, filtering, grouping, aggregates,
@@ -687,12 +690,14 @@ Captured outer paths are constant within one inner grouping invocation; grouping
 permits them in projection, HAVING and ordering while preserving local grouping restrictions.
 Scalar/array access constraints and ordered-index presence/domain proofs exclude resolved outer
 bindings. An outer path cannot constrain or prove ordering of the inner stored document.
-Equivalence checks for own paths use only the explicit alias: in FROM items, items.g denotes the field items then g.
-The collection name identifies an unaliased source only for captured references from nested
-SELECTs and META receivers. Group-key equivalence normalizes only the captured side to the
-outer query's own path scope; DISTINCT and RAW projected ordering retain that own scope too.
-Metadata validation refuses UNNEST, comprehension and unknown receivers before evaluation
-(CD05001), so the unaliased evaluator shortcut can receive only the collection name.
+DocumentSourceName supplies one explicit or implicit alias to evaluation, captures, metadata,
+DML targets/values, grouping, DISTINCT, ordered-index proofs, index bounds and EXPLAIN (#1767).
+Own and captured paths normalize identically: items.g in FROM items reads g. A self-named field
+is accessed through items.items.g or d.items.g with FROM items d. System sources use their final
+segment as written, including synthetic-star and GROUP AS wrapper keys. The plan's existing
+query copy retains the resolved name, so group members and expression
+equivalence comparisons reuse it without allocating a system-name substring.
+META validation and identity lookup use this same name; only a different receiver searches joined/captured frames.
 Identity paging recognizes only local-source
 META().id or META(local_source).id; EXPLAIN reports identity_paging=True for that path. Captured metadata
 is constant and keeps ascending inner identity ties. Metadata equivalence compares receiver bindings.
@@ -718,9 +723,19 @@ Captured source frames carry their existing row content and identity; path evalu
 the content, while META resolves stored id/version. Expression/derived rows and scalar bindings
 carry no identity, preserving their NULL metadata behavior.
 The wrapper exists only for statements containing subqueries; ordinary plan records stay unchanged.
-A pre-existing evaluation limitation remains: in a statement containing subqueries, an unaliased
-own path can still strip the collection name as a source prefix. This planning correction leaves
-that runtime behavior unchanged.
+The generated implicit-alias corpus compares 48 result-and-write digests per execution path over
+SELECT, UPDATE SET/UNSET, DELETE, INSERT SELECT and UPSERT SELECT, including RETURNING, with
+scan and indexed fixtures in process and over InMemory/TCP. Ordinary Release allocation budgets
+and the unchanged OQ-Q3 correlation corpus guard the same source-binding contract.
+Ordinary and nested evaluators share the resolved alias; no separate SourceName fallback remains.
+An inner bare FROM items still names the collection under an implicit outer items; it correlates
+only to an explicit outer alias, including JOIN/NEST declarations. Inferred UNNEST and FROM-expression
+names also keep an inner bare FROM keyspace-only. OqlSelectExpression.IsAliasImplicit and
+OqlUnnestExpression.Alias preserve provenance alongside the resolved name; OqlJoinExpression retains
+its nullable explicit Alias beside its resolved Variable. Scope, grouping and nested-query equivalence
+visitors preserve that keyspace-versus-variable distinction. This follows Couchbase algebra/from_keyspace.go:294-303
+and algebra/from_expression.go:116-133 at 6d40d1dd. Standalone ORDER BY projection aliases retain
+precedence.
 
 DocumentNestedExecutionContext borrows the statement's DocumentOperation and database, parameter
 snapshot, frozen function catalog and cancellation token. It never creates or completes an operation,
@@ -774,7 +789,14 @@ The deterministic 10,000-row filter test observes identical first/last evaluatio
 at the base budgets because outer-scope state exists only in the nested evaluator state variant.
 
 DML predicates, SET/VALUES expressions and INSERT/UPSERT SELECT materialize all pending writes
-before mutation. RETURNING containing subqueries stages before writes too. UPDATE/INSERT/UPSERT
+before mutation. VALUES has no destination source row: an otherwise unbound destination name
+inside a VALUES subquery is refused eagerly with CD01036, including in nested captures and META.
+Local source, comprehension and quantifier bindings can shadow that name; a bare FROM may still
+read the destination collection. A bare FROM naming an explicit destination alias is refused too,
+including in nested subqueries, unless an enclosing local binding shadows it. Direct VALUES paths
+retain CD05001 even beside an unrelated subquery; CD01036 applies only below a subquery.
+The destination remains available to RETURNING.
+RETURNING containing subqueries stages before writes too. UPDATE/INSERT/UPSERT
 reserve each actual version from the existing durable allocator, evaluate the post-image with that
 version, then pass the reserved version into the existing internal collection write path. DELETE
 stages its pre-images. All nested reads therefore see statement-start data, including earlier
@@ -857,8 +879,8 @@ Release plan, native-query and selective-scan allocation measurements retain the
 DocumentJoinPlan wraps the initial stored, virtual, derived or expression source plan and resolves
 each right-hand stored collection against the planning snapshot. Ordered source bindings share the
 streaming expression-source pipeline, including left-to-right UNNEST cursors, correlation, grouped
-captures and ORDER BY aliases. Every SELECT source in a statement containing a key join requires an explicit alias pending #1767,
-including nested scopes without their own joins and direct AST requests. Key expressions retain initial
+captures and ORDER BY aliases. Collection and inferred UNNEST aliases are valid throughout joined
+statements; explicit and implicit names share duplicate detection (CD00010/CD01023). Key expressions retain initial
 FROM field fallback; a name matching a self or later binding requires an earlier-source qualifier.
 The language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#key-join-and-nest-1732-oq-j1)
 records all defaults, including the NULL/MISSING lookup-NEST table, qualified stars, metadata
@@ -901,9 +923,9 @@ There is no new public engine interface, assembly reference, friend grant, disk 
 Each evaluation tuple carries its owned FROM value, identity/version/raw metadata and a
 persistent chain of named UNNEST bindings. Quantifiers add an inner frame only while evaluating
 SATISFIES; their collection expression sees the enclosing tuple. The nearest named variable
-wins, then the explicit FROM alias, then document fields. Names use ordinal comparison.
-FROM and UNNEST form one binding list with unique names, reserving the unaliased collection
-name for duplicate checks (CD00010 in text, CD01023 for a
+wins, then the explicit or implicit FROM alias, then document fields. Names use ordinal comparison.
+FROM, JOIN, NEST and UNNEST form one binding list with unique explicit or implicit names.
+The unaliased collection name is a full path binding, including duplicate checks (CD00010 in text, CD01023 for a
 direct AST); quantifiers may shadow outer bindings. META on a quantified or UNNEST variable
 is invalid, including a quantified name that shadows the FROM alias.
 
@@ -919,14 +941,12 @@ distinguish a variable t from the document field d.t and preserve quantifier sco
 matching compound group keys. Persistent quantifier scope frames and UNNEST variable names
 are computed once per plan; VALUE-order equivalence is also resolved before iterating rows.
 
-With UNNEST, star constructs an object with the explicit FROM alias (or collection name) and
-each array variable, omitting MISSING bindings. For an unaliased system source, the full
-COHESION_SCHEMA name is the object key. The collection name does not become a path variable;
-broader implicit-keyspace alias semantics remain a follow-up. Synthetic stars use the existing
-whole-document result mode and row writer, with empty RawContent, so the wire receives the
-constructed object. A lone star without UNNEST still preserves stored bytes.
-An array variable colliding with the unaliased collection name is a duplicate binding;
-no additional path alias is introduced.
+With UNNEST, star constructs an object with the explicit or implicit FROM alias and each array
+variable, omitting MISSING bindings. An unaliased system source uses its last segment as written
+(for example, indexes in cohesion_schema.indexes). Synthetic stars use the existing whole-document
+result mode and row writer, with empty RawContent, so the wire receives the constructed object.
+A lone star without UNNEST still preserves stored bytes. An array variable colliding with the
+implicit source name is a duplicate binding.
 
 Quantified element results use Couchbase's true/not-true test, as recorded in the
 [language contract](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#array-bindings-and-quantified-predicates-1136).
@@ -1417,7 +1437,7 @@ the pre-update content, even a swap such as `SET amount = details.score, details
 Moving an indexed value never revisits a candidate (Halloween safety). A missing collection
 reports `Collection 'x' does not exist.`; Schema ownership permits content updates.
 
-Targets are compared by ordinal property names and integer indexes after stripping the optional
+Targets are compared by ordinal property names and integer indexes after stripping the explicit or implicit
 source alias. Repeated paths, prefix overlaps and SET/UNSET overlaps fail planning (CD01017).
 A segment trie detects all three in time linear in the total number of target segments, checking
 statement cancellation at each target and segment. This follows PostgreSQL's one-pass assignment
@@ -1531,6 +1551,17 @@ The create path uses the same segment grammar as a WHERE path, including nested 
 array subscripts, and bracket-string property names. Planning converts those segments to the
 catalog's lossless canonical path without changing their case or treating a property name's
 punctuation as structure.
+
+CREATE INDEX paths remain document-relative: the collection name is not an alias in index keys.
+ON items(items.g) stores items.g, matching DocumentCatalog.CreateIndexAsync with that path.
+Queries reach this index through WHERE items.items.g = 9; WHERE items.g = 9 means g and uses (g).
+DISTINCT ARRAY source paths follow the same rule; projection and WHEN paths remain relative to
+their element variable. Couchbase's algebra/index_create.go:93-95 uses the keyspace formalizer;
+expression/formalizer.go:24, 181-182 and 478-479 maps the keyspace to SELF without registering its
+name as an alias, and expression/identifier.go:71-87 reads the identifier as a document field.
+Sarging preserves that distinction at expression/formalizer.go:361-363, 378 and 481 (6d40d1dd;
+the language dialect links each source). Catalog paths, encoding and introspection retain the same
+document-relative spelling, including self-named fields, with no persisted format change.
 
 The executor takes the logical database's exclusive writer lock, enforces schema ownership using
 the specific `CREATE INDEX` or `DROP INDEX` operation name, and delegates the transactional
