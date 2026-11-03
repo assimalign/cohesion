@@ -63,7 +63,7 @@ public sealed partial class SqlJointTypeMigrationTests
         current.RootPageId.ShouldNotBe(registration.RootPageId);
         database.Catalog.GetIndexes(heap.ObjectId).ShouldHaveSingleItem().KeyOrders.ShouldBe([(SqlCatalogIndexKeyOrder)bits]);
         database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
-        await AssertDirectedJointTree(database, heap.ObjectId, bits, false, guard.Token);
+        await AssertDirectedJointTreeAsync(database, heap.ObjectId, bits, false, guard.Token);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joint TYPE rewrite retains non-default compiled index key orders and bytes (#1777, #1787)")]
@@ -91,10 +91,10 @@ public sealed partial class SqlJointTypeMigrationTests
         Table(database).ObjectId.ShouldNotBe(oldHeap);
         database.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
         database.Catalog.GetIndexes(Table(database).ObjectId).ShouldHaveSingleItem().KeyOrders.ShouldBe([(SqlCatalogIndexKeyOrder)bits]);
-        await AssertDirectedJointTree(database, Table(database).ObjectId, bits, true, guard.Token);
+        await AssertDirectedJointTreeAsync(database, Table(database).ObjectId, bits, true, guard.Token);
     }
 
-    private static async Task AssertDirectedJointTree(SqlDatabase database, ulong owner, int bits, bool wide, CancellationToken token)
+    private static async Task AssertDirectedJointTreeAsync(SqlDatabase database, ulong owner, int bits, bool wide, CancellationToken token)
     {
         database.Catalog.TryGetTable("dbo", "items", out var table).ShouldBeTrue();
         database.IndexManager.TryGetIndex(owner, "ix", out var tree).ShouldBeTrue();
