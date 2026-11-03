@@ -45,14 +45,27 @@ and existence constraints are independently droppable; creation checks existing 
 entity writes enforce the effective rules. SHOW PROPERTY KEYS reports their combined type and
 required state; SHOW OBJECT OWNERSHIP includes named CONSTRAINT rows with parent ownership.
 The existing column contracts remain fixed. D2 adds the schema commands and transaction policy below. Duplicate names use CG03008, conflicting rules CG03009,
-invalid existing data CG03010 and an absent named drop CG01021. Graph catalog v1 refuses with
-CG06019; only v2 is read.
+invalid existing data CG03010 and an absent named drop CG01021. Graph catalog v2 refuses with
+CG06019; only v3 is read.
 
 A named constraint may repeat an identical unnamed property rule. The declarations are
 independent: dropping that constraint preserves the unnamed rule. Typed GetPropertyKeysAsync
 returns declared metadata only; SHOW PROPERTY KEYS continues to report effective rules.
 
 ## Schema DDL (#1738, GQ-D2; #1249)
+
+The typed GraphSchema graph-type API (#1806, GQ-T1) can set, add, alter, drop and read the
+database's open type. A node with an identifying label must already have each implied label
+and satisfy declared scalar types and NOT NULL; other labels, relationship types and
+properties remain writable. These rules apply to INSERT/CREATE, MERGE final state, SET and
+REMOVE, including typed creates. Missing implied labels use CG03012; property violations retain
+CG03003. Proposed types validate existing
+members through owner postings and refuse with CG03010 without replacing the prior type.
+Budgets remain CG05004/CG05020, and explicit-transaction DDL remains CG04025. GraphTypeTests
+is the typed-schema/write-path conformance corpus. Edge declarations persist but do not yet
+enforce properties or endpoints. Text ALTER CURRENT GRAPH TYPE and SHOW CURRENT GRAPH TYPE
+remain outside this run; their parser refusals are unchanged. Catalog v3 refuses v2 before
+any write (CG06019), while graph entity format remains 5. Closed mode remains a later opt-in.
 
 Standalone commands run on the session's database:
 
@@ -107,7 +120,7 @@ remain ordinal and case-sensitive across the shared database-wide namespace.
 SHOW CONSTRAINTS returns DATABASE_NAME, DEFINITION_TYPE, DEFINITION_ID, DEFINITION_NAME,
 CONSTRAINT_NAME, PROPERTY_KEY, DATA_TYPE and IS_REQUIRED, ordered by label name then constraint
 name, followed by relationship type name then constraint name. Other SHOW column contracts
-stay fixed. Graph catalog v2 and graph format 5 remain unchanged.
+stay fixed. Graph catalog is v3 (#1806); graph entity format remains 5.
 
 Read-only statements warn with structured CG01023 for each distinct, ordinal, statically named
 entity property unknown database-wide (#1249, GQ-D3). This includes MATCH node/relationship

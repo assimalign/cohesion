@@ -14,14 +14,14 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphCatalogCodec
 {
-    internal const byte FormatVersion = 2;
+    internal const byte FormatVersion = 3;
 
     private static readonly UTF8Encoding _utf8 = new(false, true);
 
     internal static byte[] Encode(CatalogRecord record, TransactionSequence writer)
     {
-        Validate(record);
-        using var stream = new MemoryStream();
+        int size = GetEncodedSize(record);
+        using var stream = new MemoryStream(size);
         using var binary = new BinaryWriter(stream, _utf8, leaveOpen: true);
         binary.Write(writer.Value);
         binary.Write(0UL);
@@ -43,10 +43,22 @@ internal static class GraphCatalogCodec
         {
             WriteString(binary, index.PropertyKey);
         }
-        else
+        else if (record.Constraint is { } constraint)
         {
-            WriteString(binary, record.Constraint!.Value.PropertyKey);
-            binary.Write(record.Constraint.Value.Type is { } type ? (byte)type : byte.MaxValue);
+            WriteString(binary, constraint.PropertyKey);
+            binary.Write(constraint.Type is { } type ? (byte)type : byte.MaxValue);
+        }
+        else if (record.NodeType is { } node)
+        {
+            binary.Write(node.ImpliedLabels.Count);
+            foreach (string label in node.ImpliedLabels) { WriteString(binary, label); }
+            WriteProperties(binary, node.Properties);
+        }
+        else if (record.EdgeType is { } edge)
+        {
+            WriteString(binary, edge.SourceNodeType);
+            WriteString(binary, edge.TargetNodeType);
+            WriteProperties(binary, edge.Properties);
         }
         if (stream.Length > SlottedPage.MaxRecordSize)
         {
@@ -54,6 +66,18 @@ internal static class GraphCatalogCodec
                 ErrorMessages.CatalogRecordTooLarge, stream.Length, SlottedPage.MaxRecordSize));
         }
         return stream.ToArray();
+    }
+
+    internal static int GetEncodedSize(CatalogRecord record)
+    {
+        Validate(record);
+        long size = EncodedSize(record);
+        if (size > SlottedPage.MaxRecordSize)
+        {
+            throw new GraphElementTooLargeException(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.CatalogRecordTooLarge, size, SlottedPage.MaxRecordSize));
+        }
+        return (int)size;
     }
 
     internal static CatalogRecord Decode(ReadOnlySpan<byte> bytes, Assimalign.Cohesion.Database.Storage.PageId page, int slot)
@@ -114,6 +138,25 @@ internal static class GraphCatalogCodec
                 result = new CatalogRecord(constraint: new GraphConstraintMetadata(id, name, property,
                     type == byte.MaxValue ? null : (DatabaseType)type));
             }
+            else if (kind is 6 or 7 or 8)
+            {
+                if (id != GraphCatalog.GraphTypeId || kind == 6 && name != "CURRENT")
+                { throw new ArgumentException(ErrorMessages.GraphTypeRecordInvalid); }
+                if (kind == 6) { result = new CatalogRecord(graphType: GraphType.Create()); }
+                else if (kind == 7)
+                {
+                    int count = ReadCount(reader);
+                    var labels = new string[count];
+                    for (int i = 0; i < count; i++) { labels[i] = ReadString(reader)!; }
+                    result = new CatalogRecord(nodeType: GraphNodeType.Create(name, labels, ReadProperties(reader)));
+                }
+                else
+                {
+                    string source = ReadString(reader)!;
+                    string target = ReadString(reader)!;
+                    result = new CatalogRecord(edgeType: GraphEdgeType.Create(name, source, target, ReadProperties(reader)));
+                }
+            }
             else
             {
                 throw new GraphCatalogException("CG06006", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphCatalogCodecDecodeGraphCatalog5, kind));
@@ -173,6 +216,66 @@ internal static class GraphCatalogCodec
         byte[] bytes = _utf8.GetBytes(value);
         writer.Write(bytes.Length);
         writer.Write(bytes);
+    }
+
+    private static void WriteProperties(BinaryWriter writer, System.Collections.Generic.IReadOnlyList<GraphPropertyType> properties)
+    {
+        writer.Write(properties.Count);
+        foreach (var property in properties)
+        {
+            WriteString(writer, property.Name);
+            writer.Write((byte)property.Type);
+            writer.Write(property.Required ? (byte)1 : (byte)0);
+        }
+    }
+
+    private static long EncodedSize(CatalogRecord record)
+    {
+        long size = 34L + StringSize(record.Name);
+        if (record.Kind <= 2) { return size + 1 + StringSize(record.OwningSchema); }
+        if (record.Property is not null) { return size + 2; }
+        if (record.Index is { } index) { return size + StringSize(index.PropertyKey); }
+        if (record.Constraint is { } constraint) { return size + StringSize(constraint.PropertyKey) + 1; }
+        if (record.NodeType is { } node)
+        {
+            size += 4;
+            foreach (string label in node.ImpliedLabels) { size += StringSize(label); }
+            return size + PropertySize(node.Properties);
+        }
+        if (record.EdgeType is { } edge)
+        { return size + StringSize(edge.SourceNodeType) + StringSize(edge.TargetNodeType) + PropertySize(edge.Properties); }
+        return size;
+
+        static long PropertySize(System.Collections.Generic.IReadOnlyList<GraphPropertyType> properties)
+        {
+            long size = 4;
+            foreach (var property in properties) { size += StringSize(property.Name) + 2; }
+            return size;
+        }
+        static long StringSize(string? value) => 4L + (value is null ? 0 : _utf8.GetByteCount(value));
+    }
+
+    private static GraphPropertyType[] ReadProperties(BinaryReader reader)
+    {
+        int count = ReadCount(reader);
+        var properties = new GraphPropertyType[count];
+        for (int i = 0; i < count; i++)
+        {
+            string name = ReadString(reader)!;
+            var type = (DatabaseType)reader.ReadByte();
+            byte required = reader.ReadByte();
+            if (required > 1) { throw new ArgumentException(ErrorMessages.GraphTypeRecordInvalid); }
+            properties[i] = GraphPropertyType.Create(name, type, required == 1);
+        }
+        return properties;
+    }
+
+    private static int ReadCount(BinaryReader reader)
+    {
+        int count = reader.ReadInt32();
+        if (count < 0 || count > (reader.BaseStream.Length - reader.BaseStream.Position) / 4)
+        { throw new ArgumentException(ErrorMessages.GraphTypeRecordInvalid); }
+        return count;
     }
 
     private static string? ReadString(BinaryReader reader)

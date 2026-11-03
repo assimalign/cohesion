@@ -1,9 +1,98 @@
 # Graph engine design
 
+## Open graph types (#1806, GQ-T1)
+
+GraphType, GraphNodeType, GraphEdgeType and GraphPropertyType are sealed, immutable public
+declarations in the Graph namespace, implemented in the Catalog component. Collections are
+copied, read-only and ordinally ordered. Identifying labels, relationship types, implied labels
+and property names compare ordinally and case-sensitively. Property types use the existing graph
+scalar domain and TypeOf numeric promotion; Required defaults to false. Empty element and graph
+types are permitted. Null/repeated elements or properties, repeated implied labels and implying
+one's own identifying label are argument errors. Edge references use node identifying-label
+strings and resolve against the complete resulting type, allowing ADD/ALTER fragments.
+
+GraphSchema supplies GetGraphTypeAsync, SetGraphTypeAsync, AddGraphTypeAsync,
+AlterGraphTypeAsync and DropGraphTypeAsync. An absent type reads as null; a set empty type is a non-null
+GraphType with empty collections. SET replaces the whole type. ADD introduces new element names
+and refuses existing names. ALTER replaces complete declarations of existing elements and cannot
+introduce names. Unmentioned elements survive ADD/ALTER. Selective DROP requires existing names
+and refuses dangling edge references; node and referencing edge types can be dropped together.
+Dropping the complete absent type succeeds. These operations leave independent named constraints
+and property metadata intact. They run through schema autocommit and refuse explicit transactions
+with CG04025. Invalid constructor arguments precede admission; admitted failures retain the
+ordinary transaction-abort policy. CG03011 identifies invalid element operations or references.
+
+A node carrying an identifying label must carry every implied label and satisfy its property
+types and NOT NULL rules. Missing implied labels are refused, never synthesized. Multiple matching
+node types all apply. Additional labels, types and properties remain writable: this run supplies
+open semantics only. Validation uses ValidateNodeAsync for typed creates and staged INSERT,
+CREATE, MERGE, SET and REMOVE. MERGE defers required properties and implied labels until its
+final working copy, permitting ON CREATE to complete them. Removing an identifying label removes
+that membership; deleting a node is permitted. Missing implied labels use CG03012; property
+type and NOT NULL violations retain CG03003. Snapshot writes
+compare the selected node-type record against latest visibility, including an absent old rule;
+a stale writer reports CG04007. The existing database writer lock serializes DDL and data through
+commit or rollback. Edge properties and endpoints are persisted declarations only in GQ-T1;
+their enforcement, text ALTER and SHOW CURRENT GRAPH TYPE are GQ-T2. Closedness is GQ-T3.
+
+Before publishing any resulting type, schema operations stream only each identifying label's
+owner postings under latest visibility and the writer lock. A violation stops at the first node
+with CG03010 and leaves the previous type in force. Empty owners decode no unrelated nodes.
+Descriptor work and selected postings consume CG05004's engine work budget; descriptor containers
+and bounded posting cursors consume CG05020's memory grant. Each decoded node's labels and
+property payload have a temporary value grant, released before advancing to the next member.
+Loading previous type definitions
+reserves candidate-directory capacity before copying keys and conservatively charges 32 times
+each candidate's encoded length plus 512 bytes before decoding its strings, objects, collection
+and mutation buffers. Invisible versions are charged too. ADD/ALTER fragments reserve 512 bytes
+per element before allocating mutation maps and copied result arrays; resulting descriptors charge
+their names, implied labels and properties before retention. Each element must fit one catalog
+record (CG02009). The codec measures strict UTF-8 lengths before allocating an exact-sized payload
+buffer, so an oversized declaration does not first allocate its encoded bytes. Ordinary catalog
+definitions and graph-type variants share one object slot, keeping property/index records from
+growing for the new variants. There is no graph-wide data materialization. Successful publication
+discovers label/type/property tokens in the same logical transaction; dropping a type retains
+those discoveries. Failed operations roll all new tokens back. The defaults remain 1,000,000
+work units and 256 MiB retained memory. Every grant unwinds on success, cancellation or failure.
+
+Catalog v3 adds kind 6 (current-type marker), 7 (node declaration) and 8 (edge declaration).
+The private fixed GUID 672bf6e9-3491-4306-a153-2a0f4c0370ed routes only these kinds; it is never
+a graph token identity. Membership remains label-derived and graph entity format stays 5.
+The old type's records are tombstoned, then the marker, ordinal nodes and ordinal edges are
+inserted through the existing physical apply brackets in one logical transaction. The publication
+boundaries are token discovery, old-record tombstones, marker, each node, each edge, and the
+logical commit. Recovery scrubs every abandoned creator and restores its deleters; committed
+replacement publishes the complete type. No independently committed metadata or mutable type
+cache exists. Crash-image tests interrupt after tombstones, marker and each element publication,
+and check exact state on two successive reopens; the fault-injecting storage also supplies
+images at the logical commit record before flush confirmation and after confirmed replacement
+and drop. Version 2, including journal-only images, refuses with CG06019 through the
+existing recovered read-only gate before any write. No upgrade or legacy reader is added.
+
+GraphTypeTests is the typed-schema and node-write conformance corpus; GraphTypeWireTests verifies
+node refusals and continued session use over InMemory and TCP. Catalog-format tests pin
+v3 for every existing record kind and byte-preserving v2 refusal. The NativeAOT sample exercises
+all five schema verbs and node enforcement. No new interface, assembly reference, wire message
+or EventSource is introduced. This follows the concrete-first Database rule (database-area.md).
+Local Neo4j shapes consulted without copying code: GraphType.scala:277-343 under
+`C:/Source/repos/neo4j/neo4j/community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/`
+defines identifying and additional labels, property types and endpoint references. The typed
+fragment replacement/default rules above are Cohesion's explicit API contract for this run.
+
+| Code | Graph-type condition |
+| --- | --- |
+| CG03003 | A node write violates a property-type or NOT NULL rule |
+| CG03010 | Existing member data violates a proposed graph type |
+| CG03011 | ADD/ALTER/DROP names or edge node-type references are invalid |
+| CG03012 | A node write omits a required implied label |
+| CG04025 | A schema mutation is attempted inside an explicit transaction |
+| CG05004 / CG05020 | Schema work / retained-memory budget is exhausted |
+| CG06019 | A catalog record version differs from v3 |
+
 ## Refused opens preserve every file (#1744)
 
 GraphStore.EnsureIndexFormat and GraphCatalog.EnsureFormat read graph headers, index registrations
-and roots, and catalog v2 records. The engine validates these through Storage's recovered read-only
+and roots, and catalog v3 records. The engine validates these through Storage's recovered read-only
 view before acquiring writable file handles.
 A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
 committed and uncommitted crash records. Acceptance discards the probe, opens the original files
@@ -29,7 +118,7 @@ analysis, including correlated EXISTS and pattern comprehensions. Results, expli
 EXPLAIN performs the same admission and reports the same warnings without execution.
 
 The catalog maintains a property-name directory alongside its existing version directory, loaded
-from existing v2 records and updated on publication and undo. Resolution checks snapshot-visible
+from existing v3 records and updated on publication and undo. Resolution checks snapshot-visible
 writer stamps in memory, without decoding catalog records or scanning labels, types or entities.
 Entity records currently embed string keys; there is no separate property-token identity to consult.
 Unlabeled writes and undeclared keys on schema-owned definitions therefore save untyped kind-3
@@ -165,8 +254,8 @@ a named rule into an unnamed declaration. CreateConstraintAsync validates names,
 owner identities and supported types before statement admission, leaving an explicit transaction
 usable after a bad argument. D2 applies this order to the remaining schema mutations. Oversized encoded constraint metadata reports DatabaseException with CG02009.
 
-The catalog record codec is v2 for every kind (1 label, 2 relationship type, 3 property, 4 index,
-5 constraint). Its prefix remains writer/deleter u64 stamps, kind byte, version byte, GUID and
+The catalog record codec is v3 for every kind (1 label, 2 relationship type, 3 property, 4 index,
+5 constraint, 6 current-type marker, 7 node type, 8 edge type). Its prefix remains writer/deleter u64 stamps, kind byte, version byte, GUID and
 length-prefixed UTF-8 name. Constraint payload is a length-prefixed UTF-8 property key followed
 by one type byte (255 for existence). Other payload layouts are unchanged. Earlier or future
 versions refuse with CG06019 before logical recovery scrub; no legacy reader or upgrade exists.
@@ -190,7 +279,7 @@ records to refuse. No wire bytes, public interface or assembly boundary changes 
 | CG03009 | Duplicate constraint kind or incompatible property type rules |
 | CG03010 | Existing data violates a new named constraint |
 | CG04025 | Schema DDL inside an explicit transaction (Cohesion policy) |
-| CG06019 | Unsupported catalog record format; only v2 is admitted |
+| CG06019 | Unsupported catalog record format; only v3 is admitted |
 
 ## Schema text coordination (#1738, GQ-D2; #1249)
 
@@ -3281,14 +3370,18 @@ The payload begins at byte 16:
 
 | Offset / order | Encoding | Meaning |
 | --- | --- | --- |
-| 16 | byte | Kind: 1 label, 2 relationship type, 3 property key, 4 named index, 5 named constraint |
-| 17 | byte | Format version, currently 2; earlier versions refuse with CG06019 before logical scrub |
-| 18 | 16 bytes | CLR `Guid.ToByteArray()` representation: definition ID for kinds 1/2, parent ID for kinds 3/4/5 |
+| 16 | byte | Kind: 1 label, 2 relationship type, 3 property key, 4 named index, 5 named constraint, 6 current graph type, 7 node type, 8 edge type |
+| 17 | byte | Format version 3 for every kind; earlier versions refuse with CG06019 before any write |
+| 18 | 16 bytes | CLR `Guid.ToByteArray()` representation: definition ID for kinds 1/2, parent ID for kinds 3/4/5, private current-type GUID for kinds 6/7/8 |
 | 34 | string | Definition name, property key, or index name |
 | Following name, kinds 1/2 | byte, string | `DatabaseObjectOwner` value and owning schema |
 | Following name, kind 3 | byte, byte | Shared `DatabaseType` value (255 means unconstrained), required flag (0 or 1) |
 | Following name, kind 4 | string | Indexed scalar property key |
 | Following name, kind 5 | string, byte | Constrained property key and type (255 means existence) |
+| Following name, kind 6 | none | Marker name is CURRENT; distinguishes an empty type from no type |
+| Following name, kind 7 | int32, strings, properties | Implied-label count and labels, then property declarations |
+| Following name, kind 8 | string, string, properties | Source and target node identifying labels, then property declarations |
+| Properties in kinds 7/8 | int32, repeated (string, byte, byte) | Property count, then name, DatabaseType and NOT NULL flag (0 or 1) |
 
 All fixed-width numeric values are little-endian. Strings use a signed 32-bit little-endian
 UTF-8 byte length followed by exactly that many strict UTF-8 bytes. Length -1 represents

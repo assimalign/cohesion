@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Graph.Storage;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
-/// <summary>Database-scoped label, relationship-type, index and constraint management bound to one session.</summary>
+/// <summary>Database-scoped graph-type, label, relationship-type, index and constraint management bound to one session.</summary>
 /// <remarks>
 /// <para>
 /// Reads follow the session transaction. Schema writes run in their own autocommit transaction;

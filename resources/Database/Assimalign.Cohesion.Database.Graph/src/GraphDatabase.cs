@@ -281,7 +281,8 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="DatabaseException">
     /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
     /// holds it, its transaction refuses statements (<c>CG04007</c>), or the write failed (a
-    /// property that does not match the graph definition, <c>CG03003</c>).
+    /// property that does not match the graph definition, <c>CG03003</c>, or an omitted implied
+    /// label required by a node type, <c>CG03012</c>).
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The graph catalog changed since the transaction's snapshot (retryable).</exception>
@@ -532,8 +533,11 @@ public sealed partial class GraphDatabase : DatabaseInstance
         }
         foreach (string label in labels)
         {
+            var latest = LatestSnapshot(operation.Context);
+            var nodeType = Catalog.GetNodeTypeForWrite(label, operation.Context.Snapshot, latest);
+            if (nodeType is not null) { ValidateNodeType(nodeType, labels, properties, deferRequired, existingData: false); }
             var metadata = Catalog.FindLabel(label, operation.Context.Snapshot);
-            if (metadata != Catalog.FindLabel(label, LatestSnapshot(operation.Context))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
+            if (metadata != Catalog.FindLabel(label, latest)) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
             if (metadata is null)
             {
                 metadata = new GraphLabelMetadata(Guid.NewGuid(), label);
@@ -541,6 +545,25 @@ public sealed partial class GraphDatabase : DatabaseInstance
             }
             await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token, deferRequired).ConfigureAwait(false);
         }
+    }
+
+    internal static void ValidateNodeType(GraphNodeType type, IReadOnlyList<string> labels,
+        IReadOnlyDictionary<string, object?>? properties, bool deferRequired, bool existingData)
+    {
+        if (!deferRequired)
+        {
+            foreach (string label in type.ImpliedLabels)
+            { if (!labels.Contains(label, StringComparer.Ordinal)) { Refuse(label, impliedLabel: true); } }
+        }
+        foreach (var property in type.Properties)
+        {
+            object? value = null;
+            bool present = properties?.TryGetValue(property.Name, out value) == true && value is not null;
+            if (!deferRequired && property.Required && !present || present && TypeOf(value) != property.Type) { Refuse(property.Name); }
+        }
+        void Refuse(string name, bool impliedLabel = false) => throw DatabaseException.CreateGraphFailure(
+            existingData ? "CG03010" : impliedLabel ? "CG03012" : "CG03003",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphTypeViolation, type.IdentifyingLabel, name));
     }
 
     internal async ValueTask<GraphRelationship> CreateRelationshipCoreAsync(GraphOperation operation, GraphNodeId from, GraphNodeId to,
@@ -615,9 +638,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         _ => throw new DatabaseException(ErrorMessages.GraphDatabaseTypeOfDatabase),
     };
 
-    internal static bool SupportsPropertyType(DatabaseType type) => type is DatabaseType.Boolean or DatabaseType.Int8 or
-        DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or
-        DatabaseType.Decimal or DatabaseType.String;
+    internal static bool SupportsPropertyType(DatabaseType type) => GraphPropertyType.Supports(type);
 
     /// <inheritdoc />
     protected override ValueTask<DatabaseSession> CreateSessionCoreAsync(CancellationToken cancellationToken)

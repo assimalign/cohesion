@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.Database.Graph.Catalog;
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("GraphCatalog")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalog.DebugView))]
-public sealed class GraphCatalog
+public sealed partial class GraphCatalog
 {
     private readonly GraphStorage _storage;
     private readonly TransactionCoordinator _coordinator;
@@ -731,7 +731,7 @@ public sealed class GraphCatalog
         }
     }
 
-    private Found? Find(byte kind, Guid parent, string name, TransactionSnapshot snapshot)
+    private Found? Find(byte kind, Guid parent, string name, TransactionSnapshot snapshot, Action<long>? reserve = null)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -765,6 +765,10 @@ public sealed class GraphCatalog
                     RemoveStaleReference(key, versions, index);
                     continue;
                 }
+                // The graph-type schema path reserves before decoding strings, property objects,
+                // sorting/deduplication buffers and immutable collections. Repeated versions are
+                // conservatively charged separately, including invisible candidates.
+                reserve?.Invoke(512L + bytes.Length * 32L);
                 var record = GraphCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
                 if ((record.Kind, record.Parent, record.Name) != key || record.Id != reference.Id)
                 {
@@ -781,11 +785,17 @@ public sealed class GraphCatalog
         }
     }
 
-    private IReadOnlyList<Found> List(byte kind, Guid? parent, TransactionSnapshot snapshot)
+    private IReadOnlyList<Found> List(byte kind, Guid? parent, TransactionSnapshot snapshot, Action<long>? reserve = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         lock (_sync)
         {
+            // Reserve directory and result capacity before copying candidate keys.
+            if (reserve is not null)
+            {
+                int count = parent is { } ownerId && _children.TryGetValue((kind, ownerId), out var children) ? children.Count : 0;
+                reserve(checked(count * 128L));
+            }
             var result = new List<Found>();
             var keys = parent is { } owner
                 ? _children.TryGetValue((kind, owner), out var names)
@@ -794,7 +804,7 @@ public sealed class GraphCatalog
             foreach (var key in keys)
             {
                 BeforeDirectoryKeyVisit?.Invoke();
-                if (Find(key.Kind, key.Parent, key.Name, snapshot) is { } found)
+                if (Find(key.Kind, key.Parent, key.Name, snapshot, reserve) is { } found)
                 {
                     result.Add(found);
                 }

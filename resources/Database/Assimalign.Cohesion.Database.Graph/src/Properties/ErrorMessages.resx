@@ -8,7 +8,13 @@
   <data name="ConstraintConflict" xml:space="preserve"><value>A constraint or property definition already constrains '{0}' with an incompatible type or the same constraint kind.</value></data>
   <data name="ConstraintTypeUnsupported" xml:space="preserve"><value>Property type '{0}' is not supported by graph storage.</value></data>
   <data name="ConstraintDataViolation" xml:space="preserve"><value>Existing data violates constraint '{0}' on property '{1}'.</value></data>
-  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Graph catalog format {0} is unsupported; this engine supports only format 2. Recreate the database.</value></data>
+  <data name="GraphTypeScalarInvalid" xml:space="preserve"><value>Graph types support only the graph scalar property types.</value></data>
+  <data name="GraphTypeDuplicate" xml:space="preserve"><value>Graph type declarations cannot contain null or repeated elements, properties or implied labels, or imply their own identifying label.</value></data>
+  <data name="GraphTypeRecordInvalid" xml:space="preserve"><value>The graph type catalog record is malformed.</value></data>
+  <data name="GraphTypeChangeInvalid" xml:space="preserve"><value>The graph type {0} operation cannot apply to element type '{1}'.</value></data>
+  <data name="GraphTypeReferenceMissing" xml:space="preserve"><value>Edge type '{0}' references an absent node type.</value></data>
+  <data name="GraphTypeViolation" xml:space="preserve"><value>Node type '{0}' requires label or property '{1}' with its declared type and nullability.</value></data>
+  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Graph catalog format {0} is unsupported; this engine supports only format 3. Recreate the database.</value></data>
   <data name="CatalogIndexPropertyMismatch" xml:space="preserve"><value>Index '{0}' already identifies property '{1}'.</value></data>
   <data name="CatalogIdentityMismatch" xml:space="preserve"><value>Definition '{0}' already has a different identity.</value></data>
   <data name="CatalogIdentityReused" xml:space="preserve"><value>A definition identity cannot be reused or renamed. After a drop, wait for version purge before reusing the identity.</value></data>
