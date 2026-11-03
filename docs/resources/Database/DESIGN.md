@@ -371,8 +371,12 @@ must cover Build's recovery and inline schema migration. A gateway declares the 
 There are no Database-owned actions or instance health contributors yet. The retired catalog
 mutation commands do not fit snapshot restore: writes are restored on every instance, whose data
 and principals live in its durable catalog. Gateway health aggregation is unresolved. These remain
-owner follow-ups. Database binds only code-configured endpoints, through Database.Tcp's Listen(Uri)
-or a supplied listener, and reads no COHESION_ENDPOINT_* variable. The in-process platform reports
+owner follow-ups. When the application is managed (a nonempty COHESION_GATEWAY), a model server
+with no listener binds its named platform endpoint (`sql`, `documents`, `graph`, `kv` or `blob`)
+from the COHESION_ENDPOINT_* values, over plain TCP. An explicit Database.Tcp Listen(Uri) or a
+supplied listener wins. Unmanaged, Database binds only code-configured endpoints (EN-A1, #1790).
+Two servers of one model without a listener would share the assignment and collide at start;
+give each extra server its own listener. The in-process platform reports
 an HTTP endpoint unrelated to the database wire listener, so dependents pass the latter as a
 literal setting. Gateway G18 counts publication as readiness, before servers accept; dependent
 deployment can therefore precede database accept. See the integration's
@@ -442,7 +446,11 @@ The integration architecture, in the order the work items landed:
   `Assimalign.Cohesion.Database` event source carries); a database a failed fsync, journal drain
   or header slot write took offline is unhealthy until it is reopened, and every lock wait on it ends with the
   coded refusal (`TransactionCoordinator.AbandonLockWaits`). `Database.Hosting`'s internal admin service exposes the aggregate over private
-  `Web.Health` routes (`/healthz`, `/readyz`, `/livez`) when explicitly started. Under `/cohesion/v1` only the namespaced health aliases answer, to loopback callers only, and every other `/cohesion/v1` route (the retired resource control plane) returns 403. No production path starts the admin service today (T3 EN-A1).
+  `Web.Health` routes (`/healthz`, `/readyz`, `/livez`). Under `/cohesion/v1` only the namespaced health aliases answer, to loopback callers only, and every other `/cohesion/v1` route (the retired resource control plane) returns 403. Which endpoint it binds (EN-A1, #1790):
+  - A managed application binds the platform's `http` assignment when it is plain HTTP with a bindable host (T3-28). It skips any other assignment with an event, and it replaces an explicit endpoint with an event.
+  - An unmanaged application binds the endpoint it passes to `DatabaseApplicationBuilder.AddHealthEndpoint(Uri)`.
+  - With neither, no health listener starts.
+  - A bind failure fails start with `CK07102`.
   This realizes the observational
   surface without adding a Database-specific health abstraction or treating the wire protocol's
   `Ping` frame as readiness. Each Database application owns its context and health observations.
