@@ -23,6 +23,8 @@
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
 	<ItemGroup>
+		<!-- Missing model listeners default to managed platform endpoints; TCP stays runtime-private. -->
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<!--
 			Web is an internal implementation detail of the database server piece.
 			PrivateAssets='all' (via CohesionPrivateProjectReference) keeps Web from
@@ -32,5 +34,8 @@
 			in resources/Database/Assimalign.Cohesion.Database.Runtime/Directory.Build.props.
 		-->
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="EndpointBinding" />
 	</ItemGroup>
 </Project>

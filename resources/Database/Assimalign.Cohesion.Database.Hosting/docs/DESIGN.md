@@ -26,6 +26,58 @@ flowchart LR
 
 COHRES001–004 remain enforced. [Database.Hosting.ApplicationModel](../../Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md) supplies the managed-resource registration on `builder.Services`; the runtime itself references no ApplicationModel package.
 
+## Platform binding and HTTP health (#1790, EN-A1)
+
+When COHESION_GATEWAY is nonempty, each model server's options snapshot defaults a missing listener from its named runtime endpoint
+(sql, documents, graph, kv or blob); an explicit Listener or Listen(Uri) wins. The common root
+owns that resolution before the model validates its snapshot, because Hosting receives an already
+constructed server. It privately uses Connections.Tcp and shares the stateless binder with
+Database.Tcp. Hosting adds no model reference or public composition seam. See the
+[root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790-en-a1).
+
+The concrete builder's AddHealthEndpoint(Uri) configures one plain HTTP listener; the last call
+wins. Registration validates an endpoint URI, literal IP address or localhost and refuses HTTPS
+without a certificate source. At Build, a nonempty runtime COHESION_GATEWAY plus a valid http
+endpoint assignment with a plain http scheme and a literal IP address or localhost overrides that explicit value (T3-28).
+Event 19 names both endpoints when the assignment replaces a different explicit endpoint.
+A malformed or missing assignment is
+unset under Core's TryGetEndpoint contract; absent an explicit value, no listener is composed.
+An assignment with an unsupported scheme or DNS bind host is skipped with informational event 18,
+which names the assignment, its endpoint and scheme. The explicit endpoint is kept, or no health
+listener is composed, so an unusable implicit health assignment cannot prevent engine availability.
+Explicit AddHealthEndpoint input remains strictly validated. An unmanaged host
+creates no listener unless AddHealthEndpoint is called, even if http values are present.
+
+This filtering follows Web.Hosting's HttpServerConfiguration.GetPlatformEndPoint scheme policy
+(resources/Web/Assimalign.Cohesion.Web.Hosting/src/Internal/HttpServerConfiguration.cs:865-874).
+At cohesion-platforms HEAD 40a9052, DockerPlanCompiler.cs:936-966
+(platforms/Docker/Assimalign.Cohesion.ApplicationModel.Gateway.Docker/src/Internal/) and
+KubernetesPlanCompiler.cs:1446-1465
+(platforms/Kubernetes/Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes/src/Internal/)
+write a port's scheme, then an exposure's scheme, then tcp/udp; Docker additionally uses http for
+an HTTP probe. Thus an assignment named http can legitimately carry https or tcp.
+
+Build registers the internal DatabaseAdminEndpointService as a singleton IHostService factory in
+Services, before closing the container. The factory runs after the engine/server registry exists,
+last among container services, before the reopen service and model servers. It starts a private
+Web host and awaits its bind, so a bind failure fails the outer start and rolls back prior services.
+Socket bind failures carry structured CK07102 on DatabaseException and retain the original Web
+HostStartupException with its SocketException cause; cancellation still propagates unchanged.
+Event 15 still reports the original Web host failure exactly once.
+Shutdown drains model servers before stopping health; async disposal owns the private Web host.
+The Web.Hosting/Web.Health dependencies and their App.Database assemblies remain private.
+
+| Code | Condition | Carrier |
+| --- | --- | --- |
+| CK07102 | HTTP health listener socket bind failed | DatabaseException.Diagnostics; original Web host failure and socket cause retained |
+
+The existing /healthz, /readyz and /livez routes and /cohesion/v1 aliases retain their health and
+transport-peer policies: namespaced routes admit loopback peers only; bare routes admit remote
+probes; forwarded headers never grant access. Readiness remains unavailable until the outer host
+is Started, after every model server confirmed accept. Liveness omits that readiness-only gate.
+Other /cohesion/v1 paths remain forbidden. No gateway readiness semantics, health contributors,
+resource actions, existing event identities, wire messages or store formats change in this run.
+
 ## Build and configuration
 
 Build consumes the builder before user code runs, even if construction fails. Registration methods and the service container reject late mutation, and so does the logging builder once Build built its factory. The `Options` host settings are copied at Build and cannot alter the application later. The root builder has no live `Engines` property. `DatabaseApplicationOptions` holds host policy only: its borrowed `Engines`, `Servers` and `Services` lists, the `DatabaseApplication(options)` constructor and `CreateBuilder(options)` were deleted (owner decision 54 of 2026-10-09), so there is one registration path per kind of thing (`AddEngine`, `AddService`, and a server on its engine's builder).
@@ -213,6 +265,8 @@ The module raises its own events through one internal event source, named for th
 | 15 | `AdminEndpointFailed` | Error | `endpoint` (scheme and authority only), `operation` (`Start`, `Stop`, `Dispose`), `exceptionType`, `exceptionMessage` |
 | 16 | `HealthDegraded` | Warning | `hostId`, `engineName`, `database`, `reason` (`Provisioning`/`Offline`), `cause` (offline cause or empty), `operation`, `objectName`, `position`, `stepCount`, `rowsProcessed`, `totalRows` |
 | 17 | `HealthRestored` | Informational | same as 16; the condition and last observed progress that cleared |
+| 18 | `HealthEndpointAssignmentSkipped` | Informational | `assignment` (`http`), `endpoint` (scheme and authority only), `scheme` |
+| 19 | `HealthEndpointOverridden` | Informational | `explicitEndpoint`, `platformEndpoint` (scheme and authority only) |
 
 Batch D part 2 (#1349) observes database health through the existing root inventory and
 provisioning state, with no SQL dependency or new public seam. The first enabled observation
@@ -276,7 +330,8 @@ the propagated failure or a later start's record. A hook failure or reporting ti
 measure their own operation only while an Informational listener is attached; a listener attaching
 mid-operation sees zero duration. These are lifetime names, not EventSource Start/Stop activity pairs.
 Disposal reports its aggregate once, before throwing it; repeated disposal shares that same result.
-Admin start/stop/disposal exceptions are recorded and rethrown unchanged; expected cancellation is
+Admin start/stop/disposal exceptions are recorded and rethrown unchanged, except socket bind
+failures gain structured CK07102 while retaining the original cause chain; expected cancellation is
 silent. Disabled lifecycle and admin hooks allocate zero bytes and read no timestamp.
 
 No counters: the attempts are on the health contribution. The engine's own events (a worker's failures, the database it took offline) are on the root's `Assimalign.Cohesion.Database` source. `DatabaseHostingEventSourceTests` checks the name, strict manifest, real reopen and application transitions, disposal and admin bind failure, exact payloads, and disabled-write allocations. The test project disables

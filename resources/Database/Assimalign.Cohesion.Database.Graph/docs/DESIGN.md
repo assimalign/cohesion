@@ -3970,6 +3970,8 @@ Listener, Authenticator, MaxSessions, AuthenticationTimeout, IdleTimeout and Shu
 Defaults stay 100 sessions, ten seconds for authentication, thirty minutes idle and thirty seconds
 for shutdown. TerminalDrainLinger remains on the model leaves, default two seconds. Each model
 still snapshots every value before validation and owns the transferred listener through stop.
+Timers and MaxSessions are validated before platform listener resolution, so invalid options
+allocate no fallback listener (#1790). See the root DESIGN for managed endpoint admission.
 No public Database interface is added; the count remains five.
 
 Database.Tcp replaces Database.Sql.Tcp. Its root-namespace extension
