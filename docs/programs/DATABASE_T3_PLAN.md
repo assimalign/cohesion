@@ -134,7 +134,7 @@ row by its number.
 |---|---|---|---|---|
 | EN-G1 | #1744 | A refused open writes nothing: SQL's probe overlay generalized to Graph, Documents and Key-Value | — | none |
 | SQ-T4 | #1764, #1782 | Reclamation snapshot pins break context-count assertions; one root cause, CI stability | — | none |
-| SQ-A4 | #1777 | Keep table owners for index-only changes in a joint migration | — | maybe a fence |
+| SQ-A4 | #1777 | Keep table owners for index-only changes in a joint migration | — | SQL bump (35) |
 | SQ-A5, SQ-A6 | #1778 | Publish 49a's deferred migrations jointly, with default-only changes (T3-6) | A4 | SQL bump |
 | SQ-A7 | #1779 | Applied-schema history and hold-and-degrade rollback (T3-4, T3-5). Covers any change, not only lossy ones | A5, A6 | SQL bump, new code |
 | SQ-A8 | #1756 | Sdk.Database migration writer for TYPE changes (`sdks/` edits authorized) | K4, A6 | SDK output |
@@ -212,8 +212,8 @@ The largest risk in the tier is IX-V3, HNSW repair under MVCC. Every index kind 
 
 | Batch | Runs | Bumps |
 |---|---|---|
-| B1 | EN-G1, SQ-T4, SQ-A4, OQ-K1, EN-C1 | none |
-| B2 | SQ-K4, SQ-L1, OQ-S1, GQ-T1, EN-A1 | SQL (K4), Graph catalog (T1) |
+| B1 | EN-G1, SQ-T4, SQ-A4, OQ-K1, EN-C1 | SQL 35 (A4), after EN-G1 |
+| B2 | SQ-K4, SQ-L1, OQ-S1, GQ-T1, EN-A1 | SQL 36 (K4), Graph catalog (T1) |
 | B3 | SQ-A5, EN-X1, SQ-H3, OQ-S2, GQ-N1, EN-P1 | SQL (A5) |
 | B4 | SQ-A6, SQ-L2, EN-C2, IX-B1, SQ-J3, IX-R1 (#1644) | B-tree format (B1), Graph catalog (R1) |
 | B5 | SQ-A7, SQ-L3, IX-S1 after A7, SQ-CT1, OQ-M1 with OQ-W1 | SQL (A7, then S1 in merge order) |
