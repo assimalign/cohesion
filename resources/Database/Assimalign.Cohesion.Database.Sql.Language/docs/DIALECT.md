@@ -1933,7 +1933,7 @@ introduced the Joint/ kind-9 meaning. Every earlier format is refused (#1152).
 Compiled-schema v12 remains current; record encodings and wire messages are unchanged.
 SQL format 27 introduced the per-column TYPE default-assignment flag in table extension 7; older files
 refuse without an upgrade reader. Compiled-schema v8 was unchanged by SQ-A.
-The current compiled-schema v12 remains unchanged by SQ-A3.
+Compiled-schema v11 was unchanged by SQ-A3.
 CS02064 names a missing assignment pathway for the value, USING result or default (42804).
 Reference anchors: PostgreSQL tablecmds.c:14949-14998,15142-15199,15269-15304,15612-15624 and
 utils/adt/varchar.c:620-648 in the local clone.
@@ -3942,7 +3942,7 @@ also records extraction NULL and negative-index behavior.
 
 SQL format 33 fences the new contextual function names and quoted ordinary-call
 rendering. Format 32 and earlier files are refused before expression loading; compiled
-schema v12 and JSONB storage bytes are unchanged. Quoted names such as `"json_value"`
+schema v11 and JSONB storage bytes were unchanged. Quoted names such as `"json_value"`
 remain ordinary function calls (PostgreSQL gram.y:16017-16027,16576-16633).
 
 The three contextual functions are measured profile clauses. Their names and clause

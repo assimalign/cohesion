@@ -73,6 +73,12 @@ public sealed class SqlDialectDocumentationTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Dialect: format history retains the version that introduced each record (#1723)")]
+    [InlineData("Sql.Language", "DIALECT.md", "Compiled-schema v11 was unchanged by SQ-A3.")]
+    [InlineData("Sql.Language", "DIALECT.md", "schema v11 and JSONB storage bytes were unchanged.")]
+    [InlineData("Sql.Language", "DESIGN.md", "grammar, AST and compiled-schema v11 were unchanged.")]
+    [InlineData("Sql", "DESIGN.md", "Compiled-schema v11, dense row encoding,")]
+    [InlineData("Sql", "DESIGN.md", "compiled documents advanced to **cohesion/database-schema/v6** in #1437")]
+    [InlineData("Sql", "DESIGN.md", "cohesion/database-schema/v7` in #1108, matching Sdk.Database.")]
     [InlineData("Sql.Language", "DIALECT.md", "(TRUNCATE restart). SQL format 29 refuses format 28 and earlier")]
     [InlineData("Sql.Language", "DIALECT.md", "Format 29 added owned-sequence metadata to format 28's shared sequence records")]
     [InlineData("Sql.Language", "DIALECT.md", "abandoned owners. SQL remains format 29; existing kind-14 reclamation records suffice.")]

@@ -19,8 +19,8 @@ are expressed by the shared compiled metadata. No project reference or public se
 
 ## Compiled SQL schema v10 (#1630, SQ-P1)
 
-The shared compiled index record adds optional Predicate text. SDK artifacts and baselines
-use v12 and reject v11 and earlier formats through the existing gate. SDK extraction keeps its
+The shared compiled index record added optional Predicate text in v10. SDK artifacts and baselines
+used v10 and rejected v9 and earlier formats through the existing gate. SDK extraction keeps its
 unconditional typed Index declarations; no extractor API or project boundary changes.
 
 The migration writer retains predicates on initial indexes and drop/add replacements. It parses
@@ -57,7 +57,7 @@ are refused without an upgrade path. Migration SQL retains the validated CustomT
 
 ## Fixed-length strings (#1437)
 
-SDK and runtime now emit **cohesion/database-schema/v12** together. CLR char maps to Character (19)
+SDK and runtime advanced to **cohesion/database-schema/v6** together in #1437. CLR char maps to Character (19)
 with length one, and explicit CHAR(n)/CHARACTER(n) string columns normalize through the schema
 snapshot to Character with length n. Shared SqlTypeModifiers still owns length validation.
 Migration SQL renders CHAR(n), and switching between CHAR and VARCHAR is an AlterColumn change.
