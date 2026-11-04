@@ -567,6 +567,9 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             StatementTimeout = TimeSpan.FromSeconds(11),
             LockTimeout = TimeSpan.FromMilliseconds(222),
             StatementMemoryBudget = 3 * 1024 * 1024,
+            TempDirectory = Path.Combine(rootPath, "spill"),
+            TempSpaceQuota = 7 * 1024 * 1024,
+            StatementTempSpaceQuota = 5 * 1024 * 1024,
             CheckpointInterval = TimeSpan.FromMinutes(9),
             CheckpointJournalSize = 3 * 1024 * 1024,
             WorkerFailureWindow = TimeSpan.FromSeconds(42),
@@ -592,6 +595,9 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         copy.StatementTimeout.ShouldBe(options.StatementTimeout);
         copy.LockTimeout.ShouldBe(options.LockTimeout);
         copy.StatementMemoryBudget.ShouldBe(options.StatementMemoryBudget);
+        copy.TempDirectory.ShouldBe(options.TempDirectory);
+        copy.TempSpaceQuota.ShouldBe(options.TempSpaceQuota);
+        copy.StatementTempSpaceQuota.ShouldBe(options.StatementTempSpaceQuota);
         copy.CheckpointInterval.ShouldBe(options.CheckpointInterval);
         copy.CheckpointJournalSize.ShouldBe(options.CheckpointJournalSize);
         copy.WorkerFailureWindow.ShouldBe(options.WorkerFailureWindow);
@@ -610,10 +616,10 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Every property, the internal ones included: an option added to either set fails here
         // until Snapshot copies it and this test checks it.
-        typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(16);
+        typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(19);
         typeof(SqlDatabaseEngineOptions)
             .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
-            .Length.ShouldBe(19);
+            .Length.ShouldBe(22);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a name that breaks the database-name rule is refused at the declaration")]

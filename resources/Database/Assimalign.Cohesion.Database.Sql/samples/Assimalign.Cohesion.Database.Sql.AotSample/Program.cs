@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -14,6 +15,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.AotSample;
@@ -173,6 +175,7 @@ internal static class Program
 
             await listener.DisposeAsync();
             await RunJointMigrationAsync();
+            await RunTempSpaceAsync();
         }
         catch (Exception exception)
         {
@@ -181,6 +184,50 @@ internal static class Program
 
         Console.WriteLine($"smoke: {(_failed == 0 ? "passed" : "FAILED")} {_passed} of {_passed + _failed} checks (in process and over the wire)");
         return _failed == 0 ? 0 : 1;
+    }
+
+    private static async Task RunTempSpaceAsync()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "cohesion-temp-aot-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var engine = SqlDatabaseEngine.Create("temp-aot", new()
+            { TempDirectory = directory, TempSpaceQuota = 32 * 1024 * 1024 }))
+            {
+                using var statement = engine.TempSpace!.CreateStatement(32 * 1024 * 1024);
+                using var sort = StorageTempSorter.Create(statement, 65536, 256);
+                byte[] key = new byte[4], value = new byte[128];
+                for (int i = 0; i < 7000; i++)
+                {
+                    BinaryPrimitives.WriteInt32BigEndian(key, i % 91);
+                    BinaryPrimitives.WriteInt32LittleEndian(value, i);
+                    sort.Append(key, value);
+                }
+                using var run = sort.Complete();
+                using var reader = StorageTempSortReader.Create(run, 8192 + 256);
+                int rows = 0, previousKey = -1, previousId = -1;
+                bool ordered = true;
+                while (reader.MoveNext())
+                {
+                    int currentKey = BinaryPrimitives.ReadInt32BigEndian(reader.Key.Span);
+                    int id = BinaryPrimitives.ReadInt32LittleEndian(reader.Value.Span);
+                    ordered &= currentKey > previousKey || (currentKey == previousKey && id > previousId);
+                    previousKey = currentKey; previousId = id; rows++;
+                }
+                Check("temp external sort rows", rows, 7000);
+                Check("temp external sort stable keys", ordered, true);
+                Check("temp external sort passes", sort.MergePasses > 1, true);
+                using var partitions = StorageTempPartitions.Create(statement, 2, 17408);
+                partitions.Append(0, key); partitions.Append(1, value); partitions.Seal();
+                Check("temp hash partition", partitions.GetPartition(1)!.RecordCount, 1L);
+                using var refused = engine.TempSpace.CreateStatement(0);
+                using var empty = refused.CreateRun();
+                try { empty.Append(key); Fail("temp statement quota", "growth accepted"); }
+                catch (StorageTempException failure) { Check("temp statement quota", failure.Code, "CK05002"); }
+            }
+            Check("temp disposal files", Directory.GetFiles(directory).Length, 0);
+        }
+        finally { if (Directory.Exists(directory)) { Directory.Delete(directory, recursive: true); } }
     }
 
     private static async Task RunJointMigrationAsync()

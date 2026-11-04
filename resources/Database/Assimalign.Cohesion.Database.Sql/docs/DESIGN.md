@@ -1,5 +1,37 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Temporary space options and lifetime (#1789, EN-X1)
+
+SqlDatabaseEngine owns and disposes a public nullable StorageTempSpace. A file engine defaults
+to RootPath/.cohesion-temp; the leading dot avoids collision with a valid database name.
+TempDirectory overrides must be dedicated descendants of RootPath. An in-memory engine has no
+space unless TempDirectory is explicitly set. The options snapshot includes TempDirectory,
+TempSpaceQuota and StatementTempSpaceQuota. They are configuration for the substrate only:
+SQL operators still refuse with CS05067 as before. No DIALECT or conformance behavior changes.
+
+TempSpaceQuota is nullable: an explicit nonnegative physical-byte cap, or min(10 GiB, 25% of
+available bytes) measured when the space is created, before startup sweeping. Zero refuses page
+growth. StatementTempSpaceQuota is nullable: an explicit nonnegative cap, or four times
+StatementMemoryBudget (saturating at Int64.MaxValue). Quotas include 8 KiB framing and both
+input and output files during a merge, and are released when the run/statement is disposed.
+
+The floor delegate uses a lock-free published database snapshot, so the temp monitor cannot
+invert the engine registry/storage lock order. It reserves at least one database, even before
+publication. For N = max(1, published database count), its components are 1 MiB +
+N * (BufferPoolCapacity + 128 * 8192 + 2 * (JournalSizeLimit +
+JointBracketBytes(32, 0))). The floor adds max(1 MiB, ceil(components / 4)); overflow saturates at
+Int64.MaxValue. This conservatively applies JointEngineReserve's dirty-pool, reclamation bracket
+and 25% headroom shape using both file sets' journal caps, rather than a migration-specific row
+estimate. Pool reserves apply even when physical data growth is nonsparse. It can refuse earlier
+than a particular migration's estimate. Storage probes free space before **each** page reservation,
+subtracting pending unwritten temp pages. It does not reserve blocks against unrelated writers.
+
+The default temp directory inherits the engine root's permissions; explicit/pre-existing
+directories must carry the same ACL/mode as the data directory. Temp bytes remain unencrypted.
+Run disposal deletes files; a directory lease protects the open-time sweep from live files.
+No durable data, catalog, journal, record-space or wire format changes.
+
+
 ## Refused opens preserve every file (#1744)
 
 The catalog preflight loads catalog metadata, checks the record-space marker and recorded schema

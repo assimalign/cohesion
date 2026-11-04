@@ -63,6 +63,20 @@ public sealed class SqlDatabaseEngineOptions
     /// Exceeding the budget fails before writes or publication; hash joins never spill.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
+    /// <summary>Gets or sets a dedicated spill directory. File engines default to RootPath/.cohesion-temp;
+    /// an override must remain under RootPath. In-memory engines have no spill space unless set.</summary>
+    public FileSystemPath? TempDirectory { get; set; }
+
+    /// <summary>Gets or sets the engine's physical temporary-byte quota. Null fixes the quota at
+    /// min(10 GiB, 25% of available volume bytes), measured when the engine is created before sweeping.
+    /// Zero refuses all growth. Must be nonnegative. The live free-space floor always applies.</summary>
+    public long? TempSpaceQuota { get; set; }
+
+    /// <summary>Gets or sets the statement's physical temporary-byte quota. Null uses four times
+    /// StatementMemoryBudget, saturating at Int64.MaxValue. Zero refuses growth. Must be nonnegative.
+    /// SQL operators retain CS05067 until their spill consumers are wired.</summary>
+    public long? StatementTempSpaceQuota { get; set; }
+
     /// <summary>
     /// Gets or sets the checkpoint time backstop: the longest a file set (data or catalog) whose
     /// journal received records waits for a checkpoint, which durably flushes its pages and
@@ -249,6 +263,9 @@ public sealed class SqlDatabaseEngineOptions
         StatementTimeout = StatementTimeout,
         LockTimeout = LockTimeout,
         StatementMemoryBudget = StatementMemoryBudget,
+        TempDirectory = TempDirectory,
+        TempSpaceQuota = TempSpaceQuota,
+        StatementTempSpaceQuota = StatementTempSpaceQuota,
         CheckpointInterval = CheckpointInterval,
         CheckpointJournalSize = CheckpointJournalSize,
         WorkerFailureWindow = WorkerFailureWindow,
@@ -279,6 +296,9 @@ public sealed class SqlDatabaseEngineOptions
         public global::System.TimeSpan StatementTimeout => _target.StatementTimeout;
         public global::System.TimeSpan LockTimeout => _target.LockTimeout;
         public long StatementMemoryBudget => _target.StatementMemoryBudget;
+        public global::System.IO.FileSystemPath? TempDirectory => _target.TempDirectory;
+        public long? TempSpaceQuota => _target.TempSpaceQuota;
+        public long? StatementTempSpaceQuota => _target.StatementTempSpaceQuota;
         public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
         public long CheckpointJournalSize => _target.CheckpointJournalSize;
         public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;
