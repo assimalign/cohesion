@@ -73,10 +73,22 @@ internal sealed partial class SqlPlanner
                     && aggregates[slots[projected] - select.GroupBy.Count].Function.IsNeverNull),
             });
         }
+        // Bind every select-list aggregate before matching whole window keys to targets,
+        // including targets written after the window that uses them.
+        if (HasWindows(select))
+        {
+            var names = NamedWindows(select);
+            foreach (var window in WindowExpressions(select))
+            {
+                var windowKeys = WindowKeysOf(window, names);
+                foreach (var key in windowKeys.Partition) { BindKey(key); }
+                foreach (var key in windowKeys.Order) { BindKey(key.Expression); }
+            }
+        }
         foreach (var definition in select.Windows)
         {
-            foreach (var key in definition.Specification.PartitionBy) { BindSlots(key); }
-            foreach (var key in definition.Specification.OrderBy) { BindSlots(key.Expression); }
+            foreach (var key in definition.Specification.PartitionBy) { BindKey(key); }
+            foreach (var key in definition.Specification.OrderBy) { BindKey(key.Expression); }
         }
         if (select.Having is not null)
         {
@@ -87,7 +99,7 @@ internal sealed partial class SqlPlanner
         CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
         foreach (var order in select.OrderBy)
         {
-            BindSlots(order.Expression, orderByProjections);
+            BindKey(order.Expression, orderByProjections);
         }
 
         // Every slot is known now. The input relation, the keys and the aggregates' operands bind
@@ -164,6 +176,22 @@ internal sealed partial class SqlPlanner
             select.IsDistinct);
         return windows is null ? result : FinishWindowGroup(select, result, groupScope, windows, keys.Length + boundAggregates.Length, orderByProjections);
 
+        void BindKey(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
+        {
+            if (outputSlots is null || !outputSlots.ContainsKey(expression))
+            {
+                // Ordinary nonvolatile calls still reach FindIndex. In particular, expression
+                // keys on the allocation-guard path need no extra tree walk or retained state.
+                for (int i = 0; i < aggregates.Count; i++)
+                {
+                    if (!HasVolatileAggregateInputs(aggregates[i].Call, evaluator)) { continue; }
+                    if (ContainsAggregate(expression)) { ReuseKeyAggregateSlots(expression, select, evaluator, slots, outputSlots); }
+                    break;
+                }
+            }
+            BindSlots(expression, outputSlots);
+        }
+
         void BindSlots(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -174,9 +202,6 @@ internal sealed partial class SqlPlanner
             if (expression is SqlWindowExpression window)
             {
                 foreach (var argument in Children(window.Function)) { if (argument is not SqlStarExpression) { BindSlots(argument); } }
-                var windowKeys = WindowKeysOf(window, NamedWindows(select));
-                foreach (var key in windowKeys.Partition) { BindSlots(key); }
-                foreach (var key in windowKeys.Order) { BindSlots(key.Expression); }
                 return;
             }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
@@ -266,6 +291,66 @@ internal sealed partial class SqlPlanner
         }
     }
 
+    /// <summary>Matches whole keys before allocating aggregate slots, as PostgreSQL parse_clause.c:2205-2206,2815-2824 does.</summary>
+    private void ReuseKeyAggregateSlots(SqlExpression key, SqlSelectExpression select,
+        SqlExpressionEvaluator evaluator, Dictionary<SqlExpression, int> slots,
+        IReadOnlyDictionary<SqlExpression, int>? outputSlots)
+    {
+        // Output aliases belong to the completed row, not this input-scope comparison.
+        if (ContainsOutput(key)) { return; }
+        // Only fully bound counterparts qualify. Searching syntax avoids retaining another
+        // per-plan collection on the ordinary grouping path. HAVING is never a candidate.
+        foreach (var column in select.Columns)
+        { if (Match(column.Expression)) { return; } }
+        if (HasWindows(select))
+        {
+            var names = NamedWindows(select);
+            foreach (var window in WindowExpressions(select))
+            {
+                var windowKeys = WindowKeysOf(window, names);
+                foreach (var candidate in windowKeys.Partition) { if (Match(candidate)) { return; } }
+                foreach (var candidate in windowKeys.Order) { if (Match(candidate.Expression)) { return; } }
+            }
+        }
+        foreach (var definition in select.Windows)
+        {
+            foreach (var candidate in definition.Specification.PartitionBy) { if (Match(candidate)) { return; } }
+            foreach (var candidate in definition.Specification.OrderBy) { if (Match(candidate.Expression)) { return; } }
+        }
+        foreach (var candidate in select.OrderBy) { if (Match(candidate.Expression)) { return; } }
+
+        bool Match(SqlExpression counterpart)
+        {
+            if (ReferenceEquals(key, counterpart) || !SameGroupExpression(key, counterpart, evaluator) ||
+                !MapAggregateSlots(key, counterpart, false)) { return false; }
+            return MapAggregateSlots(key, counterpart, true);
+        }
+
+        bool MapAggregateSlots(SqlExpression expression, SqlExpression counterpart, bool assign)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is SqlFunctionCallExpression call && IsAggregate(call))
+            {
+                if (!slots.TryGetValue(counterpart, out int slot)) { return false; }
+                if (assign && HasVolatileAggregateInputs(call, evaluator)) { slots[expression] = slot; }
+                return true;
+            }
+            using var first = Children(expression).GetEnumerator();
+            using var second = Children(counterpart).GetEnumerator();
+            while (first.MoveNext())
+            {
+                if (!second.MoveNext() || !MapAggregateSlots(first.Current, second.Current, assign)) { return false; }
+            }
+            return !second.MoveNext();
+        }
+
+        bool ContainsOutput(SqlExpression expression)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            return outputSlots is not null && (outputSlots.ContainsKey(expression) || Children(expression).Any(ContainsOutput));
+        }
+    }
+
     /// <summary>Refuses aggregate reuse when any argument, FILTER or inner ordering input may be volatile.</summary>
     private static bool HasVolatileAggregateInputs(SqlFunctionCallExpression call, SqlExpressionEvaluator evaluator)
     {
@@ -284,9 +369,10 @@ internal sealed partial class SqlPlanner
         static bool HasVolatileInput(SqlExpression input, SqlExpressionEvaluator evaluator)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
-            // Child query bodies bind in their own scope. Preserve separate aggregate invocations
-            // unless their volatility can be proved, as PostgreSQL's walker descends into sublinks.
-            if (input is SqlNextValueExpression or SqlSubqueryExpression or SqlExistsExpression or
+            // PostgreSQL never shares separate child-query occurrences either: by prepagg.c
+            // each is a separate SubPlan, so equal() fails (planner.c:1475-1477,1880-1881;
+            // prepagg.c:416). This refusal is independent of the child query's volatility.
+            if (input is SqlSubqueryExpression or SqlExistsExpression or
                 SqlQuantifiedComparisonExpression or SqlInExpression { Subquery: not null }) { return true; }
             if (input is SqlFunctionCallExpression functionCall &&
                 evaluator.ResolveFunction(functionCall)?.Volatility == SqlFunctionVolatility.Volatile) { return true; }
@@ -313,6 +399,7 @@ internal sealed partial class SqlPlanner
         {
             // Repeated subqueries in one scope share a group key when their complete bodies
             // match structurally. The ordinary child comparison still binds scalar operands.
+            (SqlWindowExpression a, SqlWindowExpression b) => SqlPersistedExpression.AreEquivalent(a, b),
             (SqlSubqueryExpression a, SqlSubqueryExpression b) => SqlPersistedExpression.SameQuery(a.Select, b.Select),
             (SqlExistsExpression a, SqlExistsExpression b) => a.IsNegated == b.IsNegated && SqlPersistedExpression.SameQuery(a.Subquery, b.Subquery),
             (SqlQuantifiedComparisonExpression a, SqlQuantifiedComparisonExpression b) => a.Operator == b.Operator &&

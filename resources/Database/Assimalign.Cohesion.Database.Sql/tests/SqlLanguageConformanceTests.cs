@@ -605,6 +605,39 @@ public sealed class SqlLanguageConformanceTests
         sequence.ShouldHaveSingleItem().ShouldBe(new object?[] { 6L });
     }
 
+    public static IEnumerable<object[]> VolatileAggregateKeyClauses()
+    {
+        foreach (string grouping in new[] { "", " GROUP BY k", " GROUP BY GROUPING SETS ((k))", " GROUP BY ROLLUP(k)", " GROUP BY CUBE(k)" })
+        {
+            yield return [grouping, " ORDER BY SUM(nextval('s'))", 6m, 3L];
+            yield return [grouping, " HAVING SUM(nextval('s')) = 12", 9m, 6L];
+            yield return [grouping, " HAVING SUM(nextval('s')) = 12 ORDER BY SUM(nextval('s'))", 9m, 6L];
+            yield return [grouping, " ORDER BY SUM(nextval('s')) + 1", 9m, 6L];
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: whole aggregate keys reuse targets while HAVING and nested keys stay independent (#1763)")]
+    [MemberData(nameof(VolatileAggregateKeyClauses))]
+    public async Task Select_VolatileAggregateKeys_ShouldRespectOccurrenceScope(string grouping, string clause, decimal sum, long allocations)
+    {
+        // Arrange: one slot sums 1+2+3; independent slots sum odd/even allocations.
+        await using var engine = SqlDatabaseEngine.Create("sql-aggregate-key-conformance", new());
+        var database = await engine.CreateDatabaseAsync("audit", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SEQUENCE s;");
+        await ExecuteAsync(session, "CREATE TABLE volatile_aggregates(k INT);");
+        await ExecuteAsync(session, "INSERT INTO volatile_aggregates VALUES(1),(1),(1);");
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT SUM(nextval('s')) FROM volatile_aggregates{grouping}{clause};");
+        var sequence = await RowsAsync(session, "SELECT currval('s');");
+
+        // Assert
+        rows.Count.ShouldBe(grouping.Contains("ROLLUP") || grouping.Contains("CUBE") ? 2 : 1);
+        rows.ShouldAllBe(row => Equals(row[0], sum));
+        sequence.ShouldHaveSingleItem()[0].ShouldBe(allocations);
+    }
+
     /// <summary>Applies the full Int64 count range consistently to every materialized SELECT shape.</summary>
     /// <param name="query">The ordered query producing three rows.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - LIMIT/OFFSET: Int64 counts preserve the row window for every plan shape")]

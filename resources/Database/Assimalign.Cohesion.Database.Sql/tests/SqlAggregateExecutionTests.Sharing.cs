@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,6 +16,10 @@ public sealed partial class SqlAggregateExecutionTests
         string[] aggregates =
         [
             "SUM(observe(id))",
+            "COUNT(DISTINCT observe(id))",
+            "SUM(CASE WHEN id > 0 THEN observe(id) ELSE 0 END)",
+            "SUM(CAST(observe(id) AS BIGINT))",
+            "SUM(-observe(id))",
             "SUM(COALESCE(NULL, observe(id)) + 0)",
             "SUM(random())",
             "SUM(id) FILTER (WHERE observe(id) > 0)",
@@ -55,9 +61,9 @@ public sealed partial class SqlAggregateExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Aggregate sharing: repeated HAVING and ORDER BY calls follow scalar volatility (#1763)")]
-    [InlineData(SqlFunctionVolatility.Volatile, "", 12)]
-    [InlineData(SqlFunctionVolatility.Volatile, " GROUP BY g", 12)]
-    [InlineData(SqlFunctionVolatility.Volatile, " GROUP BY ROLLUP(g)", 12)]
+    [InlineData(SqlFunctionVolatility.Volatile, "", 9)]
+    [InlineData(SqlFunctionVolatility.Volatile, " GROUP BY g", 9)]
+    [InlineData(SqlFunctionVolatility.Volatile, " GROUP BY ROLLUP(g)", 9)]
     [InlineData(SqlFunctionVolatility.Stable, "", 3)]
     [InlineData(SqlFunctionVolatility.Stable, " GROUP BY g", 3)]
     [InlineData(SqlFunctionVolatility.Stable, " GROUP BY ROLLUP(g)", 3)]
@@ -162,13 +168,14 @@ public sealed partial class SqlAggregateExecutionTests
         calls.ShouldBe(6);
         rows.ShouldNotBeEmpty();
 
-        // Act: a separately written ORDER BY window call has its own aggregate as well.
+        // Act: the whole ORDER BY window expression reuses its grouped aggregate inputs.
+        // The window functions themselves still have separate aggregate states.
         calls = 0;
         var ordered = await RowsAsync(session, $"SELECT {aggregate} OVER w, {aggregate} OVER w FROM t{grouping} " +
             $"WINDOW w AS () ORDER BY {aggregate} OVER w;");
 
         // Assert
-        calls.ShouldBe(9);
+        calls.ShouldBe(grouping.Length == 0 ? 9 : 6);
         ordered.Count.ShouldBe(rows.Count);
     }
 
@@ -196,7 +203,7 @@ public sealed partial class SqlAggregateExecutionTests
         rows.ShouldNotBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Aggregate sharing: window partitions and shared-sort prefixes respect independent aggregate slots (#1763)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Aggregate sharing: equal whole window keys reuse aggregate slots (#1763)")]
     [InlineData(" GROUP BY g", "partition", false)]
     [InlineData(" GROUP BY g", "partition", true)]
     [InlineData(" GROUP BY g", "order", false)]
@@ -211,7 +218,7 @@ public sealed partial class SqlAggregateExecutionTests
     [InlineData(" GROUP BY GROUPING SETS ((g))", "prefix", true)]
     public async Task ExecuteAsync_WindowAggregateKeys_ShouldUseEachBoundResult(string grouping, string kind, bool wrapped)
     {
-        // Arrange: the two written aggregates produce different partitions or opposite orderings.
+        // Arrange: independent aggregates would produce different partitions or orderings.
         int calls = 0;
         bool partition = kind == "partition";
         var builder = SqlDatabaseEngine.CreateBuilder("window-aggregate-key-sharing");
@@ -232,7 +239,120 @@ public sealed partial class SqlAggregateExecutionTests
             $"{function} OVER ({clause}{aggregate}) FROM t{grouping} ORDER BY g;");
 
         // Assert
-        calls.ShouldBe(6);
-        CheckRows(rows, partition ? [[1, 3L, 1L], [2, 3L, 1L], [3, 3L, 1L]] : [[1, 1L, 3L], [2, 2L, 2L], [3, 3L, 1L]]);
+        calls.ShouldBe(3);
+        CheckRows(rows, partition ? [[1, 2L, 2L], [2, 1L, 1L], [3, 2L, 2L]] : [[1, 2L, 2L], [2, 1L, 1L], [3, 3L, 3L]]);
+    }
+
+    public static IEnumerable<object[]> WholeAggregateKeys()
+    {
+        foreach (string grouping in new[] { " GROUP BY g", " GROUP BY GROUPING SETS ((g))" })
+        {
+            yield return ["SUM(nextval('s'))", " ORDER BY SUM(nextval('s'))", grouping, 6m, 3L];
+            yield return ["SUM(nextval('s'))", " HAVING SUM(nextval('s')) = 12 ORDER BY SUM(nextval('s'))", grouping, 9m, 6L];
+            yield return ["SUM(nextval('s'))", " ORDER BY SUM(nextval('s')) + 1", grouping, 9m, 6L];
+            yield return ["SUM(nextval('s')) AS result", " ORDER BY result + SUM(nextval('s'))", grouping, 9m, 6L];
+            yield return ["COUNT(*)", " ORDER BY SUM(nextval('s')) + 1, SUM(nextval('s')) + 1", grouping, 3L, 3L];
+            yield return ["SUM(nextval('s')), COUNT(*) OVER w", " WINDOW w AS (ORDER BY SUM(nextval('s')))", grouping, 6m, 3L];
+            yield return ["COUNT(*) OVER (PARTITION BY SUM(nextval('s'))), SUM(nextval('s'))", "", grouping, 1L, 3L];
+            yield return ["SUM(nextval('s')) + MAX(nextval('s'))", " ORDER BY SUM(nextval('s')) + MAX(nextval('s'))", grouping, 15m, 6L];
+            yield return ["SUM((SELECT nextval('s') + t.id * 0))", " ORDER BY SUM((SELECT nextval('s') + t.id * 0))", grouping, 6m, 3L];
+            yield return ["COUNT(*) OVER (ORDER BY SUM(nextval('s'))), COUNT(*) OVER (ORDER BY SUM(nextval('s')))", "", grouping, 1L, 3L];
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Aggregate sharing: whole targets and earlier keys map slots while nested keys remain independent (#1763)")]
+    [MemberData(nameof(WholeAggregateKeys))]
+    public async Task ExecuteAsync_WholeAggregateKeys_ShouldReadMatchedSlots(string projection, string suffix, string grouping, object expected, long allocations)
+    {
+        // Arrange: slots run left to right per row. One SUM gives 1+2+3=6;
+        // independent SUM/HAVING slots give 1+3+5=9 and 2+4+6=12.
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("keys");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SEQUENCE s;");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,1),(2,1),(3,1);");
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT {projection} FROM t{grouping}{suffix};");
+        var sequence = await RowsAsync(session, "SELECT currval('s');");
+
+        // Assert
+        rows.ShouldHaveSingleItem()[0].ShouldBe(expected);
+        if (projection.StartsWith("COUNT(*) OVER (PARTITION", StringComparison.Ordinal)) { rows[0][1].ShouldBe(6m); }
+        if (projection.EndsWith(", COUNT(*) OVER w", StringComparison.Ordinal)) { rows[0][1].ShouldBe(1L); }
+        sequence.ShouldHaveSingleItem()[0].ShouldBe(allocations);
+        if (projection.StartsWith("COUNT(*) OVER (ORDER", StringComparison.Ordinal))
+        {
+            // Repeat from a fresh sequence position to pin executed sort work as well.
+            await RowsAsync(session, "SELECT setval('s', 1, FALSE);");
+            var plan = await RowsAsync(session, $"EXPLAIN ANALYZE SELECT {projection} FROM t{grouping}{suffix};");
+            plan.Where(row => Equals(row[2], "WindowAgg")).ShouldHaveSingleItem()[5]!.ToString()!
+                .ShouldContain("sort_count=1", Case.Sensitive);
+            (await RowsAsync(session, "SELECT currval('s');")).ShouldHaveSingleItem()[0].ShouldBe(3L);
+            rows[0][1].ShouldBe(1L);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Aggregate sharing: grouped window keys merge stages and share sort prefixes for nonvolatile inputs (#1763)")]
+    [InlineData("SUM(id)", false)]
+    [InlineData("SUM(observe(id))", false)]
+    [InlineData("SUM(id)", true)]
+    [InlineData("SUM(observe(id))", true)]
+    public async Task ExecuteAsync_NonvolatileWindowKeys_ShouldShareSort(string key, bool prefix)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("window-keys");
+        builder.Functions.Add(SqlScalarFunction.Create<int, int>("observe", value => value, SqlFunctionVolatility.Stable));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("keys");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(id INT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,1),(2,2),(3,3);");
+        string extra = prefix ? ", g" : "";
+
+        // Act
+        var plan = await RowsAsync(session, $"EXPLAIN SELECT ROW_NUMBER() OVER (ORDER BY {key}{extra}), RANK() OVER (ORDER BY {key}) FROM t GROUP BY g;");
+
+        // Assert
+        var windows = plan.Where(row => Equals(row[2], "WindowAgg")).ToArray();
+        windows.Length.ShouldBe(prefix ? 2 : 1);
+        if (prefix) { windows.ShouldContain(row => row[5]!.ToString()!.Contains("sort_shared=true", StringComparison.Ordinal)); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Aggregate sharing: volatile builtins and nonvolatile child queries retain separate states (#1763)")]
+    [InlineData("currval('s')", " GROUP BY g", false)]
+    [InlineData("lastval()", " GROUP BY g", false)]
+    [InlineData("gen_random_uuid()", " GROUP BY g", true)]
+    [InlineData("(SELECT 1)", " GROUP BY g", false)]
+    [InlineData("currval('s')", " GROUP BY GROUPING SETS ((g))", false)]
+    [InlineData("lastval()", " GROUP BY GROUPING SETS ((g))", false)]
+    [InlineData("gen_random_uuid()", " GROUP BY GROUPING SETS ((g))", true)]
+    [InlineData("(SELECT 1)", " GROUP BY GROUPING SETS ((g))", false)]
+    public async Task ExecuteAsync_NonshareableInputs_ShouldCreateSeparateStates(string input, string grouping, bool uuid)
+    {
+        // Arrange
+        int states = 0, transitions = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("builtin-sharing");
+        builder.Functions.Add(SqlAggregateFunction.Create<long, long, long>("tracked_sum", () => { states++; return 0; },
+            (state, value) => { transitions++; return state + value; }, state => state));
+        builder.Functions.Add(SqlAggregateFunction.Create<long, Guid, long>("tracked_count", () => { states++; return 0; },
+            (state, value) => { transitions++; return state + 1; }, state => state));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("sharing");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SEQUENCE s;");
+        await RowsAsync(session, "SELECT nextval('s');");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,1),(2,1),(3,1);");
+        string aggregate = uuid ? "tracked_count" : "tracked_sum";
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT {aggregate}({input}), {aggregate}({input}) FROM t{grouping};");
+
+        // Assert
+        states.ShouldBe(2);
+        transitions.ShouldBe(6);
+        rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 3L, 3L });
     }
 }

@@ -2595,8 +2595,9 @@ flowchart LR
   Every set identity enters its hash key, so duplicate sets and subtotal NULLs never
   share state with other sets or stored NULLs.
   A logical transition evaluates FILTER, arguments and input ordering once per row
-  before feeding all sets, as execExpr.c:3708–3740 does. Volatile calls never share
-  a logical transition. Immutable input tuples may alias, while mutable ordered
+  before feeding all sets, as execExpr.c:3708–3740 does. Separate volatile aggregate occurrences
+  never share a logical transition; equal whole keys reuse the matched occurrence as described below.
+  Immutable input tuples may alias, while mutable ordered
   representatives are copied per set to keep DISTINCT replacement independent.
   Completed rows contain masked keys, independent aggregate results and GROUPING masks before HAVING,
   projection, ordering or correlated reads. The rightmost argument is bit zero
@@ -2634,15 +2635,26 @@ flowchart LR
   before argument or ordering subqueries, evaluation, coercion, DISTINCT retention or transition
   calls. Only TRUE admits a row. Independent children inside a filtered call are deferred until
   demanded and then cached per statement; correlated children retain their row lifetime.
-  All calls containing volatile arguments, FILTER conditions or inner ORDER BY keys (including
-  WITHIN GROUP) have independent states in plain grouping and grouping sets (#1763, SQ-H3),
-  including repeated calls in HAVING and ORDER BY. Stable and Immutable inputs retain sharing.
-  Child queries conservatively prevent sharing as their bodies bind separately. ORDER BY aliases
-  and ordinals still read completed outputs. Window calls each bind a separate aggregate and result
-  slot. Partition/sort matching also compares grouped aggregate slots, including inside scalar
-  key expressions, so independent volatile aggregate results cannot share window keys or sort prefixes.
-  Repeated visits to one named-window key syntax node retain its one aggregate slot.
-  This follows PostgreSQL optimizer/prep/prepagg.c:387-389 and optimizer/util/clauses.c:592-598,636-640.
+  Separate calls containing volatile arguments, FILTER conditions or inner ORDER BY keys (including
+  WITHIN GROUP) have independent states in plain grouping and grouping sets (#1763, SQ-H3): SELECT
+  duplicates, every HAVING occurrence and aggregates inside larger unmatched keys remain independent.
+  Whole query ORDER BY and inline/named window PARTITION BY / ORDER BY keys structurally equal
+  (SameGroupExpression) to a select-list expression or an earlier whole key reuse that occurrence's
+  aggregate slots before allocation. One parallel tree walk maps the calls; the executor adds no reuse.
+  Select-list aggregates bind before window keys, including targets following the window expression.
+  Scalar output evaluation is unchanged; ORDER BY aliases and ordinals still read completed outputs.
+  Stable and Immutable inputs retain sharing. Separate child-query occurrences never share states:
+  PostgreSQL expands each child to a separate SubPlan before prepagg.c, so equal() fails
+  (optimizer/plan/planner.c:1475-1477,1880-1881; optimizer/prep/prepagg.c:416). Equal complete child
+  queries can still match inside a whole key during target matching. Window calls each bind a separate
+  aggregate and result slot. Partition/sort matching also compares grouped aggregate slots, including
+  inside scalar key expressions, so independent aggregate results cannot share keys or sort prefixes.
+  Equal whole window keys receive equal slots and merge without executor changes. Repeated visits
+  to one named-window key syntax node retain its one slot. PostgreSQL performs whole-key target
+  matching in parser/parse_clause.c:2205-2206,2815-2824 and merges equal windows in
+  parser/parse_agg.c:1103-1112; optimizer/prep/prepagg.c:387-389 refuses remaining volatile sharing.
+  The volatility walker also treats NextValueExpr as volatile (optimizer/util/clauses.c:635-639);
+  Cohesion refuses NEXT VALUE FOR within aggregates before this sharing check.
   Bare calls keep the existing execution path and object sizes; optional FILTER payloads
   allocate only for filtered calls. EVERY uses the BOOL_AND transition; Boolean
   aggregates are strict and return NULL without non-NULL input. Statistical signatures choose
