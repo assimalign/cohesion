@@ -131,6 +131,8 @@ public sealed class SqlWindowExecutionTests
         var subtotal = await RowsAsync(session, "SELECT GROUPING(p),p,COUNT(*),ROW_NUMBER() OVER (ORDER BY GROUPING(p),p) FROM t GROUP BY GROUPING SETS((p),()) ORDER BY 4;");
         var nested = await RowsAsync(session, "WITH q AS (SELECT p,ROW_NUMBER() OVER b AS n FROM t WINDOW a AS (PARTITION BY p),b AS(a ORDER BY v)) SELECT DISTINCT p FROM q WHERE n=1 ORDER BY RANK() OVER (ORDER BY p DESC) LIMIT 2;");
         var namedSubtotal = await RowsAsync(session, "SELECT ROW_NUMBER() OVER w+1 FROM t GROUP BY ROLLUP(p) WINDOW w AS(ORDER BY GROUPING(p),p) ORDER BY 1;");
+        var inlineSubtotal = await RowsAsync(session, "SELECT ROW_NUMBER() OVER (ORDER BY GROUPING(p), p) + 1 FROM t GROUP BY ROLLUP(p) ORDER BY 1;");
+        var detailRanks = await RowsAsync(session, "SELECT p, CASE WHEN GROUPING(p) = 0 THEN RANK() OVER (PARTITION BY GROUPING(p) ORDER BY SUM(v) DESC) END FROM t GROUP BY ROLLUP(p) ORDER BY GROUPING(p), 2;");
         var scalar = await RowsAsync(session, "SELECT p,(SELECT RANK() OVER() FROM t x WHERE x.v=t.v) FROM t WHERE v=40;");
         await ExecuteAsync(session, "CREATE TABLE u(id INT,n BIGINT);");
         await ExecuteAsync(session, "INSERT INTO u VALUES(1,0),(2,0),(3,0);");
@@ -143,8 +145,50 @@ public sealed class SqlWindowExecutionTests
         subtotal[3].ShouldBe([1,null,4L,4L]);
         nested.Select(r => r[0]).ShouldBe([3,2]);
         namedSubtotal.Select(r => r[0]).ShouldBe([2L,3L,4L,5L]);
+        inlineSubtotal.Select(r => r[0]).ShouldBe([2L,3L,4L,5L]);
+        detailRanks.Count.ShouldBe(4);
+        detailRanks[0].ShouldBe([2,1L]); detailRanks[1].ShouldBe([1,2L]);
+        detailRanks[2].ShouldBe([3,3L]); detailRanks[3].ShouldBe([null,null]);
         scalar.ShouldHaveSingleItem().ShouldBe([2,1L]);
         updated[0].ShouldBe([1,2L]); updated[1].ShouldBe([2,3L]); updated[2].ShouldBe([3,1L]);
+    }
+
+    public static IEnumerable<object[]> WrappedGroupedWindowKeys()
+    {
+        string[] wrappers = ["{0} + 1", "CASE WHEN p IS NULL THEN {0} ELSE {0} END", "COALESCE({0}, 0)", "CAST({0} AS BIGINT)"];
+        foreach (string wrapper in wrappers)
+        {
+            yield return [wrapper, "GROUPING(p), p", "ROLLUP(p)", false];
+            yield return [wrapper, "GROUPING(p)", "ROLLUP(p)", true];
+            foreach (string grouping in new[] { "p", "ROLLUP(p)" })
+            {
+                foreach (string key in new[] { "SUM(v)", "ABS(p)", "CAST(p AS TEXT) COLLATE case_insensitive",
+                    "(SELECT 1)", "(SELECT SUM(x.v) FROM t x WHERE x.p=t.p)", "SUM(v) FILTER (WHERE v > 0)" })
+                { yield return [wrapper, key + ", p", grouping, false]; }
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Windows: wrapped inline keys validate masks, aggregates, scalars and child queries (#1763)")]
+    [MemberData(nameof(WrappedGroupedWindowKeys))]
+    public async Task Execute_WrappedGroupedWindowKeys_ShouldReturnRowsAsync(string wrapper, string key, string grouping, bool partition)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("window-key-validation", new());
+        var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await db.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(p INT,v INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,10),(1,20),(2,40),(3,1);");
+        string window = partition ? $"PARTITION BY {key} ORDER BY p" : $"ORDER BY {key}";
+        string expression = string.Format(CultureInfo.InvariantCulture, wrapper, $"ROW_NUMBER() OVER ({window})");
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT {expression} FROM t GROUP BY {grouping} ORDER BY 1;");
+
+        // Assert: numbering covers all groups, or restarts for the subtotal partition.
+        long increment = wrapper == "{0} + 1" ? 1 : 0;
+        long[] expected = grouping == "p" ? [1,2,3] : partition ? [1,1,2,3] : [1,2,3,4];
+        rows.Select(row => row[0]).ShouldBe(expected.Select(value => (object?)(value + increment)));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Windows: invalid names, copies, signatures, placement and offsets have stable codes")]

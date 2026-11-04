@@ -57,10 +57,22 @@ internal sealed partial class SqlPlanner
                     && aggregates[slots[projected] - groupKeys.Count].Function.IsNeverNull),
             });
         }
+        // Bind every select-list aggregate before matching whole window keys to targets,
+        // including targets written after the window that uses them.
+        if (HasWindows(select))
+        {
+            var names = NamedWindows(select);
+            foreach (var window in WindowExpressions(select))
+            {
+                var windowKeys = WindowKeysOf(window, names);
+                foreach (var key in windowKeys.Partition) { BindKey(key); }
+                foreach (var key in windowKeys.Order) { BindKey(key.Expression); }
+            }
+        }
         foreach (var definition in select.Windows)
         {
-            foreach (var key in definition.Specification.PartitionBy) { BindSlots(key); }
-            foreach (var key in definition.Specification.OrderBy) { BindSlots(key.Expression); }
+            foreach (var key in definition.Specification.PartitionBy) { BindKey(key); }
+            foreach (var key in definition.Specification.OrderBy) { BindKey(key.Expression); }
         }
         if (select.Having is not null)
         {
@@ -71,7 +83,7 @@ internal sealed partial class SqlPlanner
         CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
         foreach (var order in select.OrderBy)
         {
-            BindSlots(order.Expression, orderByProjections);
+            BindKey(order.Expression, orderByProjections);
         }
 
         if (groupingCalls is not null)
@@ -159,6 +171,22 @@ internal sealed partial class SqlPlanner
             groupingSets, groupingCalls?.Select(item => item.Arguments).ToArray());
         return windows is null ? result : FinishWindowGroup(select, result, groupScope, windows, keys.Length + boundAggregates.Length + (groupingCalls?.Count ?? 0), orderByProjections);
 
+        void BindKey(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
+        {
+            if (outputSlots is null || !outputSlots.ContainsKey(expression))
+            {
+                // Ordinary nonvolatile calls still reach FindIndex. COUNT(*) and SUM(column)
+                // walk without allocating; a compound input costs one iterator per key.
+                for (int i = 0; i < aggregates.Count; i++)
+                {
+                    if (!HasVolatileAggregateInputs(aggregates[i].Call, evaluator)) { continue; }
+                    if (ContainsAggregate(expression)) { ReuseKeyAggregateSlots(expression, select, evaluator, slots, outputSlots); }
+                    break;
+                }
+            }
+            BindSlots(expression, outputSlots);
+        }
+
         void BindSlots(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -168,6 +196,7 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlFunctionCallExpression grouping && IsGrouping(grouping))
             {
+                if (slots.ContainsKey(grouping)) { return; }
                 if (evaluator.OuterGrouping(grouping) is not null) { return; }
                 var arguments = new int[grouping.Arguments.Count];
                 for (int i = 0; i < arguments.Length; i++)
@@ -193,13 +222,20 @@ internal sealed partial class SqlPlanner
             if (expression is SqlWindowExpression window)
             {
                 foreach (var argument in Children(window.Function)) { if (argument is not SqlStarExpression) { BindSlots(argument); } }
-                var windowKeys = WindowKeysOf(window, NamedWindows(select));
-                foreach (var key in windowKeys.Partition) { BindSlots(key); }
-                foreach (var key in windowKeys.Order) { BindSlots(key.Expression); }
+                // An enclosing scalar expression validates inline keys before BindKey runs.
+                // Register masks now; aggregate slots still bind after the select list.
+                if (window.Specification is { } specification)
+                {
+                    foreach (var key in specification.PartitionBy) { BindKeyGroupingCalls(key); }
+                    foreach (var key in specification.OrderBy) { BindKeyGroupingCalls(key.Expression); }
+                }
                 return;
             }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
+                // Named window keys can visit the same syntax node more than once. This is
+                // one written occurrence, even when its volatile inputs forbid structural reuse.
+                if (slots.ContainsKey(call)) { return; }
                 if (call.Filter is not null)
                 {
                     if (ContainsAggregate(call.Filter))
@@ -238,7 +274,7 @@ internal sealed partial class SqlPlanner
                 {
                     throw new SqlUnsupportedQueryException(ErrorMessages.StringAggregateDelimiter, location: call.Arguments[1].Location);
                 }
-                bool volatileInputs = Children(call).Any(HasVolatileInput);
+                bool volatileInputs = HasVolatileAggregateInputs(call, evaluator);
                 int index = volatileInputs ? -1 : aggregates.FindIndex(candidate => SameGroupExpression(candidate.Call, call, evaluator));
                 if (index < 0)
                 {
@@ -247,17 +283,6 @@ internal sealed partial class SqlPlanner
                 }
                 slots[expression] = groupKeys.Count + index;
                 return;
-
-                bool HasVolatileInput(SqlExpression input)
-                {
-                    RuntimeHelpers.EnsureSufficientExecutionStack();
-                    // Child query bodies have their own binding; conservatively retain their
-                    // separate invocation rather than sharing a possibly volatile result.
-                    if (input is SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlInExpression { Subquery: not null }) { return true; }
-                    if (input is SqlFunctionCallExpression functionCall &&
-                        evaluator.ResolveFunction(functionCall)?.Volatility == SqlFunctionVolatility.Volatile) { return true; }
-                    return Children(input).Any(HasVolatileInput);
-                }
             }
             for (int i = 0; i < groupKeys.Count; i++)
             {
@@ -297,6 +322,17 @@ internal sealed partial class SqlPlanner
                 RuntimeHelpers.EnsureSufficientExecutionStack();
                 return outputSlots is not null && (outputSlots.ContainsKey(candidate) || Children(candidate).Any(ContainsOutput));
             }
+        }
+
+        void BindKeyGroupingCalls(SqlExpression expression)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is SqlFunctionCallExpression call)
+            {
+                if (IsGrouping(call)) { BindSlots(call); return; }
+                if (IsAggregate(call)) { return; }
+            }
+            foreach (var child in Children(expression)) { BindKeyGroupingCalls(child); }
         }
     }
 

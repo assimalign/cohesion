@@ -579,6 +579,86 @@ public sealed class SqlLanguageConformanceTests
         (await RowsAsync(session, $"SELECT {projection} FROM t GROUP BY age - age;")).ShouldHaveSingleItem()[0].ShouldBe(expected);
     }
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: duplicate volatile SUM calls allocate twice per input row (#1763)")]
+    [InlineData("", 1)]
+    [InlineData(" GROUP BY k", 1)]
+    [InlineData(" GROUP BY GROUPING SETS ((k))", 1)]
+    [InlineData(" GROUP BY ROLLUP(k)", 2)]
+    [InlineData(" GROUP BY CUBE(k)", 2)]
+    public async Task Select_DuplicateVolatileAggregates_ShouldReturnIndependentSequenceSums(string grouping, int expectedRows)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-volatile-aggregate-conformance", new());
+        var database = await engine.CreateDatabaseAsync("audit", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SEQUENCE s;");
+        await ExecuteAsync(session, "CREATE TABLE volatile_aggregates(k INT);");
+        await ExecuteAsync(session, "INSERT INTO volatile_aggregates VALUES(1),(1),(1);");
+
+        // Act
+        var rows = await RowsAsync(session, "SELECT SUM(nextval('s')), SUM(nextval('s')) FROM volatile_aggregates" + grouping + ";");
+        var sequence = await RowsAsync(session, "SELECT currval('s');");
+
+        // Assert
+        rows.Count.ShouldBe(expectedRows);
+        rows.ShouldAllBe(row => Equals(row[0], 9m) && Equals(row[1], 12m));
+        sequence.ShouldHaveSingleItem().ShouldBe(new object?[] { 6L });
+    }
+
+    public static IEnumerable<object[]> VolatileAggregateKeyClauses()
+    {
+        foreach (string grouping in new[] { "", " GROUP BY k", " GROUP BY GROUPING SETS ((k))", " GROUP BY ROLLUP(k)", " GROUP BY CUBE(k)" })
+        {
+            yield return [grouping, " ORDER BY SUM(nextval('s'))", 6m, 3L];
+            yield return [grouping, " HAVING SUM(nextval('s')) = 12", 9m, 6L];
+            yield return [grouping, " HAVING SUM(nextval('s')) = 12 ORDER BY SUM(nextval('s'))", 9m, 6L];
+            yield return [grouping, " ORDER BY SUM(nextval('s')) + 1", 9m, 6L];
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: whole aggregate keys reuse targets while HAVING and nested keys stay independent (#1763)")]
+    [MemberData(nameof(VolatileAggregateKeyClauses))]
+    public async Task Select_VolatileAggregateKeys_ShouldRespectOccurrenceScope(string grouping, string clause, decimal sum, long allocations)
+    {
+        // Arrange: one slot sums 1+2+3; independent slots sum odd/even allocations.
+        await using var engine = SqlDatabaseEngine.Create("sql-aggregate-key-conformance", new());
+        var database = await engine.CreateDatabaseAsync("audit", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SEQUENCE s;");
+        await ExecuteAsync(session, "CREATE TABLE volatile_aggregates(k INT);");
+        await ExecuteAsync(session, "INSERT INTO volatile_aggregates VALUES(1),(1),(1);");
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT SUM(nextval('s')) FROM volatile_aggregates{grouping}{clause};");
+        var sequence = await RowsAsync(session, "SELECT currval('s');");
+
+        // Assert
+        rows.Count.ShouldBe(grouping.Contains("ROLLUP") || grouping.Contains("CUBE") ? 2 : 1);
+        rows.ShouldAllBe(row => Equals(row[0], sum));
+        sequence.ShouldHaveSingleItem()[0].ShouldBe(allocations);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: wrapped inline window keys can read grouping masks (#1763)")]
+    [InlineData("SELECT ROW_NUMBER() OVER (ORDER BY GROUPING(p), p) + 1 FROM t GROUP BY ROLLUP(p) ORDER BY 1", false)]
+    [InlineData("SELECT p, CASE WHEN GROUPING(p) = 0 THEN RANK() OVER (PARTITION BY GROUPING(p) ORDER BY SUM(v) DESC) END FROM t GROUP BY ROLLUP(p) ORDER BY GROUPING(p), 2", true)]
+    public async Task Select_GroupingWindowReports_ShouldReturnDetailAndSubtotalRows(string sql, bool detail)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-grouping-window-conformance", new());
+        var database = await engine.CreateDatabaseAsync("audit", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(p INT,v INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,10),(1,20),(2,40),(3,1);");
+
+        // Act
+        var rows = await RowsAsync(session, sql);
+
+        // Assert
+        object?[][] expected = detail ? [[2,1L], [1,2L], [3,3L], [null,null]] : [[2L], [3L], [4L], [5L]];
+        rows.Count.ShouldBe(expected.Length);
+        for (int i = 0; i < expected.Length; i++) { rows[i].ShouldBe(expected[i]); }
+    }
+
     /// <summary>Applies the full Int64 count range consistently to every materialized SELECT shape.</summary>
     /// <param name="query">The ordered query producing three rows.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - LIMIT/OFFSET: Int64 counts preserve the row window for every plan shape")]

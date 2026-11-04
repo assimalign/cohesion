@@ -535,9 +535,12 @@ SqlFunctionCallExpression.Filter retains the optional condition, including depth
 extent. Rendering, semantic child walks, aggregate-level correlation and persisted equality
 include it. FILTER adds one named clause and nine function names join the executable profile.
 The profile has 59 declared clauses, or 64 including the five documented exclusions.
-Aggregate windows and their FILTER execute; window calls inside FILTER fail placement binding. The catalog owns aggregate
+Aggregate windows and their FILTER execute; window calls inside a plain aggregate's FILTER fail
+with CS05076 and inside a window aggregate's FILTER with CS05077 (both 42P20). The catalog owns aggregate
 admission (CS05072 for FILTER on scalar calls); a same-scope aggregate in the condition is
-CS05073. Child queries bind independently. See DIALECT.md for types, NULLs and rounding.
+CS05073. Child queries bind independently. DIALECT.md also records whole aggregate-key reuse's
+alias, child-query and window-expression limits, and the separate scalar-key rule for equal
+window specifications or shared sort prefixes (#1763). See DIALECT.md for types, NULLs and rounding.
 
 SqlFunctionCallExpression retains a SqlSetQuantifier and ordered input keys for every call;
 the engine catalog decides which calls are aggregates. Depth measurement, rendering and
