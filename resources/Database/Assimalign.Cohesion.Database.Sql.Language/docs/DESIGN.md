@@ -11,6 +11,8 @@ formatting differences, parenthesized-only option grammar and deliberate refusal
 invalid option; CS01071 is an invalid output-column selection. No persisted syntax changes.
 The execution corpus also verifies table-scoped COPY scan cost, byte-sized delivery batches,
 deferred migration admission and shared embedded-session admission; DIALECT records these contracts.
+Deferred admission includes new table names before binding and reserves FK neighbours only when
+their constraints, either owner or matching parent key trees change (#1778).
 
 ## Savepoint grammar and rendering (#1726, XT-4)
 

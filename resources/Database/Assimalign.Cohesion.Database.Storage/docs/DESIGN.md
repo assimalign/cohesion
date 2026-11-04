@@ -20,8 +20,8 @@ failure, including ENOSPC or an exception before the provider reports any writte
 medium outcome cannot be proved. Unconfirmed commit waits, failed durable data-file flushes
 and failures after issuing a checkpoint header-slot write retain their fences. Engine-wide
 write-back/checkpoint/write-ahead-flush/version-purge failure windows and the repeated
-failed-checkpoint journal limit retain their offline policies; so do 49a provisioning failure
-and interrupted open-time recovery. A read error or a prepared-page write refusal alone stays
+failed-checkpoint journal limit retain their offline policies; so do post-commit publication
+faults and interrupted open-time recovery. A read error or a prepared-page write refusal alone stays
 online. SQL documents the admission formula,
 its concurrency/expansion limits and CS03403's unknown publication outcome in its DESIGN.
 
@@ -47,7 +47,7 @@ classification and scrub. If that scrub is interrupted after committing a batch,
 unpublished storage with `StorageOfflineCause.RecoveryInterrupted` before disposal; ordinary
 shutdown must not checkpoint away the remaining classification records. The original cancellation
 or recovery error still reaches the caller. `ProvisioningFailure` is the other new engine cause:
-a deferred migration failed and its database must remain offline until reopened. Both reuse the
+in-memory publication failed after a catalog commit and recovery must decide the published state. Both reuse the
 existing offline write fence and add no new events or on-disk storage format.
 
 `HasOwnerPages(ownerId)` is a constant-time physical-allocation query beside `GetOwnerPages`.

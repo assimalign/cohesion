@@ -152,7 +152,7 @@ internal sealed partial class SqlSchemaProvisioner
             // Lock/latch order: fail-fast apply admission -> owned sequence X (ascending)
             // -> every old/touched table X (ascending) BEFORE queueing -> prepared owners X
             // -> coordinator apply gate -> tree/page latches. No queue monitor spans work.
-            // Every deferred job uses this order, including its cheap-step tables and FK closure.
+            // Every deferred job uses this order, including its cheap-step tables and required FK neighbours.
             // Non-definition metadata admission is retained from Build; publication takes snapshot gate
             // -> coordinator snapshot pin -> catalog monitor -> catalog storage bracket.
             // No data apply gate or page/tree latch spans publication. All waiting uses this
@@ -229,8 +229,9 @@ internal sealed partial class SqlSchemaProvisioner
             if (target is null) { await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false); }
             else { await DiscardMismatchedIntentAsync(target, 0, cancellationToken).ConfigureAwait(false); }
             TraceOutcome("Discarded", 0);
-            _database.ReportProvisioning(new DatabaseProvisioningProgress("JointMigration", _database.Name.ToString(), 1, 1,
-                false, failureCode: SqlProvisioningCodes.JointFailed));
+            if (target is not null)
+            { _database.ReportProvisioning(new DatabaseProvisioningProgress("JointMigration", _database.Name.ToString(), 1, 1,
+                false, failureCode: SqlProvisioningCodes.JointFailed)); }
         }
         finally { EndTrace(); }
     }
@@ -255,7 +256,7 @@ internal sealed partial class SqlSchemaProvisioner
                 }, checkpointCopy: true);
             JointMetrics = statement.Metrics;
             BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken);
-            AdmitJointSpace(migration.JointPlan!, migration.Intent, cancellationToken);
+            AdmitJointSpace(migration.JointPlan, migration.Intent, cancellationToken);
             bool sparseGrowth = _database.Engine.SparseDataGrowth(_database.Name);
             statement.ConfigureCopySpace((touches, allocations, unflushed, prepared) =>
             {
@@ -266,9 +267,10 @@ internal sealed partial class SqlSchemaProvisioner
                 long pending = sparseGrowth ? Math.Min(checked(unflushed * Page.Size), _database.Engine.EngineOptions.BufferPoolCapacity) : 0;
                 CheckJointSpace(checked(JointBracketBytes(touches, allocations - reused) + pending + JointSpaceDiscardBytes));
             }, unflushed => CheckJointSpace(checked(JointSpacePublicationBytes + JointSpaceDiscardBytes +
-                (sparseGrowth ? Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity) : 0))), _database.TableReclamation.CaptureAllocationCount);
+                (sparseGrowth ? Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity) : 0))), _database.TableReclamation.CaptureAllocationCount,
+                JointCopyCheckpointThreshold);
             var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
-            await executor.ExecuteJointMigrationAsync(migration.JointPlan!, migration.Schema, statement,
+            await executor.ExecuteJointMigrationAsync(migration.JointPlan, migration.Schema, statement,
                 phase => JointStage?.Invoke(phase), cancellationToken).ConfigureAwait(false);
             _formatCheckedStateDocument = migration.Schema.CanonicalDocument;
             EndDeferredTrace(migration, 0, "Applied");

@@ -18,7 +18,12 @@ public sealed class SqlDialectDocumentationTests
 
         // Act / Assert
         dialect.ShouldContain("Every deferred plan publishes its", Case.Sensitive);
-        dialect.ShouldContain("different/no-target Build discards it", Case.Sensitive);
+        // #1778: only a declared different target replans; a no-target open has
+        // no declaration to report against, and successful Verify clears the report.
+        dialect.ShouldContain("different-target Build discards it and replans", Case.Sensitive);
+        dialect.ShouldContain("A no-target open discards without a provisioning report or trace", Case.Sensitive);
+        dialect.ShouldContain("successful Verify clears a declared discard observation", Case.Sensitive);
+        dialect.ShouldContain("Statements naming a new table in the plan also wait before binding", Case.Sensitive);
         dialect.ShouldContain("default-only changes still refuse CS03105", Case.Sensitive);
         design.ShouldContain("SQL record-space format 37 requires this joint kind-9 meaning", Case.Sensitive);
         design.ShouldContain("prepared target plus untouched objects", Case.Sensitive);

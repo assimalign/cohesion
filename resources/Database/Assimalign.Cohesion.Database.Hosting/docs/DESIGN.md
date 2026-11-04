@@ -278,8 +278,11 @@ of an unhealthy condition writes 16. Later observations write only on a change o
 offline cause or database instance, or write 17 when the database is observed healthy again.
 Pending-to-running,
 step changes and row progress alone do not repeat a degraded transition. Offline has precedence
-over provisioning; a deferred failure therefore changes Provisioning to Offline with cause
-`ProvisioningFailure`, rather than producing a restoration. Reopen-service pending entries
+over provisioning. Failed joint preparation keeps the old schema online with a failed
+Provisioning observation (CS03402). Independent storage-safety latches retain Offline precedence;
+`ProvisioningFailure` denotes only an in-memory publication fault after the catalog commit.
+Joint row counts restart at each table and phase. Operation, object name and position retain the
+job's first operation throughout preparation and do not identify later table work. Reopen-service pending entries
 remain Offline through recovery. A dropped/closed database or disposed engine is forgotten,
 never reported as restored. Healthy first observations write nothing.
 

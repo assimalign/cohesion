@@ -54,6 +54,14 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 tables.Add(table.ObjectId);
             }
+            if (migration.JointPlan.Tables.Any(item => item.Previous is null &&
+                item.Shape.Schema.Equals(reference.SchemaName ?? referenceSchema, System.StringComparison.OrdinalIgnoreCase) &&
+                item.Shape.Name.Equals(reference.TableName, System.StringComparison.OrdinalIgnoreCase)))
+            {
+                // New names have no published identity yet. Rendezvous on an old
+                // reservation, then bind the published catalog (or its ordinary miss).
+                tables.Add(migration.Tables.Min());
+            }
             if (_catalog.TryGetView(reference.SchemaName ?? referenceSchema, reference.TableName, out var view))
             {
                 var directory = _catalog.Views.ToDictionary(value => SqlObjectIdentity.View(value.Schema, value.Name), System.StringComparer.OrdinalIgnoreCase);

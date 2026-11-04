@@ -130,7 +130,7 @@ remain excluded. The profile adds CREATE INDEX KEY ORDER (+1 declared clause).
 Catalog/record-space format 37 stores every key's effective order in mandatory index extension 3;
 compiled-schema v12 carries KeyOrders. The language, catalog and compiled enums use zero for
 ASC NULLS FIRST; an omitted or zero-filled KeyOrders vector has that default. PRIMARY KEY and
-UNIQUE-constraint indexes also take it. Format 35 and earlier databases and v11 and earlier
+UNIQUE-constraint indexes also take it. Format 36 and earlier databases and v11 and earlier
 artifacts are refused before any write, including unclean journals, without conversion.
 INFORMATION_SCHEMA.INDEXES and COHESION_SCHEMA.INDEXES add nullable DIRECTION and
 NULL_PLACEMENT: DESC is reported when descending, LAST only for ascending NULLS LAST,
@@ -1430,7 +1430,12 @@ Rows travel unchanged in existing SQL header/row/complete frames.
 ## Admission during deferred provisioning (49a)
 
 While a code-first migration runs on populated tables, statements referencing its reserved
-tables wait before binding. This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and
+tables wait before binding; all plan targets remain reserved through publication. FK neighbours
+are reserved when the FK changes, either end rewrites or matching parent key trees change;
+stable neighbours remain available, though FK probes into a reserved table wait.
+Statements naming a new table in the plan also wait before binding, then see the published table
+or the ordinary undefined-table error if preparation failed; creating its reserved name refuses CS03404.
+This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and
 ALTER ADD CONSTRAINT, so a pending unique index is available when the FK is checked.
 EXPLAIN recursively admits its wrapped statement through the same table reservations before
 planning, so its access path reflects the completed migration.
@@ -1439,8 +1444,9 @@ tables remain available. Code-first changes to built-in `VARCHAR` length and `DE
 precision in a deferred plan use joint validation/preparation. Every deferred plan publishes its
 complete target in one catalog commit, including cheap additions and drops (#1778, SQ-A5).
 Before publication a failure reports CS03402 and keeps the old schema online. Only a matching
-target Build resumes interrupted preparation; a different/no-target Build discards it and plans
-from the stored schema. Non-TYPE inline and empty-table paths retain their existing behavior
+target Build resumes interrupted preparation; a different-target Build discards it and replans
+from the stored schema. A no-target open discards without a provisioning report or trace; a
+successful Verify clears a declared discard observation. Non-TYPE inline and empty-table paths retain their existing behavior
 until SQ-A6; default-only changes still refuse CS03105.
 
 Referential SET NULL and SET DEFAULT update only matching foreign-key columns, using the

@@ -16,6 +16,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlSchemaProvisioner
 {
     internal const long JointCopyCheckpointBytes = 16L * 1024 * 1024;
+    internal long JointCopyCheckpointThreshold { get; private set; } = JointCopyCheckpointBytes;
     private long _jointMinimumPages;
     private long _jointReserveBase;
     private long _jointReclamationLimit;
@@ -148,17 +149,29 @@ internal sealed partial class SqlSchemaProvisioner
             // RegisterTouch may log a full pre-image (including spill); commit logs
             // a delta/committed image. Each payload <= B+8; each frame is 38 bytes.
             // CheckpointReplacementCopy truncates at chunk boundaries. Only a final
-            // chunk or the root-creation bracket can overshoot the 16 MiB threshold.
+            // chunk or the root-creation bracket can overshoot the admitted threshold.
             long pageFrames = 2 * (Page.Size + 8 + 38);
-            long journal = Math.Min((totalTouches + roots) * pageFrames + chunks * 4 * 38,
-                JointCopyCheckpointBytes + Math.Max(maximumChunkTouches, roots) * pageFrames + 4 * 38);
-            long subtotal = replacement + journal;
+            long allJournal = (totalTouches + roots) * pageFrames + chunks * 4 * 38;
+            long overshoot = Math.Max(maximumChunkTouches, roots) * pageFrames + 4 * 38;
             JointSpaceDiscardBytes = JointEngineReserve(replacementPages);
             JointSpacePublicationBytes = JointPublicationBound(plan, intent);
-            long need = subtotal + DivideUp(subtotal, 4) + JointSpacePublicationBytes + JointSpaceDiscardBytes;
-            JointSpaceNeed = need;
+            long Need(long threshold)
+            {
+                long journal = allJournal <= threshold ? allJournal : Math.Min(allJournal, threshold + overshoot);
+                long subtotal = replacement + journal;
+                return subtotal + DivideUp(subtotal, 4) + JointSpacePublicationBytes + JointSpaceDiscardBytes;
+            }
+            JointCopyCheckpointThreshold = JointCopyCheckpointBytes;
+            long preferred = _database.Engine.EngineOptions.CheckpointJournalSize;
+            // Kept heaps need only tree copies. Buy fewer forced flushes with the
+            // engine's journal budget when admission can afford it; a small volume
+            // retains the bounded 16 MiB route instead of refusing this optimization.
+            if (plan.Tables.All(item => item.KeepsOwner) && preferred > JointCopyCheckpointBytes &&
+                Need(preferred) <= _database.Engine.GetAvailableMigrationBytes(_database.Name))
+            { JointCopyCheckpointThreshold = preferred; }
+            JointSpaceNeed = Need(JointCopyCheckpointThreshold);
             JointSpaceIndexPages = actualIndexPages;
-            CheckJointSpace(need);
+            CheckJointSpace(JointSpaceNeed);
         }
     }
 

@@ -30,8 +30,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// <b>Schema provisioning</b> belongs to the SQL model (owner decisions 50 and 53 of 2026-10-09).
-/// The engine's builder applies cheap schema steps before returning and reserves populated tables
-/// for its worker to finish persisted data-scaling steps. <see cref="ApplySchemaAsync"/> applies a
+/// The engine's builder reserves every table in a deferred plan before returning; its worker
+/// prepares and publishes the complete target jointly. <see cref="ApplySchemaAsync"/> applies a
 /// compiled schema inline for tools, Studio and tests. The root <see cref="DatabaseInstance"/>
 /// exposes model-neutral progress without a schema capability API.
 /// </para>
@@ -87,7 +87,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
             // preparation from the trusted old marker, retaining the durable intent.
             // A rolled-back application (or a plain open) discards it without fencing.
             var target = _engine.FindDeclaration(Name)?.Schema;
-            if (target is null || !string.Equals(target.Hash, pending.ContentHash, StringComparison.Ordinal))
+            if (_engine.ProvisioningBuildComplete || target is null || !string.Equals(target.Hash, pending.ContentHash, StringComparison.Ordinal))
             { await _schemaProvisioner.DiscardUnpublishedIntentAsync(target, cancellationToken).ConfigureAwait(false); }
             return;
         }
@@ -197,7 +197,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
             // Journal append/drain/flush (including ENOSPC and zero-byte failures),
             // unconfirmed commit, durable data flush, issued checkpoint header write,
             // engine failure windows (write-back/checkpoint/WAL flush/version purge),
-            // failed-checkpoint journal limit, 49a failure and interrupted recovery
+            // failed-checkpoint journal limit, post-commit publication faults and interrupted recovery
             // retain the kernel latch. Reads and unpublished prepared-page write refusals
             // stay online unless an independent kernel/worker latch was raised.
             _catalogStorage.TakeOffline(error);

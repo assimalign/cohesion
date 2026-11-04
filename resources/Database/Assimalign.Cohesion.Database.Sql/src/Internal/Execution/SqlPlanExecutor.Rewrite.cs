@@ -307,7 +307,7 @@ internal sealed partial class SqlPlanExecutor
         long length = _storage.Journal.Length;
         long added = statement.AddCopyJournalBytes(length - journalStart);
         RewriteStage?.Invoke("CopyCommitted", length);
-        if (added < SqlSchemaProvisioner.JointCopyCheckpointBytes) { return; }
+        if (added < statement.CopyCheckpointBytes) { return; }
         while (true)
         {
             token.ThrowIfCancellationRequested();

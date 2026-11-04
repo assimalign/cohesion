@@ -18,7 +18,7 @@ builder.AddSql("orders-sql", sql =>                        // the engine name, w
     sql.AddServer(server => server.Listen(new Uri("cohesion-db://localhost:5740")));
 });
 
-await using var app = builder.Build();                     // engines built; cheap DDL done, pending tables reserved
+await using var app = builder.Build();                     // engines built; deferred plan tables reserved
 SqlDatabaseEngine orders = app.Context.GetEngine<SqlDatabaseEngine>("orders-sql");
 await app.RunAsync();                                      // services start, then servers accept
 ```
@@ -26,10 +26,11 @@ await app.RunAsync();                                      // services start, th
 Model verbs (`AddSql`, `AddDocuments`, `AddGraph`, `AddKeyValue`, `AddBlob`) take an engine name
 and a callback over its engine builder. Names are reserved before factories run. Model builders
 declare servers, workers and databases; Build opens or creates the databases before servers accept.
-SQL runs cheap schema steps there and defers populated-table work to its own provisioning worker
-(49a), reserving affected tables before returning. Health remains responsive during recovery and reports Degraded with the current step
-and row progress through the root instance's model-neutral observation. A deferred failure takes
-that database offline; an inline failure disposes the already-built owned products.
+SQL defers the complete plan when any populated-table work needs its provisioning worker
+(#1778), reserving affected tables before returning. Health remains responsive during recovery and reports Degraded with the current step
+and row progress through the root instance's model-neutral observation. Failed joint preparation
+keeps the old schema online and reports CS03402; independent storage-safety latches still take
+the database offline. An inline failure disposes the already-built owned products.
 
 The concrete builder's `Build(CancellationToken)` passes its caller's shutdown token into SQL
 construction and recovery. The root `IDatabaseApplicationBuilder.Build()` remains parameterless

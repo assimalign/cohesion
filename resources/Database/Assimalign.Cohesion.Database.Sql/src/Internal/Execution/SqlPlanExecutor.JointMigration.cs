@@ -150,14 +150,36 @@ internal sealed partial class SqlPlanExecutor
             }
             result.Add(new SqlJointMigrationTable(old, table, tableIndexes, values, keepsOwner));
         }
-        // Include both ends of old and new FKs, even when the old parent is dropped
-        // or a constraint is re-pointed. Stable adjacent tables keep their owners.
+        bool KeepsReference(SqlCatalogTable child, SqlCatalogConstraint reference)
+        {
+            var childPlan = result.FirstOrDefault(item => item.Shape.Schema.Equals(child.Schema, StringComparison.OrdinalIgnoreCase) &&
+                item.Shape.Name.Equals(child.Name, StringComparison.OrdinalIgnoreCase));
+            var parentPlan = result.FirstOrDefault(item => item.Shape.Schema.Equals(reference.ReferencedSchema, StringComparison.OrdinalIgnoreCase) &&
+                item.Shape.Name.Equals(reference.ReferencedTable, StringComparison.OrdinalIgnoreCase));
+            if (IsTarget(child) && childPlan?.KeepsOwner != true ||
+                IsTargetName(reference.ReferencedSchema!, reference.ReferencedTable!) && parentPlan?.KeepsOwner != true) { return false; }
+            if (!image.TryGetTable(child.Schema, child.Name, out var oldChild) ||
+                !oldChild.Constraints.Any(old => SameJointConstraint(reference, old))) { return false; }
+            var finalChild = childPlan?.Shape ?? oldChild;
+            var finalParent = parentPlan?.Shape ?? all.FirstOrDefault(table =>
+                table.Schema.Equals(reference.ReferencedSchema, StringComparison.OrdinalIgnoreCase) &&
+                table.Name.Equals(reference.ReferencedTable, StringComparison.OrdinalIgnoreCase));
+            return finalParent is not null && finalChild.Constraints.Any(current => SameJointConstraint(reference, current)) &&
+                !NeedsJointReferenceValidation(finalChild, reference, finalParent, indexes);
+        }
+        // Plan targets always reserve X. An omitted neighbour has the identical FK,
+        // kept identities at both ends and unchanged matching parent key trees, so
+        // every writable row still enforces the old/new constraint. FK probes acquire
+        // adjacent IS before selecting a lookup tree (Constraints.cs); a wait releases
+        // new grants and rediscovers incoming bindings/parents, and BindReference gives
+        // changed descriptions new lookup keys. No retired handle survives that retry.
         var touched = image.Tables.Where(IsTarget).ToDictionary(table => table.ObjectId);
         foreach (var child in image.Tables.Concat(result.Select(table => table.Shape)))
         {
             foreach (var reference in child.Constraints.Where(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference))
             {
                 if (!IsTarget(child) && !IsTargetName(reference.ReferencedSchema!, reference.ReferencedTable!)) { continue; }
+                if (KeepsReference(child, reference)) { continue; }
                 if (image.TryGetTable(child.Schema, child.Name, out var liveChild)) { touched.TryAdd(liveChild.ObjectId, liveChild); }
                 if (image.TryGetTable(reference.ReferencedSchema!, reference.ReferencedTable!, out var parent)) { touched.TryAdd(parent.ObjectId, parent); }
             }

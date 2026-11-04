@@ -3482,8 +3482,10 @@ validation, required-column addition, additions of columns whose domains carry c
 `SqlProvisioningWorker`. If any such step defers, its complete plan prepares jointly, including
 creation, nullable additions and drops. Otherwise cheap and empty-table work remains inline.
 `SqlDatabaseBuilder.RunMigrationsInline = true` keeps all work in Build.
-Imperative `ApplySchemaAsync` remains inline. Nullable additions validate their immutable missing
-value once; existing rows continue to resolve that value from the catalog without a rewrite.
+Imperative `ApplySchemaAsync` remains inline. Outside a deferred joint plan, nullable additions validate their immutable missing
+value once and existing rows resolve it from the catalog without a rewrite. In a deferred plan,
+nullable append, DROP COLUMN and facet-only changes rewrite until SQ-A6; space admission counts
+that rewrite, which re-evaluates every CHECK and domain on every row.
 Column additions retain declaration order in the jointly prepared target.
 
 Decision 77 (#1443) makes every `DROP TABLE` unpublish inline and reclaim afterwards. The
@@ -3583,7 +3585,8 @@ provisioning DROP phase; decision 77 in the program design records the measureme
 Catalog kind 9 contains the complete target document/hash, Joint/ operation identities, ordered
 positions and per-table KeepOwner/RewriteOwner choices. Its transaction commits before any
 preparation. Format 37 fences the former per-step meaning. After a crash only a matching target
-Build may resume; a different/no-target Build discards it with CS03402 and uses the stored schema.
+Build may resume; a different-target Build discards it with CS03402 and uses the stored schema.
+A no-target open discards without a provisioning report or trace.
 The old applied marker stays trusted. One publication commit installs the complete new schema,
 applied marker and registrations and removes the intent. Failure discards unpublished preparation.
 
@@ -3599,14 +3602,15 @@ stateDiagram-v2
     Pending --> Running
     Running --> Done
     Running --> Failed
-    Running --> Pending: Crash with matching target
-    Pending --> Failed: Different target or cancellation
+    Running --> Pending: "Crash with matching target"
+    Pending --> Failed: "Different target or cancellation"
     Failed --> [*]
     Done --> [*]
 ```
 
 Before Build returns, one read-only transaction reserves exclusive lock-manager table locks for
-the pending tables and any FK parent needed by their DDL. The worker keeps that transaction until
+all plan tables and FK neighbours whose reference, either owner or matching parent key trees
+change. Stable neighbours remain available; FK probes that need a reserved table wait on its IS lock. The worker keeps that transaction until
 completion or cancellation. Reservations cover the remaining migration as a set: a later table
 cannot accept work ahead of its pending step. Tables outside that set continue to serve reads,
 writes and DDL. The request admission walk uses those same lock-manager locks before planning
@@ -7664,7 +7668,7 @@ bounded peer-sent names) are in the area's
 | 17 | *(retired)* | — | — | `IndexRegistrationsSaved` reported a separate registration save; B2 publishes an index's registration atomically with its description (#1355), so the id is retired, never reused |
 | 18 | `DeferredStepBound` | Informational | — | `engineName`, `database`, `table`, `objectName`, `kind`, `position`, `stepCount`, `rowsProcessed`, `totalRows` |
 | 19 | `DeferredStepProgress` | Verbose | — | same as 18 |
-| 20 | `DeferredStepCompleted` | Informational | — | same as 18, `outcome` (`Applied`, `Error`, `Cancelled`), `durationMilliseconds` |
+| 20 | `DeferredStepCompleted` | Informational | — | same as 18, `outcome` (`Applied`, `Error`, `Unconfirmed`), `durationMilliseconds` |
 | 21 | `DeferredStepFailed` | Error | — | same as 18, `code` (`CS03402` before publication or `CS03403` for unconfirmed publication, for every deferred migration), `exceptionType` (no message) |
 | 22 | `ScriptApplied` | Informational | — | `engineName`, `database`, `script`, `hash`; never the script body |
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
@@ -8748,9 +8752,11 @@ trees use their measured heights in the admission WAL estimate. C is the maximum
 page-touch bound, T the root count, Q the sum of all row-touch bounds plus T, and K the
 number of copy/root brackets. Copy-owned WAL is accumulated from journal-length deltas across
 its brackets, including their begin/commit frames; existing WAL and writes between brackets
-never trigger its checkpoint. J = min(Q*2(B+46)+152K, 16 MiB + max(C,T)*2(B+46)+152).
-The 16 MiB threshold is 1/16 of the engine's default 256 MiB: twice the previous copy allowance,
-while bounding the WAL reserve independently of a large database. Checkpoints flush the shared
+never trigger its checkpoint. J = min(Q*2(B+46)+152K, H + max(C,T)*2(B+46)+152).
+H is 16 MiB for any job that rewrites a table. When every plan table keeps its owner, H may
+instead use the engine's larger nonzero CheckpointJournalSize if this same admission formula
+fits the available space; otherwise H falls back to 16 MiB without refusing the job.
+The 16 MiB rewrite threshold bounds its WAL reserve independently of a large database. Checkpoints flush the shared
 pool and stall every database writer under the apply gate, including untouched tables; they
 can also increase subsequent full-page images. This deliberate stall cost buys bounded copy
 WAL. The copy checkpoint waits for reclamation's bounded batch at the apply gate. Ungated
@@ -8891,8 +8897,10 @@ Provisioning and the thrown diagnostic. It leaves all new trees and directory re
 place; recovery alone decides the schema. Joint cleanup never turns it into "schema unchanged".
 
 After a crash, recovery reclaims abandoned owners. A matching Build retains the kind-9 target
-and replans preparation from the old marker. An old/different/no-target Build or plain open
-discards the intent and opens the current catalog without fencing. After publication it opens the
+and replans preparation from the old marker. An old/different/no-target Build discards the intent
+and opens the current catalog without fencing. An in-process reopen after Build also discards a
+matching intent and reports CS03402 because it cannot schedule a job. A no-target open sets no
+provisioning observation or provisioning trace. Successful Verify clears a prior observation. After publication it opens the
 new schema. Rollback after success plans an ordinary reverse migration: every unproven conversion,
 length/precision/scale narrowing and rounding requires destructive opt-in, refused with CS03105
 before any step otherwise. The planner's conservative exact whitelist includes integer widening,
@@ -8931,7 +8939,12 @@ heap-owned DROP INDEX page reclamation remains #1808. Kind 9 records Joint/KeepO
 Joint/RewriteOwner for each existing target. Empty Build, RunMigrationsInline, ApplySchemaAsync
 and the worker use this same metadata classification. The joint X-lock protocol is unchanged:
 owned sequences, then every touched table, in ascending identity order, through publication.
-Index-only jobs retain the same table-X lock matrix as the original 49a builder.
+Unchanged FK neighbours stay outside the reservation only when both ends keep their owners,
+the FK is identical and the matching parent unique trees are unchanged. Their reads, parent
+inserts and non-key updates proceed; parent deletes and child inserts wait when their FK probe
+needs a reserved table. Those probes rediscover bindings after waiting before selecting trees.
+PostgreSQL likewise omits the parent FK check when the referenced key did not change
+(`src/backend/utils/adt/ri_triggers.c:1611-1613`); no reference code is copied.
 
 Index comparison includes every effective key-order value. A direction-only or NULL-placement-only
 change rebuilds an independently owned tree while retaining its heap; joint TYPE rewrites use
@@ -8999,6 +9012,9 @@ include every storage write/flush boundary and those named phases, converging to
 or new catalog while preserving the heap. Space admission charges new trees only for a kept
 table; it charges no heap copy and no retained tree. The bracket watchdog, 16 MiB copy checkpoint
 and engine reserve also cover these builds and the retirement of separate tree owners.
+A job whose every plan table keeps its owner uses the engine CheckpointJournalSize when larger
+than 16 MiB and measured admission can afford it; otherwise it falls back to 16 MiB. Jobs that
+rewrite any table retain 16 MiB. Admission and the copier use the same per-job threshold.
 
 SQL format 35 fences the changed logical-registration/physical-owner relationship and the
 classification records. These metadata choices are excluded from provisioning, trace and event
@@ -9019,15 +9035,19 @@ additional validation decodes. The other table's single copied row adds one deco
 Before any inline DDL commits, the provisioner classifies the complete rendered plan. If any
 49a data-scaling step would defer, the entire plan goes to joint preparation: indexes, CHECK,
 UNIQUE, FK and NOT NULL validation, bounded facet changes and required/domain column backfills.
-Cheap additions, drops and other steps in that plan remain unpublished too. Index-only jobs keep
-their heaps using SQ-A4; one catalog commit publishes every change and the applied marker.
+Cheap additions, drops and other steps in that plan remain unpublished too. Additive index
+changes and changes to alternate trees keep their heaps using SQ-A4; dropping or replacing a
+heap-owned tree rewrites its table until #1808. One catalog commit publishes every change and
+the applied marker.
 Non-TYPE RunMigrationsInline, empty-table Build and ApplySchemaAsync retain their per-step
 behavior until SQ-A6. Default-only changes still refuse CS03105 in this run.
 
-Build reserves the whole touched-table/FK closure before returning. The original 49a path held
+Build reserves every plan table and the required FK neighbours before returning. The original 49a path held
 X on each deferred table from reservation through its steps, but cheap steps had already committed
-and released their locks. The joint window covers those cheap-step tables and both old/new FK
-neighbors from reservation through all preparation and publication. Definition metadata admission
+and released their locks. The joint window covers those cheap-step tables through all preparation
+and publication; their reads wait too. FK neighbours, including reads, also wait when the FK
+is added, dropped or re-pointed, either end rewrites, or matching parent key trees change. Stable
+neighbours keep serving reads, parent inserts and non-key updates. Definition metadata admission
 also spans that window. Untouched DML remains available; the existing lock-manager admission and
 lock/latch order above govern every wait. Build validates registered definitions against the
 prepared target plus untouched objects, without caching that result as validation of the live
@@ -9040,7 +9060,12 @@ events describe the complete joint job using Joint/ kinds. Cancellation reports 
 after discarding unpublished work; inline per-step CS03104 remains unchanged. A different-target
 Build discards kind 9, reports CS03402, and replans from the stored schema. Discard ends the prior
 trace with Restarted and uses Replan; recovery completes that trace with Discarded. A no-target
-open discards without parsing the abandoned target for trace metadata.
+open discards without parsing the abandoned target and sets no provisioning report or trace.
+Successful Verify, apply or skip clears the discard observation for a declared target.
+Progress retains the job's first executable operation throughout preparation; Kind, Table and
+Position do not identify later table work. Row counts restart at each table and phase. Accurate
+labels for unrendered layout changes and FK-validation neighbours need a separate progress model;
+ownership records remain excluded from executable StepCount. The event payload shape is unchanged.
 
 No new durable boundary or reclamation mechanism is added. The newly routed corpus captures
 IntentDurable, LocksReserved, Handoff, OwnersDurable, TreesDurable, BeforeTreeBuild,
@@ -9049,8 +9074,13 @@ storage write, flush and length change. Reopening converges to the exact old or 
 catalog; repeated drains reclaim abandoned owners once while retaining kept heaps and trees.
 The deferred corpus also checks rollback Builds, cancellation admission counters, space refusal
 and the retained 49a index builder's page-write and row-rewrite costs.
+Every recorded A5 image reopens with no declaration, the matching target and a third target.
+Failed-preparation discard/drain images cover all three durability modes; a separate wide-copy
+fixture crosses a copy checkpoint over multiple 64-version brackets.
 For 32,768 indexed rows the retained 49a builder writes 137 pages and joint publication writes 138; both rewrite zero rows and decode 65,536
-versions. The complete data-and-catalog checkpoint measurement adds 0.73% page writes.
+versions. The complete data-and-catalog checkpoint measurement adds 0.73% page writes. The ten-percent
+page-write bound covers additive index builds and changes to alternate trees that keep their
+heaps; it excludes drops or replacements of heap-owned trees until #1808.
 
 SQL record-space format 37 requires this joint kind-9 meaning for every deferred job and refuses
 36 before any write through the existing format gate. Compiled-schema v12 and wire messages

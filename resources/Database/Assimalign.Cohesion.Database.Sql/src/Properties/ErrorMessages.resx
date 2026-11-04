@@ -863,8 +863,6 @@
   <data name="JointSpaceProbeFailed" xml:space="preserve"><value>The database volume's available space could not be determined.</value></data>
   <data name="JointPublicationUnconfirmed" xml:space="preserve"><value>Joint migration publication is unconfirmed. Recovery must determine whether the old or new schema committed; reopen before retrying.</value></data>
   <data name="JointTableNameReserved" xml:space="preserve"><value>Relation name '{0}' is reserved by a pending joint schema migration.</value></data>
-  <data name="ProvisionerRunDeferredAsyncFailure" xml:space="preserve"><value>The applied catalog differs: {0}.</value></data>
-  <data name="ProvisionerRunDeferredAsyncFailure2" xml:space="preserve"><value>{0}: {1}: deferred step {2} of {3} ({4} '{5}.{6}') failed. The pending migration is retained for recovery and retry.</value></data>
   <data name="RendererAppendConstraintDatabase" xml:space="preserve"><value>Constraint '{0}' has an unsupported delete action.</value></data>
   <data name="RendererAppendConstraintDatabase2" xml:space="preserve"><value>Check constraint '{0}' has no expression.</value></data>
   <data name="RendererAppendConstraintDatabase3" xml:space="preserve"><value>Constraint '{0}' has an unsupported kind.</value></data>
