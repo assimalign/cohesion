@@ -68,14 +68,10 @@ public sealed partial class SqlJointTypeMigrationTests
         recorder.Count.ShouldBeGreaterThan(1);
         for (int point = 0; point < recorder.Count; point++)
         {
-            await using var engine = await Builder(recorder.Open(point)).AddDatabase(DeferredDeclaration(false)).BuildAsync(guard.Token);
-            var database = await engine.OpenDatabaseAsync("typed", guard.Token);
-            database.Catalog.SchemaState!.ContentHash.ShouldBe(DeferredDeclaration(false).Compile().Hash);
-            database.Catalog.PendingMigration.ShouldBeNull();
-            database.Catalog.TryGetTable("dbo", "created", out _).ShouldBeFalse();
-            database.IsOffline.ShouldBeFalse();
+            for (int mode = 0; mode < 3; mode++)
+            { await CheckDeferredCrashImageAsync(recorder.Open(point), false, mode, null, guard.Token, 0); }
         }
-        _output.WriteLine($"Deferred discard storage images: {recorder.Count}");
+        _output.WriteLine($"Deferred discard storage images={recorder.Count}; reopens={recorder.Count * 3}");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred: a valid pending target cannot hide an untouched unresolved domain from Build")]
@@ -267,44 +263,71 @@ public sealed partial class SqlJointTypeMigrationTests
         // Assert
         foreach (string phase in new[] { "IntentDurable", "Handoff", "OwnersDurable", "TreesDurable", "BeforeTreeBuild", "AfterTreeBuild", "Validated", "Publishing", "Published" })
         { phases.ShouldContainKey(phase); }
-        int old = 0, changed = 0;
+        int old = 0, changed = 0, images = 0;
         foreach (var image in phases.Values.Concat(Enumerable.Range(0, recorder.Count).Select(recorder.Open)))
         {
-            await using var recovered = await Builder(image).BuildAsync(guard.Token);
-            var database = await recovered.OpenDatabaseAsync("typed", guard.Token);
-            bool applied = database.Catalog.SchemaState!.ContentHash == DeferredDeclaration(true, backfill).Compile().Hash;
-            if (applied) { changed++; } else { old++; }
-            database.Catalog.SchemaState.ContentHash.ShouldBe(DeferredDeclaration(applied, backfill).Compile().Hash);
-            Table(database).ObjectId.ShouldBe(heap);
-            Table(database).Constraints.Count.ShouldBe(applied ? 1 : 0);
-            database.Catalog.GetIndexes(heap).Count.ShouldBe(applied ? 1 : 0);
-            database.Catalog.TryGetTable("dbo", "created", out _).ShouldBe(applied);
-            database.Catalog.TryGetTable("dbo", "filled", out var filled).ShouldBeTrue();
-            (filled.FindColumn("Added") is not null).ShouldBe(applied && backfill);
-            database.Catalog.PendingMigration.ShouldBeNull();
-            database.IsOffline.ShouldBeFalse();
-            await using var reader = await database.CreateSessionAsync(guard.Token);
-            (await RowsAsync(reader, "SELECT Id FROM items ORDER BY Id", guard.Token)).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
-            if (applied && backfill) { (await RowsAsync(reader, "SELECT Added FROM filled", guard.Token)).Single()[0].ShouldBe(7); }
-            await DrainReclamationAsync(database, guard.Token);
-            database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
-            var liveHeaps = database.Catalog.Tables.Select(table => table.ObjectId).ToHashSet();
-            var liveTrees = database.IndexManager.ExportRegistrations().Select(database.IndexManager.PageOwner).ToHashSet();
-            for (long page = 1; page < database.DataStorage.PageManager.PageCount; page++)
+            images++;
+            for (int mode = 0; mode < 3; mode++)
             {
-                if (!database.DataStorage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
-                using var handle = database.DataStorage.PageManager.GetPage((PageId)page);
-                if (handle.Page.Type == PageType.Index) { liveTrees.ShouldContain(handle.Page.OwnerId); }
-                else if (handle.Page.OwnerId != 0) { liveHeaps.ShouldContain(handle.Page.OwnerId); }
+                bool applied = await CheckDeferredCrashImageAsync(image.CaptureDurableImages(), backfill, mode, heap, guard.Token);
+                if (mode == 0) { if (applied) { changed++; } else { old++; } }
             }
-            long reclaimed = database.TableReclamation.ReclaimedPages;
-            await DrainReclamationAsync(database, guard.Token);
-            database.TableReclamation.ReclaimedPages.ShouldBe(reclaimed);
-            database.DataStorage.HasOwnerPages(heap).ShouldBeTrue();
         }
         old.ShouldBeGreaterThan(0);
         changed.ShouldBeGreaterThan(0);
-        _output.WriteLine($"Deferred crash images: backfill={backfill}; old={old}; new={changed}; total={old + changed}");
+        _output.WriteLine($"Deferred crash images: backfill={backfill}; old={old}; new={changed}; images={images}; reopens={images * 3}");
+    }
+
+    private sealed record DeferredThird(int Id);
+    private static SqlSchema ThirdDeferredDeclaration() => SqlSchema.Create("typed", schema =>
+    {
+        schema.AllowDestructiveChanges();
+        schema.Table<OtherRow>("items", table => table.Column(row => row.Id));
+        schema.Table<DeferredBackfill>("filled", table => table.Key(row => row.Id));
+        schema.Table<DeferredThird>("third", table => table.Column(row => row.Id));
+    });
+    private static SqlCompiledSchema ThirdDeferredTarget() => ThirdDeferredDeclaration().Compile();
+
+    private static async Task<bool> CheckDeferredCrashImageAsync(CrashCaptureSqlStorageStrategy image, bool backfill,
+        int mode, ulong? heap, CancellationToken token, int expectedRows = 2)
+    {
+        var builder = Builder(image);
+        if (mode == 1) { builder.AddDatabase(DeferredDeclaration(true, backfill)); }
+        if (mode == 2) { builder.AddDatabase(ThirdDeferredDeclaration()); }
+        await using var recovered = await builder.BuildAsync(token);
+        var database = await recovered.OpenDatabaseAsync("typed", token);
+        await WaitDoneAsync(database, token);
+        bool applied = database.Catalog.SchemaState!.ContentHash == DeferredDeclaration(true, backfill).Compile().Hash;
+        database.Catalog.SchemaState.ContentHash.ShouldBe(mode == 2 ? ThirdDeferredTarget().Hash : DeferredDeclaration(mode == 1 || applied, backfill).Compile().Hash);
+        if (heap is { } owner) { Table(database).ObjectId.ShouldBe(owner); }
+        Table(database).Constraints.Count.ShouldBe(applied ? 1 : 0);
+        database.Catalog.GetIndexes(Table(database).ObjectId).Count.ShouldBe(applied ? 1 : 0);
+        database.Catalog.TryGetTable("dbo", "created", out _).ShouldBe(applied);
+        database.Catalog.TryGetTable("dbo", "third", out _).ShouldBe(mode == 2);
+        database.Catalog.TryGetTable("dbo", "filled", out var filled).ShouldBeTrue();
+        (filled.FindColumn("Added") is not null).ShouldBe(applied && backfill);
+        database.Catalog.PendingMigration.ShouldBeNull();
+        database.IsOffline.ShouldBeFalse();
+        await using var reader = await database.CreateSessionAsync(token);
+        var rows = await RowsAsync(reader, "SELECT Id FROM items ORDER BY Id", token);
+        rows.Select(row => row[0]).ShouldBe(Enumerable.Range(1, expectedRows).Select(value => (object?)value));
+        if (applied && backfill) { (await RowsAsync(reader, "SELECT Added FROM filled", token)).Single()[0].ShouldBe(7); }
+        await DrainReclamationAsync(database, token);
+        database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
+        var liveHeaps = database.Catalog.Tables.Select(table => table.ObjectId).ToHashSet();
+        var liveTrees = database.IndexManager.ExportRegistrations().Select(database.IndexManager.PageOwner).ToHashSet();
+        for (long page = 1; page < database.DataStorage.PageManager.PageCount; page++)
+        {
+            if (!database.DataStorage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
+            using var handle = database.DataStorage.PageManager.GetPage((PageId)page);
+            if (handle.Page.Type == PageType.Index) { liveTrees.ShouldContain(handle.Page.OwnerId); }
+            else if (handle.Page.OwnerId != 0) { liveHeaps.ShouldContain(handle.Page.OwnerId); }
+        }
+        long reclaimed = database.TableReclamation.ReclaimedPages;
+        await DrainReclamationAsync(database, token);
+        database.TableReclamation.ReclaimedPages.ShouldBe(reclaimed);
+        if (heap is { } retained) { database.DataStorage.HasOwnerPages(retained).ShouldBeTrue(); }
+        return applied;
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred: metadata floor, measured admission and publication watchdog preserve the old schema")]
@@ -359,20 +382,27 @@ public sealed partial class SqlJointTypeMigrationTests
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         using var release = new ManualResetEventSlim();
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var engine = await Builder(new CrashCaptureSqlStorageStrategy()).AddDatabase(DeferredDeclaration(false)).BuildAsync(guard.Token);
-        var database = await engine.OpenDatabaseAsync("typed", guard.Token);
+        SqlCompiledSchema Declaration(bool target) => Compiled(DeferredDeclaration(target).Compile().Tables.Select(table => table.Name == "items"
+            ? new CompiledSchemaTable(table.Name, table.RowType, table.Columns, table.PrimaryKey, table.Indexes,
+                table.Constraints.Append(new CompiledSchemaConstraint("fk_customer", CompiledSchemaConstraintKind.Reference, ["Id"], "customers", ["id"])).ToArray()) : table)
+            .Append(new CompiledSchemaTable("customers", "customers", [new("id", Assimalign.Cohesion.Database.Types.DatabaseType.Int32, false),
+                new("note", Assimalign.Cohesion.Database.Types.DatabaseType.Int32, true)], new("pk", ["id"]), [], [])).ToArray());
+        await using var engine = await Builder(new CrashCaptureSqlStorageStrategy()).BuildAsync(guard.Token);
+        var database = await engine.CreateDatabaseAsync("typed", guard.Token);
+        await database.ApplySchemaAsync(Declaration(false), guard.Token);
         await using var seed = await database.CreateSessionAsync(guard.Token);
+        await seed.ExecuteAsync("INSERT INTO customers VALUES(1,7)", cancellationToken: guard.Token);
         await seed.ExecuteAsync("INSERT INTO items VALUES(1)", cancellationToken: guard.Token);
         database.SchemaProvisioner.JointStage = phase =>
         { if (phase == "AfterTreeBuild") { ready.TrySetResult(); release.Wait(guard.Token); } };
-        int waits = 0, cancellations = 0;
+        int waits = 0, cancellations = 0, neighbourReads = 0, neighbourUpdates = 0, neighbourInserts = 0;
         TaskCompletionSource? waiting = null;
         using var listener = new LockWaitListener(database.Name);
         listener.Observed = value =>
         { if (value.EventName == "LockWaitStart") { Interlocked.Increment(ref waits); waiting?.TrySetResult(); } };
 
         // Act
-        await database.SchemaProvisioner.ApplyAsync(DeferredDeclaration(true).Compile(), guard.Token, deferDataScalingSteps: true);
+        await database.SchemaProvisioner.ApplyAsync(Declaration(true), guard.Token, deferDataScalingSteps: true);
         await ready.Task.WaitAsync(guard.Token);
         try
         {
@@ -387,6 +417,12 @@ public sealed partial class SqlJointTypeMigrationTests
                 cancellation.Cancel();
                 await Should.ThrowAsync<OperationCanceledException>(async () => await write);
                 cancellations++;
+                (await RowsAsync(seed, "SELECT note FROM customers WHERE id=1", guard.Token)).ShouldHaveSingleItem();
+                neighbourReads++;
+                await seed.ExecuteAsync("UPDATE customers SET note=8 WHERE id=1", cancellationToken: guard.Token);
+                neighbourUpdates++;
+                await seed.ExecuteAsync($"INSERT INTO customers VALUES({cancellations + 1},7)", cancellationToken: guard.Token);
+                neighbourInserts++;
             } while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || cancellations < 8 || Volatile.Read(ref waits) < 8);
         }
         finally { release.Set(); await WaitDoneAsync(database, guard.Token); }
@@ -395,13 +431,16 @@ public sealed partial class SqlJointTypeMigrationTests
         // migration's table reservation, apply gate and metadata lease.
         waits.ShouldBeGreaterThanOrEqualTo(8);
         cancellations.ShouldBeGreaterThanOrEqualTo(8);
+        neighbourReads.ShouldBeGreaterThanOrEqualTo(8);
+        neighbourUpdates.ShouldBeGreaterThanOrEqualTo(8);
+        neighbourInserts.ShouldBeGreaterThanOrEqualTo(8);
         var failure = await Should.ThrowAsync<DatabaseException>(async () =>
             await seed.ExecuteAsync("INSERT INTO items VALUES(-1)", cancellationToken: guard.Token));
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03038");
         await seed.ExecuteAsync("INSERT INTO items VALUES(2)", cancellationToken: guard.Token);
-        await database.SchemaProvisioner.VerifyAsync(DeferredDeclaration(true).Compile(), guard.Token);
+        await database.SchemaProvisioner.VerifyAsync(Declaration(true), guard.Token);
         await seed.ExecuteAsync("CREATE VIEW after_migration AS SELECT Id FROM items", cancellationToken: guard.Token);
-        _output.WriteLine($"Deferred admission stress: lock waits={waits}; canceled writers={cancellations}");
+        _output.WriteLine($"Deferred admission stress: lock waits={waits}; canceled writers={cancellations}; neighbour reads={neighbourReads}; updates={neighbourUpdates}; inserts={neighbourInserts}");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred: index-only page writes stay within ten percent of the retained 49a builder")]

@@ -287,12 +287,14 @@ public sealed partial class SqlDeferredProvisioningTests
         SqlSchema desired = Desired();
         var storage = await SeedAsync(new CrashCaptureSqlStorageStrategy(), null, desired, timeout.Token);
         int applied = 0;
+        SqlDatabase? interrupted = null;
         var builder = Builder(storage);
         builder.AddWorker(engine =>
         {
             engine.BeforeProvisioning = database => database.SchemaProvisioner.JointStage = stage =>
             {
                 if (stage != "Handoff") { return; }
+                interrupted = database;
                 Interlocked.Increment(ref applied);
                 cancellation.Cancel();
                 cancellation.Token.ThrowIfCancellationRequested();
@@ -303,6 +305,7 @@ public sealed partial class SqlDeferredProvisioningTests
         // Act
         await Should.ThrowAsync<OperationCanceledException>(async () =>
             await builder.AddDatabase(desired).BuildAsync(cancellation.Token));
+        interrupted.ShouldNotBeNull().Catalog.PendingMigration.ShouldBeNull();
         await using var retry = await Builder(storage.CaptureDurableImages()).AddDatabase(desired).BuildAsync(timeout.Token);
         var database = await retry.OpenDatabaseAsync("pending", timeout.Token);
         await WaitDoneAsync(database, timeout.Token);
@@ -313,8 +316,8 @@ public sealed partial class SqlDeferredProvisioningTests
         database.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: canceling Build after a pending reservation releases the worker transaction and retries on restart")]
-    public async Task BuildAsync_CanceledAfterReservation_ShouldRetainPendingAndConverge()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Joint deferred: canceling Build after a pending reservation discards and retries on restart")]
+    public async Task BuildAsync_CanceledAfterReservation_ShouldDiscardPendingAndConverge()
     {
         // Arrange: the second declaration cancels Build after the first reserved its table.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -322,11 +325,13 @@ public sealed partial class SqlDeferredProvisioningTests
         SqlSchema desired = Desired();
         var storage = await SeedAsync(new CrashCaptureSqlStorageStrategy(), null, desired, timeout.Token);
         int steps = 0;
+        SqlDatabase? interrupted = null;
         var builder = Builder(storage);
         builder.AddWorker(engine =>
         {
             engine.BeforeProvisioning = database =>
             {
+                if (database.Name.ToString() == "pending") { interrupted = database; }
                 database.SchemaProvisioner.BeforeDeferredStep = (_, _) => Interlocked.Increment(ref steps);
                 if (database.Name.ToString() == "stop")
                 {
@@ -340,6 +345,7 @@ public sealed partial class SqlDeferredProvisioningTests
         await Should.ThrowAsync<OperationCanceledException>(async () =>
             await builder.AddDatabase(desired).AddDatabase("stop").BuildAsync(cancellation.Token));
         steps.ShouldBe(0);
+        interrupted.ShouldNotBeNull().Catalog.PendingMigration.ShouldBeNull();
         await using var retry = await Builder(storage.CaptureDurableImages()).AddDatabase(desired).BuildAsync(timeout.Token);
         var database = await retry.OpenDatabaseAsync("pending", timeout.Token);
         await WaitDoneAsync(database, timeout.Token);

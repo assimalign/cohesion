@@ -191,6 +191,9 @@ public sealed partial class SqlJointTypeMigrationTests
             trace.Length.ShouldBe(2);
             trace[0].Payload![4].ShouldBe("Apply");
             trace[1].Payload![5].ShouldBe("Deferred");
+            // The fresh script has three precision changes plus NOT NULL. Its four
+            // executable steps replace the interrupted script's smaller total.
+            trace[1].Payload![4].ShouldBe(4);
         }
         else
         {

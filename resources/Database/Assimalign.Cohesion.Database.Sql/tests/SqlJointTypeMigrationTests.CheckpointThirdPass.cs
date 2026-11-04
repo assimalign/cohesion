@@ -37,7 +37,8 @@ public sealed partial class SqlJointTypeMigrationTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var storage = new CrashCaptureSqlStorageStrategy();
         var builder = Builder(storage);
-        builder.Options.CheckpointJournalSize = 0;
+        // Rewritten jobs retain the 16 MiB copy bound even with a larger engine budget.
+        builder.Options.CheckpointJournalSize = 256L * 1024 * 1024;
         builder.Options.CheckpointInterval = TimeSpan.FromDays(1);
         await using var engine = await builder.BuildAsync(guard.Token);
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
