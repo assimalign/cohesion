@@ -225,7 +225,7 @@ internal sealed partial class SqlPlanner
             for (int i = 0; i < length; i++)
             {
                 var a = Key(previous, i); var b = Key(current, i);
-                if (a.Descending != b.Descending || a.NullsFirst != b.NullsFirst || !SameGroupExpression(a.Expression, b.Expression, scope)) { return false; }
+                if (a.Descending != b.Descending || a.NullsFirst != b.NullsFirst || !SameWindowKey(a.Expression, b.Expression)) { return false; }
             }
             return true;
         }
@@ -238,10 +238,32 @@ internal sealed partial class SqlPlanner
         }
 
         bool SameKeys(IReadOnlyList<SqlExpression> a, IReadOnlyList<SqlExpression> b) => a.Count == b.Count &&
-            a.Select((key, i) => SameGroupExpression(key, b[i], scope)).All(same => same);
+            a.Select((key, i) => SameWindowKey(key, b[i])).All(same => same);
         bool SameOrder(IReadOnlyList<SqlOrderByColumn> a, IReadOnlyList<SqlOrderByColumn> b) => a.Count == b.Count &&
             a.Select((key, i) => key.IsDescending == b[i].IsDescending && NullsFirst(key) == NullsFirst(b[i]) &&
-                SameGroupExpression(key.Expression, b[i].Expression, scope)).All(same => same);
+                SameWindowKey(key.Expression, b[i].Expression)).All(same => same);
+
+        bool SameWindowKey(SqlExpression left, SqlExpression right) =>
+            SameGroupExpression(left, right, scope) && SameAggregateSlots(left, right);
+
+        bool SameAggregateSlots(SqlExpression left, SqlExpression right)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            // Equal syntax can read different grouped results when volatile inputs prevent
+            // aggregate sharing. Keep their partitions and sort prefixes independent too.
+            if (left is SqlFunctionCallExpression call && IsAggregate(call))
+            {
+                return slots.TryGetValue(left, out int leftSlot) && slots.TryGetValue(right, out int rightSlot)
+                    && leftSlot == rightSlot;
+            }
+            using var first = Children(left).GetEnumerator();
+            using var second = Children(right).GetEnumerator();
+            while (first.MoveNext())
+            {
+                if (!second.MoveNext() || !SameAggregateSlots(first.Current, second.Current)) { return false; }
+            }
+            return !second.MoveNext();
+        }
     }
 
     private static bool IsFrameOffsetSource(SqlSelectExpression select, SqlExpression source)

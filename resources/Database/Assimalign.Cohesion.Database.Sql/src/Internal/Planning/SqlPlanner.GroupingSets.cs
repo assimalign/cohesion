@@ -200,6 +200,9 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
+                // Named window keys can visit the same syntax node more than once. This is
+                // one written occurrence, even when its volatile inputs forbid structural reuse.
+                if (slots.ContainsKey(call)) { return; }
                 if (call.Filter is not null)
                 {
                     if (ContainsAggregate(call.Filter))
@@ -238,7 +241,7 @@ internal sealed partial class SqlPlanner
                 {
                     throw new SqlUnsupportedQueryException(ErrorMessages.StringAggregateDelimiter, location: call.Arguments[1].Location);
                 }
-                bool volatileInputs = Children(call).Any(HasVolatileInput);
+                bool volatileInputs = HasVolatileAggregateInputs(call, evaluator);
                 int index = volatileInputs ? -1 : aggregates.FindIndex(candidate => SameGroupExpression(candidate.Call, call, evaluator));
                 if (index < 0)
                 {
@@ -247,17 +250,6 @@ internal sealed partial class SqlPlanner
                 }
                 slots[expression] = groupKeys.Count + index;
                 return;
-
-                bool HasVolatileInput(SqlExpression input)
-                {
-                    RuntimeHelpers.EnsureSufficientExecutionStack();
-                    // Child query bodies have their own binding; conservatively retain their
-                    // separate invocation rather than sharing a possibly volatile result.
-                    if (input is SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlInExpression { Subquery: not null }) { return true; }
-                    if (input is SqlFunctionCallExpression functionCall &&
-                        evaluator.ResolveFunction(functionCall)?.Volatility == SqlFunctionVolatility.Volatile) { return true; }
-                    return Children(input).Any(HasVolatileInput);
-                }
             }
             for (int i = 0; i < groupKeys.Count; i++)
             {

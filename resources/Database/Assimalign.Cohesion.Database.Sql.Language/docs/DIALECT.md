@@ -2801,14 +2801,21 @@ evaluated. This includes correlated and independent argument subqueries. Indepen
 inside the filtered call are evaluated on first demand and cached for the statement.
 FILTER works with default/ALL/DISTINCT calls, COUNT(*), ordered STRING_AGG/LISTAGG,
 GROUP BY, HAVING and ORDER BY. Different conditions retain independent aggregate states.
-Filtered calls with volatile arguments, ordering keys or conditions also retain independent
-states; child queries conservatively prevent aggregate sharing.
+Every aggregate call with a volatile argument, FILTER condition or inner ORDER BY key (including
+WITHIN GROUP) retains an independent state in plain grouping and grouping sets (#1763).
+This includes repeated calls in SELECT, HAVING and ORDER BY; ORDER BY aliases and ordinals still
+read completed outputs. Stable and Immutable inputs retain sharing. Child queries conservatively
+prevent aggregate sharing. Window calls retain separate aggregates even when they share a sort;
+window partitions and sort prefixes using independent aggregate results remain separate too.
+PostgreSQL optimizer/prep/prepagg.c:387-389 likewise refuses reuse for volatile inputs;
+optimizer/util/clauses.c:592-598 descends into sublink bodies.
 The condition binds over input columns and may reference enclosing columns or contain
 subqueries; aggregates local to those child queries belong to the child scope. Calls owned
 entirely by an enclosing query retain the existing outer-only aggregate CK00001 boundary.
 FILTER on a scalar call fails with CS05072 (42809), a same-scope aggregate in the condition with CS05073
-(42803), and a non-Boolean condition with CS02003 (42804). Window calls in a condition and
-FILTER on a window aggregate retain CK00001 until the window family implements them.
+(42803), and a non-Boolean condition with CS02003 (42804). Window calls inside FILTER
+conditions fail window-placement binding; FILTER on a window aggregate executes with the
+same predicate-first rule.
 EXPLAIN reports `filtered_aggregates=N` on a grouping node only when N is nonzero.
 
 | Aggregate | Non-NULL input and result |

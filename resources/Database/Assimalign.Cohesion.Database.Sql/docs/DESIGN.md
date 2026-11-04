@@ -2634,8 +2634,15 @@ flowchart LR
   before argument or ordering subqueries, evaluation, coercion, DISTINCT retention or transition
   calls. Only TRUE admits a row. Independent children inside a filtered call are deferred until
   demanded and then cached per statement; correlated children retain their row lifetime.
-  Filtered calls containing volatile inputs have independent states, following PostgreSQL
-  prepagg.c:388-389. Child queries conservatively prevent sharing as their bodies bind separately.
+  All calls containing volatile arguments, FILTER conditions or inner ORDER BY keys (including
+  WITHIN GROUP) have independent states in plain grouping and grouping sets (#1763, SQ-H3),
+  including repeated calls in HAVING and ORDER BY. Stable and Immutable inputs retain sharing.
+  Child queries conservatively prevent sharing as their bodies bind separately. ORDER BY aliases
+  and ordinals still read completed outputs. Window calls each bind a separate aggregate and result
+  slot. Partition/sort matching also compares grouped aggregate slots, including inside scalar
+  key expressions, so independent volatile aggregate results cannot share window keys or sort prefixes.
+  Repeated visits to one named-window key syntax node retain its one aggregate slot.
+  This follows PostgreSQL optimizer/prep/prepagg.c:387-389 and optimizer/util/clauses.c:592-598,636-640.
   Bare calls keep the existing execution path and object sizes; optional FILTER payloads
   allocate only for filtered calls. EVERY uses the BOOL_AND transition; Boolean
   aggregates are strict and return NULL without non-NULL input. Statistical signatures choose

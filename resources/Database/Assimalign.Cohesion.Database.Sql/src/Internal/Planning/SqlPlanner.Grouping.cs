@@ -181,6 +181,9 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
+                // Named window keys can visit the same syntax node more than once. This is
+                // one written occurrence, even when its volatile inputs forbid structural reuse.
+                if (slots.ContainsKey(call)) { return; }
                 if (call.Filter is not null)
                 {
                     if (ContainsAggregate(call.Filter))
@@ -219,7 +222,7 @@ internal sealed partial class SqlPlanner
                 {
                     throw new SqlUnsupportedQueryException(ErrorMessages.StringAggregateDelimiter, location: call.Arguments[1].Location);
                 }
-                bool volatileInputs = call.Filter is not null && Children(call).Any(HasVolatileInput);
+                bool volatileInputs = HasVolatileAggregateInputs(call, evaluator);
                 int index = volatileInputs ? -1 : aggregates.FindIndex(candidate => SameGroupExpression(candidate.Call, call, evaluator));
                 if (index < 0)
                 {
@@ -228,17 +231,6 @@ internal sealed partial class SqlPlanner
                 }
                 slots[expression] = select.GroupBy.Count + index;
                 return;
-
-                bool HasVolatileInput(SqlExpression input)
-                {
-                    RuntimeHelpers.EnsureSufficientExecutionStack();
-                    // Child query bodies have their own binding; conservatively retain their
-                    // separate invocation rather than sharing a possibly volatile result.
-                    if (input is SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlInExpression { Subquery: not null }) { return true; }
-                    if (input is SqlFunctionCallExpression functionCall &&
-                        evaluator.ResolveFunction(functionCall)?.Volatility == SqlFunctionVolatility.Volatile) { return true; }
-                    return Children(input).Any(HasVolatileInput);
-                }
             }
             for (int i = 0; i < select.GroupBy.Count; i++)
             {
@@ -271,6 +263,39 @@ internal sealed partial class SqlPlanner
                 RuntimeHelpers.EnsureSufficientExecutionStack();
                 return outputSlots is not null && (outputSlots.ContainsKey(candidate) || Children(candidate).Any(ContainsOutput));
             }
+        }
+    }
+
+    /// <summary>Refuses aggregate reuse when any argument, FILTER or inner ordering input may be volatile.</summary>
+    private static bool HasVolatileAggregateInputs(SqlFunctionCallExpression call, SqlExpressionEvaluator evaluator)
+    {
+        // Index the common argument/ordering lists so the new check adds no enumerator or
+        // delegate allocations to ordinary COUNT(*) / SUM(column) grouping plans.
+        for (int i = 0; i < call.Arguments.Count; i++)
+        {
+            if (HasVolatileInput(call.Arguments[i], evaluator)) { return true; }
+        }
+        for (int i = 0; i < call.OrderBy.Count; i++)
+        {
+            if (HasVolatileInput(call.OrderBy[i].Expression, evaluator)) { return true; }
+        }
+        return call.Filter is not null && HasVolatileInput(call.Filter, evaluator);
+
+        static bool HasVolatileInput(SqlExpression input, SqlExpressionEvaluator evaluator)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            // Child query bodies bind in their own scope. Preserve separate aggregate invocations
+            // unless their volatility can be proved, as PostgreSQL's walker descends into sublinks.
+            if (input is SqlNextValueExpression or SqlSubqueryExpression or SqlExistsExpression or
+                SqlQuantifiedComparisonExpression or SqlInExpression { Subquery: not null }) { return true; }
+            if (input is SqlFunctionCallExpression functionCall &&
+                evaluator.ResolveFunction(functionCall)?.Volatility == SqlFunctionVolatility.Volatile) { return true; }
+            if (input is SqlLiteralExpression or SqlParameterExpression or SqlColumnReferenceExpression or SqlStarExpression) { return false; }
+            foreach (var child in Children(input))
+            {
+                if (HasVolatileInput(child, evaluator)) { return true; }
+            }
+            return false;
         }
     }
 

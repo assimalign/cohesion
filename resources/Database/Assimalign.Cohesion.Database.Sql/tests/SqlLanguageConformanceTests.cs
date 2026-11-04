@@ -579,6 +579,32 @@ public sealed class SqlLanguageConformanceTests
         (await RowsAsync(session, $"SELECT {projection} FROM t GROUP BY age - age;")).ShouldHaveSingleItem()[0].ShouldBe(expected);
     }
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: duplicate volatile SUM calls allocate twice per input row (#1763)")]
+    [InlineData("", 1)]
+    [InlineData(" GROUP BY k", 1)]
+    [InlineData(" GROUP BY GROUPING SETS ((k))", 1)]
+    [InlineData(" GROUP BY ROLLUP(k)", 2)]
+    [InlineData(" GROUP BY CUBE(k)", 2)]
+    public async Task Select_DuplicateVolatileAggregates_ShouldReturnIndependentSequenceSums(string grouping, int expectedRows)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-volatile-aggregate-conformance", new());
+        var database = await engine.CreateDatabaseAsync("audit", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SEQUENCE s;");
+        await ExecuteAsync(session, "CREATE TABLE volatile_aggregates(k INT);");
+        await ExecuteAsync(session, "INSERT INTO volatile_aggregates VALUES(1),(1),(1);");
+
+        // Act
+        var rows = await RowsAsync(session, "SELECT SUM(nextval('s')), SUM(nextval('s')) FROM volatile_aggregates" + grouping + ";");
+        var sequence = await RowsAsync(session, "SELECT currval('s');");
+
+        // Assert
+        rows.Count.ShouldBe(expectedRows);
+        rows.ShouldAllBe(row => Equals(row[0], 9m) && Equals(row[1], 12m));
+        sequence.ShouldHaveSingleItem().ShouldBe(new object?[] { 6L });
+    }
+
     /// <summary>Applies the full Int64 count range consistently to every materialized SELECT shape.</summary>
     /// <param name="query">The ordered query producing three rows.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - LIMIT/OFFSET: Int64 counts preserve the row window for every plan shape")]
