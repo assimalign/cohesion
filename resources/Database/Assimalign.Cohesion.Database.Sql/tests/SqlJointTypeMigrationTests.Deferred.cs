@@ -320,6 +320,8 @@ public sealed partial class SqlJointTypeMigrationTests
         database.Catalog.TryGetTable("dbo", "third", out _).ShouldBe(mode == 2);
         database.Catalog.TryGetTable("dbo", "filled", out var filled).ShouldBeTrue();
         (filled.FindColumn("Added") is not null).ShouldBe(applied && backfill);
+        database.Catalog.GetIndexes(Table(database).ObjectId).Single(index => index.IsPrimaryKey).Name.ShouldBe("PrimaryKey_items_Id_0");
+        database.Catalog.GetIndexes(filled.ObjectId).Single(index => index.IsPrimaryKey).Name.ShouldBe("PrimaryKey_filled_Id_0");
         database.Catalog.PendingMigration.ShouldBeNull();
         database.Provisioning.ShouldBeNull();
         database.IsOffline.ShouldBeFalse();

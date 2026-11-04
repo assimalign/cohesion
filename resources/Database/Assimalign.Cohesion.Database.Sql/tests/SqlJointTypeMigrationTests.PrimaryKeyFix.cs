@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -53,6 +54,9 @@ public sealed partial class SqlJointTypeMigrationTests
         var compiled = KeyDeclaration(target, rewrite, created).Compile();
         return composite ? Compiled(compiled.Tables.Select(table => table.Name == "items"
             ? new CompiledSchemaTable(table.Name, table.RowType, table.Columns, new("pk", ["Id", "Part"]), table.Indexes, table.Constraints)
+            : table.Name == "created" ? new CompiledSchemaTable(table.Name, table.RowType,
+                [new("Id", DatabaseType.Int32, false), new("Part", DatabaseType.Int32, false)],
+                new("pk_created", ["Id", "Part"]), [], [new("fk_created_items", CompiledSchemaConstraintKind.Reference, ["Id", "Part"], "items", ["Id", "Part"])])
             : table).ToArray()) : compiled;
     }
 
@@ -143,8 +147,9 @@ public sealed partial class SqlJointTypeMigrationTests
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        await using var ordinary = await Builder(new()).AddDatabase(KeyDeclaration(true, created: true)).BuildAsync(guard.Token);
-        var perStep = await ordinary.OpenDatabaseAsync("typed", guard.Token);
+        await using var ordinary = await Builder(new()).BuildAsync(guard.Token);
+        var perStep = await ordinary.CreateDatabaseAsync("typed", guard.Token);
+        await perStep.ApplySchemaAsync(KeyTarget(true, composite, created: true), guard.Token);
         string Name(SqlDatabase database) => database.Catalog.GetIndexes(database.Catalog.Tables.Single(table => table.Name == "created").ObjectId).Single(index => index.IsPrimaryKey).Name;
         string expected = Name(perStep);
         await using var engine = await Builder(new()).AddDatabase("typed", db => { if (!composite) { db.Schema(KeyDeclaration(false)); } }).BuildAsync(guard.Token);
@@ -158,6 +163,17 @@ public sealed partial class SqlJointTypeMigrationTests
 
         // Assert
         Name(database).ShouldBe(expected);
+        await using var ordinaryReader = await perStep.CreateSessionAsync(guard.Token);
+        await using var jointReader = await database.CreateSessionAsync(guard.Token);
+        const string query = "SELECT CONSTRAINT_NAME,CONSTRAINT_TYPE FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_NAME='created' ORDER BY CONSTRAINT_NAME";
+        var ordinaryNames = await RowsAsync(ordinaryReader, query, guard.Token);
+        var jointNames = await RowsAsync(jointReader, query, guard.Token);
+        jointNames.Select(row => string.Join('|', row)).ShouldBe(ordinaryNames.Select(row => string.Join('|', row)));
+        if (composite)
+        {
+            jointNames.Length.ShouldBe(2);
+            database.Catalog.Tables.Single(table => table.Name == "created").PrimaryKeyColumns.ShouldBe(new[] { "Id", "Part" });
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Joint PK fix: an old RewriteOwner intent is discarded and replanned to KeepOwner (#1820)")]

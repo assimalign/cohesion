@@ -204,7 +204,7 @@ public sealed partial class SqlJointTypeMigrationTests
         {
             engine.BeforeProvisioning = database => database.SchemaProvisioner.JointStage = phase =>
             {
-                if (phase != "TreesDurable") { return; }
+                if (phase != (fail ? "AfterTreeBuild" : "TreesDurable")) { return; }
                 ready.TrySetResult(); release.Wait(guard.Token);
                 if (fail) { throw new InvalidOperationException("injected new-table preparation failure"); }
             };

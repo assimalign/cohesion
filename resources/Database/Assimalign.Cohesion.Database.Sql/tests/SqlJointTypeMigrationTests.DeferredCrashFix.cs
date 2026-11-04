@@ -125,9 +125,20 @@ public sealed partial class SqlJointTypeMigrationTests
             {
                 var builder = Builder(image.CaptureDurableImages());
                 if (mode != 0) { builder.AddDatabase(DeferredCheckpointDeclaration(mode == 1, mode == 2)); }
+                int thirdJobs = 0;
+                if (mode == 2)
+                {
+                    builder.AddWorker(engine =>
+                    {
+                        engine.BeforeProvisioning = current => current.SchemaProvisioner.JointStage = phase =>
+                        { if (phase == "IntentDurable") { thirdJobs++; } };
+                        return new RecordingWorker(engine);
+                    });
+                }
                 await using var engine = await builder.BuildAsync(guard.Token);
                 var database = await engine.OpenDatabaseAsync("typed", guard.Token);
                 await WaitDoneAsync(database, guard.Token);
+                if (mode == 2) { thirdJobs.ShouldBe(1); }
                 database.Catalog.SchemaState!.ContentHash.ShouldBe(DeferredCheckpointDeclaration(mode == 1, mode == 2).Compile().Hash);
                 database.Catalog.PendingMigration.ShouldBeNull();
                 database.Provisioning.ShouldBeNull();
