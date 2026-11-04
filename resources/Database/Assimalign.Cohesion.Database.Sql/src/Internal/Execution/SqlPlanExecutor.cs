@@ -138,8 +138,9 @@ internal sealed partial class SqlPlanExecutor
         _metrics = statement.Metrics;
         if (RecursiveState is not null && StatementInput(plan) is SqlRelationPlan)
         { return await ExecuteRecursiveQueryAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
-        plan = InitializeWindow(plan, cancellationToken);
-        switch (plan)
+        // Keep the static plan as the eligibility key; LIMIT/OFFSET initialization may
+        // create a fresh execution copy on every correlated invocation.
+        switch (InitializeWindow(plan, cancellationToken))
         {
             case SqlWindowAggregatePlan window:
                 return await ExecuteWindowAggregateAsync(window, statement, cancellationToken).ConfigureAwait(false);
@@ -156,7 +157,7 @@ internal sealed partial class SqlPlanExecutor
                 return MaterializeSelect(evaluator.Matches(constant.Where, []) ? [Array.Empty<object?>()] : [],
                     constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
                     evaluator, constant.OrderByProjections, cancellationToken,
-                    incrementalDistinct: CanPipelinePlainDistinct(constant));
+                    incrementalDistinct: CanPipelinePlainDistinct(plan));
             case SqlWithPlan with:
                 foreach (var relation in RecursiveState is null ? with.Relations : Array.Empty<SqlDerivedRelation>())
                 {
@@ -173,21 +174,25 @@ internal sealed partial class SqlPlanExecutor
                 _definitions.EnsureIndexPredicatesResolved(insertSelect.Table, cancellationToken);
                 return await ExecuteInsertSelectAsync(insertSelect, statement, cancellationToken).ConfigureAwait(false);
             case SqlGroupPlan group:
-                return await ExecuteGroupAsync(group, statement, cancellationToken).ConfigureAwait(false);
+                return await ExecuteGroupAsync(group, statement, cancellationToken, (SqlGroupPlan)plan).ConfigureAwait(false);
             case SqlSystemViewPlan systemView:
                 return _subqueryValues is { HasCorrelatedQueries: true }
                     ? await ExecuteCorrelatedSelectAsync(ReadCorrelatedSystemRelation(systemView.View, statement, cancellationToken),
                         systemView.Projections, systemView.Where, systemView.OrderBy, systemView.Limit, systemView.Offset,
                         systemView.IsDistinct, statement, cancellationToken).ConfigureAwait(false)
-                    : ExecuteSystemView(systemView, statement, cancellationToken);
+                    : ExecuteSystemView(systemView, statement, cancellationToken, plan);
             case SqlSelectPlan select:
                 return _subqueryValues is { HasCorrelatedQueries: true }
                     ? await ExecuteCorrelatedSelectAsync(EnumerateRows(select.Table, select.Access, statement, cancellationToken).Select(row => row.Values),
                         select.Projections, select.Where, select.OrderBy, select.Limit, select.Offset, select.IsDistinct,
                         statement, cancellationToken).ConfigureAwait(false)
-                    : ExecuteSelect(select, statement, cancellationToken);
+                    : ExecuteSelect(select, statement, cancellationToken, retainRows: null, retentionPlan: plan);
             case SqlJoinPlan join:
-                return await ExecuteJoinAsync(join, statement, cancellationToken).ConfigureAwait(false);
+                // Keep this dispatcher Task-based: a new ValueTask awaiter would grow
+                // its state machine even for ordinary DML with exact allocation guards.
+                return await (CanPipelineJoinOutput((SqlJoinPlan)plan)
+                    ? ExecutePipelinedJoinAsync(join, statement, cancellationToken).AsTask()
+                    : ExecuteJoinAsync(join, statement, cancellationToken)).ConfigureAwait(false);
             case SqlInsertPlan insert:
                 _definitions.EnsureIndexPredicatesResolved(insert.Table, cancellationToken);
                 return await ExecuteInsertAsync(insert, statement, cancellationToken).ConfigureAwait(false);
@@ -246,16 +251,17 @@ internal sealed partial class SqlPlanExecutor
     private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
         => ExecuteSelect(plan, statement, cancellationToken, retainRows: null);
 
-    private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken, int? retainRows)
+    private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken,
+        int? retainRows, SqlPlan? retentionPlan = null)
     {
-        if (plan.Access is SqlOrderedIndexPath ordered) { return ExecuteOrderedSelect(plan, ordered, statement, cancellationToken); }
+        if (plan.Access is SqlOrderedIndexPath ordered) { return ExecuteOrderedSelect(plan, ordered, statement, cancellationToken, retentionPlan); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         // The access path narrows the candidate set; the full WHERE stays the
         // residual predicate for both paths, so seek results are equivalent to
         // scan results by construction.
         return MaterializeSelect(Matches(), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
             plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken,
-            incrementalDistinct: CanPipelinePlainDistinct(plan), retainRows: retainRows);
+            incrementalDistinct: CanPipelinePlainDistinct(retentionPlan ?? plan), retainRows: retainRows);
 
         IEnumerable<object?[]> Matches()
         {
@@ -267,18 +273,18 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private DatabaseResult ExecuteOrderedSelect(SqlSelectPlan plan, SqlOrderedIndexPath path,
-        SqlStatementContext statement, CancellationToken cancellationToken)
+        SqlStatementContext statement, CancellationToken cancellationToken, SqlPlan? retentionPlan = null)
     {
         // Resolve once before omitting the sort. A detached/replaced tree falls back to
         // a heap scan with the original ordering. The statement's reclamation horizon
         // retains a successfully resolved handle's pages even if DROP detaches it later.
         if (!TryResolveSeekTree(plan.Table, path.Index, out var tree))
-        { return ExecuteSelect(plan with { Access = SqlScanPath.Instance }, statement, cancellationToken); }
+        { return ExecuteSelect(plan with { Access = SqlScanPath.Instance }, statement, cancellationToken, retainRows: null, retentionPlan: retentionPlan ?? plan); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         statement.Metrics.AccessPath = "ordered:" + path.Index.Name + (path.Reverse ? ":backward" : ":forward");
         return MaterializeSelect(Matches(), plan.Projections, [], plan.Limit, plan.Offset,
             plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken,
-            incrementalDistinct: CanPipelinePlainDistinct(plan));
+            incrementalDistinct: CanPipelinePlainDistinct(retentionPlan ?? plan));
 
         IEnumerable<object?[]> Matches()
         {

@@ -22,8 +22,6 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        if (CanPipelineJoinOutput(plan))
-        { return await ExecutePipelinedJoinAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
         foreach (var binding in plan.Bindings)
         {

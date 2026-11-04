@@ -13,22 +13,89 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    private bool _isTableAsSource;
+
+    [Flags]
+    private enum RetentionCheck { Group = 1, Join = 2, BoundedBody = 4, Distinct = 8 }
+
+    // Reuse the executor's optional relation-state slot: ordinary statements and ordinary
+    // CTEs keep their exact object sizes. Only a correlated statement creates this map.
+    private sealed class RetentionRelationRows : RelationRows
+    {
+        internal RetentionRelationRows(RelationRows? previous) : base(previous?.TransactionStart)
+        {
+            if (previous is not null)
+            { foreach (var entry in previous) { Add(entry.Key, entry.Value); } }
+        }
+
+        internal Dictionary<SqlPlan, (RetentionCheck Checked, RetentionCheck Allowed)> Eligibility { get; }
+            = new(ReferenceEqualityComparer.Instance);
+    }
+
+    private bool RetentionEligible(SqlPlan plan, RetentionCheck check)
+    {
+        RetentionRelationRows? cache = _materializedRelations as RetentionRelationRows;
+        if (cache is null)
+        {
+            for (var frame = _subqueryValues; frame is not null && cache is null; frame = frame.Parent)
+            {
+                if (!frame.HasCorrelatedQueries) { continue; }
+                foreach (var query in frame.Queries.Values)
+                {
+                    if (!query.IsCorrelated) { continue; }
+                    cache = new RetentionRelationRows(_materializedRelations);
+                    _materializedRelations = cache;
+                    break;
+                }
+            }
+        }
+        var answer = cache is not null ? cache.Eligibility.GetValueOrDefault(plan) : default;
+        if ((answer.Checked & check) != 0) { return (answer.Allowed & check) != 0; }
+        _definitions.ObserveSelectRetention?.Invoke("eligibility-inspection", false, 0);
+        bool allowed = check switch
+        {
+            RetentionCheck.Group => InspectGroupInput((SqlGroupPlan)plan),
+            RetentionCheck.Join => InspectJoinOutput((SqlJoinPlan)plan),
+            RetentionCheck.BoundedBody => InspectBoundedSubqueryBody(plan),
+            _ => InspectPlainDistinct(plan),
+        };
+        if (cache is not null)
+        { cache.Eligibility[plan] = (answer.Checked | check, answer.Allowed | (allowed ? check : 0)); }
+        return allowed;
+    }
+
+    private bool CanPipelineGroupInput(SqlGroupPlan plan)
+        => CanPipelineSelectRetention() && RetentionEligible(plan, RetentionCheck.Group);
+
+    private bool CanPipelineJoinOutput(SqlJoinPlan plan)
+        => CanPipelineSelectRetention() && RetentionEligible(plan, RetentionCheck.Join);
+
+    private bool CanBoundSubqueryBody(SqlSubqueryBinding query)
+        => query.Kind is SqlSubqueryKind.Exists or SqlSubqueryKind.Scalar
+            && CanPipelineSelectRetention() && RetentionEligible(query.Query, RetentionCheck.BoundedBody);
+
+    private bool CanPipelinePlainDistinct(SqlPlan plan)
+        => (plan switch { SqlSelectPlan p => p.IsDistinct, SqlSystemViewPlan p => p.IsDistinct,
+                SqlConstantPlan p => p.IsDistinct, _ => false })
+            && CanPipelineSelectRetention() && RetentionEligible(plan, RetentionCheck.Distinct);
+
     private bool CanPipelineSelectRetention()
         => !_definitions.ForceSelectRetentionBasePath // Differential tests use the unchanged collectors.
             && RecursiveState is null // Recursive scratch retains its existing ownership and charges.
+            && !_isTableAsSource // CTAS charges output list capacity; SQ-L1b decides its accounting.
             && !_isDml // All write sources retain their existing DML ledger and evaluation.
             && SqlWindowMemory.For(_metrics) is null // A window's owner keeps its existing charges.
             && (_metrics is null || !SqlJsonPathExecution.IsStatement(_metrics)) // JSON scalar grants must not overlap new hash lifetimes.
             && _subqueryValues is not { HasCorrelatedQueries: true }; // Row preparation must remain staged.
 
-    private bool CanPipelineGroupInput(SqlGroupPlan plan)
+    private bool InspectGroupInput(SqlGroupPlan plan)
     {
         try
         {
             // Every bound subquery runs within a frame. Ordinary plans need no subquery walk.
             bool inspectSubqueries = _subqueryValues is not null;
             // Subqueries retain their own staged setup, cache and lazy-branch preparation.
-            if (!CanPipelineSelectRetention() || !IsPlainRetentionInput(plan.Input) ||
+            if (!IsPlainRetentionInput(plan.Input) ||
                 inspectSubqueries && (HasRetentionSubquery(plan.Input) || HasRetentionSubquery(plan.Having))) { return false; }
             bool downstreamVolatile = false;
             foreach (var key in plan.Keys)
@@ -73,16 +140,15 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private bool CanPipelineJoinOutput(SqlJoinPlan plan)
+    private bool InspectJoinOutput(SqlJoinPlan plan)
     {
         try
         {
-            return CanPipelineSelectRetention()
-                && (_subqueryValues is null || !HasRetentionSubquery(plan)) && CanStreamRetentionTree(plan)
+            return (_subqueryValues is null || !HasRetentionSubquery(plan)) && CanStreamRetentionTree(plan)
                 // Finish input before volatile outputs/keys, even when a later input row fails.
                 && !RetentionOutputIsVolatile(plan)
                 // Ordered DISTINCT must choose its representative after the stable sort.
-                && (!plan.IsDistinct || CanPipelineUnorderedDistinct(plan.Projections, plan.OrderBy));
+                && (!plan.IsDistinct || InspectUnorderedDistinct(plan.Projections, plan.OrderBy));
         }
         catch (InsufficientExecutionStackException)
         {
@@ -91,19 +157,18 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private bool CanBoundSubqueryBody(SqlSubqueryBinding query)
+    private bool InspectBoundedSubqueryBody(SqlPlan plan)
     {
         try
         {
-            return query.Kind is SqlSubqueryKind.Exists or SqlSubqueryKind.Scalar
-                && CanPipelineSelectRetention() && query.Query is SqlSelectPlan or SqlJoinPlan
-                && !HasRetentionSubquery(query.Query) // Includes independent children; call traversal omits their bodies.
-                && !(RetentionInputIsVolatile(query.Query) && ((SqlRelationPlan)query.Query).OutputProjections
+            return plan is SqlSelectPlan or SqlJoinPlan
+                && !HasRetentionSubquery(plan) // Includes independent children; call traversal omits their bodies.
+                && !(RetentionInputIsVolatile(plan) && ((SqlRelationPlan)plan).OutputProjections
                     .Any(projection => RetentionHasVolatileCall(projection.Value))) // Preserve staged call order.
-                && query.Query switch
+                && plan switch
                 {
                     SqlSelectPlan scan => !scan.IsDistinct && scan.OrderBy.Count == 0,
-                    SqlJoinPlan join => !join.IsDistinct && join.OrderBy.Count == 0 && CanPipelineJoinOutput(join),
+                    SqlJoinPlan join => !join.IsDistinct && join.OrderBy.Count == 0 && InspectJoinOutput(join),
                     _ => false,
                 };
         }
@@ -114,9 +179,9 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private bool CanPipelineUnorderedDistinct(IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy)
+    private static bool InspectUnorderedDistinct(IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy)
     {
-        if (!CanPipelineSelectRetention() || orderBy.Count != 0) { return false; } // Sort representatives stay on base.
+        if (orderBy.Count != 0) { return false; } // Sort representatives stay on base.
         foreach (var projection in projections)
         {
             // Deferred collations use the last qualifying row, after all projections ran.
@@ -125,7 +190,7 @@ internal sealed partial class SqlPlanExecutor
         return true;
     }
 
-    private bool CanPipelinePlainDistinct(SqlPlan plan)
+    private bool InspectPlainDistinct(SqlPlan plan)
     {
         try
         {
@@ -135,9 +200,9 @@ internal sealed partial class SqlPlanExecutor
                 && !(RetentionInputIsVolatile(plan) && relation.OutputProjections.Any(projection => RetentionHasVolatileCall(projection.Value)))
                 && plan switch
                 {
-                    SqlSelectPlan p => p.IsDistinct && CanPipelineUnorderedDistinct(p.Projections, p.OrderBy),
-                    SqlSystemViewPlan p => p.IsDistinct && CanPipelineUnorderedDistinct(p.Projections, p.OrderBy),
-                    SqlConstantPlan p => p.IsDistinct && CanPipelineUnorderedDistinct(p.Projections, p.OrderBy),
+                    SqlSelectPlan p => p.IsDistinct && InspectUnorderedDistinct(p.Projections, p.OrderBy),
+                    SqlSystemViewPlan p => p.IsDistinct && InspectUnorderedDistinct(p.Projections, p.OrderBy),
+                    SqlConstantPlan p => p.IsDistinct && InspectUnorderedDistinct(p.Projections, p.OrderBy),
                     _ => false,
                 };
         }
@@ -266,7 +331,6 @@ internal sealed partial class SqlPlanExecutor
         var metrics = statement.Metrics;
         var frame = metrics.IsAnalyzing ? metrics.BeginAnalysisFrame() : null;
         var input = plan.Input;
-        int peak = 0;
         try
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -283,7 +347,6 @@ internal sealed partial class SqlPlanExecutor
                     evaluator, cancellationToken).ConfigureAwait(false))
                 {
                     if (joined.Tree is null && !evaluator.Matches(joined.Where, source)) { continue; }
-                    peak = 1;
                     yield return GroupInputRow(source, projections, evaluator, cancellationToken);
                 }
             }
@@ -302,7 +365,6 @@ internal sealed partial class SqlPlanExecutor
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (!evaluator.Matches(where, source)) { continue; }
-                    peak = 1;
                     yield return GroupInputRow(source, projections, evaluator, cancellationToken);
                 }
             }
@@ -316,7 +378,7 @@ internal sealed partial class SqlPlanExecutor
         }
         finally
         {
-            _definitions.ObserveSelectRetention?.Invoke("group-input", true, peak);
+            _definitions.ObserveSelectRetention?.Invoke("group-input", true, 0);
             if (frame is not null) { metrics.EndAnalysisFrame(frame); }
         }
     }
@@ -337,6 +399,7 @@ internal sealed partial class SqlPlanExecutor
     private DatabaseResult ProjectUnorderedDistinct(IEnumerable<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         SqlRowCount? limit, SqlRowCount? offset, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
+        _definitions.ObserveSelectRetention?.Invoke("distinct", true, 0);
         var collations = projections.Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray();
         var seen = new HashSet<object?[]>(new GroupKeyComparer(collations));
         var rows = new List<object?[]>();
@@ -357,10 +420,10 @@ internal sealed partial class SqlPlanExecutor
         return MaterializeProjected(projections, ApplyRowWindow(rows, limit, offset));
     }
 
-    // Match the evaluator's deferred-expression boundary: cancellation and process-resource
-    // failures abort immediately rather than running more expressions on an exhausted process.
+    // As in grouped consumption, stack-guard failures wait for the base input drain.
+    // Cancellation and OOM still abort immediately.
     private static bool CanDeferRetentionFailure(Exception failure)
-        => failure is not (OperationCanceledException or InsufficientExecutionStackException or OutOfMemoryException);
+        => failure is not (OperationCanceledException or OutOfMemoryException);
 
     private IAsyncEnumerable<object?[]> EnumerateRetentionJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
@@ -404,14 +467,14 @@ internal sealed partial class SqlPlanExecutor
         long remaining = plan.Limit?.Count ?? long.MaxValue;
         ExceptionDispatchInfo? projectionFailure = null;
         ExceptionDispatchInfo? distinctFailure = null;
-        int peakInputRows = 0;
+        _definitions.ObserveSelectRetention?.Invoke("join-matches", true, 0);
+        if (seen is not null) { _definitions.ObserveSelectRetention?.Invoke("distinct", true, 0); }
         await foreach (var source in EnumerateRetentionJoinRowsAsync(plan, statement, sharedColumns, derived,
             evaluator, cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
             // Drain every candidate and WHERE, even after LIMIT (including LIMIT 0).
             if (plan.Tree is null && !evaluator.Matches(plan.Where, source)) { continue; }
-            peakInputRows = 1;
             if (projectionFailure is not null) { continue; }
             try
             {
@@ -464,7 +527,6 @@ internal sealed partial class SqlPlanExecutor
         {
             rows = collector.Finish(resolveEmptyCollations: false);
         }
-        _definitions.ObserveSelectRetention?.Invoke("join-matches", true, peakInputRows);
         if (seen is not null)
         {
             _definitions.ObserveSelectRetention?.Invoke("distinct", true, rows.Count);

@@ -52,6 +52,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             bool boundedBody = CanBoundSubqueryBody(query);
+            _definitions.ObserveSelectRetention?.Invoke("subquery-body", boundedBody, 0);
             await using var result = (DatabaseResultSet)await (boundedBody
                 ? ExecuteBoundedSubqueryBodyAsync(query.Query, statement, cancellationToken, 2)
                 : ExecuteAsync(query.Query, statement, cancellationToken)).ConfigureAwait(false);

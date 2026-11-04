@@ -55,6 +55,7 @@ internal sealed partial class SqlPlanExecutor
                 long sourceBytes = 0, batchBytes = 0, bufferBytes = 0;
                 try
                 {
+                    _isTableAsSource = true;
                     await using var source = (SqlMaterializedResultSet)await ExecuteAsync(
                         Cost(plan.Source, statement, cancellationToken), statement, cancellationToken).ConfigureAwait(false);
                     sourceBytes = source.ReserveMemory(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken);

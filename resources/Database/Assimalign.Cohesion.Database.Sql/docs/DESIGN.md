@@ -1645,7 +1645,7 @@ DISTINCT with fixed collations keeps the first projected occurrence in input ord
 consumes all input before pagination. CHAR cells cross the same output/input normalization as a
 materialized row, and retained binary cells are detached from reusable producers.
 
-Each pipeline keeps the materialized path for recursive evaluation, every DML source, a current
+Each pipeline keeps the materialized path for recursive evaluation, every DML and CTAS source, a current
 window owner, a SQL/JSON statement grant, a frame with correlated/deferred queries, or a subquery
 in its own expressions. SQL/JSON keeps staging so scalar grants never acquire a new overlap
 with a live input hash build.
@@ -1656,8 +1656,10 @@ must not observe consumer calls that base never reached. Consumer failures drain
 input predicates before surfacing, preserving their calls and work. Tree joins keep volatile
 WHERE predicates on the staged path; a nonvolatile WHERE failure drains all remaining ON work.
 DISTINCT hash/collation failures preserve all preceding projection-stage evaluation before surfacing.
-Ordered, grouped and correlated DISTINCT and
-deferred collations keep their original collectors. Independent volatile ordered join projections
+Ordered and grouped DISTINCT and deferred collations keep their original collectors. A DISTINCT
+whose own frame has correlated queries or whose expressions contain a subquery stays on base.
+A DISTINCT in the body of a correlated subquery runs once per invocation and may pipeline;
+results match either way. Independent volatile ordered join projections
 keep the full source sort, which is required to evaluate those projections in sorted order.
 Derived tables, views and CTE caches retain their existing statement lifetime and materialization.
 An eligibility walk reaching its stack guard also selects the original path.
@@ -1666,9 +1668,32 @@ These pipelines never stop evaluation early: joins drain all candidates and WHER
 at LIMIT 0 or after the output window fills; bounded subquery bodies run every projection that
 the original body ran, and scalar cardinality is checked afterwards. Existing stored-scan early
 stops remain unchanged. Statement memory charges and refusal conditions are unchanged in this
-retention-only step (#1776, SQ-L1a); later accounting attaches to these boundaries. Per-database
-internal test seams force the original collectors and observe boundary row counts, without
-allocating observation state for ordinary statements.
+retention-only step (#1776, SQ-L1a). CTAS sources and their nested plans fall back to preserve
+capacity-based source admission; SQ-L1b decides their charge. Per-database internal test seams
+force the original collectors, observe operator entry and count retained DISTINCT/subquery rows.
+The separate forced-GC regression proves streamed group/join inputs retain no growing list.
+
+SQ-L1b attaches accounting at these code boundaries:
+
+| Pipeline | Retention boundary |
+|---|---|
+| Group input | `EnumerateGroupInputAsync` delivers `GroupInputRow` directly to `ExecutePipelinedGroupAsync`; keys and aggregate state survive at its accumulation step, including aggregate DISTINCT and ordered-input buffers. The base counterpart is `ExecuteMaterializedPlainGroupAsync`'s input result. |
+| Join output | `ProjectJoinRowsAsync` retains outputs at `rows.Add` or `SqlRowCollector.Add`. `EnumerateNormalizedJoinRowsAsync` still retains child buffers at `Retain`, and hash builds keep their existing admission. The base counterpart is `ExecuteJoinAsync`'s matches list. |
+| Bounded body | `ExecuteBoundedSubqueryBodyAsync` passes its explicit retention argument to `MaterializeSelect` or `ProjectJoinRowsAsync`; their output-list additions retain at most two rows. `MaterializePlainSubqueryAsync` then copies the values into the existing statement/frame cache. |
+| Unordered DISTINCT | `ProjectUnorderedDistinct` and the DISTINCT branch in `ProjectJoinRowsAsync` retain the same first output in `seen.Add` and `rows.Add`; pagination changes count after the full drain. The base counterpart is `Deduplicate` over the full projected list. |
+
+Ordered peaks publish only after input succeeds, before a deferred consumer failure is surfaced.
+Eligibility caches only static plan inspection in a lazily created, reference-keyed executor map
+for correlated statements. It uses a subtype in the existing optional relation-state slot so
+ordinary statements and CTEs pay no extra allocation. The window owner, DML/CTAS flags,
+recursive state, current frame's correlated queries, SQL/JSON scope and forced-base switch are
+read on every check. LIMIT/OFFSET execution copies keep their original static plan as the map key.
+Consumer stack-guard failures drain input just like grouped consumption;
+cancellation and out-of-memory failures still abort immediately.
+
+The group post-input body deliberately duplicates the base body, and `PrepareJoinInputsAsync`
+duplicates the base join prologue. SQ-L1b must keep both copies aligned when adding charges;
+this retention pass preserves the reference collectors and their staging.
 
 ## Ordering output values (#1024)
 

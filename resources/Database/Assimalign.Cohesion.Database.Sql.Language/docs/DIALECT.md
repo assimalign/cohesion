@@ -2704,7 +2704,8 @@ outputs (`src/backend/optimizer/plan/planner.c:6649-6662`). When ordering refere
 outputs, projections still evaluate once per input before keys. Grouped and correlated
 projections retain their existing evaluation before sorting.
 Pipelined grouping inputs, join outputs, bounded EXISTS/scalar bodies and unordered DISTINCT
-retain the same evaluation; when a statement contains multiple failures, which failure surfaces
+retain the same volatile and sequence evaluation; nonvolatile calls may interleave. When a statement
+contains multiple failures, which failure surfaces
 first may change.
 
 ## VALUES and counts have no column scope (#1165)

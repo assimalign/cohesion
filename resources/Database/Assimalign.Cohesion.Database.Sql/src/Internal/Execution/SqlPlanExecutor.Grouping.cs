@@ -15,17 +15,20 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken) => plan is SqlGroupingSetsPlan grouped
+        CancellationToken cancellationToken) => ExecuteGroupAsync(plan, statement, cancellationToken, plan);
+
+    private Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
+        CancellationToken cancellationToken, SqlGroupPlan retentionPlan) => plan is SqlGroupingSetsPlan grouped
             ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
-            : ExecutePlainGroupAsync(plan, statement, cancellationToken);
+            : ExecutePlainGroupAsync(plan, statement, cancellationToken, retentionPlan);
 
     /// <summary>
     /// Consumes a filtered relation, accumulates one state per group, then applies
     /// HAVING, ordering, projection and pagination to completed groups.
     /// </summary>
     private Task<DatabaseResult> ExecutePlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken)
-        => CanPipelineGroupInput(plan) ? ExecutePipelinedGroupAsync(plan, statement, cancellationToken)
+        CancellationToken cancellationToken, SqlGroupPlan? retentionPlan = null)
+        => CanPipelineGroupInput(retentionPlan ?? plan) ? ExecutePipelinedGroupAsync(plan, statement, cancellationToken)
             : ExecuteMaterializedPlainGroupAsync(plan, statement, cancellationToken);
 
     // The staged body remains the reference path for DML, recursive/window owners and differential tests.
