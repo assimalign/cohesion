@@ -82,13 +82,17 @@ public sealed partial class SqlSelectRetentionTests
                 var baseline = await Capture(row, true);
                 var pipelined = await Capture(row, false);
                 Check(() => pipelined.ShouldBe(baseline, $"seed={seed}; transport={transport}; {row.Sql}"));
-                var analyzed = await Capture(row, false, "EXPLAIN ANALYZE ");
-                var baseAnalyzed = await Capture(row, true, "EXPLAIN ANALYZE ");
-                Check(() => analyzed.ShouldBe(baseAnalyzed, row.Sql));
+                // EXPLAIN ANALYZE refuses CTAS before planning; only executable forms belong here.
+                if (!row.TableAs)
+                {
+                    var analyzed = await Capture(row, false, "EXPLAIN ANALYZE ");
+                    var baseAnalyzed = await Capture(row, true, "EXPLAIN ANALYZE ");
+                    Check(() => analyzed.ShouldBe(baseAnalyzed, row.Sql));
+                }
                 var explained = await Capture(row, false, "EXPLAIN ");
                 var baseExplained = await Capture(row, true, "EXPLAIN ");
                 Check(() => explained.ShouldBe(baseExplained, row.Sql));
-                statements += 6;
+                statements += row.TableAs ? 4 : 6;
             }
         }
         _output.WriteLine($"transport={transport}; differential statements={statements}");
@@ -262,14 +266,19 @@ public sealed partial class SqlSelectRetentionTests
         yield return Pipeline("SELECT id,EXISTS(SELECT a.id FROM u a JOIN u b ON a.k=b.k WHERE a.k=t.k) FROM t", "subquery-body", "join-matches");
         yield return Fallback("SELECT nextval('s') FROM t GROUP BY k ORDER BY (SELECT MIN(u.k) FROM u WHERE u.k=t.k) LIMIT 0", "group-input");
         yield return Fallback("SELECT record_call(k) FROM t GROUP BY k ORDER BY (SELECT MIN(u.k) FROM u WHERE u.k=t.k) LIMIT 0", "group-input");
-        yield return Fallback("SELECT COUNT(*) OVER() FROM t");
+        yield return Fallback("SELECT COUNT(*) OVER() FROM (SELECT k,COUNT(*) FROM t GROUP BY k) d", "group-input");
         yield return Fallback("WITH RECURSIVE r(k) AS (SELECT 1 UNION ALL SELECT k+1 FROM r WHERE k<3) SELECT COUNT(*) FROM r", "group-input");
         yield return Pipeline("SELECT DISTINCT t.ci FROM t JOIN u ON t.k=u.k LIMIT 1 OFFSET 1", "join-matches", "distinct");
+        // Both spellings reach the join; compare the surviving case/CHAR-space representative.
+        yield return Pipeline("SELECT DISTINCT t.ci FROM t JOIN u ON t.k=u.k", "join-matches", "distinct");
+        yield return Pipeline("SELECT DISTINCT t.c FROM t LEFT JOIN u ON t.k=u.k", "join-matches", "distinct");
         yield return Pipeline("SELECT DISTINCT t.c FROM t JOIN u ON t.k=u.k", "join-matches", "distinct");
         yield return Pipeline("SELECT DISTINCT t.j FROM t JOIN u ON t.k=u.k", "join-matches", "distinct");
         yield return Pipeline("SELECT a.id AS x FROM t a JOIN u b ON a.k=b.k ORDER BY x LIMIT 2", "join-matches");
         yield return Pipeline("SELECT a.id AS x FROM t a JOIN u b ON a.k=b.k ORDER BY 1 LIMIT 2", "join-matches");
         yield return Pipeline("SELECT a.id,b.id,c.id FROM t a JOIN u b ON a.k=b.k JOIN t c ON c.k=b.k WHERE b.id=2 LIMIT 3", "join-matches");
+        yield return Pipeline("SELECT a.id,b.id,c.id FROM t a JOIN (u b JOIN t c ON c.k=b.k) ON a.k=b.k WHERE b.id=2 LIMIT 3", "join-matches");
+        yield return Pipeline("SELECT COUNT(*) FROM t a JOIN (u b JOIN t c ON c.k=b.k) ON a.k=b.k WHERE b.id=2", "group-input");
         yield return Pipeline("SELECT COUNT(*) FROM (SELECT k FROM t) d JOIN u ON d.k=u.k", "group-input");
         yield return Pipeline("SELECT COUNT(*) FROM v JOIN u ON v.k=u.k", "group-input");
         yield return Pipeline("WITH c AS (SELECT k FROM t) SELECT COUNT(*) FROM c JOIN u ON c.k=u.k", "group-input");

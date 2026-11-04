@@ -21,7 +21,7 @@ public sealed class SqlCorrelatedRetentionAllocationTests
     public SqlCorrelatedRetentionAllocationTests(ITestOutputHelper output) { _output = output; }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT retention: correlated scalar and EXISTS retain reference thread allocations (#1776)")]
-    [InlineData("SELECT k,(SELECT SUM(id+1) FROM u WHERE u.k=t.k) FROM t", 89_610_368L)]
+    [InlineData("SELECT k,(SELECT SUM(id+1) FROM u WHERE u.k=t.k) FROM t", 82_442_368L)]
     [InlineData("SELECT k,EXISTS(SELECT id+1 FROM u WHERE u.k=t.k) FROM t", 60_426_368L)]
     public async Task ExecuteAsync_CorrelatedBodies_ShouldKeepReferenceAllocations(string sql, long maximum)
     {
@@ -45,8 +45,9 @@ public sealed class SqlCorrelatedRetentionAllocationTests
         Measure(32);
         long large = Minimum();
 
-        // Assert: cc605c78d, Release .NET 10.0.13 win-arm64. The increment excludes cache setup and catches walks
-        // allocating per correlated invocation. Both sizes use the same query and thread.
+        // Assert: Release .NET 10.0.13 win-arm64; scalar pins SQ-L1a (2fabbf737), EXISTS keeps cc605c78d.
+        // The increment excludes cache setup and catches walks allocating per correlated invocation.
+        // Both sizes use the same query and thread.
         long increment = large - small;
         _output.WriteLine($"{sql}; thread bytes/16: 1000={small}, 2000={large}, increment={increment}; maximum={maximum}");
         increment.ShouldBeLessThanOrEqualTo(maximum);
