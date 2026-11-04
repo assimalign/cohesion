@@ -8,6 +8,10 @@ representation — model-specific layouts live in the Storage components of each
 
 ## Scope
 
+- **Disposable query storage** — statement/engine quotas, free-space admission, private checked
+  run pages, stable external sorting with a streaming final merge, and hash partitions.
+  Temporary I/O failures refuse the statement without taking durable databases offline.
+
 - **Pages** — 8 KiB `Page` unit with a 96-byte header (id, LSN, CRC-32C checksum, type,
   flags, slot bookkeeping), `SlottedPage` variable-length record layout, `PageSlot`
   directory entries.

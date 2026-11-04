@@ -567,7 +567,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             StatementTimeout = TimeSpan.FromSeconds(11),
             LockTimeout = TimeSpan.FromMilliseconds(222),
             StatementMemoryBudget = 3 * 1024 * 1024,
-            TempDirectory = Path.Combine(rootPath, "spill"),
+            TempDirectory = Path.Combine(rootPath, ".spill"),
             TempSpaceQuota = 7 * 1024 * 1024,
             StatementTempSpaceQuota = 5 * 1024 * 1024,
             CheckpointInterval = TimeSpan.FromMinutes(9),

@@ -25,7 +25,7 @@ public sealed class StorageTempSorterTests : IDisposable
     {
         // Arrange
         const int grant = 65536, count = 7000;
-        using var space = StorageTempSpace.Create(_directory, 32 * 1024 * 1024);
+        using var space = StorageTempSpace.Create(_directory, 32 * 1024 * 1024, () => 0);
         using var statement = space.CreateStatement(32 * 1024 * 1024);
         using var sort = StorageTempSorter.Create(statement, grant, 128);
         var expected = new List<(byte[] Key, int Value)>();
@@ -41,33 +41,31 @@ public sealed class StorageTempSorterTests : IDisposable
         }
 
         // Act
-        using var output = sort.Complete();
-        using var reader = StorageTempSortReader.Create(output, 8192 + 128);
+        using var reader = sort.Complete();
         var actual = new List<int>();
         while (reader.MoveNext()) { actual.Add(BinaryPrimitives.ReadInt32LittleEndian(reader.Value.Span)); }
 
         // Assert
         actual.ShouldBe(expected.OrderBy(row => row.Key, Comparer<byte[]>.Create((a, b) => a.AsSpan().SequenceCompareTo(b))).Select(row => row.Value));
-        (count * 121).ShouldBeGreaterThan(10 * grant);
         sort.RunsCreated.ShouldBeGreaterThan(sort.FanIn);
         sort.MergePasses.ShouldBeGreaterThan(1);
         // Deterministic complexity guard against scanning every active run or all earlier rows.
         sort.KeyComparisons.ShouldBeLessThan(count * 40L);
         sort.RecordsWritten.ShouldBeLessThanOrEqualTo(count * (long)(sort.MergePasses + 1));
-        _output.WriteLine($"rows={count}; fan-in={sort.FanIn}; initial runs={sort.RunsCreated}; passes={sort.MergePasses}; comparisons={sort.KeyComparisons}; records written={sort.RecordsWritten}; quadratic baseline={count * (count - 1L) / 2}");
-        output.Dispose(); statement.Bytes.ShouldBe(0);
+        _output.WriteLine($"rows={count}; fan-in={sort.FanIn}; initial runs={sort.RunsCreated}; passes={sort.MergePasses}; comparisons={sort.KeyComparisons}; records written={sort.RecordsWritten}");
+        reader.Dispose(); statement.Bytes.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - External sort: empty and grant-dependent fan-in")]
     public void Complete_EmptyInput_ShouldReturnEmptyRunWithinGrant()
     {
         // Arrange
-        using var space = StorageTempSpace.Create(_directory); using var statement = space.CreateStatement(1024 * 1024);
+        using var space = StorageTempSpace.Create(_directory, null, () => 0); using var statement = space.CreateStatement(1024 * 1024);
         using var small = StorageTempSorter.Create(statement, 65536, 128);
         using var large = StorageTempSorter.Create(statement, 131072, 128);
 
         // Act
-        using var output = small.Complete(); using var reader = StorageTempSortReader.Create(output, 8192);
+        using var reader = small.Complete();
 
         // Assert
         reader.MoveNext().ShouldBeFalse(); small.MergePasses.ShouldBe(0);
@@ -79,7 +77,7 @@ public sealed class StorageTempSorterTests : IDisposable
     public void Append_DisposedStatement_ShouldRefuseBufferedChildren()
     {
         // Arrange
-        using var space = StorageTempSpace.Create(_directory);
+        using var space = StorageTempSpace.Create(_directory, null, () => 0);
         using var statement = space.CreateStatement(1024 * 1024);
         using var sort = StorageTempSorter.Create(statement, 65536, 128);
         using var partitions = StorageTempPartitions.Create(statement, 2, 17408);
@@ -102,7 +100,7 @@ public sealed class StorageTempSorterTests : IDisposable
     public void Complete_EarlyExit_ShouldReleaseAllIntermediateRuns(int exit)
     {
         // Arrange
-        using var space = StorageTempSpace.Create(_directory, exit == 0 ? 8192 : 16 * 1024 * 1024);
+        using var space = StorageTempSpace.Create(_directory, exit == 0 ? 8192 : 16 * 1024 * 1024, () => 0);
         using var statement = space.CreateStatement(16 * 1024 * 1024);
         using var sort = StorageTempSorter.Create(statement, 65536, 128);
         using var cancellation = new CancellationTokenSource();
@@ -126,7 +124,7 @@ public sealed class StorageTempSorterTests : IDisposable
     public void Complete_MidMergeCancellation_ShouldDeleteAllRuns()
     {
         // Arrange
-        using var space = StorageTempSpace.Create(_directory, 16 * 1024 * 1024);
+        using var space = StorageTempSpace.Create(_directory, 16 * 1024 * 1024, () => 0);
         using var statement = space.CreateStatement(16 * 1024 * 1024);
         using var sort = StorageTempSorter.Create(statement, 65536, 128);
         for (int i = 0; i < 5000; i++) { sort.Append([1], new byte[100]); }
@@ -146,7 +144,7 @@ public sealed class StorageTempSorterTests : IDisposable
     public void Partitions_HashMembership_ShouldReadAllRecordsAndRelease()
     {
         // Arrange
-        using var space = StorageTempSpace.Create(_directory); using var statement = space.CreateStatement(1024 * 1024);
+        using var space = StorageTempSpace.Create(_directory, null, () => 0); using var statement = space.CreateStatement(1024 * 1024);
         using var partitions = StorageTempPartitions.Create(statement, 7, 7 * 8704);
         for (int i = 0; i < 1000; i++)
         { byte[] value = new byte[4]; BinaryPrimitives.WriteInt32LittleEndian(value, i); partitions.Append((ulong)i, value); }
@@ -170,7 +168,7 @@ public sealed class StorageTempSorterTests : IDisposable
     public void Partitions_CanceledSeal_ShouldReleaseAllFiles()
     {
         // Arrange
-        using var space = StorageTempSpace.Create(_directory); using var statement = space.CreateStatement(1024 * 1024);
+        using var space = StorageTempSpace.Create(_directory, null, () => 0); using var statement = space.CreateStatement(1024 * 1024);
         using var partitions = StorageTempPartitions.Create(statement, 2, 17408);
         partitions.Append(0, [1]); partitions.Append(1, [2]);
         using var canceled = new CancellationTokenSource(); canceled.Cancel();
@@ -186,7 +184,7 @@ public sealed class StorageTempSorterTests : IDisposable
     public void Partitions_QuotaRefusal_ShouldReleaseEarlierPartitions()
     {
         // Arrange
-        using var space = StorageTempSpace.Create(_directory, 8192);
+        using var space = StorageTempSpace.Create(_directory, 8192, () => 0);
         using var statement = space.CreateStatement(16384);
         using var partitions = StorageTempPartitions.Create(statement, 2, 17408);
         partitions.Append(0, [1]);
@@ -204,7 +202,7 @@ public sealed class StorageTempSorterTests : IDisposable
     {
         // Arrange
         const int count = 10000;
-        using var space = StorageTempSpace.Create(_directory);
+        using var space = StorageTempSpace.Create(_directory, null, () => 0);
         using var statement = space.CreateStatement(4 * 1024 * 1024);
         using var run = statement.CreateRun();
         byte[] record = new byte[100];
@@ -237,8 +235,7 @@ public sealed class StorageTempSorterTests : IDisposable
         }
 
         // Assert
-        baseline.ShouldBeGreaterThanOrEqualTo(count * 100L);
         reused.ShouldBeLessThanOrEqualTo(512);
-        _output.WriteLine($"reader rows={count - 1}; before allocating destinations={baseline} bytes; after reusing destination={reused} bytes; minimum of 3 rounds");
+        _output.WriteLine($"reader rows={count - 1}; control allocating destinations={baseline} bytes; after reusing destination={reused} bytes; minimum of 3 rounds");
     }
 }

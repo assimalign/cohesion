@@ -186,15 +186,14 @@ internal static class Program
         return _failed == 0 ? 0 : 1;
     }
 
-    private static async Task RunTempSpaceAsync()
+    private static Task RunTempSpaceAsync()
     {
         string directory = Path.Combine(Path.GetTempPath(), "cohesion-temp-aot-" + Guid.NewGuid().ToString("N"));
         try
         {
-            await using (var engine = SqlDatabaseEngine.Create("temp-aot", new()
-            { TempDirectory = directory, TempSpaceQuota = 32 * 1024 * 1024 }))
+            using (var space = StorageTempSpace.Create(directory, 32 * 1024 * 1024, () => 1024 * 1024))
             {
-                using var statement = engine.TempSpace!.CreateStatement(32 * 1024 * 1024);
+                using var statement = space.CreateStatement(32 * 1024 * 1024);
                 using var sort = StorageTempSorter.Create(statement, 65536, 256);
                 byte[] key = new byte[4], value = new byte[128];
                 for (int i = 0; i < 7000; i++)
@@ -203,8 +202,7 @@ internal static class Program
                     BinaryPrimitives.WriteInt32LittleEndian(value, i);
                     sort.Append(key, value);
                 }
-                using var run = sort.Complete();
-                using var reader = StorageTempSortReader.Create(run, 8192 + 256);
+                using var reader = sort.Complete();
                 int rows = 0, previousKey = -1, previousId = -1;
                 bool ordered = true;
                 while (reader.MoveNext())
@@ -220,7 +218,7 @@ internal static class Program
                 using var partitions = StorageTempPartitions.Create(statement, 2, 17408);
                 partitions.Append(0, key); partitions.Append(1, value); partitions.Seal();
                 Check("temp hash partition", partitions.GetPartition(1)!.RecordCount, 1L);
-                using var refused = engine.TempSpace.CreateStatement(0);
+                using var refused = space.CreateStatement(0);
                 using var empty = refused.CreateRun();
                 try { empty.Append(key); Fail("temp statement quota", "growth accepted"); }
                 catch (StorageTempException failure) { Check("temp statement quota", failure.Code, "CK05002"); }
@@ -228,6 +226,7 @@ internal static class Program
             Check("temp disposal files", Directory.GetFiles(directory).Length, 0);
         }
         finally { if (Directory.Exists(directory)) { Directory.Delete(directory, recursive: true); } }
+        return Task.CompletedTask;
     }
 
     private static async Task RunJointMigrationAsync()

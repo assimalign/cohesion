@@ -15,14 +15,16 @@ internal static class Program
             File.WriteAllBytes(Path.Combine(args[0], "cohesion-00000000000000000000000000000001.ctmp"), [1]);
             try
             {
-                using var lease = StorageTempSpace.Create(args[0]);
+                using var lease = StorageTempSpace.Create(args[0], null, () => 0);
+                using var statementProbe = lease.CreateStatement(8192);
+                using var runProbe = statementProbe.CreateRun();
                 Console.WriteLine("LEASE_OK");
             }
-            catch (IOException error) when (!OperatingSystem.IsWindows())
-            { Console.WriteLine("LEASE_REFUSED"); Console.WriteLine(error.Message); }
+            catch (StorageTempException error) when (!OperatingSystem.IsWindows())
+            { Console.WriteLine("LEASE_REFUSED"); Console.WriteLine(error.InnerException!.Message); }
             return;
         }
-        using var space = StorageTempSpace.Create(args[0], 16 * 1024 * 1024);
+        using var space = StorageTempSpace.Create(args[0], 16 * 1024 * 1024, () => 0);
         using var statement = space.CreateStatement(16 * 1024 * 1024);
         using var run = statement.CreateRun();
         run.Append(new byte[32768]); run.Seal();

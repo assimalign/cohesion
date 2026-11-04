@@ -55,6 +55,9 @@ internal sealed class StorageEventSource : EventSource
 
         /// <summary>Foreground evictions of dirty pages.</summary>
         public const EventKeywords BufferPool = (EventKeywords)0x8;
+
+        /// <summary>Disposable query storage.</summary>
+        public const EventKeywords TempSpace = (EventKeywords)0x10;
     }
 
     private PollingCounter? _currentStoragesCounter;
@@ -77,6 +80,9 @@ internal sealed class StorageEventSource : EventSource
     private long _tempBytes;
     private long _tempPagesWritten;
     private long _tempRefusals;
+    private long _tempDamage;
+    private IncrementingPollingCounter? _tempDamageCounter;
+    internal long TempDamage => Interlocked.Read(ref _tempDamage);
     private PollingCounter? _tempBytesCounter;
     private IncrementingPollingCounter? _tempWritesCounter;
     private IncrementingPollingCounter? _tempRefusalsCounter;
@@ -89,7 +95,7 @@ internal sealed class StorageEventSource : EventSource
     internal void TempBytesChanged(long delta)
     {
         long current = Interlocked.Add(ref _tempBytes, delta);
-        if (IsEnabled(EventLevel.Verbose, EventKeywords.None)) { TempSpaceBytes(delta, current); }
+        if (IsEnabled(EventLevel.Verbose, Keywords.TempSpace)) { TempSpaceBytes(delta, current); }
     }
 
     [NonEvent]
@@ -100,14 +106,30 @@ internal sealed class StorageEventSource : EventSource
     {
         Interlocked.Increment(ref _tempRefusals);
         // A refusal is statement detail, deliberately Verbose: the exact counter counts all.
-        if (IsEnabled(EventLevel.Verbose, EventKeywords.None)) { TempSpaceRefused(code); }
+        if (IsEnabled(EventLevel.Verbose, Keywords.TempSpace)) { TempSpaceRefused(code); }
     }
 
-    [Event(21, Level = EventLevel.Verbose, Message = "Temporary storage changed by {0} bytes; {1} bytes reserved.")]
+    [Event(21, Level = EventLevel.Verbose, Keywords = Keywords.TempSpace, Message = "Temporary storage changed by {0} bytes; {1} bytes reserved.")]
     private void TempSpaceBytes(long deltaBytes, long currentBytes) => WriteEvent(21, deltaBytes, currentBytes);
 
-    [Event(22, Level = EventLevel.Verbose, Message = "Temporary storage growth refused: {0}.")]
+    [Event(22, Level = EventLevel.Verbose, Keywords = Keywords.TempSpace, Message = "Temporary storage growth refused: {0}.")]
     private void TempSpaceRefused(string code) => WriteEvent(22, code);
+
+    [NonEvent]
+    internal void TempUnavailable(string code)
+    {
+        if (IsEnabled(EventLevel.Warning, Keywords.TempSpace)) { TempSpaceUnavailable(code); }
+    }
+    [NonEvent]
+    internal void TempDamaged(string code)
+    {
+        Interlocked.Increment(ref _tempDamage);
+        if (IsEnabled(EventLevel.Error, Keywords.TempSpace)) { TempSpaceDamaged(code); }
+    }
+    [Event(23, Level = EventLevel.Warning, Keywords = Keywords.TempSpace, Message = "Temporary storage unavailable at startup: {0}.")]
+    private void TempSpaceUnavailable(string code) => WriteEvent(23, code);
+    [Event(24, Level = EventLevel.Error, Keywords = Keywords.TempSpace, Message = "Temporary storage integrity failed: {0}.")]
+    private void TempSpaceDamaged(string code) => WriteEvent(24, code);
 
     private StorageEventSource()
     {
@@ -581,6 +603,8 @@ internal sealed class StorageEventSource : EventSource
             return;
         }
 
+        _tempDamageCounter ??= new IncrementingPollingCounter("temp-damage-per-second", this, () => TempDamage)
+        { DisplayName = "Temporary Integrity Failure Rate", DisplayRateTimeScale = TimeSpan.FromSeconds(1) };
         _tempBytesCounter ??= new PollingCounter("current-temp-bytes", this, () => TempBytes)
         { DisplayName = "Current Temporary Physical Bytes" };
         _tempWritesCounter ??= new IncrementingPollingCounter("temp-pages-written-per-second", this, () => TempPagesWritten)

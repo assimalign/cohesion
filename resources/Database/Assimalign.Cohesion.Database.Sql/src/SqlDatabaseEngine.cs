@@ -199,14 +199,15 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     internal SqlDatabaseEngineOptions EngineOptions => _options;
 
     /// <summary>Gets this engine's disposable query space, or null for an in-memory engine without
-    /// an explicit directory. SQL operators do not spill until their consumer runs are integrated.</summary>
-    public StorageTempSpace? TempSpace { get; }
+    /// an explicit directory.</summary>
+    internal StorageTempSpace? TempSpace { get; }
 
     internal long StatementTempSpaceQuota => _options.StatementTempSpaceQuota ??
         (_options.StatementMemoryBudget > long.MaxValue / 4 ? long.MaxValue : _options.StatementMemoryBudget * 4);
 
     private long TempFreeSpaceFloor()
     {
+        if (_strategy is InMemorySqlStorageStrategy) { return 1024 * 1024; }
         // Lock-free snapshot: the temp-space monitor must never enter the engine registry or a
         // storage latch. Conservatively reserve both file sets' journal caps, dirty pools, one
         // reclamation bracket and JointEngineReserve's 25% (at least 1 MiB) headroom. Count at
@@ -333,6 +334,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <see cref="SqlDatabaseEngineOptions.WorkerFailureWindow"/> is not positive or is longer than
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>;
     /// <see cref="SqlDatabaseEngineOptions.WorkerFailureMinimumPasses"/> is less than one; or
+    /// <see cref="SqlDatabaseEngineOptions.TempSpaceQuota"/> or <see cref="SqlDatabaseEngineOptions.StatementTempSpaceQuota"/> is negative;
+    /// <see cref="SqlDatabaseEngineOptions.RootPath"/> is empty/default or <see cref="SqlDatabaseEngineOptions.TempDirectory"/> is empty/default,
+    /// outside the root, inside a database directory, or contains a link below the root; or
     /// <see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
     /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
@@ -404,17 +408,35 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 options.StatementMemoryBudget, ErrorMessages.OptionPositiveRequirement);
         }
 
-        if (options.TempSpaceQuota is { } tempQuota) { ArgumentOutOfRangeException.ThrowIfNegative(tempQuota); }
-        if (options.StatementTempSpaceQuota is { } statementQuota) { ArgumentOutOfRangeException.ThrowIfNegative(statementQuota); }
+        if (options.TempSpaceQuota is { } tempQuota) { DatabaseEngineOptionChecks.ThrowIfNegative(tempQuota, engine, nameof(options.TempSpaceQuota)); }
+        if (options.StatementTempSpaceQuota is { } statementQuota) { DatabaseEngineOptionChecks.ThrowIfNegative(statementQuota, engine, nameof(options.StatementTempSpaceQuota)); }
+        if (options.RootPath is { } configuredRoot && (configuredRoot == default || configuredRoot.IsEmpty))
+        { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.RootPath), configuredRoot, ErrorMessages.TempDirectoryInvalid); }
         if (options.TempDirectory is { } directory)
         {
-            if (directory.IsEmpty) { throw new ArgumentException(ErrorMessages.TempDirectoryInvalid, nameof(options.TempDirectory)); }
+            if (directory == default || directory.IsEmpty)
+            { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
             if (options.RootPath is { IsEmpty: false } tempRoot)
             {
                 string relative = Path.GetRelativePath(Path.GetFullPath(tempRoot), Path.GetFullPath(directory));
                 if (Path.IsPathRooted(relative) || relative == "." || relative == ".." ||
                     relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                { throw new ArgumentException(ErrorMessages.TempDirectoryInvalid, nameof(options.TempDirectory)); }
+                { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
+                string[] segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (DatabaseFileNames.IsStorageName(segments[0].ToLowerInvariant()))
+                { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
+                string component = Path.GetFullPath(tempRoot);
+                foreach (string segment in segments)
+                {
+                    component = Path.Combine(component, segment);
+                    try
+                    {
+                        if (new DirectoryInfo(component).LinkTarget is not null)
+                        { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                    { break; } // Optional-directory access failures warn through StorageTempSpace at startup.
+                }
             }
         }
 
@@ -1332,7 +1354,6 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
         public global::Assimalign.Cohesion.Database.Sql.SqlFunctionCatalog Functions => _target.Functions;
         public global::Assimalign.Cohesion.Database.Sql.SqlTypeCatalog Types => _target.Types;
-        public StorageTempSpace? TempSpace => _target.TempSpace;
         public string Name => _target.Name;
         public global::Assimalign.Cohesion.Database.EngineModel Model => _target.Model;
         public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;

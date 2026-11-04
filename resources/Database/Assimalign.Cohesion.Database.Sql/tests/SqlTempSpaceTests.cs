@@ -26,7 +26,7 @@ public sealed class SqlTempSpaceTests : IDisposable
     {
         // Arrange
         await using var disabled = SqlDatabaseEngine.Create("disabled", new());
-        var options = new SqlDatabaseEngineOptions { TempDirectory = _root, StatementMemoryBudget = 123456 };
+        var options = new SqlDatabaseEngineOptions { TempDirectory = _root, CheckpointJournalSize = 65536, StatementMemoryBudget = 123456 };
         await using var enabled = SqlDatabaseEngine.Create("enabled", options);
 
         // Act
@@ -85,7 +85,7 @@ public sealed class SqlTempSpaceTests : IDisposable
     public async Task Sort_SqlDirectedKeys_ShouldMatchLogicalOrder(int orderValue, int collationId)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create("keys", new() { TempDirectory = _root, TempSpaceQuota = 32 * 1024 * 1024 });
+        await using var engine = SqlDatabaseEngine.Create("keys", new() { TempDirectory = _root, CheckpointJournalSize = 65536, TempSpaceQuota = 32 * 1024 * 1024 });
         using var statement = engine.TempSpace!.CreateStatement(32 * 1024 * 1024);
         using var sort = StorageTempSorter.Create(statement, 65536, 256);
         var order = (SqlCatalogIndexKeyOrder)orderValue;
@@ -107,8 +107,7 @@ public sealed class SqlTempSpaceTests : IDisposable
             .Select(row => row.Id).ToArray();
 
         // Act
-        using var output = sort.Complete();
-        using var reader = StorageTempSortReader.Create(output, 8192 + 256);
+        using var reader = sort.Complete();
         var actual = new List<int>();
         while (reader.MoveNext()) { actual.Add(BinaryPrimitives.ReadInt32LittleEndian(reader.Value.Span)); }
 

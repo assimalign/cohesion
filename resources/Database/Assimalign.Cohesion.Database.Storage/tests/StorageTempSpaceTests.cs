@@ -126,7 +126,7 @@ public sealed class StorageTempSpaceTests : IDisposable
         // Arrange
         long free = 3 * 8192, floor = 8192;
         using var space = StorageTempSpace.CreateCore(_directory, null, () => floor, () => free);
-        space.EngineQuota.ShouldBe(free / 4); // Snapshot before sweeping, never recomputed.
+        space.EngineQuota.ShouldBe(free / 4); // Snapshot after sweeping, never recomputed.
         using var largeSpace = StorageTempSpace.CreateCore(Path.Combine(_directory, "child"), 1024 * 1024, () => floor, () => free);
         using var statement = largeSpace.CreateStatement(1024 * 1024);
         using var first = statement.CreateRun(); using var second = statement.CreateRun(); using var third = statement.CreateRun();
@@ -174,7 +174,7 @@ public sealed class StorageTempSpaceTests : IDisposable
         using var run = statement.CreateRun();
 
         // Act
-        Should.Throw<IOException>(() => run.Append(new byte[20000])).ShouldBeSameAs(fault);
+        Should.Throw<StorageTempException>(() => run.Append(new byte[20000])).InnerException.ShouldBeSameAs(fault);
         using var source = new CancellationTokenSource();
         space.BeforePageWrite = source.Cancel;
         using var canceled = statement.CreateRun();
@@ -197,7 +197,7 @@ public sealed class StorageTempSpaceTests : IDisposable
         using var run = statement.CreateRun(); run.Append(new byte[8000]); fail = true;
 
         // Act
-        Should.Throw<IOException>(() => run.Append(new byte[8000])).ShouldBeSameAs(fault);
+        Should.Throw<StorageTempException>(() => run.Append(new byte[8000])).InnerException.ShouldBeSameAs(fault);
 
         // Assert
         space.Bytes.ShouldBe(0); statement.Bytes.ShouldBe(0);
@@ -284,7 +284,9 @@ public sealed class StorageTempSpaceTests : IDisposable
             using var statement = space.CreateStatement(8192);
             using var run = statement.CreateRun();
             run.Append([1]);
-            Should.Throw<IOException>(() => Create());
+            using var unavailable = Create();
+            using var blocked = unavailable.CreateStatement(8192);
+            Should.Throw<StorageTempException>(() => blocked.CreateRun()).Code.ShouldBe("CK05005");
         }
 
         // Assert

@@ -35,3 +35,8 @@ changes and close the physical stores, allowing refused clean opens to exercise 
 The format34-owner mode commits SQL marker 34 and an invalid alternate root owner, then leaves
 unclean journals. SQL must report its format-35 refusal from the recovered catalog before
 physical-owner attachment, preserving every file byte for byte.
+
+The temp-lease-probe mode creates and reopens a real SQL database with disabled Unix file
+locking. It requires startup warnings and a later CK05005 spill refusal while the database
+remains online. Windows verifies ordinary lease success. A test-only UnsafeAccessor reaches
+the internal engine space; no shipped visibility or reference is added.

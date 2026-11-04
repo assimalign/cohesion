@@ -2,7 +2,10 @@ using System;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 using System.Threading;
+
+using Microsoft.Win32.SafeHandles;
 
 using Assimalign.Cohesion.Database.Storage.Internal;
 
@@ -18,6 +21,10 @@ public sealed class StorageTempRun : IDisposable
     internal const int Magic = 0x31504D54;
     private readonly StorageTempStatement _statement;
     private readonly FileStream _file;
+    private readonly SafeFileHandle _handle;
+    internal readonly object Sync = new();
+    internal readonly ulong RunId;
+    internal const int FormatVersion = 2;
     private Memory<byte> _page;
     private int _used;
     private long _pages;
@@ -27,7 +34,12 @@ public sealed class StorageTempRun : IDisposable
     internal StorageTempSpace Space => _statement.Space;
     internal long PageCount => _pages;
 
-    internal StorageTempRun(StorageTempStatement statement, FileStream file) { _statement = statement; _file = file; }
+    internal StorageTempRun(StorageTempStatement statement, FileStream file)
+    {
+        _statement = statement; _file = file; _handle = file.SafeFileHandle;
+        Span<byte> identity = stackalloc byte[8]; RandomNumberGenerator.Fill(identity);
+        RunId = BinaryPrimitives.ReadUInt64LittleEndian(identity);
+    }
     /// <summary>Gets the number of appended records.</summary>
     public long RecordCount { get; private set; }
     /// <summary>Gets the largest record length, for sizing a caller-owned read destination.</summary>
@@ -38,15 +50,14 @@ public sealed class StorageTempRun : IDisposable
     /// <summary>Copies one record, including records spanning several pages.</summary>
     /// <param name="record">The record bytes, copied before returning.</param>
     /// <param name="cancellationToken">Observed before each page.</param>
-    /// <exception cref="System.IO.IOException">The temporary file could not be read or written.</exception>
-    /// <exception cref="StorageTempException">A quota or free-space floor refused growth.</exception>
+    /// <exception cref="StorageTempException">A quota or free-space floor refused growth, or temporary I/O failed (CK05005).</exception>
     /// <exception cref="InvalidOperationException">The run is sealed.</exception>
     /// <exception cref="ObjectDisposedException">The run is disposed.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested; the run is disposed.</exception>
     /// <remarks>Any append failure disposes the run and releases every page it reserved.</remarks>
     public void Append(ReadOnlySpan<byte> record, CancellationToken cancellationToken = default)
     {
-        lock (Space.Gate)
+        lock (Sync)
         {
             Check();
             if (_sealed) { throw new InvalidOperationException(ErrorMessages.TempRunSealed); }
@@ -58,7 +69,9 @@ public sealed class StorageTempRun : IDisposable
                 Write(length, cancellationToken); Write(record, cancellationToken);
                 RecordCount++; MaximumRecordLength = Math.Max(MaximumRecordLength, record.Length);
             }
-            catch { Dispose(); throw; } // Quota, I/O, cancellation and test callback failures.
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { Dispose(); throw StorageTempException.Unavailable(error); }
+            catch { Dispose(); throw; } // Quota, cancellation and test callback failures.
         }
     }
     internal void UsePage(Memory<byte> page) { _page = page; }
@@ -83,28 +96,26 @@ public sealed class StorageTempRun : IDisposable
     {
         var page = _page.Span;
         BinaryPrimitives.WriteInt32LittleEndian(page, Magic);
-        BinaryPrimitives.WriteInt32LittleEndian(page[4..], 1);
+        BinaryPrimitives.WriteInt32LittleEndian(page[4..], FormatVersion);
         BinaryPrimitives.WriteInt64LittleEndian(page[8..], _writtenPages);
         BinaryPrimitives.WriteInt32LittleEndian(page[16..], _used);
+        BinaryPrimitives.WriteUInt64LittleEndian(page[20..], RunId);
         // The CRC covers framing as well as payload; the CRC field itself is zero while stamping.
         BinaryPrimitives.WriteUInt32LittleEndian(page[28..], 0);
         BinaryPrimitives.WriteUInt32LittleEndian(page[28..], Crc32C.Compute(page));
-        // Lock order: temp-space Gate only. It covers accounting, page reservations, file I/O,
-        // reads and disposal. No storage latch, buffer-pool monitor, engine lock or callback
-        // that acquires them may be entered while holding Gate. The engine floor is lock-free.
         Space.BeforePageWrite?.Invoke();
-        RandomAccess.Write(_file.SafeFileHandle, page, _writtenPages * StorageTempSpace.PageSize);
+        RandomAccess.Write(_handle, page, _writtenPages * StorageTempSpace.PageSize);
         _writtenPages++; Space.Written(); _used = 0;
     }
 
     /// <summary>Finishes the tail page and permits multiple independent readers.</summary>
     /// <param name="cancellationToken">Checked before flushing the tail.</param>
-    /// <exception cref="IOException">The tail page could not be written; the run is disposed.</exception>
+    /// <exception cref="StorageTempException">Temporary I/O failed (CK05005); the run is disposed.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested; the run is disposed.</exception>
     /// <exception cref="ObjectDisposedException">The run is disposed.</exception>
     public void Seal(CancellationToken cancellationToken = default)
     {
-        lock (Space.Gate)
+        lock (Sync)
         {
             Check();
             try
@@ -114,6 +125,8 @@ public sealed class StorageTempRun : IDisposable
                 if (_used != 0) { FlushPage(); }
                 _sealed = true; _page = Memory<byte>.Empty;
             }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { Dispose(); throw StorageTempException.Unavailable(error); }
             catch { Dispose(); throw; }
         }
     }
@@ -131,7 +144,7 @@ public sealed class StorageTempRun : IDisposable
     }
     internal StorageTempRunReader OpenReader(Memory<byte> page)
     {
-        lock (Space.Gate)
+        lock (Sync)
         {
             Check();
             if (!_sealed) { throw new InvalidOperationException(ErrorMessages.TempRunUnsealed); }
@@ -141,28 +154,32 @@ public sealed class StorageTempRun : IDisposable
     internal void ReadPage(long index, Span<byte> destination)
     {
         Check();
+        Space.BeforePageRead?.Invoke();
         int total = 0;
         while (total < destination.Length)
         {
-            int read = RandomAccess.Read(_file.SafeFileHandle, destination[total..], index * StorageTempSpace.PageSize + total);
-            if (read == 0) { throw new StorageTempException(StorageTempException.DamageCode, ErrorMessages.TempPageDamaged); }
+            int read = RandomAccess.Read(_handle, destination[total..], index * StorageTempSpace.PageSize + total);
+            if (read == 0) { throw StorageTempException.Damage(); }
             total += read;
         }
     }
     internal void ValidateLength()
     {
-        if (RandomAccess.GetLength(_file.SafeFileHandle) != _pages * StorageTempSpace.PageSize)
-        { throw new StorageTempException(StorageTempException.DamageCode, ErrorMessages.TempPageDamaged); }
+        if (RandomAccess.GetLength(_handle) != _pages * StorageTempSpace.PageSize)
+        { throw StorageTempException.Damage(); }
     }
     internal void Check() { ObjectDisposedException.ThrowIf(_disposed, this); _statement.Check(); }
     /// <summary>Closes and deletes the file and releases every physical page, once.</summary>
+    /// <exception cref="StorageTempException">Closing the temporary file failed (CK05005).</exception>
     public void Dispose()
     {
-        lock (Space.Gate)
+        lock (Sync)
         {
             if (_disposed) { return; }
             _disposed = true;
             try { _file.Dispose(); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { throw StorageTempException.Unavailable(error); }
             finally
             {
                 Space.Release(_statement, _pages * StorageTempSpace.PageSize, (_pages - _writtenPages) * StorageTempSpace.PageSize);

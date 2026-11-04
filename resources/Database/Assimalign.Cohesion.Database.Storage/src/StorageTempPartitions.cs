@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 
@@ -28,11 +29,8 @@ public sealed class StorageTempPartitions : IDisposable
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(partitionCount);
         ArgumentOutOfRangeException.ThrowIfLessThan(memoryGrant, partitionCount * (StorageTempSpace.PageSize + 512L));
-        lock (statement.Space.Gate)
-        {
-            statement.Check();
-            return new StorageTempPartitions(statement, partitionCount);
-        }
+        statement.Check();
+        return new StorageTempPartitions(statement, partitionCount);
     }
     /// <summary>Gets the number of partitions.</summary>
     public int PartitionCount => _runs.Length;
@@ -42,12 +40,11 @@ public sealed class StorageTempPartitions : IDisposable
     /// <param name="cancellationToken">Cancels creation or page writes.</param>
     /// <exception cref="InvalidOperationException">The partitions are sealed.</exception>
     /// <exception cref="ObjectDisposedException">The partitions are disposed.</exception>
-    /// <exception cref="System.IO.IOException">The temporary file could not be read or written.</exception>
-    /// <exception cref="StorageTempException">A quota or free-space floor refused growth.</exception>
+    /// <exception cref="StorageTempException">A quota or floor refused growth, or temporary I/O failed (CK05005).</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public void Append(ulong hash, ReadOnlySpan<byte> record, CancellationToken cancellationToken = default)
     {
-        lock (_statement.Space.Gate) { AppendCore(hash, record, cancellationToken); }
+        AppendCore(hash, record, cancellationToken);
     }
 
     private void AppendCore(ulong hash, ReadOnlySpan<byte> record, CancellationToken cancellationToken)
@@ -64,13 +61,13 @@ public sealed class StorageTempPartitions : IDisposable
         catch { Dispose(); throw; }
     }
     /// <summary>Seals all files; empty partitions remain absent.</summary>
+    /// <exception cref="StorageTempException">Temporary I/O failed (CK05005).</exception>
     /// <param name="cancellationToken">Cancels before each file's tail flush.</param>
-    /// <exception cref="System.IO.IOException">A partition tail could not be written.</exception>
     /// <exception cref="ObjectDisposedException">The partitions are disposed.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public void Seal(CancellationToken cancellationToken = default)
     {
-        lock (_statement.Space.Gate) { SealCore(cancellationToken); }
+        SealCore(cancellationToken);
     }
 
     private void SealCore(CancellationToken cancellationToken)
@@ -93,7 +90,7 @@ public sealed class StorageTempPartitions : IDisposable
     /// <exception cref="ObjectDisposedException">The partitions are disposed.</exception>
     public StorageTempRun? GetPartition(int partition)
     {
-        lock (_statement.Space.Gate) { return GetPartitionCore(partition); }
+        return GetPartitionCore(partition);
     }
 
     private StorageTempRun? GetPartitionCore(int partition)
@@ -106,17 +103,25 @@ public sealed class StorageTempPartitions : IDisposable
         return _runs[partition];
     }
     /// <summary>Deletes every partition file and releases its quota.</summary>
+    /// <exception cref="AggregateException">One or more coded closes failed after all partitions were released.</exception>
     public void Dispose()
     {
-        lock (_statement.Space.Gate) { DisposeCore(); }
+        DisposeCore();
     }
 
     private void DisposeCore()
     {
         if (_disposed) { return; }
         _disposed = true;
-        foreach (var run in _runs) { run?.Dispose(); }
+        List<Exception>? failures = null;
+        foreach (var run in _runs)
+        {
+            try { run?.Dispose(); }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            { (failures ??= []).Add(error); } // Release all partitions after a failed close.
+        }
         Array.Clear(_runs);
+        if (failures is not null) { throw new AggregateException(ErrorMessages.TempCleanupFailed, failures); }
     }
     private sealed class DebugView
     {

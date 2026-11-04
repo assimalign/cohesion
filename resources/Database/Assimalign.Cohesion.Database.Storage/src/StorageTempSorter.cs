@@ -5,12 +5,14 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Storage.Internal;
+
 namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>A stable external balanced merge sorter over already encoded byte-comparable keys.</summary>
 /// <remarks>The caller encodes direction, collation and NULL placement in each key. No SQL value
 /// interpretation occurs here. Instances require serialized use; cancellation or failure disposes
-/// all intermediate files. Complete transfers its returned run to the statement/caller.</remarks>
+/// all intermediate files. Complete transfers its input runs to a streaming reader.</remarks>
 [DebuggerDisplay("StorageTempSorter {RunsCreated} runs, {MergePasses} passes")]
 [DebuggerTypeProxy(typeof(DebugView))]
 public sealed class StorageTempSorter : IDisposable
@@ -28,6 +30,8 @@ public sealed class StorageTempSorter : IDisposable
     private int _used;
     private int _count;
     private long _ordinal;
+    private StorageTempSortReader? _finalReader;
+    private long _keyComparisons;
     private bool _completed;
     private bool _disposed;
 
@@ -56,13 +60,10 @@ public sealed class StorageTempSorter : IDisposable
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumRecordLength, 16);
         int workspace = (int)memoryGrant - overheadBytes;
         long fanIn = workspace / (StorageTempSpace.PageSize + (long)maximumRecordLength);
-        if (fanIn < 2 || maximumRecordLength > workspace * 4L / 5)
+        if (fanIn < 2)
         { throw new ArgumentOutOfRangeException(nameof(maximumRecordLength), ErrorMessages.TempSortGrantSmall); }
-        lock (statement.Space.Gate)
-        {
-            statement.Check();
-            return new StorageTempSorter(statement, (int)memoryGrant, maximumRecordLength, (int)Math.Min(16, fanIn));
-        }
+        statement.Check();
+        return new StorageTempSorter(statement, (int)memoryGrant, maximumRecordLength, (int)Math.Min(16, fanIn));
     }
     /// <summary>Gets the caller's memory grant.</summary>
     public long MemoryGrant { get; }
@@ -73,23 +74,21 @@ public sealed class StorageTempSorter : IDisposable
     /// <summary>Gets the maximum number of merge stages traversed by an output row.</summary>
     public int MergePasses { get; private set; }
     /// <summary>Gets the exact key comparisons, including run sorting and heap merging.</summary>
-    public long KeyComparisons { get; private set; }
+    internal long KeyComparisons => _keyComparisons + (_finalReader?.KeyComparisons ?? 0);
     /// <summary>Gets the records written across initial and merged runs.</summary>
-    public long RecordsWritten { get; private set; }
+    internal long RecordsWritten { get; private set; }
 
     /// <summary>Copies a key and value; equal keys retain append order through every merge.</summary>
     /// <param name="key">An encoded byte-comparable key.</param>
     /// <param name="value">Opaque row bytes.</param>
     /// <param name="cancellationToken">Observed before run generation and during merging.</param>
-    /// <exception cref="ArgumentException">The framed record exceeds the declared maximum.</exception>
     /// <exception cref="InvalidOperationException">Complete already ran.</exception>
     /// <exception cref="ObjectDisposedException">The sorter is disposed.</exception>
-    /// <exception cref="System.IO.IOException">The temporary file could not be read or written.</exception>
-    /// <exception cref="StorageTempException">A quota or free-space floor refused a run.</exception>
+    /// <exception cref="StorageTempException">A quota, floor, oversized record (CK05006), or unavailable temporary storage (CK05005) refused a run.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public void Append(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value, CancellationToken cancellationToken = default)
     {
-        lock (_statement.Space.Gate) { AppendCore(key, value, cancellationToken); }
+        AppendCore(key, value, cancellationToken);
     }
 
     private void AppendCore(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value, CancellationToken cancellationToken)
@@ -99,7 +98,11 @@ public sealed class StorageTempSorter : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             long size = 16L + key.Length + value.Length;
-            if (size > _maximumRecordLength) { throw new ArgumentException(ErrorMessages.TempSortRecordLarge); }
+            if (size > _maximumRecordLength)
+            {
+                StorageEventSource.Log.TempRefused(StorageTempException.RecordTooLargeCode);
+                throw new StorageTempException(StorageTempException.RecordTooLargeCode, ErrorMessages.TempSortRecordLarge);
+            }
             if (_used + size > _arenaSize || _count == (_workspace.Length - _arenaSize) / 4) { Flush(cancellationToken); }
             var row = _workspace.AsSpan(_used, (int)size);
             BinaryPrimitives.WriteInt32LittleEndian(row, key.Length);
@@ -131,100 +134,87 @@ public sealed class StorageTempSorter : IDisposable
         }
         catch { run.Dispose(); throw; }
         _count = 0; _used = 0;
-        Push(run, 0, 0, token);
+        try { Push(run, 0, 0, token); }
+        catch { run.Dispose(); throw; }
     }
     private void Push(StorageTempRun run, int level, int depth, CancellationToken token)
     {
-        if (level == levelCount) { run.Dispose(); throw new InvalidOperationException(ErrorMessages.TempSortTooManyRows); }
         int start = level * FanIn;
-        int slot = start;
-        while (_levels[slot] is not null) { slot++; }
-        _levels[slot] = run; _depths[slot] = depth;
-        if (slot != start + FanIn - 1) { return; }
-        var merged = Merge(start, FanIn, token);
-        int nextDepth = 1;
-        for (int i = start; i <= slot; i++) { nextDepth = Math.Max(nextDepth, _depths[i] + 1); _levels[i] = null; }
-        MergePasses = Math.Max(MergePasses, nextDepth);
-        Push(merged, level + 1, nextDepth, token);
+        int count = 0;
+        while (count < FanIn && _levels[start + count] is not null) { count++; }
+        // Keep FanIn initial runs untouched. Merge a full group only when another arrives.
+        if (count == FanIn)
+        {
+            var inputs = new StorageTempRun[FanIn]; int nextDepth = 1;
+            for (int i = 0; i < FanIn; i++)
+            { inputs[i] = _levels[start + i]!; nextDepth = Math.Max(nextDepth, _depths[start + i] + 1); }
+            var merged = Merge(inputs, token);
+            Array.Clear(_levels, start, FanIn);
+            MergePasses = Math.Max(MergePasses, nextDepth);
+            try { Push(merged, level + 1, nextDepth, token); }
+            catch { merged.Dispose(); throw; }
+            count = 0;
+        }
+        _levels[start + count] = run; _depths[start + count] = depth;
     }
 
-    private StorageTempRun Merge(int start, int count, CancellationToken token)
+    private StorageTempRun Merge(StorageTempRun[] inputs, CancellationToken token)
     {
-        var readers = new StorageTempRunReader?[count];
-        var lengths = new int[count];
-        int stride = StorageTempSpace.PageSize + _maximumRecordLength;
-        var heap = new PriorityQueue<int, int>(count, Comparer<int>.Create((left, right) =>
-            CompareRows(_workspace.AsSpan(left * stride + StorageTempSpace.PageSize, lengths[left]),
-                _workspace.AsSpan(right * stride + StorageTempSpace.PageSize, lengths[right]))));
+        using var reader = new StorageTempSortReader(_statement, inputs, _maximumRecordLength, _workspace, false);
         var output = _statement.CreateRun(token); output.UsePage(_outputPage);
-        bool succeeded = false;
         try
         {
-            for (int i = 0; i < count; i++)
-            {
-                readers[i] = _levels[start + i]!.OpenReader(_workspace.AsMemory(i * stride, StorageTempSpace.PageSize));
-                if (readers[i]!.TryRead(_workspace.AsSpan(i * stride + StorageTempSpace.PageSize, _maximumRecordLength), out lengths[i], token))
-                { heap.Enqueue(i, i); }
-            }
-            while (heap.TryDequeue(out int i, out _))
-            {
-                token.ThrowIfCancellationRequested();
-                var row = _workspace.AsSpan(i * stride + StorageTempSpace.PageSize, lengths[i]);
-                ValidateRow(row); output.Append(row, token); RecordsWritten++;
-                if (readers[i]!.TryRead(_workspace.AsSpan(i * stride + StorageTempSpace.PageSize, _maximumRecordLength), out lengths[i], token))
-                { heap.Enqueue(i, i); }
-            }
+            while (reader.MoveNext(token)) { output.Append(reader.Record, token); RecordsWritten++; }
+            _keyComparisons += reader.KeyComparisons;
             output.Seal(token);
-            for (int i = 0; i < count; i++) { _levels[start + i]!.Dispose(); }
-            succeeded = true; return output;
+            foreach (var input in inputs) { input.Dispose(); }
+            return output;
         }
-        finally
-        {
-            foreach (var reader in readers) { reader?.Dispose(); }
-            if (!succeeded) { output.Dispose(); }
-        }
+        catch { output.Dispose(); throw; }
     }
 
-    /// <summary>Finishes the sort and transfers its sealed output run to the caller/statement.</summary>
-    /// <param name="cancellationToken">Observed throughout flushing and merging.</param>
-    /// <returns>A sealed run read using StorageTempSortReader.Create.</returns>
+    /// <summary>Finishes run generation and transfers the remaining inputs to a streaming merge reader.</summary>
+    /// <param name="cancellationToken">Observed throughout flushing and intermediate merging.</param>
+    /// <returns>A reader owning at most FanIn runs and count times (8192 + maximum record length) bytes.</returns>
     /// <exception cref="ObjectDisposedException">The sorter is disposed.</exception>
     /// <exception cref="InvalidOperationException">Complete already ran.</exception>
-    /// <exception cref="System.IO.IOException">The temporary file could not be read or written.</exception>
-    /// <exception cref="StorageTempException">A quota, free-space floor or integrity check failed.</exception>
+    /// <exception cref="StorageTempException">A quota, free-space floor, integrity check or temporary I/O failed.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public StorageTempRun Complete(CancellationToken cancellationToken = default)
-    {
-        lock (_statement.Space.Gate) { return CompleteCore(cancellationToken); }
-    }
-
-    private StorageTempRun CompleteCore(CancellationToken cancellationToken)
+    public StorageTempSortReader Complete(CancellationToken cancellationToken = default)
     {
         Check();
-        StorageTempRun? result = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested(); Flush(cancellationToken);
-            // Collapse at most 64 levels. Keep their existing depths: each row participates in
-            // at most logarithmically many balanced stages, plus this bounded final cascade.
-            int resultDepth = 0;
-            for (int level = 0; level < levelCount; level++)
+            var remaining = new List<(StorageTempRun Run, int Depth)>();
+            for (int i = 0; i < _levels.Length; i++)
+            { if (_levels[i] is { } run) { remaining.Add((run, _depths[i])); } }
+            while (remaining.Count > FanIn)
             {
-                int start = level * FanIn; int count = 0; int depth = 0;
-                while (count < FanIn && _levels[start + count] is not null) { depth = Math.Max(depth, _depths[start + count]); count++; }
-                if (result is not null) { _levels[start + count] = result; _depths[start + count] = resultDepth; depth = Math.Max(depth, resultDepth); count++; result = null; }
-                if (count == 0) { continue; }
-                result = count == 1 ? _levels[start] : Merge(start, count, cancellationToken);
-                resultDepth = count == 1 ? depth : depth + 1;
-                Array.Clear(_levels, start, count);
-                MergePasses = Math.Max(MergePasses, resultDepth);
+                remaining.Sort((left, right) => left.Run.PageCount.CompareTo(right.Run.PageCount));
+                int count = Math.Min(FanIn, remaining.Count - FanIn + 1), depth = 0;
+                var inputs = new StorageTempRun[count];
+                for (int i = 0; i < count; i++) { inputs[i] = remaining[i].Run; depth = Math.Max(depth, remaining[i].Depth); }
+                var merged = Merge(inputs, cancellationToken);
+                // Register a completed intermediate immediately so a later failure disposes it.
+                foreach (var input in inputs) { Array.Clear(_levels, Array.IndexOf(_levels, input), 1); }
+                int slot = Array.IndexOf(_levels, null); _levels[slot] = merged; _depths[slot] = depth + 1;
+                remaining.RemoveRange(0, count); remaining.Add((merged, depth + 1));
+                MergePasses = Math.Max(MergePasses, depth + 1);
             }
-            result ??= _statement.CreateRun(cancellationToken);
-            result.Seal(cancellationToken);
-            _completed = true; _workspace = []; _outputPage = [];
-            return result;
+            var runs = new StorageTempRun[remaining.Count];
+            for (int i = 0; i < runs.Length; i++)
+            {
+                runs[i] = remaining[i].Run;
+                MergePasses = Math.Max(MergePasses, remaining[i].Depth + (runs.Length > 1 ? 1 : 0));
+            }
+            _workspace = []; _outputPage = [];
+            _finalReader = new StorageTempSortReader(_statement, runs, _maximumRecordLength,
+                new byte[runs.Length * (StorageTempSpace.PageSize + _maximumRecordLength)], true);
+            Array.Clear(_levels); _completed = true;
+            return _finalReader;
         }
-        catch { result?.Dispose(); Dispose(); throw; }
+        catch { Dispose(); throw; }
     }
 
     private int CompareOffsets(int left, int right) => CompareRows(RowAt(left), RowAt(right));
@@ -235,7 +225,11 @@ public sealed class StorageTempSorter : IDisposable
     }
     private int CompareRows(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
     {
-        ValidateRow(left); ValidateRow(right); KeyComparisons++;
+        ValidateRow(left); ValidateRow(right); _keyComparisons++;
+        return CompareEncodedRows(left, right);
+    }
+    internal static int CompareEncodedRows(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+    {
         int comparison = left.Slice(16, BinaryPrimitives.ReadInt32LittleEndian(left)).SequenceCompareTo(
             right.Slice(16, BinaryPrimitives.ReadInt32LittleEndian(right)));
         return comparison != 0 ? comparison : BinaryPrimitives.ReadInt64LittleEndian(left[8..]).CompareTo(BinaryPrimitives.ReadInt64LittleEndian(right[8..]));
@@ -244,7 +238,7 @@ public sealed class StorageTempSorter : IDisposable
     {
         if (row.Length < 16 || BinaryPrimitives.ReadInt32LittleEndian(row) < 0 || BinaryPrimitives.ReadInt32LittleEndian(row[4..]) < 0 ||
             16L + BinaryPrimitives.ReadInt32LittleEndian(row) + BinaryPrimitives.ReadInt32LittleEndian(row[4..]) != row.Length)
-        { throw new StorageTempException(StorageTempException.DamageCode, ErrorMessages.TempPageDamaged); }
+        { throw StorageTempException.Damage(); }
     }
     private void Check()
     {
@@ -252,18 +246,26 @@ public sealed class StorageTempSorter : IDisposable
         _statement.Check();
         if (_completed) { throw new InvalidOperationException(ErrorMessages.TempSortCompleted); }
     }
-    /// <summary>Deletes all intermediates; a successfully returned output belongs to the caller.</summary>
+    /// <summary>Deletes intermediates; a successfully returned reader owns the remaining runs.</summary>
+    /// <exception cref="AggregateException">One or more coded closes failed after all intermediates were released.</exception>
     public void Dispose()
     {
-        lock (_statement.Space.Gate) { DisposeCore(); }
+        DisposeCore();
     }
 
     private void DisposeCore()
     {
         if (_disposed) { return; }
         _disposed = true;
-        foreach (var run in _levels) { run?.Dispose(); }
+        List<Exception>? failures = null;
+        foreach (var run in _levels)
+        {
+            try { run?.Dispose(); }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            { (failures ??= []).Add(error); } // Continue releasing every intermediate.
+        }
         Array.Clear(_levels); _workspace = []; _outputPage = [];
+        if (failures is not null) { throw new AggregateException(ErrorMessages.TempCleanupFailed, failures); }
     }
     private sealed class DebugView
     {
@@ -273,7 +275,5 @@ public sealed class StorageTempSorter : IDisposable
         public int FanIn => _target.FanIn;
         public long RunsCreated => _target.RunsCreated;
         public int MergePasses => _target.MergePasses;
-        public long KeyComparisons => _target.KeyComparisons;
-        public long RecordsWritten => _target.RecordsWritten;
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Storage.Internal;
 
@@ -19,56 +20,76 @@ public sealed class StorageTempSpace : IDisposable
     private readonly HashSet<StorageTempStatement> _statements = [];
     private readonly Func<long> _availableBytes;
     private readonly Func<long> _freeSpaceFloor;
+    private readonly long? _requestedQuota;
+    private readonly object _directoryGate = new();
+    private readonly object _probeGate = new();
     private FileStream? _lease;
     private long _bytes;
     private long _pendingBytes;
+    private long _reservedTotal;
+    private long _releasedTotal;
+    private long _probeReserved;
+    private long _probeReleased;
+    private long _availableAtProbe;
+    private bool _quotaKnown;
     private bool _disposed;
+    // Lock order: run lock, then Gate; never the reverse. Gate covers only accounting and
+    // registries. No syscall or event listener runs under it. Future callers must not hold
+    // a storage page latch across temporary-space calls. Directory/probe gates never enter runs.
     internal readonly object Gate = new();
     internal Action? BeforePageWrite { get; set; }
-    internal long Bytes => _bytes;
+    internal Action? BeforePageRead { get; set; }
+    internal long Bytes { get { lock (Gate) { return _bytes; } } }
+    internal long PendingBytes { get { lock (Gate) { return _pendingBytes; } } }
 
     private StorageTempSpace(FileSystemPath directory, long? engineQuota, Func<long> floor, Func<long>? available)
     {
         DirectoryPath = Path.GetFullPath(directory);
+        _requestedQuota = engineQuota;
         _availableBytes = available ?? (() => StorageTempVolumeSpace.AvailableBytes(DirectoryPath));
         _freeSpaceFloor = floor;
-        // Measured once at engine creation, before the startup sweep. The floor is independent
-        // and is measured again before each page reservation, under Gate.
-        EngineQuota = engineQuota ?? Math.Min(10L * 1024 * 1024 * 1024, Math.Max(0, _availableBytes()) / 4);
-        if (Directory.Exists(DirectoryPath))
+        try
         {
-            OpenDirectory();
-            // An idle engine open leaves no lock sidecar behind a refused format preflight.
-            // The first run reacquires the lease and sweeps again before holding it until close.
-            _lease!.Dispose(); _lease = null;
+            if (Directory.Exists(DirectoryPath) || File.Exists(DirectoryPath) || new DirectoryInfo(DirectoryPath).LinkTarget is not null)
+            { OpenDirectory(); }
+            // Fix the quota after sweeping: orphan bytes must not reduce a lifetime's quota.
+            InitializeProbe();
+            ReleaseLease();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            EngineQuota = 0; _quotaKnown = false;
+            try { ReleaseLease(); }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { } // Startup remains available.
+            StorageEventSource.Log.TempUnavailable(StorageTempException.UnavailableCode);
         }
     }
 
     /// <summary>Creates a space, sweeping owned leftover files if its directory already exists.</summary>
     /// <param name="directory">A dedicated directory; creation is deferred until the first run.</param>
-    /// <param name="engineQuota">Physical bytes allowed; null uses min(10 GiB, 25% of free bytes measured now).</param>
-    /// <param name="freeSpaceFloor">Nonnegative engine reserve in bytes, sampled before each page; null means zero.</param>
-    /// <returns>The exclusively owned temporary space.</returns>
-    /// <exception cref="ArgumentException">The directory is empty.</exception>
+    /// <param name="engineQuota">Physical bytes allowed; null uses min(10 GiB, 25% of free bytes after sweeping).</param>
+    /// <param name="freeSpaceFloor">Required nonnegative engine reserve, supplied as a constant or lock-free snapshot.</param>
+    /// <returns>A space; unavailable temporary storage warns and is retried by the first run.</returns>
+    /// <exception cref="ArgumentException">The directory is empty or default.</exception>
+    /// <exception cref="ArgumentNullException">The reserve callback is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The quota is negative.</exception>
-    /// <exception cref="IOException">Another space owns the directory or a sweep fails.</exception>
-    /// <exception cref="UnauthorizedAccessException">The directory cannot be accessed.</exception>
-    /// <remarks>The reserve callback runs under the temp-space monitor and must not acquire
-    /// engine registry locks or storage latches. Use a constant or a lock-free snapshot.</remarks>
-    public static StorageTempSpace Create(FileSystemPath directory, long? engineQuota = null, Func<long>? freeSpaceFloor = null)
-        => CreateCore(directory, engineQuota, freeSpaceFloor ?? (() => 0), null);
+    /// <remarks>A directory belongs to one spilling engine. Choose a different TempDirectory for
+    /// another engine. The reserve callback must not acquire engine registry locks or page latches.</remarks>
+    public static StorageTempSpace Create(FileSystemPath directory, long? engineQuota, Func<long> freeSpaceFloor)
+        => CreateCore(directory, engineQuota, freeSpaceFloor, null);
 
     internal static StorageTempSpace CreateCore(FileSystemPath directory, long? engineQuota, Func<long> floor, Func<long>? available)
     {
-        if (directory.IsEmpty) { throw new ArgumentException(ErrorMessages.TempDirectoryEmpty, nameof(directory)); }
+        if (directory == default || directory.IsEmpty) { throw new ArgumentException(ErrorMessages.TempDirectoryEmpty, nameof(directory)); }
+        ArgumentNullException.ThrowIfNull(floor);
         if (engineQuota is { } quota) { ArgumentOutOfRangeException.ThrowIfNegative(quota); }
         return new StorageTempSpace(directory, engineQuota, floor, available);
     }
 
     /// <summary>Gets the normalized dedicated directory.</summary>
     public string DirectoryPath { get; }
-    /// <summary>Gets the engine quota fixed at creation, in physical bytes.</summary>
-    public long EngineQuota { get; }
+    /// <summary>Gets the physical-byte quota fixed after sweeping, or zero until an unavailable probe succeeds.</summary>
+    public long EngineQuota { get; private set; }
 
     /// <summary>Creates a statement lifetime with a physical-byte quota.</summary>
     /// <param name="quota">The statement quota; the engine normally supplies four times its memory budget.</param>
@@ -80,50 +101,58 @@ public sealed class StorageTempSpace : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(quota);
         lock (Gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            Check();
             var statement = new StorageTempStatement(this, quota);
-            _statements.Add(statement);
-            return statement;
+            _statements.Add(statement); return statement;
         }
     }
 
     internal FileStream CreateFile()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_lease is null) { OpenDirectory(); }
-        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.ReadWrite,
-            Share = FileShare.Read | FileShare.Delete, BufferSize = 0, Options = FileOptions.DeleteOnClose | FileOptions.RandomAccess };
-        if (!OperatingSystem.IsWindows())
+        try
         {
-            options.UnixCreateMode = File.GetUnixFileMode(DirectoryPath) & (UnixFileMode.UserRead | UnixFileMode.UserWrite |
-                UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead | UnixFileMode.OtherWrite);
+            lock (_directoryGate)
+            {
+                Check();
+                if (_lease is null)
+                {
+                    try { OpenDirectory(); if (!_quotaKnown) { InitializeProbe(); } }
+                    catch { ReleaseLease(); throw; }
+                }
+                var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.ReadWrite,
+                    Share = FileShare.Delete, BufferSize = 0, Options = FileOptions.DeleteOnClose | FileOptions.SequentialScan };
+                if (!OperatingSystem.IsWindows()) { options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite; }
+                return new FileStream(Path.Combine(DirectoryPath, "cohesion-" + Guid.NewGuid().ToString("N") + ".ctmp"), options);
+            }
         }
-        return new FileStream(Path.Combine(DirectoryPath, "cohesion-" + Guid.NewGuid().ToString("N") + ".ctmp"), options);
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { throw StorageTempException.Unavailable(error); }
     }
 
     private void OpenDirectory()
     {
-        // No temp directory is created when an engine only probes an incompatible file set.
-        // Lease before sweeping: another engine must never delete live runs.
-        if (!Directory.Exists(DirectoryPath))
-        {
-            if (OperatingSystem.IsWindows()) { Directory.CreateDirectory(DirectoryPath); }
-            else
-            {
-                string parent = Path.GetDirectoryName(DirectoryPath)!;
-                Directory.CreateDirectory(parent);
-                Directory.CreateDirectory(DirectoryPath, File.GetUnixFileMode(parent));
-            }
-        }
         string leasePath = Path.Combine(DirectoryPath, ".cohesion-temp.lock");
-        var lease = new FileStream(leasePath, FileMode.OpenOrCreate,
-            FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        // Check before opening: Windows DeleteOnClose follows a symbolic link to its target.
+        if (new DirectoryInfo(DirectoryPath).LinkTarget is not null || new FileInfo(leasePath).LinkTarget is not null)
+        { throw new IOException(ErrorMessages.TempDirectoryUnsafe); }
+        if (OperatingSystem.IsWindows()) { Directory.CreateDirectory(DirectoryPath); }
+        else
+        {
+            Directory.CreateDirectory(DirectoryPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            if ((File.GetUnixFileMode(DirectoryPath) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+            { throw new IOException(ErrorMessages.TempDirectoryUnsafe); }
+        }
+        var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite,
+            Share = OperatingSystem.IsWindows() ? FileShare.Delete : FileShare.None, BufferSize = 1,
+            Options = OperatingSystem.IsWindows() ? FileOptions.None : FileOptions.DeleteOnClose };
+        if (!OperatingSystem.IsWindows()) { options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite; }
+        var lease = new FileStream(leasePath, options);
         try
         {
             if (!OperatingSystem.IsWindows())
             {
-                // Unix FileStream can ignore unsupported flock operations. Verify exclusion
-                // before sweeping, rather than mistaking an unprotected handle for ownership.
+                // Unix lock verification relies on the delete-on-close inode verification.
+                File.SetUnixFileMode(leasePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
                 bool exclusive = false;
                 try { using var probe = new FileStream(leasePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None); }
                 catch (IOException error) when (error.HResult is 11 or 35) { exclusive = true; }
@@ -136,67 +165,122 @@ public sealed class StorageTempSpace : IDisposable
             }
             _lease = lease;
         }
-        catch { lease.Dispose(); throw; } // A failed sweep must release the directory lease.
+        catch
+        {
+            try { if (OperatingSystem.IsWindows()) { File.Delete(leasePath); } }
+            finally { lease.Dispose(); }
+            throw;
+        }
     }
-
+    private void ReleaseLease()
+    {
+        var lease = _lease; _lease = null;
+        if (lease is null) { return; }
+        try { if (OperatingSystem.IsWindows()) { File.Delete(Path.Combine(DirectoryPath, ".cohesion-temp.lock")); } }
+        finally { lease.Dispose(); }
+    }
+    private long ProbeAvailable()
+    {
+        try { return Math.Max(0, _availableBytes()); }
+        catch (OverflowException) { return long.MaxValue; }
+    }
+    private void InitializeProbe()
+    {
+        lock (_probeGate)
+        {
+            long free = ProbeAvailable();
+            lock (Gate)
+            {
+                _availableAtProbe = free; _probeReserved = _reservedTotal; _probeReleased = _releasedTotal;
+                if (!_quotaKnown) { EngineQuota = _requestedQuota ?? Math.Min(10L * 1024 * 1024 * 1024, free / 4); }
+                _quotaKnown = true;
+            }
+        }
+    }
+    private void RefreshProbe()
+    {
+        lock (Gate) { if (_reservedTotal - _probeReserved < 128L * PageSize) { return; } }
+        lock (_probeGate)
+        {
+            long reserved, pending;
+            lock (Gate)
+            {
+                if (_reservedTotal - _probeReserved < 128L * PageSize) { return; }
+                reserved = _reservedTotal; pending = _pendingBytes;
+            }
+            long free = ProbeAvailable(); // Never a syscall under Gate.
+            lock (Gate)
+            {
+                _availableAtProbe = Math.Max(0, free - pending); _probeReserved = reserved;
+                // Ignore releases during the syscall: they may already be reflected in free.
+                _probeReleased = _releasedTotal;
+            }
+        }
+    }
     internal void Reserve(StorageTempStatement statement)
     {
-        string? code = statement.Bytes > statement.Quota - PageSize ? StorageTempException.StatementQuotaCode
-            : _bytes > EngineQuota - PageSize ? StorageTempException.EngineQuotaCode : null;
-        if (code is null)
+        RefreshProbe();
+        long floor = _freeSpaceFloor();
+        ArgumentOutOfRangeException.ThrowIfNegative(floor);
+        string? code;
+        lock (Gate)
         {
-            long floor = _freeSpaceFloor();
-            ArgumentOutOfRangeException.ThrowIfNegative(floor);
-            long free = _availableBytes();
-            if (free < floor || free - floor < _pendingBytes + PageSize) { code = StorageTempException.FreeSpaceCode; }
+            statement.Check();
+            code = statement.Bytes > statement.Quota - PageSize ? StorageTempException.StatementQuotaCode
+                : _bytes > EngineQuota - PageSize ? StorageTempException.EngineQuotaCode : null;
+            long free = _availableAtProbe - (_reservedTotal - _probeReserved);
+            long released = _releasedTotal - _probeReleased;
+            free = free > long.MaxValue - released ? long.MaxValue : free + released;
+            if (code is null && (free < floor || free - floor < PageSize)) { code = StorageTempException.FreeSpaceCode; }
+            if (code is null)
+            {
+                _bytes += PageSize; _pendingBytes += PageSize; _reservedTotal += PageSize;
+                statement.Bytes += PageSize; statement.Peak = Math.Max(statement.Peak, statement.Bytes);
+            }
         }
         if (code is not null)
         {
             StorageEventSource.Log.TempRefused(code);
-            throw new StorageTempException(code, ErrorMessages.TempSpaceRefused);
+            string message = code == StorageTempException.StatementQuotaCode ? ErrorMessages.TempStatementQuota
+                : code == StorageTempException.EngineQuotaCode ? ErrorMessages.TempEngineQuota : ErrorMessages.TempFreeSpace;
+            throw new StorageTempException(code, message);
         }
-        _bytes += PageSize; _pendingBytes += PageSize; statement.Bytes += PageSize;
         StorageEventSource.Log.TempBytesChanged(PageSize);
     }
-    internal void Written() { _pendingBytes -= PageSize; StorageEventSource.Log.TempPageWritten(); }
+    internal void Written()
+    {
+        lock (Gate) { _pendingBytes -= PageSize; }
+        StorageEventSource.Log.TempPageWritten();
+    }
     internal void Release(StorageTempStatement statement, long bytes, long pending)
     {
-        _bytes -= bytes; _pendingBytes -= pending; statement.Bytes -= bytes;
+        lock (Gate) { _bytes -= bytes; _pendingBytes -= pending; statement.Bytes -= bytes; _releasedTotal += bytes; }
         if (bytes != 0) { StorageEventSource.Log.TempBytesChanged(-bytes); }
     }
-    internal void Forget(StorageTempStatement statement)
-    {
-        if (!_disposed) { _statements.Remove(statement); }
-    }
+    internal void Check() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+    internal void Forget(StorageTempStatement statement) { lock (Gate) { _statements.Remove(statement); } }
 
     /// <summary>Closes every statement and file; repeated calls do nothing.</summary>
-    /// <exception cref="AggregateException">One or more closes failed after every statement was released.</exception>
+    /// <exception cref="AggregateException">One or more coded closes failed after every statement was released.</exception>
     public void Dispose()
     {
+        StorageTempStatement[] statements;
         lock (Gate)
         {
             if (_disposed) { return; }
-            _disposed = true;
-            List<Exception>? failures = null;
-            try
-            {
-                foreach (var statement in _statements)
-                {
-                    try { statement.Dispose(); }
-                    catch (Exception error) when (error is not OutOfMemoryException)
-                    { (failures ??= []).Add(error); } // Cleanup continues through all statements.
-                }
-            }
-            finally
-            {
-                _statements.Clear();
-                try { _lease?.Dispose(); }
-                catch (Exception error) when (error is not OutOfMemoryException)
-                { (failures ??= []).Add(error); }
-                finally { _lease = null; }
-            }
-            if (failures is not null) { throw new AggregateException(ErrorMessages.TempCleanupFailed, failures); }
+            _disposed = true; statements = [.. _statements]; _statements.Clear();
         }
+        List<Exception>? failures = null;
+        foreach (var statement in statements)
+        {
+            try { statement.Dispose(); }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            { (failures ??= []).Add(error); } // Continue releasing every owner after a failed close.
+        }
+        try { lock (_directoryGate) { ReleaseLease(); } }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { (failures ??= []).Add(StorageTempException.Unavailable(error)); }
+        if (failures is not null) { throw new AggregateException(ErrorMessages.TempCleanupFailed, failures); }
     }
     private sealed class DebugView
     {

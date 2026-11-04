@@ -64,17 +64,27 @@ public sealed class SqlDatabaseEngineOptions
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>Gets or sets a dedicated spill directory. File engines default to RootPath/.cohesion-temp;
-    /// an override must remain under RootPath. In-memory engines have no spill space unless set.</summary>
+    /// an override must remain below RootPath, outside any database-named first segment and without
+    /// link components. In-memory engines have no spill space unless set.</summary>
+    /// <remarks>One directory belongs to one spilling engine; choose a different TempDirectory for
+    /// each engine. A lease conflict warns at startup and refuses a later spill with CK05005.
+    /// Unix directories are created 0700, files 0600; group/other-writable directories are refused.
+    /// On Windows an explicit directory keeps its inherited ACL. Data is unencrypted, survives a kill
+    /// until the next sweep, and OS backups of RootPath can capture live temp files.
+    /// File engines reserve 2.54 GiB per open database at defaults. For N = max(1, open databases),
+    /// C = 1 MiB + N * (BufferPoolCapacity + 128 * 8192 + 2 * (JournalSizeLimit +
+    /// reclamation bracket bytes for 32 rows)), the floor is C + max(1 MiB, ceil(C / 4)).
+    /// An in-memory engine reserves only 1 MiB on this volume.</remarks>
     public FileSystemPath? TempDirectory { get; set; }
 
     /// <summary>Gets or sets the engine's physical temporary-byte quota. Null fixes the quota at
-    /// min(10 GiB, 25% of available volume bytes), measured when the engine is created before sweeping.
+    /// min(10 GiB, 25% of available volume bytes), measured after startup sweeping; an unavailable probe uses zero until the first run retries.
     /// Zero refuses all growth. Must be nonnegative. The live free-space floor always applies.</summary>
     public long? TempSpaceQuota { get; set; }
 
     /// <summary>Gets or sets the statement's physical temporary-byte quota. Null uses four times
     /// StatementMemoryBudget, saturating at Int64.MaxValue. Zero refuses growth. Must be nonnegative.
-    /// SQL operators retain CS05067 until their spill consumers are wired.</summary>
+    /// SQL operators retain their existing CS05067 memory-budget refusal.</summary>
     public long? StatementTempSpaceQuota { get; set; }
 
     /// <summary>

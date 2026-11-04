@@ -18,3 +18,7 @@ sequenceDiagram
     Test->>Fixture: Kill and await exit
     Test->>Space: Reopen and verify sweep
 ```
+
+The lease-probe mode runs with DOTNET_SYSTEM_IO_DISABLEFILELOCKING=1 in an isolated process.
+Create succeeds; CreateRun retries the lease and returns CK05005 on Unix before sweeping.
+On Windows the runtime still enforces sharing and the probe succeeds.
