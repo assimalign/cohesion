@@ -1708,8 +1708,10 @@ owner-scoped storage iterator
 `SeekRows` keeps its index cursor's copied entry batch and key bounds until cursor disposal.
 System-view enumeration reads the statement's retained catalog snapshot and can retain
 `SystemKeyConstraints` name sets or referenced-key ordering scratch until that enumeration
-finishes. These lower-level owners remain live alongside consumer buffers. SQ-L1b must account for simultaneous live
-buffers and transfers without charging shared cells twice; failure and cancellation must unwind every acquired charge.
+finishes. These lower-level owners remain live alongside consumer buffers; their size follows
+the storage or catalog structure being read, not the rows a statement retains. SQ-L1b charges
+simultaneously live buffers and unwinds every acquired charge on failure and cancellation. A
+value held by two buffers charges in each until SQ-L1c makes a shared wide value charge once.
 
 The group post-input body deliberately duplicates the base body, and `PrepareJoinInputsAsync`
 duplicates the base join prologue. SQ-L1b must keep both copies aligned when adding charges;
