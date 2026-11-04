@@ -1633,6 +1633,43 @@ vocabulary now quotes those identifier names in canonical persisted expressions.
 SqlT1StorageFormatTests demonstrates the format-18 CHECK drift and pins refusal on reopen.
 There is no upgrade reader. SQL-visible grammar and limits live in DIALECT.md.
 
+## What SELECT retains
+
+Plain GROUP BY and global aggregates consume eligible scan, seek, system-view, constant and
+join inputs one row at a time; groups, aggregate DISTINCT tuples and ordered aggregate inputs
+keep their existing state. Plain SELECT joins pass filtered rows to projection or the ordered
+collector without a matches list; normalized joins stream only their root output, keeping child
+buffers and hash builds unchanged. Unordered, non-DISTINCT scan/join EXISTS and scalar bodies
+retain at most two result rows, with an explicit per-plan retention argument. Plain unordered
+DISTINCT with fixed collations keeps the first projected occurrence in input order. It still
+consumes all input before pagination. CHAR cells cross the same output/input normalization as a
+materialized row, and retained binary cells are detached from reusable producers.
+
+Each pipeline keeps the materialized path for recursive evaluation, every DML source, a current
+window owner, a SQL/JSON statement grant, a frame with correlated/deferred queries, or a subquery
+in its own expressions. SQL/JSON keeps staging so scalar grants never acquire a new overlap
+with a live input hash build.
+Grouping also checks keys, arguments, FILTER, inner ordering, HAVING and output expressions,
+and keeps deferred key/aggregate collations on the original path.
+Application aggregates, volatile/sequence group transitions and join outputs keep the staged path: a later input error
+must not observe consumer calls that base never reached. Consumer failures drain remaining
+input predicates before surfacing, preserving their calls and work. Tree joins keep volatile
+WHERE predicates on the staged path; a nonvolatile WHERE failure drains all remaining ON work.
+DISTINCT hash/collation failures preserve all preceding projection-stage evaluation before surfacing.
+Ordered, grouped and correlated DISTINCT and
+deferred collations keep their original collectors. Independent volatile ordered join projections
+keep the full source sort, which is required to evaluate those projections in sorted order.
+Derived tables, views and CTE caches retain their existing statement lifetime and materialization.
+An eligibility walk reaching its stack guard also selects the original path.
+
+These pipelines never stop evaluation early: joins drain all candidates and WHERE predicates even
+at LIMIT 0 or after the output window fills; bounded subquery bodies run every projection that
+the original body ran, and scalar cardinality is checked afterwards. Existing stored-scan early
+stops remain unchanged. Statement memory charges and refusal conditions are unchanged in this
+retention-only step (#1776, SQ-L1a); later accounting attaches to these boundaries. Per-database
+internal test seams force the original collectors and observe boundary row counts, without
+allocating observation state for ordinary statements.
+
 ## Ordering output values (#1024)
 
 `src/Internal/Planning/SqlPlanner.Ordering.cs` binds aliases and standalone numeric ordinals to

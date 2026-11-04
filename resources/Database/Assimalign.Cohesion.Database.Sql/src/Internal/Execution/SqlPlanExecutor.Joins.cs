@@ -22,6 +22,8 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (CanPipelineJoinOutput(plan))
+        { return await ExecutePipelinedJoinAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
         foreach (var binding in plan.Bindings)
         {
@@ -61,6 +63,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
+        _definitions.ObserveSelectRetention?.Invoke("join-matches", false, matches.Count);
         if (_subqueryValues is { HasCorrelatedQueries: true })
         {
             return await MaterializeCorrelatedSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
@@ -68,6 +71,43 @@ internal sealed partial class SqlPlanExecutor
         }
         return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
             plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+    }
+
+    private async ValueTask<DatabaseResult> ExecutePipelinedJoinAsync(SqlJoinPlan plan,
+        SqlStatementContext statement, CancellationToken cancellationToken, int? retainRows = null)
+    {
+        var derivedRows = await PrepareJoinInputsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+        var sharedColumns = new bool[plan.Columns.Count];
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
+        return await ProjectJoinRowsAsync(plan, statement, sharedColumns, derivedRows, evaluator, cancellationToken, retainRows).ConfigureAwait(false);
+    }
+
+    // Shared with group input: retain derived materialization, lock, definition and snapshot order.
+    private async ValueTask<Dictionary<SqlDerivedRelation, List<object?[]>>?> PrepareJoinInputsAsync(SqlJoinPlan plan,
+        SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
+        foreach (var binding in plan.Bindings)
+        {
+            if (binding.Source.Derived is not { } derived) { continue; }
+            (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] =
+                await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
+        }
+        foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
+        {
+            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
+                LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
+            // Only read-only statements may use an immutable retired TRUNCATE owner.
+            // INSERT sources and DML subqueries inherit the enclosing statement's check.
+            if (_isDml || !_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
+        }
+        // Require binding's image even when an empty outer input would skip virtual enumeration.
+        if (plan.Bindings.Any(binding => binding.Source.View is not null))
+        {
+            _ = statement.RequireCatalogSnapshot();
+        }
+
+        return derivedRows;
     }
 
     /// <summary>
@@ -78,7 +118,7 @@ internal sealed partial class SqlPlanExecutor
     private async IAsyncEnumerable<object?[]> EnumerateJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, [EnumeratorCancellation] CancellationToken cancellationToken,
         IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derivedRows,
-        (int Binding, IReadOnlyList<object?[]> Rows)? dmlTarget = null)
+        (int Binding, IReadOnlyList<object?[]> Rows)? dmlTarget = null, bool streamRoot = false)
     {
         // Every earlier step is retained by a later loop. Only the final index inner
         // is a fresh read for each delivered pair. Delivery detaches selected binary cells only.
@@ -94,7 +134,7 @@ internal sealed partial class SqlPlanExecutor
         if (plan.Tree is not null)
         {
             // All tree inputs may be reused by a parent; delivery detaches selected cells.
-            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken, dmlTarget?.Binding).ConfigureAwait(false))
+            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken, dmlTarget?.Binding, streamRoot).ConfigureAwait(false))
             {
                 yield return row;
             }

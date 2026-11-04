@@ -155,7 +155,8 @@ internal sealed partial class SqlPlanExecutor
                 var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
                 return MaterializeSelect(evaluator.Matches(constant.Where, []) ? [Array.Empty<object?>()] : [],
                     constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
-                    evaluator, constant.OrderByProjections, cancellationToken);
+                    evaluator, constant.OrderByProjections, cancellationToken,
+                    incrementalDistinct: CanPipelinePlainDistinct(constant));
             case SqlWithPlan with:
                 foreach (var relation in RecursiveState is null ? with.Relations : Array.Empty<SqlDerivedRelation>())
                 {
@@ -243,6 +244,9 @@ internal sealed partial class SqlPlanExecutor
     // ── SELECT ─────────────────────────────────────────────────────────
 
     private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+        => ExecuteSelect(plan, statement, cancellationToken, retainRows: null);
+
+    private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken, int? retainRows)
     {
         if (plan.Access is SqlOrderedIndexPath ordered) { return ExecuteOrderedSelect(plan, ordered, statement, cancellationToken); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
@@ -250,7 +254,8 @@ internal sealed partial class SqlPlanExecutor
         // residual predicate for both paths, so seek results are equivalent to
         // scan results by construction.
         return MaterializeSelect(Matches(), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken,
+            incrementalDistinct: CanPipelinePlainDistinct(plan), retainRows: retainRows);
 
         IEnumerable<object?[]> Matches()
         {
@@ -272,7 +277,8 @@ internal sealed partial class SqlPlanExecutor
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         statement.Metrics.AccessPath = "ordered:" + path.Index.Name + (path.Reverse ? ":backward" : ":forward");
         return MaterializeSelect(Matches(), plan.Projections, [], plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken,
+            incrementalDistinct: CanPipelinePlainDistinct(plan));
 
         IEnumerable<object?[]> Matches()
         {
@@ -285,10 +291,13 @@ internal sealed partial class SqlPlanExecutor
     private DatabaseResult MaterializeSelect(IEnumerable<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
-        IReadOnlyDictionary<SqlExpression, int>? orderByProjections, CancellationToken cancellationToken)
+        IReadOnlyDictionary<SqlExpression, int>? orderByProjections, CancellationToken cancellationToken,
+        bool incrementalDistinct = false, int? retainRows = null)
     {
+        if (isDistinct && incrementalDistinct)
+        { return ProjectUnorderedDistinct(matches, projections, limit, offset, evaluator, cancellationToken); }
         var projected = ProjectAndSortRows(matches, projections, orderBy, evaluator, orderByProjections, cancellationToken,
-            isDistinct ? null : limit, isDistinct ? null : offset);
+            isDistinct ? null : limit, isDistinct ? null : offset, retainRows);
 
         return FinishSelect(projected, projections, limit, offset, isDistinct, evaluator, cancellationToken);
     }
@@ -341,7 +350,7 @@ internal sealed partial class SqlPlanExecutor
     private List<object?[]> ProjectAndSortRows(IEnumerable<object?[]> matches,
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots, CancellationToken cancellationToken,
-        SqlRowCount? limit = null, SqlRowCount? offset = null)
+        SqlRowCount? limit = null, SqlRowCount? offset = null, int? retainRows = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (orderBy.Count == 0)
@@ -351,16 +360,21 @@ internal sealed partial class SqlPlanExecutor
             var projected = new List<object?[]>();
             long skip = offset?.Count ?? 0;
             long remaining = limit?.Count ?? long.MaxValue;
-            if (remaining == 0) { return projected; }
+            if (remaining == 0)
+            {
+                if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, 0); }
+                return projected;
+            }
             foreach (var source in matches)
             {
                 var output = ProjectRow(source, projections, evaluator, cancellationToken);
                 if (skip > 0) { skip--; continue; }
                 SqlWindowMemory.For(_metrics)?.Retain(output);
-                projected.Add(output);
+                if (retainRows is null || projected.Count < retainRows) { projected.Add(output); }
                 if (--remaining == 0) { break; }
             }
             cancellationToken.ThrowIfCancellationRequested();
+            if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
             return projected;
         }
         if (HasSequenceProjection(projections) &&
@@ -605,6 +619,7 @@ internal sealed partial class SqlPlanExecutor
     private List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, Collation[]? collations = null)
     {
+        _definitions.ObserveSelectRetention?.Invoke("distinct", false, rows.Count);
         var windowMemory = SqlWindowMemory.For(_metrics);
         long scratch = windowMemory is null ? 0 : 128L + 32L * projections.Count + 64L * rows.Count;
         windowMemory?.Reserve(scratch);

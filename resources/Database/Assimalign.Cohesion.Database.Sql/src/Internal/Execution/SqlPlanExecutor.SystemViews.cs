@@ -19,7 +19,8 @@ internal sealed partial class SqlPlanExecutor
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         statement.Metrics.AccessPath = "system-view";
         return MaterializeSelect(Matches(), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken,
+            incrementalDistinct: CanPipelinePlainDistinct(plan));
 
         IEnumerable<object?[]> Matches()
         {
