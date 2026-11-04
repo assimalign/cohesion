@@ -36,6 +36,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache.DebugView))]
 internal sealed class SqlBoundTableCache
 {
+    // Per-database test seams: no public option, global state, or ordinary-statement counters.
+    internal bool ForceSelectRetentionBasePath { get; set; }
+    internal Action<string, bool, int>? ObserveSelectRetention { get; set; }
+
     internal long StatementMemoryBudget { get; init; } = 64L * 1024 * 1024;
     private readonly SqlCatalog _catalog;
     private readonly SqlFunctionEnvironment _native;

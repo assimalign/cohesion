@@ -717,7 +717,12 @@ public sealed class SqlWorkerResilienceTests
             await InsertAsync(healthy, id, 10);
         }
 
+        // The offline state can become visible before its completed pass is published.
+        bool offlineVisitObserved = await Eventually(() => passes.SelectMany(pass => pass.Visits)
+            .Any(visit => visit.Database == failingDatabaseName && visit.Offline));
+
         // Assert
+        offlineVisitObserved.ShouldBeTrue();
         passes.SelectMany(pass => pass.Visits).ShouldContain(visit => visit.Database == failingDatabaseName && visit.GiveUpRequested);
         passes.SelectMany(pass => pass.Visits).ShouldContain(visit => visit.Database == failingDatabaseName && visit.Offline);
         worker.PassCompleted = null;

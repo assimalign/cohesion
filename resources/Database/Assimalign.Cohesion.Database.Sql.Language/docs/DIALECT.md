@@ -2680,7 +2680,7 @@ OFFSET + LIMIT qualifying rows (#1523). Stored-table
 and system-view scans also stop reading input. Grouped queries still consume their
 aggregate input, but stop group projection and HAVING evaluation at the window;
 correlated queries stop outer-row evaluation. Join inputs/results and set operands
-still materialize, while their final projection stops at the window. Unvisited
+are read completely, while their final projection stops at the window. Unvisited
 projections and HAVING predicates raise no errors and make no volatile function
 calls, following PostgreSQL's Limit node (`src/backend/executor/nodeLimit.c:82-124`).
 Non-DISTINCT ORDER BY + a positive LIMIT
@@ -2710,6 +2710,10 @@ the previous call order and count; PostgreSQL likewise postpones independent vol
 outputs (`src/backend/optimizer/plan/planner.c:6649-6662`). When ordering references
 outputs, projections still evaluate once per input before keys. Grouped and correlated
 projections retain their existing evaluation before sorting.
+Pipelined grouping inputs, join outputs, bounded EXISTS/scalar bodies and unordered DISTINCT
+retain the same volatile and sequence evaluation; nonvolatile calls may interleave. When a statement
+contains multiple failures, which failure surfaces
+first may change.
 
 ## VALUES and counts have no column scope (#1165)
 

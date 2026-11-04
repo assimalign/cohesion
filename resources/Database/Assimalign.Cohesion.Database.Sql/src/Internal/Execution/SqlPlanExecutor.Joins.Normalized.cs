@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>Executes normalized joins, including FULL's independently tracked build rows.</summary>
     private async IAsyncEnumerable<object?[]> EnumerateNormalizedJoinRowsAsync(SqlJoinPlan plan,
         SqlStatementContext statement, Func<int, IEnumerable<object?[]>> readInput,
-        [EnumeratorCancellation] CancellationToken cancellationToken, int? dmlTarget = null)
+        [EnumeratorCancellation] CancellationToken cancellationToken, int? dmlTarget = null, bool streamRoot = false)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var indexes = new Dictionary<SqlJoinStep, BTreeIndex>(ReferenceEqualityComparer.Instance);
@@ -56,7 +56,8 @@ internal sealed partial class SqlPlanExecutor
                         var frame = new object?[plan.Columns.Count + (dmlTarget is null ? 0 : 2)];
                         input.CopyTo(frame, binding.Offset);
                         if (node.Binding == dmlTarget) { frame[^2] = input; }
-                        Retain(node, frame, rows);
+                        if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return frame; }
+                        else { Retain(node, frame, rows); }
                     }
                     results.Add(node, (rows, binding.Offset, binding.Offset + binding.Source.Columns.Count));
                     continue;
@@ -142,9 +143,14 @@ internal sealed partial class SqlPlanExecutor
                                 hash!.MarkMatched(candidate.Entry);
                                 FullJoinProgress?.Invoke("match", statement.Metrics, cancellationToken);
                             }
-                            Retain(node, joined, output);
+                            if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return joined; }
+                            else { Retain(node, joined, output); }
                         }
-                        if (!matched && step.Kind is SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.FullOuter) { Retain(node, left, output); }
+                        if (!matched && step.Kind is SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.FullOuter)
+                        {
+                            if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return left; }
+                            else { Retain(node, left, output); }
+                        }
                     }
                     if (step.Kind == SqlJoinType.FullOuter)
                     {
@@ -152,7 +158,8 @@ internal sealed partial class SqlPlanExecutor
                         {
                             FullJoinProgress?.Invoke("unmatched", statement.Metrics, cancellationToken);
                             cancellationToken.ThrowIfCancellationRequested();
-                            Retain(node, row, output);
+                            if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return row; }
+                            else { Retain(node, row, output); }
                         }
                     }
 

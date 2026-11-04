@@ -51,7 +51,13 @@ internal sealed partial class SqlPlanExecutor
         _subqueryValues = new SqlSubqueryValues(parent);
         try
         {
-            await using var result = (DatabaseResultSet)await ExecuteAsync(query.Query, statement, cancellationToken).ConfigureAwait(false);
+            bool boundedBody = CanBoundSubqueryBody(query);
+            _definitions.ObserveSelectRetention?.Invoke("subquery-body", boundedBody, 0);
+            await using var result = (DatabaseResultSet)await (boundedBody
+                ? ExecuteBoundedSubqueryBodyAsync(query.Query, statement, cancellationToken, 2)
+                : ExecuteAsync(query.Query, statement, cancellationToken)).ConfigureAwait(false);
+            if (!boundedBody && result is SqlMaterializedResultSet body)
+            { _definitions.ObserveSelectRetention?.Invoke("subquery-body", false, body.Rows.Count); }
             var rows = new List<object?>();
             bool found = false;
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
