@@ -323,7 +323,19 @@ public sealed class StorageTempSpaceTests : IDisposable
                 await process.WaitForExitAsync(cleanup.Token);
             }
         }
-        using (var reopened = Create()) { Directory.GetFiles(_directory, "*.ctmp").ShouldBeEmpty(); }
+        using var events = new StorageEventRecorder(EventLevel.Warning);
+        using (var reopened = Create())
+        {
+            // A transient close/delete failure now defers sweeping instead of refusing startup.
+            // Require its warning, then exercise the first-run retry before checking all leftovers.
+            if (reopened.EngineQuota == 0)
+            {
+                events.Events.ShouldContain(e => e.EventId == 23);
+                using var statement = reopened.CreateStatement(8192);
+                using var retry = statement.CreateRun(); retry.Dispose();
+            }
+            Directory.GetFiles(_directory, "*.ctmp").ShouldBeEmpty();
+        }
 
         // Assert
         (await stderr).ShouldBeEmpty();

@@ -269,6 +269,25 @@ public sealed class StorageTempSortRegressionTests : IDisposable
         _output.WriteLine($"streamed rows per round={count - 1}; allocated bytes={minimum}; minimum of 3 rounds");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Storage] - Streaming sort: cancellation inside a multi-page head read closes every input")]
+    public void MoveNext_MidReadCancellation_ShouldReleaseOwnedRuns()
+    {
+        // Arrange
+        using var space = Create(); using var statement = space.CreateStatement(1024 * 1024);
+        using var sorter = StorageTempSorter.Create(statement, 131072, 20016);
+        byte[] value = new byte[20000];
+        for (int i = 0; i < 10; i++) { sorter.Append([], value); }
+        using var reader = sorter.Complete(); using var cancellation = new CancellationTokenSource();
+        int reads = 0; space.BeforePageRead = () => { if (++reads == 2) { cancellation.Cancel(); } };
+
+        // Act
+        Should.Throw<OperationCanceledException>(() => reader.MoveNext(cancellation.Token));
+
+        // Assert
+        reads.ShouldBe(2); statement.PhysicalBytes.ShouldBe(0); space.PendingBytes.ShouldBe(0);
+        Directory.GetFiles(_directory, "*.ctmp").ShouldBeEmpty();
+    }
+
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_file")]
     private static extern ref FileStream RunFile(StorageTempRun run);
 }

@@ -346,6 +346,28 @@ public sealed class StorageTempRegressionTests : IDisposable
         run.Dispose(); space.Bytes.ShouldBe(0); space.PendingBytes.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Storage] - Temp availability: a blocked sweep warns at startup and retries after the obstruction closes")]
+    public void Create_BlockedSweep_ShouldRetryAtFirstRun()
+    {
+        // Arrange: Windows sharing enforces an undeletable orphan without permission changes.
+        if (!OperatingSystem.IsWindows()) { return; }
+        Directory.CreateDirectory(DirectoryPath);
+        string orphan = Path.Combine(DirectoryPath, "cohesion-" + Guid.NewGuid().ToString("N") + ".ctmp");
+        File.WriteAllBytes(orphan, [1]);
+        using var obstruction = new FileStream(orphan, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var events = new StorageEventRecorder(EventLevel.Warning);
+
+        // Act
+        using var space = Create(); space.EngineQuota.ShouldBe(0);
+        File.Exists(orphan).ShouldBeTrue(); obstruction.Dispose();
+        using var statement = space.CreateStatement(8192); using var run = statement.CreateRun();
+
+        // Assert
+        events.Events.ShouldContain(e => e.EventId == 23);
+        File.Exists(orphan).ShouldBeFalse(); space.EngineQuota.ShouldBe(32 * 1024 * 1024);
+        statement.PhysicalBytes.ShouldBe(0); space.PendingBytes.ShouldBe(0);
+    }
+
     private static void Stamp(Span<byte> page)
     {
         BinaryPrimitives.WriteUInt32LittleEndian(page[28..], 0);
