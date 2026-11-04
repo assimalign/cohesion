@@ -12,6 +12,19 @@
   <data name="HeaderSlotsUnreadableOrDamaged" xml:space="preserve"><value>Invalid storage file: neither header slot of page 0 validates; one half could not be read and the other is damaged.</value></data>
   <data name="TransactionStorageMismatch" xml:space="preserve"><value>Storage transaction {0} belongs to storage '{1}' and cannot be used by storage '{2}'.</value></data>
   <data name="RecordCorrupt" xml:space="preserve"><value>Corrupt record at page {0}, slot {1}: {2}</value></data>
+  <data name="TempDirectoryEmpty" xml:space="preserve"><value>A dedicated temporary directory is required.</value></data>
+  <data name="TempLeaseUnsupported" xml:space="preserve"><value>The temporary directory does not enforce an exclusive file lease; sweeping is unsafe.</value></data>
+  <data name="TempSpaceRefused" xml:space="preserve"><value>Temporary storage growth exceeds the engine quota, statement quota or free-space reserve.</value></data>
+  <data name="TempRunSealed" xml:space="preserve"><value>A sealed temporary run cannot be appended.</value></data>
+  <data name="TempCleanupFailed" xml:space="preserve"><value>One or more temporary resources could not be closed.</value></data>
+  <data name="TempRunUnsealed" xml:space="preserve"><value>Seal the temporary run before opening a reader.</value></data>
+  <data name="TempPageDamaged" xml:space="preserve"><value>A temporary page or record failed integrity validation.</value></data>
+  <data name="TempDestinationSmall" xml:space="preserve"><value>The destination is smaller than the largest record in this run.</value></data>
+  <data name="TempSortRecordLarge" xml:space="preserve"><value>The encoded sort record exceeds the configured maximum record length.</value></data>
+  <data name="TempSortCompleted" xml:space="preserve"><value>The temporary sort has already completed.</value></data>
+  <data name="TempSortGrantSmall" xml:space="preserve"><value>The memory grant cannot hold two merge inputs and an output page.</value></data>
+  <data name="TempSortTooManyRows" xml:space="preserve"><value>The temporary sort exceeded its bounded run directory.</value></data>
+  <data name="TempSpaceProbeFailed" xml:space="preserve"><value>The temporary volume free-space probe failed.</value></data>
   <data name="StorageGetBufferPoolPageCountFailure" xml:space="preserve"><value>A buffer pool capacity must be a whole number of {0}-byte pages, at least {1} bytes ({2} pages) and at most {3} bytes.</value></data>
   <data name="StorageFailure" xml:space="preserve"><value>Storage has not been initialized.</value></data>
   <data name="StorageTakeOfflineFailure" xml:space="preserve"><value>An engine takes a storage offline only with a cause of its own: a worker whose work kept failing, or the journal size limit.</value></data>

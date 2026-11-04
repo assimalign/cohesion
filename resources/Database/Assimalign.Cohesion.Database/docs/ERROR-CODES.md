@@ -56,6 +56,10 @@ error and has no production diagnostic code.
 | Previous code | Code | Condition family |
 |---|---|---|
 | COHDBL001 | CK00001 | Unsupported language clause |
+| New (#1789, EN-X1) | CK05001 | Engine temporary physical-byte quota exceeded |
+| New (#1789, EN-X1) | CK05002 | Statement temporary physical-byte quota exceeded |
+| New (#1789, EN-X1) | CK05003 | Temporary page would cross the engine free-space reserve |
+| New (#1789, EN-X1) | CK05004 | Temporary page or record integrity failure (no durable-storage fence) |
 | COHDBS001 | CK06001 | Storage format refusal |
 | COHDBS002 | CK06002 | Storage offline |
 | COHDBS003 | CK06003 | Record or page corruption |
