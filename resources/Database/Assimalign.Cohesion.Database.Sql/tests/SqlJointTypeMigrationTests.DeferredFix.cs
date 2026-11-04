@@ -19,21 +19,25 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlJointTypeMigrationTests
 {
+    private sealed record NeighbourKey(int Id);
+    private static CompiledSchemaKey NeighbourPrimaryKey() => SqlSchema.Create("typed", schema =>
+        schema.Table<NeighbourKey>("key", table => table.Key(row => row.Id))).Compile().Tables.Single().PrimaryKey!;
+
     private static SqlCompiledSchema NeighbourDeclaration(string change = "none", bool planParent = false)
     {
         var parent = new CompiledSchemaTable("customers", "parent",
             [new("id", DatabaseType.Int32, false), new("note", change == "parentRewrite" ? DatabaseType.Int64 : DatabaseType.Int32, true)],
-            null, change == "parentKey" ? [new("ux_base", ["id"], true), new("ux_id", ["id"], true)] :
+            NeighbourPrimaryKey(), change == "parentKey" ? [new("ux_base", ["id"], true), new("ux_id", ["id"], true)] :
                 planParent && change == "index" ? [new("ux_base", ["id"], true), new("ix_note", ["note"], false)] : [new("ux_base", ["id"], true)], []);
         var child = new CompiledSchemaTable("orders", "child",
-            [new("id", change == "childRewrite" ? DatabaseType.Int64 : DatabaseType.Int32, false), new("customer_id", DatabaseType.Int32, true)], null,
-            !planParent && change is "index" or "childRewrite" or "repoint" ? [new("ix_customer", ["customer_id"], false)] : [],
-            change == "noFk" ? [] : [new("fk", CompiledSchemaConstraintKind.Reference, ["customer_id"], change == "repoint" ? "alternate" : "customers", ["id"])]);
+            [new("id", change == "childRewrite" ? DatabaseType.Int64 : DatabaseType.Int32, false), new("customer_id", DatabaseType.Int32, true)], NeighbourPrimaryKey(),
+            !planParent && change is "index" or "childRewrite" or "repoint" or "dropFk" ? [new("ix_customer", ["customer_id"], false)] : [],
+            change is "noFk" or "dropFk" ? [] : [new("fk", CompiledSchemaConstraintKind.Reference, ["customer_id"], change == "repoint" ? "alternate" : "customers", ["id"])]);
         return Compiled(parent, child, new("alternate", "alternate",
-            [new("id", DatabaseType.Int32, false), new("note", DatabaseType.Int32, true)], null, [new("ux_alternate", ["id"], true)], []));
+            [new("id", DatabaseType.Int32, false), new("note", DatabaseType.Int32, true)], NeighbourPrimaryKey(), [new("ux_alternate", ["id"], true)], []));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred fix: stable neighbours admit reads, non-key updates and inserts during the job")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred fix: stable neighbours admit reads, parent plain or joined non-key UPDATE and parent inserts during the job")]
     [InlineData("SELECT id FROM customers")]
     [InlineData("UPDATE customers SET note=8 WHERE id=1")]
     [InlineData("UPDATE customers SET note=s.note FROM alternate AS s WHERE customers.id=s.id")]
@@ -53,7 +57,11 @@ public sealed partial class SqlJointTypeMigrationTests
         await session.ExecuteAsync("INSERT INTO alternate VALUES(1,8)", cancellationToken: guard.Token);
         database.SchemaProvisioner.DeferredFailed = failure => ready.TrySetException(failure);
         database.SchemaProvisioner.JointStage = phase =>
-        { if (phase == "AfterTreeBuild") { ready.TrySetResult(); release.Wait(guard.Token); } };
+        {
+            if (phase == "IntentDurable")
+            { database.Catalog.PendingMigration!.Steps.ShouldContain(step => step.Kind == "Joint/KeepOwner" && step.Table == "orders"); }
+            if (phase == "AfterTreeBuild") { ready.TrySetResult(); release.Wait(guard.Token); }
+        };
         var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var listener = new LockWaitListener(database.Name);
         listener.Observed = value => { if (value.EventName == "LockWaitStart") { waiting.TrySetResult(); } };
@@ -129,6 +137,7 @@ public sealed partial class SqlJointTypeMigrationTests
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred fix: changed references, either rewritten end and changed parent keys reserve neighbour reads")]
     [InlineData("addFk")]
+    [InlineData("dropFk")]
     [InlineData("repoint")]
     [InlineData("childRewrite")]
     [InlineData("parentRewrite")]
@@ -195,7 +204,7 @@ public sealed partial class SqlJointTypeMigrationTests
         {
             engine.BeforeProvisioning = database => database.SchemaProvisioner.JointStage = phase =>
             {
-                if (phase != "AfterTreeBuild") { return; }
+                if (phase != "TreesDurable") { return; }
                 ready.TrySetResult(); release.Wait(guard.Token);
                 if (fail) { throw new InvalidOperationException("injected new-table preparation failure"); }
             };
@@ -325,11 +334,11 @@ public sealed partial class SqlJointTypeMigrationTests
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await using var engine = await Builder(new()).BuildAsync(guard.Token);
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
-        var source = Compiled(new("items", "items", [new("a", DatabaseType.Int32, false), new("b", DatabaseType.Int32, false)], null, [], []),
-            new("audit", "audit", [new("v", DatabaseType.Int32, false)], null, [], []));
+        var source = Compiled(new("items", "items", [new("a", DatabaseType.Int32, false), new("b", DatabaseType.Int32, false)], new("pk", ["a"]), [], []),
+            new("audit", "audit", [new("v", DatabaseType.Int32, false)], new("pk", ["v"]), [], []));
         var items = source.Tables.Single(table => table.Name == "items");
-        var target = Compiled(new("items", "items", [items.Columns[1], items.Columns[0]], null, [], []),
-            new("audit", "audit", [new("v", DatabaseType.Int64, false)], null, [], []));
+        var target = Compiled(new("items", "items", [items.Columns[1], items.Columns[0]], items.PrimaryKey, [], []),
+            new("audit", "audit", [new("v", DatabaseType.Int64, false)], new("pk", ["v"]), [], []));
         await database.ApplySchemaAsync(source, guard.Token);
         await using var writer = await database.CreateSessionAsync(guard.Token);
         await writer.ExecuteAsync("INSERT INTO items VALUES(1,2),(3,4)", cancellationToken: guard.Token);

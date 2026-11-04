@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,7 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -25,7 +27,7 @@ public sealed partial class SqlJointTypeMigrationTests
         const int rows = 8192;
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         SqlCompiledSchema Declare(bool target) => Compiled(new CompiledSchemaTable("items", "row",
-            [new("v", DatabaseType.Int32, false), new("w", DatabaseType.Int32, true)], null,
+            [new("v", DatabaseType.Int32, false), new("w", DatabaseType.Int32, true)], new("pk", ["v"]),
             [new("ix", target ? ["w", "v"] : ["w"], false)], []));
         var storage = new CrashCaptureSqlStorageStrategy();
         await using (var seed = await Builder(storage).BuildAsync(guard.Token))
@@ -51,8 +53,8 @@ public sealed partial class SqlJointTypeMigrationTests
         // Arrange: SQ-A6 extends KeepOwner to steps that were metadata-only at base.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         SqlCompiledSchema Declare(bool target) => Compiled(
-            new("orders", "orders", target ? [new("id", DatabaseType.Int32, false), new("note", DatabaseType.String, true)] : [new("id", DatabaseType.Int32, false)], null, [], []),
-            new("audit", "audit", [new("id", DatabaseType.Int32, false)], null, target ? [new("ix", ["id"], false)] : [], []));
+            new("orders", "orders", target ? [new("id", DatabaseType.Int32, false), new("note", DatabaseType.String, true)] : [new("id", DatabaseType.Int32, false)], new("pk", ["id"]), [], []),
+            new("audit", "audit", [new("id", DatabaseType.Int32, false)], new("pk", ["id"]), target ? [new("ix", ["id"], false)] : [], []));
         await using var engine = await Builder(new()).BuildAsync(guard.Token);
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
         await database.ApplySchemaAsync(Declare(false), guard.Token);
@@ -79,49 +81,72 @@ public sealed partial class SqlJointTypeMigrationTests
     public async Task ApplyAsync_DeferredFixShuffledIndexCost_ShouldMeasureCopyCheckpoints()
     {
         // Arrange: a deterministic permutation spreads each bracket over many leaves.
-        const int rows = 262144;
-        using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(4));
-        SqlCompiledSchema Declare(bool target) => Compiled(new CompiledSchemaTable("items", "row", [new("v", DatabaseType.Int32, false)], null, target ? [new("ix", ["v"], false)] : [], []));
+        const int rows = 524288;
+        using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(6));
+        SqlCompiledSchema Declare(bool target, bool created = false) => SqlSchema.Create("typed", schema =>
+        {
+            schema.Table<OtherRow>("items", table =>
+            { table.Key(row => row.Id); if (target) { table.Index(row => row.Id); } });
+            if (target && created) { schema.Table<DeferredCreated>("created", table => table.Key(row => row.Id)); }
+        }).Compile();
         var storage = new CrashCaptureSqlStorageStrategy();
         await using (var seed = await Builder(storage).BuildAsync(guard.Token))
         {
             var database = await seed.CreateDatabaseAsync("typed", guard.Token);
             await database.ApplySchemaAsync(Declare(false), guard.Token);
-            SeedShuffledIndexRows(database, rows, guard.Token);
+            await SeedShuffledIndexRowsAsync(database, rows, guard.Token);
             database.Coordinator.Checkpoint();
             storage = storage.CaptureDurableImages();
         }
-        // Act
-        var measured = await MeasureDeferredCostAsync(storage, Declare(false), Declare(true), guard.Token);
-        // Assert
-        measured.Rewritten.ShouldBe(0);
-        measured.Checkpoints.ShouldBeGreaterThan(0);
-        _output.WriteLine($"Shuffled {rows}-row additive index (64 MiB engine checkpoint budget): 49a={measured.OldPages}; joint={measured.JointPages}; ratio={(double)measured.JointPages / measured.OldPages:P2}; copy checkpoints={measured.Checkpoints}");
-        measured.JointPages.ShouldBeLessThanOrEqualTo(measured.OldPages * 110 / 100);
-    }
-
-    private static void SeedShuffledIndexRows(SqlDatabase database, int rows, CancellationToken token)
-    {
-        var keys = Enumerable.Range(0, rows).ToArray();
-        new Random(1778).Shuffle(keys);
-        var table = Table(database);
-        for (int first = 0; first < rows; first += 64)
+        // Act: the second target also creates a keyed table, exercising its
+        // eligibility for the larger threshold at a size that crosses checkpoints.
+        var measurements = new[]
         {
-            token.ThrowIfCancellationRequested();
-            using var bracket = database.DataStorage.BeginTransaction();
-            for (int row = first; row < first + 64; row++)
-            { database.DataStorage.InsertRow(bracket, table.ObjectId, SqlRowCodec.Encode(table, [keys[row]], TransactionSequence.None)); }
-            bracket.Commit();
-            if ((first + 64) % 4096 == 0) { database.Coordinator.Checkpoint(); }
+            await MeasureDeferredCostAsync(storage, Declare(false), Declare(true), guard.Token),
+            await MeasureDeferredCostAsync(storage, Declare(false), Declare(true, true), guard.Token),
+        };
+        for (int i = 0; i < measurements.Length; i++)
+        {
+            var measured = measurements[i];
+            _output.WriteLine($"Shuffled {rows}-row PK additive index, new table={i == 1} (64 MiB engine checkpoint budget): 49a={measured.OldPages}; joint={measured.JointPages}; rewritten={measured.Rewritten}; ratio={(double)measured.JointPages / measured.OldPages:P2}; copy-phase checkpoints={measured.Checkpoints}; forced copy checkpoints={measured.ForcedCheckpoints}");
+        }
+        // Assert
+        foreach (var measured in measurements)
+        {
+            measured.Rewritten.ShouldBe(0);
+            measured.KeepsOwner.ShouldBeTrue();
+            measured.KeepsHeap.ShouldBeTrue();
+            measured.Threshold.ShouldBe(64L * 1024 * 1024);
+            measured.Checkpoints.ShouldBeGreaterThan(0);
+            // The engine services its size trigger at gate release. Nit 9 avoids
+            // following that checkpoint with a forced copy checkpoint on the empty WAL.
+            measured.ForcedCheckpoints.ShouldBe(0);
+            measured.JointPages.ShouldBeLessThanOrEqualTo(measured.OldPages * 110 / 100);
         }
     }
 
-    private static async Task<(long OldPages, long JointPages, long Rewritten, int Checkpoints)> MeasureDeferredCostAsync(
+    private static async Task SeedShuffledIndexRowsAsync(SqlDatabase database, int rows, CancellationToken token)
+    {
+        var keys = Enumerable.Range(0, rows).ToArray();
+        new Random(1778).Shuffle(keys);
+        await using var writer = await database.CreateSessionAsync(token);
+        for (int first = 0; first < rows; first += 64)
+        {
+            await writer.ExecuteAsync("INSERT INTO items VALUES " + string.Join(',', keys.Skip(first).Take(64)
+                .Select(key => $"({key})")), cancellationToken: token);
+            if ((first + 64) % 4096 == 0) { database.Coordinator.Checkpoint(token); }
+        }
+    }
+
+    private static async Task<(long OldPages, long JointPages, long Rewritten, int Checkpoints, bool KeepsHeap, bool KeepsOwner, long Threshold, int ForcedCheckpoints)> MeasureDeferredCostAsync(
         CrashCaptureSqlStorageStrategy storage, SqlCompiledSchema source, SqlCompiledSchema target, CancellationToken token)
     {
         var pages = new long[2];
         long rewritten = 0;
         int checkpoints = 0;
+        int observedCheckpoints = 0;
+        bool keepsHeap = false, keepsOwner = false;
+        long threshold = 0;
         for (int mode = 0; mode < 2; mode++)
         {
             var image = storage.CaptureDurableImages();
@@ -132,6 +157,9 @@ public sealed partial class SqlJointTypeMigrationTests
             database.Coordinator.Checkpoint();
             database.CatalogStorage.Checkpoint();
             long before = image.PageWrites("typed");
+            ulong originalHeap = Table(database).ObjectId;
+            using var checkpointEvents = new EventSourceRecorder(EventSource.GetSources().Single(source =>
+                source.Name == "Assimalign.Cohesion.Database.Storage"), EventLevel.Informational);
             SqlPlanExecutor.RewriteStage = (phase, count) =>
             { if (phase == "Copied") { rewritten = count; } if (phase == "CopyCheckpointed") { checkpoints++; } };
             try
@@ -155,13 +183,19 @@ public sealed partial class SqlJointTypeMigrationTests
                 {
                     database.SchemaProvisioner.JointStage = phase =>
                     {
-                        if (phase != "IntentDurable" || source.Tables[0].Indexes.Count == 0) { return; }
+                        if (phase != "IntentDurable") { return; }
+                        keepsOwner = database.Catalog.PendingMigration!.Steps.Any(step => step.Kind == "Joint/KeepOwner" && step.Table == "items");
+                        if (source.Tables[0].Indexes.Count == 0) { return; }
                         database.Catalog.PendingMigration!.Steps.ShouldContain(step => step.Kind == "Joint/RewriteOwner" && step.Table == "items");
                     };
                     await database.SchemaProvisioner.ApplyAsync(target, token, deferDataScalingSteps: true);
                     await WaitDoneAsync(database, token);
                     database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
                     database.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
+                    keepsHeap = Table(database).ObjectId == originalHeap;
+                    threshold = database.SchemaProvisioner.JointCopyCheckpointThreshold;
+                    observedCheckpoints = checkpointEvents.Events.Count(entry => entry.EventId == 5 &&
+                        Equals(entry.Payload![0], database.DataStorage.Name.ToString()));
                 }
                 database.Coordinator.Checkpoint();
                 database.CatalogStorage.Checkpoint();
@@ -169,7 +203,7 @@ public sealed partial class SqlJointTypeMigrationTests
             }
             finally { SqlPlanExecutor.RewriteStage = null; }
         }
-        return (pages[0], pages[1], rewritten, checkpoints);
+        return (pages[0], pages[1], rewritten, observedCheckpoints, keepsHeap, keepsOwner, threshold, checkpoints);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: kept-owner checkpoint threshold falls back on a small volume or disabled engine threshold")]
@@ -184,10 +218,10 @@ public sealed partial class SqlJointTypeMigrationTests
         builder.Options.CheckpointJournalSize = disabled ? 0 : 256L * 1024 * 1024;
         await using var engine = await builder.BuildAsync(guard.Token);
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
-        var source = Compiled(new CompiledSchemaTable("items", "row", [new("v", DatabaseType.Int32, false)], null, [], []));
-        var target = ChangeItems(source, indexes: [new("ix", ["v"], false)]);
+        var source = SqlSchema.Create("typed", schema => schema.Table<OtherRow>("items", table => table.Key(row => row.Id))).Compile();
+        var target = ChangeItems(source, indexes: [new("ix", ["Id"], false)]);
         await database.ApplySchemaAsync(source, guard.Token);
-        SeedShuffledIndexRows(database, 65536, guard.Token);
+        await SeedShuffledIndexRowsAsync(database, 131072, guard.Token);
         // Enough for the 16 MiB admission term plus reserves, below the preferred term.
         if (!disabled) { storage.VolumeCapacityBytes = storage.AllocatedBytes + 192L * 1024 * 1024; }
         int checkpoints = 0;
@@ -199,8 +233,10 @@ public sealed partial class SqlJointTypeMigrationTests
             // Act
             await database.SchemaProvisioner.ApplyAsync(target, guard.Token, deferDataScalingSteps: true);
             await WaitDoneAsync(database, guard.Token);
+
             // Assert: actual copy checkpoints prove the smaller threshold was used.
             checkpoints.ShouldBeGreaterThan(0);
+            database.SchemaProvisioner.JointCopyCheckpointThreshold.ShouldBe(SqlSchemaProvisioner.JointCopyCheckpointBytes);
             peak.ShouldBeLessThan(64L * 1024 * 1024);
             database.SchemaProvisioner.JointSpaceNeed.ShouldBeLessThan(192L * 1024 * 1024);
             database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);

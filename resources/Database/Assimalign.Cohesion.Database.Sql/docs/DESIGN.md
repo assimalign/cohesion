@@ -6536,7 +6536,13 @@ conflicting locks on the **parent row** deliver it:
 Table-grain locks stay intent-only: `IntentShared` on the adjacent tables a
 statement reads for constraint purposes, which is compatible with other writers'
 `IntentExclusive` and blocks only table-grain DDL, keeping parent definitions
-stable for the life of the statement. A cascade walks the closure locking as it
+stable for the life of the statement. A parent's plain or joined non-key UPDATE takes no child
+intent lock, on every parent and every execution, inside or outside a provisioning job; it also
+proceeds while session DDL holds the child. Assigning a referenced column still takes child
+intents. A child's non-FK UPDATE, a child DELETE, MERGE UPDATE and ON CONFLICT DO UPDATE
+retain their adjacent-table waits. PostgreSQL likewise skips the parent check when the referenced
+key is unchanged (src/backend/utils/adt/ri_triggers.c:1611-1613).
+A cascade walks the closure locking as it
 descends — a row is exclusively locked before its children are read — because a
 transitive closure cannot be pre-sorted (the walk itself is described under
 [The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion)).
@@ -8753,7 +8759,7 @@ page-touch bound, T the root count, Q the sum of all row-touch bounds plus T, an
 number of copy/root brackets. Copy-owned WAL is accumulated from journal-length deltas across
 its brackets, including their begin/commit frames; existing WAL and writes between brackets
 never trigger its checkpoint. J = min(Q*2(B+46)+152K, H + max(C,T)*2(B+46)+152).
-H is 16 MiB for any job that rewrites a table. When every plan table keeps its owner, H may
+H is 16 MiB for any job that rewrites an existing table. When every plan table keeps its owner or is new, H may
 instead use the engine's larger nonzero CheckpointJournalSize if this same admission formula
 fits the available space; otherwise H falls back to 16 MiB without refusing the job.
 The 16 MiB rewrite threshold bounds its WAL reserve independently of a large database. Checkpoints flush the shared
@@ -8761,7 +8767,7 @@ pool and stall every database writer under the apply gate, including untouched t
 can also increase subsequent full-page images. This deliberate stall cost buys bounded copy
 WAL. The copy checkpoint waits for reclamation's bounded batch at the apply gate. Ungated
 storage brackets retry the same checkpoint after a cancellation-aware delay until it succeeds.
-No checkpoint is skipped. Peak-WAL tests sample at durable commit, before truncation, and assert
+An engine checkpoint that already reduced the journal below H resets the accumulated copy budget instead of forcing another checkpoint. Peak-WAL tests sample at durable commit, before truncation, and assert
 the stated J overshoot; a checkpoint-disabled negative control must violate the bound.
 Reclamation-backlog tests prove event-21 SqlTableReclamation deferral at the gate, release the
 batch, then require zero CheckpointBusy callbacks, a completed copy checkpoint and the peak bound,
@@ -8899,8 +8905,10 @@ place; recovery alone decides the schema. Joint cleanup never turns it into "sch
 After a crash, recovery reclaims abandoned owners. A matching Build retains the kind-9 target
 and replans preparation from the old marker. An old/different/no-target Build discards the intent
 and opens the current catalog without fencing. An in-process reopen after Build also discards a
-matching intent and reports CS03402 because it cannot schedule a job. A no-target open sets no
-provisioning observation or provisioning trace. Successful Verify clears a prior observation. After publication it opens the
+matching intent and reports CS03402 because it cannot schedule a job. With no surviving intent,
+that reopen also reports CS03402 when its declared schema differs from the stored applied hash;
+a completed job stays Healthy. A no-target open sets no provisioning observation or provisioning
+trace. Successful Verify clears a prior observation. After publication it opens the
 new schema. Rollback after success plans an ordinary reverse migration: every unproven conversion,
 length/precision/scale narrowing and rounding requires destructive opt-in, refused with CS03105
 before any step otherwise. The planner's conservative exact whitelist includes integer widening,
@@ -8932,7 +8940,13 @@ Within every joint migration, classification is per table. Additive indexes and 
 changes (CHECK, NOT NULL, UNIQUE and either end of a foreign key) can keep the heap owner.
 Every column must be an identity conversion at the same ordinal, with equal counts and names;
 only IsNullable changes on the old physical column facets. Native-domain storage or facet
-changes, defaults, column order and primary-key changes rewrite. Dropping or replacing any
+changes, defaults, column order and primary-key changes rewrite. A stored primary-key tree is
+identified by its primary-key marker and columns; joint planning inherits its generated name
+across both keep and rewrite. A new joint table uses the per-step constraint definition and
+ordinal to generate that same name. TABLE_CONSTRAINTS, violation messages and ON CONFLICT
+ON CONSTRAINT therefore retain the name that applications originally observed (#1820).
+Script receipts preserve their named indexes alongside ad-hoc indexes, including uniqueness;
+dropping one of their dependency columns refuses before intent save (#1821). Dropping or replacing any
 heap-owned tree also forces RewriteOwner so its pages are reclaimed. Drops and replacements
 of alternate trees can keep the heap because kind 14 reclaims their separate owners. General
 heap-owned DROP INDEX page reclamation remains #1808. Kind 9 records Joint/KeepOwner or
@@ -8941,8 +8955,11 @@ and the worker use this same metadata classification. The joint X-lock protocol 
 owned sequences, then every touched table, in ascending identity order, through publication.
 Unchanged FK neighbours stay outside the reservation only when both ends keep their owners,
 the FK is identical and the matching parent unique trees are unchanged. Their reads, parent
-inserts and non-key updates proceed; parent deletes and child inserts wait when their FK probe
-needs a reserved table. Those probes rediscover bindings after waiting before selecting trees.
+inserts and a parent's plain or joined non-key UPDATE proceed; parent deletes and child inserts
+wait when their FK probe needs a reserved table. Those probes rediscover bindings after waiting
+before selecting trees. This parent UPDATE rule applies engine-wide, inside and outside jobs,
+including while session DDL holds the child. A child's non-FK UPDATE, a child DELETE, MERGE
+UPDATE and ON CONFLICT DO UPDATE retain their adjacent-table waits.
 PostgreSQL likewise omits the parent FK check when the referenced key did not change
 (`src/backend/utils/adt/ri_triggers.c:1611-1613`); no reference code is copied.
 
@@ -9010,9 +9027,9 @@ gap is covered here). Durable boundaries are tree-owner reservation (BeforeTreeB
 each 64-version bracket, completed tree (AfterTreeBuild), Publishing and Published. Crash images
 include every storage write/flush boundary and those named phases, converging to exactly the old
 or new catalog while preserving the heap. Space admission charges new trees only for a kept
-table; it charges no heap copy and no retained tree. The bracket watchdog, 16 MiB copy checkpoint
+table; it charges no heap copy and no retained tree. The bracket watchdog, per-job copy checkpoint
 and engine reserve also cover these builds and the retirement of separate tree owners.
-A job whose every plan table keeps its owner uses the engine CheckpointJournalSize when larger
+A job whose every plan table keeps its owner or is new uses the engine CheckpointJournalSize when larger
 than 16 MiB and measured admission can afford it; otherwise it falls back to 16 MiB. Jobs that
 rewrite any table retain 16 MiB. Admission and the copier use the same per-job threshold.
 
@@ -9047,11 +9064,22 @@ X on each deferred table from reservation through its steps, but cheap steps had
 and released their locks. The joint window covers those cheap-step tables through all preparation
 and publication; their reads wait too. FK neighbours, including reads, also wait when the FK
 is added, dropped or re-pointed, either end rewrites, or matching parent key trees change. Stable
-neighbours keep serving reads, parent inserts and non-key updates. Definition metadata admission
+neighbours keep serving reads, parent inserts and a parent's plain or joined non-key UPDATE. Definition metadata admission
 also spans that window. Untouched DML remains available; the existing lock-manager admission and
 lock/latch order above govern every wait. Build validates registered definitions against the
 prepared target plus untouched objects, without caching that result as validation of the live
 catalog. Session writes continue to bind the live schema under the table reservations.
+
+| Statement on a stable neighbour | Reservation needed by its FK probe | Admission |
+|---|---|---|
+| Neighbour SELECT, parent INSERT | None | Proceeds |
+| A parent's plain or joined non-key UPDATE | None | Proceeds, including outside a job during child session DDL |
+| Parent DELETE or referenced-key UPDATE | Reserved child | Waits |
+| Child INSERT | Reserved parent | Waits |
+| A child's non-FK UPDATE | Reserved parent | Waits, same as base |
+| A child DELETE | Reserved parent | Waits, same as base |
+| MERGE UPDATE | Reserved adjacent table | Waits, same as base |
+| ON CONFLICT DO UPDATE | Reserved adjacent table | Waits, same as base |
 
 Every job reuses JointSpace's metadata floor, measured admission, engine reserve and per-bracket
 watchdog, including index-only jobs. Constraint-only validation reports an unknown total while
@@ -9074,13 +9102,20 @@ storage write, flush and length change. Reopening converges to the exact old or 
 catalog; repeated drains reclaim abandoned owners once while retaining kept heaps and trees.
 The deferred corpus also checks rollback Builds, cancellation admission counters, space refusal
 and the retained 49a index builder's page-write and row-rewrite costs.
-Every recorded A5 image reopens with no declaration, the matching target and a third target.
+Every recorded A5 image reopens with no declaration, the matching target, a third target and the
+old rollback declaration. Each convergence clears Provisioning. The third target adds an index
+and a distinct CHECK so it reserves a job on every populated image, including already-published
+images. Kept primary-key heaps participate in the corpus.
 Failed-preparation discard/drain images cover all three durability modes; a separate wide-copy
 fixture crosses a copy checkpoint over multiple 64-version brackets.
-For 32,768 indexed rows the retained 49a builder writes 137 pages and joint publication writes 138; both rewrite zero rows and decode 65,536
-versions. The complete data-and-catalog checkpoint measurement adds 0.73% page writes. The ten-percent
-page-write bound covers additive index builds and changes to alternate trees that keep their
-heaps; it excludes drops or replacements of heap-owned trees until #1808.
+For 32,768 rows on a primary-key table the retained 49a builder writes 201 pages and joint
+publication writes 202; both rewrite zero rows and decode 65,536 versions. Column and composite
+primary-key tables with three columns measure 227 to 228 pages; adding a new keyed table in
+that plan measures 228 to 230. At the measured 64 MiB engine budget, the ten-percent page-write bound covers additive index builds
+and changes to alternate trees that keep their heaps, including plans that add a table; it
+excludes drops or replacements of heap-owned trees until #1808. Shuffled-key measurements
+count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
+already completed by the engine must not be followed by a redundant forced copy checkpoint.
 
 SQL record-space format 37 requires this joint kind-9 meaning for every deferred job and refuses
 36 before any write through the existing format gate. Compiled-schema v12 and wire messages

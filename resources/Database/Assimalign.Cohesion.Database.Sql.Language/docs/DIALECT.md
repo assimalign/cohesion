@@ -1430,13 +1430,14 @@ Rows travel unchanged in existing SQL header/row/complete frames.
 ## Admission during deferred provisioning (49a)
 
 While a code-first migration runs on populated tables, statements referencing its reserved
-tables wait before binding; all plan targets remain reserved through publication. FK neighbours
+tables wait before binding; all plan targets remain reserved through publication.
+This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and ALTER ADD CONSTRAINT,
+so a pending unique index is available when the FK is checked. FK neighbours
 are reserved when the FK changes, either end rewrites or matching parent key trees change;
 stable neighbours remain available, though FK probes into a reserved table wait.
 Statements naming a new table in the plan also wait before binding, then see the published table
 or the ordinary undefined-table error if preparation failed; creating its reserved name refuses CS03404.
-This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and
-ALTER ADD CONSTRAINT, so a pending unique index is available when the FK is checked.
+
 EXPLAIN recursively admits its wrapped statement through the same table reservations before
 planning, so its access path reflects the completed migration.
 After admission, writes enforce the completed column nullability and bounds. Unrelated

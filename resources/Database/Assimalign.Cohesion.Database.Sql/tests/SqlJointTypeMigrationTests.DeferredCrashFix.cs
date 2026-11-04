@@ -16,21 +16,23 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlJointTypeMigrationTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred fix: failed prepared owners and trees converge through every discard and drain image in three reopen modes")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred fix: failed prepared owners and trees converge through every discard and drain image in four reopen modes")]
     [InlineData(StorageCommitDurability.Synchronous)]
     [InlineData(StorageCommitDurability.Grouped)]
     [InlineData(StorageCommitDurability.None)]
-    public async Task OpenAsync_DeferredFixFailedPreparationCorpus_ShouldConvergeInThreeModes(StorageCommitDurability durability)
+    public async Task OpenAsync_DeferredFixFailedPreparationCorpus_ShouldConvergeInFourModes(StorageCommitDurability durability)
     {
         // Arrange: record once per durability contract, then reuse each image for all declarations.
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         var storage = new CrashCaptureSqlStorageStrategy(durability);
         CrashCaptureSqlStorageStrategy.CrashPointRecorder? recorder = null;
         int prepared = 0;
+        ulong heap;
         await using (var engine = await Builder(storage).AddDatabase(DeferredDeclaration(false)).BuildAsync(guard.Token))
         {
             var database = await engine.OpenDatabaseAsync("typed", guard.Token);
             await using var writer = await database.CreateSessionAsync(guard.Token);
+            heap = Table(database).ObjectId;
             await writer.ExecuteAsync("INSERT INTO items VALUES(1)", cancellationToken: guard.Token);
             await writer.ExecuteAsync("INSERT INTO filled VALUES(1)", cancellationToken: guard.Token);
             database.SchemaProvisioner.JointStage = phase =>
@@ -59,10 +61,10 @@ public sealed partial class SqlJointTypeMigrationTests
         recorder.ShouldNotBeNull().Count.ShouldBeGreaterThan(1);
         for (int point = 0; point < recorder.Count; point++)
         {
-            for (int mode = 0; mode < 3; mode++)
-            { await CheckDeferredCrashImageAsync(recorder.Open(point), true, mode, null, guard.Token, 1); }
+            for (int mode = 0; mode < 4; mode++)
+            { await CheckDeferredCrashImageAsync(recorder.Open(point), true, mode, heap, guard.Token, 1); }
         }
-        _output.WriteLine($"Failed preparation {durability}: images={recorder.Count}; reopens={recorder.Count * 3}");
+        _output.WriteLine($"Failed preparation {durability}: images={recorder.Count}; reopens={recorder.Count * 4}");
     }
 
     private sealed record DeferredCheckpointRow(int Value, string Payload, int Added);
@@ -71,15 +73,16 @@ public sealed partial class SqlJointTypeMigrationTests
         schema.AllowDestructiveChanges();
         schema.Table<DeferredCheckpointRow>("items", table =>
         {
-            table.Column(row => row.Value);
+            table.Key(row => row.Value);
+            if (third) { table.Index(row => row.Value); }
             table.Column(row => row.Payload, "VARCHAR(4000)");
             if (target) { table.Column(row => row.Added); table.Default(row => row.Added, 7); }
         });
-        if (third) { schema.Table<DeferredThird>("third", table => table.Column(row => row.Id)); }
+        if (third) { schema.Table<DeferredThird>("third", table => table.Key(row => row.Id)); }
     });
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred fix: a multi-bracket copy crossing a checkpoint reopens with no, matching and third declarations")]
-    public async Task OpenAsync_DeferredFixCheckpointCorpus_ShouldConvergeInThreeModes()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred fix: a multi-bracket copy crossing a checkpoint reopens with no, matching, third and rollback declarations")]
+    public async Task OpenAsync_DeferredFixCheckpointCorpus_ShouldConvergeInFourModes()
     {
         // Arrange: retain named checkpoint/table images instead of recording every
         // wide-page write, which would duplicate hundreds of MiB per boundary.
@@ -90,7 +93,12 @@ public sealed partial class SqlJointTypeMigrationTests
         await using (var engine = await Builder(storage).AddDatabase(DeferredCheckpointDeclaration(false)).BuildAsync(guard.Token))
         {
             var database = await engine.OpenDatabaseAsync("typed", guard.Token);
-            SeedRaw(database, [1, new string('x', 4000)], 4096);
+            await using var seed = await database.CreateSessionAsync(guard.Token);
+            for (int first = 0; first < 4096; first += 64)
+            {
+                await seed.ExecuteAsync("INSERT INTO items VALUES " + string.Join(',', Enumerable.Range(first, 64)
+                    .Select(id => $"({id},'{new string('x', 4000)}')")), cancellationToken: guard.Token);
+            }
             database.Coordinator.Checkpoint();
             SqlPlanExecutor.RewriteStage = (phase, _) =>
             {
@@ -113,7 +121,7 @@ public sealed partial class SqlJointTypeMigrationTests
         images.Count.ShouldBe(2);
         foreach (var image in images)
         {
-            for (int mode = 0; mode < 3; mode++)
+            for (int mode = 0; mode < 4; mode++)
             {
                 var builder = Builder(image.CaptureDurableImages());
                 if (mode != 0) { builder.AddDatabase(DeferredCheckpointDeclaration(mode == 1, mode == 2)); }
@@ -122,12 +130,13 @@ public sealed partial class SqlJointTypeMigrationTests
                 await WaitDoneAsync(database, guard.Token);
                 database.Catalog.SchemaState!.ContentHash.ShouldBe(DeferredCheckpointDeclaration(mode == 1, mode == 2).Compile().Hash);
                 database.Catalog.PendingMigration.ShouldBeNull();
+                database.Provisioning.ShouldBeNull();
                 await using var reader = await database.CreateSessionAsync(guard.Token);
                 (await RowsAsync(reader, "SELECT COUNT(*) FROM items", guard.Token)).Single()[0].ShouldBe(4096L);
                 await DrainReclamationAsync(database, guard.Token);
                 database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
             }
         }
-        _output.WriteLine($"Checkpoint corpus: brackets={brackets}; checkpoints={checkpoints}; images={images.Count}; reopens={images.Count * 3}");
+        _output.WriteLine($"Checkpoint corpus: brackets={brackets}; checkpoints={checkpoints}; images={images.Count}; reopens={images.Count * 4}");
     }
 }

@@ -32,8 +32,7 @@ internal sealed partial class SqlSchemaProvisioner
         string? name = created?.TableName;
         if (request.Statement.SqlExpression is SqlAlterTableExpression { Action: SqlAlterRenameTableAction rename } alterName)
         { schema = alterName.Table.SchemaName ?? SqlPlanner.DefaultSchema; name = rename.NewName; }
-        if (name is not null && migration.JointPlan is { } joint &&
-            joint.Tables.Any(table => table.Previous is null &&
+        if (name is not null && migration.JointPlan.Tables.Any(table => table.Previous is null &&
                 table.Shape.Schema.Equals(schema, System.StringComparison.OrdinalIgnoreCase) &&
                 table.Shape.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)))
         {
@@ -60,6 +59,8 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 // New names have no published identity yet. Rendezvous on an old
                 // reservation, then bind the published catalog (or its ordinary miss).
+                // A live user transaction retains that IS grant until commit; only DDL
+                // on the rendezvous table is additionally blocked by this admission.
                 tables.Add(migration.Tables.Min());
             }
             if (_catalog.TryGetView(reference.SchemaName ?? referenceSchema, reference.TableName, out var view))

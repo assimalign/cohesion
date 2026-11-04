@@ -326,14 +326,15 @@ public sealed partial class SqlJointTypeMigrationTests
             SqlPlanExecutor.RewriteStage = (stage, count) =>
             {
                 // Every expanded row allocates one heap page; the root bracket
-                // allocates none. Follow the copy's recorded flushes exactly.
+                // allocates none. Follow forced and observed engine checkpoint resets exactly.
                 if (stage == "CopyCommitted" && treesDurable) { pendingPages += 64; }
-                if (stage == "CopyCheckpointed") { pendingPages = 0; }
+                if (stage is "CopyCheckpointed" or "CopyCheckpointObserved") { pendingPages = 0; }
                 if (stage == "Copied" && prepared == 7) { copiedLast = count; }
                 if (stage == "Copied" && prepared == 7 && count == 64)
                 {
-                    // Exactly D + pending + E remains. Admit the next bracket
-                    // at equality, then stop before the following one can write.
+                    // Exactly D + pending + E remains. The engine's checkpoint
+                    // recovers room for a further bracket without a duplicate forced
+                    // flush; the next admission still refuses before physical ENOSPC.
                     long pending = storage.UnixSparseGrowth ? Math.Min(pendingPages * Page.Size, builder.Options.BufferPoolCapacity) : 0;
                     remaining = SqlSchemaProvisioner.JointBracketBytes(128, 64) + pending + database.SchemaProvisioner.JointSpaceDiscardBytes;
                     storage.VolumeCapacityBytes = storage.AllocatedBytes + remaining;
@@ -346,7 +347,9 @@ public sealed partial class SqlJointTypeMigrationTests
                     await database.ApplySchemaAsync(Declare(true), guard.Token));
                 failure.Diagnostics.ShouldContain(d => d.Code == "CS03402");
                 prepared.ShouldBe(7);
-                copiedLast.ShouldBe(128);
+                // Nit 9 avoids a redundant checkpoint after the engine truncated WAL.
+                // That saved WAL admits one more 64-row bracket at the same volume cap.
+                copiedLast.ShouldBe(192);
                 remaining.ShouldBeGreaterThan(0);
                 SqlPlanExecutor.RewriteStage = null;
                 database.CatalogStorage.Checkpoint();
@@ -376,7 +379,7 @@ public sealed partial class SqlJointTypeMigrationTests
                 // Assert
                 peak.ShouldBeLessThanOrEqualTo(1024 * 1024 + 32L * 2 * (Page.Size + 46) + 152);
                 checkpoints.ShouldBeGreaterThan(1);
-                (database.TableReclamation.ReclaimedPages - reclaimed).ShouldBeGreaterThanOrEqualTo(7 * 1024 + 128);
+                (database.TableReclamation.ReclaimedPages - reclaimed).ShouldBeGreaterThanOrEqualTo(7 * 1024 + copiedLast);
                 storage.CapacityFailures.ShouldBe(0);
                 database.IsOffline.ShouldBeFalse();
                 database.Catalog.SchemaState!.ContentHash.ShouldBe(Declare(false).Hash);

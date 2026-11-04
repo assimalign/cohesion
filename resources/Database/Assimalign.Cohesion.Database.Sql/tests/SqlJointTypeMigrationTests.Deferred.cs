@@ -27,7 +27,7 @@ public sealed partial class SqlJointTypeMigrationTests
         schema.AllowDestructiveChanges();
         schema.Table<OtherRow>("items", table =>
         {
-            table.Column(row => row.Id);
+            table.Key(row => row.Id);
             if (target) { table.Index(row => row.Id); table.Check("ck_positive", "Id > 0"); }
         });
         schema.Table<DeferredBackfill>("filled", table =>
@@ -35,10 +35,10 @@ public sealed partial class SqlJointTypeMigrationTests
             table.Key(row => row.Id);
             if (target && backfill) { table.Column(row => row.Added); table.Default(row => row.Added, 7); }
         });
-        if (target) { schema.Table<DeferredCreated>("created", table => table.Column(row => row.Id)); }
+        if (target) { schema.Table<DeferredCreated>("created", table => table.Key(row => row.Id)); }
     });
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred: every discard commit image opens the stored schema and reports CS03402")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred: every discard commit image converges with no, matching, third and rollback declarations")]
     public async Task OpenAsync_DeferredOnlyDiscardBoundaries_ShouldKeepStoredSchemaAndReportDiscard()
     {
         // Arrange
@@ -68,10 +68,10 @@ public sealed partial class SqlJointTypeMigrationTests
         recorder.Count.ShouldBeGreaterThan(1);
         for (int point = 0; point < recorder.Count; point++)
         {
-            for (int mode = 0; mode < 3; mode++)
+            for (int mode = 0; mode < 4; mode++)
             { await CheckDeferredCrashImageAsync(recorder.Open(point), false, mode, null, guard.Token, 0); }
         }
-        _output.WriteLine($"Deferred discard storage images={recorder.Count}; reopens={recorder.Count * 3}");
+        _output.WriteLine($"Deferred discard storage images={recorder.Count}; reopens={recorder.Count * 4}");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred: a valid pending target cannot hide an untouched unresolved domain from Build")]
@@ -221,6 +221,7 @@ public sealed partial class SqlJointTypeMigrationTests
             database.IsOffline.ShouldBeFalse();
             database.Catalog.SchemaState!.ContentHash.ShouldBe(DeferredDeclaration(false).Compile().Hash);
             database.Catalog.PendingMigration.ShouldBeNull();
+            database.Provisioning.ShouldBeNull();
             await DrainReclamationAsync(database, guard.Token);
             database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
         }
@@ -229,6 +230,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await WaitDoneAsync(resumed, guard.Token);
         resumed.Catalog.SchemaState!.ContentHash.ShouldBe(DeferredDeclaration(true, true).Compile().Hash);
         resumed.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
+        resumed.Provisioning.ShouldBeNull();
         await using var reader = await resumed.CreateSessionAsync(guard.Token);
         (await RowsAsync(reader, "SELECT Added FROM filled", guard.Token)).Single()[0].ShouldBe(7);
     }
@@ -267,7 +269,7 @@ public sealed partial class SqlJointTypeMigrationTests
         foreach (var image in phases.Values.Concat(Enumerable.Range(0, recorder.Count).Select(recorder.Open)))
         {
             images++;
-            for (int mode = 0; mode < 3; mode++)
+            for (int mode = 0; mode < 4; mode++)
             {
                 bool applied = await CheckDeferredCrashImageAsync(image.CaptureDurableImages(), backfill, mode, heap, guard.Token);
                 if (mode == 0) { if (applied) { changed++; } else { old++; } }
@@ -275,16 +277,16 @@ public sealed partial class SqlJointTypeMigrationTests
         }
         old.ShouldBeGreaterThan(0);
         changed.ShouldBeGreaterThan(0);
-        _output.WriteLine($"Deferred crash images: backfill={backfill}; old={old}; new={changed}; images={images}; reopens={images * 3}");
+        _output.WriteLine($"Deferred crash images: backfill={backfill}; old={old}; new={changed}; images={images}; reopens={images * 4}");
     }
 
     private sealed record DeferredThird(int Id);
     private static SqlSchema ThirdDeferredDeclaration() => SqlSchema.Create("typed", schema =>
     {
         schema.AllowDestructiveChanges();
-        schema.Table<OtherRow>("items", table => table.Column(row => row.Id));
+        schema.Table<OtherRow>("items", table => { table.Key(row => row.Id); table.Index(row => row.Id); table.Check("ck_third", "Id >= 0"); });
         schema.Table<DeferredBackfill>("filled", table => table.Key(row => row.Id));
-        schema.Table<DeferredThird>("third", table => table.Column(row => row.Id));
+        schema.Table<DeferredThird>("third", table => table.Key(row => row.Id));
     });
     private static SqlCompiledSchema ThirdDeferredTarget() => ThirdDeferredDeclaration().Compile();
 
@@ -294,19 +296,32 @@ public sealed partial class SqlJointTypeMigrationTests
         var builder = Builder(image);
         if (mode == 1) { builder.AddDatabase(DeferredDeclaration(true, backfill)); }
         if (mode == 2) { builder.AddDatabase(ThirdDeferredDeclaration()); }
+        if (mode == 3) { builder.AddDatabase(DeferredDeclaration(false)); }
+        int thirdJobs = 0;
+        if (mode == 2)
+        {
+            builder.AddWorker(engine =>
+            {
+                engine.BeforeProvisioning = current => current.SchemaProvisioner.JointStage = phase =>
+                { if (phase == "IntentDurable") { thirdJobs++; } };
+                return new RecordingWorker(engine);
+            });
+        }
         await using var recovered = await builder.BuildAsync(token);
         var database = await recovered.OpenDatabaseAsync("typed", token);
         await WaitDoneAsync(database, token);
+        if (mode == 2 && expectedRows > 0) { thirdJobs.ShouldBe(1); }
         bool applied = database.Catalog.SchemaState!.ContentHash == DeferredDeclaration(true, backfill).Compile().Hash;
         database.Catalog.SchemaState.ContentHash.ShouldBe(mode == 2 ? ThirdDeferredTarget().Hash : DeferredDeclaration(mode == 1 || applied, backfill).Compile().Hash);
         if (heap is { } owner) { Table(database).ObjectId.ShouldBe(owner); }
-        Table(database).Constraints.Count.ShouldBe(applied ? 1 : 0);
-        database.Catalog.GetIndexes(Table(database).ObjectId).Count.ShouldBe(applied ? 1 : 0);
+        Table(database).Constraints.Count.ShouldBe(applied || mode == 2 ? 1 : 0);
+        database.Catalog.GetIndexes(Table(database).ObjectId).Count.ShouldBe(1 + (applied || mode == 2 ? 1 : 0));
         database.Catalog.TryGetTable("dbo", "created", out _).ShouldBe(applied);
         database.Catalog.TryGetTable("dbo", "third", out _).ShouldBe(mode == 2);
         database.Catalog.TryGetTable("dbo", "filled", out var filled).ShouldBeTrue();
         (filled.FindColumn("Added") is not null).ShouldBe(applied && backfill);
         database.Catalog.PendingMigration.ShouldBeNull();
+        database.Provisioning.ShouldBeNull();
         database.IsOffline.ShouldBeFalse();
         await using var reader = await database.CreateSessionAsync(token);
         var rows = await RowsAsync(reader, "SELECT Id FROM items ORDER BY Id", token);
@@ -365,7 +380,7 @@ public sealed partial class SqlJointTypeMigrationTests
         database.Catalog.SchemaState!.ContentHash.ShouldBe(DeferredDeclaration(false).Compile().Hash);
         database.Catalog.PendingMigration.ShouldBeNull();
         Table(database).ObjectId.ShouldBe(heap);
-        database.Catalog.GetIndexes(heap).ShouldBeEmpty();
+        database.Catalog.GetIndexes(heap).ShouldHaveSingleItem().IsPrimaryKey.ShouldBeTrue();
         database.IsOffline.ShouldBeFalse();
         storage.MigrationAvailableBytes = long.MaxValue;
         await DrainReclamationAsync(database, guard.Token);
@@ -450,12 +465,12 @@ public sealed partial class SqlJointTypeMigrationTests
         // bounded index builder. Compare identical seeded images and flush both ends.
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         SqlSchema Declaration(bool index) => SqlSchema.Create("typed", schema => schema.Table<OtherRow>("items", table =>
-        { table.Column(row => row.Id); if (index) { table.Index(row => row.Id); } }));
+        { table.Key(row => row.Id); if (index) { table.Index(row => row.Id); } }));
         var storage = new CrashCaptureSqlStorageStrategy();
         await using (var seed = await Builder(storage).AddDatabase(Declaration(false)).BuildAsync(guard.Token))
         {
             var database = await seed.OpenDatabaseAsync("typed", guard.Token);
-            SeedRaw(database, [7], 32768);
+            await SeedShuffledIndexRowsAsync(database, 32768, guard.Token);
             database.Coordinator.Checkpoint();
             storage = storage.CaptureDurableImages();
         }
@@ -508,7 +523,7 @@ public sealed partial class SqlJointTypeMigrationTests
                 Table(database).ObjectId.ShouldBe(heap.ObjectId);
                 rewrites[mode].ShouldBe(0);
                 decodes[mode].ShouldBe(65536);
-                database.Catalog.GetIndexes(heap.ObjectId).ShouldHaveSingleItem();
+                database.Catalog.GetIndexes(heap.ObjectId).Count.ShouldBe(2);
             }
             finally { SqlPlanExecutor.RowDecoded = null; SqlPlanExecutor.RewriteStage = null; }
         }

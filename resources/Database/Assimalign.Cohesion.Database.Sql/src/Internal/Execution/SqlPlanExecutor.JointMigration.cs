@@ -42,11 +42,25 @@ internal sealed partial class SqlPlanExecutor
         foreach (var table in dropped) { EnsureNoViewReads(table); }
         var all = image.Tables.Where(table => !IsTarget(table)).Concat(shapes).ToArray();
         var indexes = new List<SqlCatalogIndex>();
+        var scripted = _catalog.Scripts.SelectMany(receipt => receipt.Objects).ToHashSet(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < shapes.Length; i++)
         {
             var table = shapes[i];
             if (table.PrimaryKeyColumns.Count != 0)
-            { indexes.Add(new SqlCatalogIndex(table.ObjectId, $"PrimaryKey_{table.Name}", table.PrimaryKeyColumns, true, table.Owner, table.OwningSchema, isPrimaryKey: true)); }
+            {
+                // The marker and columns identify the key tree. Inherit its generated
+                // name so both kept heaps and rewrites retain the statement-visible name.
+                var stored = image.TryGetTable(table.Schema, table.Name, out var keyed)
+                    ? image.GetIndexes(keyed.ObjectId).FirstOrDefault(index => index.IsPrimaryKey &&
+                        index.ColumnNames.SequenceEqual(table.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase))
+                    : null;
+                var declared = plans[i].Plan.Constraints.Select((definition, ordinal) => (definition, ordinal))
+                    .FirstOrDefault(item => item.definition.Kind == SqlConstraintKind.PrimaryKey);
+                string name = stored?.Name ?? (declared.definition is not null
+                    ? ConstraintName(table, declared.definition, declared.ordinal) : $"PrimaryKey_{table.Name}");
+                indexes.Add(new SqlCatalogIndex(table.ObjectId, name, table.PrimaryKeyColumns, true,
+                    table.Owner, table.OwningSchema, isPrimaryKey: true));
+            }
             foreach (var index in plans[i].Declaration.Indexes)
             {
                 var predicate = index.Predicate is null ? null : SqlPartialIndexPredicate.Declare(table, index.Name, index.Columns,
@@ -57,11 +71,12 @@ internal sealed partial class SqlPlanExecutor
                     predicateFunctionCalls: predicate?.PredicateFunctionCalls,
                     keyOrders: index.KeyOrders.Select(order => (SqlCatalogIndexKeyOrder)order).ToArray()));
             }
-            // Ad-hoc indexes are outside the typed document. Preserve them, or refuse
+            // Ad-hoc and script indexes are outside the typed document. Preserve them, or refuse
             // their invalidated dependency before reserving any physical work.
             if (image.TryGetTable(table.Schema, table.Name, out var old))
             {
-                foreach (var index in image.GetIndexes(old.ObjectId).Where(index => index.Owner != DatabaseObjectOwner.Schema))
+                foreach (var index in image.GetIndexes(old.ObjectId).Where(index => index.Owner != DatabaseObjectOwner.Schema ||
+                    scripted.Contains(SqlObjectIdentity.Index(old.Schema, old.Name, index.Name))))
                 {
                     foreach (var column in index.ColumnNames.Concat(index.PredicateColumns))
                     {

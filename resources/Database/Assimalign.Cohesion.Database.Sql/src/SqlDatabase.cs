@@ -77,6 +77,14 @@ public sealed partial class SqlDatabase : DatabaseInstance
     {
         if (_catalog.PendingMigration is not { } pending)
         {
+            // A completed Build cannot schedule work on reopen. A prior job may have
+            // failed and discarded its intent before an independent storage latch.
+            if (_engine.ProvisioningBuildComplete && _engine.FindDeclaration(Name)?.Schema is { } target &&
+                !string.Equals(target.Hash, _catalog.SchemaState?.ContentHash, StringComparison.Ordinal))
+            {
+                ReportProvisioning(new DatabaseProvisioningProgress("JointMigration", Name.ToString(), 1, 1,
+                    false, failureCode: SqlProvisioningCodes.JointFailed));
+            }
             return;
         }
         if (pending.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))

@@ -166,7 +166,7 @@ internal sealed partial class SqlSchemaProvisioner
             // Kept heaps need only tree copies. Buy fewer forced flushes with the
             // engine's journal budget when admission can afford it; a small volume
             // retains the bounded 16 MiB route instead of refusing this optimization.
-            if (plan.Tables.All(item => item.KeepsOwner) && preferred > JointCopyCheckpointBytes &&
+            if (plan.Tables.All(item => item.KeepsOwner || item.Previous is null) && preferred > JointCopyCheckpointBytes &&
                 Need(preferred) <= _database.Engine.GetAvailableMigrationBytes(_database.Name))
             { JointCopyCheckpointThreshold = preferred; }
             JointSpaceNeed = Need(JointCopyCheckpointThreshold);

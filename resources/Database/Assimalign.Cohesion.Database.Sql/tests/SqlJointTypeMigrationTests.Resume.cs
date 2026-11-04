@@ -89,8 +89,8 @@ public sealed partial class SqlJointTypeMigrationTests
         database.IsOffline.ShouldBeFalse();
     }
 
-    private sealed record OptionalDomainItem(decimal? V, decimal? W, decimal? X);
-    private sealed record RequiredDomainItem(decimal V, decimal? W, decimal? X);
+    private sealed record OptionalDomainItem(decimal? V, decimal? W, decimal? X, int Id);
+    private sealed record RequiredDomainItem(decimal V, decimal? W, decimal? X, int Id);
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Same-hash kept and rewritten intents replan after domain registration changes (#1777)")]
     [InlineData(false, false)]
@@ -107,8 +107,8 @@ public sealed partial class SqlJointTypeMigrationTests
         SqlSchema Declaration(bool changed) => SqlSchema.Create("typed", schema =>
         {
             schema.AllowDestructiveChanges();
-            if (changed) { schema.Table<RequiredDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); }); }
-            else { schema.Table<OptionalDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); }); }
+            if (changed) { schema.Table<RequiredDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); table.Key(row => row.Id); }); }
+            else { schema.Table<OptionalDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); table.Key(row => row.Id); }); }
         });
         var targetDeclaration = Declaration(true);
         var target = targetDeclaration.Compile();
@@ -120,7 +120,7 @@ public sealed partial class SqlJointTypeMigrationTests
             var database = await seed.CreateDatabaseAsync("typed", guard.Token);
             await database.ApplySchemaAsync(Declaration(false).Compile(), guard.Token);
             await using var writer = await database.CreateSessionAsync(guard.Token);
-            await writer.ExecuteAsync("INSERT INTO items VALUES(12,13,14)", cancellationToken: guard.Token);
+            await writer.ExecuteAsync("INSERT INTO items VALUES(12,13,14,1)", cancellationToken: guard.Token);
             storage = storage.CaptureDurableImages();
         }
         var first = Builder(storage);
@@ -128,6 +128,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await using (var engine = await first.BuildAsync(guard.Token))
         {
             var database = await engine.OpenDatabaseAsync("typed", guard.Token);
+            database.SchemaProvisioner.DeferredFailed = failure => captured.TrySetException(failure);
             ulong firstPreparedOwner = database.Catalog.NextReservedIdentity;
             void CaptureIntent(CancellationToken token)
             {

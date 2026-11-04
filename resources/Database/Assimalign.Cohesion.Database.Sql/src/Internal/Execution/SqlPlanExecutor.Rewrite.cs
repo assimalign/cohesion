@@ -308,6 +308,14 @@ internal sealed partial class SqlPlanExecutor
         long added = statement.AddCopyJournalBytes(length - journalStart);
         RewriteStage?.Invoke("CopyCommitted", length);
         if (added < statement.CopyCheckpointBytes) { return; }
+        if (length < statement.CopyCheckpointBytes)
+        {
+            // An engine checkpoint already bought this journal space. Start a fresh
+            // copy budget so it cannot be followed immediately by a forced flush.
+            statement.ResetCopyJournalBytes();
+            RewriteStage?.Invoke("CopyCheckpointObserved", length);
+            return;
+        }
         while (true)
         {
             token.ThrowIfCancellationRequested();
