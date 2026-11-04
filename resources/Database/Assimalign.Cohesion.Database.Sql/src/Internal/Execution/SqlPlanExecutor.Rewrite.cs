@@ -257,7 +257,7 @@ internal sealed partial class SqlPlanExecutor
                 statement.CheckCopySpace(touches, allocations);
                 long allocationStart = statement.CaptureCopyAllocations();
                 if (statement.CheckpointCopy) { RewriteStage?.Invoke("CopyAllocationsCaptured", allocationStart); }
-                journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
+                journalStart = _storage.JournalLength - 38; // Include this bracket's already appended Begin frame.
                 for (int i = 0; i < batch.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -304,15 +304,15 @@ internal sealed partial class SqlPlanExecutor
         if (!statement.CheckpointCopy) { return; }
         // Sample at commit, before checkpoint truncation; include only deltas across
         // our brackets, never untouched writers' WAL accumulated between brackets.
-        long length = _storage.Journal.Length;
+        long length = _storage.JournalLength;
         long added = statement.AddCopyJournalBytes(length - journalStart);
         RewriteStage?.Invoke("CopyCommitted", length);
         if (added < statement.CopyCheckpointBytes) { return; }
         if (length < statement.CopyCheckpointBytes)
         {
-            // An engine checkpoint already bought this journal space. Start a fresh
-            // copy budget so it cannot be followed immediately by a forced flush.
-            statement.ResetCopyJournalBytes();
+            // Only truncation can put the journal below our accumulated deltas.
+            // Retain its remaining bytes; no flush of ours cleared pending pages.
+            statement.SetCopyJournalBytes(length);
             RewriteStage?.Invoke("CopyCheckpointObserved", length);
             return;
         }

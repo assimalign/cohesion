@@ -127,6 +127,8 @@ internal readonly struct SqlStatementContext
         return joint.JournalBytes = checked(joint.JournalBytes + Math.Max(0, bytes));
     }
 
+    internal void SetCopyJournalBytes(long bytes) => ((JointProvisioningNames)_names).JournalBytes = bytes;
+
     internal void ResetCopyJournalBytes()
     {
         var joint = (JointProvisioningNames)_names;

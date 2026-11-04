@@ -296,7 +296,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 statement.CheckCopySpace(roots.Length);
                 long allocationStart = statement.CaptureCopyAllocations();
-                journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
+                journalStart = _storage.JournalLength - 38; // Include this bracket's already appended Begin frame.
                 foreach (var index in roots)
                 {
                     await _indexManager.CreateIndexAsync(statement.Transaction, index.TableObjectId,

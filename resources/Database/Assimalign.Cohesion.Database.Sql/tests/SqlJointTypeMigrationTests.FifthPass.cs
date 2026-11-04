@@ -326,9 +326,9 @@ public sealed partial class SqlJointTypeMigrationTests
             SqlPlanExecutor.RewriteStage = (stage, count) =>
             {
                 // Every expanded row allocates one heap page; the root bracket
-                // allocates none. Follow forced and observed engine checkpoint resets exactly.
+                // allocates none. Only our forced checkpoint clears the pending-page estimate.
                 if (stage == "CopyCommitted" && treesDurable) { pendingPages += 64; }
-                if (stage is "CopyCheckpointed" or "CopyCheckpointObserved") { pendingPages = 0; }
+                if (stage == "CopyCheckpointed") { pendingPages = 0; }
                 if (stage == "Copied" && prepared == 7) { copiedLast = count; }
                 if (stage == "Copied" && prepared == 7 && count == 64)
                 {
@@ -347,8 +347,9 @@ public sealed partial class SqlJointTypeMigrationTests
                     await database.ApplySchemaAsync(Declare(true), guard.Token));
                 failure.Diagnostics.ShouldContain(d => d.Code == "CS03402");
                 prepared.ShouldBe(7);
-                // Nit 9 avoids a redundant checkpoint after the engine truncated WAL.
-                // That saved WAL admits one more 64-row bracket at the same volume cap.
+                // The 1 MiB engine trigger fixes the physical journal phase. Exact copy
+                // deltas leave this eager-allocation refusal at the same third bracket.
+                _output.WriteLine($"Watchdog stop before pin: copiedLast={copiedLast}; pendingPages={pendingPages}; remaining={remaining}");
                 copiedLast.ShouldBe(192);
                 remaining.ShouldBeGreaterThan(0);
                 SqlPlanExecutor.RewriteStage = null;

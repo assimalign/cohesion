@@ -36,7 +36,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 statement.CheckCopySpace(1);
                 long allocationStart = statement.CaptureCopyAllocations();
-                journalStart = _storage.Journal.Length - 38;
+                journalStart = _storage.JournalLength - 38;
                 var createdIndex = physicalOwner == 0
                     ? await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId, definition, cancellationToken).ConfigureAwait(false)
                     : await _indexManager.CreatePreparedAsync(statement.Transaction, table.ObjectId, physicalOwner, definition, cancellationToken).ConfigureAwait(false);
@@ -75,7 +75,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 statement.CheckCopySpace(touches, allocations);
                 long allocationStart = statement.CaptureCopyAllocations();
-                journalStart = _storage.Journal.Length - 38;
+                journalStart = _storage.JournalLength - 38;
                 foreach (var version in included)
                 {
                     cancellationToken.ThrowIfCancellationRequested();

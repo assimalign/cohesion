@@ -8762,13 +8762,22 @@ never trigger its checkpoint. J = min(Q*2(B+46)+152K, H + max(C,T)*2(B+46)+152).
 H is 16 MiB for any job that rewrites an existing table. When every plan table keeps its owner or is new, H may
 instead use the engine's larger nonzero CheckpointJournalSize if this same admission formula
 fits the available space; otherwise H falls back to 16 MiB without refusing the job.
-The 16 MiB rewrite threshold bounds its WAL reserve independently of a large database. Checkpoints flush the shared
+The 16 MiB rewrite threshold bounds copy-owned WAL at that threshold plus one committed
+bracket (J above), independently of the engine checkpoint budget. Checkpoints flush the shared
 pool and stall every database writer under the apply gate, including untouched tables; they
 can also increase subsequent full-page images. This deliberate stall cost buys bounded copy
 WAL. The copy checkpoint waits for reclamation's bounded batch at the apply gate. Ungated
 storage brackets retry the same checkpoint after a cancellation-aware delay until it succeeds.
-An engine checkpoint that already reduced the journal below H resets the accumulated copy budget instead of forcing another checkpoint. Peak-WAL tests sample at durable commit, before truncation, and assert
-the stated J overshoot; a checkpoint-disabled negative control must violate the bound.
+Bracket deltas use logical journal length, including buffered Begin frames exactly once.
+When accumulated copy bytes reach H but the logical journal length is below H, a storage
+checkpoint has truncated the journal: exact deltas cannot exceed an untruncated journal.
+The copy counter then retains that remaining length without clearing pending pages; only a
+forced copy checkpoint resets both counters. Peak-WAL tests sample at durable commit before
+truncation. Narrow keyless and sequential-key rewrites assert J; the kept-owner fallback
+asserts H plus its largest observed bracket with engine size checkpoints disabled or above
+the job total. A real-engine-checkpoint rewrite requires a completed storage checkpoint
+before each observed-checkpoint callback; a checkpoint-disabled negative control must violate
+the bound.
 Reclamation-backlog tests prove event-21 SqlTableReclamation deferral at the gate, release the
 batch, then require zero CheckpointBusy callbacks, a completed copy checkpoint and the peak bound,
 including after failed preparation and cancellation after a completed copy checkpoint.
@@ -9111,9 +9120,10 @@ fixture crosses a copy checkpoint over multiple 64-version brackets.
 For 32,768 rows on a primary-key table the retained 49a builder writes 201 pages and joint
 publication writes 202; both rewrite zero rows and decode 65,536 versions. Column and composite
 primary-key tables with three columns measure 227 to 228 pages; adding a new keyed table in
-that plan measures 228 to 230. At the measured 64 MiB engine budget, the ten-percent page-write bound covers additive index builds
-and changes to alternate trees that keep their heaps, including plans that add a table; it
-excludes drops or replacements of heap-owned trees until #1808. Shuffled-key measurements
+that plan measures 228 to 230. At the measured 64 MiB engine budget, the ten-percent page-write
+bound covers additive index builds, including plans that add a table. Page-write costs for
+changes to alternate trees remain unmeasured. The bound excludes drops or replacements of
+heap-owned trees until #1808. Shuffled-key measurements
 count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
 already completed by the engine must not be followed by a redundant forced copy checkpoint.
 
