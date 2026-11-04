@@ -8954,8 +8954,12 @@ identified by its primary-key marker and columns; joint planning inherits its ge
 across both keep and rewrite. A new joint table uses the per-step constraint definition and
 ordinal to generate that same name. TABLE_CONSTRAINTS, violation messages and ON CONFLICT
 ON CONSTRAINT therefore retain the name that applications originally observed (#1820).
-Script receipts preserve their named indexes alongside ad-hoc indexes, including uniqueness;
-dropping one of their dependency columns refuses before intent save (#1821). Dropping or replacing any
+Script receipts preserve their named indexes alongside ad-hoc indexes, including uniqueness,
+unless the declaration has that index name or the plan drops it. A declared name wins over
+a script claim, including a stale receipt. Publication refuses duplicate index names with
+CS05060 before opening its catalog transaction. Dropping a preserved index dependency column
+refuses before intent save with CS03105, naming the blocking index through CS03056 (#1821).
+Dropping or replacing any
 heap-owned tree also forces RewriteOwner so its pages are reclaimed. Drops and replacements
 of alternate trees can keep the heap because kind 14 reclaims their separate owners. General
 heap-owned DROP INDEX page reclamation remains #1808. Kind 9 records Joint/KeepOwner or

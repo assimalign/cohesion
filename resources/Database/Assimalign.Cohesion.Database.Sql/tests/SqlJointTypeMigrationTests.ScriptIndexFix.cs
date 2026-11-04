@@ -90,6 +90,7 @@ public sealed partial class SqlJointTypeMigrationTests
 
         // Assert
         failure.Message.ShouldContain("Part", Case.Sensitive);
+        failure.Message.ShouldContain("script_unique", Case.Sensitive);
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03105");
         database.Catalog.PendingMigration.ShouldBeNull();
         database.Catalog.SchemaState!.ContentHash.ShouldBe(source.Hash);

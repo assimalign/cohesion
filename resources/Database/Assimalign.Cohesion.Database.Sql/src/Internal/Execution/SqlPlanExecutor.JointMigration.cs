@@ -76,12 +76,17 @@ internal sealed partial class SqlPlanExecutor
             if (image.TryGetTable(table.Schema, table.Name, out var old))
             {
                 foreach (var index in image.GetIndexes(old.ObjectId).Where(index => index.Owner != DatabaseObjectOwner.Schema ||
-                    scripted.Contains(SqlObjectIdentity.Index(old.Schema, old.Name, index.Name))))
+                    scripted.Contains(SqlObjectIdentity.Index(old.Schema, old.Name, index.Name)) &&
+                    !plans[i].Declaration.Indexes.Any(declared => declared.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase)) &&
+                    !script.Plan.Operations.Any(operation => operation.Kind == SqlSchemaMigrationOperationKind.DropIndex &&
+                        string.Equals(operation.ParentName, old.Name, StringComparison.OrdinalIgnoreCase) &&
+                        operation.ObjectName.Equals(index.Name, StringComparison.OrdinalIgnoreCase))))
                 {
                     foreach (var column in index.ColumnNames.Concat(index.PredicateColumns))
                     {
                         if (table.FindColumn(column) is null)
-                        { throw new DatabaseObjectLockedException(column, schema.Name, "ALTER TABLE DROP COLUMN"); }
+                        { throw new SqlCatalogException("CS03056", string.Format(CultureInfo.CurrentCulture,
+                            ErrorMessages.CatalogDropColumnCoreAsyncSqlCatalog3, column, index.Name, old.Schema, old.Name)); }
                         if (index.PredicateColumns.Contains(column, StringComparer.OrdinalIgnoreCase) &&
                             old.FindColumn(column)!.Type.Type != table.FindColumn(column)!.Type.Type)
                         { throw new SqlPlanningException("CS03083", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateTypeChange, column, index.Name)); }
