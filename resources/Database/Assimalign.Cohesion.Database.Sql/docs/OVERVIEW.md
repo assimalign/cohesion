@@ -15,7 +15,7 @@ it in one catalog commit. Failed preparation leaves the old schema online and av
 a rolled-back application; potentially lossy reversals require destructive opt-in (#1447).
 
 Index DDL defaults to ASC NULLS FIRST and DESC NULLS LAST, matching ORDER BY (#1787).
-Default nullable indexes can remove sorts in both directions. SQL format 36 and compiled-schema
+Default nullable indexes can remove sorts in both directions. SQL format 37 and compiled-schema
 v12 fence the new enum meanings; earlier databases and artifacts must be recreated or rebuilt.
 
 Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
@@ -96,18 +96,18 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   to select another database or create/drop databases through a session.
 - **Declared databases and provisioning** — the engine builder compiles declarations before I/O,
   then opens/creates their databases and runs data-independent steps. On populated tables, indexes,
-  constraints and validation-only column tightening are persisted as pending before any cheap DDL commits and run by the engine's
-  provisioning worker. Pending tables are locked before Build returns; independent tables serve
-  throughout, and health reports the step and row progress. Same-table column additions retain
-  declaration order across the inline/worker split. `RunMigrationsInline = true` keeps all
+  constraints, backfills and validation-only tightening prepare the complete target unpublished
+  on the provisioning worker. Pending tables are locked before Build returns; independent tables serve
+  throughout, and health reports the job and row progress. Every deferred plan publishes in one
+  catalog commit; column additions retain declaration order. `RunMigrationsInline = true` keeps all
   steps in Build per database. Build/BuildAsync accept cancellation, including recovery.
   `ApplySchemaAsync(SqlCompiledSchema)` remains inline. Both paths use the same DDL planner and
   B2's complete catalog snapshot, typed defaults and crash convergence. Format 9 adds ordered
   pending intent to the generation-stamped applied document. An unchanged applied hash/generation
-  with no pending intent still skips in constant time. Decision 49a's non-TYPE deferred failure takes only that database
-  offline with `CS03104`, retaining intent for the next open. Non-TYPE inline failures retain compensation;
-  joint TYPE preparation failure reports `CS03402`, discards its intent and keeps the old schema
-  online unless an unsafe-storage latch fired. Build checks a metadata-only space floor before intent save;
+  with no pending intent still skips in constant time. Every deferred preparation failure reports
+  `CS03402`, discards its intent and keeps the old schema
+  online unless an unsafe-storage latch fired. Non-TYPE inline failures retain compensation until SQ-A6.
+  Build checks a metadata-only space floor before intent save;
   the worker measures rewritten heap/index pages and bounded copy-WAL growth before prepared writes.
   Untouched tables never change the need. Refusals report needed/available bytes online; precise
   refusals discard the intent, while a floor refusal leaves a kept crash intent unchanged.
@@ -185,7 +185,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 36). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 37). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.

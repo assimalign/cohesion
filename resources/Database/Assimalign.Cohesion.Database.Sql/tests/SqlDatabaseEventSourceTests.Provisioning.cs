@@ -201,9 +201,9 @@ public sealed partial class SqlDatabaseEventSourceTests
         NewEvent(recorder, 13, "ProvisioningStart", _provisioningStartPayload);
         NewEvent(recorder, 14, "ProvisioningStop", _provisioningStopPayload).Payload![5].ShouldBe("Deferred");
         var bound = NewEvent(recorder, 18, "DeferredStepBound", _deferredPayload);
-        bound.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "AddConstraint", 1, 1]);
+        bound.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "Joint/AddConstraint", 1, 1]);
         bound.Level.ShouldBe(EventLevel.Informational);
-        callbacks.ShouldBeGreaterThanOrEqualTo(130);
+        callbacks.ShouldBeGreaterThanOrEqualTo(fail ? 130 : 132);
         var progress = recorder.Events.Where(entry => entry.EventId == 19).ToArray();
         progress.ShouldNotBeEmpty();
         foreach (var entry in progress)
@@ -211,20 +211,20 @@ public sealed partial class SqlDatabaseEventSourceTests
             entry.EventName.ShouldBe("DeferredStepProgress");
             entry.PayloadNames.ShouldBe(_deferredPayload);
             entry.Level.ShouldBe(EventLevel.Verbose);
-            entry.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "AddConstraint", 1, 1]);
+            entry.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "Joint/AddConstraint", 1, 1]);
             ((long)entry.Payload![7]!).ShouldBeInRange(0, 130);
-            entry.Payload[8].ShouldBe(130L);
+            entry.Payload[8].ShouldBe(-1L);
         }
         var completed = NewEvent(recorder, 20, "DeferredStepCompleted", [.. _deferredPayload, "outcome", "durationMilliseconds"]);
         completed.Payload![9].ShouldBe(fail ? "Error" : "Applied");
-        completed.Payload[8].ShouldBe(130L);
+        completed.Payload[8].ShouldBe(fail ? -1L : 130L);
         if (fail)
         {
             var failed = NewEvent(recorder, 21, "DeferredStepFailed", [.. _deferredPayload, "code", "exceptionType"]);
             failed.Level.ShouldBe(EventLevel.Error);
-            failed.Payload![9].ShouldBe("CS03104");
+            failed.Payload![9].ShouldBe("CS03402");
             ((string)failed.Payload[10]!).ShouldNotBeNullOrEmpty();
-            database.IsOffline.ShouldBeTrue();
+            database.IsOffline.ShouldBeFalse();
         }
         else
         {
@@ -257,7 +257,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         database.SchemaProvisioner.DeferredProgress = (_, _) => Interlocked.Increment(ref callbacks);
         if (attachAfterProgress)
         {
-            database.SchemaProvisioner.StepApplied = _ => { entered.TrySetResult(); release.Wait(timeout.Token); };
+            database.SchemaProvisioner.JointStage = stage => { if (stage == "Validated") { entered.TrySetResult(); release.Wait(timeout.Token); } };
         }
         else
         {
@@ -298,7 +298,7 @@ public sealed partial class SqlDatabaseEventSourceTests
             {
                 callbacks.ShouldBeGreaterThanOrEqualTo(130);
             }
-            database.IsOffline.ShouldBe(outcome == "Error");
+            database.IsOffline.ShouldBeFalse();
             recorder.ShouldNotBeNull();
             recorder.Events.ShouldNotContain(entry => entry.EventId == 13 || entry.EventId == 14 || entry.EventId == 18);
             if (!attachAfterProgress && outcome != "Cancelled")
@@ -309,13 +309,13 @@ public sealed partial class SqlDatabaseEventSourceTests
                 {
                     entry.EventName.ShouldBe("DeferredStepProgress");
                     entry.PayloadNames.ShouldBe(_deferredPayload);
-                    entry.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "AddConstraint", 1, 1]);
-                    entry.Payload![8].ShouldBe(130L);
+                    entry.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "Joint/AddConstraint", 1, 1]);
+                    entry.Payload![8].ShouldBe(-1L);
                 }
             }
             var completed = NewEvent(recorder, 20, "DeferredStepCompleted", [.. _deferredPayload, "outcome", "durationMilliseconds"]);
-            completed.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "AddConstraint", 1, 1]);
-            completed.Payload![9].ShouldBe(outcome);
+            completed.Payload!.Take(7).ShouldBe([engine.Name, "traced", "items", "ck_trace", "Joint/AddConstraint", 1, 1]);
+            completed.Payload![9].ShouldBe(outcome == "Cancelled" ? "Error" : outcome);
             completed.Payload[10].ShouldBe(0d);
             if (outcome == "Applied")
             {
@@ -326,14 +326,15 @@ public sealed partial class SqlDatabaseEventSourceTests
             else
             {
                 var progress = database.Provisioning.ShouldNotBeNull();
-                completed.Payload[7].ShouldBe(progress.RowsProcessed ?? -1);
-                completed.Payload[8].ShouldBe(progress.TotalRows ?? -1);
+                progress.FailureCode.ShouldBe("CS03402");
+                completed.Payload[7].ShouldBe(outcome == "Error" ? 129L : -1L);
+                completed.Payload[8].ShouldBe(-1L);
             }
-            if (outcome == "Error")
+            if (outcome != "Applied")
             {
                 var failed = NewEvent(recorder, 21, "DeferredStepFailed", [.. _deferredPayload, "code", "exceptionType"]);
                 failed.Payload!.Take(9).ShouldBe(completed.Payload.Take(9));
-                failed.Payload![9].ShouldBe("CS03104");
+                failed.Payload![9].ShouldBe("CS03402");
             }
             else
             {
@@ -346,8 +347,8 @@ public sealed partial class SqlDatabaseEventSourceTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - DeferredStep: cancellation closes its lifetime without a failure")]
-    public async Task DeferredStep_Cancelled_ShouldCompleteWithoutFailure()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - DeferredStep: cancellation reports discarded joint work online")]
+    public async Task DeferredStep_Cancelled_ShouldReportDiscardedJointWork()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -369,8 +370,9 @@ public sealed partial class SqlDatabaseEventSourceTests
 
         // Assert
         NewEvent(recorder, 18, "DeferredStepBound", _deferredPayload);
-        NewEvent(recorder, 20, "DeferredStepCompleted", [.. _deferredPayload, "outcome", "durationMilliseconds"]).Payload![9].ShouldBe("Cancelled");
-        recorder.Events.ShouldNotContain(entry => entry.EventId == 21);
+        NewEvent(recorder, 20, "DeferredStepCompleted", [.. _deferredPayload, "outcome", "durationMilliseconds"]).Payload![9].ShouldBe("Error");
+        NewEvent(recorder, 21, "DeferredStepFailed", [.. _deferredPayload, "code", "exceptionType"]).Payload![9].ShouldBe("CS03402");
+        database.IsOffline.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning tracing: disabled typed writes allocate and time nothing")]

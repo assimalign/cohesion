@@ -211,6 +211,8 @@ internal sealed partial class SqlPlanExecutor
             // Identity columns need no conversion or scan for an index-only change.
             foreach (var item in keeping.Where(item => NeedsJointRowValidation(item.Previous!, item.Shape)))
             {
+                long processed = 0;
+                statement.ProvisioningProgress?.Invoke(0, null);
                 foreach (var row in Scan(item.Shape, statement, cancellationToken, ConstraintCurrentSnapshot(statement)))
                 {
                     for (int ordinal = 0; ordinal < row.Values.Length; ordinal++)
@@ -219,7 +221,9 @@ internal sealed partial class SqlPlanExecutor
                         { _ = CoerceForColumn(row.Values[ordinal], item.Shape.Columns[ordinal]); }
                     }
                     ValidateRows(item.Shape, [row.Values], statement, cancellationToken, checksOnly: true);
+                    statement.ProvisioningProgress?.Invoke(++processed, null);
                 }
+                statement.ProvisioningProgress?.Invoke(processed, processed);
             }
             _catalog.ReserveStorageReplacement(previous, null, (table, id) =>
             {

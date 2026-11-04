@@ -2,10 +2,13 @@
 
 ## Joint SQL migration health (#1447, SQ-A3)
 
-Hosting keeps its model-neutral Provisioning observation: unpublished SQL TYPE work is Degraded
+Hosting keeps its model-neutral Provisioning observation: every unpublished deferred SQL job is Degraded
 while pending/running; CS03402 leaves health Degraded with the database online at its old schema.
-Successful explicit retry restores Healthy. This differs from decision 49a's CS03104 offline
-step failure and adds no Hosting model reference or automatic retry.
+Successful explicit retry restores Healthy. SQ-A5 (#1778) supersedes decision 49a's CS03104 offline
+step failure for every deferred job and adds no Hosting model reference or automatic retry.
+Constraint scans report an unknown total until completion; health omits totalRows while unknown.
+Provisioning remains the observed reason after a preparation failure, so health tracing deduplicates
+that continuing Degraded condition while health data carries CS03402.
 
 ## Composition
 
@@ -206,7 +209,7 @@ it needs cancellable construction; model factories still read `IDatabaseApplicat
 
 The module holds no schema knowledge and provisions nothing. A model's engine builder declares the databases its engine owns, and the engine's own build opens or creates each of them and completes inline provisioning before it returns (`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` §5.2 and §5.3). The model verb's factory runs that build inside the application's `Build()`. Servers start when the application starts, after inline work and reservation of deferred tables. Deferred provisioning can continue while the server accepts work: affected-table admission waits for completion, while other tables remain available.
 
-SQL joint TYPE migrations retain a metadata lease from Build until worker completion. Definition
+Every deferred SQL migration retains a metadata lease from Build until worker completion. Definition
 DDL is refused during that whole interval, including time queued behind other databases on the
 engine-wide provisioning worker. Taking the lease in Build prevents unrelated DDL from invalidating
 the migration at worker start. Pending new relation names also refuse session creation or table
@@ -216,9 +219,9 @@ no other condition prevents it. Precise page/tree space accounting belongs to th
 checks only the metadata floor, so populated Build stays constant-time in table size.
 
 - **What was deleted** (owner decisions 49 to 54 of 2026-10-09): `Provision(engine, schema)` and `Provision(engineName, schema)`, `AddDatabase(engine, name, schema)` and `AddDatabase(engineName, name, schema)`, `Schemas`, their validators, and the internal `DefaultDatabaseProvisioner` host service that opened or created a database and applied a compiled schema in `StartAsync`, under `StartupTimeout`.
-- **The cost, revised by decision 49a:** open, recovery and cheap migration steps run in application Build, outside StartupTimeout. Build accepts a caller cancellation token. Populated-table data-scaling steps run on the engine-owned worker after Build has reserved their tables.
+- **The cost, revised by decision 49a and SQ-A5:** open and recovery run in application Build, outside StartupTimeout. Cheap steps run there only when the plan has no deferred work; a deferred plan prepares its complete target jointly. Build accepts a caller cancellation token. Populated-table data-scaling steps run on the engine-owned worker after Build has reserved their tables.
 - **Failed inline provisioning fails Build.** The model's build disposes its engine before it throws, and the application's Build rollback disposes every product built before it.
-- **Failed deferred provisioning takes only that database offline.** Build may already have returned. Invalid existing rows or another deferred-step failure retain the durable target for recovery, report `CS03104`, and change that database's health from Degraded to Unhealthy. The application's other databases continue serving; the existing reopen policy governs retry.
+- **Failed deferred provisioning retains the old schema online.** Build may already have returned. Invalid existing rows or another preparation failure discard the unpublished target, report `CS03402` and retain Degraded health. Unrelated databases continue serving. A later explicit apply or Build may retry; storage-safety latches retain Unhealthy precedence and the existing reopen policy.
 
 `DatabaseApplication` remains `Host<DatabaseApplicationContext>` and its context remains `HostContext`. `Run`, `RunAsync`, and `AsService` use the Hosting extensions. Embedded applications can use engines immediately after Build, or Run to wait for host shutdown without a listener.
 

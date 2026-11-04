@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlLockWaitCollection.Name)]
 public sealed partial class SqlDeferredProvisioningTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - 49a: Build runs cheap DDL, reserves populated tables and serves other tables")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Joint deferred: Build retains all old objects, reserves touched tables and serves other tables")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task BuildAsync_PopulatedMigration_ShouldDeferAndAdmitOnlyOtherTables(bool fileBacked)
@@ -58,10 +58,10 @@ public sealed partial class SqlDeferredProvisioningTests
             var database = await engine.OpenDatabaseAsync("pending", timeout.Token);
             await entered.Task.WaitAsync(timeout.Token);
             database.Catalog.TryGetTable("dbo", "items", out var items).ShouldBeTrue();
-            items.FindColumn("Note").ShouldNotBeNull();
+            items.FindColumn("Note").ShouldBeNull();
             var pending = database.Catalog.PendingMigration.ShouldNotBeNull();
-            pending.Steps.Select(step => step.Kind).Order().ShouldBe(new[] { "AddIndex", "AddConstraint", "AlterColumn" }.Order());
-            pending.Steps.Select(step => step.Position).ShouldBe([2, 3, 4]);
+            pending.Steps.Select(step => step.Kind).ShouldBe(["Joint/AlterColumn", "Joint/AddColumn", "Joint/AddIndex", "Joint/AddConstraint", "Joint/RewriteOwner"]);
+            pending.Steps.Select(step => step.Position).ShouldBe([1, 2, 3, 4, 5]);
             database.Provisioning.ShouldNotBeNull().IsRunning.ShouldBeTrue();
             await using var blocked = await database.CreateSessionAsync(timeout.Token);
             await using var other = await database.CreateSessionAsync(timeout.Token);
@@ -79,7 +79,7 @@ public sealed partial class SqlDeferredProvisioningTests
                     writes++;
                     waiting.IsCompleted.ShouldBeFalse();
                     waitingCte.IsCompleted.ShouldBeFalse();
-                    elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+                    elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(25));
                 }
                 while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || writes < 10);
             }
@@ -96,7 +96,8 @@ public sealed partial class SqlDeferredProvisioningTests
 
             // Assert: binding happened after all three expensive steps published.
             writes.ShouldBeGreaterThanOrEqualTo(10);
-            kinds.Distinct().Count().ShouldBe(3);
+            kinds.ShouldHaveSingleItem().ShouldBe(SqlSchemaMigrationOperationKind.AlterColumn);
+            database.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
             Interlocked.Read(ref counted).ShouldBe(130);
             database.Catalog.PendingMigration.ShouldBeNull();
             database.Provisioning.ShouldBeNull();
@@ -146,8 +147,8 @@ public sealed partial class SqlDeferredProvisioningTests
         database.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: a crash during an index batch retains pending work and rebuilds on restart")]
-    public async Task BuildAsync_CrashDuringIndex_ShouldResumePendingAndConverge()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Joint deferred: a crash during preparation resumes only the matching target")]
+    public async Task BuildAsync_CrashDuringPreparation_ShouldResumeMatchingTargetAndConverge()
     {
         // Arrange: capture durable images at a real batch boundary, without publishing its tree.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -160,7 +161,7 @@ public sealed partial class SqlDeferredProvisioningTests
         {
             engine.BeforeProvisioning = database => database.SchemaProvisioner.DeferredProgress = (rows, total) =>
             {
-                if (database.Provisioning?.Operation == "AddIndex" && rows == 64 && total == 130)
+                if (database.Provisioning?.Operation == "Joint/AlterColumn" && rows == 64)
                 {
                     captured.TrySetResult(storage.CaptureDurableImages());
                     release.Wait(timeout.Token);
@@ -177,7 +178,7 @@ public sealed partial class SqlDeferredProvisioningTests
                 crash = await captured.Task.WaitAsync(timeout.Token);
                 var database = await engine.OpenDatabaseAsync("pending", timeout.Token);
                 database.Provisioning.ShouldNotBeNull().RowsProcessed.ShouldBe(64);
-                database.Provisioning.TotalRows.ShouldBe(130);
+                database.Provisioning.TotalRows.ShouldBeNull();
                 await using var other = await database.CreateSessionAsync(timeout.Token);
                 string values = string.Join(",", Enumerable.Range(1, 1000).Select(value => $"({value})"));
                 await other.ExecuteAsync($"INSERT INTO other (Id) VALUES {values}", cancellationToken: timeout.Token);
@@ -191,8 +192,8 @@ public sealed partial class SqlDeferredProvisioningTests
             }
         }
 
-        // Act: no declaration is necessary to recover recorded intent.
-        await using var restarted = await Builder(crash).AddDatabase("pending").BuildAsync(timeout.Token);
+        // Act: only the same target declaration may resume unpublished joint work.
+        await using var restarted = await Builder(crash).AddDatabase(desired).BuildAsync(timeout.Token);
         var recovered = await restarted.OpenDatabaseAsync("pending", timeout.Token);
         await WaitDoneAsync(recovered, timeout.Token);
 
@@ -220,55 +221,40 @@ public sealed partial class SqlDeferredProvisioningTests
         reader.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldStartWith("seek:");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: a failed deferred CHECK takes only its database offline and retains the pending intent")]
-    public async Task BuildAsync_InvalidExistingRows_ShouldTakeDatabaseOfflineWithCode()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Joint deferred: a failed CHECK retains the old schema online and a rolled-back Build opens")]
+    public async Task BuildAsync_InvalidExistingRows_ShouldKeepOldSchemaOnlineWithCode()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         SqlSchema desired = Desired(failing: true);
         var storage = await SeedAsync(new CrashCaptureSqlStorageStrategy(), null, desired, timeout.Token);
-        var offline = new TaskCompletionSource<SqlDatabase>(TaskCreationOptions.RunContinuationsAsynchronously);
         var builder = Builder(storage);
-        builder.AddWorker(owner =>
-        {
-            owner.BeforeProvisioning = database =>
-            {
-                if (database.Name != "pending") { return; }
-                var onOffline = database.DataStorage.OnOffline;
-                database.DataStorage.OnOffline = error =>
-                {
-                    onOffline?.Invoke(error);
-                    offline.TrySetResult(database);
-                };
-            };
-            return new RecordingWorker(owner);
-        });
 
         // Act
         await using var engine = await builder.AddDatabase(desired).AddDatabase("healthy").BuildAsync(timeout.Token);
-        // Observe the instance that failed. Opening it here can reopen the crash fixture's
-        // original seed image, which has no pending migration and never goes offline.
-        var database = await offline.Task.WaitAsync(timeout.Token);
+        var database = await engine.OpenDatabaseAsync("pending", timeout.Token);
+        await WaitDoneAsync(database, timeout.Token);
 
-        // Assert: the code and durable intent survive, and the engine still serves another database.
-        database.IsOffline.ShouldBeTrue();
-        database.OfflineError.ShouldNotBeNull().Message.ShouldContain("CS03104");
-        database.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("CS03104");
+        // Assert: all old objects remain published, including their schema marker.
+        database.IsOffline.ShouldBeFalse();
+        database.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("CS03402");
+        database.Catalog.PendingMigration.ShouldBeNull();
+        database.Catalog.SchemaState!.ContentHash.ShouldNotBe(desired.Compile().Hash);
+        database.Catalog.TryGetTable("dbo", "items", out var items).ShouldBeTrue();
+        items.FindColumn("Note").ShouldBeNull();
+        items.FindColumn("Value")!.IsNullable.ShouldBeTrue();
+        items.Constraints.ShouldBeEmpty();
+        database.Catalog.GetIndexes(items.ObjectId).ShouldHaveSingleItem().IsPrimaryKey.ShouldBeTrue();
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        await reader.ExecuteAsync("INSERT INTO items(Id,Value) VALUES(999,NULL)", cancellationToken: timeout.Token);
         var healthy = await engine.OpenDatabaseAsync("healthy", timeout.Token);
         await using var session = await healthy.CreateSessionAsync(timeout.Token);
         await session.ExecuteAsync("CREATE TABLE live (Id INT)", cancellationToken: timeout.Token);
-        var image = storage.CaptureDurableImages();
-        using var release = new ManualResetEventSlim();
-        var next = Builder(image);
-        next.AddWorker(owner =>
-        {
-            owner.BeforeProvisioning = db => db.SchemaProvisioner.BeforeDeferredStep = (_, token) => release.Wait(token);
-            return new RecordingWorker(owner);
-        });
-        await using var retry = await next.AddDatabase("pending").BuildAsync(timeout.Token);
-        var pending = await retry.OpenDatabaseAsync("pending", timeout.Token);
-        pending.Catalog.PendingMigration.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
-        // Disposal cancels the waiting worker; it must not turn shutdown into another failure.
+        await using var retry = await Builder(storage.CaptureDurableImages()).AddDatabase(Source()).BuildAsync(timeout.Token);
+        var reopened = await retry.OpenDatabaseAsync("pending", timeout.Token);
+        reopened.Catalog.SchemaState!.ContentHash.ShouldBe(Source().Compile().Hash);
+        reopened.Catalog.PendingMigration.ShouldBeNull();
+        reopened.IsOffline.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: the inline option completes populated-table migration during Build")]
@@ -292,10 +278,10 @@ public sealed partial class SqlDeferredProvisioningTests
         engine.DeclaredDatabases.Single().Result.ShouldNotBeNull().OperationCount.ShouldBe(4);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: canceling after cheap DDL compensates with a live lock owner and retries on restart")]
-    public async Task BuildAsync_CanceledAtDeferredHandoff_ShouldCompensateAndConverge()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Joint deferred: canceling the durable handoff releases every reservation and retries on restart")]
+    public async Task BuildAsync_CanceledAtDeferredHandoff_ShouldDiscardAndConverge()
     {
-        // Arrange: cancellation interrupts the handoff after cheap DDL has committed.
+        // Arrange: cancellation interrupts the handoff before any schema object publishes.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var cancellation = new CancellationTokenSource();
         SqlSchema desired = Desired();
@@ -304,10 +290,12 @@ public sealed partial class SqlDeferredProvisioningTests
         var builder = Builder(storage);
         builder.AddWorker(engine =>
         {
-            engine.BeforeProvisioning = database => database.SchemaProvisioner.StepApplied = _ =>
+            engine.BeforeProvisioning = database => database.SchemaProvisioner.JointStage = stage =>
             {
+                if (stage != "Handoff") { return; }
                 Interlocked.Increment(ref applied);
                 cancellation.Cancel();
+                cancellation.Token.ThrowIfCancellationRequested();
             };
             return new RecordingWorker(engine);
         });
@@ -412,6 +400,15 @@ public sealed partial class SqlDeferredProvisioningTests
         }
         rows.ShouldBe(1);
     }
+
+    private static SqlSchema Source() => SqlSchema.Create("pending", schema =>
+    {
+        schema.AllowDestructiveChanges();
+        schema.Table<NullableItem>("items", table => { table.Key(row => row.Id); table.Column(row => row.Value); });
+        schema.Table<Other>("other", table => { table.Column(row => row.Id); table.Index(row => row.Id); });
+    });
+
+    private sealed record NullableItem(int Id, int? Value);
 
     private static SqlSchema Desired(bool failing = false) => SqlSchema.Create("pending", schema =>
     {

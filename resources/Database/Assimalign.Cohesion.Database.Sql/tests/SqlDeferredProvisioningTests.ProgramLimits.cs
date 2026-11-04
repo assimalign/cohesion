@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlDeferredProvisioningTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Deferred index build: oversized stored keys retain the pending intent and size diagnostic (#1266)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Deferred index build: oversized stored keys discard preparation online with the size diagnostic (#1266)")]
     public async Task BuildAsync_DeferredOversizedIndexKey_ShouldRefusePublicationWithSizeDiagnostic()
     {
         // Arrange
@@ -37,47 +37,38 @@ public sealed partial class SqlDeferredProvisioningTests
             storage = storage.CaptureDurableImages();
         }
         int deferredSteps = 0;
-        var offline = new TaskCompletionSource<SqlDatabase>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Exception? refusal = null;
         var builder = Builder(storage);
         builder.AddWorker(owner =>
         {
             owner.BeforeProvisioning = database =>
             {
                 database.SchemaProvisioner.BeforeDeferredStep = (_, _) => Interlocked.Increment(ref deferredSteps);
-                var onOffline = database.DataStorage.OnOffline;
-                database.DataStorage.OnOffline = error =>
-                {
-                    onOffline?.Invoke(error);
-                    offline.TrySetResult(database);
-                };
+                database.SchemaProvisioner.DeferredFailed = failure => refusal = failure;
             };
             return new RecordingWorker(owner);
         });
 
         // Act
         await using var engine = await builder.AddDatabase(Schema(true)).BuildAsync(timeout.Token);
-        var failed = await offline.Task.WaitAsync(timeout.Token);
+        var failed = await engine.OpenDatabaseAsync("pending", timeout.Token);
+        await WaitDoneAsync(failed, timeout.Token);
 
         // Assert
         deferredSteps.ShouldBe(1);
-        failed.IsOffline.ShouldBeTrue();
-        failed.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("CS03104");
-        var migration = failed.OfflineError.ShouldNotBeNull().InnerException.ShouldBeOfType<SqlSchemaMigrationException>();
-        migration.InnerException.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS05042");
-        // Offline catalogs refuse reads. Inspect the durable retry image before its next step.
-        var image = storage.CaptureDurableImages();
-        using var release = new ManualResetEventSlim();
-        var retry = Builder(image);
-        retry.AddWorker(owner =>
-        {
-            owner.BeforeProvisioning = database => database.SchemaProvisioner.BeforeDeferredStep = (_, token) => release.Wait(token);
-            return new RecordingWorker(owner);
-        });
-        await using var restarted = await retry.AddDatabase("pending").BuildAsync(timeout.Token);
+        failed.IsOffline.ShouldBeFalse();
+        failed.OfflineError.ShouldBeNull();
+        failed.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("CS03402");
+        failed.Catalog.PendingMigration.ShouldBeNull();
+        failed.Catalog.TryGetTable("dbo", "items", out var table).ShouldBeTrue();
+        failed.Catalog.GetIndexes(table.ObjectId).ShouldHaveSingleItem().ColumnNames.ShouldBe(["Id"]);
+        var migration = refusal.ShouldNotBeNull().ShouldBeOfType<SqlSchemaMigrationException>();
+        migration.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+        migration.InnerException.ShouldNotBeNull().InnerException.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS05042");
+        await using var restarted = await Builder(storage.CaptureDurableImages()).AddDatabase(Schema(false)).BuildAsync(timeout.Token);
         var pending = await restarted.OpenDatabaseAsync("pending", timeout.Token);
-        pending.Catalog.PendingMigration.ShouldNotBeNull().Steps.ShouldHaveSingleItem().Kind.ShouldBe("AddIndex");
-        pending.Catalog.TryGetTable("dbo", "items", out var table).ShouldBeTrue();
-        pending.Catalog.GetIndexes(table.ObjectId).ShouldHaveSingleItem().ColumnNames.ShouldBe(["Id"]);
+        pending.Catalog.PendingMigration.ShouldBeNull();
+        pending.Catalog.SchemaState!.ContentHash.ShouldBe(Schema(false).Compile().Hash);
     }
 
     private sealed record LargeKeyItem(int Id, string? Value);

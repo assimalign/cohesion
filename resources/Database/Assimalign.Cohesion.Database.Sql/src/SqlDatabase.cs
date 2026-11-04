@@ -81,14 +81,14 @@ public sealed partial class SqlDatabase : DatabaseInstance
         }
         if (pending.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))
         {
-            // SQL format 34 gates this new kind-9 meaning from earlier 49a-only readers.
+            // SQL format 37 fences every per-step 49a kind-9 intent.
             // Only the application that still declares this target may resume it.
             // Recovery reclaims abandoned kind-14 owners; matching Build replans their
             // preparation from the trusted old marker, retaining the durable intent.
             // A rolled-back application (or a plain open) discards it without fencing.
-            if (_engine.FindDeclaration(Name)?.Schema is not { } target ||
-                !string.Equals(target.Hash, pending.ContentHash, StringComparison.Ordinal))
-            { await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false); }
+            var target = _engine.FindDeclaration(Name)?.Schema;
+            if (target is null || !string.Equals(target.Hash, pending.ContentHash, StringComparison.Ordinal))
+            { await _schemaProvisioner.DiscardUnpublishedIntentAsync(target, cancellationToken).ConfigureAwait(false); }
             return;
         }
         var schema = SqlCompiledSchemaSerializer.Deserialize(pending.CanonicalDocument);

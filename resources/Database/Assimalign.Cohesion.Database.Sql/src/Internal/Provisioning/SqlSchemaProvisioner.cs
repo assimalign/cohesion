@@ -137,7 +137,11 @@ internal sealed partial class SqlSchemaProvisioner
             TraceStage("Planning", SqlProvisioningCodes.PolicyRefused);
             if (_catalog.PendingMigration is { } intent && !string.Equals(intent.ContentHash, schema.Hash, StringComparison.Ordinal))
             {
-                throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure, SqlProvisioningCodes.PolicyRefused, Describe()));
+                if (!deferDataScalingSteps)
+                {
+                    throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure, SqlProvisioningCodes.PolicyRefused, Describe()));
+                }
+                await DiscardMismatchedIntentAsync(schema, 0, cancellationToken).ConfigureAwait(false);
             }
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             if (IsApplied(recorded, schema))
@@ -176,8 +180,11 @@ internal sealed partial class SqlSchemaProvisioner
                     : SqlMigrationScriptGenerator.Generate(renderedPlan, current);
             }
             catch (DatabaseException refusal) { throw PlanningRefusal(schema, renderedPlan.Operations.Count, refusal); }
+            // Choose the complete job before publishing any inline step. The ordinary
+            // generator above deliberately keeps default-only changes refused until SQ-A6.
+            bool jointDeferred = deferDataScalingSteps && FindDeferredSteps(script).Count > 0;
             planning = false;
-            if (jointRewrite)
+            if (jointRewrite || jointDeferred)
             {
                 var preparation = BeginJointPreparation(cancellationToken);
                 try
@@ -219,16 +226,6 @@ internal sealed partial class SqlSchemaProvisioner
             }
             TraceStage("Prepare", SqlProvisioningCodes.StepFailed, stepCount: script.Steps.Count);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
-            var deferred = deferDataScalingSteps ? FindDeferredSteps(script) : [];
-
-            if (deferred.Count > 0)
-            {
-                // Even the first cheap DDL commit must be recoverable by database name
-                // alone. Keep the complete target durable until convergence clears it.
-                await _catalog.SavePendingMigrationAsync(
-                    CreateDeferredIntent(schema, deferred, script.Steps.Count), cancellationToken).ConfigureAwait(false);
-            }
-
             // This read-only context owns table locks across self-committing statements.
             // Its rollback only releases locks: no schema/data changes enlist in it.
             locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
@@ -237,27 +234,10 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 foreach (SqlMigrationScriptStep step in script.Steps)
                 {
-                    if (deferred.Contains(step))
-                    {
-                        continue;
-                    }
                     TraceStep(script, step);
                     await session.ExecuteAsync(step.Request, cancellationToken).ConfigureAwait(false);
                     applied.Add(step);
                     StepApplied?.Invoke(step);
-                }
-
-                if (deferred.Count > 0)
-                {
-                    // Release the completed inline tables, then reserve every pending table
-                    // before handing the engine to a caller. The worker owns this transaction.
-                    TraceStage("Handoff", SqlProvisioningCodes.StepFailed);
-                    await _database.Coordinator.RollbackAsync(locks, CancellationToken.None).ConfigureAwait(false);
-                    locks = null;
-                    await PrepareDeferredAsync(schema, deferred, script.Steps.Count, cancellationToken).ConfigureAwait(false);
-                    transferred = true;
-                    TraceOutcome("Deferred");
-                    return new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, applied.Count, WasAlreadyApplied: false);
                 }
 
                 // IF NOT EXISTS and concurrent ad-hoc DDL must not turn an unowned or
@@ -278,20 +258,7 @@ internal sealed partial class SqlSchemaProvisioner
             catch (Exception failure)
             {
                 TraceStepFailure(schema, script, failure);
-                CompensationResult compensation;
-                if (locks is null && applied.Count > 0 && !_database.IsOffline)
-                {
-                    // The deferred handoff released the inline reservation. Compensation
-                    // must acquire locks with a live transaction identity,
-                    // even when cancellation interrupted that handoff.
-                    locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None).ConfigureAwait(false);
-                    await using var compensationSession = _database.CreateSchemaSession(schema.Name, CancellationToken.None, locks.Sequence);
-                    compensation = await CompensateAsync(compensationSession, applied).ConfigureAwait(false);
-                }
-                else
-                {
-                    compensation = await CompensateAsync(session, applied).ConfigureAwait(false);
-                }
+                CompensationResult compensation = await CompensateAsync(session, applied).ConfigureAwait(false);
 
                 // A canceled token can also surface as the failure of the step it interrupted (a
                 // commit whose record could not be written is an aborted transaction), so the

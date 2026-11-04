@@ -852,6 +852,9 @@
   <data name="ValidateSupportedSchemaFailure" xml:space="preserve"><value>{0}: the database cannot apply schema '{1}'.</value></data>
   <data name="ValidateSupportedSchemaFailure2" xml:space="preserve"><value>{0}: SQL schema '{1}' declares {2}.</value></data>
   <data name="ValidateSupportedSchemaFailure3" xml:space="preserve"><value>{0}: {1}: SQL schema '{2}': {3} Nothing was changed.</value></data>
+  <data name="JointIntentDiscarded" xml:space="preserve">
+    <value>The unpublished migration target or resolved route no longer matches; preparation was discarded and the stored schema remains online.</value>
+  </data>
   <data name="JointMigrationFailed" xml:space="preserve">
     <value>Unpublished joint migration failed. The published schema is unchanged; correct the cause and retry.</value>
   </data>

@@ -201,7 +201,11 @@ internal sealed partial class SqlDeclaredDatabase
         // CHECK that calls a function this engine does not register opens, and fails each write;
         // for a database the engine declares, the application that declares it removed the
         // function, so its build fails before it accepts work.
-        if (database.Definitions.FindUnresolved(cancellationToken) is { } unresolved)
+        var preparation = database.SchemaProvisioner.Deferred?.JointPlan;
+        var validation = preparation is null
+            ? (Definition: database.Definitions.FindUnresolved(cancellationToken), Domain: database.Definitions.FindUnresolvedDomain(cancellationToken))
+            : database.Definitions.FindUnresolvedPreparation(preparation, cancellationToken);
+        if (validation.Definition is { } unresolved)
         {
             throw new SqlSchemaMigrationException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredDatabaseProvisionAsyncFailure2, engine.Name, Name, unresolved.Describe()),
@@ -210,7 +214,7 @@ internal sealed partial class SqlDeclaredDatabase
 
         // The same rule for a column of a domain (phase E3): the database opens and writes to the
         // column fail, but the application that declares the database removed the domain.
-        if (database.Definitions.FindUnresolvedDomain(cancellationToken) is { } domain)
+        if (validation.Domain is { } domain)
         {
             throw new SqlSchemaMigrationException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredDatabaseProvisionAsyncFailure3, engine.Name, Name, domain.Describe()),

@@ -243,9 +243,9 @@ structured-carrier messages remain unprefixed.
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
-| COHSQLP004 | CS03104 | Schema/constraints |
+| COHSQLP004 | CS03104 | Inline per-step schema application/compensation failure; deferred jobs use CS03402 |
 | COHSQLP005 | CS03105 | Schema/constraints |
-| New (#1447, SQ-A3) | CS03402 | Joint preparation or space admission failed; old schema retained, unsafe-storage latches still apply |
+| New (#1447, SQ-A3) | CS03402 | Joint preparation/space admission failed or unpublished target/route discarded; old schema retained, unsafe-storage latches still apply |
 | New (#1447, SQ-A3 fix) | CS03403 | Joint publication commit unconfirmed; recovery determines old/new schema |
 | New (#1447, SQ-A3 fix) | CS03404 | Session relation creation or table rename names an unpublished table reserved by a pending joint plan |
 | COHSQLS001 | CS03201 | Schema/constraints |
