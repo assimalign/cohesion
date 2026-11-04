@@ -180,8 +180,8 @@ internal sealed partial class SqlPlanner
         {
             if (outputSlots is null || !outputSlots.ContainsKey(expression))
             {
-                // Ordinary nonvolatile calls still reach FindIndex. In particular, expression
-                // keys on the allocation-guard path need no extra tree walk or retained state.
+                // Ordinary nonvolatile calls still reach FindIndex. COUNT(*) and SUM(column)
+                // walk without allocating; a compound input costs one iterator per key.
                 for (int i = 0; i < aggregates.Count; i++)
                 {
                     if (!HasVolatileAggregateInputs(aggregates[i].Call, evaluator)) { continue; }
@@ -291,7 +291,7 @@ internal sealed partial class SqlPlanner
         }
     }
 
-    /// <summary>Matches whole keys before allocating aggregate slots, as PostgreSQL parse_clause.c:2205-2206,2815-2824 does.</summary>
+    /// <summary>Matches whole keys before allocating aggregate slots, as PostgreSQL parse_clause.c:2205-2206,2815-2826 does.</summary>
     private void ReuseKeyAggregateSlots(SqlExpression key, SqlSelectExpression select,
         SqlExpressionEvaluator evaluator, Dictionary<SqlExpression, int> slots,
         IReadOnlyDictionary<SqlExpression, int>? outputSlots)
@@ -321,7 +321,7 @@ internal sealed partial class SqlPlanner
 
         bool Match(SqlExpression counterpart)
         {
-            if (ReferenceEquals(key, counterpart) || !SameGroupExpression(key, counterpart, evaluator) ||
+            if (ReferenceEquals(key, counterpart) || ContainsOutput(counterpart) || !SameGroupExpression(key, counterpart, evaluator) ||
                 !MapAggregateSlots(key, counterpart, false)) { return false; }
             return MapAggregateSlots(key, counterpart, true);
         }
@@ -390,7 +390,8 @@ internal sealed partial class SqlPlanner
 
     /// <summary>
     /// Compares expression structure after column binding. Qualified and bare
-    /// references to the same column match; different operators never do.
+    /// references to the same column match, except within child-query bodies and
+    /// window expressions, which compare by spelling; different operators never do.
     /// </summary>
     private bool SameGroupExpression(SqlExpression left, SqlExpression right, SqlExpressionEvaluator evaluator)
     {

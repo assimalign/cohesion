@@ -175,8 +175,8 @@ internal sealed partial class SqlPlanner
         {
             if (outputSlots is null || !outputSlots.ContainsKey(expression))
             {
-                // Ordinary nonvolatile calls still reach FindIndex. In particular, expression
-                // keys on the allocation-guard path need no extra tree walk or retained state.
+                // Ordinary nonvolatile calls still reach FindIndex. COUNT(*) and SUM(column)
+                // walk without allocating; a compound input costs one iterator per key.
                 for (int i = 0; i < aggregates.Count; i++)
                 {
                     if (!HasVolatileAggregateInputs(aggregates[i].Call, evaluator)) { continue; }
@@ -196,6 +196,7 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlFunctionCallExpression grouping && IsGrouping(grouping))
             {
+                if (slots.ContainsKey(grouping)) { return; }
                 if (evaluator.OuterGrouping(grouping) is not null) { return; }
                 var arguments = new int[grouping.Arguments.Count];
                 for (int i = 0; i < arguments.Length; i++)
@@ -221,6 +222,13 @@ internal sealed partial class SqlPlanner
             if (expression is SqlWindowExpression window)
             {
                 foreach (var argument in Children(window.Function)) { if (argument is not SqlStarExpression) { BindSlots(argument); } }
+                // An enclosing scalar expression validates inline keys before BindKey runs.
+                // Register masks now; aggregate slots still bind after the select list.
+                if (window.Specification is { } specification)
+                {
+                    foreach (var key in specification.PartitionBy) { BindKeyGroupingCalls(key); }
+                    foreach (var key in specification.OrderBy) { BindKeyGroupingCalls(key.Expression); }
+                }
                 return;
             }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
@@ -314,6 +322,17 @@ internal sealed partial class SqlPlanner
                 RuntimeHelpers.EnsureSufficientExecutionStack();
                 return outputSlots is not null && (outputSlots.ContainsKey(candidate) || Children(candidate).Any(ContainsOutput));
             }
+        }
+
+        void BindKeyGroupingCalls(SqlExpression expression)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is SqlFunctionCallExpression call)
+            {
+                if (IsGrouping(call)) { BindSlots(call); return; }
+                if (IsAggregate(call)) { return; }
+            }
+            foreach (var child in Children(expression)) { BindKeyGroupingCalls(child); }
         }
     }
 

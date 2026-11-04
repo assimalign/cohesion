@@ -243,6 +243,56 @@ public sealed partial class SqlAggregateExecutionTests
         CheckRows(rows, partition ? [[1, 2L, 2L], [2, 1L, 1L], [3, 2L, 2L]] : [[1, 2L, 2L], [2, 1L, 1L], [3, 3L, 3L]]);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Aggregate sharing: query ordering reads the matching displayed aggregate slot (#1763)")]
+    [InlineData("g", false)]
+    [InlineData("g", true)]
+    [InlineData("GROUPING SETS ((g))", false)]
+    [InlineData("GROUPING SETS ((g))", true)]
+    public async Task ExecuteAsync_QueryAggregateOrdering_ShouldReadMatchedOutput(string grouping, bool maximum)
+    {
+        // Arrange
+        int calls = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("query-aggregate-key-sharing");
+        builder.Functions.Add(SqlScalarFunction.Create<int, int>("observe", value => ++calls % 2 == 1 ? value : -value));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("sharing");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(id INT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,1),(2,2),(3,3);");
+        string extra = maximum ? ", MAX(observe(id))" : "";
+        string ordering = maximum ? "MAX(observe(id))" : "SUM(observe(id))";
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT g, SUM(observe(id)){extra} FROM t GROUP BY {grouping} ORDER BY {ordering};");
+
+        // Assert
+        calls.ShouldBe(maximum ? 6 : 3);
+        CheckRows(rows, maximum ? [[3,3m,-3], [2,2m,-2], [1,1m,-1]] : [[2,-2m], [1,1m], [3,3m]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Aggregate sharing: an earlier key containing an output alias cannot supply slots (#1763)")]
+    [InlineData("g")]
+    [InlineData("GROUPING SETS ((g))")]
+    public async Task ExecuteAsync_AliasCounterpartKey_ShouldRetainIndependentAggregates(string grouping)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("keys");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SEQUENCE s;");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT, g INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,1),(2,1),(3,1);");
+
+        // Act
+        var rows = await RowsAsync(session, $"SELECT SUM(nextval('s')) AS g FROM t GROUP BY {grouping} " +
+            "ORDER BY g + SUM(nextval('s')), t.g + SUM(nextval('s'));");
+        var sequence = await RowsAsync(session, "SELECT currval('s');");
+
+        // Assert: three independent states receive 1/4/7, 2/5/8 and 3/6/9.
+        rows.ShouldHaveSingleItem().ShouldBe([12m]);
+        sequence.ShouldHaveSingleItem().ShouldBe([9L]);
+    }
+
     public static IEnumerable<object[]> WholeAggregateKeys()
     {
         foreach (string grouping in new[] { " GROUP BY g", " GROUP BY GROUPING SETS ((g))" })

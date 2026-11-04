@@ -638,6 +638,27 @@ public sealed class SqlLanguageConformanceTests
         sequence.ShouldHaveSingleItem()[0].ShouldBe(allocations);
     }
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: wrapped inline window keys can read grouping masks (#1763)")]
+    [InlineData("SELECT ROW_NUMBER() OVER (ORDER BY GROUPING(p), p) + 1 FROM t GROUP BY ROLLUP(p) ORDER BY 1", false)]
+    [InlineData("SELECT p, CASE WHEN GROUPING(p) = 0 THEN RANK() OVER (PARTITION BY GROUPING(p) ORDER BY SUM(v) DESC) END FROM t GROUP BY ROLLUP(p) ORDER BY GROUPING(p), 2", true)]
+    public async Task Select_GroupingWindowReports_ShouldReturnDetailAndSubtotalRows(string sql, bool detail)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-grouping-window-conformance", new());
+        var database = await engine.CreateDatabaseAsync("audit", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(p INT,v INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,10),(1,20),(2,40),(3,1);");
+
+        // Act
+        var rows = await RowsAsync(session, sql);
+
+        // Assert
+        object?[][] expected = detail ? [[2,1L], [1,2L], [3,3L], [null,null]] : [[2L], [3L], [4L], [5L]];
+        rows.Count.ShouldBe(expected.Length);
+        for (int i = 0; i < expected.Length; i++) { rows[i].ShouldBe(expected[i]); }
+    }
+
     /// <summary>Applies the full Int64 count range consistently to every materialized SELECT shape.</summary>
     /// <param name="query">The ordered query producing three rows.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - LIMIT/OFFSET: Int64 counts preserve the row window for every plan shape")]

@@ -249,8 +249,7 @@ internal sealed partial class SqlPlanner
         bool SameAggregateSlots(SqlExpression left, SqlExpression right)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
-            // Equal syntax can read different grouped results when volatile inputs prevent
-            // aggregate sharing. Keep their partitions and sort prefixes independent too.
+            // Whole-key reuse gives equal keys equal slots; this guards that invariant.
             if (left is SqlFunctionCallExpression call && IsAggregate(call))
             {
                 return slots.TryGetValue(left, out int leftSlot) && slots.TryGetValue(right, out int rightSlot)

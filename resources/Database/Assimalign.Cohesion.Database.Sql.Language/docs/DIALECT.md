@@ -317,8 +317,10 @@ the engine's common-type implicit-cast rules and registered casts; unknown text 
 the selected value type during binding, including unused defaults, with ordinary CAST diagnostics. Offsets and bucket counts accept the engine's signed integer types,
 including BIGINT, with overflow-safe navigation through the full Int64 range.
 NEXT VALUE FOR retains its existing CS03076 exclusion in window arguments and keys;
-PostgreSQL-style nextval() keeps its ordinary per-call evaluation, except that equal window
-keys are one key (below), as in PostgreSQL (parse_agg.c:1103-1112).
+PostgreSQL-style nextval() keeps its ordinary per-call evaluation, except that windows with equal
+specifications, or a sort that prefixes another's, evaluate a scalar key once (below), as PostgreSQL
+does for equal specifications (parse_agg.c:1103-1112). Equal scalar keys in other windows evaluate
+separately; PostgreSQL's target matching evaluates them once (parse_clause.c:2205-2206,2815-2826).
 If the first NTILE argument is NULL, the entire partition returns NULL even when later
 rows' bucket expressions differ. This follows the SQ-W1 contract; PostgreSQL can retry
 initialization after a NULL argument (windowfuncs.c:424-440).
@@ -640,8 +642,11 @@ name::regclass resolve a sequence to its BIGINT object identity for these calls;
 REGCLASS is limited to sequences and is not a storable column type. References
 resolve for each statement rather than pinning names across DROP/recreate.
 NULL arguments propagate NULL. Calls are volatile, evaluated left to right once
-per reached row; repeated nextval calls each allocate, except when equal whole window keys
-reuse one key or equal whole aggregate keys reuse a target's aggregate results (below). Multi-row VALUES assigns
+per reached row; repeated nextval calls each allocate, except that windows with equal specifications,
+or a sort that prefixes another's, evaluate a scalar key once, as PostgreSQL does for equal
+specifications (parse_agg.c:1103-1112). Equal scalar keys in other windows evaluate separately;
+PostgreSQL's target matching evaluates them once (parse_clause.c:2205-2206,2815-2826).
+Equal whole aggregate keys reuse a target's aggregate results (below). Multi-row VALUES assigns
 values in written tuple and expression order. INSERT SELECT assigns in the
 source's evaluation order. Independent sequence outputs evaluate after ORDER BY and before
 LIMIT/OFFSET, including ordering by another output's alias or ordinal; these independent outputs
@@ -2810,7 +2815,7 @@ larger unmatched key. A whole query ORDER BY key or whole window PARTITION BY / 
 inline or named, that is structurally equal (SameGroupExpression) to a select-list expression
 or an earlier whole key reuses that occurrence's aggregate results, even with volatile inputs.
 PostgreSQL matches those whole keys during parsing, before aggregate sharing runs
-(parser/parse_clause.c:2205-2206,2815-2824; parser/parse_agg.c:1103-1112);
+(parser/parse_clause.c:2205-2206,2815-2826; parser/parse_agg.c:1103-1112);
 optimizer/prep/prepagg.c:387-389 refuses sharing for the remaining volatile occurrences.
 ORDER BY aliases and ordinals still read completed outputs; scalar output evaluation is unchanged.
 Stable and Immutable inputs retain sharing everywhere. A cast itself is not a volatile input because
@@ -2822,6 +2827,14 @@ each child query is a separate SubPlan, so equal() fails (optimizer/plan/planner
 optimizer/prep/prepagg.c:416). Equal complete child queries still match inside a whole key before
 that refusal applies. Window calls retain separate aggregates even when they share a sort;
 equal whole window keys reuse aggregate slots and allow the windows and sort prefixes to merge.
+
+A key naming an output alias never matches. Child-query bodies and window expressions compare by
+spelling, so `t.id` against `id` stays independent; PostgreSQL compares analyzed trees and matches them.
+A matched key's independent child query still runs once under eager statement preparation and its
+value is unread, so the key's child can advance a sequence that PostgreSQL leaves alone. The rule covers
+aggregates only: a window function's own volatile input in a whole ORDER BY window expression evaluates
+per window call.
+
 The condition binds over input columns and may reference enclosing columns or contain
 subqueries; aggregates local to those child queries belong to the child scope. Calls owned
 entirely by an enclosing query retain the existing outer-only aggregate CK00001 boundary.
