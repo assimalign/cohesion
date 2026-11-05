@@ -1,5 +1,8 @@
 # Documents client design
 
+A runtime stack refusal crosses TCP as CD05021/ExecutionFailure. The failed statement leaves the
+connection open, and the exact authenticated server session accepts the next query (#1803).
+
 ## Savepoint lifecycle conformance (#1726, XT-5)
 
 Explicit wire lifecycle probes require canceled-before-dispatch controls to take no kernel admission;

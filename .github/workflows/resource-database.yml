@@ -6,6 +6,7 @@ on:
       # acceptance fixture, and the engine/wire streaming fixtures under Blob and Blob.Client.
       # Fixtures sit inside the projects whose tests drive them.
       # Includes the five model Protocol src/tests/shared trees and the client-only AOT canary.
+      # Includes Storage/fixtures/Assimalign.Cohesion.Database.Storage.TempFixture, the killed-process spill fixture.
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
@@ -38,6 +39,7 @@ on:
       # acceptance fixture, and the engine/wire streaming fixtures under Blob and Blob.Client.
       # Fixtures sit inside the projects whose tests drive them.
       # Includes the five model Protocol src/tests/shared trees and the client-only AOT canary.
+      # Includes Storage/fixtures/Assimalign.Cohesion.Database.Storage.TempFixture, the killed-process spill fixture.
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
