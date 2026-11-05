@@ -370,7 +370,7 @@ internal sealed partial class SqlPlanExecutor
         SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots, CancellationToken cancellationToken,
         SqlRowCount? limit = null, SqlRowCount? offset = null, int? retainRows = null)
     {
-        long outputBytes = 0, sourceBytes = 0, sortedBytes = 0;
+        SqlSelectMemory outputBytes = default, sourceBytes = default, sortedBytes = default;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -414,7 +414,7 @@ internal sealed partial class SqlPlanExecutor
                     sources.Add(orderedRow, keys);
                 }
                 var selected = sources.Finish(resolveEmptyCollations: false, includeOffset: true);
-                sourceBytes = AdmitSelectRows(selected, cancellationToken);
+                sourceBytes.Bytes = AdmitSelectRows(selected, cancellationToken);
                 var projected = new List<object?[]>(selected.Count);
                 foreach (var source in selected)
                 {
@@ -586,7 +586,7 @@ internal sealed partial class SqlPlanExecutor
     private List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
-        long keyBytes = 0, sortedBytes = 0;
+        SqlSelectMemory keyBytes = default, sortedBytes = default;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -637,7 +637,7 @@ internal sealed partial class SqlPlanExecutor
                     PollCancellation();
                     keys[i] = evaluator.Evaluate(orderBy[i].Key, row);
                 }
-                if (ChargesAdditionalSelectBuffers) { ReserveSelectMemory(ref keyBytes, 64L + SqlHashJoinTable.RowBytes(keys), includeWindow: true); }
+                RetainSelectRow(ref keyBytes, keys, includeWindow: true, overhead: 64);
                 // Admit the fixed sorted-output slot with its input, before ToList retains it.
                 RetainSelectRow(ref sortedBytes, row, includeWindow: true);
                 return keys;
@@ -656,7 +656,7 @@ internal sealed partial class SqlPlanExecutor
     private List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, Collation[]? collations = null)
     {
-        long seenBytes = 0;
+        SqlSelectMemory seenBytes = default;
         try
         {
             _definitions.ObserveSelectRetention?.Invoke("distinct", false, rows.Count);
@@ -674,7 +674,7 @@ internal sealed partial class SqlPlanExecutor
                     var row = rows[i];
                     if (!seen.Contains(row))
                     {
-                        ReserveSelectMemory(ref seenBytes, 64L + SqlHashJoinTable.RowBytes(row));
+                        RetainSelectRow(ref seenBytes, row, overhead: 64);
                         seen.Add(row); rows[count++] = row;
                     }
                 }

@@ -7,7 +7,7 @@ internal sealed partial class SqlPlanExecutor
 {
     private long SelectBufferBudget => _isDml || RecursiveState is not null ? 0 : _definitions.StatementMemoryBudget;
 
-    // Plain operators own byte counts only. Existing ledgers remain exclusive.
+    // Plain buffers own their bytes and wide-cell identities. Existing ledgers remain exclusive.
     private bool ChargesSelectBuffers => ChargesAdditionalSelectBuffers && SqlWindowMemory.For(_metrics) is null;
 
     // These buffers are absent from the window ledger.
@@ -20,12 +20,22 @@ internal sealed partial class SqlPlanExecutor
         reserved += bytes;
     }
 
-    private void RetainSelectRow(ref long reserved, object?[] row, bool includeWindow = false)
+    private void RetainSelectRow(ref SqlSelectMemory reserved, object?[] row, bool includeWindow = false, long overhead = 32)
     {
         if (!(includeWindow ? ChargesAdditionalSelectBuffers : ChargesSelectBuffers) || _metrics is null) { return; }
-        long bytes = 32L + SqlHashJoinTable.RowBytes(row);
+        long bytes = reserved.RowBytes(row, out bool wide, overhead);
         _metrics.ReservePlainSelectMemory(bytes, _definitions.StatementMemoryBudget);
-        reserved += bytes;
+        reserved.Bytes += bytes;
+        if (wide) { reserved.AddRow(row); }
+    }
+
+    private void RetainSelectValue(ref SqlSelectMemory reserved, object? value, long overhead = 0)
+    {
+        if (!ChargesSelectBuffers || _metrics is null) { return; }
+        long bytes = overhead + reserved.ValueBytes(value, out bool wide);
+        _metrics.ReservePlainSelectMemory(bytes, _definitions.StatementMemoryBudget);
+        reserved.Bytes += bytes;
+        if (wide) { reserved.AddValue(value!); }
     }
 
     private void ReleaseSelectMemory(ref long reserved)
@@ -34,15 +44,24 @@ internal sealed partial class SqlPlanExecutor
         reserved = 0;
     }
 
+    private void ReserveSelectMemory(ref SqlSelectMemory reserved, long bytes, bool includeWindow = false)
+        => ReserveSelectMemory(ref reserved.Bytes, bytes, includeWindow);
+
+    private void ReleaseSelectMemory(ref SqlSelectMemory reserved)
+    {
+        _metrics?.ReleasePlainSelectMemory(reserved.Bytes);
+        reserved.Clear();
+    }
+
     private long AdmitSelectRows(IReadOnlyList<object?[]> rows, CancellationToken cancellationToken, bool includeWindow = false)
     {
         if (!(includeWindow ? ChargesAdditionalSelectBuffers : ChargesSelectBuffers) || _metrics is null) { return 0; }
-        long reserved = 0;
+        SqlSelectMemory reserved = default;
         try
         {
             for (int i = 0; i < rows.Count; i++)
             { cancellationToken.ThrowIfCancellationRequested(); RetainSelectRow(ref reserved, rows[i], includeWindow); }
-            return reserved;
+            return reserved.Bytes;
         }
         catch { ReleaseSelectMemory(ref reserved); throw; }
     }
@@ -51,14 +70,14 @@ internal sealed partial class SqlPlanExecutor
         => ChargesSelectBuffers && result is SqlMaterializedResultSet rows && _metrics is not null
             ? rows.ReserveMemory(_metrics, _definitions.StatementMemoryBudget, cancellationToken, plainSelect: true) : 0;
 
-    private void ReleaseSelectRows(ref long reserved, List<object?[]> rows)
+    private void ReleaseSelectRows(ref SqlSelectMemory reserved, List<object?[]> rows)
     {
-        if (reserved == 0) { return; }
+        if (reserved.Bytes == 0) { return; }
         foreach (var row in rows)
         {
-            long bytes = 32L + SqlHashJoinTable.RowBytes(row);
+            long bytes = reserved.RemoveRow(row);
             _metrics!.ReleasePlainSelectMemory(bytes);
-            reserved -= bytes;
+            reserved.Bytes -= bytes;
         }
     }
 }

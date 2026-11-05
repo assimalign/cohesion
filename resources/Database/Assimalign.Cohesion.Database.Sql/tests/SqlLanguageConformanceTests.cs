@@ -51,6 +51,41 @@ public sealed class SqlLanguageConformanceTests
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: wide output and key aliases pay once within the collector (#1776)")]
+    [InlineData(false, 727L, true, 592L)]
+    [InlineData(false, 728L, false, 728L)]
+    [InlineData(true, 727L, true, 592L)]
+    [InlineData(true, 728L, false, 728L)]
+    public async Task ExecuteAsync_SharedWideMemoryCorpus_ShouldUseIdentityWithinBuffer(bool forceBase, long budget, bool refuses, long peak)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("wide-memory-conformance");
+        builder.Options.StatementMemoryBudget = budget;
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(k INT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(3),(2),(1)");
+        database.Definitions.ForceSelectRetentionBasePath = forceBase;
+        string payload = new('x', 113);
+
+        // Act / Assert
+        async Task Execute()
+        {
+            await using var rows = (DatabaseResultSet)await session.ExecuteAsync("SELECT @p AS p FROM t ORDER BY k,p",
+                new Dictionary<string, object?> { ["p"] = payload }, CancellationToken.None);
+            int count = 0;
+            await foreach (var row in rows.GetRowsAsync(CancellationToken.None)) { row.GetValue(0).ShouldBeSameAs(payload); count++; }
+            count.ShouldBe(3);
+        }
+        if (refuses)
+        { (await Should.ThrowAsync<DatabaseException>(Execute)).Diagnostics[0].Code.ShouldBe("CS05067"); }
+        else { await Execute(); }
+        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(peak);
+        session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
+        session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Conformance: bound MERGE above the heuristic limit reports its written normalization (#1629)")]
     public async Task ExecuteAsync_LargeBoundMergeCorpus_ShouldKeepReorderedFalse()
     {

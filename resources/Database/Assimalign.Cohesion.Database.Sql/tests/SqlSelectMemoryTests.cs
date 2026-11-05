@@ -95,7 +95,7 @@ public sealed partial class SqlSelectMemoryTests
             [1152, 992, 2016, 1856],
             [1432, 1256, 1736, 1560],
             [368, 272, 368, 272],
-            [17072, 16936, 17072, 16936],
+            [17328, 17192, 17328, 17192],
             [4272, 4248, 4272, 4248],
             [4676, 4652, 4676, 4652],
             [4176, 4152, 4176, 4152],
@@ -314,8 +314,8 @@ public sealed partial class SqlSelectMemoryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT memory: top N charges binary clones and credits null replacements (#1776)")]
-    [InlineData(4343L, true)]
-    [InlineData(4344L, false)]
+    [InlineData(4407L, true)]
+    [InlineData(4408L, false)]
     public async Task ExecuteAsync_BinaryHeapReplacement_ShouldChargeRealClones(long budget, bool refuses)
     {
         // Arrange: delivery clones shared binary cells. NULL replaces a binary candidate
@@ -342,7 +342,7 @@ public sealed partial class SqlSelectMemoryTests
         else
         {
             await Read(session, sql);
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(4344);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(4408);
         }
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
     }
@@ -367,17 +367,19 @@ public sealed partial class SqlSelectMemoryTests
         _output.WriteLine($"WINDOW_CACHE|{ordinary}|{session.LastStatementMetrics.PeakHashMemoryBytes}");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - SELECT memory: shared payload overcharge remains explicit until SQ-L1c (#1776)")]
-    public async Task ExecuteAsync_SharedWideSort_ShouldPinRepeatedValueCharge()
+    [Theory(DisplayName = "Cohesion Test [Sql] - SELECT memory: one wide sort payload charges once across outputs and keys (#1776)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_SharedWideSort_ShouldPinRepeatedValueCharge(bool forceBase)
     {
         // Arrange: one 2 MiB string is shared by every output and a second sort key.
         var builder = SqlDatabaseEngine.CreateBuilder("shared-wide-charge");
-        builder.Options.StatementMemoryBudget = 32L * 1024 * 1024 * 1024;
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t(k INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 4096).Select(i => $"({i})")), cancellationToken: CancellationToken.None);
+        database.Definitions.ForceSelectRetentionBasePath = forceBase;
         long before = GC.GetTotalMemory(forceFullCollection: true);
         string payload = new('x', 1048576);
         long retainedHeap = 0;
@@ -385,7 +387,7 @@ public sealed partial class SqlSelectMemoryTests
         {
             SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
             {
-                if (metrics.HashMemoryBytes is 17180622848L or 25770917888L)
+                if (metrics.HashMemoryBytes == 2654296)
                 { retainedHeap = GC.GetTotalMemory(forceFullCollection: true) - before; }
             };
             // Act
@@ -394,12 +396,13 @@ public sealed partial class SqlSelectMemoryTests
             int count = 0;
             await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
             { row.GetValue(0).ShouldBeSameAs(payload); count++; }
-            // Assert: the output and key buffers each charge the shared value.
+            // Assert: the collector owns one wide identity across outputs and keys.
             count.ShouldBe(4096);
             var metrics = session.LastStatementMetrics.ShouldNotBeNull();
             _output.WriteLine($"SHARED_RATIO|charged={metrics.PeakHashMemoryBytes}|retainedHeap={retainedHeap}|ratio={metrics.PeakHashMemoryBytes / (double)retainedHeap:F2}");
-            metrics.PeakHashMemoryBytes.ShouldBe(17180622848);
+            metrics.PeakHashMemoryBytes.ShouldBe(2654296);
             metrics.HashMemoryBytes.ShouldBe(0);
+            metrics.PlainSelectMemoryBytes.ShouldBe(0);
         }
         finally { SqlStatementMetrics.AfterMemoryReservation = null; }
     }
@@ -429,13 +432,13 @@ public sealed partial class SqlSelectMemoryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT memory: wire-sized projections pin their independent statement cost (#1776)")]
-    [InlineData(false, false, 35654544L, 35654544L)]
-    [InlineData(false, true, 35654544L, 71307336L)]
-    [InlineData(true, false, 65016168L, 136322328L)]
+    [InlineData(false, false, 35656720L, 35656720L)]
+    [InlineData(false, true, 35657112L, 35657112L)]
+    [InlineData(true, false, 2103128L, 2103128L)]
     public async Task ExecuteAsync_WireSizedProjection_ShouldPinStatementCost(bool manyRows, bool explicitTransaction, long expectedRefusal, long expectedPeak)
     {
         // Arrange: retain the wire tests' complete inputs and outputs; only their grant differs.
-        // Shared payload repetition is deliberate in SQ-L1b; SQ-L1c changes that cost.
+        // Wide identities share within each buffer, including constant-folded projections.
         long[] peaks = new long[2];
         for (int round = 0; round < 2; round++)
         {
@@ -459,12 +462,7 @@ public sealed partial class SqlSelectMemoryTests
                     "SELECT @payload AS payload FROM c a CROSS JOIN c b LIMIT 65"
                 : $"SELECT {columns} FROM users ORDER BY id";
             // Act
-            if (round == 0 && (manyRows || explicitTransaction))
-            {
-                var failure = await Should.ThrowAsync<DatabaseException>(ReadOutput);
-                failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
-            }
-            else { await ReadOutput(); }
+            await ReadOutput();
             peaks[round] = session.LastStatementMetrics!.PeakHashMemoryBytes;
             session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
             _output.WriteLine($"WIRE_COST|many={manyRows}|transaction={explicitTransaction}|round={round}|peak={peaks[round]}");

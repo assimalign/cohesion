@@ -419,7 +419,7 @@ internal sealed partial class SqlPlanExecutor
     private DatabaseResult ProjectUnorderedDistinct(IEnumerable<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         SqlRowCount? limit, SqlRowCount? offset, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
-        long retainedBytes = 0;
+        SqlSelectMemory retainedBytes = default, seenBytes = default;
         try
         {
             _definitions.ObserveSelectRetention?.Invoke("distinct", true, 0);
@@ -437,7 +437,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     if (!seen.Contains(output))
                     {
-                        ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(output));
+                        RetainSelectRow(ref seenBytes, output, overhead: 64);
                         RetainSelectRow(ref retainedBytes, output);
                         seen.Add(output); rows.Add(output);
                     }
@@ -450,7 +450,7 @@ internal sealed partial class SqlPlanExecutor
             _definitions.ObserveSelectRetention?.Invoke("distinct", true, rows.Count);
             return MaterializeProjected(projections, ApplyRowWindow(rows, limit, offset));
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); }
+        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
     }
 
     // As in grouped consumption, stack-guard failures wait for the base input drain.
@@ -490,7 +490,7 @@ internal sealed partial class SqlPlanExecutor
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, int? retainRows)
     {
-        long retainedBytes = 0;
+        SqlSelectMemory retainedBytes = default, seenBytes = default;
         try
         {
             var rows = new List<object?[]>();
@@ -527,7 +527,7 @@ internal sealed partial class SqlPlanExecutor
                                 {
                                     if (!seen.Contains(output))
                                     {
-                                        ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(output));
+                                        RetainSelectRow(ref seenBytes, output, overhead: 64);
                                         RetainSelectRow(ref retainedBytes, output);
                                         seen.Add(output); rows.Add(output);
                                     }
@@ -580,6 +580,6 @@ internal sealed partial class SqlPlanExecutor
             if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, rows.Count); }
             return MaterializeProjected(plan.Projections, rows);
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); }
+        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
     }
 }

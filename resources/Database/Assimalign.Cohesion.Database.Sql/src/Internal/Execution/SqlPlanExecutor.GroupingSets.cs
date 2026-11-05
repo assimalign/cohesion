@@ -18,7 +18,8 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteGroupingSetsAsync(SqlGroupingSetsPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        long inputBytes = 0, matchBytes = 0;
+        long inputBytes = 0;
+        SqlSelectMemory matchBytes = default;
         try
         {
             await using var input = (DatabaseResultSet)await (RecursiveState is null
@@ -242,7 +243,7 @@ internal sealed partial class SqlPlanExecutor
         Dictionary<object?[], GroupAggregateState[]> groups, SqlExpressionEvaluator evaluator,
         Collation[] aggregateCollations, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        long matchBytes = 0;
+        SqlSelectMemory matchBytes = default;
         try
         {
             var keys = plan.Keys;

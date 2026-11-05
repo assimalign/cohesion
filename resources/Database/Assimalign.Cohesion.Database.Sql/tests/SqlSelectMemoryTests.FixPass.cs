@@ -69,15 +69,15 @@ public sealed partial class SqlSelectMemoryTests
         _output.WriteLine($"WINDOW_INNER|{success.Peak}|{refused.Peak}|{refused.Code}|records={refused.Records}|pairs={refused.Pairs}");
         refused.Code.ShouldBe("CS05067");
         exact.Code.ShouldBeNull();
-        success.Peak.ShouldBe(34656);
-        refused.Peak.ShouldBe(30528);
+        success.Peak.ShouldBe(35168);
+        refused.Peak.ShouldBe(30976);
         refused.Records.ShouldBe(9);
         refused.Pairs.ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT memory: window set operands retain independent plain reservations (#1776)")]
-    [InlineData("INTERSECT", 43088L, 38928L)]
-    [InlineData("EXCEPT ALL", 51472L, 51408L)]
+    [InlineData("INTERSECT", 43472L, 39248L)]
+    [InlineData("EXCEPT ALL", 51984L, 51920L)]
     public async Task ExecuteAsync_WindowSetOperands_ShouldChargeConvertedRows(string operation, long expectedPeak, long expectedRefusal)
     {
         // Arrange: converted operands remain live while the next operand and count map grow.

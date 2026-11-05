@@ -1702,7 +1702,7 @@ failures, cancellation and abandoned enumeration. Cache reservations hold no row
 
 | Pipeline | Reservation owner and release | Retention boundary |
 |---|---|---|
-| Group input | Group method, released in finally; staged input has a separate result reservation. | `EnumerateGroupInputAsync` delivers `GroupInputRow` directly to `ExecutePipelinedGroupAsync`; keys and aggregate state survive at its accumulation step, including aggregate DISTINCT tuples and ordered-input buffers. `groups` and their accumulators live until `ExecutePipelinedGroupAsync` returns. The base counterpart is `ExecuteMaterializedPlainGroupAsync`'s input result, held until that method returns; its groups have the same method lifetime. |
+| Group input | Group method owns separate key and completed-match maps; buffered aggregates own DISTINCT and ordered-input maps, released in finally; staged input has a separate result reservation. | `EnumerateGroupInputAsync` delivers `GroupInputRow` directly to `ExecutePipelinedGroupAsync`; keys and aggregate state survive at its accumulation step, including aggregate DISTINCT tuples and ordered-input buffers. `groups` and their accumulators live until `ExecutePipelinedGroupAsync` returns. The base counterpart is `ExecuteMaterializedPlainGroupAsync`'s input result, held until that method returns; its groups have the same method lifetime. |
 | Join output | Projection method and enumerator locals; normalized child charges release when the parent drops those lists, all remaining charges in finally. | `ProjectJoinRowsAsync` retains outputs at `rows.Add` or `SqlRowCollector.Add`; `rows` passes to the result set. `EnumerateJoinRowsAsync` retains each flat step with no index or hash in `buffered[level]` until the enumerator finishes. `EnumerateNormalizedJoinRowsAsync` retains child buffers at `Retain`; `outer.Rows` and `results[...]` live until the parent node finishes; on the materialized fallback, the root output also stays in `results[plan.Tree]` until enumeration finishes. Hash builds keep their existing admission; normalized builds are disposed after their parent consumes them, and flat builds in the enumerator's `finally`. The base counterpart is `ExecuteJoinAsync`'s matches list, held through projection until that method returns. |
 | Bounded body | Projection method until return, then subquery materializer until copying finishes. | `ExecuteBoundedSubqueryBodyAsync` passes its explicit retention argument to `ProjectAndSortRows` or `ProjectJoinRowsAsync`; their output-list additions retain at most two rows. The unordered `ProjectAndSortRows` addition is shared by every unordered SELECT using the materialized projection path, including unbounded scans and fallbacks. `rows` passes to the result set; bounded-body rows are cleared in `MaterializePlainSubqueryAsync` after copying values into the existing statement/frame cache. |
 | Unordered DISTINCT | Projection method owns both seen and rows until return; Deduplicate owns base seen until it returns. | `ProjectUnorderedDistinct` and the DISTINCT branch in `ProjectJoinRowsAsync` retain the same first output in `seen.Add` and `rows.Add`; `seen` lives until the pipeline returns, and `rows` passes to the result set after pagination following the full drain. The base counterpart is `Deduplicate` over the full projected list; its `seen` lives until `Deduplicate` returns. |
@@ -1717,12 +1717,12 @@ hash input, or when a later projection failure prevents base from reaching DISTI
 
 | Shape | Charge comparison between pipelined and forced base |
 |---|---|
-| Unordered scan and ordered collector | Equal for the same retained rows and keys; Finish transfers kept output without a second row charge. |
+| Unordered scan and ordered collector | Equal for the same retained rows, keys and identities within each owner; a wide output/key alias charges once. Finish transfers kept output without a second row charge. |
 | Plain groups | Equal keys, state, native payload and aggregate inputs; base also holds the complete projected input. Pipeline state can overlap an input hash build. DISTINCT/ordered state includes its comparer and ordering records. |
 | Join projection and DISTINCT join | Equal inner/child/hash buffers and output costs; base additionally stages all qualifying matches. |
 | Unordered DISTINCT scan | Equal per retained output and seen entry; base holds every projected input, including duplicates. A failing projection can make its peak lower before DISTINCT runs. |
 | Correlated and sequence materialization | Equal charges for the same collector, selected sources, final returned rows and current correlated vectors. Derived inputs charge before a sibling materializes. |
-| Relations and subquery caches | Equal retained rows/vectors for the same child paths; child pipelines may retain less scratch. Independent caches remain charged through the statement. |
+| Relations and subquery caches | Equal retained rows/vectors and distinct wide identities per owner for the same child paths; child pipelines may retain less scratch. Cache and collector payloads each charge. Independent caches remain charged through the statement. |
 | Set operations | Equal converted operands, seen/count state and outputs for the same operand paths; child pipelines may retain less scratch. |
 | Window, recursion and grouping sets | Their fallback paths and ledger charges agree across the switch. Window buffers outside its ledger and completed grouping-set matches add separate plain charges. |
 | CTAS | Equal admission for equal kept output, after pagination; source charges follow the selected path and sequence source width. Sequence deferral keeps its sources and can peak above a sequence-free form. |
@@ -1756,7 +1756,26 @@ System-view enumeration reads the statement's retained catalog snapshot and can 
 finishes. These lower-level owners remain live alongside consumer buffers; their size follows
 the storage or catalog structure being read, not the rows a statement retains. SQ-L1b charges
 simultaneously live buffers and unwinds every acquired charge on failure and cancellation. A
-value held by two buffers charges in each until SQ-L1c makes a shared wide value charge once.
+cell whose SqlHashJoinTable.ValueBytes is at least 256 B charges its payload once per buffer
+owner, by reference identity (#1776, SQ-L1c). For strings the threshold is 113 UTF-16
+characters; 112 characters still cost 248 B per reference. Each distinct wide cell adds a
+fixed 64 B map-entry charge, independent of map capacity; the fixed map header is uncharged.
+Further references cost only their array slots. Equal values in different objects charge
+separately, including detached binary clones and separately constructed CHAR cells. A collector
+uses one map across output and ordering keys. A narrow buffer never allocates the dictionary.
+Each live buffer charges independently, including a relation cache and its collector; the
+remaining payload overcharge is bounded by simultaneously live buffer owners, rather than row
+count or repeated columns. Maps never lend values or transfer with byte-only reservations.
+Admission reserves before recording references. Sequential release removes the last holder's
+payload and entry charge immediately; heap replacement reserves only a positive net change
+after crediting the leaving entry. Empty maps keep capacity until wholesale release, which
+drops the map and all bytes. Window, DML, recursive scratch and hash-build ledgers keep their
+existing accounting; repeated wide hash-build cells can still charge per reference.
+Aggregate maps span every group at the same aggregate position: DISTINCT tuples, ordered
+inputs and native extrema each have an owner, so group count does not multiply one shared
+payload. Extrema preserve the fixed state's existing 32-byte value-ABI allowance. STRING_AGG
+builder growth represents real copies and keeps its existing charge. All-distinct wide values
+add 64 B per identity, which can reduce capacity at an admission boundary.
 
 The group post-input body deliberately duplicates the base body, and `PrepareJoinInputsAsync`
 duplicates the base join prologue. SQ-L1b must keep both copies aligned when adding charges;
@@ -10480,8 +10499,8 @@ SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default
 statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
-Plain SELECT uses per-operator long reservations, without reference owners, lending or eviction.
-For a retained row R, the cost is 32 + SqlHashJoinTable.RowBytes(R): a fixed list slot plus
+Plain SELECT uses per-buffer reservations and lazy wide-cell identity maps, without lending or eviction.
+Before wide-cell deduplication, a retained row R costs 32 + SqlHashJoinTable.RowBytes(R): a fixed list slot plus
 its array and conservative boxed/text/binary/CHAR payload. DISTINCT/seen/count entries cost
 64 + RowBytes(key). A group costs 128 plus its retained key and 128 per ordinary
 aggregate; each DISTINCT or ordered aggregate instead costs 320 + 128 per ordering key +
@@ -10491,7 +10510,8 @@ variable-width extrema and string aggregate state also charge retained payload g
 A collector entry costs 32 + RowBytes(output) + RowBytes(keys), including bounded top-N heaps;
 its slot covers kept output through Finish, without a second row charge. Full SortRows key
 scratch costs 64 + RowBytes(keys) per row, plus 32 + RowBytes(row) for its sorted list. Each concurrently retained
-buffer pays independently, so a shared wide value can charge repeatedly until SQ-L1c.
+buffer pays independently. Within one buffer, each wide identity replaces all of its payload
+references with one payload plus 64 B; narrow references keep the formulas above.
 
 Unordered output lists, staged join matches, flat nested-loop inners, normalized child lists,
 volatile source sorts, completed group lists, result consumers, relation caches, independent
