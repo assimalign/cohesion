@@ -10,9 +10,18 @@ public sealed partial class OqlQueryParser
     // Each operator has equal precedence; the loop builds the left-associated tree.
     private OqlQueryExpression ParseQuery()
     {
-        var query = ParseQueryCore();
-        _selectOperationDepth = System.Math.Max(_selectOperationDepth, _queryOperationDepths.GetValueOrDefault(query));
-        return query;
+        int enclosingDepth = _selectOperationDepth;
+        _selectOperationDepth = 0;
+        try
+        {
+            var query = ParseQueryCore();
+            // SELECT tails parse outside ParseSelect; include subqueries in their ordering too.
+            int depth = System.Math.Max(_selectOperationDepth, _queryOperationDepths.GetValueOrDefault(query));
+            _queryOperationDepths[query] = depth;
+            _selectOperationDepth = depth;
+            return query;
+        }
+        finally { _selectOperationDepth = System.Math.Max(enclosingDepth, _selectOperationDepth); }
     }
 
     private OqlQueryExpression ParseQueryCore()

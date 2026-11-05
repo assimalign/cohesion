@@ -1099,7 +1099,9 @@ OqlExpression for queries, writes, DDL and transactions. No protocol or persiste
 
 Nested planning walks each operand with independent local declarations, passes only its own free
 outer names to access planning and unions those names for statement caching. A sibling's capture
-cannot turn a local indexed path into an outer variable. Captured expression sources are normalized per operand; the executor
+cannot turn a local indexed path into an outer variable. Operand capture maps travel through
+statement-local planning arguments, preserving ordinary planner allocation bytes.
+Captured expression sources are normalized per operand; the executor
 supplies the current outer bindings even to a plain-collection operand with correlated projections.
 Grouping equivalence compares complete compound trees, operators, modifiers and tails while its
 capture checks retain each operand's lexical identity. Derived sources pull complete set-row values;

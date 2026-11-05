@@ -112,7 +112,8 @@ internal sealed partial class DocumentPlanner
 
     private DocumentStatementPlan PlanWrite(OqlExpression statement, string destination,
         IReadOnlyList<(OqlExpression Key, OqlExpression Value)> values, OqlQueryExpression? select,
-        string? keyName, string? valueName, IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested = null)
+        string? keyName, string? valueName, IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested = null,
+        IReadOnlyDictionary<OqlQueryExpression, IReadOnlySet<string>>? queryOuterNames = null)
     {
         string verb = statement is OqlUpsertExpression ? "UPSERT" : "INSERT";
         if (statement is OqlInsertExpression { Alias.Length: 0 } or OqlUpsertExpression { Alias.Length: 0 })
@@ -146,7 +147,7 @@ internal sealed partial class DocumentPlanner
                 ? new DocumentUpsertPlan(collection, upsert, Returning: returning)
                 : new DocumentInsertPlan(collection, (OqlInsertExpression)statement, returning);
         }
-        var source = PlanCore(select, nested);
+        var source = PlanCore(select, nested, queryOuterNames: queryOuterNames);
         var columns = SetColumns(source);
         int keyOrdinal = Bind(keyName);
         int? valueOrdinal = valueName is null ? null : Bind(valueName);

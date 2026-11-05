@@ -13,12 +13,13 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed partial class DocumentPlanner
 {
     private DocumentSetOperationPlan PlanSetOperation(OqlSetOperationExpression query,
-        IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested, IReadOnlySet<string>? outerNames)
+        IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested, IReadOnlySet<string>? outerNames,
+        IReadOnlyDictionary<OqlQueryExpression, IReadOnlySet<string>>? queryOuterNames)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         _cancellationToken.ThrowIfCancellationRequested();
-        var left = PlanCore(query.Left, nested, _queryOuterNames?.GetValueOrDefault(query.Left) ?? outerNames);
-        var right = PlanCore(query.Right, nested, _queryOuterNames?.GetValueOrDefault(query.Right) ?? outerNames);
+        var left = PlanCore(query.Left, nested, queryOuterNames?.GetValueOrDefault(query.Left) ?? outerNames, queryOuterNames);
+        var right = PlanCore(query.Right, nested, queryOuterNames?.GetValueOrDefault(query.Right) ?? outerNames, queryOuterNames);
         var leftColumns = SetColumns(left);
         var rightColumns = SetColumns(right);
         var names = new HashSet<string>(StringComparer.Ordinal);

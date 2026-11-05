@@ -8,6 +8,27 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public sealed class OqlCompoundRegressionTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Compounds: SELECT ordering subqueries contribute to the operator path")]
+    [InlineData(127)]
+    [InlineData(128)]
+    public void Parse_OrderBySubqueryDepth_ShouldSharePathBound(int inner)
+    {
+        // Arrange: ordering parses after the SELECT block, and its query still belongs to the leaf.
+        string nested = string.Join(" UNION ALL ", Enumerable.Repeat("SELECT RAW 1 FROM [0] AS z", inner + 1));
+        string text = "(SELECT 1 AS n FROM [0] AS a ORDER BY (" + nested + ")) UNION ALL SELECT 2 AS n FROM [0] AS b";
+        // Act
+        var statement = (OqlQueryStatement)new OqlQueryParser().Parse(text);
+        // Assert
+        if (inner == 127) { statement.Diagnostics.ShouldBeEmpty(); }
+        else
+        {
+            var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("CD00005");
+            diagnostic.Start.ShouldBe(text.LastIndexOf("UNION", StringComparison.Ordinal));
+            diagnostic.End.ShouldBe(diagnostic.Start + 5);
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Compounds: operator depth crosses SELECT subqueries and locates level 129")]
     [InlineData(64, 64, false)]
     [InlineData(64, 65, false)]

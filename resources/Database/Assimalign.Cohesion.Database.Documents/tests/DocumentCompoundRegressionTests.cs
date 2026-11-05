@@ -41,13 +41,13 @@ public sealed class DocumentCompoundRegressionTests
         (await ValuesAsync(session, "SELECT RAW 7 FROM [0] AS z")).ShouldBe(new[] { "7" });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Compounds: deep array evaluation refuses before exhausting the process stack")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Compounds: deep arrays return complete rows or a coded stack refusal")]
     [InlineData(64, false)]
     [InlineData(96, false)]
     [InlineData(64, true)]
     public async Task ExecuteAsync_DeepArrayOnSmallStack_ShouldSurviveAsync(int operators, bool explain)
     {
-        // Arrange: this parsed shape killed the throwaway baseline process on a 1 MiB stack.
+        // Arrange: this shape killed the Debug baseline probe on a 1 MiB stack; Release can fit.
         await using var engine = DocumentDatabaseEngine.Create("compound-array-stack", new());
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -56,22 +56,51 @@ public sealed class DocumentCompoundRegressionTests
         query += string.Concat(Enumerable.Repeat(" UNION ALL SELECT RAW 1 FROM [0] AS b", operators));
         var request = DocumentQueryRequest.FromOql((explain ? "EXPLAIN " : "") + query);
         Exception? failure = null;
+        int completedRows = 0, arrayDepth = 0, leaf = 0;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var thread = new Thread(() =>
         {
             try
             {
                 var result = session.ExecuteAsync(request, cancellation.Token).AsTask().GetAwaiter().GetResult();
-                if (result is DatabaseResultSet rows) { rows.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+                if (result is DatabaseResultSet rows)
+                {
+                    var iterator = rows.GetRowsAsync(cancellation.Token).GetAsyncEnumerator(cancellation.Token);
+                    try
+                    {
+                        while (iterator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+                        {
+                            if (!explain && completedRows == 0)
+                            {
+                                var value = (JsonElement)iterator.Current.GetValue(0)!;
+                                while (value.ValueKind == JsonValueKind.Array && value.GetArrayLength() == 1)
+                                { arrayDepth++; value = value[0]; }
+                                leaf = value.GetInt32();
+                            }
+                            completedRows++;
+                        }
+                    }
+                    finally
+                    {
+                        iterator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                        rows.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                    }
+                }
             }
             catch (Exception error) { failure = error; } // Transfer the observed outcome to the test thread.
         }, 1024 * 1024) { IsBackground = true };
         // Act
         thread.Start();
         thread.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue();
-        // Assert: EXPLAIN can finish without reaching the expression evaluator.
-        if (!explain) { failure.ShouldBeOfType<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05021"); }
-        else if (failure is not null) { failure.ShouldBeOfType<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05021"); }
+        // Assert: stack use varies by JIT/platform; either outcome must preserve the full contract.
+        if (failure is not null) { failure.ShouldBeOfType<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05021"); }
+        else if (explain) { completedRows.ShouldBeGreaterThan(0); }
+        else
+        {
+            completedRows.ShouldBe(operators + 1);
+            arrayDepth.ShouldBe(126);
+            leaf.ShouldBe(1);
+        }
         (await ValuesAsync(session, "SELECT RAW 7 FROM [0] AS z")).ShouldBe(new[] { "7" });
     }
 

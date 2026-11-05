@@ -10,8 +10,6 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentPlanner
 {
-    private Dictionary<OqlQueryExpression, IReadOnlySet<string>>? _queryOuterNames;
-
     // No iterators or optional state on the ordinary planning path.
     internal static bool HasSubquery(OqlExpression? expression, System.Threading.CancellationToken cancellationToken = default)
     {
@@ -101,7 +99,7 @@ internal sealed partial class DocumentPlanner
 
     private DocumentNestedPlan PlanNested(OqlExpression expression)
     {
-        _queryOuterNames = new(ReferenceEqualityComparer.Instance);
+        var queryOuterNames = new Dictionary<OqlQueryExpression, IReadOnlySet<string>>(ReferenceEqualityComparer.Instance);
         var queries = new Dictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>(ReferenceEqualityComparer.Instance);
         var empty = new Dictionary<string, bool>(StringComparer.Ordinal);
         var free = new HashSet<string>(StringComparer.Ordinal);
@@ -144,7 +142,7 @@ internal sealed partial class DocumentPlanner
                 }
             }
         }
-        return new DocumentNestedPlan(PlanCore(expression, queries), queries);
+        return new DocumentNestedPlan(PlanCore(expression, queries, queryOuterNames: queryOuterNames), queries);
 
         OqlQueryExpression VisitQuery(OqlQueryExpression queryExpression, Dictionary<string, bool> outer, HashSet<string> free)
         {
@@ -196,7 +194,7 @@ internal sealed partial class DocumentPlanner
                 select.Limit, select.Offset, select.Location, select.Unnest, select.GroupAliases, select.GroupAs,
                 new OqlPathExpression([new OqlPathSegment(select.Collection, null)], select.Location),
                 select.Bindings == select.Unnest ? null : select.Bindings);
-            _queryOuterNames[normalized] = free;
+            queryOuterNames[normalized] = free;
             return normalized;
         }
 
@@ -231,7 +229,7 @@ internal sealed partial class DocumentPlanner
                 finally { subqueryDepth--; }
                 foreach (var dependency in outerNames)
                 { if (!(nestedOrder ?? local).ContainsKey(dependency)) { free.Add(dependency); } }
-                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(normalized, queries, outerNames),
+                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(normalized, queries, outerNames, queryOuterNames),
                     outerNames.Count == 0 && CanCache(normalized), owner, outerNames));
                 return;
             }

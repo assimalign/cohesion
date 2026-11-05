@@ -54,13 +54,14 @@ internal sealed partial class DocumentPlanner
     }
 
     private DocumentStatementPlan PlanCore(OqlExpression expression,
-        IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested = null, IReadOnlySet<string>? outerNames = null) => expression switch
+        IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested = null, IReadOnlySet<string>? outerNames = null,
+        IReadOnlyDictionary<OqlQueryExpression, IReadOnlySet<string>>? queryOuterNames = null) => expression switch
     {
-        OqlInsertExpression insert => PlanWrite(insert, insert.Collection, insert.Values, insert.Select, insert.KeyName, insert.ValueName, nested),
-        OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName, nested),
+        OqlInsertExpression insert => PlanWrite(insert, insert.Collection, insert.Values, insert.Select, insert.KeyName, insert.ValueName, nested, queryOuterNames),
+        OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName, nested, queryOuterNames),
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
-        OqlSetOperationExpression compound => PlanSetOperation(compound, nested, outerNames),
+        OqlSetOperationExpression compound => PlanSetOperation(compound, nested, outerNames, queryOuterNames),
         OqlSelectExpression select when select.Bindings != select.Unnest => PlanJoins(select, nested, outerNames),
         OqlSelectExpression { Source: not null } select => PlanFrom(select, nested, outerNames),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
