@@ -64,13 +64,13 @@ public sealed class SqlDatabaseEngineOptions
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>Gets or sets a dedicated spill directory. File engines default to RootPath/.cohesion-temp;
-    /// an override must remain below RootPath, outside any database-named first segment and without
+    /// an override must remain below RootPath, with a first segment no database could take (a leading dot is safe) and without
     /// link components. In-memory engines have no spill space unless set.</summary>
     /// <remarks>One directory belongs to one spilling engine; choose a different TempDirectory for
     /// each engine. A lease conflict warns at startup and refuses a later spill with CK05005.
     /// Unix directories are created 0700, files 0600; group/other-writable directories are refused.
-    /// On Windows an explicit directory keeps its inherited ACL. Data is unencrypted, survives a kill
-    /// until the next sweep, and OS backups of RootPath can capture live temp files.
+    /// On Windows an explicit directory keeps its inherited ACL. Data is unencrypted. Unix runs survive a kill until the next sweep; Windows
+    /// deletes runs on process exit. Power loss can leave runs on every OS. OS backups of RootPath can capture live temp files.
     /// File engines reserve 2.54 GiB per open database at defaults. For N = max(1, open databases),
     /// C = 1 MiB + N * (BufferPoolCapacity + 128 * 8192 + 2 * (JournalSizeLimit +
     /// reclamation bracket bytes for 32 rows)), the floor is C + max(1 MiB, ceil(C / 4)).

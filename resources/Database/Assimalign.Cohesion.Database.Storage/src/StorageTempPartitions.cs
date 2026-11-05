@@ -6,6 +6,7 @@ using System.Threading;
 namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>Bounded append-only hash partition files for future grace joins and aggregates.</summary>
+/// <remarks>Instances require serialized use.</remarks>
 [DebuggerDisplay("StorageTempPartitions {PartitionCount}")]
 [DebuggerTypeProxy(typeof(DebugView))]
 public sealed class StorageTempPartitions : IDisposable
@@ -58,7 +59,7 @@ public sealed class StorageTempPartitions : IDisposable
             var run = _runs[partition] ??= _statement.CreateRun(cancellationToken);
             run.Append(record, cancellationToken);
         }
-        catch { Dispose(); throw; }
+        catch { try { Dispose(); } catch (AggregateException) { } throw; } // Close failures are already counted.
     }
     /// <summary>Seals all files; empty partitions remain absent.</summary>
     /// <exception cref="StorageTempException">Temporary I/O failed (CK05005).</exception>
@@ -80,7 +81,7 @@ public sealed class StorageTempPartitions : IDisposable
             foreach (var run in _runs) { run?.Seal(cancellationToken); }
             _sealed = true;
         }
-        catch { Dispose(); throw; }
+        catch { try { Dispose(); } catch (AggregateException) { } throw; } // Close failures are already counted.
     }
     /// <summary>Gets a sealed partition run, or null for an empty partition. This set retains ownership.</summary>
     /// <param name="partition">The zero-based partition ordinal.</param>

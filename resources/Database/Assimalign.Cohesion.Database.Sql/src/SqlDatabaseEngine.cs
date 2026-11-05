@@ -335,8 +335,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>;
     /// <see cref="SqlDatabaseEngineOptions.WorkerFailureMinimumPasses"/> is less than one; or
     /// <see cref="SqlDatabaseEngineOptions.TempSpaceQuota"/> or <see cref="SqlDatabaseEngineOptions.StatementTempSpaceQuota"/> is negative;
-    /// <see cref="SqlDatabaseEngineOptions.RootPath"/> is empty/default or <see cref="SqlDatabaseEngineOptions.TempDirectory"/> is empty/default,
-    /// outside the root, inside a database directory, or contains a link below the root; or
+    /// <see cref="SqlDatabaseEngineOptions.RootPath"/> is default or <see cref="SqlDatabaseEngineOptions.TempDirectory"/> is empty/default,
+    /// outside the root, below a first segment a database could take, or contains a link below the root; or
     /// <see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
     /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
@@ -410,33 +410,32 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
         if (options.TempSpaceQuota is { } tempQuota) { DatabaseEngineOptionChecks.ThrowIfNegative(tempQuota, engine, nameof(options.TempSpaceQuota)); }
         if (options.StatementTempSpaceQuota is { } statementQuota) { DatabaseEngineOptionChecks.ThrowIfNegative(statementQuota, engine, nameof(options.StatementTempSpaceQuota)); }
-        if (options.RootPath is { } configuredRoot && (configuredRoot == default || configuredRoot.IsEmpty))
-        { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.RootPath), configuredRoot, ErrorMessages.TempDirectoryInvalid); }
+        if (options.RootPath is { } configuredRoot && configuredRoot == default)
+        { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.RootPath), configuredRoot, ErrorMessages.TempRootInvalid); }
         if (options.TempDirectory is { } directory)
         {
             if (directory == default || directory.IsEmpty)
             { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
             if (options.RootPath is { IsEmpty: false } tempRoot)
             {
-                string relative = Path.GetRelativePath(Path.GetFullPath(tempRoot), Path.GetFullPath(directory));
-                if (Path.IsPathRooted(relative) || relative == "." || relative == ".." ||
-                    relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
-                string[] segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (DatabaseFileNames.IsStorageName(segments[0].ToLowerInvariant()))
-                { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
-                string component = Path.GetFullPath(tempRoot);
-                foreach (string segment in segments)
+                try
                 {
-                    component = Path.Combine(component, segment);
-                    try
+                    string relative = Path.GetRelativePath(Path.GetFullPath(tempRoot), Path.GetFullPath(directory));
+                    if (Path.IsPathRooted(relative) || relative == "." || relative == ".." ||
+                        relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                    { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
+                    string[] segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (DatabaseFileNames.IsStorageName(segments[0].ToLowerInvariant()))
+                    { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
+                    string component = Path.GetFullPath(tempRoot);
+                    foreach (string segment in segments)
                     {
+                        component = Path.Combine(component, segment);
                         if (new DirectoryInfo(component).LinkTarget is not null)
                         { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
                     }
-                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-                    { break; } // Optional-directory access failures warn through StorageTempSpace at startup.
                 }
+                catch (PathTooLongException) { } // Optional setup warns through StorageTempSpace; databases remain available.
             }
         }
 

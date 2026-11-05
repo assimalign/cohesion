@@ -5,7 +5,8 @@
 SqlDatabaseEngine owns and disposes an internal nullable StorageTempSpace. A file engine defaults
 to RootPath/.cohesion-temp; the leading dot avoids collision with a valid database name.
 TempDirectory overrides must be dedicated descendants of RootPath; option checks reject a
-database-named first segment and link components below the root. An in-memory engine has no
+first segment a database could take (a leading dot is safe) and link components below the root.
+A default RootPath is refused with its own message; an empty RootPath remains in-memory. An in-memory engine has no
 space unless TempDirectory is explicitly set. The options snapshot includes TempDirectory,
 TempSpaceQuota and StatementTempSpaceQuota. They are configuration for the substrate only:
 SQL operators still refuse with CS05067 as before. No DIALECT or conformance behavior changes.
@@ -25,16 +26,20 @@ Int64.MaxValue. This conservatively applies JointEngineReserve's dirty-pool, rec
 and 25% headroom shape using both file sets' journal caps, rather than a migration-specific row
 estimate. Pool reserves apply even when physical data growth is nonsparse. It can refuse earlier
 than a particular migration's estimate. File defaults retain a 2.54 GiB floor per open database. Storage probes free space outside the
-accounting monitor at most once per 128 reserved pages, subtracting reservations since the sample
-and pending unwritten pages present at the sample. It does not reserve blocks against unrelated writers.
+accounting monitor after 128 reserved pages or a sample age above one second, subtracting
+reservations since the sample and pending unwritten pages present at the sample. Before CK05003
+it re-measures once, so freed disk permits recovery; concurrent releases invalidate a sample
+without losing or doubling their credits. Ordinary refresh does not wait on a contended probe gate. It does not reserve blocks against unrelated writers.
 
 One directory belongs to one spilling engine. Two engines over one root start and can open
 different databases; the second spill refuses with CK05005 and names TempDirectory as the way out.
-Lease, probe and sweep I/O failures warn at startup and are retried by CreateRun, preserving
+Lease, probe and sweep I/O failures (including overlong optional paths) warn at startup when
+present, or at first failed use for a previously absent directory, and are retried by CreateRun, preserving
 database availability. All temporary I/O failures have CK05005 and retain their original cause.
 Unix directories are created 0700 and run/lease files 0600; group/other-writable directories refuse.
-On Windows explicit directories keep their inherited ACL. Temp bytes are unencrypted and remain
-after a kill until the next directory sweep; OS backups of RootPath can capture live temp files.
+On Windows explicit directories keep their inherited ACL. Temp bytes are unencrypted. On Unix
+after a kill, and on every OS after power loss, runs can remain until the next directory sweep.
+Windows process exit deletes delete-on-close runs; OS backups of RootPath can capture live temp files.
 No durable data, catalog, journal, record-space or wire format changes.
 
 

@@ -27,6 +27,7 @@ public sealed class StorageTempSorter : IDisposable
     private readonly Comparison<int> _compareOffsets;
     private readonly int _arenaSize;
     private readonly int _maximumRecordLength;
+    private int _runCount;
     private int _used;
     private int _count;
     private long _ordinal;
@@ -112,7 +113,7 @@ public sealed class StorageTempSorter : IDisposable
             MemoryMarshal.Cast<byte, int>(_workspace.AsSpan(_arenaSize))[_count++] = _used;
             _used += (int)size;
         }
-        catch { Dispose(); throw; }
+        catch { try { Dispose(); } catch (AggregateException) { } throw; } // Close failures are already counted.
     }
 
     private void Flush(CancellationToken token)
@@ -132,30 +133,30 @@ public sealed class StorageTempSorter : IDisposable
             }
             run.Seal(token); RunsCreated++;
         }
-        catch { run.Dispose(); throw; }
+        catch { run.DisposeAfterFailure(); throw; }
         _count = 0; _used = 0;
-        try { Push(run, 0, 0, token); }
-        catch { run.Dispose(); throw; }
+        try { Push(run, token); }
+        catch { run.DisposeAfterFailure(); throw; }
     }
-    private void Push(StorageTempRun run, int level, int depth, CancellationToken token)
+    private void Push(StorageTempRun run, CancellationToken token)
     {
-        int start = level * FanIn;
-        int count = 0;
-        while (count < FanIn && _levels[start + count] is not null) { count++; }
-        // Keep FanIn initial runs untouched. Merge a full group only when another arrives.
-        if (count == FanIn)
-        {
-            var inputs = new StorageTempRun[FanIn]; int nextDepth = 1;
-            for (int i = 0; i < FanIn; i++)
-            { inputs[i] = _levels[start + i]!; nextDepth = Math.Max(nextDepth, _depths[start + i] + 1); }
-            var merged = Merge(inputs, token);
-            Array.Clear(_levels, start, FanIn);
-            MergePasses = Math.Max(MergePasses, nextDepth);
-            try { Push(merged, level + 1, nextDepth, token); }
-            catch { merged.Dispose(); throw; }
-            count = 0;
-        }
-        _levels[start + count] = run; _depths[start + count] = depth;
+        _levels[_runCount] = run; _depths[_runCount++] = 0;
+        // The last directory slot is reserved for a merge output beside its inputs.
+        if (_runCount == _levels.Length - 1) { MergeSmallest(FanIn, token); }
+    }
+
+    private void MergeSmallest(int count, CancellationToken token)
+    {
+        Array.Sort(_levels, _depths, 0, _runCount,
+            Comparer<StorageTempRun?>.Create((left, right) => left!.PageCount.CompareTo(right!.PageCount)));
+        var inputs = new StorageTempRun[count]; int depth = 0;
+        for (int i = 0; i < count; i++) { inputs[i] = _levels[i]!; depth = Math.Max(depth, _depths[i]); }
+        var output = Merge(inputs, token);
+        Array.Copy(_levels, count, _levels, 0, _runCount - count);
+        Array.Copy(_depths, count, _depths, 0, _runCount - count);
+        Array.Clear(_levels, _runCount - count, count);
+        _runCount -= count; _levels[_runCount] = output; _depths[_runCount++] = depth + 1;
+        MergePasses = Math.Max(MergePasses, depth + 1);
     }
 
     private StorageTempRun Merge(StorageTempRun[] inputs, CancellationToken token)
@@ -170,7 +171,7 @@ public sealed class StorageTempSorter : IDisposable
             foreach (var input in inputs) { input.Dispose(); }
             return output;
         }
-        catch { output.Dispose(); throw; }
+        catch { output.DisposeAfterFailure(); throw; }
     }
 
     /// <summary>Finishes run generation and transfers the remaining inputs to a streaming merge reader.</summary>
@@ -186,35 +187,22 @@ public sealed class StorageTempSorter : IDisposable
         try
         {
             cancellationToken.ThrowIfCancellationRequested(); Flush(cancellationToken);
-            var remaining = new List<(StorageTempRun Run, int Depth)>();
-            for (int i = 0; i < _levels.Length; i++)
-            { if (_levels[i] is { } run) { remaining.Add((run, _depths[i])); } }
-            while (remaining.Count > FanIn)
-            {
-                remaining.Sort((left, right) => left.Run.PageCount.CompareTo(right.Run.PageCount));
-                int count = Math.Min(FanIn, remaining.Count - FanIn + 1), depth = 0;
-                var inputs = new StorageTempRun[count];
-                for (int i = 0; i < count; i++) { inputs[i] = remaining[i].Run; depth = Math.Max(depth, remaining[i].Depth); }
-                var merged = Merge(inputs, cancellationToken);
-                // Register a completed intermediate immediately so a later failure disposes it.
-                foreach (var input in inputs) { Array.Clear(_levels, Array.IndexOf(_levels, input), 1); }
-                int slot = Array.IndexOf(_levels, null); _levels[slot] = merged; _depths[slot] = depth + 1;
-                remaining.RemoveRange(0, count); remaining.Add((merged, depth + 1));
-                MergePasses = Math.Max(MergePasses, depth + 1);
-            }
-            var runs = new StorageTempRun[remaining.Count];
+            // Merge the partial group first, so later groups all use FanIn inputs.
+            while (_runCount > FanIn)
+            { MergeSmallest(2 + (_runCount - FanIn - 1) % (FanIn - 1), cancellationToken); }
+            var runs = new StorageTempRun[_runCount];
             for (int i = 0; i < runs.Length; i++)
             {
-                runs[i] = remaining[i].Run;
-                MergePasses = Math.Max(MergePasses, remaining[i].Depth + (runs.Length > 1 ? 1 : 0));
+                runs[i] = _levels[i]!;
+                MergePasses = Math.Max(MergePasses, _depths[i] + (runs.Length > 1 ? 1 : 0));
             }
             _workspace = []; _outputPage = [];
             _finalReader = new StorageTempSortReader(_statement, runs, _maximumRecordLength,
                 new byte[runs.Length * (StorageTempSpace.PageSize + _maximumRecordLength)], true);
-            Array.Clear(_levels); _completed = true;
+            Array.Clear(_levels); _runCount = 0; _completed = true;
             return _finalReader;
         }
-        catch { Dispose(); throw; }
+        catch { try { Dispose(); } catch (AggregateException) { } throw; } // Close failures are already counted.
     }
 
     private int CompareOffsets(int left, int right) => CompareRows(RowAt(left), RowAt(right));

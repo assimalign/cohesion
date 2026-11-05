@@ -134,4 +134,5 @@
   <data name="RecoveryPageFrameVersion" xml:space="preserve">
     <value>{0}: Page {1} journal frame at byte offset {2} uses journal frame format {3}, but this engine reads only journal frame format {4}.</value>
   </data>
+  <data name="TempReaderFailed" xml:space="preserve"><value>The temporary reader cannot continue after a previous read failed.</value></data>
 </root>

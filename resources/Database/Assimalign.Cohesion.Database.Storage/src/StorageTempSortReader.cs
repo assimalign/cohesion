@@ -75,7 +75,7 @@ public sealed class StorageTempSortReader : IDisposable
             Value = _workspace.Slice(head * _stride + StorageTempSpace.PageSize + 16 + keyLength, valueLength);
             return true;
         }
-        catch { Dispose(); throw; }
+        catch { try { Dispose(); } catch (AggregateException) { } throw; } // Preserve the initiating failure.
     }
     private void Refill(int input, CancellationToken token)
     {
@@ -84,6 +84,11 @@ public sealed class StorageTempSortReader : IDisposable
         {
             StorageTempSorter.ValidateRow(row[.._lengths[input]]);
             _heap.Enqueue(input, input);
+        }
+        else if (_ownsRuns)
+        {
+            _readers[input]!.Dispose(); _readers[input] = null;
+            _runs[input].Dispose();
         }
     }
     private int CompareHeads(int left, int right)

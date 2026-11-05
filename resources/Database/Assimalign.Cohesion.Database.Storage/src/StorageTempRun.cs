@@ -70,8 +70,8 @@ public sealed class StorageTempRun : IDisposable
                 RecordCount++; MaximumRecordLength = Math.Max(MaximumRecordLength, record.Length);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { Dispose(); throw StorageTempException.Unavailable(error); }
-            catch { Dispose(); throw; } // Quota, cancellation and test callback failures.
+            { DisposeAfterFailure(); throw StorageTempException.Unavailable(error); }
+            catch { DisposeAfterFailure(); throw; } // Quota, cancellation and test callback failures.
         }
     }
     internal void UsePage(Memory<byte> page) { _page = page; }
@@ -126,8 +126,8 @@ public sealed class StorageTempRun : IDisposable
                 _sealed = true; _page = Memory<byte>.Empty;
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { Dispose(); throw StorageTempException.Unavailable(error); }
-            catch { Dispose(); throw; }
+            { DisposeAfterFailure(); throw StorageTempException.Unavailable(error); }
+            catch { DisposeAfterFailure(); throw; }
         }
     }
 
@@ -177,15 +177,21 @@ public sealed class StorageTempRun : IDisposable
         {
             if (_disposed) { return; }
             _disposed = true;
-            try { _file.Dispose(); }
+            bool reclaimed = false;
+            try { _file.Dispose(); reclaimed = true; }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             { throw StorageTempException.Unavailable(error); }
             finally
             {
-                Space.Release(_statement, _pages * StorageTempSpace.PageSize, (_pages - _writtenPages) * StorageTempSpace.PageSize);
+                Space.Release(_statement, _pages * StorageTempSpace.PageSize, (_pages - _writtenPages) * StorageTempSpace.PageSize, reclaimed);
                 _page = Memory<byte>.Empty; _statement.Forget(this);
             }
         }
+    }
+    internal void DisposeAfterFailure()
+    {
+        try { Dispose(); }
+        catch (StorageTempException) { } // Closing already counted its own failure; preserve the first error.
     }
     private sealed class DebugView
     {

@@ -59,7 +59,7 @@ error and has no production diagnostic code.
 | New (#1789, EN-X1) | CK05001 | Engine temporary physical-byte quota exceeded |
 | New (#1789, EN-X1) | CK05002 | Statement temporary physical-byte quota exceeded |
 | New (#1789, EN-X1) | CK05003 | Temporary page would cross the engine free-space reserve |
-| New (#1789, EN-X1) | CK05004 | Temporary page or record integrity failure, including retry of a failed reader (no durable-storage fence) |
+| New (#1789, EN-X1) | CK05004 | Temporary page/record integrity failure or retry of a failed reader; retries raise no damage event/counter (no durable-storage fence) |
 | New (#1789, EN-X1) | CK05005 | Temporary space unavailable: probe, lease, sweep, create, read, write or close I/O failure |
 | New (#1789, EN-X1) | CK05006 | Encoded sort record exceeds its declared maximum |
 | COHDBS001 | CK06001 | Storage format refusal |

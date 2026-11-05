@@ -112,13 +112,13 @@ internal sealed class StorageEventSource : EventSource
     [Event(21, Level = EventLevel.Verbose, Keywords = Keywords.TempSpace, Message = "Temporary storage changed by {0} bytes; {1} bytes reserved.")]
     private void TempSpaceBytes(long deltaBytes, long currentBytes) => WriteEvent(21, deltaBytes, currentBytes);
 
-    [Event(22, Level = EventLevel.Verbose, Keywords = Keywords.TempSpace, Message = "Temporary storage growth refused: {0}.")]
+    [Event(22, Level = EventLevel.Verbose, Keywords = Keywords.TempSpace, Message = "Temporary storage operation refused: {0}.")]
     private void TempSpaceRefused(string code) => WriteEvent(22, code);
 
     [NonEvent]
-    internal void TempUnavailable(string code)
+    internal void TempUnavailable(string code, Exception cause)
     {
-        if (IsEnabled(EventLevel.Warning, Keywords.TempSpace)) { TempSpaceUnavailable(code); }
+        if (IsEnabled(EventLevel.Warning, Keywords.TempSpace)) { TempSpaceUnavailable(code, cause.GetType().FullName ?? cause.GetType().Name); }
     }
     [NonEvent]
     internal void TempDamaged(string code)
@@ -126,8 +126,8 @@ internal sealed class StorageEventSource : EventSource
         Interlocked.Increment(ref _tempDamage);
         if (IsEnabled(EventLevel.Error, Keywords.TempSpace)) { TempSpaceDamaged(code); }
     }
-    [Event(23, Level = EventLevel.Warning, Keywords = Keywords.TempSpace, Message = "Temporary storage unavailable at startup: {0}.")]
-    private void TempSpaceUnavailable(string code) => WriteEvent(23, code);
+    [Event(23, Level = EventLevel.Warning, Keywords = Keywords.TempSpace, Message = "Temporary storage unavailable during setup: {0}; {1}.")]
+    private void TempSpaceUnavailable(string code, string exceptionType) => WriteEvent(23, code, exceptionType);
     [Event(24, Level = EventLevel.Error, Keywords = Keywords.TempSpace, Message = "Temporary storage integrity failed: {0}.")]
     private void TempSpaceDamaged(string code) => WriteEvent(24, code);
 

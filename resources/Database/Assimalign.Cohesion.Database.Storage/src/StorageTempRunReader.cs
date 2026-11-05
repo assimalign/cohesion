@@ -41,7 +41,7 @@ public sealed class StorageTempRunReader : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (destination.Length < _run.MaximumRecordLength) { throw new ArgumentException(ErrorMessages.TempDestinationSmall, nameof(destination)); }
             length = 0;
-            if (_failed) { throw StorageTempException.Damage(); }
+            if (_failed) { throw new StorageTempException(StorageTempException.DamageCode, ErrorMessages.TempReaderFailed); }
             try
             {
                 _run.Check(); cancellationToken.ThrowIfCancellationRequested();

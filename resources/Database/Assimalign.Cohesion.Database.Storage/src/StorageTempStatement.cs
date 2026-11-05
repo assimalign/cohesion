@@ -41,14 +41,14 @@ public sealed class StorageTempStatement : IDisposable
         {
             try { file.Dispose(); }
             catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
-            { throw StorageTempException.Unavailable(new AggregateException(ErrorMessages.TempCleanupFailed, error, cleanup)); }
+            { _ = StorageTempException.Unavailable(cleanup); } // Count cleanup without replacing the cause.
             throw StorageTempException.Unavailable(error);
         }
         catch
         {
             try { file.Dispose(); }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { throw StorageTempException.Unavailable(error); }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            { _ = StorageTempException.Unavailable(cleanup); }
             throw;
         }
         try
@@ -56,7 +56,7 @@ public sealed class StorageTempStatement : IDisposable
             lock (Space.Gate) { Check(); _runs.Add(run); }
             return run;
         }
-        catch { run.Dispose(); throw; }
+        catch { run.DisposeAfterFailure(); throw; }
     }
     internal void Check() { ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this); Space.Check(); }
     internal void Forget(StorageTempRun run)

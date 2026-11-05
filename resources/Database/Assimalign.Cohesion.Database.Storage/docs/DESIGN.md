@@ -14,20 +14,27 @@ The free-byte probe uses the actual directory volume (GetDiskFreeSpaceEx on Wind
 mounted volumes and UNC shares; DriveInfo/statvfs on Unix), using the nearest existing ancestor
 before lazy directory creation. A probe overflow means effectively unlimited free space.
 An unavailable probe leaves quota zero until CreateRun retries successfully. A lease, sweep or
-probe IOException/UnauthorizedAccessException warns and lets the engine start; CreateRun retries
-all setup and refuses only that statement with CK05005 if it remains unavailable. Every temporary
+probe IOException (including PathTooLongException)/UnauthorizedAccessException warns and lets
+the engine start; CreateRun retries all setup and refuses only that statement with CK05005 if
+it remains unavailable. Every temporary
 file create, read, write or close I/O failure, including ENOSPC, is CK05005 with its original cause.
 Failed append/seal releases the run; failed reads permanently fail that reader, retaining ownership
 with its statement. No temporary failure takes durable storage offline.
 
 Every new physical page checks the statement quota, engine quota and live model-supplied reserve.
-The space caches available bytes, probing outside Gate at most once per 128 reserved pages
-(1 MiB). It subtracts reservations since the sample and buffered unwritten pages present at the
-sample, crediting releases after the sample. Other processes and database writes can consume
+The space caches available bytes, refreshing outside Gate after 128 reserved pages
+(1 MiB) or a sample age above one second (Environment.TickCount64). A would-be CK05003
+re-measures once before refusing, so freeing disk after a refusal permits a later reservation.
+Ordinary refresh uses TryEnter on _probeGate; a stalled probe lets other statements use the
+bounded stale sample. The before-refusal refresh may wait. A release during a probe invalidates
+that sample, preserving the previous sample and its release credits without double credit; the
+unchanged page window/timestamp makes the next reservation eligible to retry. It subtracts
+reservations since the sample and buffered unwritten pages present at the sample, crediting
+releases after the sample. Other processes and database writes can consume
 space inside that window; this is admission headroom, not an OS disk reservation.
 Gate covers accounting and the statement/run registries only. Each run locks its own reads,
-writes and disposal. Lock order is run lock then Gate, never the reverse; no syscall, sort,
-merge or event callback runs under Gate. Parent disposal snapshots registries under Gate,
+writes and disposal. Lock order is run lock, then _probeGate, then Gate, never the reverse;
+no syscall, sort, merge or event callback runs under Gate. Parent disposal snapshots registries under Gate,
 then releases it before disposing children, continuing after close failures. Callers must not
 hold a storage page latch across these calls. An unrelated statement can read, cancel, dispose
 or create a run while another statement is blocked in page I/O.
@@ -44,11 +51,14 @@ can start and open different databases; a second spill refuses with CK05005 and 
 TempDirectory as the way to choose another directory. No per-engine subdirectories are added.
 Startup releases its sweep lease immediately, keeping idle format preflights free of sidecars;
 the first run reacquires and sweeps again, holding the lease until space disposal. Both the
-lease path and temporary directory must have no LinkTarget. Windows opens the lease with
-FileOptions.None and FileShare.Delete, and deletes its path before closing, so closing cannot
+lease path and temporary directory must have no LinkTarget; the lease path is checked again
+after opening. Unix lease permissions are applied through its open handle. Windows opens the
+lease with FileOptions.None and FileShare.Delete, and deletes its path before closing, so closing cannot
 delete a symbolic link target. Unix keeps delete-on-close because runtime lock verification
 uses it; a second exclusive open verifies flock before sweeping. Unsupported/disabled flock
-warns at startup, preserves potential live files and refuses a later spill with CK05005.
+warns once at startup when the directory exists, or at first failed use when it was absent,
+preserves potential live files and refuses a later spill with CK05005. The Warning carries
+the cause's exception type. Cleanup failures are counted without replacing the initiating error.
 Sweeping removes only cohesion-<32 hex GUID>.ctmp, preserving other files/subdirectories.
 TempFixture has crash and lease-probe modes; the latter retries at CreateRun and verifies the
 coded refusal without sweeping when Unix locking is disabled.
@@ -59,25 +69,31 @@ version 2, page ordinal, used payload length, random 64-bit run identity at byte
 CRC-32C at bytes 28..31. The checksum covers the entire page with its checksum field zeroed.
 Reads check version, ordinal, run identity, used length, checksum, record boundaries and EOF
 before publishing buffer positions. Any read exception after argument checks permanently fails
-the reader; later calls raise CK05004 without I/O, even after cancellation before consuming bytes.
+the reader; later calls raise CK05004 with a previous-read-failed message and without I/O,
+damage events or damage counters, even after cancellation before consuming bytes.
 This disposable format is independent of durable storage format 4. No WAL, MVCC, recovery or
 StorageBufferPool participates, and no durable I/O counter moves.
 
 Keys encode direction, collation and NULL placement; a unique Int64 input ordinal breaks ties.
 The sorter uses a grant of at least 64 KiB, an explicit maximum framed record (key + value + 16)
-and a grant-minus-32-KiB workspace. Its separate 8-KiB output page and bounded 64-level run
-directory fit the rest. FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2.
-Balanced groups merge during generation only when another run overflows a full level. Complete
-flushes and merges the smallest remaining runs, only as many as needed to reach FanIn. It returns
+and a grant-minus-32-KiB workspace. Its separate 8-KiB output page and bounded 64 * FanIn run
+directory fit the rest; one directory slot is reserved for merge output.
+FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2. Runs accumulate during
+generation until the directory is full apart from that output slot, then the FanIn smallest merge.
+Complete flushes and merges
+the smallest remaining runs down to FanIn, doing the partial group first to minimize writes
+(Huffman-style); the global input ordinal makes merge-tree shape irrelevant to stability. It returns
 StorageTempSortReader owning those runs; the final heap merge runs in MoveNext without a new
 output file. At most FanIn initial runs write each row once. The reader retains count times
 (8 KiB + maximum record) and Complete releases the rest of the workspace. It refills the previous
-winner at the next MoveNext, preserving borrowed Key/Value until then. Reader disposal deletes
-its inputs; statement disposal also closes them. Statement PhysicalBytes/PeakBytes expose live
-and peak reservations. RecordsWritten/KeyComparisons are internal test counters; two input sizes
+winner at the next MoveNext, preserving borrowed Key/Value until then. An exhausted owned input
+immediately closes its reader and run, returning quota and disk as the merge proceeds. Reader
+disposal deletes its remaining inputs; statement disposal also closes them. Statement
+PhysicalBytes/PeakBytes expose live and peak reservations. RecordsWritten/KeyComparisons are internal test counters; two input sizes
 bound merge depth and write growth, while differential cases cover several grants and levels.
-Hash partitions are lazy files selected by hash modulo count; their grant covers an 8-KiB writer
-plus 512 bytes bookkeeping per partition. Consumers own skew/repartition policy and match flags.
+Hash partition instances require serialized use. Partitions are lazy files selected by hash
+modulo count; their grant covers an 8-KiB writer plus 512 bytes bookkeeping per partition.
+Consumers own skew/repartition policy and match flags.
 
 Reference behavior, without copying code: PostgreSQL balanced k-way sorting
 (src/backend/utils/sort/tuplesort.c:15-42), on-the-fly final merge (tuplesort.c:161), private BufFile
@@ -85,14 +101,25 @@ buffering (src/backend/storage/file/buffile.c:71-104), pre-write quota checks
 (src/backend/storage/file/fd.c:2251-2274), startup availability (fd.c:3316-3318), and owner-only
 file/directory defaults (src/common/file_perm.c:19-20; src/include/common/file_perm.h:38).
 
-Temp data is **unencrypted**. After a kill or power loss row data stays on disk until an engine
-next opens that directory; OS-level backups of RootPath can capture live temp files. Unix creates
+Temp data is **unencrypted**. On Unix after a kill, and on every OS after power loss, row data
+can stay on disk until an engine next opens that directory. Windows process exit deletes
+delete-on-close runs; OS-level backups of RootPath can capture live temp files. Unix creates
 new directories 0700 and run/lease files 0600, deliberately stricter than data-file permissions,
 and refuses group- or other-writable directories. On Windows an explicit directory keeps its
 inherited ACL. File-engine option checks reject a database-named first segment below RootPath
 and any link component below the root. Encryption at rest must cover these files when it arrives.
 
-Limits: the arena is allocated for the full grant at creation; growing it on demand, multi-page
+Limits: peak disk is bounded by compact data pages (including the 4-byte run prefix per sort
+frame), plus the largest intermediate merge, plus one 8-KiB rounding page per initial run
+(and one output page). This is not a
+(1 + 1 / FanIn) bound: at 2 * FanIn - 1 equal runs, the largest merge includes FanIn runs,
+so FanIn 16 can peak near 1.52 times the data. Seventeen 52,608-row runs of 1,020-byte sort
+frames finish inside a 1-GiB quota; a late larger merge can still need more headroom.
+At most 64 * FanIn run handles are live (1,024 at FanIn 16), plus the directory lease.
+File handle exhaustion (EMFILE) surfaces as CK05005 and releases all owned runs; no handle
+virtualization or operator spilling is introduced. Failed closes return accounting but credit
+only unwritten pages as free headroom, since disk reclamation was not confirmed.
+The arena is allocated for the full grant at creation; growing it on demand, multi-page
 merge input buffers and dynamic fan-in remain for SQ-L2 to measure with a real consumer. A record
 over the declared maximum is a coded CK05006 refusal. The engine quota and statement default
 (4 times the memory budget) bound capacity; ten grants requires an explicit larger statement quota.
@@ -108,9 +135,9 @@ over the declared maximum is a coded CK05006 refusal. The engine quota and state
 
 The Storage EventSource owns exact process counters even without listeners. Events 21
 TempSpaceBytes (Verbose, deltaBytes/currentBytes), 22 TempSpaceRefused (Verbose, code), 23
-TempSpaceUnavailable (Warning, code) and 24 TempSpaceDamaged (Error, code) use Keywords.TempSpace
+TempSpaceUnavailable (Warning, code/exceptionType) and 24 TempSpaceDamaged (Error, code) use Keywords.TempSpace
 (0x10); callbacks run outside Gate. Counters: current-temp-bytes (gauge), temp-pages-written-per-second,
-temp-refusals-per-second (including CK05006) and temp-damage-per-second (rates). No path, key or row enters events.
+temp-refusals-per-second (including CK05005 and CK05006) and temp-damage-per-second (rates). No path, key or row enters events.
 
 
 ## Bracket commit failure injection (#1726)
@@ -3075,9 +3102,9 @@ session enables.
 | 19 | `CheckpointBusy` | Verbose | Checkpoints | `database`, `bracketClass`, `owner`, `transactionSequence`, `refusal` | once for each physical bracket blocking a refused checkpoint |
 | 20 | `CheckpointJournalPeak` | Verbose | Checkpoints | `database`, `peakLength` | exact journal high-water mark since open, before an admitted checkpoint |
 | 21 | `TempSpaceBytes` | Verbose | TempSpace | `deltaBytes`, `currentBytes` | temporary physical-page reservation or release |
-| 22 | `TempSpaceRefused` | Verbose | TempSpace | `code` | every temporary quota or floor refusal |
-| 23 | `TempSpaceUnavailable` | Warning | TempSpace | `code` | optional temporary setup failure at startup |
-| 24 | `TempSpaceDamaged` | Error | TempSpace | `code` | temporary integrity failure or retry of a failed reader |
+| 22 | `TempSpaceRefused` | Verbose | TempSpace | `code` | every temporary quota, floor, unavailable I/O (CK05005) or oversized-record (CK05006) refusal |
+| 23 | `TempSpaceUnavailable` | Warning | TempSpace | `code`, `exceptionType` | first optional temporary setup failure, at startup or first failed use |
+| 24 | `TempSpaceDamaged` | Error | TempSpace | `code` | temporary validation failure; a retry of a failed reader raises no damage event/counter |
 | 7 | `PagesWrittenBack` | Verbose | `WriteBack` | `database`, `pages`, `durationMilliseconds` | `WriteBackDirtyPages`, when the pass wrote a page |
 | 8 | `PendingCommitsFlushed` | Verbose | `GroupCommit` | `database`, `durableLsn` | the gate's `FlushPending` (a flush worker's `FlushPendingCommits`), when it flushed |
 | 9 | `GroupCommitWindowMissed` | Verbose | `GroupCommit` | `database`, `lsn`, `windowMilliseconds` | the gate's `AwaitDurable`: the window passed before a group flush covered the commit, so the committer requested the journal flush itself (a no-op when another flush covered it first; a zero window does this on every grouped commit); not for a wait the storage going offline abandoned |
@@ -3126,7 +3153,7 @@ per pin, per record or per statement:
 | `current-temp-bytes` | gauge | physical temp-page reservation/release, including buffered unwritten tails |
 | `temp-pages-written-per-second` | rate | a completed temporary page write, independent of durable page writes |
 | `temp-refusals-per-second` | rate | every temporary quota, floor, oversized-record or unavailable-space refusal |
-| `temp-damage-per-second` | rate | temporary integrity failures, including retries of failed readers |
+| `temp-damage-per-second` | rate | temporary validation failures; retries of failed readers do not increment it |
 | `checkpoints-per-second` | rate | a completed `Checkpoint` |
 | `journal-flushes-per-second` | rate | a completed durable flush of a journal's medium (`StorageJournal.FlushCore`) |
 | `page-reads-per-second` | rate | a page the pool read from the data file on a miss |
