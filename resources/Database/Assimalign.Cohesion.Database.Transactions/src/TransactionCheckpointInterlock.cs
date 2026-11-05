@@ -380,7 +380,7 @@ public sealed class TransactionCheckpointInterlock
         CancellationToken closing = OfflineCancellation();
         using var linked = token.CanBeCanceled ? CancellationTokenSource.CreateLinkedTokenSource(token, closing) : null;
         try { _gate.Wait(linked?.Token ?? closing); }
-        catch (OperationCanceledException) { ThrowIfClosed(); throw; }
+        catch (OperationCanceledException) { ThrowIfClosed(); token.ThrowIfCancellationRequested(); throw; }
     }
 
     private async Task WaitUntilAvailableAsync(CancellationToken token)
@@ -388,7 +388,7 @@ public sealed class TransactionCheckpointInterlock
         CancellationToken closing = OfflineCancellation();
         using var linked = token.CanBeCanceled ? CancellationTokenSource.CreateLinkedTokenSource(token, closing) : null;
         try { await _gate.WaitAsync(linked?.Token ?? closing).ConfigureAwait(false); }
-        catch (OperationCanceledException) { ThrowIfClosed(); throw; }
+        catch (OperationCanceledException) { ThrowIfClosed(); token.ThrowIfCancellationRequested(); throw; }
     }
 
     private bool TryAdmit(string bracketClass, long owner, bool drain)
