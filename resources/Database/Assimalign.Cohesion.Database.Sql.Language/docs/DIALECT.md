@@ -329,7 +329,7 @@ The WindowAgg stage groups equal partition/order specifications and processes lo
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
 functions and sort_shared for each group. Window inputs, augmented result rows, sort indexes,
 key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
-an excess and every reservation unwinds on success, error or cancellation. Whole input and
+an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first and every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
 Reference-identity ownership avoids duplicate payload charges; consumed input rows and
 partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
@@ -509,8 +509,9 @@ not a claim that GC heap measurements equal the grant. The ownership ledger itse
 Final ordered collectors remove discarded outputs and keys from the partition cleanup owner
 before releasing their ledger charges, including bounded LIMIT heaps. Cleanup uses counted
 reference-identity membership with bounded dictionary-capacity allowances and O(1) removal.
-Previously materialized statement subquery vectors and CTE/relation rows are admitted when
-the window owner starts (CS05067 on failed admission); payload aliases remain charged once.
+In DML and recursion, previously materialized statement subquery vectors and CTE/relation rows
+are admitted when the window owner starts (CS05067 on failed admission); payload aliases remain
+charged once. Plain SELECT caches keep their separate statement reservations.
 Scalar, EXISTS and IN/quantified subquery caches share this admission path. Plain children
 clear their owned source cells and buffers after copying the cached values, including unread
 EXISTS rows, so completed async frames cannot keep discarded payloads alive across admission. Computed IN-list
@@ -5378,8 +5379,9 @@ SELECT, including sort/group state and relation caches; both sequence and sequen
 1,001-key grouped OFFSET forms refuse at 8 KiB, while equal kept outputs have equal admission.
 Window buffers absent from the window ledger also charge; ledger-owned rows and vectors
 keep that owner. An independent cache first materialized in a window remains charged for
-the statement. New refusals caused only by plain bytes report CS05067; base window and
-SQL/JSON grant refusals retain CS05079 and CS05094. Statement memory refusal aborts input
+the statement. When plain bytes fill the grant first, refusal reports CS05067, including statements whose
+earlier ledger would later refuse with CS05079 or CS05094. With no plain bytes live, window
+and SQL/JSON grant refusals retain their specific code. Statement memory refusal aborts input
 immediately, including input with a later error. Shared values pay once per retaining buffer in
 this step (#1776, SQ-L1b); SQ-L1c addresses repeated wide payloads. Plan-sized traversal and
 current-row state, storage iterator scratch and transient planning remain outside the grant.

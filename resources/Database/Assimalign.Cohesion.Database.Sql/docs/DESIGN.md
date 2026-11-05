@@ -570,7 +570,7 @@ The WindowAgg stage groups equal partition/order specifications and processes lo
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
 functions and sort_shared for each group. Window inputs, augmented result rows, sort indexes,
 key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
-an excess and every reservation unwinds on success, error or cancellation. Whole input and
+an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first and every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
 Reference-identity ownership avoids duplicate payload charges; consumed input rows and
 partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
@@ -753,8 +753,9 @@ not a claim that GC heap measurements equal the grant. The ownership ledger itse
 Final ordered collectors remove discarded outputs and keys from the partition cleanup owner
 before releasing their ledger charges, including bounded LIMIT heaps. Cleanup uses counted
 reference-identity membership with bounded dictionary-capacity allowances and O(1) removal.
-Previously materialized statement subquery vectors and CTE/relation rows are admitted when
-the window owner starts (CS05067 on failed admission); payload aliases remain charged once.
+In DML and recursion, previously materialized statement subquery vectors and CTE/relation rows
+are admitted when the window owner starts (CS05067 on failed admission); payload aliases remain
+charged once. Plain SELECT caches keep their separate statement reservations.
 Scalar, EXISTS and IN/quantified subquery caches share this admission path. Plain children
 clear their owned source cells and buffers after copying the cached values, including unread
 EXISTS rows, so completed async frames cannot keep discarded payloads alive across admission. Computed IN-list
@@ -1660,7 +1661,10 @@ window owner, a SQL/JSON statement grant, a frame with correlated/deferred queri
 in its own expressions. SQL/JSON keeps staging so scalar grants never acquire a new overlap
 with a live input hash build. Scalar grants can overlap retained output and sort buffers;
 only newly charged plain bytes causing refusal report CS05067, while an exhausted scalar
-grant with those bytes excluded keeps CS05079 (window) or CS05094 (SQL/JSON).
+grant with those bytes excluded keeps CS05079 (window) or CS05094 (SQL/JSON). A plain-byte
+overflow can therefore report CS05067 where the earlier ledger would later report a specific
+code. A window over an independent vector can also succeed where earlier vector adoption
+refused, because the vector costs less at rest.
 Grouping also checks keys, arguments, FILTER, inner ordering, HAVING and output expressions,
 and keeps deferred key/aggregate collations on the original path.
 Application aggregates, volatile/sequence group transitions and join outputs keep the staged path: a later input error
@@ -8665,7 +8669,7 @@ unchanged; a BEGIN queued there does not block admission of ordinary statements.
 survives reopen, so no persisted creation marker or format change is needed.
 
 Query operators keep their existing materialization policy, as INSERT SELECT does. Before copying,
-the retained child result (row arrays, scalar/text/binary payloads and result-list capacity) is
+the retained child result (row arrays, scalar/text/binary payloads and a fixed slot per kept row) is
 charged to the statement memory grant. The encoded batch and its reference buffer share that
 grant. CS05067 refuses an over-budget build before publication. Source disposal, flush completion
 and every exception/cancellation path release the corresponding reservations.

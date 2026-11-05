@@ -72,7 +72,7 @@ internal sealed class SqlRowCollector : IDisposable
         long ordinal = _visited++;
         if (_orderBy.Count == 0)
         {
-            if (ordinal >= _offset) { Reserve(32L + SqlHashJoinTable.RowBytes(output)); _rows.Add(output); return null; }
+            if (ordinal >= _offset) { if (ChargesPlainMemory) { Reserve(32L + SqlHashJoinTable.RowBytes(output)); } _rows.Add(output); return null; }
             windowMemory?.ReleaseRow(output);
             return output;
         }

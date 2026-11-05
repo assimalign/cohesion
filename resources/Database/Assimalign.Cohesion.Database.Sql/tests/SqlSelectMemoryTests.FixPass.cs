@@ -18,7 +18,7 @@ public sealed partial class SqlSelectMemoryTests
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT memory: new window and JSON overlap refusals keep the statement code (#1776)")]
     [InlineData(false, 7724L, 7692L)]
     [InlineData(true, 3728L, 3616L)]
-    public async Task ExecuteAsync_ScalarGrantOverlap_ShouldPreserveBaseRefusal(bool json, long expectedPeak, long expectedRefusal)
+    public async Task ExecuteAsync_ScalarGrantWithoutPlainBytes_ShouldKeepSpecificCode(bool json, long expectedPeak, long expectedRefusal)
     {
         // Arrange: each scalar scope fits alone; the outer collector remains live between calls.
         string sql = json ? "SELECT JSON_VALUE(doc,'$.a') FROM o"
@@ -150,6 +150,7 @@ public sealed partial class SqlSelectMemoryTests
     {
         var builder = SqlDatabaseEngine.CreateBuilder("select-fix-boundary");
         builder.Options.StatementMemoryBudget = budget;
+        builder.Functions.Add(new MemoryRandomFunction());
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -160,6 +161,7 @@ public sealed partial class SqlSelectMemoryTests
         catch (DatabaseException failure) { code = failure.Diagnostics[0].Code; }
         var metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.HashMemoryBytes.ShouldBe(0);
+        metrics.PlainSelectMemoryBytes.ShouldBe(0);
         return (metrics.PeakHashMemoryBytes, code, metrics.RecordsExamined, metrics.JoinCandidatePairs);
     }
 
@@ -227,6 +229,7 @@ public sealed partial class SqlSelectMemoryTests
         _output.WriteLine($"REPRESENTATIVE|{measured}|{refused}");
         measured.ShouldBe(1944);
         refused.ShouldBe(1704);
+        (await Run(1511, true)).ShouldBe(1384);
 
         async Task<long> Run(long budget, bool refuses)
         {

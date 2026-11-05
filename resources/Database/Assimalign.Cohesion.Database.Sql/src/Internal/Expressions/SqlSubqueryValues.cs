@@ -82,10 +82,10 @@ internal class SqlSubqueryValues
     {
         get
         {
-            long bytes = 0;
+            BudgetedValues? owner = null;
             for (var frame = this; frame is not null; frame = frame._parent)
-            { if (frame is BudgetedValues budgeted) { bytes += budgeted.PendingStatementBytes; } }
-            return bytes;
+            { if (frame is BudgetedValues budgeted) { owner = budgeted; } }
+            return owner?.PendingStatementBytes ?? 0;
         }
     }
 

@@ -637,7 +637,7 @@ internal sealed partial class SqlPlanExecutor
                     PollCancellation();
                     keys[i] = evaluator.Evaluate(orderBy[i].Key, row);
                 }
-                ReserveSelectMemory(ref keyBytes, 64L + SqlHashJoinTable.RowBytes(keys), includeWindow: true);
+                if (ChargesAdditionalSelectBuffers) { ReserveSelectMemory(ref keyBytes, 64L + SqlHashJoinTable.RowBytes(keys), includeWindow: true); }
                 // Admit the fixed sorted-output slot with its input, before ToList retains it.
                 RetainSelectRow(ref sortedBytes, row, includeWindow: true);
                 return keys;

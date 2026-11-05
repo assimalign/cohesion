@@ -206,7 +206,7 @@ internal sealed partial class SqlPlanExecutor
             GroupAggregateState[] CreateStates()
             {
                 RecursiveScratch?.Reserve(128L + 128L * aggregates.Count);
-                ReserveSelectMemory(ref retainedBytes, PlainGroupStateBytes(aggregates), includeWindow: true);
+                if (ChargesAdditionalSelectBuffers) { ReserveSelectMemory(ref retainedBytes, PlainGroupStateBytes(aggregates), includeWindow: true); }
                 var states = new GroupAggregateState[aggregates.Count];
                 for (int i = 0; i < states.Length; i++)
                 {
@@ -392,7 +392,7 @@ internal sealed partial class SqlPlanExecutor
                 GroupAggregateState[] CreateStates()
                 {
                     RecursiveScratch?.Reserve(128L + 128L * aggregates.Count);
-                    ReserveSelectMemory(ref retainedBytes, PlainGroupStateBytes(aggregates), includeWindow: true);
+                    if (ChargesAdditionalSelectBuffers) { ReserveSelectMemory(ref retainedBytes, PlainGroupStateBytes(aggregates), includeWindow: true); }
                     var states = new GroupAggregateState[aggregates.Count];
                     for (int i = 0; i < states.Length; i++)
                     {

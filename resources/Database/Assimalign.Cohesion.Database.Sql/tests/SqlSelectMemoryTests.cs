@@ -102,7 +102,6 @@ public sealed partial class SqlSelectMemoryTests
             [1480, 1376, 1656, 1440],
             [5332, 5132, 5332, 5132],
             [3868, 3732, 3868, 3732],
-
         ];
         for (int i = 0; i < queries.Length; i++)
         {
@@ -146,7 +145,11 @@ public sealed partial class SqlSelectMemoryTests
                 else { await Read(session, sql); }
                 return session.LastStatementMetrics.ShouldNotBeNull().PeakHashMemoryBytes;
             }
-            finally { session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0); }
+            finally
+            {
+                session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
+                session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+            }
         }
     }
 

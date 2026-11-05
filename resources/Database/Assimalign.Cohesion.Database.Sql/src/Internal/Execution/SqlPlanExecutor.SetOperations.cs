@@ -31,7 +31,7 @@ internal sealed partial class SqlPlanExecutor
                     int start = rows.Count;
                     await MaterializeSetOperandAsync(operand.Query, operand.Values, plan, statement, cancellationToken, rows, seen).ConfigureAwait(false);
                     for (int i = start; i < rows.Count; i++)
-                    { RetainSelectRow(ref retainedBytes, rows[i], includeWindow: true); if (seen is not null) { ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(rows[i]), includeWindow: true); } }
+                    { RetainSelectRow(ref retainedBytes, rows[i], includeWindow: true); if (seen is not null && ChargesAdditionalSelectBuffers) { ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(rows[i]), includeWindow: true); } }
                 }
             }
             else
@@ -45,7 +45,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (!counts.TryGetValue(row, out int count))
-                    { recursiveScratch?.Reserve(64); ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(row), includeWindow: true); }
+                    { recursiveScratch?.Reserve(64); if (ChargesAdditionalSelectBuffers) { ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(row), includeWindow: true); } }
                     counts[row] = count + 1;
                 }
                 var seen = plan.IsAll ? null : new HashSet<object?[]>(comparer);
@@ -59,7 +59,7 @@ internal sealed partial class SqlPlanExecutor
                     bool include = plan.Operator == SqlSetOperator.Intersect ? count > 0 : count == 0;
                     if (include && (seen is null || !seen.Contains(row)))
                     {
-                        if (seen is not null) { ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(row), includeWindow: true); seen.Add(row); }
+                        if (seen is not null) { if (ChargesAdditionalSelectBuffers) { ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(row), includeWindow: true); } seen.Add(row); }
                         recursiveScratch?.Reserve(64); RetainSelectRow(ref retainedBytes, row, includeWindow: true); rows.Add(row);
                     }
                 }
@@ -103,7 +103,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         if (RecursiveState is not null && SqlWindowMemory.For(statement.Metrics) is { } memory)
                         { memory.Retain(converted); memory.Reserve(32); }
-                        if (seen is not null) { ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(converted), includeWindow: true); seen.Add(converted); }
+                        if (seen is not null) { if (ChargesAdditionalSelectBuffers) { ReserveSelectMemory(ref retainedBytes, 64L + SqlHashJoinTable.RowBytes(converted), includeWindow: true); } seen.Add(converted); }
                         RetainSelectRow(ref retainedBytes, converted, includeWindow: true);
                         rows.Add(converted);
                     }

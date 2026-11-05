@@ -571,7 +571,6 @@ internal sealed partial class SqlPlanExecutor
             if (collector is not null)
             {
                 rows = collector.Finish(resolveEmptyCollations: false);
-                retainedBytes += AdmitSelectRows(rows, cancellationToken);
             }
             if (seen is not null)
             {
