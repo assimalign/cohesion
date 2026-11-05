@@ -178,7 +178,7 @@ public static class GqlClauses
     /// <summary>Three-valued ALL, ANY, NONE and SINGLE predicates over lists.</summary>
     public const string ListPredicate = "LIST PREDICATE";
 
-    /// <summary>Invokes a graph query procedure.</summary>
+    /// <summary>Invokes a read-only inline query with RETURN for each input row.</summary>
     public const string Call = "CALL";
 
     /// <summary>Projects values produced by a procedure.</summary>

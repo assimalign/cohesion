@@ -13,7 +13,7 @@ internal static partial class GraphPlanExecutor
     private static async IAsyncEnumerable<object?[]> StreamCompositeTreeRowsAsync(GraphDatabase database,
         GraphOperation operation, GraphCompositePlan composite, [EnumeratorCancellation] CancellationToken token,
         IReadOnlyList<IReadOnlyDictionary<string, object?>>? incoming, DatabaseType[]? metadataTypes,
-        bool[]? dynamicTypes, bool[]? nullable)
+        bool[]? dynamicTypes, bool[]? nullable, IReadOnlyDictionary<string, object?>? globals = null)
     {
         var budget = operation.QueryBudget!;
         var stack = new List<GraphCompositeCursor>();
@@ -37,7 +37,7 @@ internal static partial class GraphPlanExecutor
                 if (cursor.Node.Operator is null)
                 {
                     var plan = composite.Operands[cursor.Node.Operand];
-                    cursor.Source ??= StreamCompositeOperandAsync(database, operation, plan, token, incoming).GetAsyncEnumerator(token);
+                    cursor.Source ??= StreamCompositeOperandAsync(database, operation, plan, token, incoming, globals).GetAsyncEnumerator(token);
                     operation.FunctionBindings = plan.FunctionBindings;
                     operation.FunctionCancellation = token;
                     if (await cursor.Source.MoveNextAsync().ConfigureAwait(false))

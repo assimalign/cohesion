@@ -39,6 +39,8 @@ internal static partial class GraphPlanExecutor
                 }
                 source = StreamCompositeBindingsAsync(database, operation, composite.Composite, source, token);
             }
+            else if (stage is GraphCallStagePlan call)
+            { source = StreamCallAsync(database, operation, call, source, layout, budget, token); }
             else if (stage.Stage is GqlMatchStage)
             {
                 foreach (var clause in stage.Plan.MatchClauses)
@@ -234,7 +236,8 @@ internal static partial class GraphPlanExecutor
 
     private static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamBoundaryAsync(GraphPlan plan,
         GqlReturnStage stage, IAsyncEnumerable<IReadOnlyDictionary<string, object?>> input, GraphBindingLayout layout, ExpansionBudget budget,
-        GraphOperation operation, IReadOnlyDictionary<string, object?>? parameters, [EnumeratorCancellation] CancellationToken token)
+        GraphOperation operation, IReadOnlyDictionary<string, object?>? parameters, [EnumeratorCancellation] CancellationToken token,
+        IReadOnlyDictionary<string, object?>? globals = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         using var iteratorMemory = budget.Memory.Reserve(256);
@@ -242,7 +245,10 @@ internal static partial class GraphPlanExecutor
         if (plan.SortPage is not { Keys.Count: > 0 })
         {
             if (plan.Grouping is { } grouping)
-            { input = StreamGroupsAsync(grouping, input, operation, parameters, token); }
+            {
+                input = StreamGroupsAsync(grouping, input, operation, parameters, token);
+                if (globals is not null) { input = RestoreCallImportsAsync(input, globals, layout, budget, token); }
+            }
             var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
             long offset = plan.SortPage?.Offset ?? 0;
             long? limit = plan.SortPage?.Limit;
@@ -261,6 +267,7 @@ internal static partial class GraphPlanExecutor
                 var scope = plan.Grouping is null && plan.Distinct is null ? new GraphBindingRow(layout, binding) : new GraphBindingRow(layout);
                 for (int i = 0; i < values.Length; i++)
                 { if (plan.Projections[i].BindingName is { } name) { scope[name] = values[i]; } }
+                if (globals is not null) { foreach (var pair in globals) { scope[pair.Key] = pair.Value; } }
                 if (stage.Predicate is { } predicate && GraphExpressionEvaluator.Boolean(
                     GraphExpressionEvaluator.Evaluate(predicate, scope, operation.EvaluationContext, parameters), predicate) is not true) { continue; }
                 var carried = new GraphBindingRow(layout);
@@ -272,13 +279,17 @@ internal static partial class GraphPlanExecutor
                         ErrorMessages.DuplicateResultColumn, name), plan.Projections[i].Expression.Location ?? plan.Query.Location); }
                 }
                 retained.RetainValue(values, token);
-                try { using (budget.Memory.Reserve(carried.RetainedBytes + scope.RetainedBytes)) { yield return carried; } }
+                try { if (globals is not null) { foreach (var pair in globals) { carried[pair.Key] = pair.Value; } }
+                    using (budget.Memory.Reserve(carried.RetainedBytes + scope.RetainedBytes)) { yield return carried; } }
                 finally { retained.ReleaseValue(values); }
             }
             yield break;
         }
         if (plan.Grouping is { } orderedGrouping)
-        { input = StreamGroupsAsync(orderedGrouping, input, operation, parameters, token); }
+        {
+            input = StreamGroupsAsync(orderedGrouping, input, operation, parameters, token);
+            if (globals is not null) { input = RestoreCallImportsAsync(input, globals, layout, budget, token); }
+        }
         using var top = new GraphTopRows(budget.Memory, plan.SortPage, token);
         var seen = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
         long ordinal = 0;
@@ -294,6 +305,7 @@ internal static partial class GraphPlanExecutor
                 scope = plan.Grouping is null && plan.Distinct is null ? new(layout, binding) : new(layout);
                 for (int i = 0; i < values.Length; i++)
                 { if (plan.Projections[i].BindingName is { } name) { scope[name] = values[i]; } }
+                if (globals is not null) { foreach (var pair in globals) { scope[pair.Key] = pair.Value; } }
             }
             top.Add(new(values, GraphSortPage.Keys(plan, binding, values, operation.EvaluationContext, token), ordinal++) { Scope = scope });
         }
@@ -314,6 +326,7 @@ internal static partial class GraphPlanExecutor
                 { throw new GraphPlanningException("CG01015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.DuplicateResultColumn, name), plan.Projections[i].Expression.Location ?? plan.Query.Location); }
             }
+            if (globals is not null) { foreach (var pair in globals) { row[pair.Key] = pair.Value; } }
             using (budget.Memory.Reserve(row.RetainedBytes)) { yield return row; }
         }
     }
