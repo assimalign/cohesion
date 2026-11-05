@@ -1,5 +1,8 @@
 # Database.Sql.Client — Design
 
+A runtime stack refusal crosses TCP as CS05004/ExecutionFailure. The failed statement leaves the
+connection usable, and the exact authenticated server session accepts the next query (#1151).
+
 ## Typed TYPE migration publication (#1447, SQ-A3)
 
 InMemory and TCP code-first server tests reopen populated typed tables with a changed column

@@ -44,6 +44,10 @@ This registry covers the Database edit boundary. CK does not reserve codes for u
 Cohesion libraries or resource areas. Cache has its prefix reserved even when an operation
 reports through the existing cache result vocabulary rather than an exception diagnostic.
 
+Language stack backstops use SQL `CS05004`, Graph `CG05008` and Documents `CD05021`.
+Each refuses the statement while keeping the session usable, including over TCP; none ends
+the process. The per-model rows below describe the guarded stages.
+
 Process-crash test reopening (#1713) changes no error identity or engine behavior. An underlying
 sharing/lock violation (Windows HRESULT 0x80070020/0x80070021, or EWOULDBLOCK/EAGAIN errno
 11 on Linux and 35 on macOS) still fails open with Blob CB06005,
@@ -283,7 +287,7 @@ structured-carrier messages remain unprefixed.
 | New (#1012, SQ-I1) | CS04073 | SERIALIZABLE text transaction isolation is unsupported (0A000) |
 | New (#1726, XT-4) | CS04074 | SET TRANSACTION inside an active named savepoint (25001) |
 | New (#1724, SQ-C1) | CS04075 | COPY inside an explicit transaction (25001, Cohesion policy) |
-| COHSQLE004 | CS05004 | Execution/budgets |
+| COHSQLE004 | CS05004 | Statement parsing, planning or execution needs more execution stack than the executing thread has left; the statement fails and the session stays open (SQLSTATE 54001) |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
 | COHSQLE017 | CS05017 | Execution/budgets |
@@ -490,7 +494,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1738, GQ-D2) | CG04025 | Transactions — schema DDL inside an explicit transaction (Cohesion policy) |
 | COHDBG001 | CG05001 | Execution/budgets |
 | COHDBG004 | CG05004 | Execution/budgets — physical work or qualifying 65th hop, including selector search |
-| COHDBG008 | CG05008 | Execution/budgets |
+| COHDBG008 | CG05008 | Statement parsing, planning or execution needs more execution stack than the executing thread has left; the statement fails and the session stays open |
 | COHDBG020 | CG05020 | Execution/budgets — retained statement memory, including selector history and output |
 | New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
 | New (#1735, GQ-M1) | CG05023 | Execution — invalid bound MERGE pattern lock identity |

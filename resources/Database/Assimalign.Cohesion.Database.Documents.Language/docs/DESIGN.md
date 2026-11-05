@@ -4,6 +4,7 @@
 
 OQL uses the shared non-virtual QueryParser.Parse template. The model supplies protected
 grammar core; the base constructs the profile lexer and runs analyzers.
+The grammar stamps the complete statement text before analyzers read it, including compound query bodies.
 OQL opts into base-owned serialization through analyzer completion, preserving its existing per-instance gate.
 The [Language audit](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parser-and-analyzer-type-shape-audit-1264)
 records the constructor, options and analyzer decisions. Grammar, diagnostics and conformance
