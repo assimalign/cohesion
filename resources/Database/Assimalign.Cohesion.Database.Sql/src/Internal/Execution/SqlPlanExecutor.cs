@@ -133,117 +133,122 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteCoreAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-        _containsLike |= plan.ContainsLike;
-        _metrics = statement.Metrics;
-        if (RecursiveState is not null && StatementInput(plan) is SqlRelationPlan)
-        { return await ExecuteRecursiveQueryAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
-        // Keep the static plan as the eligibility key; LIMIT/OFFSET initialization may
-        // create a fresh execution copy on every correlated invocation.
-        switch (InitializeWindow(plan, cancellationToken))
+        bool statementRoot = _metrics is null;
+        try
         {
-            case SqlWindowAggregatePlan window:
-                return await ExecuteWindowAggregateAsync(window, statement, cancellationToken).ConfigureAwait(false);
-            case SqlSetOperationPlan set:
-                return await ExecuteSetOperationAsync(set, statement, cancellationToken).ConfigureAwait(false);
-            case SqlConstantPlan constant:
-                if (_subqueryValues is { HasCorrelatedQueries: true })
-                {
-                    return await ExecuteCorrelatedSelectAsync([Array.Empty<object?>()], constant.Projections,
-                        constant.Where, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
-                        statement, cancellationToken).ConfigureAwait(false);
-                }
-                var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
-                return MaterializeSelect(evaluator.Matches(constant.Where, []) ? [Array.Empty<object?>()] : [],
-                    constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
-                    evaluator, constant.OrderByProjections, cancellationToken,
-                    incrementalDistinct: CanPipelinePlainDistinct(plan));
-            case SqlWithPlan with:
-                foreach (var relation in RecursiveState is null ? with.Relations : Array.Empty<SqlDerivedRelation>())
-                {
-                    await MaterializeRelationAsync(relation, statement, cancellationToken).ConfigureAwait(false);
-                }
-                return await ExecuteAsync(with.Input, statement, cancellationToken).ConfigureAwait(false);
-            case SqlDefinitionPlan definition:
-                return await ExecuteDefinitionAsync(definition, statement, cancellationToken).ConfigureAwait(false);
-            case SqlSubqueryPlan subquery:
-                return await ExecuteSubqueriesAsync(subquery.Input, subquery.Queries, statement, cancellationToken).ConfigureAwait(false);
-            case SqlCorrelatedSubqueryPlan correlated:
-                return await ExecuteSubqueriesAsync(correlated.Input, correlated.Queries, statement, cancellationToken).ConfigureAwait(false);
-            case SqlInsertSelectPlan insertSelect:
-                _definitions.EnsureIndexPredicatesResolved(insertSelect.Table, cancellationToken);
-                return await ExecuteInsertSelectAsync(insertSelect, statement, cancellationToken).ConfigureAwait(false);
-            case SqlGroupPlan group:
-                return await ExecuteGroupAsync(group, statement, cancellationToken, (SqlGroupPlan)plan).ConfigureAwait(false);
-            case SqlSystemViewPlan systemView:
-                return _subqueryValues is { HasCorrelatedQueries: true }
-                    ? await ExecuteCorrelatedSelectAsync(ReadCorrelatedSystemRelation(systemView.View, statement, cancellationToken),
-                        systemView.Projections, systemView.Where, systemView.OrderBy, systemView.Limit, systemView.Offset,
-                        systemView.IsDistinct, statement, cancellationToken).ConfigureAwait(false)
-                    : ExecuteSystemView(systemView, statement, cancellationToken, plan);
-            case SqlSelectPlan select:
-                return _subqueryValues is { HasCorrelatedQueries: true }
-                    ? await ExecuteCorrelatedSelectAsync(EnumerateRows(select.Table, select.Access, statement, cancellationToken).Select(row => row.Values),
-                        select.Projections, select.Where, select.OrderBy, select.Limit, select.Offset, select.IsDistinct,
-                        statement, cancellationToken).ConfigureAwait(false)
-                    : ExecuteSelect(select, statement, cancellationToken, retainRows: null, retentionPlan: plan);
-            case SqlJoinPlan join:
-                // Keep this dispatcher Task-based: a new ValueTask awaiter would grow
-                // its state machine even for ordinary DML with exact allocation guards.
-                return await (CanPipelineJoinOutput((SqlJoinPlan)plan)
-                    ? ExecutePipelinedJoinAsync(join, statement, cancellationToken).AsTask()
-                    : ExecuteJoinAsync(join, statement, cancellationToken)).ConfigureAwait(false);
-            case SqlInsertPlan insert:
-                _definitions.EnsureIndexPredicatesResolved(insert.Table, cancellationToken);
-                return await ExecuteInsertAsync(insert, statement, cancellationToken).ConfigureAwait(false);
-            case SqlUpdatePlan update:
-                _definitions.EnsureIndexPredicatesResolved(update.Table, cancellationToken);
-                return await ExecuteUpdateAsync(update, statement, cancellationToken).ConfigureAwait(false);
-            case SqlDeletePlan delete:
-                _definitions.EnsureIndexPredicatesResolved(delete.Table, cancellationToken);
-                return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
-            case SqlMergePlan merge:
-                _definitions.EnsureIndexPredicatesResolved(merge.Table, cancellationToken);
-                return await ExecuteMergeAsync(merge, statement, cancellationToken).ConfigureAwait(false);
-            case SqlSequencePlan sequence:
-                return await ExecuteSequenceDdlAsync(sequence, statement, cancellationToken).ConfigureAwait(false);
-            case SqlCreateTablePlan create:
-                return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
-            case SqlCreateTableAsPlan create:
-                return await ExecuteCreateTableAsAsync(create, statement, cancellationToken).ConfigureAwait(false);
-            case SqlCreateViewPlan createView:
-                return await ExecuteCreateViewAsync(createView, statement, cancellationToken).ConfigureAwait(false);
-            case SqlDropViewPlan dropView:
-                return await ExecuteDropViewAsync(dropView, statement, cancellationToken).ConfigureAwait(false);
-            case SqlCreateSchemaPlan createSchema:
-                return await ExecuteCreateSchemaAsync(createSchema, statement, cancellationToken).ConfigureAwait(false);
-            case SqlTruncatePlan truncate:
-                return await ExecuteTruncateAsync(truncate, statement, cancellationToken).ConfigureAwait(false);
-            case SqlDropTablePlan drop:
-                return await ExecuteDropTableAsync(drop, statement, cancellationToken).ConfigureAwait(false);
-            case SqlDropSchemaPlan dropSchema:
-                return await ExecuteDropSchemaAsync(dropSchema, statement, cancellationToken).ConfigureAwait(false);
-            case SqlCreateIndexPlan createIndex:
-                return await ExecuteCreateIndexAsync(createIndex, statement, cancellationToken).ConfigureAwait(false);
-            case SqlDropIndexPlan dropIndex:
-                return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
-            case SqlAlterIdentityPlan identity:
-                return await ExecuteAlterIdentityAsync(identity, statement, cancellationToken).ConfigureAwait(false);
-            case SqlAddColumnPlan addColumn:
-                return await ExecuteAddColumnAsync(addColumn, statement, cancellationToken).ConfigureAwait(false);
-            case SqlRenamePlan rename:
-                return await ExecuteRenameAsync(rename, statement, cancellationToken).ConfigureAwait(false);
-            case SqlAlterColumnPlan alterColumn:
-                return await ExecuteAlterColumnAsync(alterColumn, statement, cancellationToken).ConfigureAwait(false);
-            case SqlAddConstraintPlan addConstraint:
-                return await ExecuteAddConstraintAsync(addConstraint, statement, cancellationToken).ConfigureAwait(false);
-            case SqlDropConstraintPlan dropConstraint:
-                return await ExecuteDropConstraintAsync(dropConstraint, statement, cancellationToken).ConfigureAwait(false);
-            case SqlDropColumnPlan dropColumn:
-                return await ExecuteDropColumnAsync(dropColumn, statement, cancellationToken).ConfigureAwait(false);
-            default:
-                throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlanNotExecutable, plan.GetType().Name));
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            _containsLike |= plan.ContainsLike;
+            _metrics = statement.Metrics;
+            if (RecursiveState is not null && StatementInput(plan) is SqlRelationPlan)
+            { return await ExecuteRecursiveQueryAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
+            // Keep the static plan as the eligibility key; LIMIT/OFFSET initialization may
+            // create a fresh execution copy on every correlated invocation.
+            switch (InitializeWindow(plan, cancellationToken))
+            {
+                case SqlWindowAggregatePlan window:
+                    return await ExecuteWindowAggregateAsync(window, statement, cancellationToken).ConfigureAwait(false);
+                case SqlSetOperationPlan set:
+                    return await ExecuteSetOperationAsync(set, statement, cancellationToken).ConfigureAwait(false);
+                case SqlConstantPlan constant:
+                    if (_subqueryValues is { HasCorrelatedQueries: true })
+                    {
+                        return await ExecuteCorrelatedSelectAsync([Array.Empty<object?>()], constant.Projections,
+                            constant.Where, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
+                            statement, cancellationToken).ConfigureAwait(false);
+                    }
+                    var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+                    return MaterializeSelect(evaluator.Matches(constant.Where, []) ? [Array.Empty<object?>()] : [],
+                        constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
+                        evaluator, constant.OrderByProjections, cancellationToken,
+                        incrementalDistinct: CanPipelinePlainDistinct(plan));
+                case SqlWithPlan with:
+                    foreach (var relation in RecursiveState is null ? with.Relations : Array.Empty<SqlDerivedRelation>())
+                    {
+                        await MaterializeRelationAsync(relation, statement, cancellationToken).ConfigureAwait(false);
+                    }
+                    return await ExecuteAsync(with.Input, statement, cancellationToken).ConfigureAwait(false);
+                case SqlDefinitionPlan definition:
+                    return await ExecuteDefinitionAsync(definition, statement, cancellationToken).ConfigureAwait(false);
+                case SqlSubqueryPlan subquery:
+                    return await ExecuteSubqueriesAsync(subquery.Input, subquery.Queries, statement, cancellationToken).ConfigureAwait(false);
+                case SqlCorrelatedSubqueryPlan correlated:
+                    return await ExecuteSubqueriesAsync(correlated.Input, correlated.Queries, statement, cancellationToken).ConfigureAwait(false);
+                case SqlInsertSelectPlan insertSelect:
+                    _definitions.EnsureIndexPredicatesResolved(insertSelect.Table, cancellationToken);
+                    return await ExecuteInsertSelectAsync(insertSelect, statement, cancellationToken).ConfigureAwait(false);
+                case SqlGroupPlan group:
+                    return await ExecuteGroupAsync(group, statement, cancellationToken, (SqlGroupPlan)plan).ConfigureAwait(false);
+                case SqlSystemViewPlan systemView:
+                    return _subqueryValues is { HasCorrelatedQueries: true }
+                        ? await ExecuteCorrelatedSelectAsync(ReadCorrelatedSystemRelation(systemView.View, statement, cancellationToken),
+                            systemView.Projections, systemView.Where, systemView.OrderBy, systemView.Limit, systemView.Offset,
+                            systemView.IsDistinct, statement, cancellationToken).ConfigureAwait(false)
+                        : ExecuteSystemView(systemView, statement, cancellationToken, plan);
+                case SqlSelectPlan select:
+                    return _subqueryValues is { HasCorrelatedQueries: true }
+                        ? await ExecuteCorrelatedSelectAsync(EnumerateRows(select.Table, select.Access, statement, cancellationToken).Select(row => row.Values),
+                            select.Projections, select.Where, select.OrderBy, select.Limit, select.Offset, select.IsDistinct,
+                            statement, cancellationToken).ConfigureAwait(false)
+                        : ExecuteSelect(select, statement, cancellationToken, retainRows: null, retentionPlan: plan);
+                case SqlJoinPlan join:
+                    // Keep this dispatcher Task-based: a new ValueTask awaiter would grow
+                    // its state machine even for ordinary DML with exact allocation guards.
+                    return await (CanPipelineJoinOutput((SqlJoinPlan)plan)
+                        ? ExecutePipelinedJoinAsync(join, statement, cancellationToken).AsTask()
+                        : ExecuteJoinAsync(join, statement, cancellationToken)).ConfigureAwait(false);
+                case SqlInsertPlan insert:
+                    _definitions.EnsureIndexPredicatesResolved(insert.Table, cancellationToken);
+                    return await ExecuteInsertAsync(insert, statement, cancellationToken).ConfigureAwait(false);
+                case SqlUpdatePlan update:
+                    _definitions.EnsureIndexPredicatesResolved(update.Table, cancellationToken);
+                    return await ExecuteUpdateAsync(update, statement, cancellationToken).ConfigureAwait(false);
+                case SqlDeletePlan delete:
+                    _definitions.EnsureIndexPredicatesResolved(delete.Table, cancellationToken);
+                    return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
+                case SqlMergePlan merge:
+                    _definitions.EnsureIndexPredicatesResolved(merge.Table, cancellationToken);
+                    return await ExecuteMergeAsync(merge, statement, cancellationToken).ConfigureAwait(false);
+                case SqlSequencePlan sequence:
+                    return await ExecuteSequenceDdlAsync(sequence, statement, cancellationToken).ConfigureAwait(false);
+                case SqlCreateTablePlan create:
+                    return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
+                case SqlCreateTableAsPlan create:
+                    return await ExecuteCreateTableAsAsync(create, statement, cancellationToken).ConfigureAwait(false);
+                case SqlCreateViewPlan createView:
+                    return await ExecuteCreateViewAsync(createView, statement, cancellationToken).ConfigureAwait(false);
+                case SqlDropViewPlan dropView:
+                    return await ExecuteDropViewAsync(dropView, statement, cancellationToken).ConfigureAwait(false);
+                case SqlCreateSchemaPlan createSchema:
+                    return await ExecuteCreateSchemaAsync(createSchema, statement, cancellationToken).ConfigureAwait(false);
+                case SqlTruncatePlan truncate:
+                    return await ExecuteTruncateAsync(truncate, statement, cancellationToken).ConfigureAwait(false);
+                case SqlDropTablePlan drop:
+                    return await ExecuteDropTableAsync(drop, statement, cancellationToken).ConfigureAwait(false);
+                case SqlDropSchemaPlan dropSchema:
+                    return await ExecuteDropSchemaAsync(dropSchema, statement, cancellationToken).ConfigureAwait(false);
+                case SqlCreateIndexPlan createIndex:
+                    return await ExecuteCreateIndexAsync(createIndex, statement, cancellationToken).ConfigureAwait(false);
+                case SqlDropIndexPlan dropIndex:
+                    return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
+                case SqlAlterIdentityPlan identity:
+                    return await ExecuteAlterIdentityAsync(identity, statement, cancellationToken).ConfigureAwait(false);
+                case SqlAddColumnPlan addColumn:
+                    return await ExecuteAddColumnAsync(addColumn, statement, cancellationToken).ConfigureAwait(false);
+                case SqlRenamePlan rename:
+                    return await ExecuteRenameAsync(rename, statement, cancellationToken).ConfigureAwait(false);
+                case SqlAlterColumnPlan alterColumn:
+                    return await ExecuteAlterColumnAsync(alterColumn, statement, cancellationToken).ConfigureAwait(false);
+                case SqlAddConstraintPlan addConstraint:
+                    return await ExecuteAddConstraintAsync(addConstraint, statement, cancellationToken).ConfigureAwait(false);
+                case SqlDropConstraintPlan dropConstraint:
+                    return await ExecuteDropConstraintAsync(dropConstraint, statement, cancellationToken).ConfigureAwait(false);
+                case SqlDropColumnPlan dropColumn:
+                    return await ExecuteDropColumnAsync(dropColumn, statement, cancellationToken).ConfigureAwait(false);
+                default:
+                    throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlanNotExecutable, plan.GetType().Name));
+            }
         }
+        finally { if (statementRoot && _materializedRelations is { } relations) { ReleaseSelectMemory(ref relations.Reserved); } }
     }
 
     // ── SELECT ─────────────────────────────────────────────────────────
@@ -312,12 +317,17 @@ internal sealed partial class SqlPlanExecutor
         SqlRowCount? limit, SqlRowCount? offset, bool isDistinct, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken,
         Collation[]? projectionCollations = null)
     {
-        if (isDistinct)
+        long retainedBytes = isDistinct ? AdmitSelectRows(projected, cancellationToken) : 0;
+        try
         {
-            projected = Deduplicate(projected, projections, evaluator, cancellationToken, projectionCollations);
-        }
+            if (isDistinct)
+            {
+                projected = Deduplicate(projected, projections, evaluator, cancellationToken, projectionCollations);
+            }
 
-        return MaterializeProjected(projections, isDistinct ? ApplyRowWindow(projected, limit, offset) : projected);
+            return MaterializeProjected(projections, isDistinct ? ApplyRowWindow(projected, limit, offset) : projected);
+        }
+        finally { ReleaseSelectMemory(ref retainedBytes); }
     }
 
     private static DatabaseResult MaterializeProjected(IReadOnlyList<SqlProjection> projections,
@@ -328,7 +338,9 @@ internal sealed partial class SqlPlanExecutor
         {
             columns[i] = new DatabaseColumn
             {
-                Name = projections[i].Name, Ordinal = i, Type = projections[i].Type,
+                Name = projections[i].Name,
+                Ordinal = i,
+                Type = projections[i].Type,
                 MaxLength = projections[i].MaxLength,
                 IsNullable = projections[i].IsNullable,
             };
@@ -358,101 +370,112 @@ internal sealed partial class SqlPlanExecutor
         SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots, CancellationToken cancellationToken,
         SqlRowCount? limit = null, SqlRowCount? offset = null, int? retainRows = null)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (orderBy.Count == 0)
+        long outputBytes = 0, sourceBytes = 0, sortedBytes = 0;
+        try
         {
-            // The common scan needs only its output list. Avoid allocating sort state
-            // for an unordered query, including the unlimited single-row lookup path.
-            var projected = new List<object?[]>();
-            long skip = offset?.Count ?? 0;
-            long remaining = limit?.Count ?? long.MaxValue;
-            if (remaining == 0)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (orderBy.Count == 0)
             {
-                if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, 0); }
+                // The common scan needs only its output list. Avoid allocating sort state
+                // for an unordered query, including the unlimited single-row lookup path.
+                var projected = new List<object?[]>();
+                long skip = offset?.Count ?? 0;
+                long remaining = limit?.Count ?? long.MaxValue;
+                if (remaining == 0)
+                {
+                    if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, 0); }
+                    return projected;
+                }
+                foreach (var source in matches)
+                {
+                    var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                    if (skip > 0) { skip--; continue; }
+                    SqlWindowMemory.For(_metrics)?.Retain(output);
+                    if (retainRows is null || projected.Count < retainRows) { RetainSelectRow(ref outputBytes, output); projected.Add(output); }
+                    if (--remaining == 0) { break; }
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
                 return projected;
             }
-            foreach (var source in matches)
+            if (HasSequenceProjection(projections) &&
+                !OrderingUsesSequence(projections, outputSlots?.Values))
             {
-                var output = ProjectRow(source, projections, evaluator, cancellationToken);
-                if (skip > 0) { skip--; continue; }
-                SqlWindowMemory.For(_metrics)?.Retain(output);
-                if (retainRows is null || projected.Count < retainRows) { projected.Add(output); }
-                if (--remaining == 0) { break; }
+                // PostgreSQL planner.c:6703-6763 postpones volatile outputs independent of
+                // sorting. Alias/ordinal keys need only their referenced, non-sequence outputs.
+                using var sources = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken, _metrics, SelectBufferBudget);
+                if (sources.IsComplete) { return []; }
+                var completed = outputSlots?.Values.ToHashSet();
+                foreach (var source in matches)
+                {
+                    var orderedRow = OrderingRow(source, projections, completed, evaluator, cancellationToken);
+                    var keys = new object?[orderBy.Count];
+                    for (int index = 0; index < keys.Length; index++) { keys[index] = evaluator.Evaluate(orderBy[index].Key, orderedRow); }
+                    sources.Add(orderedRow, keys);
+                }
+                var selected = sources.Finish(resolveEmptyCollations: false, includeOffset: true);
+                sourceBytes = AdmitSelectRows(selected, cancellationToken);
+                var projected = new List<object?[]>(selected.Count);
+                foreach (var source in selected)
+                {
+                    var output = ProjectRow(source, projections, evaluator, cancellationToken, completed,
+                        completed is { Count: > 0 } ? source.Length - projections.Count : 0);
+                    SqlWindowMemory.For(_metrics)?.Retain(output);
+                    RetainSelectRow(ref outputBytes, output);
+                    projected.Add(output);
+                }
+                return ApplyRowWindow(projected, limit, offset);
             }
-            cancellationToken.ThrowIfCancellationRequested();
-            if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
-            return projected;
-        }
-        if (HasSequenceProjection(projections) &&
-            !OrderingUsesSequence(projections, outputSlots?.Values))
-        {
-            // PostgreSQL planner.c:6703-6763 postpones volatile outputs independent of
-            // sorting. Alias/ordinal keys need only their referenced, non-sequence outputs.
-            var sources = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken, _metrics);
-            if (sources.IsComplete) { return []; }
-            var completed = outputSlots?.Values.ToHashSet();
-            foreach (var source in matches)
+            if (outputSlots is not { Count: > 0 } && projections.Any(projection => ContainsVolatileCall(projection.Value)))
             {
-                var orderedRow = OrderingRow(source, projections, completed, evaluator, cancellationToken);
-                var keys = new object?[orderBy.Count];
-                for (int index = 0; index < keys.Length; index++) { keys[index] = evaluator.Evaluate(orderBy[index].Key, orderedRow); }
-                sources.Add(orderedRow, keys);
-            }
-            var selected = sources.Finish(resolveEmptyCollations: false, includeOffset: true);
-            var projected = new List<object?[]>(selected.Count);
-            foreach (var source in selected)
-            {
-                var output = ProjectRow(source, projections, evaluator, cancellationToken, completed,
-                    completed is { Count: > 0 } ? source.Length - projections.Count : 0);
-                SqlWindowMemory.For(_metrics)?.Retain(output);
-                projected.Add(output);
-            }
-            return ApplyRowWindow(projected, limit, offset);
-        }
-        if (outputSlots is not { Count: > 0 } && projections.Any(projection => ContainsVolatileCall(projection.Value)))
-        {
-            // Preserve the old sort-then-project path, including its call count before
-            // pagination. PostgreSQL planner.c:6649-6662 likewise postpones independent
-            // volatile outputs. Aliases/ordinals still require projection before sorting.
-            var sources = matches.ToList();
-            if (_metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, sources.Count); }
-            if (sources.Count == 0) { return []; }
-            var sorted = SortRows(sources, orderBy, evaluator, cancellationToken);
-            var projected = new List<object?[]>(sorted.Count);
-            foreach (var source in sorted)
-            {
-                var output = ProjectRow(source, projections, evaluator, cancellationToken);
-                SqlWindowMemory.For(_metrics)?.Retain(output);
-                projected.Add(output);
-            }
-            cancellationToken.ThrowIfCancellationRequested();
-            return ApplyRowWindow(projected, limit, offset);
-        }
-        var rows = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken, _metrics);
-        if (rows.IsComplete) { return []; }
-        foreach (var source in matches)
-        {
-            var output = ProjectRow(source, projections, evaluator, cancellationToken);
-            var orderedRow = source;
-            if (outputSlots is { Count: > 0 })
-            {
-                // Output aliases/ordinals follow the source slots. This combined row is
-                // transient: only completed outputs and fixed keys survive this iteration.
-                orderedRow = new object?[source.Length + output.Length];
-                source.CopyTo(orderedRow, 0);
-                output.CopyTo(orderedRow, source.Length);
-            }
-            var keys = orderBy.Count == 0 ? Array.Empty<object?>() : new object?[orderBy.Count];
-            for (int i = 0; i < keys.Length; i++)
-            {
+                // Preserve the old sort-then-project path, including its call count before
+                // pagination. PostgreSQL planner.c:6649-6662 likewise postpones independent
+                // volatile outputs. Aliases/ordinals still require projection before sorting.
+                var sources = new List<object?[]>();
+                foreach (var source in matches)
+                { RetainSelectRow(ref sourceBytes, source, includeWindow: true); sources.Add(source); }
+                if (_metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, sources.Count); }
+                if (sources.Count == 0) { return []; }
+                var sorted = SortRows(sources, orderBy, evaluator, cancellationToken);
+                foreach (var source in sorted) { RetainSelectRow(ref sortedBytes, source, includeWindow: true); }
+                var projected = new List<object?[]>(sorted.Count);
+                foreach (var source in sorted)
+                {
+                    var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                    SqlWindowMemory.For(_metrics)?.Retain(output);
+                    RetainSelectRow(ref outputBytes, output);
+                    projected.Add(output);
+                }
                 cancellationToken.ThrowIfCancellationRequested();
-                keys[i] = evaluator.Evaluate(orderBy[i].Key, orderedRow);
+                return ApplyRowWindow(projected, limit, offset);
             }
-            rows.Add(output, keys);
-            if (rows.IsComplete) { break; }
+            using var rows = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken, _metrics, SelectBufferBudget);
+            if (rows.IsComplete) { return []; }
+            foreach (var source in matches)
+            {
+                var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                var orderedRow = source;
+                if (outputSlots is { Count: > 0 })
+                {
+                    // Output aliases/ordinals follow the source slots. This combined row is
+                    // transient: only completed outputs and fixed keys survive this iteration.
+                    orderedRow = new object?[source.Length + output.Length];
+                    source.CopyTo(orderedRow, 0);
+                    output.CopyTo(orderedRow, source.Length);
+                }
+                var keys = orderBy.Count == 0 ? Array.Empty<object?>() : new object?[orderBy.Count];
+                for (int i = 0; i < keys.Length; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    keys[i] = evaluator.Evaluate(orderBy[i].Key, orderedRow);
+                }
+                rows.Add(output, keys);
+                if (rows.IsComplete) { break; }
+            }
+            // The base ordinary SELECT skips sort/collation resolution over empty input.
+            return rows.Finish(resolveEmptyCollations: false);
         }
-        // The base ordinary SELECT skips sort/collation resolution over empty input.
-        return rows.Finish(resolveEmptyCollations: false);
+        finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref outputBytes); }
     }
 
     private static object?[] OrderingRow(object?[] source, IReadOnlyList<SqlProjection> projections,
@@ -560,90 +583,107 @@ internal sealed partial class SqlPlanExecutor
         return direction * Math.Sign(SqlValueComparer.Compare(left, right, collation));
     }
 
-    private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
+    private List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        int operations = 0;
-        // Precompute sort keys; OrderBy is a stable sort, satisfying determinism.
-        var keyed = rows.Select(row => (Row: row, Keys: EvaluateKeys(row)));
-
-        IOrderedEnumerable<(object?[] Row, object?[] Keys)>? ordered = null;
-
-        for (int i = 0; i < orderBy.Count; i++)
-        {
-            int index = i;
-            var ordering = orderBy[index];
-            var collation = ordering.Collation.Resolve(evaluator.SubqueryValues);
-            int direction = ordering.IsDescending ? -1 : 1;
-            int nullComparison = ordering.NullsFirst ? -1 : 1;
-            var comparer = Comparer<object?>.Create((left, right) =>
-            {
-                PollCancellation();
-                return CompareOrderingValues(left, right, direction, nullComparison, collation);
-            });
-
-            ordered = ordered is null
-                ? keyed.OrderBy(x => x.Keys[index], comparer)
-                : ordered.ThenBy(x => x.Keys[index], comparer);
-        }
-
+        long keyBytes = 0, sortedBytes = 0;
         try
         {
-            var sorted = ordered!.Select(x => x.Row).ToList();
             cancellationToken.ThrowIfCancellationRequested();
-            return sorted;
-        }
-        catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException or OperationCanceledException)
-        {
-            // The runtime sort wraps a throwing comparer in InvalidOperationException.
-            // Two keys the value order cannot compare are a statement error, so the
-            // comparer's own DatabaseException is the failure, not a session-ending fault.
-            ExceptionDispatchInfo.Throw(exception.InnerException);
-            throw;
-        }
+            int operations = 0;
+            // Precompute sort keys; OrderBy is a stable sort, satisfying determinism.
+            var keyed = rows.Select(row => (Row: row, Keys: EvaluateKeys(row)));
 
-        object?[] EvaluateKeys(object?[] row)
-        {
-            var keys = new object?[orderBy.Count];
-            for (int i = 0; i < keys.Length; i++)
+            IOrderedEnumerable<(object?[] Row, object?[] Keys)>? ordered = null;
+
+            for (int i = 0; i < orderBy.Count; i++)
             {
-                PollCancellation();
-                keys[i] = evaluator.Evaluate(orderBy[i].Key, row);
-            }
-            return keys;
-        }
+                int index = i;
+                var ordering = orderBy[index];
+                var collation = ordering.Collation.Resolve(evaluator.SubqueryValues);
+                int direction = ordering.IsDescending ? -1 : 1;
+                int nullComparison = ordering.NullsFirst ? -1 : 1;
+                var comparer = Comparer<object?>.Create((left, right) =>
+                {
+                    PollCancellation();
+                    return CompareOrderingValues(left, right, direction, nullComparison, collation);
+                });
 
-        void PollCancellation()
-        {
-            // Bound cancellation latency during both key evaluation and the runtime's sort.
-            if ((operations++ & 31) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                ordered = ordered is null
+                    ? keyed.OrderBy(x => x.Keys[index], comparer)
+                    : ordered.ThenBy(x => x.Keys[index], comparer);
+            }
+
+            try
+            {
+                var sorted = ordered!.Select(x => x.Row).ToList();
+                cancellationToken.ThrowIfCancellationRequested();
+                return sorted;
+            }
+            catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException or OperationCanceledException)
+            {
+                // The runtime sort wraps a throwing comparer in InvalidOperationException.
+                // Two keys the value order cannot compare are a statement error, so the
+                // comparer's own DatabaseException is the failure, not a session-ending fault.
+                ExceptionDispatchInfo.Throw(exception.InnerException);
+                throw;
+            }
+
+            object?[] EvaluateKeys(object?[] row)
+            {
+                var keys = new object?[orderBy.Count];
+                for (int i = 0; i < keys.Length; i++)
+                {
+                    PollCancellation();
+                    keys[i] = evaluator.Evaluate(orderBy[i].Key, row);
+                }
+                ReserveSelectMemory(ref keyBytes, 64L + SqlHashJoinTable.RowBytes(keys), includeWindow: true);
+                // Admit the fixed sorted-output slot with its input, before ToList retains it.
+                RetainSelectRow(ref sortedBytes, row, includeWindow: true);
+                return keys;
+            }
+
+            void PollCancellation()
+            {
+                // Bound cancellation latency during both key evaluation and the runtime's sort.
+                if ((operations++ & 31) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+            }
         }
+        finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref keyBytes); }
     }
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
     private List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, Collation[]? collations = null)
     {
-        _definitions.ObserveSelectRetention?.Invoke("distinct", false, rows.Count);
-        var windowMemory = SqlWindowMemory.For(_metrics);
-        long scratch = windowMemory is null ? 0 : 128L + 32L * projections.Count + 64L * rows.Count;
-        windowMemory?.Reserve(scratch);
+        long seenBytes = 0;
         try
         {
-            var seen = new HashSet<object?[]>(new GroupKeyComparer(collations ?? projections
-                .Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray()));
-            int count = 0;
-            for (int i = 0; i < rows.Count; i++)
+            _definitions.ObserveSelectRetention?.Invoke("distinct", false, rows.Count);
+            var windowMemory = SqlWindowMemory.For(_metrics);
+            long scratch = windowMemory is null ? 0 : 128L + 32L * projections.Count + 64L * rows.Count;
+            windowMemory?.Reserve(scratch);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var row = rows[i];
-                if (seen.Add(row)) { rows[count++] = row; }
+                var seen = new HashSet<object?[]>(new GroupKeyComparer(collations ?? projections
+                    .Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray()));
+                int count = 0;
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var row = rows[i];
+                    if (!seen.Contains(row))
+                    {
+                        ReserveSelectMemory(ref seenBytes, 64L + SqlHashJoinTable.RowBytes(row));
+                        seen.Add(row); rows[count++] = row;
+                    }
+                }
+                rows.RemoveRange(count, rows.Count - count);
+                return rows;
             }
-            rows.RemoveRange(count, rows.Count - count);
-            return rows;
+            finally { windowMemory?.Release(scratch); }
         }
-        finally { windowMemory?.Release(scratch); }
+        finally { ReleaseSelectMemory(ref seenBytes); }
     }
 
     private static Collation[] CaptureProjectionCollations(IReadOnlyList<SqlProjection> projections,

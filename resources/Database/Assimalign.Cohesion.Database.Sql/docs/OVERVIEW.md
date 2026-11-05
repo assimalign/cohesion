@@ -445,8 +445,11 @@ Access selection compares bounded snapshot-visible index probes without stored s
 Broad safe equijoins can build an in-memory hash table; unique and small indexed probes retain
 nested loops. LEFT semantics, duplicate matches, SQL equality and full residual evaluation remain.
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live
-hash builds and grouping-set aggregate states per statement; CS05067 (SQLSTATE 53200)
-refuses excess memory, without spill.
+hash builds, retained SELECT buffers and grouping-set aggregate states per statement.
+CTAS sources charge like any SELECT; CTAS itself admits only kept output after pagination.
+CS05067 (SQLSTATE 53200) refuses newly charged memory without spill and stops input promptly.
+Window and SQL/JSON grants retain their existing refusal codes when they fail without the
+plain SELECT charges.
 Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
 executes to report candidate work in the same eight-column description; unavailable counts remain
 NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;

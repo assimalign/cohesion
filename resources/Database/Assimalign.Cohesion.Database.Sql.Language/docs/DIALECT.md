@@ -659,9 +659,10 @@ returns nextval 2 and leaves 3 next. A sequence output used as a sort key evalua
 (PostgreSQL src/backend/optimizer/plan/planner.c:2216-2225;
 src/backend/executor/nodeLimit.c:91-116). Unordered grouped and correlated inputs apply WHERE/HAVING,
 project each qualifying row immediately, discard OFFSET rows and stop at LIMIT.
-They retain no deferred input and charge no grant. Ordered deferred inputs filter before retention
-and use the same uncharged sorting as sequence-free queries on plain, correlated, grouped and
-grouping-set paths. LIMIT and deep OFFSET pages add no deferral charge. On plain and correlated
+They retain no deferred input; kept outputs and group state still charge the statement grant. Ordered deferred inputs filter before retention
+and use budgeted sorting like sequence-free queries on plain, correlated, grouped and
+grouping-set paths. Pagination adds no capacity-based CTAS admission charge; sorting still
+charges retained OFFSET + LIMIT candidates. On plain and correlated
 paths, fixed collations bound retention by OFFSET + LIMIT; grouped and grouping-set deferral
 retains every group that passes HAVING, and deferred collations retain all candidates. Existing grouping-set
 group/aggregate state charges still apply equally with and without sequence outputs.
@@ -2201,7 +2202,7 @@ ANALYZE counts tested candidate pairs, excluding emitted unmatched rows. All ret
 rows and match flags share StatementMemoryBudget (default 64 MiB), including nested builds;
 CS05067 refuses exhaustion without spill. Reservations unwind on success, failure and
 cancellation. Joined DML also charges retained outer/intermediate inputs and associations as
-described in the statement-memory contract below. General SELECT result materialization is outside that grant.
+described in the statement-memory contract below. Plain SELECT result materialization also shares that grant, as described below.
 PostgreSQL anchors: optimizer/path/joinrels.c:1157-1180, executor/nodeHashjoin.c:578-592,634-679,729-756.
 
 Three through eight eligible stored-table inputs use exact subset dynamic programming
@@ -5364,7 +5365,24 @@ including normalized buffers and referential writes. These conservative reservat
 statement exit; shared payload already charged by a hash build is not charged again for an alias.
 An exhausted joined statement refuses before any write and releases memory on success, failure or
 cancellation. CTAS also charges its retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
-`CS05067` (53200, out_of_memory). It does not cap result materialization or transient planning.
+`CS05067` (53200, out_of_memory). Plain SELECT also charges nested-loop inners, normalized
+join child buffers, staged matches, group keys and aggregate state, aggregate DISTINCT tuples
+and ordered inputs, full sorts and bounded top-N heaps, output rows and DISTINCT sets,
+materialized results retained by consumers, derived/view/CTE caches, independent subquery
+values and correlated vectors, and set operands, seen sets and counts. Each operator reserves
+before retaining an entry and releases on consumption or scope exit, including cancellation
+and failure. Child result charges unwind before return; consumers re-admit retained results.
+Costs follow retained rows, never list capacity. CTAS source admission counts only rows kept
+after pagination, including sequence OFFSET queries (#1762). CTAS sources charge like any
+SELECT, including sort/group state and relation caches; both sequence and sequence-free
+1,001-key grouped OFFSET forms refuse at 8 KiB, while equal kept outputs have equal admission.
+Window buffers absent from the window ledger also charge; ledger-owned rows and vectors
+keep that owner. An independent cache first materialized in a window remains charged for
+the statement. New refusals caused only by plain bytes report CS05067; base window and
+SQL/JSON grant refusals retain CS05079 and CS05094. Statement memory refusal aborts input
+immediately, including input with a later error. Shared values pay once per retaining buffer in
+this step (#1776, SQ-L1b); SQ-L1c addresses repeated wide payloads. Plan-sized traversal and
+current-row state, storage iterator scratch and transient planning remain outside the grant.
 SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and
 returns the existing eight-column plan description. `actual_rows` counts candidates before
 residuals on instrumented nodes, rather than final output cardinality. `estimated_rows` and

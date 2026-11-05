@@ -22,90 +22,107 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
-        foreach (var binding in plan.Bindings)
+        long matchBytes = 0, derivedBytes = 0;
+        try
         {
-            if (binding.Source.Derived is not { } derived) { continue; }
-            (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] =
-                await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
-        }
-        foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
-        {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
-            // Only read-only statements may use an immutable retired TRUNCATE owner.
-            // INSERT sources and DML subqueries inherit the enclosing statement's check.
-            if (_isDml || !_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
-        }
-        // Require binding's image even when an empty outer input would skip virtual enumeration.
-        if (plan.Bindings.Any(binding => binding.Source.View is not null))
-        {
-            _ = statement.RequireCatalogSnapshot();
-        }
-
-        var sharedColumns = new bool[plan.Columns.Count];
-        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
-        var matches = new List<object?[]>();
-        await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows).ConfigureAwait(false))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await PrepareSubqueriesAsync(plan.Where, row, statement, cancellationToken).ConfigureAwait(false);
-            if (evaluator.Matches(plan.Where, row))
+            Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
+            foreach (var binding in plan.Bindings)
             {
-                if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
-                {
-                    memory.Retain(row);
-                    memory.Reserve(32);
-                }
-                matches.Add(row);
+                if (binding.Source.Derived is not { } derived) { continue; }
+                var materialized = await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
+                if (derived.IsCorrelated) { derivedBytes += AdmitSelectRows(materialized, cancellationToken, includeWindow: true); }
+                (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] = materialized;
             }
-        }
+            foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
+            {
+                await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
+                    LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
+                // Only read-only statements may use an immutable retired TRUNCATE owner.
+                // INSERT sources and DML subqueries inherit the enclosing statement's check.
+                if (_isDml || !_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
+            }
+            // Require binding's image even when an empty outer input would skip virtual enumeration.
+            if (plan.Bindings.Any(binding => binding.Source.View is not null))
+            {
+                _ = statement.RequireCatalogSnapshot();
+            }
 
-        _definitions.ObserveSelectRetention?.Invoke("join-matches", false, matches.Count);
-        if (_subqueryValues is { HasCorrelatedQueries: true })
-        {
-            return await MaterializeCorrelatedSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-                plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
+            var sharedColumns = new bool[plan.Columns.Count];
+            var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
+            var matches = new List<object?[]>();
+            await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows).ConfigureAwait(false))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await PrepareSubqueriesAsync(plan.Where, row, statement, cancellationToken).ConfigureAwait(false);
+                if (evaluator.Matches(plan.Where, row))
+                {
+                    if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                    {
+                        memory.Retain(row);
+                        memory.Reserve(32);
+                    }
+                    RetainSelectRow(ref matchBytes, row, includeWindow: true);
+                    matches.Add(row);
+                }
+            }
+
+            _definitions.ObserveSelectRetention?.Invoke("join-matches", false, matches.Count);
+            if (_subqueryValues is { HasCorrelatedQueries: true })
+            {
+                return await MaterializeCorrelatedSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+                    plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
+            }
+            return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+                plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
         }
-        return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+        finally { ReleaseSelectMemory(ref matchBytes); ReleaseSelectMemory(ref derivedBytes); }
     }
 
     private async ValueTask<DatabaseResult> ExecutePipelinedJoinAsync(SqlJoinPlan plan,
         SqlStatementContext statement, CancellationToken cancellationToken, int? retainRows = null)
     {
-        var derivedRows = await PrepareJoinInputsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
-        var sharedColumns = new bool[plan.Columns.Count];
-        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
-        return await ProjectJoinRowsAsync(plan, statement, sharedColumns, derivedRows, evaluator, cancellationToken, retainRows).ConfigureAwait(false);
+        var (derivedRows, derivedBytes) = await PrepareJoinInputsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var sharedColumns = new bool[plan.Columns.Count];
+            var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
+            return await ProjectJoinRowsAsync(plan, statement, sharedColumns, derivedRows, evaluator, cancellationToken, retainRows).ConfigureAwait(false);
+        }
+        finally { ReleaseSelectMemory(ref derivedBytes); }
     }
 
     // Shared with group input: retain derived materialization, lock, definition and snapshot order.
-    private async ValueTask<Dictionary<SqlDerivedRelation, List<object?[]>>?> PrepareJoinInputsAsync(SqlJoinPlan plan,
+    private async ValueTask<(Dictionary<SqlDerivedRelation, List<object?[]>>? Rows, long Bytes)> PrepareJoinInputsAsync(SqlJoinPlan plan,
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
-        foreach (var binding in plan.Bindings)
+        long derivedBytes = 0;
+        try
         {
-            if (binding.Source.Derived is not { } derived) { continue; }
-            (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] =
-                await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
-        }
-        foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
-        {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
-            // Only read-only statements may use an immutable retired TRUNCATE owner.
-            // INSERT sources and DML subqueries inherit the enclosing statement's check.
-            if (_isDml || !_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
-        }
-        // Require binding's image even when an empty outer input would skip virtual enumeration.
-        if (plan.Bindings.Any(binding => binding.Source.View is not null))
-        {
-            _ = statement.RequireCatalogSnapshot();
-        }
+            Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
+            foreach (var binding in plan.Bindings)
+            {
+                if (binding.Source.Derived is not { } derived) { continue; }
+                var materialized = await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
+                if (derived.IsCorrelated) { derivedBytes += AdmitSelectRows(materialized, cancellationToken, includeWindow: true); }
+                (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] = materialized;
+            }
+            foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
+            {
+                await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
+                    LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
+                // Only read-only statements may use an immutable retired TRUNCATE owner.
+                // INSERT sources and DML subqueries inherit the enclosing statement's check.
+                if (_isDml || !_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
+            }
+            // Require binding's image even when an empty outer input would skip virtual enumeration.
+            if (plan.Bindings.Any(binding => binding.Source.View is not null))
+            {
+                _ = statement.RequireCatalogSnapshot();
+            }
 
-        return derivedRows;
+            return (derivedRows, derivedBytes);
+        }
+        catch { ReleaseSelectMemory(ref derivedBytes); throw; }
     }
 
     /// <summary>
@@ -170,6 +187,7 @@ internal sealed partial class SqlPlanExecutor
         }
         bool reversed = plan is not SqlSearchedJoinPlan && plan.FirstBinding == 1;
         var initial = plan.Bindings[plan.FirstBinding];
+        long bufferBytes = 0;
         var buffered = new List<object?[]>?[plan.Steps.Count];
         var hashes = new SqlHashJoinTable?[plan.Steps.Count];
         var cursors = new IEnumerator<object?[]>?[plan.Steps.Count];
@@ -232,6 +250,7 @@ internal sealed partial class SqlPlanExecutor
                                         memory.Retain(item);
                                         memory.Reserve(32); // list storage, including growth
                                     }
+                                    RetainSelectRow(ref bufferBytes, item, includeWindow: true);
                                     buffer.Add(item);
                                 }
                                 buffered[level] = buffer;
@@ -280,6 +299,7 @@ internal sealed partial class SqlPlanExecutor
         {
             foreach (var cursor in cursors) { cursor?.Dispose(); }
             foreach (var hash in hashes) { hash?.Dispose(); }
+            ReleaseSelectMemory(ref bufferBytes);
         }
 
         IEnumerable<object?[]> ReadInput(int binding)

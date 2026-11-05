@@ -53,7 +53,7 @@ internal sealed class SqlJsonPathExecution : IDisposable
     }
     internal void Reserve(long bytes)
     {
-        if (bytes < 0 || bytes > _budget - (_metrics?.HashMemoryBytes ?? _reserved))
+        if (bytes < 0 || bytes > _budget - (_metrics is null ? _reserved : _metrics.HashMemoryBytes - _metrics.PlainSelectMemoryBytes))
         { throw new SqlExecutionException("CS05094", ErrorMessages.JsonPathBudget); }
         _metrics?.ReserveHashMemory(bytes, _budget); _reserved += bytes;
     }

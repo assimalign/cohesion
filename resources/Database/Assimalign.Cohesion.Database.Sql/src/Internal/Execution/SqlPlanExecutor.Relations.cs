@@ -28,10 +28,12 @@ internal sealed partial class SqlPlanExecutor
         if (relation.CatalogView is not null) { _materializedRelations = new RelationRows(statement.TransactionStart); }
         _subqueryValues = relation.CatalogView is not null ? null : parent is null ? null : new SqlSubqueryValues(parent);
         var rows = new List<object?[]>();
+        long retainedBytes = 0, resultBytes = 0;
         try
         {
             using var analysis = statement.Metrics.EnterRelationAnalysis(relation);
             await using var result = (DatabaseResultSet)await ExecuteAsync(relation.Query, statement, cancellationToken).ConfigureAwait(false);
+            resultBytes = AdmitSelectResult(result, cancellationToken);
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -43,15 +45,31 @@ internal sealed partial class SqlPlanExecutor
                     memory.Retain(values);
                     memory.Reserve(32);
                 }
+                RetainSelectRow(ref retainedBytes, values, includeWindow: true);
                 rows.Add(values);
+            }
+            if (!relation.IsCorrelated)
+            {
+                // A view's nested cache is scoped to its body, whereas these copied rows
+                // enter the enclosing statement cache after catalog scope restoration.
+                var destination = relation.CatalogView is not null ? previousRelations : _materializedRelations;
+                destination ??= new RelationRows();
+                destination.Add(relation, rows);
+                destination.Reserved += retainedBytes;
+                retainedBytes = 0;
+                if (relation.CatalogView is not null) { previousRelations = destination; }
+                else { _materializedRelations = destination; }
             }
         }
         finally
         {
+            ReleaseSelectMemory(ref resultBytes);
+            ReleaseSelectMemory(ref retainedBytes);
+            if (relation.CatalogView is not null && _materializedRelations is { } scoped)
+            { ReleaseSelectMemory(ref scoped.Reserved); }
             _subqueryValues = parent;
             if (relation.CatalogView is not null) { _materializedRelations = previousRelations; }
         }
-        if (!relation.IsCorrelated) { (_materializedRelations ??= new RelationRows()).Add(relation, rows); }
         return rows;
     }
 
@@ -61,5 +79,6 @@ internal sealed partial class SqlPlanExecutor
         internal RelationRows(DateTimeOffset? transactionStart = null) : base(ReferenceEqualityComparer.Instance)
         { TransactionStart = transactionStart; }
         internal DateTimeOffset? TransactionStart { get; }
+        internal long Reserved;
     }
 }

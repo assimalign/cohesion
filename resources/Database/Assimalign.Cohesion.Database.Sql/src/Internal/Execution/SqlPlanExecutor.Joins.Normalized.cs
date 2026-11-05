@@ -35,6 +35,7 @@ internal sealed partial class SqlPlanExecutor
         statement.Metrics.JoinAccessPaths = paths;
         // Postorder work avoids recursive MoveNext/async calls for arbitrarily long join chains.
         // Each child result is released after its parent consumes it.
+        long bufferBytes = 0;
         var pending = new Stack<(SqlJoinTree Node, int Phase)>();
         var results = new Dictionary<SqlJoinTree, (List<object?[]> Rows, int Start, int End)>(ReferenceEqualityComparer.Instance);
         var builds = new Dictionary<SqlJoinTree, SqlHashJoinTable>(ReferenceEqualityComparer.Instance);
@@ -182,7 +183,12 @@ internal sealed partial class SqlPlanExecutor
                         foreach (var row in candidates) { yield return (row, -1); }
                     }
                 }
-                finally { hash?.Dispose(); }
+                finally
+                {
+                    hash?.Dispose();
+                    ReleaseSelectRows(ref bufferBytes, outer.Rows);
+                    if (!seek) { ReleaseSelectRows(ref bufferBytes, inner.Rows); }
+                }
                 results.Remove(node.Left!);
                 results.Remove(node.Right!);
                 results.Add(node, (output, Math.Min(outer.Start, inner.Start), Math.Max(outer.End, inner.End)));
@@ -196,6 +202,7 @@ internal sealed partial class SqlPlanExecutor
         finally
         {
             foreach (var build in builds.Values) { build.Dispose(); }
+            ReleaseSelectMemory(ref bufferBytes);
         }
 
         void Retain(SqlJoinTree node, object?[] row, List<object?[]> buffer)
@@ -216,6 +223,7 @@ internal sealed partial class SqlPlanExecutor
                     memory.Retain(row);
                     memory.Reserve(32); // list storage, including growth
                 }
+                RetainSelectRow(ref bufferBytes, row, includeWindow: true);
                 buffer.Add(row);
             }
         }

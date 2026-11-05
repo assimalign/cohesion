@@ -51,28 +51,29 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
 
     // Admit query output retained by CTAS alongside its encoded batch and any other
     // statement reservations. The caller releases this grant after source disposal.
-    internal long ReserveMemory(SqlStatementMetrics metrics, long budget, CancellationToken cancellationToken)
+    internal long ReserveMemory(SqlStatementMetrics metrics, long budget, CancellationToken cancellationToken, bool plainSelect = false)
     {
         long reserved = 0;
         try
         {
-            Reserve(24L + 8L * _rows.Capacity);
             foreach (var row in _rows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Reserve(SqlHashJoinTable.RowBytes(row));
+                Reserve(32L + SqlHashJoinTable.RowBytes(row));
             }
             return reserved;
         }
         catch
         {
-            metrics.ReleaseHashMemory(reserved);
+            if (plainSelect) { metrics.ReleasePlainSelectMemory(reserved); }
+            else { metrics.ReleaseHashMemory(reserved); }
             throw;
         }
 
         void Reserve(long bytes)
         {
-            metrics.ReserveHashMemory(bytes, budget);
+            if (plainSelect) { metrics.ReservePlainSelectMemory(bytes, budget); }
+            else { metrics.ReserveHashMemory(bytes, budget); }
             reserved += bytes;
         }
     }

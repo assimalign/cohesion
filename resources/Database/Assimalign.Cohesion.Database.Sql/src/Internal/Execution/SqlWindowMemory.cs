@@ -42,7 +42,7 @@ internal sealed class SqlWindowMemory : IDisposable
 
     internal void Reserve(long bytes)
     {
-        if (!_statementBudgetOnly && !_admittingChildren && bytes > _budget - _metrics.HashMemoryBytes)
+        if (!_statementBudgetOnly && !_admittingChildren && bytes > _budget - (_metrics.HashMemoryBytes - _metrics.PlainSelectMemoryBytes))
         { throw new SqlExecutionException("CS05079", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WindowMemoryBudget, _budget)); }
         _metrics.ReserveHashMemory(bytes, _budget);
         _reserved += bytes;

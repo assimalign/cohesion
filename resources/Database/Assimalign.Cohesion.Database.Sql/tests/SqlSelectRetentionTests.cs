@@ -29,14 +29,18 @@ public sealed partial class SqlSelectRetentionTests
     public SqlSelectRetentionTests(ITestOutputHelper output) { _output = output; }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT retention: generated corpus matches the materialized path, including calls and analysis (#1776)")]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    public async Task ExecuteAsync_GeneratedRetentionCorpus_ShouldMatchBase(int transport)
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    public async Task ExecuteAsync_GeneratedRetentionCorpus_ShouldMatchBase(int transport, bool largeBudget)
     {
         // Arrange: seed controls insertion order, duplicate spelling, NULLs and stable sort ties.
         var calls = new List<long>();
         var builder = SqlDatabaseEngine.CreateBuilder("retention-corpus");
+        builder.Options.StatementMemoryBudget = largeBudget ? 1L << 40 : 67_108_864L;
         builder.Functions.Add(SqlScalarFunction.Create("record_call", (long value) => { calls.Add(value); return value; }));
         builder.Functions.Add(SqlAggregateFunction.Create<long, long, long>("sum_calls", () => 0L,
             (state, value) => { calls.Add(1000 + value); return state + value; }, state => state));
@@ -65,6 +69,7 @@ public sealed partial class SqlSelectRetentionTests
         var mismatches = new List<string>();
         database.Definitions.ObserveSelectRetention = (name, pipeline, count) => observed.Add((name, pipeline, count));
         int statements = 0;
+        long capturedPeak = 0;
         for (int seed = 0; seed < 3; seed++)
         {
             await Execute("DELETE FROM t");
@@ -80,7 +85,24 @@ public sealed partial class SqlSelectRetentionTests
             {
                 // Act / Assert: each executed statement proves its own operator choices.
                 var baseline = await Capture(row, true);
+                long basePeak = capturedPeak;
                 var pipelined = await Capture(row, false);
+                if (row.Sql == "SELECT DISTINCT 10/(id-2) FROM t LIMIT 1")
+                {
+                    // This failing projection runs before base builds DISTINCT state.
+                    Check(() => basePeak.ShouldBe(new long[] { 192, 480, 768 }[seed]));
+                    Check(() => capturedPeak.ShouldBe(new long[] { 448, 896, 1344 }[seed]));
+                    _output.WriteLine($"PEAK_FINDING|seed={seed}|{row.Sql}|base={basePeak}|pipeline={capturedPeak}");
+                }
+                else if (row.Sql.StartsWith("SELECT id,(SELECT COUNT(*) FROM u a JOIN u b", StringComparison.Ordinal))
+                {
+                    // Pipelined global state overlaps the live input hash build.
+                    Check(() => basePeak.ShouldBe(new long[] { 1496, 1712, 1712 }[seed]));
+                    Check(() => capturedPeak.ShouldBe(1752));
+                    _output.WriteLine($"PEAK_FINDING|seed={seed}|{row.Sql}|base={basePeak}|pipeline={capturedPeak}");
+                }
+                else { Check(() => capturedPeak.ShouldBeLessThanOrEqualTo(basePeak, row.Sql)); }
+                if (row.Pipelines.Length == 0) { Check(() => capturedPeak.ShouldBe(basePeak, row.Sql)); }
                 Check(() => pipelined.ShouldBe(baseline, $"seed={seed}; transport={transport}; {row.Sql}"));
                 // EXPLAIN ANALYZE refuses CTAS before planning; only executable forms belong here.
                 if (!row.TableAs)
@@ -95,7 +117,7 @@ public sealed partial class SqlSelectRetentionTests
                 statements += row.TableAs ? 4 : 6;
             }
         }
-        _output.WriteLine($"transport={transport}; differential statements={statements}");
+        _output.WriteLine($"transport={transport}; largeBudget={largeBudget}; differential statements={statements}");
         mismatches.ShouldBeEmpty(string.Join(Environment.NewLine, mismatches));
 
         void Check(Action assertion)
@@ -171,8 +193,10 @@ public sealed partial class SqlSelectRetentionTests
                 }
             }
             var metrics = executionSession.LastStatementMetrics!;
+            capturedPeak = metrics.PeakHashMemoryBytes;
+            Check(() => metrics.HashMemoryBytes.ShouldBe(0, sql));
             captured.Add($"work={metrics.RecordsExamined}:{metrics.JoinCandidatePairs}:{metrics.AccessPath}:{metrics.PeakOrderedRows}:" +
-                $"{metrics.PeakHashMemoryBytes}:{metrics.HashMemoryBytes}:" + string.Join(",", metrics.JoinAccessPaths ?? []));
+                $"{metrics.HashMemoryBytes}:" + string.Join(",", metrics.JoinAccessPaths ?? []));
             captured.Add("calls=" + string.Join(",", calls));
             if (row.TableAs && code is null && prefix != "EXPLAIN ")
             { captured.AddRange(await Read("SELECT * FROM d")); }
@@ -267,6 +291,7 @@ public sealed partial class SqlSelectRetentionTests
         yield return Fallback("SELECT nextval('s') FROM t GROUP BY k ORDER BY (SELECT MIN(u.k) FROM u WHERE u.k=t.k) LIMIT 0", "group-input");
         yield return Fallback("SELECT record_call(k) FROM t GROUP BY k ORDER BY (SELECT MIN(u.k) FROM u WHERE u.k=t.k) LIMIT 0", "group-input");
         yield return Fallback("SELECT COUNT(*) OVER() FROM (SELECT k,COUNT(*) FROM t GROUP BY k) d", "group-input");
+        yield return Fallback("SELECT k,COUNT(*) FROM t GROUP BY ROLLUP(k)");
         yield return Fallback("WITH RECURSIVE r(k) AS (SELECT 1 UNION ALL SELECT k+1 FROM r WHERE k<3) SELECT COUNT(*) FROM r", "group-input");
         yield return Pipeline("SELECT DISTINCT t.ci FROM t JOIN u ON t.k=u.k LIMIT 1 OFFSET 1", "join-matches", "distinct");
         // Both spellings reach the join; compare the surviving case/CHAR-space representative.
@@ -285,11 +310,11 @@ public sealed partial class SqlSelectRetentionTests
         yield return Pipeline("SELECT EXISTS(SELECT id FROM t LIMIT 1 OFFSET 1)", "subquery-body");
         yield return Pipeline("SELECT (SELECT id FROM t LIMIT 1 OFFSET 1)", "subquery-body");
         yield return Pipeline("SELECT EXISTS(SELECT a.id FROM t a JOIN u b ON a.k=b.k LIMIT 1 OFFSET 1)", "subquery-body", "join-matches");
-        yield return Fallback("CREATE TABLE d AS SELECT DISTINCT k FROM t", "distinct") with { TableAs = true };
-        yield return Fallback("CREATE TABLE d AS SELECT DISTINCT t.k FROM t JOIN u ON t.k=u.k", "join-matches", "distinct") with { TableAs = true };
-        yield return Fallback("CREATE TABLE d AS SELECT k,COUNT(*) AS n FROM t GROUP BY k", "group-input") with { TableAs = true };
-        yield return Fallback("CREATE TABLE d AS SELECT t.id,u.k FROM t JOIN u ON t.k=u.k", "join-matches") with { TableAs = true };
-        yield return Fallback("CREATE TABLE d AS SELECT id,(SELECT u.id FROM u WHERE u.id=t.id) AS n FROM t", "subquery-body") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT DISTINCT k FROM t", "distinct") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT DISTINCT t.k FROM t JOIN u ON t.k=u.k", "join-matches", "distinct") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT k,COUNT(*) AS n FROM t GROUP BY k", "group-input") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT t.id,u.k FROM t JOIN u ON t.k=u.k", "join-matches") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT id,(SELECT u.id FROM u WHERE u.id=t.id) AS n FROM t", "subquery-body") with { TableAs = true };
     }
 
     private static string Cell(object? value) => value switch

@@ -21,13 +21,17 @@ public sealed partial class SqlSequenceThirdPassTests
     public SqlSequenceThirdPassTests(ITestOutputHelper output) { _output = output; }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Sequence retention: unbounded grouped and correlated queries match ordinary memory accounting")]
-    [InlineData(0, false)][InlineData(1, false)][InlineData(2, false)]
-    [InlineData(0, true)][InlineData(1, true)][InlineData(2, true)]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
     public async Task Execute_UnboundedSequenceCorpus_ShouldMatchSequenceFreeBudget(int shape, bool ordered)
     {
         // Arrange: the old 296+ byte charge admits fewer than 28 of these 128 rows.
         const int count = 128;
-        await using var engine = SqlDatabaseEngine.Create("third-pass", new() { StatementMemoryBudget = 8192 });
+        await using var engine = SqlDatabaseEngine.Create("third-pass", new() { StatementMemoryBudget = 131072 });
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
         await Exec(session, "CREATE SEQUENCE s");
@@ -41,7 +45,8 @@ public sealed partial class SqlSequenceThirdPassTests
             (shape != 1 ? " GROUP BY t.k" : "") + (ordered ? " ORDER BY t.k" : "");
         var ordinary = await Rows(session, "SELECT t.k" + clauses);
         ordinary.Length.ShouldBe(count);
-        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(0);
+        long ordinaryPeak = session.LastStatementMetrics!.PeakHashMemoryBytes;
+        ordinaryPeak.ShouldBe(new long[,] { { 40960, 49152 }, { 12384, 20480 }, { 53248, 78848 } }[shape, ordered ? 1 : 0]);
         int retained = 0;
         SqlPlanExecutor.SequenceCandidatesRetained = value => retained = Math.Max(retained, value);
         try
@@ -60,7 +65,7 @@ public sealed partial class SqlSequenceThirdPassTests
             rows.Length.ShouldBe(count);
             rows.Select(row => row[0]).ShouldBe(Enumerable.Range(1, count).Select(i => (object?)(long)i));
             rows.Select(row => row[1]).ShouldBe(ordinary.Select(row => row[0]));
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(0);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(new long[,] { { 25600, 25600 }, { 17504, 31744 }, { 58368, 84992 } }[shape, ordered ? 1 : 0]);
             session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
             retained.ShouldBe(ordered ? count : 0);
             (await Rows(session, "SELECT currval('s')"))[0][0].ShouldBe((long)count);
@@ -124,10 +129,18 @@ public sealed partial class SqlSequenceThirdPassTests
         _output.WriteLine("offset=1; limit=1; projected calls=2; next=3");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Bounded sequence top N: no sort charge on success, cancellation, predicate/projection errors or low budgets")]
-    [InlineData(false, 0)][InlineData(false, 1)][InlineData(false, 2)][InlineData(false, 3)][InlineData(false, 4)]
-    [InlineData(true, 0)][InlineData(true, 1)][InlineData(true, 2)][InlineData(true, 3)][InlineData(true, 4)]
-    public async Task Execute_BoundedSequenceTopNExit_ShouldKeepSortUncharged(bool grouped, int exit)
+    [Theory(DisplayName = "Cohesion Test [Sql] - Bounded sequence top N: charges release on success, cancellation, errors and refusal")]
+    [InlineData(false, 0)]
+    [InlineData(false, 1)]
+    [InlineData(false, 2)]
+    [InlineData(false, 3)]
+    [InlineData(false, 4)]
+    [InlineData(true, 0)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    [InlineData(true, 3)]
+    [InlineData(true, 4)]
+    public async Task Execute_BoundedSequenceTopNExit_ShouldReleaseSortCharges(bool grouped, int exit)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("third-pass", new() { StatementMemoryBudget = exit == 4 ? 600 : 8192 });
@@ -151,7 +164,12 @@ public sealed partial class SqlSequenceThirdPassTests
         try
         {
             // Act
-            if (exit is 0 or 4) { (await Rows(session, sql, cancel.Token)).Length.ShouldBe(exit == 0 ? 2 : 4); }
+            if (exit == 0) { (await Rows(session, sql, cancel.Token)).Length.ShouldBe(2); }
+            else if (exit == 4)
+            {
+                var failure = await Should.ThrowAsync<DatabaseException>(() => Rows(session, sql, cancel.Token));
+                failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
+            }
             else if (exit == 1) { await Should.ThrowAsync<OperationCanceledException>(() => Rows(session, sql, cancel.Token)); }
             else
             {
@@ -166,17 +184,17 @@ public sealed partial class SqlSequenceThirdPassTests
                 // HAVING completes before ordered deferral starts: no candidates existed yet.
                 peak.ShouldBe(0);
             }
-            else
+            else if (exit != 4 || !grouped)
             {
                 peak.ShouldBeGreaterThan(0);
             }
-            metrics.PeakHashMemoryBytes.ShouldBe(0);
+            metrics.PeakHashMemoryBytes.ShouldBe(new long[,] { { 496, 352, 272, 448, 592 }, { 1776, 1632, 992, 1632, 544 } }[grouped ? 1 : 0, exit]);
             metrics.HashMemoryBytes.ShouldBe(0);
             if (exit == 0) { peak.ShouldBe(2); }
             if (exit == 4)
             {
-                peak.ShouldBe(4);
-                (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(5L);
+                peak.ShouldBe(grouped ? 0 : 3);
+                (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(1L);
             }
             _output.WriteLine($"grouped={grouped}; exit={exit}; retained peak={peak}; charged peak={metrics.PeakHashMemoryBytes}; final grant={metrics.HashMemoryBytes}");
         }
