@@ -11,6 +11,7 @@ using Xunit;
 using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Storage.Internal;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
@@ -99,7 +100,8 @@ public sealed class StorageTempSortRegressionTests : IDisposable
         using var reader = sorter.Complete();
         long physicalData = ((count * (long)(framedLength + 4) + StorageTempRun.PayloadSize - 1) / StorageTempRun.PayloadSize) * 8192;
         long pageAllowance = (sorter.RunsCreated + 1) * 8192;
-        long bound = physicalData + physicalData / sorter.FanIn + pageAllowance;
+        long largestMerge = TempSortModel.Measure(count, 65536, framedLength, sorter.FanIn).LargestMerge;
+        long bound = physicalData + largestMerge + pageAllowance;
 
         // Assert
         sorter.MergePasses.ShouldBeGreaterThan(1);

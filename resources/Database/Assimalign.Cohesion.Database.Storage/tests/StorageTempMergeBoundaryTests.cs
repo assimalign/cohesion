@@ -8,6 +8,8 @@ using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 public sealed class StorageTempMergeBoundaryTests : IDisposable
@@ -31,7 +33,7 @@ public sealed class StorageTempMergeBoundaryTests : IDisposable
         using var statement = space.CreateStatement(4L * 1024 * 1024 * 1024);
         using var sorter = StorageTempSorter.Create(statement, grant, maximumRecord);
         byte[] key = new byte[keyLength], value = new byte[valueLength]; int framed = 16 + keyLength + valueLength;
-        var expected = Model(count, grant, framed, sorter.FanIn);
+        var expected = TempSortModel.Measure(count, grant, framed, sorter.FanIn);
 
         // Act
         for (int i = 0; i < count; i++) { sorter.Append(key, value); }
@@ -63,7 +65,7 @@ public sealed class StorageTempMergeBoundaryTests : IDisposable
 
         // Assert
         rows.ShouldBe(count); sorter.RunsCreated.ShouldBe(17); sorter.RecordsWritten.ShouldBe(999552);
-        var expected = Model(count, grant, framed, sorter.FanIn);
+        var expected = TempSortModel.Measure(count, grant, framed, sorter.FanIn);
         statement.PeakBytes.ShouldBeLessThanOrEqualTo(expected.Data + expected.LargestMerge + 18 * 8192);
         statement.PhysicalBytes.ShouldBe(0);
         _output.WriteLine($"one GiB quota: rows={rows}; peak={statement.PeakBytes}; writes={sorter.RecordsWritten}; depth={sorter.MergePasses}");
@@ -95,7 +97,10 @@ public sealed class StorageTempMergeBoundaryTests : IDisposable
         // Assert
         actual.ShouldBe(expected.OrderBy(x => x.Key).Select(x => x.Ordinal)); sorter.RunsCreated.ShouldBe(runs);
         sorter.MergePasses.ShouldBe(runs == sorter.FanIn ? 1 : 2);
-        sorter.RecordsWritten.ShouldBe(Model(runs * countPerRun, 65536, 121, sorter.FanIn).Writes);
+        var cost = TempSortModel.Measure(runs * countPerRun, 65536, 121, sorter.FanIn);
+        sorter.RecordsWritten.ShouldBe(cost.Writes);
+        statement.PeakBytes.ShouldBeLessThanOrEqualTo(cost.Data + cost.LargestMerge + (runs + 1) * 8192);
+        _output.WriteLine($"boundary runs={runs}; peak={statement.PeakBytes}; largest merge={cost.LargestMerge}; writes={sorter.RecordsWritten}");
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Deferred merges: a full directory bounds live handles and preserves ordinal stability")]
@@ -122,21 +127,4 @@ public sealed class StorageTempMergeBoundaryTests : IDisposable
         _output.WriteLine($"full directory: rows={rows}; handles={peakHandles}; runs={sorter.RunsCreated}; depth={sorter.MergePasses}; writes={sorter.RecordsWritten}");
     }
 
-    private static (long Data, long LargestMerge, long Writes) Model(int count, int grant, int framed, int fanIn)
-    {
-        int workspace = grant - 32768, arena = (int)(workspace * 4L / 5) & ~3;
-        int perRun = Math.Min(arena / framed, (workspace - arena) / 4);
-        var remaining = new List<long>();
-        for (int rows = count; rows > 0; rows -= Math.Min(perRun, rows)) { remaining.Add(Math.Min(perRun, rows)); }
-        long writes = count, largest = 0;
-        while (remaining.Count > fanIn)
-        {
-            remaining.Sort(); int remainder = (remaining.Count - fanIn) % (fanIn - 1);
-            int take = remainder == 0 ? fanIn : remainder + 1;
-            long merged = remaining.Take(take).Sum(); remaining.RemoveRange(0, take); remaining.Add(merged);
-            writes += merged; largest = Math.Max(largest, Pages(merged * (framed + 4L)));
-        }
-        return (Pages(count * (framed + 4L)), largest, writes);
-    }
-    private static long Pages(long bytes) => (bytes + StorageTempRun.PayloadSize - 1) / StorageTempRun.PayloadSize * 8192;
 }
