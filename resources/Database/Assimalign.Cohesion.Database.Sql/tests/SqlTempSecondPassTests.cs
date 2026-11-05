@@ -39,11 +39,15 @@ public sealed class SqlTempSecondPassTests : IDisposable
         tempError.Message.ShouldContain("first segment", Case.Sensitive); tempError.Message.ShouldContain("leading dot", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Temp availability: an overlong optional path does not prevent engine creation")]
-    public async Task Create_OverlongTempPath_ShouldKeepEngineOnline()
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Temp availability: an overlong optional path does not prevent engine creation")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Create_OverlongTempPath_ShouldKeepEngineOnline(bool fileEngine)
     {
         // Arrange and act
-        await using var engine = SqlDatabaseEngine.Create("long-temp", new() { TempDirectory = Path.Combine(_root, new string('x', 40000)) });
+        var options = new SqlDatabaseEngineOptions { TempDirectory = Path.Combine(_root, ".spill", new string('x', 40000)) };
+        if (fileEngine) { options.RootPath = _root; }
+        await using var engine = SqlDatabaseEngine.Create("long-temp", options);
         var database = await engine.CreateDatabaseAsync("online", CancellationToken.None);
 
         // Assert
