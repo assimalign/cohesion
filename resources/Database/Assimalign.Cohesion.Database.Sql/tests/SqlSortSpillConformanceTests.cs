@@ -136,6 +136,11 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
     [InlineData(4)]
     [InlineData(5)]
     [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
     public async Task ExecuteAsync_UnavailablePermission_ShouldRefuseAndRelease(int refusal)
     {
         // Arrange
@@ -145,6 +150,7 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         await using var engine = await builder.BuildAsync();
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await Seed(session);
+        if (refusal == 9) { await session.ExecuteAsync("CREATE TABLE c(id INT,k INT)"); }
         string sql = refusal switch
         {
             2 => "SELECT COUNT(*) FROM (SELECT id,k FROM t ORDER BY k) d",
@@ -152,6 +158,11 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
             4 => "(SELECT id FROM t ORDER BY k) UNION ALL SELECT id FROM t",
             5 => "CREATE TABLE c AS SELECT id,k FROM t ORDER BY k",
             6 => "SELECT id,COUNT(*) OVER() FROM (SELECT id,k FROM t ORDER BY k) d",
+            7 => "SELECT t.id,(SELECT u.id FROM u WHERE u.id=t.id) AS value FROM t ORDER BY t.k",
+            8 => "WITH RECURSIVE r(id) AS (SELECT 0 UNION ALL SELECT id+1 FROM r WHERE id<4000) SELECT id FROM r ORDER BY id",
+            9 => "INSERT INTO c SELECT id,k FROM t ORDER BY k",
+            10 => "SELECT k,COUNT(*) FROM t GROUP BY GROUPING SETS ((k)) ORDER BY k",
+            11 => "SELECT nextval('s'),id FROM t ORDER BY k",
             _ => "SELECT id,k FROM t ORDER BY k",
         };
 
