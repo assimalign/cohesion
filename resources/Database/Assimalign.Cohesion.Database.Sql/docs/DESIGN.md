@@ -1657,7 +1657,8 @@ and keeps deferred key/aggregate collations on the original path.
 Application aggregates, volatile/sequence group transitions and join outputs keep the staged path: a later input error
 must not observe consumer calls that base never reached. Consumer failures drain remaining
 input predicates before surfacing, preserving their calls and work. Statement memory refusal
-(CS05067), cancellation and out-of-memory abort input immediately. If later input would also
+(CS05067) and cancellation abort input immediately. Join and DISTINCT consumers also abort
+immediately on out-of-memory. If later input would also
 have failed, CS05067 now wins; that statement was going to fail either way. Tree joins keep volatile
 WHERE predicates on the staged path; a nonvolatile WHERE failure drains all remaining ON work.
 Bounded bodies and plain DISTINCT also fall back when both input and output are volatile,

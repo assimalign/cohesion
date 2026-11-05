@@ -60,7 +60,7 @@ public sealed class SqlDatabaseEngineOptions
     /// Plain ON DELETE CASCADE closures charge about 840 bytes per two-column row: the default
     /// 64 MiB grant caps such a closure at about 79,900 rows, less when other work retains memory.
     /// A 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget.
-    /// Exceeding the budget fails before writes or publication; query buffers do not spill yet.</remarks>
+    /// Budget exhaustion refuses the statement. CTAS publishes only after all copying succeeds; query buffers do not spill yet.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>
