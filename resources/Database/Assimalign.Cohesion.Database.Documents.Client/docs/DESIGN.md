@@ -79,9 +79,9 @@ The real DocumentClient and model server run missing-database handshakes on InMe
 loopback TCP for at least one second and 200 consecutive coded refusals per transport. The
 tests assert DatabaseNotFound and reuse a one-slot pool to expose leaked failed rentals.
 
-## Set-operation wire conformance (#1803, OQ-S1)
+## Set-operation wire conformance (#1803, OQ-S1 and OQ-S2)
 
-UNION [ALL] uses existing OQL text, ResultHeader, Document and Complete messages. T3-30 chooses
+UNION/INTERSECT/EXCEPT [ALL] use existing OQL text, ResultHeader, Document and Complete messages. T3-30 chooses
 one `value` column for all RAW/VALUE operands, typed columns for identical ordered named
 projections, and whole-document mode with one `document` Json column otherwise. Named MISSING
 members retain omission and typed rows retain the existing missing bitmap. No codec, frame,
@@ -92,13 +92,16 @@ DocumentSetOperationWireTests exercises equality, NULL/MISSING, numeric widening
 arity/modes, operand and compound pages, LIMIT 0, EXPLAIN operands and located CD01037/CD01038
 refusals over InMemory and TCP. Memory/work refusals retain CD05018/CD05020; rollback and a
 subsequent query prove connection reuse. The NativeAOT consumer checks headers, value equality,
-pages and EXPLAIN on both transports. INTERSECT/EXCEPT and compound nested/DML positions
-remain CK00001 until OQ-S2.
+pages, multiset counts, expression arrays, derived FROM and INSERT/UPSERT SELECT on both transports.
 The deterministic engine oracle also runs its first 16 trials for each RAW/whole-document/typed-column
-and ALL/distinct combination over TCP (96 comparisons). Matching named projections exercise typed
+and ALL/distinct/operator combination over TCP (288 comparisons). Matching named projections exercise typed
 headers; Json cells preserve first representatives' member order and numeric scale, while numeric
 cells compare by value. A fixed typed-column trial pins which left and right rows supply the cells
 through Json text and Decimal scale (3.00 and 4.50) over TCP.
+
+Compounds execute as expression arrays, derived rows and INSERT/UPSERT sources, including correlated
+operands. Whole-document rows are unwrapped directly in nested positions; heterogeneous DML sources
+bind KEY/VALUE members by name and stage all rows before writes.
 
 ## Ordering wire conformance (#1730, #1632)
 

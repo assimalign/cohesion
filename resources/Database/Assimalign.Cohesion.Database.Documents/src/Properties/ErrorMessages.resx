@@ -94,9 +94,6 @@
   <data name="JoinMetadataInvalid" xml:space="preserve"><value>META in a joined query requires a receiver naming a FROM, JOIN or NEST source, and id or version.</value></data>
   <data name="ValuesDestinationUnbound" xml:space="preserve"><value>VALUES cannot reference destination binding '{0}' without a source row.</value></data>
   <data name="JoinKeyInvalid" xml:space="preserve"><value>A document join key must be a string, NULL or MISSING; key lists are not supported.</value></data>
-  <data name="NestedCompoundUnsupported" xml:space="preserve">
-    <value>Compound queries in nested query and DML source positions are not supported in OQL.</value>
-  </data>
   <data name="RawCompoundOrderUnsupported" xml:space="preserve">
     <value>ORDER BY over a RAW or VALUE compound has no named result members.</value>
   </data>
@@ -257,4 +254,5 @@
   <data name="TextTransactionStatusRequired" xml:space="preserve"><value>Text transaction control requires the negotiated transaction-status capability.</value></data>
   <data name="QualifiedStarDeferred" xml:space="preserve"><value>Qualified star projections are not supported yet.</value></data>
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
+  <data name="StatementTooComplex" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce its query and expression nesting, or run it on a thread with a larger stack.</value></data>
 </root>

@@ -40,7 +40,6 @@ public sealed partial class OqlQueryParser
                         var parenthesis = Previous;
                         var queryStart = Current;
                         var query = ParseQuery();
-                        RefuseNestedCompound(query);
                         if (!Failed && !query.IsValue)
                         { Error("CD00014", ErrorMessages.InSubqueryRequiresRaw, queryStart); }
                         if (!Failed) { Expect(TokenType.RightParen, "')'"); }
@@ -263,7 +262,6 @@ public sealed partial class OqlQueryParser
             if (Is("SELECT") || IsParenthesizedQuery(expressionOperand: true))
             {
                 var query = ParseQuery();
-                RefuseNestedCompound(query);
                 if (!Failed) { Expect(TokenType.RightParen, "')'"); }
                 return new OqlSubqueryExpression(query, Span(start, Previous));
             }

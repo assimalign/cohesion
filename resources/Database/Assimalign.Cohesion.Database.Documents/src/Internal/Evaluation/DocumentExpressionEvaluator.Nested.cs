@@ -12,6 +12,7 @@ internal sealed partial class DocumentExpressionEvaluator
 {
     internal async ValueTask<object?> EvaluateAsync(OqlExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group, DocumentNestedExecutionContext nested)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         _cancellationToken.ThrowIfCancellationRequested();
         try
         {
@@ -239,6 +240,7 @@ internal sealed partial class DocumentExpressionEvaluator
     private async ValueTask<object> ConstructAsync(OqlExpression expression, DocumentEvaluationContext document,
         IReadOnlyList<DocumentEvaluationContext>? group, DocumentNestedExecutionContext nested)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is OqlArrayExpression array)
         {
             var result = await DocumentJsonValue.ArrayAsync(ElementsAsync(array), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);

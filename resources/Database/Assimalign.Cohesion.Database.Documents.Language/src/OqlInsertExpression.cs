@@ -12,7 +12,7 @@ public sealed class OqlInsertExpression : OqlExpression
     /// <param name="collection">The destination collection.</param>
     /// <param name="alias">The optional destination alias.</param>
     /// <param name="values">The key and value expressions for VALUES, in order.</param>
-    /// <param name="select">The query source, or null for VALUES. Compound sources are currently refused.</param>
+    /// <param name="select">The query source, or null for VALUES.</param>
     /// <param name="keyName">The SELECT output name supplying the key.</param>
     /// <param name="valueName">The SELECT output name supplying the value, or null to store the output row.</param>
     /// <param name="location">The source span.</param>
@@ -36,7 +36,7 @@ public sealed class OqlInsertExpression : OqlExpression
     public string? Alias { get; }
     /// <summary>Gets the VALUES pairs in statement order.</summary>
     public IReadOnlyList<(OqlExpression Key, OqlExpression Value)> Values { get; }
-    /// <summary>Gets the optional query source. Compound sources are currently refused.</summary>
+    /// <summary>Gets the optional query source.</summary>
     public OqlQueryExpression? Select { get; }
     /// <summary>Gets the SELECT key output name.</summary>
     public string? KeyName { get; }

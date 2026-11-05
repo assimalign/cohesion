@@ -370,7 +370,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
 | New (#1729, OQ-G2) | CD00012 | Language/syntax — GROUP AS without preceding GROUP BY terms |
 | New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
-| New (#1731, OQ-Q1) | CD00014 | Language/syntax — IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand; nested compounds currently retain CK00001) |
+| New (#1731, OQ-Q1) | CD00014 | Language/syntax — IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand) |
 | New (#1731, OQ-Q2) | CD00015 | Language/syntax — derived FROM subquery has no alias |
 | Retired (#1767) | CD00016 | Reserved — former JOIN/NEST statement-wide explicit-alias requirement |
 | COHDOC002 | CD01002 | Binding/names |
@@ -592,9 +592,10 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
-| CD05018 | Retained SELECT sources/groups, compound equality/sort/output state, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
+| CD05018 | Retained SELECT sources/groups, compound equality/multiset/sort/output state, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
 | CD05020 | Shared expression/lookup/set-operation work budget exhausted across a statement's subqueries, expression sources, key joins and compounds (#1731, #1732) | — |
+| CD05021 | Statement planning, EXPLAIN or evaluation needs more execution stack than the executing thread has left; the statement fails and the session stays open (#1803) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

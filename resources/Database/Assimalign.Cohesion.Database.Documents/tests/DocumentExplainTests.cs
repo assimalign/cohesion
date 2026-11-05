@@ -96,7 +96,7 @@ public sealed class DocumentExplainTests
 
     [Fact(DisplayName = "Cohesion Test [Documents] - EXPLAIN: every statement plan record includes collection DDL mappings")]
     [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Test-only plan-family enumeration; shipped descriptions use a closed switch.")]
-    [UnconditionalSuppressMessage("Trimming", "IL2072", Justification = "Test-only records exercise the mapping's type patterns without reading fields.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2072", Justification = "Test-only plan enumeration; set operations receive parsed query metadata.")]
     public void Describe_EveryStatementPlan_ShouldHaveMapping()
     {
         // Arrange / Act
@@ -106,7 +106,16 @@ public sealed class DocumentExplainTests
         // Assert
         types.ShouldNotBeEmpty();
         foreach (var type in types)
-        { DocumentPlanner.DescribeOperator(RuntimeHelpers.GetUninitializedObject(type)).ShouldNotBeNullOrEmpty(type.Name); }
+        {
+            var plan = RuntimeHelpers.GetUninitializedObject(type);
+            if (plan is DocumentSetOperationPlan compound)
+            {
+                // A set plan's operator depends on its parsed operation and ALL modifier.
+                plan = compound with { Query = (OqlSetOperationExpression)((OqlQueryStatement)new OqlQueryParser()
+                    .Parse("SELECT RAW 1 FROM c UNION ALL SELECT RAW 2 FROM d")).OqlExpression };
+            }
+            DocumentPlanner.DescribeOperator(plan).ShouldNotBeNullOrEmpty(type.Name);
+        }
         DocumentPlanner.DescribeOperator(new DocumentCreateCollectionPlan((OqlCreateCollectionExpression)
             ((OqlQueryStatement)new OqlQueryParser().Parse("CREATE COLLECTION c")).OqlExpression)).ShouldBe("CreateCollection");
         DocumentPlanner.DescribeOperator(new DocumentDropCollectionPlan((OqlDropCollectionExpression)

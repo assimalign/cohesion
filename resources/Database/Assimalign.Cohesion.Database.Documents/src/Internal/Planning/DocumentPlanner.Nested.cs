@@ -99,13 +99,14 @@ internal sealed partial class DocumentPlanner
 
     private DocumentNestedPlan PlanNested(OqlExpression expression)
     {
+        var queryOuterNames = new Dictionary<OqlQueryExpression, IReadOnlySet<string>>(ReferenceEqualityComparer.Instance);
         var queries = new Dictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>(ReferenceEqualityComparer.Instance);
         var empty = new Dictionary<string, bool>(StringComparer.Ordinal);
         var free = new HashSet<string>(StringComparer.Ordinal);
         string? unboundValuesName = null;
         bool valuesAliasExplicit = false;
         int subqueryDepth = 0;
-        if (expression is OqlQueryExpression query) { VisitRootQuery(query); }
+        if (expression is OqlQueryExpression query) { VisitQuery(query, empty, free); }
         else
         {
             string? name = expression switch
@@ -131,7 +132,7 @@ internal sealed partial class DocumentPlanner
             }
             foreach (var child in NestedChildren(expression))
             {
-                if (child is OqlQueryExpression select) { VisitQuery(RequireQueryBlock(select), empty, free); }
+                if (child is OqlQueryExpression select) { VisitQuery(select, empty, free); }
                 else
                 {
                     bool values = expression is OqlInsertExpression or OqlUpsertExpression && child is not OqlReturningExpression;
@@ -141,17 +142,25 @@ internal sealed partial class DocumentPlanner
                 }
             }
         }
-        return new DocumentNestedPlan(PlanCore(expression, queries), queries);
+        return new DocumentNestedPlan(PlanCore(expression, queries, queryOuterNames: queryOuterNames), queries);
 
-        void VisitRootQuery(OqlQueryExpression query)
+        OqlQueryExpression VisitQuery(OqlQueryExpression queryExpression, Dictionary<string, bool> outer, HashSet<string> free)
         {
-            if (query is OqlSetOperationExpression compound)
-            { VisitRootQuery(compound.Left); VisitRootQuery(compound.Right); }
-            else { VisitQuery((OqlSelectExpression)query, empty, free); }
-        }
-
-        void VisitQuery(OqlSelectExpression select, Dictionary<string, bool> outer, HashSet<string> free)
-        {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (queryExpression is OqlSetOperationExpression compound)
+            {
+                var leftFree = new HashSet<string>(StringComparer.Ordinal);
+                var rightFree = new HashSet<string>(StringComparer.Ordinal);
+                var left = VisitQuery(compound.Left, outer, leftFree);
+                var right = VisitQuery(compound.Right, outer, rightFree);
+                free.UnionWith(leftFree);
+                free.UnionWith(rightFree);
+                return ReferenceEquals(left, compound.Left) && ReferenceEquals(right, compound.Right) ? compound :
+                    new OqlSetOperationExpression(left, right, compound.Operation, compound.IsAll, compound.OrderBy,
+                        compound.Limit, compound.Offset, compound.Location);
+            }
+            var select = (OqlSelectExpression)queryExpression;
             if (unboundValuesName is not null && valuesAliasExplicit && select.Source is null &&
                 select.Collection == unboundValuesName && !outer.ContainsKey(select.Collection))
             { throw new DocumentPlanningException("CD01036", string.Format(System.Globalization.CultureInfo.CurrentCulture,
@@ -180,6 +189,13 @@ internal sealed partial class DocumentPlanner
             VisitOrdering(select, grouped,
                 (scope, name) => new Dictionary<string, bool>(scope, StringComparer.Ordinal) { [name] = false },
                 (expression, scope, nested) => { Visit(expression, "ORDER BY", scope, outer, free, nested); return true; });
+            var normalized = !capturesSource ? select : new OqlSelectExpression("", DocumentSourceName.Of(select), select.Projections,
+                select.Predicate, select.GroupBy, select.Having, select.OrderBy, select.IsDistinct, select.IsValue,
+                select.Limit, select.Offset, select.Location, select.Unnest, select.GroupAliases, select.GroupAs,
+                new OqlPathExpression([new OqlPathSegment(select.Collection, null)], select.Location),
+                select.Bindings == select.Unnest ? null : select.Bindings);
+            queryOuterNames[normalized] = free;
+            return normalized;
         }
 
         void Visit(OqlExpression? node, string owner, Dictionary<string, bool> local, Dictionary<string, bool> outer, HashSet<string> free,
@@ -208,19 +224,13 @@ internal sealed partial class DocumentPlanner
                 foreach (var declaration in nestedOrder ?? local) { enclosing[declaration.Key] = declaration.Value; }
                 var outerNames = new HashSet<string>(StringComparer.Ordinal);
                 subqueryDepth++;
-                try { VisitQuery(RequireQueryBlock(subquery.Query), enclosing, outerNames); }
+                OqlQueryExpression normalized;
+                try { normalized = VisitQuery(subquery.Query, enclosing, outerNames); }
                 finally { subqueryDepth--; }
                 foreach (var dependency in outerNames)
                 { if (!(nestedOrder ?? local).ContainsKey(dependency)) { free.Add(dependency); } }
-                var select = RequireQueryBlock(subquery.Query);
-                if (select.Source is null && enclosing.TryGetValue(select.Collection, out bool keyspace) && !keyspace)
-                {
-                    select = new OqlSelectExpression("", DocumentSourceName.Of(select), select.Projections,
-                        select.Predicate, select.GroupBy, select.Having, select.OrderBy, select.IsDistinct, select.IsValue,
-                        select.Limit, select.Offset, select.Location, select.Unnest, select.GroupAliases, select.GroupAs,
-                        new OqlPathExpression([new OqlPathSegment(select.Collection, null)], select.Location), select.Bindings == select.Unnest ? null : select.Bindings);
-                }
-                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(select, queries, outerNames), outerNames.Count == 0 && CanCache(select), owner, outerNames));
+                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(normalized, queries, outerNames, queryOuterNames),
+                    outerNames.Count == 0 && CanCache(normalized), owner, outerNames));
                 return;
             }
             if (node is OqlComprehensionExpression comprehension)
@@ -244,6 +254,7 @@ internal sealed partial class DocumentPlanner
 
         bool CanCache(OqlExpression node)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             if (node is OqlCallExpression call && !DocumentFunctionCatalog.IsSpecial(call.Name))
             {
                 var function = _functions.Find(call.Name, call.Arguments.Count == 1 && call.Arguments[0] is OqlStarExpression ? 0 : call.Arguments.Count);
@@ -313,6 +324,7 @@ internal sealed partial class DocumentPlanner
 
         void AddQuery(DocumentStatementPlan queryPlan, int? parent)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             int offset = nodes.Count;
             foreach (var node in queryPlan is DocumentSetOperationPlan ? DescribeNodes(queryPlan).Take(1) : DescribeNodes(queryPlan))
             {
@@ -336,8 +348,8 @@ internal sealed partial class DocumentPlanner
             };
             var writeSource = queryPlan switch
             {
-                DocumentInsertSelectPlan insert => insert.Source is DocumentFromPlan or DocumentJoinPlan ? insert.Source : null,
-                DocumentUpsertPlan upsert => upsert.Source is DocumentFromPlan or DocumentJoinPlan ? upsert.Source : null,
+                DocumentInsertSelectPlan insert => insert.Source is DocumentFromPlan or DocumentJoinPlan or DocumentSetOperationPlan ? insert.Source : null,
+                DocumentUpsertPlan upsert => upsert.Source is DocumentFromPlan or DocumentJoinPlan or DocumentSetOperationPlan ? upsert.Source : null,
                 _ => null,
             };
             if (writeSource is not null) { AddQuery(writeSource, offset); }
@@ -346,7 +358,7 @@ internal sealed partial class DocumentPlanner
             { AddQuery(source.Input, nodes.Skip(offset).First(node => node.Operator == "DerivedSource").NodeId); }
             foreach (var child in NestedChildren(query))
             {
-                if (writeSource is not null && child is OqlSelectExpression) { continue; }
+                if (writeSource is not null && child is OqlQueryExpression) { continue; }
                 if (!ReferenceEquals(child, (query as OqlSelectExpression)?.Source)) { AddExpressions(child, offset); }
                 else if (inputPlan is DocumentFromPlan { Input: null })
                 { AddExpressions(child, nodes.Skip(offset).First(node => node.Operator == "ExpressionSource").NodeId); }
@@ -355,6 +367,7 @@ internal sealed partial class DocumentPlanner
 
         void AddExpressions(OqlExpression node, int parent)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             if (node is OqlSubqueryExpression expression)
             {
                 var nested = plan.Queries[expression];
@@ -370,9 +383,24 @@ internal sealed partial class DocumentPlanner
         }
     }
 
-    private static bool EquivalentNestedQuery(OqlSelectExpression left, OqlSelectExpression right)
+    private static bool EquivalentNestedQuery(OqlQueryExpression leftQuery, OqlQueryExpression rightQuery)
     {
-        if (ReferenceEquals(left, right)) { return true; }
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (ReferenceEquals(leftQuery, rightQuery)) { return true; }
+        if (leftQuery is OqlSetOperationExpression leftSet)
+        {
+            if (rightQuery is not OqlSetOperationExpression rightSet || leftSet.Operation != rightSet.Operation || leftSet.IsAll != rightSet.IsAll ||
+                leftSet.OrderBy.Count != rightSet.OrderBy.Count || !EquivalentNestedQuery(leftSet.Left, rightSet.Left) || !EquivalentNestedQuery(leftSet.Right, rightSet.Right)) { return false; }
+            // Compound tails bind only result members. Compare them with an empty query scope.
+            var scope = new OqlSelectExpression("", null, [], null, [], null, [], false, false);
+            var bindings = new DocumentBindingScopes();
+            bool SameTail(OqlExpression? x, OqlExpression? y) => x is null || y is null ? x is null && y is null :
+                EquivalentExpression(x, y, scope, null, bindings);
+            return SameTail(leftSet.Limit, rightSet.Limit) && SameTail(leftSet.Offset, rightSet.Offset) && leftSet.OrderBy.Zip(rightSet.OrderBy).All(pair =>
+                pair.First.Descending == pair.Second.Descending && pair.First.NullPlacement == pair.Second.NullPlacement &&
+                SameTail(pair.First.Expression, pair.Second.Expression));
+        }
+        if (leftQuery is not OqlSelectExpression left || rightQuery is not OqlSelectExpression right) { return false; }
         if (left.Collection != right.Collection || left.Alias != right.Alias || left.IsAliasImplicit != right.IsAliasImplicit || left.IsValue != right.IsValue ||
             left.IsDistinct != right.IsDistinct || left.GroupAs != right.GroupAs ||
             !left.GroupAliases.SequenceEqual(right.GroupAliases) || left.Projections.Count != right.Projections.Count ||

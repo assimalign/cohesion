@@ -94,7 +94,7 @@ internal static partial class DocumentPlanExecutor
         bool applyPage, bool needsValue, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (plan.Limit == 0) { yield break; }
-        bool needsInputValue = needsValue || !plan.Query.IsAll || plan.Query.OrderBy.Count > 0 || plan.Shape == DocumentSetResultShape.Document;
+        bool needsInputValue = needsValue || plan.Query.Operation != OqlSetOperation.Union || !plan.Query.IsAll || plan.Query.OrderBy.Count > 0 || plan.Shape == DocumentSetResultShape.Document;
         var memory = operation.GetStatementMemory(cancellationToken);
         using var distinctMemory = memory.Reserve();
         SortedSet<JsonElement>? seen = null;
@@ -107,10 +107,33 @@ internal static partial class DocumentPlanExecutor
                 return DocumentExpressionEvaluator.Compare(left, right, cancellationToken);
             }));
         }
+        using var rightMemory = memory.Reserve();
+        SortedDictionary<JsonElement, StrongBox<long>>? rightCounts = null;
+        if (plan.Query.Operation != OqlSetOperation.Union)
+        {
+            rightMemory.Charge(128);
+            rightCounts = new SortedDictionary<JsonElement, StrongBox<long>>(Comparer<JsonElement>.Create((left, right) =>
+            {
+                nested.ConsumeWork(cancellationToken);
+                return DocumentExpressionEvaluator.Compare(left, right, cancellationToken);
+            }));
+            await foreach (var row in StreamQueryRowsAsync(database, operation, plan.Right, parameters, nested, true, cancellationToken).ConfigureAwait(false))
+            {
+                nested.ConsumeWork(cancellationToken);
+                if (rightCounts.TryGetValue(row.Value, out var count))
+                { if (plan.Query.IsAll) { count.Value = checked(count.Value + 1); } }
+                else
+                {
+                    // Own only one equality key per distinct right value; occurrences are counters.
+                    rightMemory.Charge(192L + memory.ValueBytes(row.Value));
+                    rightCounts.Add(row.Value.Clone(), new StrongBox<long>(1));
+                }
+            }
+        }
         if (plan.Query.OrderBy.Count == 0)
         {
             long accepted = 0, emitted = 0;
-            await using var input = UnionInputAsync().GetAsyncEnumerator(cancellationToken);
+            await using var input = InputAsync().GetAsyncEnumerator(cancellationToken);
             while ((!applyPage || plan.Limit is null || emitted < plan.Limit) && await input.MoveNextAsync().ConfigureAwait(false))
             {
                 var row = input.Current;
@@ -123,10 +146,12 @@ internal static partial class DocumentPlanExecutor
         }
         using var retained = memory.Reserve();
         var sorted = new List<(SetRow Row, object?[] Keys, int Ordinal)>();
+        // ORDER BY binds only the result row. Async evaluation still shares statement work,
+        // but the evaluator must not capture an enclosing query's bindings.
         var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken,
             transactionStart: operation.TransactionStart, functions: database.Engine.Functions,
-            databaseName: database.Name, operation: operation, nested: nested);
-        await foreach (var row in UnionInputAsync().ConfigureAwait(false))
+            databaseName: database.Name, operation: operation);
+        await foreach (var row in InputAsync().ConfigureAwait(false))
         {
             if (!Accept(row)) { continue; }
             retained.Charge(256L + row.Cells.Length * 32L + plan.Query.OrderBy.Count * 16L);
@@ -171,18 +196,27 @@ internal static partial class DocumentPlanExecutor
         bool Accept(SetRow row)
         {
             nested.ConsumeWork(cancellationToken);
+            if (rightCounts is not null)
+            {
+                bool present = rightCounts.TryGetValue(row.Value, out var count) && count.Value > 0;
+                if (present && plan.Query.IsAll) { count!.Value--; }
+                if (present != (plan.Query.Operation == OqlSetOperation.Intersect)) { return false; }
+            }
             if (seen is null) { return true; }
             if (!seen.Add(row.Value)) { return false; }
             distinctMemory.Charge(160L + memory.ValueBytes(row.Value));
             return true;
         }
         SetRow Shape(SetRow row) => plan.Shape == DocumentSetResultShape.Document ? new SetRow(row.Value, [row.Value]) : row;
-        async IAsyncEnumerable<SetRow> UnionInputAsync()
+        async IAsyncEnumerable<SetRow> InputAsync()
         {
             await foreach (var row in StreamQueryRowsAsync(database, operation, plan.Left, parameters, nested, needsInputValue, cancellationToken).ConfigureAwait(false))
             { yield return row; }
-            await foreach (var row in StreamQueryRowsAsync(database, operation, plan.Right, parameters, nested, needsInputValue, cancellationToken).ConfigureAwait(false))
-            { yield return row; }
+            if (plan.Query.Operation == OqlSetOperation.Union)
+            {
+                await foreach (var row in StreamQueryRowsAsync(database, operation, plan.Right, parameters, nested, needsInputValue, cancellationToken).ConfigureAwait(false))
+                { yield return row; }
+            }
         }
     }
 
@@ -201,7 +235,8 @@ internal static partial class DocumentPlanExecutor
         if (logical.Limit == 0) { yield break; }
         // Each top-level operand follows standalone SELECT: only its own subqueries,
         // expression sources or key bindings opt it into expression work accounting.
-        var operandContext = DocumentPlanner.HasSubquery(logical.Query, cancellationToken) ? nested : null;
+        // Correlated evaluations also need the current outer bindings, as nested SELECT does.
+        var operandContext = nested.Bindings is not null || DocumentPlanner.HasSubquery(logical.Query, cancellationToken) ? nested : null;
         var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken, operandContext);
         if (!Streams(logical))
         {

@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Database.Documents;
 public sealed class DocumentDatabaseEngineOptions
 {
     /// <summary>
-    /// Gets or sets the maximum retained statement memory for SELECT sources, groups, results and aggregates, compound distinct/sort/output state, and RETURNING rows.
+    /// Gets or sets the maximum retained statement memory for SELECT sources, groups, results and aggregates, compound distinct keys, right-side multiset keys and counters, sort buffers, output, and RETURNING rows.
     /// Defaults to 64 MiB and must be positive. Charges include row storage, scalar values,
     /// JSON clones (128 bytes plus UTF-8 length plus 12 bytes per JSON token), and
     /// preserved whole-document bytes. A lone star retains one clone and one raw image;

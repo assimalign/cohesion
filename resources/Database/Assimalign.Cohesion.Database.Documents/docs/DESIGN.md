@@ -608,9 +608,10 @@ CD00007 for the same count rule at parse and plan time:
 | `CD05015` | A query/RETURNING constructor, SELECT projection or result formatter exceeds the 256-level serialized result limit, including the row wrapper |
 | `CD05018` | Retained statement source rows, ordered candidate buckets, key-lookup caches, groups, compound state, RETURNING results or aggregate values exceed the statement memory budget |
 | `CD05020` | Shared expression/lookup/set-operation work budget exhausted across nested queries, expression sources, key joins and compounds |
+| `CD05021` | Planning, EXPLAIN or evaluation needs more execution stack than the executing thread has left; the statement fails and the session stays open |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
-| `CD00014` | IN subquery requires RAW/VALUE (direct SELECT or compound, including a parenthesized first operand; nested compounds currently retain CK00001) |
+| `CD00014` | IN subquery requires RAW/VALUE (direct SELECT or compound, including a parenthesized first operand) |
 | `CD00015` | Derived FROM subquery requires an alias |
 | `CD00016` | Retired and reserved: former joined-statement explicit-alias requirement (#1767) |
 | `CD01033` | FROM expression has no explicit alias or implicit field name |
@@ -842,8 +843,7 @@ Subqueries preserve zero/multiple-row SQL++ arrays, including RAW/VALUE null nor
 object-star preservation (nonobject roots wrap under document). Star deliberately follows this
 engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Non-RAW IN
 subqueries retain the conservative CD00014 guard (owner sign-off, 2026-11-02): a direct SELECT or
-compound query, including a parenthesized first operand, requires RAW/VALUE, subject to the current
-nested-compound CK00001 gate. Redundant wrappers alone keep the value-list interpretation.
+compound query, including a parenthesized first operand, requires RAW/VALUE. Redundant wrappers alone keep the value-list interpretation.
 This is a deliberate SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope;
 inner declarations shadow them. Qualified stars outside joined SELECT projections retain their
 CK00001 refusal.
@@ -1037,29 +1037,40 @@ estimate and rollback boundary. Ordinary SELECT retains its existing memory poli
 DocumentQueryTests.Comprehensions, OqlExecutionConformanceTests and DocumentComprehensionWireTests
 cover values, nested scopes, grouping, registered calls, cancellation and both transports.
 
-#### Set-operation execution (#1803, OQ-S1)
+#### Set-operation execution (#1803, OQ-S1 and OQ-S2)
 
 Every supported compound operand retains standalone implicit-source alias and nested-subquery
 correlation rules, including explicit-alias capture versus an independent collection read.
 Index DDL still refuses element-rooted relative paths with CD03027, and VALUES subqueries still
-refuse unbound destination capture with CD01036; compounds in those deferred query positions
-retain CK00001 until OQ-S2 (#1767).
+refuse unbound destination capture with CD01036, including compounds (#1767).
 
 DocumentSetOperationPlan binds two independent query plans and chooses T3-30's result shape
 before document reads: all RAW/VALUE leaves give `value`; identical ordered named projections
 give typed columns; otherwise the existing whole-document mode gives one `document` Json column.
 Wildcard operands keep document mode and open result-member names. Compound ORDER BY addresses
-members from either operand, independent of input collection bindings. CD01037 rejects ordering
+members from either operand, independent of input collection bindings. Its evaluator captures no
+outer bindings, even when a result member has the same name as an enclosing alias; async key
+evaluation still uses the shared work/memory context. CD01037 rejects ordering
 on all-RAW/VALUE compounds and CD01038 rejects an unbound member or source-only metadata/star.
-The [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#set-operations-1803-oq-s1)
-records precedence, equality, deferred positions and every default.
+The [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#set-operations-1803-oq-s1-and-oq-s2)
+records precedence, equality, query positions and every default.
 
 The executor reuses the source pull pipeline. UNION ALL streams each operand without an
 operand-result buffer; local grouping, DISTINCT and ordering retain their own blocking semantics.
-Unordered RAW/typed-column ALL consumers pass cells directly, building a complete JSON row only
-when a parent needs it for equality, ordering or whole-document output. Each distinct insertion
+Unordered RAW/typed-column UNION ALL consumers pass cells directly, building a complete JSON row only
+when a parent needs it for equality, ordering or whole-document output. Each left distinct insertion
 uses one set probe before charging a new key; duplicates need no key reservation or size estimate.
 A failed charge aborts the statement, so an uncharged inserted key cannot outlive the refusal.
+INTERSECT/EXCEPT first build a right-side sorted count dictionary with the same comparator.
+It reserves 128 bytes plus 192 bytes and the JSON ownership/token estimate per distinct key;
+ALL increments an Int64 counter without retaining repeated frames. Keys are cloned before the
+borrowed input advances. INTERSECT ALL decrements counts while yielding the earliest left
+matches; EXCEPT ALL decrements counts while discarding matched left occurrences. Distinct forms
+use right membership and the left distinct set to keep only the first qualifying representative.
+The right dictionary retains keys until operator completion, even after counts reach zero.
+Mutable count boxes let duplicates and ALL decrements use one comparison walk; only a new key
+needs lookup followed by insertion. The existing per-key reservation covers the count box.
+Right evaluation precedes left evaluation; LIMIT 0 returns before either source or dictionary opens.
 UNION keeps first representatives in input order using the existing grouping structural comparator
 on complete row values. Named MISSING members are omitted before comparison; RAW MISSING is NULL.
 Different arity or member order needs no special rejection. The equality set reserves 128 bytes,
@@ -1079,18 +1090,35 @@ Fixed-type unordered pages stop before another operand row is pulled. LIMIT 0 pr
 binding and parameter validation, then opens no operand, invokes no callback and skips every
 blocking stage. Returned values are independently owned; no borrowed source frame escapes.
 
-EXPLAIN's Union/UnionAll parent has both complete operand trees, a static shape, order-key count
+EXPLAIN's Union/UnionAll, Intersect/IntersectAll and Except/ExceptAll parents have both complete
+operand trees, a static shape, order-key count
 and resolved limit/offset, without source evaluation. OqlQueryExpression is the public closed
-SELECT/set family; nested-query and DML-source properties are retyped now but compound execution
-in those positions remains a CK00001 gate for OQ-S2. The mixed statement envelope stays
+SELECT/set family. Expression subqueries, derived FROM, INSERT/UPSERT SELECT and correlated
+operands all accept that family. The mixed statement envelope stays
 OqlExpression for queries, writes, DDL and transactions. No protocol or persisted format changes.
 
-DocumentSetOperationTests includes a deterministic 384-case generated concatenation/deduplication oracle
+Nested planning walks each operand with independent local declarations, passes only its own free
+outer names to access planning and unions those names for statement caching. A sibling's capture
+cannot turn a local indexed path into an outer variable. Operand capture maps travel through
+statement-local planning arguments, preserving ordinary planner allocation bytes.
+Captured expression sources are normalized per operand; the executor
+supplies the current outer bindings even to a plain-collection operand with correlated projections.
+Grouping equivalence compares complete compound trees, operators, modifiers and tails while its
+capture checks retain each operand's lexical identity. Derived sources pull complete set-row values;
+expression arrays unwrap whole-document results directly. DML sources retain T3-30's static shape,
+bind named members on heterogeneous row values and stage every write before publication. Their
+omitted VALUE is the complete row value. Every retained equality/sort/output owner releases on
+success, cancellation and refusal. Recursive planning, EXPLAIN and async expression/constructor paths
+check execution stack before descending; the engine translates exhaustion to CD05021, aborting the
+statement while keeping the session open. The parser's 128-operator path bound includes compounds
+inside SELECT leaves. No wire frame or storage version changes.
+
+DocumentSetOperationTests includes a deterministic 1,152-case generated concatenation/deduplication/multiset oracle
 covering RAW values, whole documents with omitted MISSING members, and matching named projections
 with typed columns. Canonical keys choose each first representative; Json cells preserve numeric
 scale and member order, while generated numeric cells compare by value. A fixed typed-column trial
 pins both left and right representatives through Json text and Decimal scale (3.00 and 4.50).
-The same seed and generator run 96 cases over TCP. Release guards
+The same seed and generator run 288 cases over TCP. Release guards
 enforce allocation ceilings for RAW/typed UNION ALL; Debug and Release enforce the same deterministic
 work-counter ceiling for distinct insertion. Execution also covers exactly 128 operators and duplicate
 admission at the measured memory ceiling, with a new-key refusal control and complete release.
@@ -1289,7 +1317,7 @@ columns retain long values. JSON numeric equality and wire digits are unchanged 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, expression/derived FROM, UNNEST, key JOIN/NEST, quantified predicates, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, UNION [ALL], IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
+CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, UNION/INTERSECT/EXCEPT [ALL], IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; general joins, deferred document mutations
 and server statements are rejected with `CK00001`. Expression subqueries execute as described above.
 The parser advertises only clauses this executor supports.

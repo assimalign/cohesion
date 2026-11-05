@@ -60,6 +60,10 @@ public static class OqlClauses
 
     /// <summary>Combines query values, eliminating duplicates unless ALL is specified.</summary>
     public const string Union = "UNION";
+    /// <summary>Retains values shared by both query operands.</summary>
+    public const string Intersect = "INTERSECT";
+    /// <summary>Removes right-operand values from the left query operand.</summary>
+    public const string Except = "EXCEPT";
 
     /// <summary>Eliminates duplicate projected values.</summary>
     public const string Distinct = "DISTINCT";

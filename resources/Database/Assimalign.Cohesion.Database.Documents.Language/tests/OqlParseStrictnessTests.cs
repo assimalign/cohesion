@@ -77,7 +77,7 @@ public sealed class OqlParseStrictnessTests
     [InlineData("SELECT c AS limit «ALL» FROM c", "ALL")]
     // A Clause word directly after the collection is a construct, never an AS-less alias.
     // A set operation and its ALL or DISTINCT are one construct.
-    [InlineData("SELECT * FROM c «INTERSECT ALL» SELECT * FROM d", "INTERSECT")]
+    [InlineData("SELECT * FROM c «INTERSECT DISTINCT» SELECT * FROM d", "INTERSECT DISTINCT")]
     [InlineData("SELECT * FROM c «EXCEPT DISTINCT» SELECT * FROM d", "EXCEPT DISTINCT")]
     [InlineData("SELECT * FROM c «UNION DISTINCT» SELECT * FROM d", "UNION DISTINCT")]
     // ODMG's FOR ALL owns its SATISFIES, which is not reported again.
