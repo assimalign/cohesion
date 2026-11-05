@@ -12,6 +12,13 @@ records the constructor, options and analyzer decisions. Grammar, diagnostics an
 corpora retain their existing behavior.
 
 
+## Root sort spill conformance (#1789)
+
+SqlSortSpillConformanceTests extends the executable SQL corpus with root ORDER BY and ordered
+DISTINCT spill, stable evaluation and representative selection, lazy repeatable delivery,
+located CK05 failures and retained-grant refusals. Grammar and wire formats are unchanged.
+DIALECT records the root-only scope and the default quota capacity.
+
 ## COPY table export grammar (#1724)
 
 SqlCopyToExpression retains the ordered table column list and immutable resolved SqlCopyOptions.

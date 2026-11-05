@@ -182,6 +182,10 @@ internal sealed partial class SqlPlanner
                 _ => null,
             };
             if (current.ContainsSequences) { detail = (detail is null ? "" : detail + "; ") + "sequences=volatile; object_locks=transaction"; }
+            if (nodes.Count == 0 && metrics is not null && SqlSortSpillMetrics.For(metrics) is { } spill)
+            {
+                detail += $"; spilled_bytes={spill.PhysicalBytes}; spill_peak_bytes={spill.PeakBytes}; spill_runs={spill.Runs}; spill_merge_passes={spill.MergePasses}";
+            }
             string? indexName = current switch
             {
                 SqlCreateIndexPlan p => p.IndexName,

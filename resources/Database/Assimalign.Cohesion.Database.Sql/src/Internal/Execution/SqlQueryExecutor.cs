@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution.Internal;
+using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -87,16 +88,16 @@ internal sealed partial class SqlQueryExecutor
         if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
         using (SqlJsonPathExecution.BeginPlanning(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken))
         { plan = executor.Cost(plan, statement, cancellationToken); }
-        return sequenceUsage is not null ? ExecuteSequencesAsync(executor, plan, statement, session, cancellationToken, sequenceUsage)
-            : executor.ExecuteAsync(plan, statement, cancellationToken);
+        return sequenceUsage is not null ? ExecuteSequencesAsync(executor, plan, statement, session, cancellationToken, sequenceUsage, request.Statement.SqlExpression.Location)
+            : executor.ExecuteRootAsync(plan, statement, cancellationToken, session, request.Statement.SqlExpression.Location);
     }
 
     internal async Task<DatabaseResult> ExecuteSequencesAsync(SqlPlanExecutor executor, SqlPlan plan, SqlStatementContext statement,
-        SqlDatabaseSession? session, CancellationToken cancellationToken, SqlSequenceUsage? usage = null)
+        SqlDatabaseSession? session, CancellationToken cancellationToken, SqlSequenceUsage? usage = null, Location? rootLocation = null)
     {
         using var sequences = await SqlSequenceExecution.OpenAsync(_catalog, statement, session?.SequenceState ?? new SqlSequenceSessionState(), cancellationToken, usage ?? plan.SequenceUsage).ConfigureAwait(false);
         sequences.Enter();
-        return await executor.ExecuteAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+        return await executor.ExecuteRootAsync(plan, statement, cancellationToken, session, rootLocation).ConfigureAwait(false);
     }
 
     private sealed class DebugView

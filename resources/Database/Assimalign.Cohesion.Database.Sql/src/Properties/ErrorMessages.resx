@@ -486,6 +486,18 @@
   <data name="StatementMemoryBudgetExceeded" xml:space="preserve">
     <value>The statement memory budget of {0} bytes was exceeded.</value>
   </data>
+  <data name="SortBufferReadOnly" xml:space="preserve">
+    <value>The evaluated sort buffer is read-only.</value>
+  </data>
+  <data name="SortBudgetHandoff" xml:space="preserve">
+    <value>The evaluated sort buffer requires temporary storage.</value>
+  </data>
+  <data name="SpillCleanupFailed" xml:space="preserve">
+    <value>Temporary SQL result cleanup failed.</value>
+  </data>
+  <data name="SpillRowDamaged" xml:space="preserve">
+    <value>A temporary SQL result row is damaged.</value>
+  </data>
   <data name="ExplainAnalyzeSelectOnly" xml:space="preserve">
     <value>EXPLAIN ANALYZE supports SELECT queries only.</value>
   </data>

@@ -89,6 +89,7 @@ public sealed partial class SqlDatabaseSession
     /// <inheritdoc />
     protected override async ValueTask DisposeAsyncCore()
     {
+        if (Database.Engine.TempSpace is not null) { SqlSpillLifetime.Close(this); }
         if (Volatile.Read(ref _copyOperation) is not { } operation) { return; }
         try { await operation.CancelAsync().ConfigureAwait(false); }
         finally { await operation.Completion.Task.ConfigureAwait(false); }

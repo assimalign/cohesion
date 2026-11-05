@@ -8,8 +8,7 @@ TempDirectory overrides must be dedicated descendants of RootPath; option checks
 first segment a database could take (a leading dot is safe) and link components below the root.
 A default RootPath is refused with its own message; an empty RootPath remains in-memory. An in-memory engine has no
 space unless TempDirectory is explicitly set. The options snapshot includes TempDirectory,
-TempSpaceQuota and StatementTempSpaceQuota. They are configuration for the substrate only:
-SQL operators still refuse with CS05067 as before. No DIALECT or conformance behavior changes.
+TempSpaceQuota and StatementTempSpaceQuota. Root plain SELECT sorts consume this substrate as described below; other operators retain their current memory policy.
 
 TempSpaceQuota is nullable: an explicit nonnegative physical-byte cap, or min(10 GiB, 25% of
 available bytes) measured after startup sweeping. An unavailable probe uses zero until CreateRun
@@ -47,9 +46,66 @@ Windows process exit deletes delete-on-close runs; OS backups of RootPath can ca
 No durable data, catalog, journal, record-space or wire format changes.
 
 
+## Root SELECT sort spilling (#1789, SQ-L2b)
+
+A root plain SELECT may spill ORDER BY, its bounded OFFSET + LIMIT heap, and ordered
+DISTINCT when the existing reservation refuses CS05067. A fitting collector keeps its
+existing charges and representation. Permission is an explicit root argument; nested
+ExecuteAsync calls never inherit it. Subqueries, derived/CTE bodies, correlated frames,
+recursion, windows, grouping sets, CTAS and DML sources retain their existing refusals.
+An ordered index scan does not introduce a sort or a new result-spooling permission.
+Ordered sequence deferral stays in memory. A staged volatile input or join writes its
+already evaluated source rows in input order on refusal, finishing all predicates before
+keys and projections at their original evaluation boundary. Its temporary input and output
+share one statement quota. If SortRows key scratch refuses first, a pooled adapter captures
+LINQ's existing tuple buffer, drains its evaluated prefix and spools the unevaluated suffix
+before allocating the arena. Previously evaluated keys are never evaluated again.
+
+No TempSpace, a nonfixed ordering collation, an unsupported codec value, a second key
+family, a grant below 65,536 B, or an encoded record above the grant-derived bound keeps
+CS05067. The bound must also be at least 16, so the fixed fan-in rule imposes a higher
+practical minimum than 65,536 B. The sorter receives min(Int32.MaxValue, remaining grant).
+Every buffered row is validated before handoff. Its stable sorted prefix is written while
+entries and wide-identity references are cleared; only then is the arena allocated and
+charged to the plain ledger. SQL sets a ceiling of 64 simultaneously open sort runs,
+including a merge output, so small-grant sorts merge before approaching a common Unix
+1024-descriptor soft limit. A staged input/output run and the space lease are additional;
+concurrent statements still add their handles. This is a per-sort ceiling, not a process pool.
+Scan and join producers have released page latches before
+temp I/O. The established order is SQL object intent locks, no page latch, temp run lock,
+probe gate, space gate. Registry locks are released before result/storage disposal.
+
+SqlSpilledResultSet owns the StorageTempStatement. Its immutable final runs can be read
+repeatedly and concurrently, with one bounded reader per enumeration. OFFSET skips decoded
+rows and LIMIT stops reading. CHAR output, typed SqlMaterializedRow conversions, detached
+binary values, headers and AffectedCount are unchanged. Evaluation completes before return;
+no snapshot, transaction or lock is needed during delivery. Disposal invalidates enumeration
+with ObjectDisposedException, closes active readers and releases exactly once. Session close,
+engine disposal and all server delivery exits also dispose it; a later session statement
+leaves it intact. Ordered DISTINCT uses the existing GroupKeyComparer across the whole sorted
+stream, retains the first representative, charges its seen set and refuses CS05067 if that
+set itself exceeds the grant. Its output is a rewindable run.
+
+CK05001 through CK05006 remain kernel identities carried by located SqlExecutionException.
+Temporary causes are retained in Exception.Data under StorageTempException, outside the
+durable InnerException failure walker; temp I/O cannot fence durable storage. No new error
+identity or event is allocated. EXPLAIN is unchanged. Only actual spills append spilled_bytes,
+spill_peak_bytes, spill_runs and spill_merge_passes to EXPLAIN ANALYZE's root detail.
+PhysicalBytes and PeakBytes are sampled after evaluation; both memory ledgers are zero then.
+The Debug/Release conformance corpus samples forced-GC live bytes with a 512 KiB fixed
+allowance above 1.1 times a 1 MiB grant and checks drained values with WeakReference.
+The 512 KiB allowance includes execution metadata, current rows and temporary run handles;
+it is a test allowance, not an additional statement reservation.
+
+SqlSortSpillConformanceTests differentially compares rows, headers, calls, sequences and
+access work, covers owner/cancellation/I/O exits, and reuses VerifyEveryUnwind. Default quotas
+complete ten grants of 20- and 50-character ASCII output. Twenty three-byte characters fit
+six grants but seven refuse CK05002; payload capacity before rounding is 6.66 grants. The
+64 MiB collector acceptance also exercises ten grants without fixture table-write overhead.
+
 ### Temp encoding (#1789, SQ-L2a)
 
-SqlTempRowCodec and SqlTempSortKeyCodec are internal and have no operator callers yet.
+SqlTempRowCodec and SqlTempSortKeyCodec are internal; root sort spilling is their first operator consumer.
 The private row format is version 2: a byte version, little-endian Int32 cell count, then
 typed payloads without MVCC stamps. Valid text uses length-prefixed UTF-8 written with
 Utf8.FromUtf16; malformed text retains raw UTF-16 tags so NULs and unpaired surrogates survive
@@ -1806,7 +1862,7 @@ On success these pipelines never stop evaluation early: joins drain all candidat
 at LIMIT 0 or after the output window fills; bounded subquery bodies run every projection that
 the original body ran, and scalar cardinality is checked afterwards. Existing stored-scan early
 stops remain unchanged. Every retained plain SELECT buffer now reserves statement memory before adding an entry
-(#1776, SQ-L1b). Newly charged buffers refuse with CS05067. CTAS sources use the same
+(#1776, SQ-L1b). Newly charged buffers refuse with CS05067 unless the root sort handoff above applies. CTAS sources use the same
 pipelines and charge like any SELECT; CTAS itself admits only rows kept after pagination,
 independent of list capacity (#1762). Per-database internal test seams
 force the original collectors, observe operator entry and count retained DISTINCT/subquery rows.
@@ -10792,8 +10848,8 @@ scan/seek/system-view scratch remain outside the grant. COUNT(*) and low-cardina
 can consume input much larger than the budget on the pipelined path.
 Every exit releases reservations, including cancellation, failed decoding and budget refusal.
 CS05067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
-message and one diagnostic code. These operators do not partition or spill yet; the T3 spill
-family adds that support. Standalone ANALYZE remains later work.
+message and one diagnostic code. Root sort spilling is described above; the remaining retained
+buffers do not partition or spill yet. Standalone ANALYZE remains later work.
 
 Joined UPDATE FROM, DELETE USING and MERGE also reserve retained decoded target identities,
 non-hash input buffers, derived-source copies, normalized intermediate frames, associations,

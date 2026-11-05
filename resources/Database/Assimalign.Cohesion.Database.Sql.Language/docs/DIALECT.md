@@ -1,5 +1,34 @@
 # The Declared SQL Dialect
 
+## Root ORDER BY and ordered DISTINCT spilling (#1789, SQ-L2b)
+
+At the root of a plain SELECT, ORDER BY and ordered DISTINCT may use temporary runs when
+the statement grant would refuse. Stable ties, DISTINCT's first sorted representative,
+volatile/sequence evaluation, access paths and pagination are unchanged. In-memory engines
+need an explicit TempDirectory; file engines use their configured temp space. Fitting sorts
+retain their existing path. OFFSET + LIMIT heaps can spill too; delivered results decode
+lazily and can be read repeatedly or concurrently until disposed, the session closes, or
+the engine is disposed. A later statement does not invalidate them.
+
+CS05067 remains for nested/subquery, derived/CTE operand bodies, correlated frames,
+recursion, windows, CTAS, DML sources, grouping sets, ordered sequence deferral, and
+buffers belonging to operators preceding the root sort that have no handoff.
+Window and SQL/JSON owners keep their specific grant codes when they fill first. Spill
+also refuses CS05067 without temp space, for a nonfixed ordering collation, an unsupported
+row/key family or a row above the record bound. For grant G the bound is
+(G - 32768) / 16 - 8192 bytes, including key, row and 16 framing bytes; G must be at least
+65,536 and the bound at least 16. Ordered DISTINCT's seen set must itself fit the grant.
+
+The default physical statement quota remains four grants. Ten grants of 20- and
+50-character ASCII rows complete; 20 three-byte characters fit six grants but seven
+refuse CK05002 (6.66 grants of payload before rounding). Width, framing, run tails and
+intermediate merges determine capacity. CK05001 (engine quota), CK05002 (statement quota),
+CK05003 (free-space reserve), CK05004 (temp integrity), CK05005 (unavailable temp I/O) and
+CK05006 (sort record bound) are located statement/delivery errors and release temporary
+files without taking the database offline. EXPLAIN changes no fields; EXPLAIN ANALYZE
+adds spilled_bytes, spill_peak_bytes, spill_runs and spill_merge_passes only after a spill.
+SqlSortSpillConformanceTests is the executable differential, lifetime, memory and wire corpus.
+
 ## COPY TO STDOUT (#1724, SQ-C1)
 
 `COPY table [(column, ...)] TO STDOUT [WITH] [(option, ...)]` exports a physical table

@@ -1231,6 +1231,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         _checkpointNeededSignal.Dispose();
         _undoDeferredSignal.Dispose();
 
+        try { if (TempSpace is not null) { SqlSpillLifetime.Close(this); } }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        { (failures ??= []).Add(failure); }
         try { TempSpace?.Dispose(); }
         catch (Exception failure) when (failure is not OutOfMemoryException)
         { (failures ??= []).Add(failure); }

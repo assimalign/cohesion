@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>Retains completed outputs and keys, bounded by OFFSET + LIMIT when ordered.</summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlRowCollector")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlRowCollector.DebugView))]
-internal sealed class SqlRowCollector : IDisposable
+internal sealed partial class SqlRowCollector : IDisposable
 {
     private readonly IReadOnlyList<SqlBoundOrdering> _orderBy;
     private readonly Collation[] _collations;
@@ -63,9 +63,11 @@ internal sealed class SqlRowCollector : IDisposable
         return true;
     }
 
-    internal object?[]? Add(object?[] output, object?[] keys)
+    internal object?[]? Add(object?[] output, object?[] keys, SqlDatabaseSession? spillOwner = null)
     {
         _cancellationToken.ThrowIfCancellationRequested();
+        if (spillOwner is not null && _spills.TryGetValue(this, out var spill))
+        { AppendSpilled(spill, output, keys); _visited++; return output; }
         var windowMemory = SqlWindowMemory.For(_metrics);
         windowMemory?.Retain(output);
         if (keys.Length > 0) { windowMemory?.Retain(keys); }
@@ -83,7 +85,7 @@ internal sealed class SqlRowCollector : IDisposable
         if (!_canBound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
-            if (ChargesPlainMemory) { ReserveEntry(entry); }
+            if (ChargesPlainMemory && !AdmitEntry(entry, spillOwner)) { return output; }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -94,7 +96,7 @@ internal sealed class SqlRowCollector : IDisposable
         if (_ordered.Count < Bound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
-            if (ChargesPlainMemory) { ReserveEntry(entry); }
+            if (ChargesPlainMemory && !AdmitEntry(entry, spillOwner)) { return output; }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -117,7 +119,12 @@ internal sealed class SqlRowCollector : IDisposable
             bool wide = false;
             long difference = ChargesPlainMemory
                 ? _memory.ReplacementBytes(entry.Output, entry.Keys, replaced.Output, replaced.Keys, out wide) : 0;
-            if (difference > 0) { Reserve(difference); }
+            if (difference > 0)
+            {
+                try { Reserve(difference); }
+                catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
+                { if (TrySpill(entry, spillOwner)) { return output; } throw; }
+            }
             SiftDown(0, entry);
             if (ChargesPlainMemory && (_memory.HasWideCells || wide))
             { _memory.Replace(entry.Output, entry.Keys, replaced.Output, replaced.Keys); }
@@ -196,8 +203,8 @@ internal sealed class SqlRowCollector : IDisposable
 
     public void Dispose()
     {
-        _metrics?.ReleasePlainSelectMemory(_memory.Bytes);
-        _memory.Clear();
+        try { if (_spills.TryGetValue(this, out var spill)) { _spills.Remove(this); spill.Dispose(); } }
+        finally { _metrics?.ReleasePlainSelectMemory(_memory.Bytes); _memory.Clear(); }
     }
 
     private void RecordRetainedCount()

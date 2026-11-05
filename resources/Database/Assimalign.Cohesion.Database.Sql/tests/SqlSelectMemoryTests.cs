@@ -480,15 +480,17 @@ public sealed partial class SqlSelectMemoryTests
         peaks.ShouldBe([expectedDefaultPeak, expectedPeak]);
     }
 
-    private static async Task VerifyEveryUnwind(string sql, bool forceBase)
+    internal static async Task VerifyEveryUnwind(string sql, bool forceBase,
+        Action<SqlDatabaseEngineBuilder>? configure = null, Func<SqlDatabaseSession, Task>? setup = null)
     {
         var builder = SqlDatabaseEngine.CreateBuilder("every-buffer-unwind");
         builder.Options.StatementMemoryBudget = 1_048_576;
+        configure?.Invoke(builder);
         builder.Functions.Add(SqlScalarFunction.Create("record_value", (long value) => value));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Setup(session);
+        await (setup is null ? Setup(session) : setup(session));
         database.Definitions.ForceSelectRetentionBasePath = forceBase;
         int count = 0;
         try

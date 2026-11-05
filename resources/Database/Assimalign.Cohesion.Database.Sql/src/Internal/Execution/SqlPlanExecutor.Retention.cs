@@ -488,7 +488,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async ValueTask<DatabaseResult> ProjectJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
-        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, int? retainRows)
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, int? retainRows, SqlDatabaseSession? spillOwner = null)
     {
         SqlSelectMemory retainedBytes = default, seenBytes = default;
         try
@@ -554,7 +554,7 @@ internal sealed partial class SqlPlanExecutor
                         }
                         var keys = new object?[plan.OrderBy.Count];
                         for (int i = 0; i < keys.Length; i++) { keys[i] = evaluator.Evaluate(plan.OrderBy[i].Key, ordered); }
-                        collector.Add(output, keys);
+                        collector.Add(output, keys, spillOwner);
                     }
                 }
                 catch (Exception failure) when (CanDeferRetentionFailure(failure))
@@ -570,6 +570,7 @@ internal sealed partial class SqlPlanExecutor
             distinctFailure?.Throw();
             if (collector is not null)
             {
+                if (collector.HasSpilled) { return FinishCollected(collector, plan.Projections, plan.Limit, plan.Offset, false, evaluator, cancellationToken, resolveEmptyCollations: false); }
                 rows = collector.Finish(resolveEmptyCollations: false);
             }
             if (seen is not null)

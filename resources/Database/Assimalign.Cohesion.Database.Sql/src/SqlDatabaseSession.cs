@@ -821,7 +821,7 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
         SqlStatementContext scope, IEnumerable<Diagnostic> diagnostics, CancellationToken cancellationToken, SqlSequenceUsage? sequenceUsage)
     {
         await using var result = (DatabaseResultSet)await (sequenceUsage is not null ? _executor.ExecuteSequencesAsync(executor, plan, scope, this, cancellationToken, sequenceUsage)
-            : executor.ExecuteAsync(plan, scope, cancellationToken)).ConfigureAwait(false);
+            : executor.ExecuteRootAsync(plan, scope, cancellationToken, this)).ConfigureAwait(false);
         // Drain the SELECT before returning its description; dispose its ordinary result on every exit.
         await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
         {

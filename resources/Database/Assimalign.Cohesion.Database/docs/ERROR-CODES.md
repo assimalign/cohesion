@@ -79,6 +79,11 @@ error and has no production diagnostic code.
 | COHDBO002 | CK08002 | Session count refusal |
 | COHDBO003 | CK08003 | Server timeout refusal |
 
+SQL root sort spilling (#1789, SQ-L2b) carries CK05001–CK05006 as located SQL execution or
+delivery errors, retaining each identity. Temporary I/O never becomes a durable-storage
+failure or takes a database offline. CS05067 remains the memory/codec/eligibility refusal;
+no new diagnostic identity is allocated.
+
 ## Sql migration
 
 SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for an omitted

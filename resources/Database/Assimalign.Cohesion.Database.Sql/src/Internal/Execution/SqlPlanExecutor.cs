@@ -257,7 +257,7 @@ internal sealed partial class SqlPlanExecutor
         => ExecuteSelect(plan, statement, cancellationToken, retainRows: null);
 
     private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken,
-        int? retainRows, SqlPlan? retentionPlan = null)
+        int? retainRows, SqlPlan? retentionPlan = null, SqlDatabaseSession? spillOwner = null)
     {
         if (plan.Access is SqlOrderedIndexPath ordered) { return ExecuteOrderedSelect(plan, ordered, statement, cancellationToken, retentionPlan); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
@@ -266,7 +266,7 @@ internal sealed partial class SqlPlanExecutor
         // scan results by construction.
         return MaterializeSelect(Matches(), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
             plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken,
-            incrementalDistinct: CanPipelinePlainDistinct(retentionPlan ?? plan), retainRows: retainRows);
+            incrementalDistinct: CanPipelinePlainDistinct(retentionPlan ?? plan), retainRows: retainRows, spillOwner: spillOwner);
 
         IEnumerable<object?[]> Matches()
         {
@@ -303,12 +303,13 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, int>? orderByProjections, CancellationToken cancellationToken,
-        bool incrementalDistinct = false, int? retainRows = null)
+        bool incrementalDistinct = false, int? retainRows = null, SqlDatabaseSession? spillOwner = null)
     {
         if (isDistinct && incrementalDistinct)
         { return ProjectUnorderedDistinct(matches, projections, limit, offset, evaluator, cancellationToken); }
         var projected = ProjectAndSortRows(matches, projections, orderBy, evaluator, orderByProjections, cancellationToken,
-            isDistinct ? null : limit, isDistinct ? null : offset, retainRows);
+            out var spilled, isDistinct ? null : limit, isDistinct ? null : offset, retainRows, spillOwner, isDistinct, limit, offset);
+        if (spilled is not null) { return spilled; }
 
         return FinishSelect(projected, projections, limit, offset, isDistinct, evaluator, cancellationToken);
     }
@@ -368,8 +369,10 @@ internal sealed partial class SqlPlanExecutor
     private List<object?[]> ProjectAndSortRows(IEnumerable<object?[]> matches,
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots, CancellationToken cancellationToken,
-        SqlRowCount? limit = null, SqlRowCount? offset = null, int? retainRows = null)
+        out DatabaseResult? spilled, SqlRowCount? limit = null, SqlRowCount? offset = null, int? retainRows = null,
+        SqlDatabaseSession? spillOwner = null, bool isDistinct = false, SqlRowCount? resultLimit = null, SqlRowCount? resultOffset = null)
     {
+        spilled = null;
         SqlSelectMemory outputBytes = default, sourceBytes = default, sortedBytes = default;
         try
         {
@@ -432,22 +435,48 @@ internal sealed partial class SqlPlanExecutor
                 // pagination. PostgreSQL planner.c:6649-6662 likewise postpones independent
                 // volatile outputs. Aliases/ordinals still require projection before sorting.
                 var sources = new List<object?[]>();
-                foreach (var source in matches)
-                { RetainSelectRow(ref sourceBytes, source, includeWindow: true); sources.Add(source); }
-                if (_metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, sources.Count); }
-                if (sources.Count == 0) { return []; }
-                var sorted = SortRows(sources, orderBy, evaluator, cancellationToken);
-                foreach (var source in sorted) { RetainSelectRow(ref sortedBytes, source, includeWindow: true); }
-                var projected = new List<object?[]>(sorted.Count);
-                foreach (var source in sorted)
+                try
                 {
-                    var output = ProjectRow(source, projections, evaluator, cancellationToken);
-                    SqlWindowMemory.For(_metrics)?.Retain(output);
-                    RetainSelectRow(ref outputBytes, output);
-                    projected.Add(output);
+                    foreach (var source in matches)
+                    { if (RetainStagedSortSource(sources, source, ref sourceBytes, orderBy, spillOwner, cancellationToken)) { sources.Add(source); } }
+                    if (SqlStagedSortSource.For(sources) is { } spooled)
+                    { spilled = MaterializeStagedSort(spooled, projections, orderBy, resultLimit, resultOffset, isDistinct, evaluator, outputSlots, cancellationToken, deferProjection: true); return []; }
+                    if (_metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, sources.Count); }
+                    if (sources.Count == 0) { return []; }
+                    List<object?[]> sorted;
+                    try { sorted = SortRows(sources, orderBy, evaluator, cancellationToken,
+                        spillOwner is not null && orderBy.All(order => order.Collation.IsFixed)); }
+                    catch (SqlSortBudgetHandoff handoff)
+                    {
+                        spilled = MaterializeSortHandoff(handoff, sources, ref sourceBytes, projections, orderBy,
+                            resultLimit, resultOffset, isDistinct, evaluator, cancellationToken, spillOwner!);
+                        return [];
+                    }
+                    foreach (var source in sorted) { RetainSelectRow(ref sortedBytes, source, includeWindow: true); }
+                    var projected = new List<object?[]>(sorted.Count);
+                    try
+                    {
+                        foreach (var source in sorted)
+                        {
+                            var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                            SqlWindowMemory.For(_metrics)?.Retain(output);
+                            if (RetainStagedSortSource(projected, output, ref outputBytes, orderBy, spillOwner, cancellationToken, includeWindow: false)) { projected.Add(output); }
+                        }
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (SqlStagedSortSource.For(projected) is { } outputSpool)
+                        {
+                            sources.Clear(); sources.Capacity = 0; sorted.Clear(); sorted.Capacity = 0;
+                            ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref sortedBytes);
+                            spilled = FinishStagedOutput(outputSpool, projections, resultLimit, resultOffset, isDistinct, evaluator, cancellationToken);
+                            return [];
+                        }
+                        return ApplyRowWindow(projected, limit, offset);
+                    }
+                    catch (Exception exception) { SqlStagedSortSource.ReleaseAfterFailure(projected, exception); throw; }
+                    finally { SqlStagedSortSource.Release(projected); }
                 }
-                cancellationToken.ThrowIfCancellationRequested();
-                return ApplyRowWindow(projected, limit, offset);
+                catch (Exception exception) { SqlStagedSortSource.ReleaseAfterFailure(sources, exception); throw; }
+                finally { SqlStagedSortSource.Release(sources); }
             }
             using var rows = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken, _metrics, SelectBufferBudget);
             if (rows.IsComplete) { return []; }
@@ -469,10 +498,12 @@ internal sealed partial class SqlPlanExecutor
                     cancellationToken.ThrowIfCancellationRequested();
                     keys[i] = evaluator.Evaluate(orderBy[i].Key, orderedRow);
                 }
-                rows.Add(output, keys);
+                rows.Add(output, keys, spillOwner);
                 if (rows.IsComplete) { break; }
             }
             // The base ordinary SELECT skips sort/collation resolution over empty input.
+            if (rows.HasSpilled)
+            { spilled = FinishCollected(rows, projections, resultLimit, resultOffset, isDistinct, evaluator, cancellationToken, resolveEmptyCollations: false); return []; }
             return rows.Finish(resolveEmptyCollations: false);
         }
         finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref outputBytes); }
@@ -584,15 +615,19 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
-        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, bool captureBudgetRefusal = false)
     {
         SqlSelectMemory keyBytes = default, sortedBytes = default;
+        // A reference-sized union replaces the original captured evaluator field. The pooled
+        // adapter lends LINQ its original selector and tuple array; fitting warm calls allocate identically.
+        object evaluation = captureBudgetRefusal ? SqlSortBufferAdapter.Rent(rows, evaluator) : evaluator;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             int operations = 0;
             // Precompute sort keys; OrderBy is a stable sort, satisfying determinism.
             var keyed = rows.Select(row => (Row: row, Keys: EvaluateKeys(row)));
+            if (evaluation is SqlSortBufferAdapter adapter) { adapter.SetSource(keyed); keyed = adapter; }
 
             IOrderedEnumerable<(object?[] Row, object?[] Keys)>? ordered = null;
 
@@ -632,14 +667,23 @@ internal sealed partial class SqlPlanExecutor
             object?[] EvaluateKeys(object?[] row)
             {
                 var keys = new object?[orderBy.Count];
+                var keyEvaluator = evaluation is SqlSortBufferAdapter adapter ? adapter.Evaluator : (SqlExpressionEvaluator)evaluation;
                 for (int i = 0; i < keys.Length; i++)
                 {
                     PollCancellation();
-                    keys[i] = evaluator.Evaluate(orderBy[i].Key, row);
+                    keys[i] = keyEvaluator.Evaluate(orderBy[i].Key, row);
                 }
-                RetainSelectRow(ref keyBytes, keys, includeWindow: true, overhead: 64);
-                // Admit the fixed sorted-output slot with its input, before ToList retains it.
-                RetainSelectRow(ref sortedBytes, row, includeWindow: true);
+                try
+                {
+                    RetainSelectRow(ref keyBytes, keys, includeWindow: true, overhead: 64);
+                    // Admit the fixed sorted-output slot with its input, before ToList retains it.
+                    RetainSelectRow(ref sortedBytes, row, includeWindow: true);
+                }
+                catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
+                {
+                    if (evaluation is SqlSortBufferAdapter capture) { capture.Capture(row, keys, keyBytes.Bytes + sortedBytes.Bytes, exception); }
+                    throw;
+                }
                 return keys;
             }
 
@@ -649,7 +693,11 @@ internal sealed partial class SqlPlanExecutor
                 if ((operations++ & 31) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
             }
         }
-        finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref keyBytes); }
+        finally
+        {
+            ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref keyBytes);
+            if (evaluation is SqlSortBufferAdapter adapter) { adapter.Return(); }
+        }
     }
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>

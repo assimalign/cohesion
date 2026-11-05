@@ -489,7 +489,17 @@ internal sealed partial class SqlDatabaseServerSession : DatabaseServerSession
         await WriteResultAsync(result, preparation, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task WriteResultAsync(DatabaseResult result, SqlResultPreparation preparation, CancellationToken cancellationToken)
+    private Task WriteResultAsync(DatabaseResult result, SqlResultPreparation preparation, CancellationToken cancellationToken)
+        => result is SqlSpilledResultSet spilled ? WriteSpilledResultAsync(spilled, preparation, cancellationToken)
+            : WriteResultCoreAsync(result, preparation, cancellationToken);
+
+    private async Task WriteSpilledResultAsync(SqlSpilledResultSet result, SqlResultPreparation preparation, CancellationToken cancellationToken)
+    {
+        await using (result.ConfigureAwait(false))
+        { await WriteResultCoreAsync(result, preparation, cancellationToken).ConfigureAwait(false); }
+    }
+
+    private async Task WriteResultCoreAsync(DatabaseResult result, SqlResultPreparation preparation, CancellationToken cancellationToken)
     {
         if (!preparation.IsPrepared)
         {
