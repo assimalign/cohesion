@@ -46,6 +46,7 @@ internal sealed partial class DocumentPlanner
 
     private static IReadOnlyList<DatabasePlanNode> DescribeNodes(DocumentStatementPlan plan)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         if (plan is DocumentSetOperationPlan compound)
         {
             var compoundNodes = new List<DatabasePlanNode>

@@ -10,6 +10,13 @@ public sealed partial class OqlQueryParser
     // Each operator has equal precedence; the loop builds the left-associated tree.
     private OqlQueryExpression ParseQuery()
     {
+        var query = ParseQueryCore();
+        _selectOperationDepth = System.Math.Max(_selectOperationDepth, _queryOperationDepths.GetValueOrDefault(query));
+        return query;
+    }
+
+    private OqlQueryExpression ParseQueryCore()
+    {
         var start = Current;
         var query = ParseQueryTerm();
         int operations = 0;
@@ -28,8 +35,8 @@ public sealed partial class OqlQueryParser
             bool all = Take("ALL");
             // The final grammar admits only ALL; explicit DISTINCT is not SQL++ syntax.
             var right = ParseQueryTerm();
-            // Leaves have zero operators. Include parenthesized subtrees without counting
-            // their leaf as another level, and locate the operator that exceeds the bound.
+            // A SELECT leaf contributes its deepest nested compound. Include that depth
+            // across subqueries and locate the operator that exceeds the path bound.
             int depth = 1 + System.Math.Max(_queryOperationDepths.GetValueOrDefault(query), _queryOperationDepths.GetValueOrDefault(right));
             if (!Failed && depth > 128)
             { Error("CD00005", ErrorMessages.OqlQueryParserParseExpressionVoid, operatorToken); break; }
@@ -97,15 +104,28 @@ public sealed partial class OqlQueryParser
             return result;
         }
         var select = (OqlSelectExpression)query;
-        return new OqlSelectExpression(select.Collection, select.Alias, select.Projections, select.Predicate,
+        var pagedSelect = new OqlSelectExpression(select.Collection, select.Alias, select.Projections, select.Predicate,
             select.GroupBy, select.Having, ordering.AsReadOnly(), select.IsDistinct, select.IsValue, limit, offset,
             Span(start, Previous), select.Unnest, source: select.Source,
             bindings: select.Bindings == select.Unnest ? null : select.Bindings, isAliasImplicit: select.IsAliasImplicit);
+        _queryOperationDepths[pagedSelect] = _queryOperationDepths.GetValueOrDefault(select);
+        return pagedSelect;
     }
 
     private OqlQueryExpression ParseQueryTerm()
     {
-        if (Is("SELECT")) { return ParseSelect(); }
+        if (Is("SELECT"))
+        {
+            int enclosingDepth = _selectOperationDepth;
+            _selectOperationDepth = 0;
+            try
+            {
+                var select = ParseSelect();
+                _queryOperationDepths[select] = _selectOperationDepth;
+                return select;
+            }
+            finally { _selectOperationDepth = enclosingDepth; }
+        }
         var start = Current;
         if (Take(TokenType.LeftParen))
         {

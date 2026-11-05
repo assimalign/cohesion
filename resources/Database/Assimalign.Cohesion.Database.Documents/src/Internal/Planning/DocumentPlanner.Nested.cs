@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentPlanner
 {
+    private Dictionary<OqlQueryExpression, IReadOnlySet<string>>? _queryOuterNames;
+
     // No iterators or optional state on the ordinary planning path.
     internal static bool HasSubquery(OqlExpression? expression, System.Threading.CancellationToken cancellationToken = default)
     {
@@ -99,6 +101,7 @@ internal sealed partial class DocumentPlanner
 
     private DocumentNestedPlan PlanNested(OqlExpression expression)
     {
+        _queryOuterNames = new(ReferenceEqualityComparer.Instance);
         var queries = new Dictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>(ReferenceEqualityComparer.Instance);
         var empty = new Dictionary<string, bool>(StringComparer.Ordinal);
         var free = new HashSet<string>(StringComparer.Ordinal);
@@ -149,8 +152,12 @@ internal sealed partial class DocumentPlanner
             _cancellationToken.ThrowIfCancellationRequested();
             if (queryExpression is OqlSetOperationExpression compound)
             {
-                var left = VisitQuery(compound.Left, outer, free);
-                var right = VisitQuery(compound.Right, outer, free);
+                var leftFree = new HashSet<string>(StringComparer.Ordinal);
+                var rightFree = new HashSet<string>(StringComparer.Ordinal);
+                var left = VisitQuery(compound.Left, outer, leftFree);
+                var right = VisitQuery(compound.Right, outer, rightFree);
+                free.UnionWith(leftFree);
+                free.UnionWith(rightFree);
                 return ReferenceEquals(left, compound.Left) && ReferenceEquals(right, compound.Right) ? compound :
                     new OqlSetOperationExpression(left, right, compound.Operation, compound.IsAll, compound.OrderBy,
                         compound.Limit, compound.Offset, compound.Location);
@@ -184,12 +191,13 @@ internal sealed partial class DocumentPlanner
             VisitOrdering(select, grouped,
                 (scope, name) => new Dictionary<string, bool>(scope, StringComparer.Ordinal) { [name] = false },
                 (expression, scope, nested) => { Visit(expression, "ORDER BY", scope, outer, free, nested); return true; });
-            if (!capturesSource) { return select; }
-            return new OqlSelectExpression("", DocumentSourceName.Of(select), select.Projections,
+            var normalized = !capturesSource ? select : new OqlSelectExpression("", DocumentSourceName.Of(select), select.Projections,
                 select.Predicate, select.GroupBy, select.Having, select.OrderBy, select.IsDistinct, select.IsValue,
                 select.Limit, select.Offset, select.Location, select.Unnest, select.GroupAliases, select.GroupAs,
                 new OqlPathExpression([new OqlPathSegment(select.Collection, null)], select.Location),
                 select.Bindings == select.Unnest ? null : select.Bindings);
+            _queryOuterNames[normalized] = free;
+            return normalized;
         }
 
         void Visit(OqlExpression? node, string owner, Dictionary<string, bool> local, Dictionary<string, bool> outer, HashSet<string> free,
@@ -318,6 +326,7 @@ internal sealed partial class DocumentPlanner
 
         void AddQuery(DocumentStatementPlan queryPlan, int? parent)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             int offset = nodes.Count;
             foreach (var node in queryPlan is DocumentSetOperationPlan ? DescribeNodes(queryPlan).Take(1) : DescribeNodes(queryPlan))
             {
@@ -360,6 +369,7 @@ internal sealed partial class DocumentPlanner
 
         void AddExpressions(OqlExpression node, int parent)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             if (node is OqlSubqueryExpression expression)
             {
                 var nested = plan.Queries[expression];

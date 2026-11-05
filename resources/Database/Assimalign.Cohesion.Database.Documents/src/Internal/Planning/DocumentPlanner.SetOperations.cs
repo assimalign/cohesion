@@ -17,8 +17,8 @@ internal sealed partial class DocumentPlanner
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         _cancellationToken.ThrowIfCancellationRequested();
-        var left = PlanCore(query.Left, nested, outerNames);
-        var right = PlanCore(query.Right, nested, outerNames);
+        var left = PlanCore(query.Left, nested, _queryOuterNames?.GetValueOrDefault(query.Left) ?? outerNames);
+        var right = PlanCore(query.Right, nested, _queryOuterNames?.GetValueOrDefault(query.Right) ?? outerNames);
         var leftColumns = SetColumns(left);
         var rightColumns = SetColumns(right);
         var names = new HashSet<string>(StringComparer.Ordinal);

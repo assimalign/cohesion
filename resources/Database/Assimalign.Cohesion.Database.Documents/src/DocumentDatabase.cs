@@ -458,6 +458,8 @@ public sealed class DocumentDatabase : DatabaseInstance
         _ when DatabaseFailure.Find<IOException>(error) is not null || DatabaseFailure.Find<Assimalign.Cohesion.Database.Storage.StorageException>(error) is not null => CodedFailure("CD06104", error),
         _ when DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null => CodedFailure("CD06105", error),
         DocumentCatalogException catalog => CodedFailure(catalog.Code ?? "CD06105", catalog),
+        InsufficientExecutionStackException stack => new DatabaseException(ErrorMessages.StatementTooComplex,
+            [new Types.Diagnostic { Code = "CD05021", Message = ErrorMessages.StatementTooComplex, Severity = Types.DiagnosticSeverity.Error }], stack),
         _ => error,
     };
 

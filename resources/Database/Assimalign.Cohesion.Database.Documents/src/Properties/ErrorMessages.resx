@@ -254,4 +254,5 @@
   <data name="TextTransactionStatusRequired" xml:space="preserve"><value>Text transaction control requires the negotiated transaction-status capability.</value></data>
   <data name="QualifiedStarDeferred" xml:space="preserve"><value>Qualified star projections are not supported yet.</value></data>
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
+  <data name="StatementTooComplex" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce its query and expression nesting, or run it on a thread with a larger stack.</value></data>
 </root>

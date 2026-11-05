@@ -121,7 +121,6 @@ internal static partial class DocumentPlanExecutor
         {
             await using var result = (DatabaseResultSet)(nested is not null ? await ExecuteNestedQueryAsync(database, operation, sourcePlan.Source, parameters, cancellationToken, nested, verb).ConfigureAwait(false) : sourcePlan.Source switch
             {
-                DocumentSetOperationPlan source => await ExecuteSetOperationAsync(database, operation, source, parameters, cancellationToken).ConfigureAwait(false),
                 DocumentPlan source => await ExecuteSelectAsync(database, operation, source, parameters, cancellationToken, writeVerb: verb).ConfigureAwait(false),
                 DocumentSystemCollectionPlan source => ExecuteSystemCollection(database, operation, source, parameters, cancellationToken, writeVerb: verb),
                 _ => throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), statement.Location),

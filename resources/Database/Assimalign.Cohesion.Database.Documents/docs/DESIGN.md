@@ -608,6 +608,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD05015` | A query/RETURNING constructor, SELECT projection or result formatter exceeds the 256-level serialized result limit, including the row wrapper |
 | `CD05018` | Retained statement source rows, ordered candidate buckets, key-lookup caches, groups, compound state, RETURNING results or aggregate values exceed the statement memory budget |
 | `CD05020` | Shared expression/lookup/set-operation work budget exhausted across nested queries, expression sources, key joins and compounds |
+| `CD05021` | Planning, EXPLAIN or evaluation needs more execution stack than the executing thread has left; the statement fails and the session stays open |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
 | `CD00014` | IN subquery requires RAW/VALUE (direct SELECT or compound, including a parenthesized first operand) |
@@ -1067,6 +1068,8 @@ borrowed input advances. INTERSECT ALL decrements counts while yielding the earl
 matches; EXCEPT ALL decrements counts while discarding matched left occurrences. Distinct forms
 use right membership and the left distinct set to keep only the first qualifying representative.
 The right dictionary retains keys until operator completion, even after counts reach zero.
+Mutable count boxes let duplicates and ALL decrements use one comparison walk; only a new key
+needs lookup followed by insertion. The existing per-key reservation covers the count box.
 Right evaluation precedes left evaluation; LIMIT 0 returns before either source or dictionary opens.
 UNION keeps first representatives in input order using the existing grouping structural comparator
 on complete row values. Named MISSING members are omitted before comparison; RAW MISSING is NULL.
@@ -1094,15 +1097,19 @@ SELECT/set family. Expression subqueries, derived FROM, INSERT/UPSERT SELECT and
 operands all accept that family. The mixed statement envelope stays
 OqlExpression for queries, writes, DDL and transactions. No protocol or persisted format changes.
 
-Nested planning walks each operand with independent local declarations and unions its free outer
-names for statement caching. Captured expression sources are normalized per operand; the executor
+Nested planning walks each operand with independent local declarations, passes only its own free
+outer names to access planning and unions those names for statement caching. A sibling's capture
+cannot turn a local indexed path into an outer variable. Captured expression sources are normalized per operand; the executor
 supplies the current outer bindings even to a plain-collection operand with correlated projections.
 Grouping equivalence compares complete compound trees, operators, modifiers and tails while its
 capture checks retain each operand's lexical identity. Derived sources pull complete set-row values;
 expression arrays unwrap whole-document results directly. DML sources retain T3-30's static shape,
 bind named members on heterogeneous row values and stage every write before publication. Their
 omitted VALUE is the complete row value. Every retained equality/sort/output owner releases on
-success, cancellation and refusal; no new diagnostic, wire frame or storage version is introduced.
+success, cancellation and refusal. Recursive planning, EXPLAIN and async expression/constructor paths
+check execution stack before descending; the engine translates exhaustion to CD05021, aborting the
+statement while keeping the session open. The parser's 128-operator path bound includes compounds
+inside SELECT leaves. No wire frame or storage version changes.
 
 DocumentSetOperationTests includes a deterministic 1,152-case generated concatenation/deduplication/multiset oracle
 covering RAW values, whole documents with omitted MISSING members, and matching named projections

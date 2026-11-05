@@ -108,11 +108,11 @@ internal static partial class DocumentPlanExecutor
             }));
         }
         using var rightMemory = memory.Reserve();
-        SortedDictionary<JsonElement, long>? rightCounts = null;
+        SortedDictionary<JsonElement, StrongBox<long>>? rightCounts = null;
         if (plan.Query.Operation != OqlSetOperation.Union)
         {
             rightMemory.Charge(128);
-            rightCounts = new SortedDictionary<JsonElement, long>(Comparer<JsonElement>.Create((left, right) =>
+            rightCounts = new SortedDictionary<JsonElement, StrongBox<long>>(Comparer<JsonElement>.Create((left, right) =>
             {
                 nested.ConsumeWork(cancellationToken);
                 return DocumentExpressionEvaluator.Compare(left, right, cancellationToken);
@@ -120,13 +120,13 @@ internal static partial class DocumentPlanExecutor
             await foreach (var row in StreamQueryRowsAsync(database, operation, plan.Right, parameters, nested, true, cancellationToken).ConfigureAwait(false))
             {
                 nested.ConsumeWork(cancellationToken);
-                if (rightCounts.TryGetValue(row.Value, out long count))
-                { if (plan.Query.IsAll) { rightCounts[row.Value] = checked(count + 1); } }
+                if (rightCounts.TryGetValue(row.Value, out var count))
+                { if (plan.Query.IsAll) { count.Value = checked(count.Value + 1); } }
                 else
                 {
                     // Own only one equality key per distinct right value; occurrences are counters.
                     rightMemory.Charge(192L + memory.ValueBytes(row.Value));
-                    rightCounts.Add(row.Value.Clone(), 1);
+                    rightCounts.Add(row.Value.Clone(), new StrongBox<long>(1));
                 }
             }
         }
@@ -198,8 +198,8 @@ internal static partial class DocumentPlanExecutor
             nested.ConsumeWork(cancellationToken);
             if (rightCounts is not null)
             {
-                bool present = rightCounts.TryGetValue(row.Value, out long count) && count > 0;
-                if (present && plan.Query.IsAll) { rightCounts[row.Value] = count - 1; }
+                bool present = rightCounts.TryGetValue(row.Value, out var count) && count.Value > 0;
+                if (present && plan.Query.IsAll) { count!.Value--; }
                 if (present != (plan.Query.Operation == OqlSetOperation.Intersect)) { return false; }
             }
             if (seen is null) { return true; }

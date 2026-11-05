@@ -805,8 +805,9 @@ For example, `(SELECT x AS n FROM [3,1,2] AS x ORDER BY x LIMIT 2) UNION ALL
 (SELECT y AS n FROM [5,4] AS y ORDER BY y DESC LIMIT 1) ORDER BY n DESC OFFSET 1 LIMIT 2`
 returns named rows with n = 2, then n = 1. An additional outer tail on a lone parenthesized
 query that already has its own tail is explicitly deferred with CK00001; its inner tail is never
-silently replaced; the refusal spans only the outer tail. A chain or parenthesized query tree
-admits exactly 128 operators along a path; CD00005 locates the operator that would add level 129.
+silently replaced; the refusal spans only the outer tail. A query tree admits exactly 128 operators
+along a path, including compounds inside SELECT subqueries. A SELECT leaf contributes the depth
+of its deepest nested compound; CD00005 locates the operator that would add level 129.
 Query parentheses retain the separate 128-level expression nesting bound.
 
 Rows are values, with no equal-arity requirement. Every set operator reuses DISTINCT/grouping structural
@@ -819,7 +820,8 @@ INTERSECT and EXCEPT without ALL retain the first qualifying left representative
 EXCEPT ALL consumes right counts against successive left occurrences, retaining the later
 unmatched occurrences in left order. Right operands are read before left operands for these two
 operators; only equality keys and occurrence counters are retained from the right. Even an empty
-left input does not suppress right evaluation, except when the compound LIMIT is zero.
+left input does not suppress right evaluation, and an empty right input does not suppress left
+evaluation, except when the compound LIMIT is zero.
 A compound's header shape is chosen statically at planning
 (owner decision T3-30), even when the page is empty:
 
@@ -831,8 +833,8 @@ A compound's header shape is chosen statically at planning
 
 Named columns widen compatible Int64/Decimal values to Decimal; heterogeneous columns have the
 existing Null type descriptor and numeric cells use Decimal. Fixed operand types determine their
-common header before opening sources. Once heterogeneous, a column retains the Null descriptor
-through later operators; an all-null operand alone does not make it heterogeneous. Dynamic
+common header before opening sources. Static heterogeneous descriptors propagate through later
+operators; an all-null operand alone does not make a column heterogeneous. Dynamic
 named/value columns inspect the complete pre-page
 stream while retaining only the selected page; LIMIT 0 uses the static descriptors without opening
 any source, evaluating a callback or running a blocking stage.
@@ -865,13 +867,17 @@ explicit outer aliases can supply expression sources while implicit collection n
 independent collection reads. Nested-query caching requires every operand to be uncorrelated
 and cacheable. INSERT/UPSERT bind KEY/VALUE names against the static columns or declared result
 members; heterogeneous rows resolve those members per row. An omitted VALUE retains the complete
-compound row value. A missing key/value uses the existing write diagnostic, and all source rows
+compound row value. Thus `INSERT … SELECT RAW 'a'` with omitted VALUE stores `{"value":"a"}`,
+while adding a compound operand stores the scalar RAW values directly. A missing key/value uses the existing write diagnostic, and all source rows
 are staged and validated before any mutation. Subqueries within compound ORDER BY stay CK00001.
 A lone parenthesized SELECT is also a valid INSERT/UPSERT source.
 Inside IN or NOT IN, a compound whose first operand is parenthesized is a query, subject to the
 same RAW/VALUE membership requirement as a directly written query.
-Redundant wrappers around a single query, with no set operator or query tail after it, retain the
-signed-off value-list grammar: one item containing the subquery array, with no CD00014.
+Redundant wrappers around a complete query, with no set operator or query tail after its matching
+close, retain the signed-off value-list grammar: one item containing the subquery array, with no
+CD00014. This includes `x IN ((S UNION T))`, which compares x with the complete array as one item;
+over x = 1, 2, 3 and RAW S = 1, T = 3 it returns no rows. In `x IN (((S) UNION T))`, the operator
+after the parenthesized first operand selects compound query membership and returns 1 and 3.
 A scalar operator or comma following any leading wrapper's matching close also keeps the
 expression/list grammar, including through redundant nested wrappers.
 Existing single-block subqueries and source bindings inside operands

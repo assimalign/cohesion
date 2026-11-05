@@ -10,17 +10,16 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 public sealed class OqlSetOperationParserTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Set operations: every operator has equal left-associative precedence")]
-    [InlineData("UNION", "UNION", OqlSetOperation.Union, OqlSetOperation.Union, 0)]
-    [InlineData("UNION ALL", "INTERSECT ALL", OqlSetOperation.Union, OqlSetOperation.Intersect, 0)]
-    [InlineData("EXCEPT", "UNION ALL", OqlSetOperation.Except, OqlSetOperation.Union, 0)]
-    [InlineData("INTERSECT", "EXCEPT", OqlSetOperation.Intersect, OqlSetOperation.Except, 0)]
-    public void Parse_OperatorChain_ShouldAssociateLeft(string first, string second, OqlSetOperation leftKind, OqlSetOperation rootKind, int refusals)
+    [InlineData("UNION", "UNION", OqlSetOperation.Union, OqlSetOperation.Union)]
+    [InlineData("UNION ALL", "INTERSECT ALL", OqlSetOperation.Union, OqlSetOperation.Intersect)]
+    [InlineData("EXCEPT", "UNION ALL", OqlSetOperation.Except, OqlSetOperation.Union)]
+    [InlineData("INTERSECT", "EXCEPT", OqlSetOperation.Intersect, OqlSetOperation.Except)]
+    public void Parse_OperatorChain_ShouldAssociateLeft(string first, string second, OqlSetOperation leftKind, OqlSetOperation rootKind)
     {
         // Arrange / Act
         var statement = Parse($"SELECT a FROM c {first} SELECT b FROM d {second} SELECT e FROM f");
         // Assert
-        statement.Diagnostics.Count().ShouldBe(refusals);
-        statement.Diagnostics.ShouldAllBe(diagnostic => diagnostic.Code == "CK00001");
+        statement.Diagnostics.ShouldBeEmpty();
         var root = statement.OqlExpression.ShouldBeOfType<OqlSetOperationExpression>();
         root.Operation.ShouldBe(rootKind);
         root.Right.ShouldBeOfType<OqlSelectExpression>().Collection.ShouldBe("f");

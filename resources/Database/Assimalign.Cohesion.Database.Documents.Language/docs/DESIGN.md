@@ -282,8 +282,9 @@ clauses to the query parser, including their ALL modifier, while explicit
 DISTINCT remains one complete capability refusal. Contextual identifiers and AS labels stay names.
 An unparenthesized local tail followed by a set operator remains CD00002. Additional outer tails
 on a lone already-paged parenthesized term are explicitly CK00001 rather than overwriting state.
-That refusal locates the outer tail. Both flat and parenthesized trees admit exactly 128 operators
-along a path; CD00005 locates the operator that would introduce level 129. Parentheses retain
+That refusal locates the outer tail. Flat and parenthesized trees, including compounds nested in
+SELECT leaves, admit exactly 128 operators along a path; a leaf contributes its deepest nested
+compound, and CD00005 locates the operator that would introduce level 129. Parentheses retain
 their separate 128-level expression guard. All nested entry points recognize parenthesized query
 terms, including expression subqueries, derived FROM and INSERT/UPSERT sources.
 Expression lookahead checks each leading wrapper at its matching close, innermost first, retaining
