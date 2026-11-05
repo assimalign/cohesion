@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlProvisioningCollisionTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: table DDL between provisioning steps is refused before compensation")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: table DDL during joint preparation is refused before publication")]
     public async Task ApplySchemaAsync_TableDdlBetweenSteps_ShouldRefuseAndCompensateOnlyItsOwnWork()
     {
         // Arrange: the callback injects the exact interleaving without racing threads.
@@ -37,7 +37,7 @@ public sealed class SqlProvisioningCollisionTests
         var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
             await database.ApplySchemaAsync(schema, CancellationToken.None));
 
-        // Assert: only the completed schema-owned step was compensated.
+        // Assert: prepared schema-owned work was discarded; existing objects survive.
         completed.ShouldBe(1);
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
         failure.InnerException!.InnerException.ShouldBeOfType<Catalog.SqlCatalogException>().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03404");
@@ -48,10 +48,10 @@ public sealed class SqlProvisioningCollisionTests
         database.Catalog.SchemaState.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: index DDL between provisioning steps is refused and existing indexes survive compensation")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: DDL during joint preparation is refused and existing indexes survive discard")]
     public async Task ApplySchemaAsync_IndexDdlBetweenSteps_ShouldRefuseAndPreserveExistingAdhocIndex()
     {
-        // Arrange: keep the owning table from an earlier apply, so compensating
+        // Arrange: keep the owning table from an earlier apply, so discarding
         // the added column must preserve an independently added index on id.
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("collisions", CancellationToken.None);

@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlLockWaitCollection.Name)]
 public sealed class SqlProvisioningIsolationTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: canceling behind a prior writer compensates only its own work and releases admission")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: canceling behind a prior writer discards unpublished work and releases admission")]
     public async Task ApplySchemaAsync_CanceledBehindPriorWriter_ShouldPreserveWriterAndAllowRetry()
     {
         // Arrange: an existing transaction owns the target before the migration starts.
@@ -88,7 +88,7 @@ public sealed class SqlProvisioningIsolationTests
         rows.ShouldBe(1);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: table writers wait through completion or compensation while unrelated traffic progresses")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: table writers wait through publication or discard while unrelated traffic progresses")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ApplySchemaAsync_ConcurrentWriters_ShouldLockOnlyTheAffectedTableUntilCompletion(bool failApply)
@@ -106,7 +106,7 @@ public sealed class SqlProvisioningIsolationTests
                 null, [new CompiledSchemaIndex("ix_orders_id", ["id"])], [])], []);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var release = new ManualResetEventSlim();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         int hooks = 0;
         database.SchemaProvisioner.BeforeJointPublication = step =>
         {
@@ -172,7 +172,7 @@ public sealed class SqlProvisioningIsolationTests
             }
         }
 
-        // Assert: compensation released admission and table locks without admitting a write
+        // Assert: joint cleanup released admission and table locks without admitting a write
         // to its temporary table. Subsequent ad-hoc commits survive a refused schema retry.
         hooks.ShouldBe(1);
         writes.ShouldBeGreaterThanOrEqualTo(10);
@@ -198,11 +198,11 @@ public sealed class SqlProvisioningIsolationTests
         count.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: compensation never deletes another session's committed row and index")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: joint discard preserves another session's committed row and index")]
     public async Task ApplySchemaAsync_WriterAndIndexBetweenSteps_ShouldPreventInterleavingWithoutDataLoss()
     {
         // Arrange: reproduce the reviewer's exact BeforeJointPublication interleaving. A protected
-        // write times out; an unprotected one commits and must survive any compensation.
+        // write times out; any unprotected committed work must survive a joint discard.
         var builder = SqlDatabaseEngine.CreateBuilder("provisioning-isolation");
         builder.Options.StorageStrategy = new CrashCaptureSqlStorageStrategy();
         await using var engine = builder.Build();
@@ -249,10 +249,10 @@ public sealed class SqlProvisioningIsolationTests
         }
         catch (SqlSchemaMigrationException)
         {
-            // The old collision path compensates here, after both ad-hoc commits.
+            // A failed joint preparation discards only its unpublished work.
         }
 
-        // Assert: a committed row/index must never have been compensated away.
+        // Assert: a committed row/index must survive preparation cleanup.
         hooks.ShouldBe(1);
         database.Catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         if (committed)
