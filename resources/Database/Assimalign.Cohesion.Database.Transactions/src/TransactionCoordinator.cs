@@ -715,7 +715,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             }
             // Admission freezes this writer's ledger and end before prefix work. Other
             // writers retain the apply gate until physical undo actually needs it.
-            await _applyGate.WaitAsync(bracketClass: "PartialUndo", owner: unchecked((long)context.Sequence.Value)).ConfigureAwait(false);
+            await _applyGate.WaitAsync(bracketClass: "PartialUndo", owner: unchecked((long)context.Sequence.Value), drain: true).ConfigureAwait(false);
             _insideApply.Value = true;
             try
             {

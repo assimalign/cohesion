@@ -17,6 +17,7 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// Coordinated statements, catalog writes and reclamation share the same per-storage gate.
 /// Acquire model locks before entering; no operation inside the gate may wait for model locks.
 /// Catalog storages have independent gates and no logical writer anchor.
+/// An owner disables the pause before draining shutdown cleanup, and closes admission when storage is fenced offline.
 /// </remarks>
 [System.Diagnostics.DebuggerDisplay("TransactionCheckpointInterlock")]
 [System.Diagnostics.DebuggerTypeProxy(typeof(TransactionCheckpointInterlock.DebugView))]
@@ -42,8 +43,42 @@ public sealed class TransactionCheckpointInterlock
     private bool _retryRequested;
     private readonly HashSet<long> _leases = new();
     private long _nextLease;
+    private long _outerIdentity;
     private long _unattributed;
     private ExceptionDispatchInfo? _failure;
+    private bool _suppressForeground;
+    private long _journalSizeLimit;
+    private TaskCompletionSource? _pause;
+    private long _pauseStarted;
+    private int _closed;
+
+    // Tests compare the same workload with and without the T3-27 backstop. The
+    // size-due release checkpoint (EN-C1) is deliberately unaffected.
+    internal bool AdmissionPauseEnabled { get; set; } = true;
+
+    /// <summary>Gets or sets the journal limit whose halfway point pauses new write admission. Zero disables the backstop.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">The limit is negative.</exception>
+    public long JournalSizeLimit
+    {
+        get => Volatile.Read(ref _journalSizeLimit);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            Volatile.Write(ref _journalSizeLimit, value);
+            if (value == 0) { EndPause("Disabled"); }
+        }
+    }
+
+    /// <summary>Gets whether this storage is waiting for a checkpoint before admitting new writes.</summary>
+    /// <remarks>Readers that do not open a physical write bracket remain admitted.</remarks>
+    public bool IsAdmissionPaused => ObservePause() is not null;
+
+    /// <summary>Ends new write admission and wakes paused callers during database shutdown. Undo and checkpoint work can still drain.</summary>
+    public void CloseAdmission()
+    {
+        Volatile.Write(ref _closed, 1);
+        EndPause("Closing");
+    }
 
     private TransactionCheckpointInterlock(PhysicalStorage storage)
     {
@@ -81,6 +116,7 @@ public sealed class TransactionCheckpointInterlock
         {
             long identity = ++_nextLease;
             _leases.Add(identity);
+            if (_rawDepth == 0) { Volatile.Write(ref _outerIdentity, identity); }
             _rawDepth++;
             Volatile.Write(ref _rawThread, thread);
             return new Lease(this, thread, identity);
@@ -106,7 +142,14 @@ public sealed class TransactionCheckpointInterlock
     {
         if (Volatile.Read(ref _rawThread) == Environment.CurrentManagedThreadId || _insideCoordinatedApply?.Invoke() == true)
         { throw new StorageTransactionException(ErrorMessages.CheckpointInterlockRecursiveWait); }
-        Interlocked.Exchange(ref _failure, null)?.Throw();
+        ObservePause();
+        ExceptionDispatchInfo? failure;
+        lock (_state)
+        {
+            failure = _failure;
+            if (failure is not null) { _failure = null; _suppressForeground = false; }
+        }
+        failure?.Throw();
         if (!_gate.Wait(gateTimeout, cancellationToken))
         {
             // Gate release and this second look share _state: a holder that just ended
@@ -148,7 +191,8 @@ public sealed class TransactionCheckpointInterlock
 
     internal void Checkpoint(CancellationToken cancellationToken)
     {
-        Wait(cancellationToken, "Checkpoint");
+        ObservePause();
+        Wait(cancellationToken, "Checkpoint", drain: true);
         try
         {
             Interlocked.Exchange(ref _pending, 0);
@@ -177,7 +221,15 @@ public sealed class TransactionCheckpointInterlock
             _binding = null;
             _checkpoint = _storage.Checkpoint;
             _insideCoordinatedApply = null;
+            _failure = null;
+            _suppressForeground = false;
+            _pending = 0;
+            _busy = false;
+            _retryRequested = false;
+            _checkpointSucceeded = false;
+            Volatile.Write(ref _journalSizeLimit, 0);
         }
+        EndPause("Unconfigured");
     }
 
     private void RunCheckpoint()
@@ -189,33 +241,184 @@ public sealed class TransactionCheckpointInterlock
             lock (_state) { _pending = 1; _busy = true; }
             throw;
         }
+        catch
+        {
+            lock (_state) { _pending = 1; }
+            throw;
+        }
         // This sharp checkpoint covered requests received while it ran too.
-        lock (_state) { _pending = 0; _busy = false; _retryRequested = false; _checkpointSucceeded = true; }
+        lock (_state) { _pending = 0; _busy = false; _retryRequested = false; _checkpointSucceeded = true; _suppressForeground = false; }
+        EndPause("CheckpointCompleted");
     }
 
-    internal void Wait(CancellationToken cancellationToken = default, string bracketClass = "Maintenance", long owner = 0)
+    internal void Wait(CancellationToken cancellationToken = default, string bracketClass = "Maintenance", long owner = 0, bool drain = false)
     {
         ThrowIfRecursiveWait();
-        _gate.Wait(cancellationToken);
-        try { SetHolder(bracketClass, owner); }
-        catch { _gate.Release(); throw; }
+        bool counted = false;
+        while (true)
+        {
+            if (!drain) { WaitForPause(cancellationToken, bracketClass, owner, ref counted); }
+            try { _gate.Wait(cancellationToken); }
+            catch (OperationCanceledException exception) when (!drain && ObservePause() is not null)
+            {
+                if (!counted) { TransactionEventSource.Log.AdmissionWait(_storage, bracketClass, owner); }
+                throw new TransactionAdmissionCanceledException(cancellationToken, exception);
+            }
+            try
+            {
+                if (!drain)
+                {
+                    ThrowIfClosed();
+                    if (ObservePause() is not null) { _gate.Release(); continue; }
+                }
+                SetHolder(bracketClass, owner);
+                return;
+            }
+            catch { _gate.Release(); throw; }
+        }
     }
 
-    internal ValueTask WaitAsync(CancellationToken cancellationToken = default, string bracketClass = "Maintenance", long owner = 0)
+    internal ValueTask WaitAsync(CancellationToken cancellationToken = default, string bracketClass = "Maintenance", long owner = 0, bool drain = false)
     {
         ThrowIfRecursiveWait();
+        if (!drain)
+        {
+            ThrowIfClosed();
+            if (ObservePause() is not null) { return WaitPausedAsync(cancellationToken, bracketClass, owner); }
+        }
         Task waiting = _gate.WaitAsync(cancellationToken);
-        if (!waiting.IsCompletedSuccessfully) { return CompleteWaitAsync(waiting, bracketClass, owner); }
-        try { SetHolder(bracketClass, owner); }
-        catch { _gate.Release(); throw; }
-        return default;
+        if (!waiting.IsCompletedSuccessfully) { return CompleteWaitAsync(waiting, bracketClass, owner, cancellationToken, drain); }
+        if (TryAdmit(bracketClass, owner, drain)) { return default; }
+        _gate.Release();
+        return WaitPausedAsync(cancellationToken, bracketClass, owner);
     }
 
-    private async ValueTask CompleteWaitAsync(Task waiting, string bracketClass, long owner)
+    private async ValueTask CompleteWaitAsync(Task waiting, string bracketClass, long owner, CancellationToken cancellationToken, bool drain)
     {
-        await waiting.ConfigureAwait(false);
-        try { SetHolder(bracketClass, owner); }
+        try { await waiting.ConfigureAwait(false); }
+        catch (OperationCanceledException exception) when (!drain && ObservePause() is not null)
+        {
+            TransactionEventSource.Log.AdmissionWait(_storage, bracketClass, owner);
+            throw new TransactionAdmissionCanceledException(cancellationToken, exception);
+        }
+        if (TryAdmit(bracketClass, owner, drain)) { return; }
+        _gate.Release();
+        await WaitPausedAsync(cancellationToken, bracketClass, owner).ConfigureAwait(false);
+    }
+
+    private void ThrowIfClosed()
+    {
+        if (Volatile.Read(ref _closed) == 0) { return; }
+        // Preserve the storage fence's identity at model translation boundaries;
+        // a pause wake-up must not replace an offline refusal with disposal.
+        if (_storage.OfflineError is { } offline) { throw offline; }
+        ObjectDisposedException.ThrowIf(true, this);
+    }
+
+    private bool TryAdmit(string bracketClass, long owner, bool drain)
+    {
+        try
+        {
+            if (!drain)
+            {
+                ThrowIfClosed();
+                if (ObservePause() is not null) { return false; }
+            }
+            SetHolder(bracketClass, owner);
+            return true;
+        }
         catch { _gate.Release(); throw; }
+    }
+
+    private TaskCompletionSource? ObservePause()
+    {
+        if (Volatile.Read(ref _closed) != 0) { return null; }
+        var existing = Volatile.Read(ref _pause);
+        if (existing is not null) { return existing; }
+        long limit = JournalSizeLimit;
+        // No new lock on the healthy fast path. The checkpoint's own record is
+        // excluded, just as it is for EN-C1's size-due predicate.
+        if (!AdmissionPauseEnabled || limit == 0 || _storage.JournalBytesSinceCheckpoint < limit / 2 + limit % 2
+            || (Volatile.Read(ref _pending) == 0 && !_storage.IsCheckpointDue(TimeSpan.MaxValue))) { return null; }
+        string holder;
+        string reason;
+        long owner;
+        long journalBytes;
+        lock (_state)
+        {
+            if (_pause is not null) { return _pause; }
+            // A checkpoint may have completed between the advisory read and this monitor.
+            journalBytes = _storage.JournalBytesSinceCheckpoint;
+            if (_closed != 0 || !AdmissionPauseEnabled || JournalSizeLimit != limit ||
+                journalBytes < limit / 2 + limit % 2) { return null; }
+            existing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pauseStarted = Stopwatch.GetTimestamp();
+            holder = _holder; owner = _owner;
+            reason = _suppressForeground ? "CheckpointFailure" : _busy ? "BracketOpen" : "CheckpointPending";
+            Volatile.Write(ref _pause, existing);
+        }
+        TransactionEventSource.Log.AdmissionPaused(_storage, reason, holder, owner, journalBytes, limit);
+        return existing;
+    }
+
+    private void EndPause(string reason)
+    {
+        TaskCompletionSource? pause;
+        long started;
+        lock (_state)
+        {
+            pause = _pause;
+            if (pause is null) { return; }
+            started = _pauseStarted;
+            Volatile.Write(ref _pause, null);
+        }
+        try { TransactionEventSource.Log.AdmissionResumed(_storage, reason, Stopwatch.GetTimestamp() - started); }
+        finally { pause.TrySetResult(); }
+    }
+
+    // Lock order: model grants / catalog _sync -> admission semaphore -> log
+    // monitor -> storage transaction/header locks -> page/pool latches. _state
+    // snapshots never span storage work. A paused caller owns NO semaphore or
+    // latch. A holder never waits for model grants. Undo bypasses only the pause
+    // (still takes the semaphore), so it can release grants needed by waiters.
+    // Nested raw/coordinated scopes reuse their outer admission. Checkpoints
+    // bypass admission pausing; otherwise a checkpoint could wait for itself.
+    private void WaitForPause(CancellationToken cancellationToken, string bracketClass, long owner, ref bool counted)
+    {
+        ThrowIfClosed();
+        var pause = ObservePause();
+        if (pause is null) { return; }
+        if (!counted) { TransactionEventSource.Log.AdmissionWait(_storage, bracketClass, owner); counted = true; }
+        try { pause.Task.WaitAsync(cancellationToken).GetAwaiter().GetResult(); }
+        catch (OperationCanceledException exception)
+        { throw new TransactionAdmissionCanceledException(cancellationToken, exception); }
+        ThrowIfClosed();
+    }
+
+    private async ValueTask WaitPausedAsync(CancellationToken cancellationToken, string bracketClass, long owner)
+    {
+        bool counted = false;
+        while (true)
+        {
+            ThrowIfClosed();
+            var pause = ObservePause();
+            if (pause is not null)
+            {
+                if (!counted) { TransactionEventSource.Log.AdmissionWait(_storage, bracketClass, owner); counted = true; }
+                try { await pause.Task.WaitAsync(cancellationToken).ConfigureAwait(false); }
+                catch (OperationCanceledException exception)
+                { throw new TransactionAdmissionCanceledException(cancellationToken, exception); }
+            }
+            ThrowIfClosed();
+            try { await _gate.WaitAsync(cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException exception) when (ObservePause() is not null)
+            {
+                if (!counted) { TransactionEventSource.Log.AdmissionWait(_storage, bracketClass, owner); }
+                throw new TransactionAdmissionCanceledException(cancellationToken, exception);
+            }
+            if (TryAdmit(bracketClass, owner, drain: false)) { return; }
+            _gate.Release();
+        }
     }
 
     private void ThrowIfRecursiveWait()
@@ -245,15 +448,28 @@ public sealed class TransactionCheckpointInterlock
     {
         // MaxValue selects size only. InfiniteTimeSpan is negative and makes every
         // written journal interval-due. No storage work runs under the state monitor.
-        bool due = allowCheckpoint && _storage.IsCheckpointDue(TimeSpan.MaxValue);
+        bool due;
         // Our own brackets have ended while admission is still held. Only ungated
         // brackets remain, including any replacement for an earlier busy blocker.
-        bool stillBlocked = Volatile.Read(ref _busy) && _storage.HasActiveTransactions;
+        bool stillBlocked;
+        try
+        {
+            if (allowCheckpoint) { ObservePause(); }
+            due = allowCheckpoint && _storage.IsCheckpointDue(TimeSpan.MaxValue);
+            stillBlocked = Volatile.Read(ref _busy) && _storage.HasActiveTransactions;
+        }
+        catch
+        {
+            // Even failure to allocate a pause task cannot strand the releasing
+            // holder's permit after its brackets and latches have ended.
+            lock (_state) { ReleaseUnderState(); }
+            throw;
+        }
         lock (_state)
         {
             // Claim the request or release atomically with TryCheckpoint's second
             // look. No deferral can land after the final check but before release.
-            if (!allowCheckpoint || _failure is not null || (_busy && !_retryRequested && stillBlocked) || (_pending == 0 && !due))
+            if (!allowCheckpoint || _suppressForeground || (_busy && !_retryRequested && stillBlocked) || (_pending == 0 && !due))
             {
                 ReleaseUnderState();
                 return;
@@ -300,14 +516,16 @@ public sealed class TransactionCheckpointInterlock
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Volatile.Write(ref _failure, ExceptionDispatchInfo.Capture(exception));
+            // Preserve the first uncollected identity across a successful explicit
+            // checkpoint and a later failing cycle; every failure is still emitted.
+            lock (_state) { _failure ??= ExceptionDispatchInfo.Capture(exception); _suppressForeground = true; }
             TransactionEventSource.Log.DeferredCheckpointFailed(_storage, exception);
         }
     }
 
     private void ExitRaw(int thread, long identity)
     {
-        if (identity == 0 || Volatile.Read(ref _rawThread) != thread) { return; }
+        if (identity == 0 || identity < Volatile.Read(ref _outerIdentity) || Volatile.Read(ref _rawThread) != thread) { return; }
         if (thread != Environment.CurrentManagedThreadId)
         {
             TransactionEventSource.Log.CheckpointLeaseThreadMismatch(_storage, thread, Environment.CurrentManagedThreadId);
@@ -333,7 +551,7 @@ public sealed class TransactionCheckpointInterlock
         internal Lease(TransactionCheckpointInterlock? owner, int thread, long identity)
         { _owner = owner; _thread = thread; _identity = identity; }
         /// <summary>Services due work and releases this scope on its entering thread.</summary>
-        /// <remarks>Disposal is inert when its entering thread does not hold admission at disposal. Otherwise, disposal on another thread is refused and leaves admission unchanged, including a stale copy after re-entry.</remarks>
+        /// <remarks>Disposal is inert after a later outer scope re-enters, or when its entering thread holds no admission. Otherwise, cross-thread disposal is refused, including an ended nested copy within the same outer scope.</remarks>
         /// <exception cref="StorageTransactionException">The lease or a copy of it was disposed on another thread while its entering thread held admission.</exception>
         public void Dispose() => _owner?.ExitRaw(_thread, _identity);
         private sealed class DebugView

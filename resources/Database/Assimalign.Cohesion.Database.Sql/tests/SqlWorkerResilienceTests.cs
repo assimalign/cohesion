@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -36,6 +37,53 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlWorkerResilienceTests))]
 public sealed class SqlWorkerResilienceTests
 {
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_givingUp")]
+    private static extern ref ConcurrentDictionary<string, Task> PendingGiveUps(DatabaseEngine engine);
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - A recovered pause cannot be taken offline by its delayed lane failure (#1283)")]
+    public async Task CheckpointWorker_PauseRecoveredBeforeLaneSettlement_ShouldRetainThePauseWitness()
+    {
+        // Arrange: first establish an operational failure below the pause threshold.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var clock = new ManualTimeProvider();
+        var options = Options(new FaultInjectingJournalSqlStorageStrategy());
+        options.TimeProvider = clock; options.WorkerFailureMinimumPasses = 2;
+        options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
+        await using var engine = SqlDatabaseEngine.Create("stale-pause-failure", options);
+        var database = await CreateAsync(engine, failingDatabaseName);
+        await InsertAsync(database, 0, 1);
+        var worker = (SqlCheckpointWorker)WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        worker.PassCompleted = _ => { if (worker.FailureCount >= 2) { settled.TrySetResult(); } };
+        worker.BeforeCheckpoint = _ =>
+        {
+            int call = Interlocked.Increment(ref calls);
+            if (call == 2) { entered.Set(); release.Wait(guard.Token); }
+            if (call <= 2) { throw new IOException("checkpoint attempt refusal"); }
+        };
+        database.DataStorage.CheckpointJournalSize = 1;
+        try
+        {
+            while (worker.FailureCount == 0) { await Task.Delay(1, guard.Token); }
+            var gate = Assimalign.Cohesion.Database.Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage);
+            gate.JournalSizeLimit = 2; gate.IsAdmissionPaused.ShouldBeTrue();
+            clock.Advance(DatabaseEngine.DefaultWorkerFailureWindow);
+            entered.Wait(guard.Token);
+            // Act: recover the real checkpoint before the blocked failing lane returns to its pump.
+            database.Coordinator.Checkpoint(guard.Token);
+            gate.IsAdmissionPaused.ShouldBeFalse();
+            release.Set();
+            await settled.Task.WaitAsync(guard.Token);
+            // Assert: a queue snapshot first, then the offline list, covers either queued or completed give-up.
+            PendingGiveUps(engine).ShouldBeEmpty();
+            engine.OfflineDatabases.ShouldBeEmpty(); database.IsOffline.ShouldBeFalse();
+        }
+        finally { release.Set(); worker.BeforeCheckpoint = null; worker.PassCompleted = null; }
+    }
+
     private const string failingDatabaseName = "sql-worker-resilience-failing";
     private const string healthyDatabaseName = "sql-worker-resilience-healthy";
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
@@ -667,79 +715,61 @@ public sealed class SqlWorkerResilienceTests
         (await CountAsync(reopened)).ShouldBe(20);
     }
 
-    /// <summary>
-    /// A journal that grows past the engine's cap while its checkpoints fail takes the database
-    /// offline on its second failed checkpoint in a row (owner decision 25 and its review), long
-    /// before the failure window, with
-    /// <see cref="StorageOfflineCause.JournalSizeLimit"/>, and only that database: under load the
-    /// journal would otherwise fill the device first.
-    /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: a journal past the cap while its checkpoints fail takes only its database offline")]
-    public async Task CheckpointWorker_JournalPastTheCap_ShouldTakeOnlyItsDatabaseOffline()
+    /// <summary>T3-27 keeps a checkpoint-failing journal online behind a bounded admission pause.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Journal admission pauses failed checkpoints online and recovers without reopen (#1283)")]
+    public async Task CheckpointWorker_JournalAdmissionPaused_ShouldStayOnlineAndResumeAfterRecovery()
     {
-        // Arrange: checkpoints by journal size, a cap of four times the size, and a minimum of failed
-        // passes out of reach.
+        // Arrange: create a due, dirty journal at half the limit without a huge bracket.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         var options = Options(strategy);
         options.CheckpointJournalSize = paceJournalSize;
         options.JournalSizeLimit = 4 * paceJournalSize;
-        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
+        var clock = new ManualTimeProvider(); options.TimeProvider = clock;
+        await using var engine = SqlDatabaseEngine.Create("pause-recovery", options);
         var failing = await CreateAsync(engine, failingDatabaseName);
         var healthy = await CreateAsync(engine, healthyDatabaseName);
-        var worker = (SqlCheckpointWorker)WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var passes = new ConcurrentQueue<DatabaseWorkerPass>();
-        worker.PassCompleted = passes.Enqueue;
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(failingDatabaseName);
-
-        // Act: the failing database's journal grows past the cap while its checkpoints fail.
+        failing.DataStorage.CheckpointJournalSize = 0;
+        int next = 0;
+        while (failing.DataStorage.JournalBytesSinceCheckpoint < options.JournalSizeLimit / 2)
+        {
+            await InsertAsync(failing, next, 10); next += 10; guard.Token.ThrowIfCancellationRequested();
+        }
         faults.FailPageWrites = true;
+        failing.DataStorage.CheckpointJournalSize = paceJournalSize;
+        var gate = Assimalign.Cohesion.Database.Transactions.TransactionCheckpointInterlock.ForStorage(failing.DataStorage);
+        gate.IsAdmissionPaused.ShouldBeTrue();
+        long held = failing.DataStorage.JournalBytesSinceCheckpoint;
+        Task? waiting = null;
         try
         {
-            for (int id = 0; failing.DataStorage.JournalLength < options.JournalSizeLimit; id += 10)
-            {
-                await InsertAsync(failing, id, 10);
-            }
+            // Act: new work waits, while retries persist past the old worker failure window.
+            waiting = InsertAsync(failing, next, 1);
+            while (worker.FailureCount < 2) { await Task.Delay(10, guard.Token); }
+            long failures = worker.FailureCount;
+            clock.Advance(DatabaseEngine.DefaultWorkerFailureWindow);
+            while (worker.FailureCount == failures) { await Task.Delay(10, guard.Token); }
+            waiting.IsCompleted.ShouldBeFalse();
+            engine.HasFailingWorker(failingDatabaseName).ShouldBeFalse();
+            failing.IsOffline.ShouldBeFalse(); engine.OfflineDatabases.ShouldBeEmpty();
+            held.ShouldBeLessThanOrEqualTo(options.JournalSizeLimit);
+            failing.DataStorage.JournalBytesSinceCheckpoint.ShouldBe(held);
+            long checkpoints = strategy.Faults(healthyDatabaseName).HeaderWrites;
+            for (int id = 0; strategy.Faults(healthyDatabaseName).HeaderWrites == checkpoints; id += 10)
+            { await InsertAsync(healthy, id, 10); guard.Token.ThrowIfCancellationRequested(); }
+            // Assert: clearing the cause reopens admission on the same instance.
+            faults.Clear();
+            await waiting.WaitAsync(guard.Token);
+            while (gate.IsAdmissionPaused) { await Task.Delay(10, guard.Token); }
+            failing.IsOffline.ShouldBeFalse(); engine.OfflineDatabases.ShouldBeEmpty();
         }
-        catch (DatabaseOfflineException)
+        finally
         {
-            // A failed checkpoint found the journal past the cap between two writes.
+            faults.Clear();
+            if (waiting is not null) { await waiting.WaitAsync(guard.Token); }
         }
-
-        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)failingDatabaseName));
-        long failedPasses = worker.FailureCount;
-        bool failedTwice = await Eventually(() => worker.FailureCount >= 2);
-        var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
-
-        // The other database is still checkpointed by size.
-        long checkpoints = strategy.Faults(healthyDatabaseName).HeaderWrites;
-        for (int id = 0; strategy.Faults(healthyDatabaseName).HeaderWrites == checkpoints && id < 100_000; id += 10)
-        {
-            await InsertAsync(healthy, id, 10);
-        }
-
-        // The offline state can become visible before its completed pass is published.
-        bool offlineVisitObserved = await Eventually(() => passes.SelectMany(pass => pass.Visits)
-            .Any(visit => visit.Database == failingDatabaseName && visit.Offline));
-
-        // Assert
-        offlineVisitObserved.ShouldBeTrue();
-        passes.SelectMany(pass => pass.Visits).ShouldContain(visit => visit.Database == failingDatabaseName && visit.GiveUpRequested);
-        passes.SelectMany(pass => pass.Visits).ShouldContain(visit => visit.Database == failingDatabaseName && visit.Offline);
-        worker.PassCompleted = null;
-        offline.ShouldBeTrue();
-        // Long before the window: fewer failed passes than the window holds at the backoff.
-        failedPasses.ShouldBeLessThan((long)(DatabaseEngine.DefaultWorkerFailureWindow / DatabaseEngineWorker.FailureBackoff));
-        failedTwice.ShouldBeTrue();
-        refusal.Code.ShouldBe("CS04004");
-        refusal.Message.ShouldContain("its journal grew past its engine's limit while its checkpoints kept failing");
-        var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
-        cause.Cause.ShouldBe(StorageOfflineCause.JournalSizeLimit);
-        cause.Message.ShouldContain($"past the engine's limit of {options.JournalSizeLimit} bytes");
-        cause.Message.ShouldContain($"'{worker.Name}'");
-        cause.Message.ShouldContain("passes in a row");
-        engine.OfflineDatabases.ShouldBe([(DatabaseName)failingDatabaseName]);
-        healthy.IsOffline.ShouldBeFalse();
-        strategy.Faults(healthyDatabaseName).HeaderWrites.ShouldBeGreaterThan(checkpoints);
     }
 
     /// <summary>

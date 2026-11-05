@@ -16,8 +16,10 @@ public sealed class CheckpointBracketLoadTests
     private readonly ITestOutputHelper _output;
     public CheckpointBracketLoadTests(ITestOutputHelper output) { _output = output; }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Checkpoint: four continuous writers on three Windows cores (#1283)")]
-    public async Task Checkpoint_FourContinuousWriters_ShouldRecordBoundedProgress()
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Checkpoint: four continuous writers on three Windows cores (#1283)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Checkpoint_FourContinuousWriters_ShouldRecordBoundedProgress(bool admissionPause)
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create("bracket-load", new()
@@ -41,7 +43,7 @@ public sealed class CheckpointBracketLoadTests
                 var files = await session.GetContainerAsync("files", token);
                 await using var upload = await files.OpenWriteAsync($"{writer}-{next}", cancellationToken: token);
                 await upload.WriteAsync(new byte[1024], token);
-            }, _output.WriteLine);
+            }, _output.WriteLine, admissionPause);
         }
         finally
         {

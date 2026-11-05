@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database;
@@ -103,6 +104,50 @@ namespace Assimalign.Cohesion.Database;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
 {
+    /// <summary>Configures the per-storage journal admission backstop and attaches its live state to a database.</summary>
+    /// <param name="database">The newly constructed database, before publication to callers.</param>
+    /// <param name="journalSizeLimit">The engine's resolved journal limit, in bytes.</param>
+    /// <param name="storages">Every independently checkpointed storage belonging to the database.</param>
+    /// <exception cref="ArgumentNullException">A database, storage array or storage is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The limit is negative.</exception>
+    protected void ConfigureJournalAdmission(DatabaseInstance database, long journalSizeLimit, params Storage.Storage[] storages)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(storages);
+        ArgumentOutOfRangeException.ThrowIfNegative(journalSizeLimit);
+        var admissions = new TransactionCheckpointInterlock[storages.Length];
+        for (int i = 0; i < storages.Length; i++)
+        {
+            var storage = storages[i];
+            var admission = TransactionCheckpointInterlock.ForStorage(storage);
+            admissions[i] = admission;
+            admission.JournalSizeLimit = journalSizeLimit;
+            var onOffline = storage.OnOffline;
+            storage.OnOffline = error =>
+            {
+                try { admission.CloseAdmission(); }
+                finally { onOffline?.Invoke(error); }
+            };
+            if (storage.IsOffline) { admission.CloseAdmission(); }
+        }
+        database.AttachJournalAdmission(admissions);
+        bool closing;
+        // Model construction may hold its registry lock. Root _sync protects only
+        // membership; it never spans gate notifications, model work or joins.
+        lock (_sync)
+        {
+            closing = IsDisposed || database.IsClosing;
+            if (!closing) { _journalAdmissions.Add(database, admissions); }
+        }
+        if (closing)
+        { foreach (var admission in admissions) { admission.JournalSizeLimit = 0; } }
+    }
+
+    internal void DetachJournalAdmission(DatabaseInstance database)
+    {
+        lock (_sync) { _journalAdmissions.Remove(database); }
+    }
+
     /// <summary>
     /// The fewest failed passes in a row of one database that the engine gives up on when its
     /// options state none: three (owner decision 42 of 2026-10-07). See
@@ -135,6 +180,9 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     private readonly object _sync = new();
     private readonly List<DatabaseEngineWorker> _workers = [];
     private readonly List<DatabaseServer> _servers = [];
+    // Weak keys also cover a model's construction failure after admission was
+    // attached but before the instance was published to its database registry.
+    private readonly ConditionalWeakTable<DatabaseInstance, TransactionCheckpointInterlock[]> _journalAdmissions = new();
     private readonly List<Thread> _threads = [];
     private readonly CancellationTokenSource _stop = new();
 
@@ -447,6 +495,14 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             var worker = workers[index];
             if (worker.TakesDatabasesOffline && worker.HoldsFailure(name))
             {
+                // T3-27 owns backpressure while checkpoint admission is paused.
+                // Keep read service, including Blob wire service, available even
+                // when a failure first appeared before the halfway threshold.
+                // Healthy requests take no inventory lock: this lookup is only
+                // needed for a checkpoint that already holds a failure record.
+                if (worker.Kind == DatabaseEngineWorkerKind.Checkpoint &&
+                    TryGetDatabaseCore(name, out var database) && database.IsJournalAdmissionPaused)
+                { continue; }
                 return true;
             }
         }
@@ -679,12 +735,22 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             DatabaseServer[] servers;
             DatabaseEngineWorker[] workers;
             Thread[] threads;
+            TransactionCheckpointInterlock[] admissions;
             lock (_sync)
             {
                 servers = [.. _servers];
                 workers = [.. _workers];
                 threads = [.. _threads];
+                admissions = _journalAdmissions.SelectMany(static entry => entry.Value).ToArray();
             }
+
+            // Disable the backstop before servers or worker joins. A paused catalog
+            // caller can hold catalog _sync while a maintenance lane waits for
+            // that monitor; joining the lane before waking the caller deadlocks.
+            // Engine entry points reject new work; model operations and migration
+            // intent discard must still drain before storage closes. Snapshot under
+            // root _sync, then notify with no root/model lock held.
+            foreach (var admission in admissions) { admission.JournalSizeLimit = 0; }
 
             // Servers release their listeners and sessions before the workers or the storages go.
             for (int index = servers.Length - 1; index >= 0; index--)

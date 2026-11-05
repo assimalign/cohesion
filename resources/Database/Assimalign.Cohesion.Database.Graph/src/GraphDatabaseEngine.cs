@@ -675,6 +675,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 // A created database reports the name it was created with; an opened one the
                 // spelling its storage header kept from its creation, whatever spelling opened it.
                 var database = new GraphDatabase(create ? name : DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, recover: !create);
+                ConfigureJournalAdmission(database, JournalSizeLimit, storage);
                 _databases.Add(name, database);
                 return new ValueTask<DatabaseInstance>(database);
             }

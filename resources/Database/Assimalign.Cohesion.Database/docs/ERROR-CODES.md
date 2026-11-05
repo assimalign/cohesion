@@ -69,6 +69,7 @@ error and has no production diagnostic code.
 | COHDBS001 | CK06001 | Storage format refusal |
 | COHDBS002 | CK06002 | Storage offline |
 | COHDBS003 | CK06003 | Record or page corruption |
+| New (#1283) | CK06006 | Write admission paused for a pending journal checkpoint (Degraded health) |
 | COHDBI001 | CK06101 | Index format refusal |
 | COHDBI002 | CK06102 | Index corruption |
 | COHDBP001 | CK07001 | Diagnostic truncation notice |
@@ -584,8 +585,10 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK04011 | A transaction has reached the supported limit of 65,535 open write streams (#1726) | — |
 | CK04012 | Savepoint control requires an explicit transaction with an owned kernel binding (#1726) | — |
 | CK04013 | The named savepoint does not exist in the current transaction (#1726) | — |
+| CK04014 | Statement deadline expired while waiting for journal checkpoint admission (#1283) | — |
 | CK06004 | Interrupted creation/drop left an orphan directory | — |
 | CK06005 | Physical data or catalog file set is absent | — |
+| CK06006 | Write admission paused for a pending journal checkpoint; database remains online (#1283) | — |
 | CK07003 | Session operations overlap | — |
 | CK07004 | Session is closed | — |
 | CK07005 | SQL outbound stream has invalid request parameters, ordering, payload size or terminal counters | — |

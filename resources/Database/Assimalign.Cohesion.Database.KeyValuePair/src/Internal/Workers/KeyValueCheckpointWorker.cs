@@ -87,10 +87,10 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
             return true;
         }
 
-        // Re-export the index registrations first when they changed — a backstop: root pages stay
-        // fixed through splits (#1159), and the checkpoint is the engine's persistence point for
-        // re-attachment metadata.
-        database.SaveIndexRegistrationsIfChanged();
+        // The one primary registration is durably persisted at bootstrap, and
+        // its root stays fixed through splits (#1159). Checkpoint must not read
+        // or rewrite catalog metadata: a writer paused at catalog admission can
+        // hold catalog _sync, and needs this pure storage checkpoint to wake it.
 
         // The data storage checkpoints through the transaction coordinator: the truncating
         // checkpoint record carries every in-flight logical transaction's sequence, so recovery

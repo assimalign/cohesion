@@ -89,6 +89,10 @@ the source boundary while the existing public construction and execution APIs re
   `DatabaseExecutionSession<TRequest>` adds typed execution; `DatabaseLanguageSession<TRequest>`
   adds text execution for Sql, Documents and Graph. KeyValuePair is typed-only, and Blob has
   no execute member. Sessions are single-threaded; disposal rolls back an active transaction.
+- **Journal admission** — at half JournalSizeLimit with a checkpoint pending, every model
+  pauses new physical write brackets and stays online with Degraded health (CK06006, #1283).
+  Undo and checkpoints drain; a successful checkpoint resumes admission. Reads retain their
+  ordinary snapshot and locking rules; an admission deadline in SQL reports CK04014.
 - **Error root** — `DatabaseException` for the contract root and everything built above it;
   `DatabaseNotFoundException` for the exact missing-database outcome of
   `DatabaseEngine.OpenDatabaseAsync`; `DatabaseParseException` for statement text a session's

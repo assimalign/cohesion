@@ -643,7 +643,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     {
         long removed = 0;
 
-        await _applyGate.WaitAsync(cancellationToken, "Undo", unchecked((long)writer.Value)).ConfigureAwait(false);
+        await _applyGate.WaitAsync(cancellationToken, "Undo", unchecked((long)writer.Value), drain: true).ConfigureAwait(false);
         try
         {
             for (int end = entries.Count; end > 0;)

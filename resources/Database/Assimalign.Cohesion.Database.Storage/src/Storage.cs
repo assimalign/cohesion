@@ -343,7 +343,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// checkpoint record. Before the first checkpoint, includes the whole journal.
     /// </summary>
     /// <remarks>A concurrent checkpoint can make this advisory count briefly stale.</remarks>
-    internal long JournalBytesSinceCheckpoint => _journal?.BytesSinceCheckpoint ?? 0;
+    public long JournalBytesSinceCheckpoint => _journal?.BytesSinceCheckpoint ?? 0;
 
     /// <summary>
     /// Gets or sets the appended journal bytes at which the storage asks for a checkpoint

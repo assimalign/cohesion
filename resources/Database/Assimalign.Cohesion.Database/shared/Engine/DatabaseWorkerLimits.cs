@@ -8,7 +8,8 @@ namespace Assimalign.Cohesion.Database;
 /// The one copy of the worker limits every model engine checks and resolves from its options (owner
 /// decisions 25 of 2026-10-06 and 42 of 2026-10-07; database-area.md rule 8): how long, and across
 /// how many failed passes in a row, one database's worker failures may persist before its engine
-/// takes it offline, and how long a database's journal may grow while its checkpoints keep failing.
+/// takes it offline, and the journal limit whose halfway point pauses new write admission
+/// while a checkpoint is pending (T3-27).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -81,7 +82,7 @@ internal static class DatabaseWorkerLimits
     }
 
     /// <summary>
-    /// Resolves the journal size limit an engine's checkpointer applies.
+    /// Resolves the journal size limit used by an engine's admission backstop and checkpointer.
     /// </summary>
     /// <param name="journalSizeLimit">The options' journal size limit; zero for the default.</param>
     /// <param name="checkpointJournalSize">The options' checkpoint journal size.</param>

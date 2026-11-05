@@ -258,6 +258,7 @@ public partial class TransactionCoordinatorRecoveryTests
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var interlock = TransactionCheckpointInterlock.ForStorage(storage);
         using var control = new SemaphoreSlim(1, 1);
+        interlock.JournalSizeLimit = 1024L * 1024 * 1024;
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         CancellationToken token = ceiling.Token;
         long admission = long.MaxValue;

@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -8,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <summary>
 /// A server-side statement or lock timer stopped a statement. Its own changes are rolled back;
 /// the session and an explicit transaction remain usable. Diagnostics contains CS05043
-/// (statement timeout) or CS04044 (lock timeout).
+/// (statement timeout), CK04014 (journal admission deadline) or CS04044 (lock timeout).
 /// </summary>
 public sealed class SqlTimeoutException : DatabaseException
 {
@@ -37,7 +38,9 @@ public sealed class SqlTimeoutException : DatabaseException
     public string SqlState { get; }
 
     internal static SqlTimeoutException Statement(Exception cause, Location? location)
-        => new("CS05043", "57014", _statementMessage, cause, location);
+        => cause is TransactionAdmissionCanceledException admission
+            ? new("CK04014", "57014", admission.Message, admission, location)
+            : new("CS05043", "57014", _statementMessage, cause, location);
 
     internal static SqlTimeoutException Lock(Exception cause, Location? location)
         => new("CS04044", "55P03", _lockMessage, cause, location);

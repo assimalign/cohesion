@@ -4,12 +4,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Testing;
 
@@ -486,7 +488,7 @@ internal static class CheckpointLoad
     internal const long JournalSize = 64 * 1024;
 
     internal static async Task RunAsync(Assimalign.Cohesion.Database.Storage.Storage storage,
-        Action<CancellationToken> checkpoint, Func<int, long, CancellationToken, Task> write, Action<string> report)
+        Action<CancellationToken> checkpoint, Func<int, long, CancellationToken, Task> write, Action<string> report, bool admissionPause = true)
     {
         // Arrange: Windows process affinity includes every writer and checkpoint lane.
         // Linux affinity is per thread; no workload-affinity claim is made there.
@@ -498,6 +500,27 @@ internal static class CheckpointLoad
         var counts = new long[4];
         var watch = Stopwatch.StartNew();
         var writers = new List<Task>(4);
+        var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        SetAdmissionPause(gate, admissionPause);
+        using var probeEntered = new ManualResetEventSlim();
+        using var probeRelease = new ManualResetEventSlim();
+        int writerStarts = 0;
+        // Exercise the long-holder backstop once, then keep the original four
+        // continuous writers. Each synthetic bracket is short; the outer raw
+        // scope holds admission across them as a nested catalog operation can.
+        checkpoint(ceiling.Token);
+        var probe = DedicatedTestTask.Run(() =>
+        {
+            using var lease = gate.Enter("LoadPauseProbe", cancellationToken: ceiling.Token);
+            while (storage.JournalBytesSinceCheckpoint < gate.JournalSizeLimit / 2)
+            {
+                using var bracket = storage.BeginTransaction("LoadPauseProbe");
+                bracket.Commit(awaitDurability: false);
+                ceiling.Token.ThrowIfCancellationRequested();
+            }
+            gate.IsAdmissionPaused.ShouldBe(admissionPause);
+            probeEntered.Set(); probeRelease.Wait(ceiling.Token);
+        }, CancellationToken.None);
         try
         {
             for (int writer = 0; writer < 4; writer++)
@@ -506,6 +529,7 @@ internal static class CheckpointLoad
                 writers.Add(DedicatedTestTask.Run(async () =>
                 {
                     await ready.Task;
+                    Interlocked.Increment(ref writerStarts);
                     long next = 0;
                     while (!stop.IsCancellationRequested)
                     {
@@ -516,7 +540,13 @@ internal static class CheckpointLoad
                 }, CancellationToken.None));
             }
             // Act: a minimum exposure followed by counter-driven progress, with a hang guard.
+            probeEntered.Wait(ceiling.Token);
             ready.SetResult();
+            while (Volatile.Read(ref writerStarts) < 4 || (admissionPause && Interlocked.Read(ref observation.AdmissionWaits) == 0))
+            { await Task.Delay(1, ceiling.Token); }
+            probeRelease.Set();
+            await probe.WaitAsync(ceiling.Token);
+            watch.Restart();
             do
             {
                 await Task.Delay(10, ceiling.Token);
@@ -528,8 +558,10 @@ internal static class CheckpointLoad
         finally
         {
             stop.Cancel();
+            probeRelease.Set();
             ready.TrySetResult(); // Also joins writers after a partial setup failure.
-            await Task.WhenAll(writers);
+            try { await probe.WaitAsync(ceiling.Token); }
+            finally { await Task.WhenAll(writers); }
         }
         // Read the append-locked high-water mark after all four writers have ended.
         // Autonomous checkpoint progress was already required above.
@@ -550,11 +582,12 @@ internal static class CheckpointLoad
         long busy = Interlocked.Read(ref observation.Busy);
         // Assert: journal bytes and attribution, never a wall-clock rate, decide the outcome.
         long writes = counts.Sum();
-        string measured = $"{storage.Name}: writes={writes}, checkpoints={checkpoints}, " +
+        string measured = $"{storage.Name}: pauseEnabled={admissionPause}, writes={writes}, checkpoints={checkpoints}, " +
             $"checkpoints/write={(double)checkpoints / writes:F6}, " +
             $"checkpoints/s={checkpoints / watch.Elapsed.TotalSeconds:F2}, " +
             $"peak={observation.Peak} ({(double)observation.Peak / JournalSize:F2}x), " +
             $"deferred={deferred}, attributed={attributed}, busy={busy}, " +
+            $"pauses={observation.AdmissionPauses}, bracketWaits={observation.AdmissionWaits}, pauseMs={observation.PauseMilliseconds:F3}, " +
             $"classes={string.Join(",", classes.OrderBy(pair => pair.Key).Select(pair => pair.Key + "=" + pair.Value))}, seconds={watch.Elapsed.TotalSeconds:F2}";
         report(measured);
         counts.ShouldAllBe(count => count >= 32, measured);
@@ -563,7 +596,20 @@ internal static class CheckpointLoad
         attributed.ShouldBe(deferred, measured);
         observation.Peak.ShouldBeLessThanOrEqualTo(4 * JournalSize, measured);
         storage.IsOffline.ShouldBeFalse(measured);
+        if (admissionPause)
+        {
+            observation.AdmissionPauses.ShouldBeGreaterThan(0, measured);
+            observation.AdmissionWaits.ShouldBeGreaterThan(0, measured);
+            observation.AdmissionResumes.ShouldBe(observation.AdmissionPauses, measured);
+        }
+        else { observation.AdmissionPauses.ShouldBe(0, measured); }
+        SetAdmissionPause(gate, true);
     }
+
+    // Test-only access to the internal comparison switch; no public toggle or
+    // shipped friend grant. Both measurements retain EN-C1 release arming.
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "set_AdmissionPauseEnabled")]
+    private static extern void SetAdmissionPause(TransactionCheckpointInterlock gate, bool enabled);
 
     private sealed class LoadAffinity : IDisposable
     {
@@ -616,6 +662,10 @@ internal static class CheckpointLoad
         internal long Deferred;
         internal long Busy;
         internal long Attributed;
+        internal long AdmissionPauses;
+        internal long AdmissionResumes;
+        internal long AdmissionWaits;
+        internal double PauseMilliseconds;
         internal readonly ConcurrentDictionary<string, long> Classes = new();
         internal long Errors;
         internal void Observe(long value)
@@ -641,6 +691,9 @@ internal static class CheckpointLoad
             }
             else
             {
+                if (data.EventId == 23) { Interlocked.Increment(ref AdmissionPauses); }
+                if (data.EventId == 24) { Interlocked.Increment(ref AdmissionResumes); PauseMilliseconds += (double)payload[2]!; }
+                if (data.EventId == 25) { Interlocked.Increment(ref AdmissionWaits); }
                 if (data.EventId == 15) { Interlocked.Increment(ref Deferred); }
                 if (data.EventId == 21)
                 {

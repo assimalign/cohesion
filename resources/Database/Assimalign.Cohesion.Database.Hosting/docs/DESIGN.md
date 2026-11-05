@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.Hosting — Design
 
+## Journal admission health (#1283)
+
+DatabaseInstance.IsJournalAdmissionPaused folds live per-storage checkpoint admission state.
+Health is Degraded while paused, with journalAdmissionPauseCode=CK06006,
+journalAdmissionPausedDatabaseCount and journalAdmissionPausedDatabases. Existing health
+transition events 16/17 use reason JournalAdmissionPaused:CK06006. Worker faults can also
+degrade health; offline storage keeps its Unhealthy priority. A successful checkpoint clears
+the pause without reopen. Reads retain ordinary snapshot and locking rules. Root close wakes
+paused writers before cleanup, including raw catalog callers.
+
 ## Joint SQL migration health (#1447, SQ-A3)
 
 Hosting keeps its model-neutral Provisioning observation: every unpublished deferred SQL job is Degraded

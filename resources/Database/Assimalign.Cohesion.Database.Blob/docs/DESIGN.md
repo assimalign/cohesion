@@ -1,5 +1,19 @@
 # Blob engine design
 
+## Journal admission backstop (#1283, EN-C2)
+
+The engine configures every independently checkpointed file set with its resolved journal
+limit before publishing a database. At half the limit with a checkpoint pending (size-due
+included), new physical write brackets wait for a successful sharp checkpoint. The database
+stays online; health reports Degraded/CK06006. Whole/partial undo and nested brackets drain;
+reads retain ordinary MVCC and model-lock rules. Root close wakes waiters before disposal.
+Checkpoint failures while paused retry without escalating offline. Storage-safety fences and
+the single-huge-bracket overshoot residual remain. See Transactions DESIGN for lock order,
+attribution and exact pause/wait/duration counters. The four-writer load compares the internal
+switch enabled/disabled, with one controlled long-holder window before free-running writes.
+No format or crash-recovery changes. Stream chunk admission retains upload lifetime
+cancellation through final Flush/Dispose; only two distinct cancellable tokens allocate a link.
+
 ## Refused opens preserve every file (#1744)
 
 The preflight decodes owner-zero catalog metadata through Storage's recovered read-only view,

@@ -190,6 +190,7 @@ public partial class TransactionCoordinatorRecoveryTests
         using var storage = CoordinatorStorage.Create();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        gate.JournalSizeLimit = 1024L * 1024 * 1024;
         long leaseBytes = long.MaxValue, bracketBytes = long.MaxValue;
         long leaseTicks = long.MaxValue, bracketTicks = long.MaxValue;
         const int count = 4096;

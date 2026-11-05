@@ -1335,8 +1335,8 @@ The value-type lease records its entering thread. While that thread holds admiss
 disposal emits event 22, asserts in Debug and throws; a refused disposal leaves admission unchanged.
 Inert coordinated leases and disposals whose entering thread does not hold admission at disposal
 return before the thread-affinity check. Otherwise, disposal on another thread is refused,
-including an ended nested copy and a stale copy after its entering thread releases and re-enters
-admission. The live coordinator binds after construction initializes every callback
+including an ended nested copy within that outer acquisition. A stale copy from an earlier
+outer acquisition returns before the thread check after re-entry. The live coordinator binds after construction initializes every callback
 dependency; it binds once; a second live bind throws, and disposal unbinds only its own registration.
 A short state monitor makes the final pending-work check atomic with gate release, closing the
 failed-wait handoff race; it is never held across model or storage work. A checkpoint running at
@@ -1355,7 +1355,7 @@ identities make copies and repeated disposal on the entering thread idempotent w
 
 Every release also pulls the storage's size-only due predicate (TimeSpan.MaxValue), arming the
 existing deferral before a possibly starved worker gets its first attempt. A releasing holder
-runs the sharp checkpoint before the next admission. No new admission condition is introduced.
+runs the sharp checkpoint before the next admission. EN-C2 adds the backstop described below.
 A successful checkpoint consumes requests received during that checkpoint under the state monitor,
 atomically with release. A busy outside bracket retains the request but foreground retries wait
 for another worker request or completion of every active physical bracket. Release reads
@@ -1374,7 +1374,77 @@ class and optional owner. A semaphore handoff can reserve a permit before its wa
 attribution is published on admission rather than inventing an unknown physical bracket. Storage
 event 19 independently lists every raw physical bracket that refuses truncation. Deferred failures
 keep the existing identity-preserving handoff to the next worker attempt. This introduces no
-format, language, error identity or admission-pause policy.
+format or checkpoint-model change; EN-C2 adds admission policy and coded refusal below.
+
+
+### Bounded journal admission (#1283, EN-C2)
+
+T3-27 retains the sharp, truncating checkpoint and changes no format. With a checkpoint
+pending (including the size-only due predicate), observing appended bytes at or above
+ceil(JournalSizeLimit / 2) pauses all new physical write scopes on that storage. The journal's
+completed checkpoint record is excluded. Engine limits retain their 4x size-trigger default
+(1 GiB at the 256 MiB trigger, or with the trigger disabled). Standalone interlocks default to
+a disabled limit; engine composition configures every data and catalog interlock before
+publishing the database. A successful checkpoint ends the pause automatically. Operational
+failures keep admission paused and health Degraded (CK06006), with original failure reporting
+and independent checkpoint retries intact. A storage safety failure still fences storage.
+
+Waiters hold no admission semaphore, page latch or storage/log monitor. Model grants precede
+admission; catalog _sync precedes its independent catalog interlock. Checkpoints never ask for
+model locks or catalog _sync. Whole/partial undo and explicit/worker checkpoints bypass only
+the pause, retaining semaphore exclusion; nested scopes reuse their holder. Thus undo can
+release grants needed by a waiter, and a checkpoint never waits on itself. Reclamation yields
+at its pending predicate. EN-C1 still checkpoints at release before the next admission.
+Explicit checkpoint success clears foreground retry suppression without dropping an uncollected
+deferred failure; a later failing cycle cannot overwrite that first uncollected identity.
+Unconfigure clears failure, busy/request/suppression state and the standalone
+limit. CloseAdmission wakes paused callers, preserving a storage offline error when present
+and otherwise refusing them with ObjectDisposedException. Shutdown disables the backstop
+before server/worker joins or database cleanup: closing engine/database entry points reject new work,
+while already accepted catalog operations and intent-discard/undo cleanup drain before storage
+disposal. Setting the standalone limit to zero ends a pause as Disabled.
+An outer lease identity is recorded at depth 0->1; older outer copies return before thread
+affinity validation. Ended nested copies in that same outer acquisition remain refused on
+another thread.
+
+Reads needing no physical write bracket continue under ordinary MVCC and model-lock rules.
+They can wait on a writer's logical grants or checkpoint I/O, but never on the admission-pause
+task. Catalog reads can wait behind _sync held by a paused catalog writer until that
+catalog checkpoint completes; the checkpoint itself never needs _sync. Blob wire reads also stay available for a paused checkpoint failure. A SQL statement
+deadline at admission returns CK04014 / SQLSTATE 57014, rolling back the failed statement and
+releasing its new lock resources; caller cancellation keeps its cancellation semantics. The internal test
+switch disables only this backstop, retaining EN-C1. A single huge admitted bracket, and
+mandatory undo of existing work, can exceed the limit (#1270); there is no mid-bracket refusal.
+
+Healthy admission adds flag/counter reads, no lock or allocation: only the existing semaphore
+and holder-state monitor are taken. Pause tasks and timestamps are created only on a pause.
+Exact process totals publish as journal-admission-pauses, journal-admission-waits and
+journal-admission-pause-milliseconds. Duration sums completed episodes, including close and
+unconfigure; durations never decide a test. The five model probes compare enabled/disabled
+with four continuous writers on three Windows process cores. One controlled long-holder window
+exercises the backstop before at least two seconds of counter-driven write progress. This is
+not a claim that EN-C1 normally reaches the backstop. Append-locked high-water events decide
+the journal bound; paused operational failures also cross the old worker window in each model.
+
+Reference: PostgreSQL permits max_wal_size overshoot under heavy load
+(doc/src/sgml/config.sgml:4010-4018), the soft-limit behavior T3-27 rejects.
+[InnoDB redo-log rules](https://dev.mysql.com/doc/dev/mysql-server/latest/PAGE_INNODB_REDO_LOG.html)
+(rules 14-15) permit requesting a checkpoint and waiting for log-file space. Its
+[checkpoint manual](https://dev.mysql.com/doc/refman/8.4/en/innodb-checkpoints.html) describes
+fuzzy flushing, which Cohesion cannot adopt without segmented recovery retention. No reference
+code is copied; the halfway threshold is owner policy.
+
+The Transactions source adds Verbose / Checkpoints events, outside the state monitor:
+
+| Id | Event | Payload |
+| --- | --- | --- |
+| 23 | AdmissionPaused | database, reason (CheckpointPending/CheckpointFailure/BracketOpen), bracketClass, owner, journalBytes, journalSizeLimit |
+| 24 | AdmissionResumed | database, reason (CheckpointCompleted/Closing/Unconfigured/Disabled), durationMilliseconds |
+| 25 | AdmissionWait | database, bracketClass, owner |
+
+Counters update without listeners; event payload construction is listener-gated. Every pause
+carries its cause and observed holder identity. Storage events 19/20 retain physical blocker
+and append-locked peak attribution. Synchronous event observers must not reenter engine work.
 
 The merged raw-site audit covers every BeginTransaction call under Database src and shared:
 SQL catalog (including ReserveJointTreeOwner), key/value catalog, reclamation, statement apply,
@@ -1713,7 +1783,7 @@ events check `EventKeywords.None`.
 | 19 | `LockWaitBlocked` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `blockers` | `LockManager`, once per wait still queued when the slow-lock-wait threshold passes, from a one-shot timer the wait arms only while a listener takes warnings (#1390). `blockers` names each transaction the request waits for: a holder as `<sequence>:<modes held>` (modes joined by `+`), the owner of a conflicting request queued ahead of it as `<sequence>:queued <mode>`. Each is followed by what that transaction has queued itself: `" waiting for <mode> on <resource> (<its blockers>)"`, one level deep, so a cycle of two shows in one report and each waiter of a longer chain reports its own step. Bounded (#1390 review): 16 blockers, 4 queued requests of each and 4 blockers of each of those, the rest counted as `... (+N more)` and ` and N more requests` |
 | 20 | `TransactionIsolationChanged` | Verbose | Transactions | `database`, `transactionSequence`, `isolationLevel` | successful `ReplaceIsolationLevel`, only when the effective level changes; no rate or gauge transition |
 | 21 | `CheckpointBlocked` | Verbose | Checkpoints | `database`, `bracketClass`, `owner` | each deferred checkpoint, attributed to the gate holder or the next admitted handoff |
-| 22 | `CheckpointLeaseThreadMismatch` | Error | Checkpoints | `database`, `enteringThread`, `disposingThread` | cross-thread disposal while its entering thread holds admission is refused, including a stale copy after re-entry; leaves admission unchanged |
+| 22 | `CheckpointLeaseThreadMismatch` | Error | Checkpoints | `database`, `enteringThread`, `disposingThread` | cross-thread disposal while its entering thread holds admission is refused, including an ended nested copy within the same outer acquisition; older outer copies are inert after re-entry; leaves admission unchanged |
 
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow
@@ -1753,7 +1823,7 @@ dotnet-trace collect --process-id <pid> \
     --providers "Assimalign.Cohesion.Database.Transactions:0x2:4:SlowLockWaitThresholdMs=250"
 ```
 
-**Counters.** All six are created on the first enable command; their backing fields are updated
+**Counters.** All nine are created on the first enable command; their backing fields are updated
 with `Interlocked` on every transition whether or not anyone listens, so a tool that attaches late
 reads exact values.
 
@@ -1773,7 +1843,7 @@ snapshots without kernel contexts are outside #1351. The lock counters count eve
 The transaction rates move once at a non-pin kernel transaction's begin and once at its end,
 which is once per autocommit statement (plan D6 reads statement throughput from
 `transactions-per-second`), beside a per-database lock; only writers append journal records
-(#1280). No counter moves per row or per frame. The six backing fields are process-global and sit
+(#1280). No counter moves per row or per frame. The transaction and lock backing fields are process-global and sit
 together, so the begin and end `Interlocked` operations of every database in the process share
 them (plan D6 sanctions these counters).
 

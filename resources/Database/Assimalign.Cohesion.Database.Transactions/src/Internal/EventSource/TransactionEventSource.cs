@@ -54,6 +54,15 @@ internal sealed class TransactionEventSource : EventSource
     private long _totalRollbacks;
     private long _totalDeadlocks;
     private long _totalLockWaits;
+    private PollingCounter? _admissionPausesCounter;
+    private PollingCounter? _admissionWaitsCounter;
+    private PollingCounter? _admissionPauseTimeCounter;
+    private long _admissionPauses;
+    private long _admissionWaits;
+    private long _admissionPauseTicks;
+    internal long AdmissionPauses => Interlocked.Read(ref _admissionPauses);
+    internal long AdmissionWaits => Interlocked.Read(ref _admissionWaits);
+    internal long AdmissionPauseTicks => Interlocked.Read(ref _admissionPauseTicks);
     private double _slowLockWaitThresholdMilliseconds = DefaultSlowLockWaitThresholdMilliseconds;
 
     private TransactionEventSource()
@@ -499,6 +508,42 @@ internal sealed class TransactionEventSource : EventSource
     private void LockWaitBlocked(string database, long transactionSequence, string resource, string mode, double durationMilliseconds, string blockers)
         => WriteEvent(19, database, transactionSequence, resource, mode, durationMilliseconds, blockers);
 
+    [NonEvent]
+    internal void AdmissionPaused(Storage.Storage storage, string reason, string bracketClass, long owner, long journalBytes, long journalSizeLimit)
+    {
+        Interlocked.Increment(ref _admissionPauses);
+        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        { AdmissionPaused(storage.Name, reason, bracketClass, owner, journalBytes, journalSizeLimit); }
+    }
+
+    [NonEvent]
+    internal void AdmissionResumed(Storage.Storage storage, string reason, long ticks)
+    {
+        Interlocked.Add(ref _admissionPauseTicks, ticks);
+        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        { AdmissionResumed(storage.Name, reason, ticks * 1000.0 / Stopwatch.Frequency); }
+    }
+
+    [NonEvent]
+    internal void AdmissionWait(Storage.Storage storage, string bracketClass, long owner)
+    {
+        Interlocked.Increment(ref _admissionWaits);
+        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        { AdmissionWait(storage.Name, bracketClass, owner); }
+    }
+
+    [Event(23, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' paused write admission: {1}, holder {2}, owner {3}, journal {4} bytes, limit {5} bytes.")]
+    private void AdmissionPaused(string database, string reason, string bracketClass, long owner, long journalBytes, long journalSizeLimit)
+        => WriteEvent(23, database, reason, bracketClass, owner, journalBytes, journalSizeLimit);
+
+    [Event(24, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' resumed write admission: {1}, after {2} ms.")]
+    private void AdmissionResumed(string database, string reason, double durationMilliseconds)
+        => WriteEvent(24, database, reason, durationMilliseconds);
+
+    [Event(25, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' admission waits for a checkpoint: {1}, owner {2}.")]
+    private void AdmissionWait(string database, string bracketClass, long owner)
+        => WriteEvent(25, database, bracketClass, owner);
+
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
     {
@@ -534,6 +579,12 @@ internal sealed class TransactionEventSource : EventSource
         // Created on the first enable command, as the runtime's own sources do, and kept for the
         // source's lifetime. The backing fields are maintained whether or not anyone listens, so a
         // tool that attaches late still reads exact values.
+        _admissionPausesCounter ??= new PollingCounter("journal-admission-pauses", this, () => AdmissionPauses)
+        { DisplayName = "Journal Admission Pauses" };
+        _admissionWaitsCounter ??= new PollingCounter("journal-admission-waits", this, () => AdmissionWaits)
+        { DisplayName = "Journal Admission Waits" };
+        _admissionPauseTimeCounter ??= new PollingCounter("journal-admission-pause-milliseconds", this, () => AdmissionPauseTicks * 1000.0 / Stopwatch.Frequency)
+        { DisplayName = "Total Journal Admission Pause Time", DisplayUnits = "ms" };
         _currentTransactionsCounter ??= new PollingCounter("current-transactions", this, () => Volatile.Read(ref _currentTransactions))
         {
             DisplayName = "Current Transactions",

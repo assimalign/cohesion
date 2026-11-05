@@ -1,5 +1,23 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Journal admission backstop (#1283, EN-C2)
+
+The engine configures every independently checkpointed file set with its resolved journal
+limit before publishing a database. At half the limit with a checkpoint pending (size-due
+included), new physical write brackets wait for a successful sharp checkpoint. The database
+stays online; health reports Degraded/CK06006. Whole/partial undo and nested brackets drain;
+reads retain ordinary MVCC and model-lock rules. Root close wakes waiters before disposal.
+Checkpoint failures while paused retry without escalating offline. Storage-safety fences and
+the single-huge-bracket overshoot residual remain. See Transactions DESIGN for lock order,
+attribution and exact pause/wait/duration counters. The four-writer load compares the internal
+switch enabled/disabled, with one controlled long-holder window before free-running writes.
+No format or crash-recovery changes.
+The checkpointer performs no catalog metadata read or registration re-export: a paused catalog
+writer can own _sync and needs the pure storage checkpoint to wake it. Bootstrap durably
+persists the sole primary registration before database publication; BTreeIndex root IDs stay
+fixed through splits (Indexing/src/BTreeIndex.cs:132 and BTreeIndexManager.cs:27). The existing
+disposal-time registration backstop remains.
+
 ## Refused opens preserve every file (#1744)
 
 The catalog preflight checks the entry-space marker before opening even a read-only data view,

@@ -112,7 +112,7 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
             _target = value;
         }
 
-        public global::Assimalign.Cohesion.Database.DatabaseWorkerLanes<bool> Lanes => _target.Lanes;
+        public global::Assimalign.Cohesion.Database.DatabaseWorkerLanes<global::Assimalign.Cohesion.Database.DatabaseCheckpointWorker<SqlDatabase>.CheckpointAttempt> Lanes => _target.Lanes;
         public bool CompletionOnly => _target.CompletionOnly;
         public string Name => _target.Name;
         public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
