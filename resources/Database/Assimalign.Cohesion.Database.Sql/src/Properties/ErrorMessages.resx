@@ -852,6 +852,9 @@
   <data name="ValidateSupportedSchemaFailure" xml:space="preserve"><value>{0}: the database cannot apply schema '{1}'.</value></data>
   <data name="ValidateSupportedSchemaFailure2" xml:space="preserve"><value>{0}: SQL schema '{1}' declares {2}.</value></data>
   <data name="ValidateSupportedSchemaFailure3" xml:space="preserve"><value>{0}: {1}: SQL schema '{2}': {3} Nothing was changed.</value></data>
+  <data name="JointIntentDiscarded" xml:space="preserve">
+    <value>The unpublished migration target or resolved route no longer matches; preparation was discarded and the stored schema remains online.</value>
+  </data>
   <data name="JointMigrationFailed" xml:space="preserve">
     <value>Unpublished joint migration failed. The published schema is unchanged; correct the cause and retry.</value>
   </data>
@@ -860,8 +863,6 @@
   <data name="JointSpaceProbeFailed" xml:space="preserve"><value>The database volume's available space could not be determined.</value></data>
   <data name="JointPublicationUnconfirmed" xml:space="preserve"><value>Joint migration publication is unconfirmed. Recovery must determine whether the old or new schema committed; reopen before retrying.</value></data>
   <data name="JointTableNameReserved" xml:space="preserve"><value>Relation name '{0}' is reserved by a pending joint schema migration.</value></data>
-  <data name="ProvisionerRunDeferredAsyncFailure" xml:space="preserve"><value>The applied catalog differs: {0}.</value></data>
-  <data name="ProvisionerRunDeferredAsyncFailure2" xml:space="preserve"><value>{0}: {1}: deferred step {2} of {3} ({4} '{5}.{6}') failed. The pending migration is retained for recovery and retry.</value></data>
   <data name="RendererAppendConstraintDatabase" xml:space="preserve"><value>Constraint '{0}' has an unsupported delete action.</value></data>
   <data name="RendererAppendConstraintDatabase2" xml:space="preserve"><value>Check constraint '{0}' has no expression.</value></data>
   <data name="RendererAppendConstraintDatabase3" xml:space="preserve"><value>Constraint '{0}' has an unsupported kind.</value></data>
@@ -1035,6 +1036,7 @@
   <data name="CompiledDefaultSubject" xml:space="preserve"><value>Compiled column DEFAULT</value></data>
   <data name="DamagedCatalogHint" xml:space="preserve"><value>The catalog is damaged or was written by an incompatible engine build; restore the database from a backup.</value></data>
   <data name="UncheckedCallHint" xml:space="preserve"><value>An engine build that did not check function arguments stored it, and this engine cannot evaluate it; open the database with that build and drop the constraint or replace it with a valid one.</value></data>
+  <data name="TempDirectoryInvalid" xml:space="preserve"><value>must name a dedicated directory below RootPath without link components; its first segment must not be a name a database could take, and a leading dot is safe. Empty or default paths are invalid.</value></data>
   <data name="FileNamesOrphanDirectory" xml:space="preserve"><value>Database '{0}' cannot be created: its directory '{1}' is already there without a database in it, left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.</value></data>
   <data name="FileStorageAlreadyExists" xml:space="preserve"><value>Storage for database '{0}' already exists.</value></data>
   <data name="CatalogTableSubject" xml:space="preserve"><value>table '{0}.{1}'</value></data>
@@ -1075,4 +1077,5 @@
   <data name="StoragePublicationFailed" xml:space="preserve">
     <value>Storage replacement publication failed after its catalog commit; recovery decides the outcome.</value>
   </data>
+  <data name="TempRootInvalid" xml:space="preserve"><value>must be a valid path or an empty path for an in-memory engine; a default path is invalid.</value></data>
 </root>

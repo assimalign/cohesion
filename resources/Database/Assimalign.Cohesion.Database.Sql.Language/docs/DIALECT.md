@@ -127,10 +127,11 @@ Canonical SQL omits ASC, ASC's NULLS FIRST and DESC's NULLS LAST. PRIMARY KEY an
 constraint column lists reject these options with CS00003; index expressions and INCLUDE
 remain excluded. The profile adds CREATE INDEX KEY ORDER (+1 declared clause).
 
-Catalog/record-space format 36 stores every key's effective order in mandatory index extension 3;
+Format 36 introduced ASC NULLS FIRST as the default key order (#1787). Current
+catalog/record-space format 37 stores every key's effective order in mandatory index extension 3;
 compiled-schema v12 carries KeyOrders. The language, catalog and compiled enums use zero for
 ASC NULLS FIRST; an omitted or zero-filled KeyOrders vector has that default. PRIMARY KEY and
-UNIQUE-constraint indexes also take it. Format 35 and earlier databases and v11 and earlier
+UNIQUE-constraint indexes also take it. Format 36 and earlier databases and v11 and earlier
 artifacts are refused before any write, including unclean journals, without conversion.
 INFORMATION_SCHEMA.INDEXES and COHESION_SCHEMA.INDEXES add nullable DIRECTION and
 NULL_PLACEMENT: DESC is reported when descending, LAST only for ascending NULLS LAST,
@@ -246,7 +247,7 @@ NULL-containing partial keys neither conflict nor take uniqueness locks, includi
 COHESION_SCHEMA.INDEXES and its nonstandard INFORMATION_SCHEMA.INDEXES alias expose nullable
 canonical PREDICATE text per key column. Views over these relations retain that text. Partial
 unique indexes are excluded from TABLE_CONSTRAINTS because their uniqueness is conditional.
-Current SQL record-space format is 36 and compiled-schema format is v12; earlier files and
+Current SQL record-space format is 37 and compiled-schema format is v12; earlier files and
 artifacts are refused with the existing coded format gates and no upgrade reader.
 
 
@@ -258,7 +259,7 @@ ON DELETE and ON UPDATE can appear in either order, once each; omitted actions i
 mean NO ACTION. Canonical constraint SQL renders ON DELETE before ON UPDATE. Duplicate actions
 and incomplete actions report CS00003. Action column lists remain CK00001.
 
-Catalog format 36 and compiled-schema v12 retain OnUpdate; INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
+Catalog format 37 and compiled-schema v12 retain OnUpdate; INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
 and views over it report the stored UPDATE_RULE. CompiledSchemaConstraint exposes the action;
 the typed References builder keeps its existing declaration and defaults update metadata to NO ACTION.
 Declared provisioning scripts may carry the SQL clause and persistent views over its metadata.
@@ -317,7 +318,9 @@ the engine's common-type implicit-cast rules and registered casts; unknown text 
 the selected value type during binding, including unused defaults, with ordinary CAST diagnostics. Offsets and bucket counts accept the engine's signed integer types,
 including BIGINT, with overflow-safe navigation through the full Int64 range.
 NEXT VALUE FOR retains its existing CS03076 exclusion in window arguments and keys;
-PostgreSQL-style nextval() keeps its ordinary per-call evaluation.
+PostgreSQL-style nextval() keeps its ordinary per-call evaluation, except that windows with equal
+specifications, or a sort that prefixes another's, evaluate a scalar key once (below), as PostgreSQL
+does for equal specifications (parse_agg.c:1103-1112). Equal scalar keys in other windows, or in one window's PARTITION BY and ORDER BY, evaluate separately; PostgreSQL's target matching evaluates them once (parse_clause.c:2205-2206,2815-2826).
 If the first NTILE argument is NULL, the entire partition returns NULL even when later
 rows' bucket expressions differ. This follows the SQ-W1 contract; PostgreSQL can retry
 initialization after a NULL argument (windowfuncs.c:424-440).
@@ -326,7 +329,7 @@ The WindowAgg stage groups equal partition/order specifications and processes lo
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
 functions and sort_shared for each group. Window inputs, augmented result rows, sort indexes,
 key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
-an excess and every reservation unwinds on success, error or cancellation. Whole input and
+an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first. Every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
 Reference-identity ownership avoids duplicate payload charges; consumed input rows and
 partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
@@ -506,8 +509,9 @@ not a claim that GC heap measurements equal the grant. The ownership ledger itse
 Final ordered collectors remove discarded outputs and keys from the partition cleanup owner
 before releasing their ledger charges, including bounded LIMIT heaps. Cleanup uses counted
 reference-identity membership with bounded dictionary-capacity allowances and O(1) removal.
-Previously materialized statement subquery vectors and CTE/relation rows are admitted when
-the window owner starts (CS05067 on failed admission); payload aliases remain charged once.
+In DML and recursion, previously materialized statement subquery vectors and CTE/relation rows
+are admitted when the window owner starts (CS05067 on failed admission); payload aliases remain
+charged once. Plain SELECT caches keep their separate statement reservations.
 Scalar, EXISTS and IN/quantified subquery caches share this admission path. Plain children
 clear their owned source cells and buffers after copying the cached values, including unread
 EXISTS rows, so completed async frames cannot keep discarded payloads alive across admission. Computed IN-list
@@ -639,7 +643,11 @@ name::regclass resolve a sequence to its BIGINT object identity for these calls;
 REGCLASS is limited to sequences and is not a storable column type. References
 resolve for each statement rather than pinning names across DROP/recreate.
 NULL arguments propagate NULL. Calls are volatile, evaluated left to right once
-per reached row; repeated nextval calls each allocate. Multi-row VALUES assigns
+per reached row; repeated nextval calls each allocate, except that windows with equal specifications,
+or a sort that prefixes another's, evaluate a scalar key once, as PostgreSQL does for equal
+specifications (parse_agg.c:1103-1112). Equal scalar keys in other windows, or in one window's PARTITION BY and ORDER BY, evaluate separately;
+PostgreSQL's target matching evaluates them once (parse_clause.c:2205-2206,2815-2826).
+Equal whole aggregate keys reuse a target's aggregate results (below). Multi-row VALUES assigns
 values in written tuple and expression order. INSERT SELECT assigns in the
 source's evaluation order. Independent sequence outputs evaluate after ORDER BY and before
 LIMIT/OFFSET, including ordering by another output's alias or ordinal; these independent outputs
@@ -652,9 +660,10 @@ returns nextval 2 and leaves 3 next. A sequence output used as a sort key evalua
 (PostgreSQL src/backend/optimizer/plan/planner.c:2216-2225;
 src/backend/executor/nodeLimit.c:91-116). Unordered grouped and correlated inputs apply WHERE/HAVING,
 project each qualifying row immediately, discard OFFSET rows and stop at LIMIT.
-They retain no deferred input and charge no grant. Ordered deferred inputs filter before retention
-and use the same uncharged sorting as sequence-free queries on plain, correlated, grouped and
-grouping-set paths. LIMIT and deep OFFSET pages add no deferral charge. On plain and correlated
+They retain no deferred input; kept outputs and group state still charge the statement grant. Ordered deferred inputs filter before retention
+and use budgeted sorting like sequence-free queries on plain, correlated, grouped and
+grouping-set paths. Pagination adds no capacity-based CTAS admission charge; sorting still
+charges retained OFFSET + LIMIT candidates. On plain and correlated
 paths, fixed collations bound retention by OFFSET + LIMIT; grouped and grouping-set deferral
 retains every group that passes HAVING, and deferred collations retain all candidates. Existing grouping-set
 group/aggregate state charges still apply equally with and without sequence outputs.
@@ -1430,14 +1439,25 @@ Rows travel unchanged in existing SQL header/row/complete frames.
 ## Admission during deferred provisioning (49a)
 
 While a code-first migration runs on populated tables, statements referencing its reserved
-tables wait before binding. This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and
-ALTER ADD CONSTRAINT, so a pending unique index is available when the FK is checked.
+tables wait before binding; all plan targets remain reserved through publication.
+This includes FK parents in CREATE TABLE, ALTER ADD COLUMN and ALTER ADD CONSTRAINT,
+so a pending unique index is available when the FK is checked. FK neighbours
+are reserved when the FK changes, either end rewrites or matching parent key trees change;
+stable neighbours remain available, though FK probes into a reserved table wait.
+Statements naming a new table in the plan also wait before binding, then see the published table
+or the ordinary undefined-table error if preparation failed; creating its reserved name refuses CS03404.
+
 EXPLAIN recursively admits its wrapped statement through the same table reservations before
 planning, so its access path reflects the completed migration.
 After admission, writes enforce the completed column nullability and bounds. Unrelated
 tables remain available. Code-first changes to built-in `VARCHAR` length and `DECIMAL`
-precision use the validation-only ALTER path described above; a storage, domain, scale or
-DEFAULT rewrite remains unsupported.
+precision in a deferred plan use joint validation/preparation. Every deferred plan publishes its
+complete target in one catalog commit, including cheap additions and drops (#1778, SQ-A5).
+Before publication a failure reports CS03402 and keeps the old schema online. Only a matching
+target Build resumes interrupted preparation; a different-target Build discards it and replans
+from the stored schema. A no-target open discards without a provisioning report or trace; a
+successful Verify clears a declared discard observation. Non-TYPE inline and empty-table paths retain their existing behavior
+until SQ-A6; default-only changes still refuse CS03105.
 
 Referential SET NULL and SET DEFAULT update only matching foreign-key columns, using the
 ordinary domain, nullability, CHECK, outgoing/incoming FK, MVCC and index machinery.
@@ -1872,10 +1892,11 @@ length, while non-space overflow refuses. Each rewrite chunk
 evaluates USING, domains and CHECKs before entering the database-wide physical apply gate.
 Failed builds expose their abandoned owner through pending reclamations until its pages are freed.
 Full-definition identity-type changes retain their refusal; use explicit TYPE for integer identity conversion.
-Typed-schema plans containing a TYPE rewrite prepare their complete target unpublished, using
+Typed-schema plans containing a TYPE rewrite and every deferred migration prepare their complete target unpublished, using
 the same assignment conversion/copy path, then publish every table, index, constraint and applied
-marker in one commit (#1447, SQ-A3). Build defers populated work to the provisioning worker;
-empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same joint executor inline.
+marker in one commit (#1447, SQ-A3). Build defers populated work to the provisioning worker.
+For TYPE-rewrite plans, empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same
+joint executor inline; their non-TYPE paths retain their existing behavior until SQ-A6.
 Before publication users on touched tables wait through the lock manager; DML on other tables
 proceeds. Definition DDL is refused database-wide from Build through queue time and worker completion.
 CREATE TABLE, CTAS, CREATE VIEW, CREATE SEQUENCE and ALTER TABLE RENAME TO cannot claim an
@@ -1917,7 +1938,7 @@ WAL write/flush, unconfirmed commit and existing engine-wide failure policies st
 offline. An unconfirmed publication uses CS03403 and leaves recovery to decide old/new.
 Deferred Build does not copy data; RunMigrationsInline or any declared script forces the typed
 copy inline during Build. The executable SqlJointTypeMigrationTests corpus covers these edges.
-In a joint TYPE plan, additive indexes and CHECK, NOT NULL, UNIQUE and foreign-key constraint
+In every joint plan, additive indexes and CHECK, NOT NULL, UNIQUE and foreign-key constraint
 changes can keep the physical heap owner (#1777, SQ-A4). Stored column types and facets must
 remain identical, including native-domain bounds. Dropping or replacing a heap-owned index
 forces a rewrite; alternate-tree drops and replacements can keep the heap and reclaim kind-14
@@ -1929,7 +1950,8 @@ Space admission counts only new trees for a kept table. Failed preparation recla
 trees and retains its heap and published indexes. The SqlJointTypeMigrationTests.KeepOwners
 conformance corpus covers owner retention, constraint failures, mixed publication and crash images.
 SQL format 35 introduced separate tree ownership and durable per-table classification; format 34
-introduced the Joint/ kind-9 meaning. Every earlier format is refused (#1152).
+introduced the Joint/ kind-9 meaning. Format 37 requires joint publication for every deferred
+job and fences all per-step 49a intents before any write. Every earlier format is refused (#1152).
 Compiled-schema v12 remains current; record encodings and wire messages are unchanged.
 SQL format 27 introduced the per-column TYPE default-assignment flag in table extension 7; older files
 refuse without an upgrade reader. Compiled-schema v8 was unchanged by SQ-A.
@@ -2194,7 +2216,7 @@ ANALYZE counts tested candidate pairs, excluding emitted unmatched rows. All ret
 rows and match flags share StatementMemoryBudget (default 64 MiB), including nested builds;
 CS05067 refuses exhaustion without spill. Reservations unwind on success, failure and
 cancellation. Joined DML also charges retained outer/intermediate inputs and associations as
-described in the statement-memory contract below. General SELECT result materialization is outside that grant.
+described in the statement-memory contract below. Plain SELECT result materialization also shares that grant, as described below.
 PostgreSQL anchors: optimizer/path/joinrels.c:1157-1180, executor/nodeHashjoin.c:578-592,634-679,729-756.
 
 Three through eight eligible stored-table inputs use exact subset dynamic programming
@@ -2517,7 +2539,7 @@ database is refused too. Format 6 (#1241) keeps format 5's rows and index trees
 but records each table's dropped-column positions in the catalog and decodes
 rows through them, so a format-5 database is refused too. The engine has no
 upgrade path (#1152). It refuses to
-open a database on any format but 36 — older or newer — with an error that names
+open a database on any format but 37 — older or newer — with an error that names
 the database, the format it found and the format it supports. The check reads
 only the database's catalog and runs before the engine opens the data files, so
 a refused open never touches them. Catalog and data format checks read Storage's
@@ -2527,7 +2549,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. Format 29 added owned-sequence metadata to format 28's shared sequence records and retained TYPE default assignment coercion. Format 30 added foreign-key ON UPDATE metadata; new databases use format 36, retaining partial predicates and directed keys and fencing SQL/JSON function spelling; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
+is tracked by #1152. Format 29 added owned-sequence metadata to format 28's shared sequence records and retained TYPE default assignment coercion. Format 30 added foreign-key ON UPDATE metadata; new databases use format 37, retaining partial predicates and directed keys and fencing SQL/JSON function spelling; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
 stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
@@ -2673,7 +2695,7 @@ OFFSET + LIMIT qualifying rows (#1523). Stored-table
 and system-view scans also stop reading input. Grouped queries still consume their
 aggregate input, but stop group projection and HAVING evaluation at the window;
 correlated queries stop outer-row evaluation. Join inputs/results and set operands
-still materialize, while their final projection stops at the window. Unvisited
+are read completely, while their final projection stops at the window. Unvisited
 projections and HAVING predicates raise no errors and make no volatile function
 calls, following PostgreSQL's Limit node (`src/backend/executor/nodeLimit.c:82-124`).
 Non-DISTINCT ORDER BY + a positive LIMIT
@@ -2703,6 +2725,10 @@ the previous call order and count; PostgreSQL likewise postpones independent vol
 outputs (`src/backend/optimizer/plan/planner.c:6649-6662`). When ordering references
 outputs, projections still evaluate once per input before keys. Grouped and correlated
 projections retain their existing evaluation before sorting.
+Pipelined grouping inputs, join outputs, bounded EXISTS/scalar bodies and unordered DISTINCT
+retain the same volatile and sequence evaluation; nonvolatile calls may interleave. When a statement
+contains multiple failures, which failure surfaces
+first may change.
 
 ## VALUES and counts have no column scope (#1165)
 
@@ -2801,14 +2827,43 @@ evaluated. This includes correlated and independent argument subqueries. Indepen
 inside the filtered call are evaluated on first demand and cached for the statement.
 FILTER works with default/ALL/DISTINCT calls, COUNT(*), ordered STRING_AGG/LISTAGG,
 GROUP BY, HAVING and ORDER BY. Different conditions retain independent aggregate states.
-Filtered calls with volatile arguments, ordering keys or conditions also retain independent
-states; child queries conservatively prevent aggregate sharing.
-The condition binds over input columns and may reference enclosing columns or contain
+In plain grouping and grouping sets (#1763), separate aggregate occurrences with a volatile
+argument, FILTER condition or inner ORDER BY key (including WITHIN GROUP) retain independent
+states. This includes SELECT duplicates, every HAVING occurrence and aggregates nested inside a
+larger unmatched key. A whole query ORDER BY key or whole window PARTITION BY / ORDER BY key,
+inline or named, that is structurally equal (SameGroupExpression) to a select-list expression
+or an earlier whole key reuses that occurrence's aggregate results, even with volatile inputs.
+PostgreSQL matches those whole keys during parsing, before aggregate sharing runs
+(parser/parse_clause.c:2205-2206,2815-2826; parser/parse_agg.c:1103-1112);
+optimizer/prep/prepagg.c:387-389 refuses sharing for the remaining volatile occurrences.
+ORDER BY aliases and ordinals still read completed outputs; scalar output evaluation is unchanged.
+Stable and Immutable inputs retain sharing everywhere. A cast itself is not a volatile input because
+SqlCast declares no volatility; the partial-index path instead refuses reachable application casts
+for that reason (Assimalign.Cohesion.Database.Sql/src/Internal/Binding/SqlPartialIndexPredicate.cs:224-226;
+partial indexes above).
+Separate child-query occurrences never share aggregate states: by PostgreSQL prepagg.c time
+each child query is a separate SubPlan, so equal() fails (optimizer/plan/planner.c:1475-1477,1880-1881;
+optimizer/prep/prepagg.c:416). Equal complete child queries still match inside a whole key before
+that refusal applies. Window calls retain separate aggregates even when they share a sort;
+equal whole window keys reuse aggregate slots and allow the windows and sort prefixes to merge.
+
+A key naming an output alias never matches. Child-query bodies and window expressions compare by
+spelling, so `t.id` against `id` stays independent. PostgreSQL compares child queries and a window
+call's arguments as analyzed trees and matches them; it compares an inline OVER clause as written
+(parse_agg.c:1103-1107), so those stay independent there too.
+A matched key's independent child query still runs once under eager statement preparation and its
+value is unread, so the key's child can advance a sequence that PostgreSQL leaves alone. The rule covers
+aggregates only: a window function's own volatile input in a whole ORDER BY window expression evaluates
+per window call.
+
+The FILTER condition binds over input columns and may reference enclosing columns or contain
 subqueries; aggregates local to those child queries belong to the child scope. Calls owned
 entirely by an enclosing query retain the existing outer-only aggregate CK00001 boundary.
 FILTER on a scalar call fails with CS05072 (42809), a same-scope aggregate in the condition with CS05073
-(42803), and a non-Boolean condition with CS02003 (42804). Window calls in a condition and
-FILTER on a window aggregate retain CK00001 until the window family implements them.
+(42803), and a non-Boolean condition with CS02003 (42804). Window calls inside a plain aggregate's
+FILTER fail with CS05076; inside a window aggregate's FILTER they fail with CS05077 (both 42P20).
+FILTER on a window aggregate executes with the
+same predicate-first rule.
 EXPLAIN reports `filtered_aggregates=N` on a grouping node only when N is nonzero.
 
 | Aggregate | Non-NULL input and result |
@@ -3811,7 +3866,7 @@ and `parse_expr.c:2541-2560,3085-3105`.
 
 These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
 SQL function bodies and views. Canonical CHECK text is exposed by
-INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 36 refuses older files;
+INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 37 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
 ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
@@ -5078,7 +5133,7 @@ wrappers and domain CHECKs, including domains in casts and function parameter/re
 Reopening with the original compatible registration restores use.
 New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
 on every bind. Domain defaults remain literal-only
-and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 36, with no compatibility reader.
+and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 37, with no compatibility reader.
 Format 28 adds the internal sequence definition and reservation records (#1717). Relation-name
 collisions involving an existing sequence use CS03070 (42P07), as sequence creation does for any
 occupied relation name; the diagnostic names the existing kind. Table-on-table collisions retain
@@ -5244,7 +5299,7 @@ SQL does not infer it from a CLR exception type. This follows PostgreSQL datetim
 REAL and DOUBLE text retain CS02022 / 22P02 for malformed input and CS02002 / 22003
 for overflow/underflow. Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
 
-Catalog format 36 and compiled-schema v12 refuse earlier definitions rather than reinterpret
+Catalog format 37 and compiled-schema v12 refuse earlier definitions rather than reinterpret
 retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
 '2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries CS06041;
 a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,
@@ -5326,7 +5381,31 @@ including normalized buffers and referential writes. These conservative reservat
 statement exit; shared payload already charged by a hash build is not charged again for an alias.
 An exhausted joined statement refuses before any write and releases memory on success, failure or
 cancellation. CTAS also charges its retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
-`CS05067` (53200, out_of_memory). It does not cap result materialization or transient planning.
+`CS05067` (53200, out_of_memory). Plain SELECT also charges nested-loop inners, normalized
+join child buffers, staged matches, group keys and aggregate state, aggregate DISTINCT tuples
+and ordered inputs, full sorts and bounded top-N heaps, output rows and DISTINCT sets,
+materialized results retained by consumers, derived/view/CTE caches, independent subquery
+values and correlated vectors, and set operands, seen sets and counts. Each operator reserves
+before retaining an entry and releases on consumption or scope exit, including cancellation
+and failure. Child result charges unwind before return; consumers re-admit retained results.
+Costs follow retained rows, never list capacity. CTAS source admission counts only rows kept
+after pagination, including sequence OFFSET queries (#1762). CTAS sources charge like any
+SELECT, including sort/group state and relation caches; both sequence and sequence-free
+1,001-key grouped OFFSET forms refuse at 8 KiB, while equal kept outputs have equal admission.
+Window buffers absent from the window ledger also charge; ledger-owned rows and vectors
+keep that owner. An independent cache first materialized in a window remains charged for
+the statement. When plain bytes fill the grant first, refusal reports CS05067, including statements whose
+earlier ledger would later refuse with CS05079 or CS05094. With no plain bytes live, window
+and SQL/JSON grant refusals retain their specific code. Statement memory refusal aborts input
+immediately, including input with a later error. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
+buffer owner by reference identity, plus a fixed 64 B per distinct wide-cell map entry
+(#1776, SQ-L1c). Further references pay their array slots; smaller cells still pay per
+reference. Equal but separate objects, including binary clones, each pay. Output and ordering
+keys share their collector map. Two live buffers each pay, bounding repeated-payload
+overcharge by simultaneously live owners rather than rows. Hash builds still charge each reference.
+Maps release with their buffer;
+heap replacement removes dead identities immediately. Plan-sized traversal and
+current-row state, storage iterator scratch and transient planning remain outside the grant.
 SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and
 returns the existing eight-column plan description. `actual_rows` counts candidates before
 residuals on instrumented nodes, rather than final output cardinality. `estimated_rows` and

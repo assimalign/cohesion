@@ -201,7 +201,7 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             object? value;
-            if (expression.Query.IsValue)
+            if (expression.Query.IsValue || plan.Plan is DocumentSetOperationPlan { Shape: DocumentSetResultShape.Document })
             { value = row.GetValue(0); }
             else if (expression.Query is OqlSelectExpression { Projections.Count: 1 } block && block.Projections[0].Expression is OqlUnaryExpression { Operator: ".*" })
             { value = row.IsMissing(0) ? DocumentMissing.Instance : row.GetValue(0); }

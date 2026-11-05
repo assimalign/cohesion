@@ -17,15 +17,15 @@ internal sealed class DatabasePlanDescriptionRow : DatabaseRow
     }
 
     public override int FieldCount => _values.Length;
-    public override bool IsNull(int ordinal) => _values[ordinal] is null;
-    public override object? GetValue(int ordinal) => _values[ordinal];
-    public override string? GetString(int ordinal) => _values[ordinal] is null ? null : Convert.ToString(_values[ordinal], CultureInfo.InvariantCulture);
-    public override int GetInt32(int ordinal) => Convert.ToInt32(Required(ordinal), CultureInfo.InvariantCulture);
-    public override long GetInt64(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
-    public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
-    public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
-    public override ReadOnlyMemory<byte> GetBytes(int ordinal) => _values[ordinal] is null
-        ? ReadOnlyMemory<byte>.Empty : Encoding.UTF8.GetBytes(GetString(ordinal)!);
+    protected override bool IsNullCore(int ordinal) => _values[ordinal] is null;
+    protected override object? GetValueCore(int ordinal) => _values[ordinal];
+    protected override string? GetStringCore(int ordinal) => _values[ordinal] is null ? null : Convert.ToString(_values[ordinal], CultureInfo.InvariantCulture);
+    protected override int GetInt32Core(int ordinal) => Convert.ToInt32(Required(ordinal), CultureInfo.InvariantCulture);
+    protected override long GetInt64Core(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
+    protected override bool GetBooleanCore(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
+    protected override double GetDoubleCore(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
+    protected override ReadOnlyMemory<byte> GetBytesCore(int ordinal) => _values[ordinal] is null
+        ? ReadOnlyMemory<byte>.Empty : Encoding.UTF8.GetBytes(GetStringCore(ordinal)!);
 
     private object Required(int ordinal) => _values[ordinal] ?? throw new InvalidOperationException();
 

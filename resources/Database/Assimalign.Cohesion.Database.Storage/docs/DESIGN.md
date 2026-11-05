@@ -1,5 +1,156 @@
 # Assimalign.Cohesion.Database.Storage — Design
 
+## Disposable query spill substrate (#1789, EN-X1)
+
+StorageTempSpace, StorageTempStatement, StorageTempRun, StorageTempRunReader,
+StorageTempSorter, StorageTempSortReader and StorageTempPartitions are sealed public leaves.
+The model owns one space and supplies a required free-space reserve delegate; Storage references
+no model. StorageTempException carries an unprefixed message, a CK05 identity and the I/O cause.
+SQL keeps its space internal; SQL, OQL and GQL operators retain their existing memory refusals.
+
+A space fixes its engine quota after sweeping: an explicit nonnegative quota, or min(10 GiB,
+floor(available volume bytes / 4)). Leftovers do not shrink the quota for the engine's lifetime.
+The free-byte probe uses the actual directory volume (GetDiskFreeSpaceEx on Windows, including
+mounted volumes and UNC shares; DriveInfo/statvfs on Unix), using the nearest existing ancestor
+before lazy directory creation. A probe overflow means effectively unlimited free space.
+An unavailable probe leaves quota zero until CreateRun retries successfully. A lease, sweep or
+probe IOException (including PathTooLongException)/UnauthorizedAccessException warns and lets
+the engine start; CreateRun retries all setup and refuses only that statement with CK05005 if
+it remains unavailable. Every temporary
+file create, read, write or close I/O failure, including ENOSPC, is CK05005 with its original cause.
+Failed append/seal releases the run; failed reads permanently fail that reader, retaining ownership
+with its statement. No temporary failure takes durable storage offline.
+
+Every new physical page checks the statement quota, engine quota and live model-supplied reserve.
+The space caches available bytes, refreshing outside Gate after 128 reserved pages
+(1 MiB) or a sample age above one second (Environment.TickCount64). A would-be CK05003
+re-measures once before refusing, so freeing disk after a refusal permits a later reservation.
+Ordinary refresh uses TryEnter on _probeGate; a stalled probe lets other statements use the
+stale sample with the engine's own reservations still subtracted; a stalled or repeatedly discarded
+probe has no page-count or age bound on staleness. The before-refusal refresh may wait and accepts
+its fresh value even when a release races it, treating that release as already reflected. A release
+during an ordinary probe invalidates that sample and leaves the next reservation eligible to retry.
+A close reflected in a sample before its release accounting can be credited twice until the next
+accepted sample. The estimate subtracts
+reservations since the sample and buffered unwritten pages present at the sample, crediting
+releases after the sample. Other processes and database writes can consume
+space inside that window; this is admission headroom, not an OS disk reservation.
+Gate covers accounting and the statement/run registries only. Each run locks its own reads,
+writes and disposal. Lock order is run lock, then _probeGate, then Gate, never the reverse;
+no syscall, sort, merge or event callback runs under Gate. Parent disposal snapshots registries under Gate,
+then releases it before disposing children, continuing after close failures. Callers must not
+hold a storage page latch across these calls. An unrelated statement can read, cancel, dispose
+or create a run while another statement is blocked in page I/O.
+
+File engines keep the conservative floor: 2.54 GiB per open database at default options. For
+N = max(1, published database count), C = 1 MiB + N * (BufferPoolCapacity + 128 * 8192 +
+2 * (JournalSizeLimit + JointBracketBytes(32, 0))); floor = C + max(1 MiB, ceil(C / 4)), saturating
+on overflow. A refused spill preserves database headroom. An in-memory engine has no journals
+on the temporary volume and uses the 1 MiB minimum.
+
+Files are lazy, delete-on-close, sequential-scan and opened with FileShare.Delete only. The run
+caches its handle once. A directory belongs to one spilling engine: two engines over one root
+can start and open different databases; a second spill refuses with CK05005 and names
+TempDirectory as the way to choose another directory. No per-engine subdirectories are added.
+Startup releases its sweep lease immediately, keeping idle format preflights free of sidecars;
+the first run reacquires and sweeps again, holding the lease until space disposal. Both the
+lease path and temporary directory must have no LinkTarget; the lease path is checked again
+after opening. Unix lease permissions are applied through its open handle. Windows opens the
+lease with FileOptions.None and FileShare.Delete, and deletes its path before closing, so closing cannot
+delete a symbolic link target. Unix keeps delete-on-close because runtime lock verification
+uses it; a second exclusive open verifies flock before sweeping. Unsupported/disabled flock
+warns once at startup when the directory exists, or at first failed use when it was absent,
+preserves potential live files and refuses a later spill with CK05005. The Warning carries
+the cause's exception type. Cleanup failures are counted without replacing the initiating error.
+Sweeping removes only cohesion-<32 hex GUID>.ctmp, preserving other files/subdirectories.
+TempFixture has crash and lease-probe modes; the latter retries at CreateRun and verifies the
+coded refusal without sweeping when Unix locking is disabled.
+
+Each run is a 4-byte little-endian length followed by opaque bytes, possibly crossing pages.
+Empty records/runs are valid. Each 8192-byte page has a 32-byte header: magic, private format
+version 2, page ordinal, used payload length, random 64-bit run identity at bytes 20..27 and
+CRC-32C at bytes 28..31. The checksum covers the entire page with its checksum field zeroed.
+Reads check version, ordinal, run identity, used length, checksum, record boundaries and EOF
+before publishing buffer positions. Any read exception after argument checks permanently fails
+the reader; later calls raise CK05004 with a previous-read-failed message and without I/O,
+damage events or damage counters, even after cancellation before consuming bytes.
+This disposable format is independent of durable storage format 4. No WAL, MVCC, recovery or
+StorageBufferPool participates, and no durable I/O counter moves.
+
+Keys encode direction, collation and NULL placement; a unique Int64 input ordinal breaks ties.
+The sorter uses a grant of at least 64 KiB, an explicit maximum framed record (key + value + 16)
+and a grant-minus-32-KiB workspace. Its separate 8-KiB output page and bounded 64 * FanIn run
+directory fit the rest; one directory slot is reserved for merge output.
+FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2. Runs accumulate during
+generation until the directory is full apart from that output slot, then the FanIn smallest merge
+repeatedly until the directory is at most half full.
+Complete flushes and merges
+the smallest remaining runs down to FanIn, doing the partial group first to minimize writes
+(Huffman-style); the global input ordinal makes merge-tree shape irrelevant to stability. It returns
+StorageTempSortReader owning those runs; the final heap merge runs in MoveNext without a new
+output file. At most FanIn initial runs write each row once. The reader retains count times
+(8 KiB + maximum record) and Complete releases the rest of the workspace. It refills the previous
+winner at the next MoveNext, preserving borrowed Key/Value until then. An exhausted owned input
+immediately closes its reader and run, returning quota as the merge proceeds; a close failure is
+counted without failing MoveNext. Reader
+disposal deletes its remaining inputs; statement disposal also closes them. Statement
+PhysicalBytes/PeakBytes expose live and peak reservations. RecordsWritten/KeyComparisons are internal test counters; two input sizes
+bound merge depth and write growth, while differential cases cover several grants and levels.
+Hash partition instances require serialized use. Partitions are lazy files selected by hash
+modulo count; their grant covers an 8-KiB writer plus 512 bytes bookkeeping per partition.
+Consumers own skew/repartition policy and match flags.
+
+Reference behavior, without copying code: PostgreSQL balanced k-way sorting
+(src/backend/utils/sort/tuplesort.c:15-42), on-the-fly final merge (tuplesort.c:161), private BufFile
+buffering (src/backend/storage/file/buffile.c:71-104), pre-write quota checks
+(src/backend/storage/file/fd.c:2251-2274), startup availability (fd.c:3316-3318), and owner-only
+file/directory defaults (src/common/file_perm.c:19-20; src/include/common/file_perm.h:38).
+
+Temp data is **unencrypted**. On Unix after a kill, and on every OS after power loss, row data
+can stay on disk until an engine next opens that directory. Windows process exit deletes
+delete-on-close runs; OS-level backups of RootPath can capture live temp files. Unix creates
+new directories 0700 and run/lease files 0600, deliberately stricter than data-file permissions,
+and refuses group- or other-writable directories. On Windows an explicit directory keeps its
+inherited ACL. File-engine option checks reject a first segment a database could take
+(a leading dot is safe) below RootPath
+and any link component below the root. Encryption at rest must cover these files when it arrives.
+
+Limits: peak disk is bounded by compact data pages (including the 4-byte run prefix per sort
+frame), plus the largest intermediate merge, plus one 8-KiB rounding page per initial run
+(and one output page). This is not a
+(1 + 1 / FanIn) bound: at 2 * FanIn - 1 equal runs, the largest merge includes FanIn runs,
+giving a ratio of 1 + F / (2F - 1), where F = FanIn, before page rounding. Seventeen 52,608-row runs of 1,020-byte sort
+frames finish inside a 1-GiB quota; a late larger merge can still need more headroom.
+At FanIn 3, 2,000 equal 216-row runs (51.7 MiB) measured 6.9535 times input writes at depth 7;
+500, 5,000 and 20,000 runs measured 5.7720, 7.8458 and 9.2722 times at depths 6, 8 and 10.
+At most 64 * FanIn run handles are live per sorter (1,024 at FanIn 16), plus the directory lease;
+concurrent statements add up. File handle exhaustion (EMFILE) surfaces as CK05005 and releases
+the failing sorter's owned runs. EMFILE is process-wide, so other opens in the process can fail
+while a sort is at the limit. FileStream objects, handles, paths and statement run-registry entries
+are outside the fixed-buffer grant and grow with the live run count. No handle virtualization or
+operator spilling is introduced. Failed closes return accounting but credit
+only unwritten pages as free headroom, since disk reclamation was not confirmed.
+The arena is allocated for the full grant at creation; growing it on demand, multi-page
+merge input buffers and dynamic fan-in remain for SQ-L2 to measure with a real consumer. A record
+over the declared maximum is a coded CK05006 refusal. The engine quota and statement default
+(4 times the memory budget) bound capacity; ten grants requires an explicit larger statement quota.
+
+| Code | Temporary storage condition |
+|---|---|
+| CK05001 | Engine physical-byte quota exceeded |
+| CK05002 | Statement physical-byte quota exceeded |
+| CK05003 | New page would cross the engine free-space reserve |
+| CK05004 | Temporary page/record damaged, or reader previously failed |
+| CK05005 | Temporary space unavailable, including lease, probe, sweep and file I/O |
+| CK05006 | Encoded sort record exceeds its declared maximum |
+
+The Storage EventSource owns exact process counters even without listeners. Events 21
+TempSpaceBytes (Verbose, deltaBytes/currentBytes), 22 TempSpaceRefused (Verbose, code), 23
+TempSpaceUnavailable (Warning, code/exceptionType) and 24 TempSpaceDamaged (Error, code) use Keywords.TempSpace
+(0x10); callbacks run outside Gate. Counters: current-temp-bytes (gauge), temp-pages-written-per-second,
+temp-refusals-per-second (including CK05005 and CK05006) and temp-damage-per-second (rates). No path, key or row enters events.
+
+
 ## Bracket commit failure injection (#1726)
 
 The internal TransactionCommitting observer runs before commit journals a page or ends the bracket.
@@ -20,8 +171,8 @@ failure, including ENOSPC or an exception before the provider reports any writte
 medium outcome cannot be proved. Unconfirmed commit waits, failed durable data-file flushes
 and failures after issuing a checkpoint header-slot write retain their fences. Engine-wide
 write-back/checkpoint/write-ahead-flush/version-purge failure windows and the repeated
-failed-checkpoint journal limit retain their offline policies; so do 49a provisioning failure
-and interrupted open-time recovery. A read error or a prepared-page write refusal alone stays
+failed-checkpoint journal limit retain their offline policies; so do post-commit publication
+faults and interrupted open-time recovery. A read error or a prepared-page write refusal alone stays
 online. SQL documents the admission formula,
 its concurrency/expansion limits and CS03403's unknown publication outcome in its DESIGN.
 
@@ -47,7 +198,7 @@ classification and scrub. If that scrub is interrupted after committing a batch,
 unpublished storage with `StorageOfflineCause.RecoveryInterrupted` before disposal; ordinary
 shutdown must not checkpoint away the remaining classification records. The original cancellation
 or recovery error still reaches the caller. `ProvisioningFailure` is the other new engine cause:
-a deferred migration failed and its database must remain offline until reopened. Both reuse the
+in-memory publication failed after a catalog commit and recovery must decide the published state. Both reuse the
 existing offline write fence and add no new events or on-disk storage format.
 
 `HasOwnerPages(ownerId)` is a constant-time physical-allocation query beside `GetOwnerPages`.
@@ -2948,7 +3099,7 @@ and its `Message`; no record, key, page content or path other than what an excep
 carries is written.
 
 Keywords, for the high-volume families: `Checkpoints = 0x1`, `WriteBack = 0x2`,
-`GroupCommit = 0x4`, `BufferPool = 0x8`. An event without one is written whatever keywords a
+`GroupCommit = 0x4`, `BufferPool = 0x8`, `TempSpace = 0x10`. An event without one is written whatever keywords a
 session enables.
 
 | Id | Event | Level | Keyword | Payload | Written at |
@@ -2961,6 +3112,10 @@ session enables.
 | 6 | `CheckpointStop` | Informational | `Checkpoints` | `database`, `status` (`Success`, or `Error` for a checkpoint that threw), `checkpointLsn`, `durationMilliseconds` | the end of `Checkpoint`, on every path, from a `finally` |
 | 19 | `CheckpointBusy` | Verbose | Checkpoints | `database`, `bracketClass`, `owner`, `transactionSequence`, `refusal` | once for each physical bracket blocking a refused checkpoint |
 | 20 | `CheckpointJournalPeak` | Verbose | Checkpoints | `database`, `peakLength` | exact journal high-water mark since open, before an admitted checkpoint |
+| 21 | `TempSpaceBytes` | Verbose | TempSpace | `deltaBytes`, `currentBytes` | temporary physical-page reservation or release |
+| 22 | `TempSpaceRefused` | Verbose | TempSpace | `code` | every temporary quota, floor, unavailable I/O (CK05005) or oversized-record (CK05006) refusal |
+| 23 | `TempSpaceUnavailable` | Warning | TempSpace | `code`, `exceptionType` | first temporary unavailability, at startup or first failed use |
+| 24 | `TempSpaceDamaged` | Error | TempSpace | `code` | temporary validation failure; a retry of a failed reader raises no damage event/counter |
 | 7 | `PagesWrittenBack` | Verbose | `WriteBack` | `database`, `pages`, `durationMilliseconds` | `WriteBackDirtyPages`, when the pass wrote a page |
 | 8 | `PendingCommitsFlushed` | Verbose | `GroupCommit` | `database`, `durableLsn` | the gate's `FlushPending` (a flush worker's `FlushPendingCommits`), when it flushed |
 | 9 | `GroupCommitWindowMissed` | Verbose | `GroupCommit` | `database`, `lsn`, `windowMilliseconds` | the gate's `AwaitDurable`: the window passed before a group flush covered the commit, so the committer requested the journal flush itself (a no-op when another flush covered it first; a zero window does this on every grouped commit); not for a wait the storage going offline abandoned |
@@ -2999,12 +3154,17 @@ run outside that monitor while the page's I/O stripe is owned. BufferPoolResized
 run under the transaction lock when a checkpoint or shutdown journal flush fails;
 the following OnOffline hook also raises Transactions' LockWaitsAbandoned there.
 
-Counters, all maintained whether or not anyone listens, and only on paths that already wrote to or
-waited on a device (plan D6; nothing is counted per pin, per record or per statement):
+Counters are maintained whether or not anyone listens. Durable counters move only after device
+work; temporary reservations, refusals and damage can be counted before I/O. Nothing is counted
+per pin, per record or per statement:
 
 | Counter | Kind | Moves at |
 | --- | --- | --- |
 | `current-storages` | gauge | +1 when `InitializeNew` or `OpenExisting` completes; −1 on the first close of such a storage, behind an `Interlocked` state (`_disposed` is a plain `bool` two closes can both read false) |
+| `current-temp-bytes` | gauge | physical temp-page reservation/release, including buffered unwritten tails |
+| `temp-pages-written-per-second` | rate | a completed temporary page write, independent of durable page writes |
+| `temp-refusals-per-second` | rate | every temporary quota, floor, oversized-record or unavailable-space refusal |
+| `temp-damage-per-second` | rate | temporary validation failures; retries of failed readers do not increment it |
 | `checkpoints-per-second` | rate | a completed `Checkpoint` |
 | `journal-flushes-per-second` | rate | a completed durable flush of a journal's medium (`StorageJournal.FlushCore`) |
 | `page-reads-per-second` | rate | a page the pool read from the data file on a miss |

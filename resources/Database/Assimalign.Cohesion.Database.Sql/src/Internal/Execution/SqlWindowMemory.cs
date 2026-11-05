@@ -42,7 +42,7 @@ internal sealed class SqlWindowMemory : IDisposable
 
     internal void Reserve(long bytes)
     {
-        if (!_statementBudgetOnly && !_admittingChildren && bytes > _budget - _metrics.HashMemoryBytes)
+        if (!_statementBudgetOnly && !_admittingChildren && bytes > _budget - (_metrics.HashMemoryBytes - _metrics.PlainSelectMemoryBytes))
         { throw new SqlExecutionException("CS05079", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WindowMemoryBudget, _budget)); }
         _metrics.ReserveHashMemory(bytes, _budget);
         _reserved += bytes;
@@ -53,9 +53,9 @@ internal sealed class SqlWindowMemory : IDisposable
     // number of keys, navigation results or aggregate caches retaining a reference.
     internal void Retain(object?[] row) => RetainResult(row, transient: _partitionRows is not null);
 
-    // Independent children may have completed before this stage acquired its grant.
-    // Admission uses the statement's existing CS05067 budget condition; subsequent
-    // window work retains its window-specific CS05079 refusal.
+    // DML and recursive children may complete before this stage acquires its grant.
+    // Adoption uses CS05067. Plain SELECT caches keep separate reservations; if
+    // plain bytes fill the grant first, subsequent window work also reports CS05067.
     internal void AdoptResult(object?[] row)
     {
         _admittingChildren = true;

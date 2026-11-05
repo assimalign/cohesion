@@ -274,7 +274,7 @@ public sealed class SqlDatabaseEngineBuilder
     /// on the thread pool, so the caller's synchronization context is never captured.
     /// </summary>
     /// <param name="cancellationToken">Cancels recovery and inline provisioning; owned resources are disposed.</param>
-    /// <returns>The operational engine with cheap steps complete, pending tables reserved, and servers still stopped.</returns>
+    /// <returns>The operational engine with inline plans complete, deferred plans reserved for joint publication, and servers still stopped.</returns>
     /// <exception cref="OperationCanceledException">The build was canceled.</exception>
     /// <exception cref="InvalidOperationException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="ArgumentException">See <see cref="BuildAsync"/>.</exception>
@@ -285,12 +285,12 @@ public sealed class SqlDatabaseEngineBuilder
         => Task.Run(async () => await BuildAsync(cancellationToken).ConfigureAwait(false)).GetAwaiter().GetResult();
 
     /// <summary>
-    /// Freezes composition, builds the engine with its workers and servers, and applies cheap
-    /// schema steps. Populated-table data-scaling steps are persisted and their tables reserved
-    /// for the provisioning worker unless the database enables inline migrations.
+    /// Freezes composition and builds the engine with its workers and servers. If a populated-table
+    /// data-scaling step defers, the complete schema plan stays unpublished and reserved for the
+    /// provisioning worker; otherwise the plan runs inline. RunMigrationsInline forces inline work.
     /// </summary>
     /// <param name="cancellationToken">Observed between the phases and by each provisioning step.</param>
-    /// <returns>The operational engine with cheap steps complete, pending tables reserved, and servers still stopped.</returns>
+    /// <returns>The operational engine with inline plans complete, deferred plans reserved for joint publication, and servers still stopped.</returns>
     /// <exception cref="InvalidOperationException">
     /// A build was already attempted; a factory returned null; or the engine refused a product (a
     /// duplicate worker name, a product returned twice, a server that fronts another engine).

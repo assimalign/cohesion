@@ -36,6 +36,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage.TempFixture" ReferenceOutputAssembly="false" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.InMemory" />
 	</ItemGroup>
 	<ItemGroup>
@@ -43,4 +44,10 @@
 		<Compile Remove="TestObjects\FormatProbeCrash.cs" />
 	</ItemGroup>
 
+  <Target Name="CopyStorageTempFixture" AfterTargets="Build">
+    <ItemGroup>
+      <StorageTempFixtureOutput Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\fixtures\Assimalign.Cohesion.Database.Storage.TempFixture\bin\$(Configuration)\$(TargetFramework)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(StorageTempFixtureOutput)" DestinationFiles="@(StorageTempFixtureOutput->'$(OutDir)TempFixture\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

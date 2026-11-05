@@ -1,5 +1,16 @@
 # Assimalign.Cohesion.Database.Graph.Language — Design
 
+## Parser entry contract (#1264)
+
+GQL uses the shared non-virtual QueryParser.Parse template. The model supplies protected
+grammar core; the base constructs the profile lexer and runs analyzers.
+The grammar stamps the complete statement text before analyzers read it, including CALL bodies.
+GQL opts into base-owned serialization through analyzer completion, preserving its existing per-instance gate.
+The [Language audit](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parser-and-analyzer-type-shape-audit-1264)
+records the constructor, options and analyzer decisions. Grammar, diagnostics and conformance
+corpora retain their existing behavior.
+
+
 ## Savepoint grammar and rendering (#1726, XT-4)
 
 Standalone named controls retain TransactionCommand and SavepointName. The name reuses the
@@ -249,6 +260,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `FOR` | `FOR variable IN expression` | Expands a list; NULL yields zero rows; a non-list is CG02013 |
 | `UNWIND` | Cypher spelling `UNWIND expression AS variable` | The same list expansion, with the scalar divergence below |
 | `NEXT` | Separates linear segments after RETURN or a modifying segment | Carries projected columns, or one empty binding after a modifying segment without RETURN |
+| `CALL` | Optional inline read-only body with RETURN and omitted, named, all or empty imports | Apply per input row; OPTIONAL CALL null-extends an empty invocation |
 | `WITH` | Cypher projection spelling, including DISTINCT/ALL, star, GROUP BY, ordering/paging and WHERE | Projects a new scope; applies WHERE after ordering/paging |
 | `UNION [DISTINCT]` | Complete read-only operands with matching columns | Existing structural tuple equality removes duplicates; all operands are planned first |
 | `UNION ALL` | The same operands, without mixing modes | Streams every occurrence in operand order into the ordinary final result collector |
@@ -753,11 +765,80 @@ Standalone ORDER BY/OFFSET/SKIP/LIMIT after NEXT retains CK00001 naming the unsu
 INSERT followed by NEXT RETURN * parses, but its empty final projection is CG05001 during planning,
 before acquiring the writer lock or applying any mutation.
 
+## Inline CALL subqueries (#1807, GQ-N1)
+
+[OPTIONAL] CALL [(a, b) | (*) | ()] { query } runs a read-only query with RETURN for each
+incoming row. An omitted scope imports nothing; () explicitly imports nothing; (*) imports
+all current bindings; a name list imports exactly those names. Imports retain their binding kinds
+and remain visible across inner WITH, NEXT and composite boundaries. Inner declarations stay
+inside the call. Returned bare variables or aliased expressions add bindings to the outer row;
+computed results require aliases (CG05001). Every returned name, including RETURN * expansions,
+must be absent from the outer scope (CG01024), even when it names an import. This strict rule
+follows the owner requirement rather than Neo4j's exemption for imported star results.
+RETURN * still expands imports after an inner WITH, so a body with imports conservatively
+refuses that form with CG01024 even when WITH projects only local names.
+
+For omitted scopes only, a leading importing WITH translates to a scope clause when it contains
+only bare variables without aliases, or star, and no DISTINCT, GROUP BY, ORDER BY, paging or
+WHERE. Explicit ALL is harmless. After the importing WITH, no later WITH, NEXT or composite
+stage may occur: its scope lifetime must map exactly to one scope clause. Composite operands
+must import the same set (order may differ); otherwise the translation is CK00001. With an
+explicit scope, WITH is an ordinary inner projection. Imports cannot be rebound (CG03003);
+a missing import is CG05001, and importing a deleted variable is CG03003. Variables
+introduced inside one invocation cannot escape except through its final RETURN.
+
+The existing read-only UNION, EXCEPT, INTERSECT, OTHERWISE and NEXT rules apply inside the
+braces, including validation of operands that will be empty or skipped. CALL joins every result
+row; zero results remove the input row. OPTIONAL CALL instead emits exactly one row with NULL
+for each returned binding when the invocation is empty; an existing NULL result is a real row.
+Empty outer input invokes nothing. Inner grouping, DISTINCT, ordering and paging apply separately
+to each invocation. A returning CALL cannot conclude the enclosing query by itself (CG05001);
+existing RETURN or mutation conclusions apply. Uncorrelated bodies are
+also evaluated per input row, without caching.
+
+The inner query shares the GraphOperation, snapshot, parameters, transaction clock, cancellation,
+physical-work budget and retained-memory budget. Each invocation and emitted CALL row consumes
+one work unit in addition to its inner operators. Borrowed arguments/results, grouping state,
+composite state and cursors release their grants on completion, early exit, refusal or cancellation.
+EXPLAIN describes Apply or OptionalApply and their nested plans without executing them.
+A read-only body can follow an outer write and sees that statement's update overlay.
+
+Writes and bodies without RETURN remain CK00001 at GraphPlanner.ValidateCallReadOnly, the single
+admission boundary GQ-N2 will lift. Named CALL proc(...) YIELD, FOREACH and CALL ... IN TRANSACTIONS
+remain CK00001. There is no wire or disk-format change.
+
+Behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j:
+community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:2501-2530,2663-2750
+checks isolated imported scope and outer output collisions;
+community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Query.scala:698-711
+requires a returning subquery to be followed by a concluding clause.
+community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Query.scala:876-911
+refuses rebinding scope-clause imports;
+community/cypher/front-end/frontend-tests/src/test/scala/org/neo4j/cypher/internal/frontend/ScopeTreeTest.scala:307-320
+and scoping/checker/GQL_42N44_InaccessibleVariableTest.scala:66-73 in that same frontend directory
+pin scope-clause import persistence across WITH.
+scoping/checker/GQL_42N62_VariableNotDefinedTest.scala:89-99,858-868 in that directory
+pins the different lifetime and permitted rebinding of legacy importing WITH.
+The Cypher 25 grammar is
+community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:320-357.
+ISO GQL inline-call clause numbers remain unverified; this is no claim of full ISO conformance.
+
+The sealed GqlCallStage leaf carries Body, Imports, ImportAll and Optional. A null Imports list
+records an omitted scope; an empty list records (). The capability scanner visits braced CALL
+bodies with fresh query context, preserving map/label/property identifiers. Named procedures
+retain the CALL vocabulary refusal even though the profile advertises inline CALL. Parsing keeps
+write/unit bodies available for one planner admission check; no write can execute through this run.
+Rendering walks semantic children through the existing explicit-stack renderer. Parser, keyword,
+live-profile, generated oracle, InMemory/TCP and NativeAOT cases cover the admitted surface.
+Nested operands retain the parser's one captured source string instead of overlapping substrings;
+body rendering uses semantic children, never that retained text. Parser-built NEXT operands also
+retain the source marker, so child planning preserves parsed provenance after normalization.
+
 ## Linear composition (#1145)
 
 The stage list is the planner/executor input. A leading NEXT or WITH immediately followed by NEXT is CG00002. A hand-built RETURN predicate is CG05001; predicates belong to WITH. The original constructors retain the owner-selected single-segment facade for hand-built ASTs; SHOW composition is rejected through either shape. Empty or missing mandatory stage operands are refused by the planner with CG05001. NEXT and FOR are profile keywords and also remain legal variable names and aliases, so `RETURN a AS next NEXT ...` and property keys named next or for remain valid.
 
-LET adds new bindings, evaluating comma-separated assignments in order. Value variables may hold maps, lists or entities; member access admits maps/entities, preserving the accessed value shape. A known scalar owner is CG03003 during planning; an invalid runtime container is CG02013. FILTER (also FILTER WHERE) keeps only TRUE. FOR and Cypher UNWIND expand a list per incoming row; NULL gives zero rows. A non-list, including string or byte[], is CG02013. The ISO WITH ORDINALITY and WITH OFFSET suffixes are excluded with one CK00001 naming FOR ORDINALITY/OFFSET SUFFIX. FOREACH, CALL and NEXT YIELD remain capability refusals; UNION is a composite-query conjunction. Standalone ORDER BY/OFFSET/SKIP/LIMIT stages, including after LET, FILTER, FOR or writes, remain CK00001 under the owner default.
+LET adds new bindings, evaluating comma-separated assignments in order. Value variables may hold maps, lists or entities; member access admits maps/entities, preserving the accessed value shape. A known scalar owner is CG03003 during planning; an invalid runtime container is CG02013. FILTER (also FILTER WHERE) keeps only TRUE. FOR and Cypher UNWIND expand a list per incoming row; NULL gives zero rows. A non-list, including string or byte[], is CG02013. The ISO WITH ORDINALITY and WITH OFFSET suffixes are excluded with one CK00001 naming FOR ORDINALITY/OFFSET SUFFIX. FOREACH, named CALL and NEXT YIELD remain capability refusals; inline returning CALL is described above; UNION is a composite-query conjunction. Standalone ORDER BY/OFFSET/SKIP/LIMIT stages, including after LET, FILTER, FOR or writes, remain CK00001 under the owner default.
 
 RETURN followed by NEXT and WITH retain only aliased columns and bare-variable projections. Carried names are decoded variable names, including under star; displayed quotes and grouping do not create different bindings. Duplicate carried bindings are CG01015 during planning, including EXPLAIN. Star expands all current bindings in scope order, including LET/FOR values and the preceding projection's order. Unaliased computed columns are accepted but cannot be referenced in a later stage; this is an explicit superset divergence from Cypher. WITH DISTINCT uses the same exact numeric tuple comparer as RETURN DISTINCT. Entity kinds, optionality, possible composite values and Int64 COUNT types survive boundaries. An unbound variable is CG05001; LET/FOR rebinding, a scalar used as an entity, or a later reference to a deleted variable is CG03003. A NEXT after a modifying segment without RETURN starts with one empty binding and no scope.
 
@@ -1143,7 +1224,7 @@ FUNCTION and the spelling; these table entries apply only before `(` in value po
 `date` and `duration` remain legal variables. `id(n)` specifically directs callers to element_id.
 CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are recognized unsupported niladic expressions.
 CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher toStringList/toIntegerList/
-toFloatList/toBooleanList are recognized unsupported calls. Procedures/CALL, temporal
+toFloatList/toBooleanList are recognized unsupported calls. Named procedures, temporal
 constructors, ELEMENTS and head/last/tail/reverse/range remain outside this subset.
 
 The table distinguishes ISO clause 20 forms, direct Cypher aliases, and Cohesion extensions.

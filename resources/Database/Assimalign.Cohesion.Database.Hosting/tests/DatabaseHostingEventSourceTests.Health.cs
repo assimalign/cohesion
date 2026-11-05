@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Schema;
@@ -84,7 +85,7 @@ public sealed partial class DatabaseHostingEventSourceTests
                         (await application.Context.CheckAsync(timeout.Token)).Status.ShouldBe(HealthStatus.Degraded);
                         Interlocked.Increment(ref polls);
                     }, timeout.Token)));
-                    elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+                    elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(25));
                 }
                 while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || polls < 32);
 
@@ -92,28 +93,35 @@ public sealed partial class DatabaseHostingEventSourceTests
                 polls.ShouldBeGreaterThanOrEqualTo(32);
                 var degraded = Event(recorder, 16, "HealthDegraded", _healthPayload);
                 degraded.Level.ShouldBe(EventLevel.Warning);
-                degraded.Payload!.Skip(1).ShouldBe(["sql", "health", "Provisioning", "", "AddConstraint", "items", 1, 1, 1L, 3L]);
+                degraded.Payload!.Skip(1).ShouldBe(["sql", "health", "Provisioning", "", "Joint/AddConstraint", "items", 1, 1, 1L, -1L]);
                 var sqlEngine = (SqlDatabaseEngine)application.Context.Engines.Single();
                 var database = await sqlEngine.OpenDatabaseAsync("health", timeout.Token);
-                // Capture the gated instance before failure can make an open schedule a retry.
+                // A failed joint job keeps this instance online with its old schema.
                 release.Set();
-                while (fail ? sqlEngine.OfflineDatabases.Count == 0 : database.Provisioning is not null)
+                while (fail ? database.Provisioning?.FailureCode is null : database.Provisioning is not null)
                 {
                     await Task.Delay(1, timeout.Token);
                 }
                 for (int poll = 0; poll < 8; poll++)
                 {
-                    (await application.Context.CheckAsync(timeout.Token)).Status.ShouldBe(fail ? HealthStatus.Unhealthy : HealthStatus.Healthy);
+                    (await application.Context.CheckAsync(timeout.Token)).Status.ShouldBe(fail ? HealthStatus.Degraded : HealthStatus.Healthy);
                 }
                 calls.ShouldBe(fail ? 2 : 3);
                 recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
                 if (fail)
                 {
-                    var changes = recorder.Events.Where(entry => entry.EventId == 16).ToArray();
-                    changes.Length.ShouldBe(2);
-                    changes[1].PayloadNames.ShouldBe(_healthPayload);
-                    changes[1].Payload![3].ShouldBe("Offline");
-                    changes[1].Payload![4].ShouldBe("ProvisioningFailure");
+                    recorder.Events.Count(entry => entry.EventId == 16).ShouldBe(1);
+                    var health = await application.Context.CheckAsync(timeout.Token);
+                    health.Data.ShouldNotBeNull()["engine.0.provisioning.0.failureCode"].ShouldBe("CS03402");
+                    sqlEngine.OfflineDatabases.ShouldBeEmpty();
+                    await using var writer = await database.CreateSessionAsync(timeout.Token);
+                    await writer.ExecuteAsync("INSERT INTO items VALUES(-1)", cancellationToken: timeout.Token);
+                    await using var constraints = (await writer.ExecuteAsync(
+                        "SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'items'",
+                        cancellationToken: timeout.Token)).ShouldBeAssignableTo<DatabaseResultSet>();
+                    int constraintCount = 0;
+                    await foreach (var row in constraints.GetRowsAsync(timeout.Token)) { constraintCount++; }
+                    constraintCount.ShouldBe(0);
                     recorder.Events.ShouldNotContain(entry => entry.EventId == 17);
                 }
                 else

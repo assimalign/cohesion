@@ -36,10 +36,10 @@ internal sealed class SqlDeferredMigration
     internal SqlCompiledSchema Schema { get; }
     internal IReadOnlyList<SqlMigrationScriptStep> Steps { get; }
     internal SqlCatalogPendingMigration Intent { get; }
-    internal int ProvisioningStepCount => JointPlan is null ? Intent.StepCount : Steps.Count;
+    internal int ProvisioningStepCount => Steps.Count;
     internal TransactionContext Locks { get; }
     internal IReadOnlySet<ulong> Tables { get; }
-    internal SqlJointMigrationPlan? JointPlan { get; init; }
+    internal required SqlJointMigrationPlan JointPlan { get; init; }
     internal DatabaseProvisioningProgress? JointFailureProgress { get; init; }
     internal IDisposable? JointMetadata { get; init; }
 
@@ -54,7 +54,7 @@ internal sealed class SqlDeferredMigration
             entered = true;
             await _owner.RunDeferredAsync(this, linked.Token, propagateJointFailure: true).ConfigureAwait(false);
         }
-        catch (Exception) when (!entered && JointPlan is not null)
+        catch (Exception) when (!entered)
         {
             // Even a failed linked-token allocation must discard the intent and release
             // the retained owner/gate. Cancellation enters the joint cleanup boundary.
@@ -85,7 +85,7 @@ internal sealed class SqlDeferredMigration
             entered = true;
             _owner.RunDeferredAsync(this, linked.Token).GetAwaiter().GetResult();
         }
-        catch (Exception) when (!entered && JointPlan is not null)
+        catch (Exception) when (!entered)
         {
             _owner.RunDeferredAsync(this, new CancellationToken(true)).GetAwaiter().GetResult();
             throw;

@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("SqlSubqueryValues")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSubqueryValues.DebugView))]
-internal sealed class SqlSubqueryValues
+internal class SqlSubqueryValues
 {
     private object?[]?[] _values = new object?[]?[4];
     private readonly SqlSubqueryValues? _parent;
@@ -45,6 +45,86 @@ internal sealed class SqlSubqueryValues
     internal object?[]? Row { get; private set; }
     internal Dictionary<SqlBoundExpression, object?>? Evaluated { get; }
 
+    // Only a frame registering queries needs a reservation. Ordinary per-invocation
+    // evaluation frames keep their original layout and allocation.
+    internal static SqlSubqueryValues WithMemory(SqlSubqueryValues? parent, int scope,
+        IReadOnlyList<SqlSubqueryBinding> queries, bool lazy, SqlStatementMetrics metrics, long budget)
+        => new BudgetedValues(parent, scope, queries, lazy, metrics, budget);
+
+    internal SqlStatementMetrics? MemoryMetrics
+    {
+        get
+        {
+            for (var frame = this; frame is not null; frame = frame._parent)
+            { if (frame is BudgetedValues budgeted) { return budgeted.Metrics; } }
+            return null;
+        }
+    }
+
+    internal void Admit(object?[] values, bool correlated)
+    {
+        if (this is not BudgetedValues budgeted) { return; }
+        bool windowOwned = SqlWindowMemory.For(budgeted.Metrics) is not null;
+        if (windowOwned && correlated) { return; }
+        long bytes = SqlSelectMemory.VectorBytes(values);
+        if (!correlated)
+        {
+            for (var frame = _parent; frame is not null; frame = frame._parent)
+            { if (frame is BudgetedValues parentBudget) { budgeted = parentBudget; } }
+        }
+        if (windowOwned) { budgeted.PendingStatementBytes += bytes; return; }
+        budgeted.Metrics.ReservePlainSelectMemory(bytes, budgeted.Budget);
+        if (correlated) { budgeted.CorrelatedBytes += bytes; }
+        else { budgeted.StatementBytes += bytes; }
+    }
+
+    internal long PendingStatementMemoryBytes
+    {
+        get
+        {
+            BudgetedValues? owner = null;
+            for (var frame = this; frame is not null; frame = frame._parent)
+            { if (frame is BudgetedValues budgeted) { owner = budgeted; } }
+            return owner?.PendingStatementBytes ?? 0;
+        }
+    }
+
+    internal void AdmitPendingStatementMemory(long previousPending)
+    {
+        BudgetedValues? owner = null;
+        for (var frame = this; frame is not null; frame = frame._parent)
+        { if (frame is BudgetedValues budgeted) { owner = budgeted; } }
+        if (owner is null) { return; }
+        // New independent vectors belong to the outermost registration frame.
+        // An inner window transfers only its own additions; earlier vectors stay
+        // on the still-live parent window ledger until that stage ends.
+        long bytes = owner.PendingStatementBytes - previousPending;
+        if (bytes == 0) { return; }
+        owner.Metrics.ReservePlainSelectMemory(bytes, owner.Budget);
+        owner.StatementBytes += bytes;
+        owner.PendingStatementBytes = previousPending;
+    }
+
+    internal void ReleaseMemory()
+    {
+        if (this is not BudgetedValues budgeted) { return; }
+        budgeted.Metrics.ReleasePlainSelectMemory(budgeted.StatementBytes + budgeted.CorrelatedBytes);
+        budgeted.StatementBytes = 0; budgeted.CorrelatedBytes = 0; budgeted.PendingStatementBytes = 0;
+    }
+
+    private sealed class BudgetedValues : SqlSubqueryValues
+    {
+        internal readonly SqlStatementMetrics Metrics;
+        internal readonly long Budget;
+        internal long StatementBytes;
+        internal long PendingStatementBytes;
+        internal long CorrelatedBytes;
+
+        internal BudgetedValues(SqlSubqueryValues? parent, int scope, IReadOnlyList<SqlSubqueryBinding> queries,
+            bool lazy, SqlStatementMetrics metrics, long budget) : base(parent, scope, queries, lazy)
+        { Metrics = metrics; Budget = budget; }
+    }
+
     internal void BeginRow(object?[] row, SqlWindowMemory? memory = null)
     {
         if (ReferenceEquals(Row, row)) { return; }
@@ -55,6 +135,8 @@ internal sealed class SqlSubqueryValues
 
     internal void ClearCorrelated(SqlWindowMemory? memory)
     {
+        if (this is BudgetedValues budgeted)
+        { budgeted.Metrics.ReleasePlainSelectMemory(budgeted.CorrelatedBytes); budgeted.CorrelatedBytes = 0; }
         foreach (var query in Queries.Values)
         {
             if (!query.IsCorrelated) { continue; }

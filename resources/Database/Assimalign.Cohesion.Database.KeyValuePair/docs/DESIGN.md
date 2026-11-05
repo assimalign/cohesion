@@ -144,6 +144,15 @@ throughput window. Slow-cadence, producer and observer regressions cover runner 
 No public type, visibility grant, project reference or storage format changed. Storage exposes
 its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
 
+## Row access contract (#1264)
+
+KeyValueMaterializedRow supplies protected typed cores behind DatabaseRow's non-virtual
+ordinal guards. Valid-ordinal invariant conversions, binary borrowing and CK02001/CK02002
+type/NULL failures retain their existing results. Out-of-range value access now throws
+ArgumentOutOfRangeException from the base instead of the array's IndexOutOfRangeException.
+Its wrapper layout and GetRowsAsync remain unchanged. IsMissing retains its capability-first
+NotSupportedException for every ordinal.
+
 ## Result diagnostics (#1264)
 
 Key-value command and materialized row results return a non-null Diagnostics collection,

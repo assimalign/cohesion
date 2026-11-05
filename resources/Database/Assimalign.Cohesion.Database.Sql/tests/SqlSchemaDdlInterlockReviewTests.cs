@@ -14,23 +14,19 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Types;
 
-using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
-
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection("SQL namespace DDL interlock")]
 public sealed class SqlSchemaDdlInterlockReviewTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Schema DDL between deferred steps never takes the database offline")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Schema DDL during joint deferred preparation refuses online, then succeeds after publication")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ExecuteAsync_SchemaDdlDuringDeferredMigration_ShouldStayOnline(bool drop)
     {
-        // Arrange: pause between two real deferred index builds on a populated typed table.
+        // Arrange: pause after the first of two unpublished index builds.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var releaseWorker = new ManualResetEventSlim();
-        using var enteredDdl = new ManualResetEventSlim();
-        using var releaseDdl = new ManualResetEventSlim();
         var enteredWorker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var storage = new CrashCaptureSqlStorageStrategy();
         var builder = SqlDatabaseEngine.CreateBuilder("schema-deferred");
@@ -48,82 +44,55 @@ public sealed class SqlSchemaDdlInterlockReviewTests
         var target = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "db", false, [],
             [new CompiledSchemaTable(items.Name, items.RowType, items.Columns, null,
                 [new("ix_one", ["id"]), new("ix_two", ["id"])], [])], []);
-        int steps = 0;
-        int resumed = 0;
-        database.SchemaProvisioner.BeforeDeferredStep = (_, token) =>
+        int trees = 0, resumed = 0, refusals = 0;
+        database.SchemaProvisioner.JointStage = phase =>
         {
-            if (Interlocked.Increment(ref steps) == 2)
+            if (phase == "AfterTreeBuild" && Interlocked.Increment(ref trees) == 1)
             {
                 enteredWorker.TrySetResult();
-                releaseWorker.Wait(token);
+                releaseWorker.Wait(timeout.Token);
                 Interlocked.Increment(ref resumed);
             }
         };
+        string command = drop ? "DROP SCHEMA sales CASCADE" : "CREATE SCHEMA other";
         try
         {
             await database.SchemaProvisioner.ApplyAsync(target, timeout.Token, deferDataScalingSteps: true);
             await enteredWorker.Task.WaitAsync(timeout.Token);
             await using var transaction = await holder.BeginTransactionAsync(timeout.Token);
-            Task<DatabaseResult> pending;
-            if (drop)
-            {
-                await holder.ExecuteAsync("INSERT INTO sales.t VALUES (7)", cancellationToken: timeout.Token);
-                using var waits = new EventSourceRecorder(EventSource.GetSources().Single(value =>
-                    value.Name == "Assimalign.Cohesion.Database.Transactions"), EventLevel.Verbose);
-                pending = ddl.ExecuteAsync("DROP SCHEMA sales CASCADE", cancellationToken: timeout.Token).AsTask();
-                await waits.WaitForAsync(value => value.EventName == "LockWaitStart" &&
-                    value.Payload is { Count: > 3 } payload && Equals(payload[0], "db") && Equals(payload[3], "Exclusive"), timeout.Token);
-            }
-            else
-            {
-                int armed = 1;
-                storage.StorageWriteStarting = catalog =>
-                {
-                    if (catalog && Interlocked.Exchange(ref armed, 0) == 1)
-                    {
-                        enteredDdl.Set();
-                        releaseDdl.Wait(timeout.Token);
-                    }
-                };
-                pending = DedicatedTestTask.Run(async () => await ddl.ExecuteAsync("CREATE SCHEMA other", cancellationToken: timeout.Token), timeout.Token);
-                enteredDdl.Wait(timeout.Token);
-            }
+            await holder.ExecuteAsync("INSERT INTO sales.t VALUES (7)", cancellationToken: timeout.Token);
 
-            // Act: DROP waits on A's INSERT; CREATE holds a real definition lease.
-            releaseWorker.Set();
-            int observations = 0;
+            // Act: definition DDL is excluded for the complete joint preparation.
+            // Exercise repeated admission while an unrelated table remains writable.
             var elapsed = Stopwatch.StartNew();
             do
             {
+                await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
+                    await ddl.ExecuteAsync(command, cancellationToken: timeout.Token));
+                refusals++;
                 database.IsOffline.ShouldBeFalse();
-                pending.IsCompleted.ShouldBeFalse();
-                if (!drop) { database.SchemaProvisioner.Deferred.ShouldNotBeNull(); }
-                observations++;
+                database.Catalog.GetIndexes(database.Catalog.Tables.Single(table => table.Name == "items").ObjectId).ShouldBeEmpty();
                 await Task.Delay(1, timeout.Token);
-                elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
-            } while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || observations < 10 || Volatile.Read(ref resumed) == 0 ||
-                drop && database.SchemaProvisioner.Deferred is not null);
-            observations.ShouldBeGreaterThanOrEqualTo(10);
-            resumed.ShouldBe(1);
-            releaseDdl.Set();
-            await transaction.CommitAsync(timeout.Token);
-            (await pending.WaitAsync(timeout.Token)).Status.ShouldBe(DatabaseResultStatus.Success);
+                elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(25));
+            } while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || refusals < 10);
+            releaseWorker.Set();
             while (database.SchemaProvisioner.Deferred is not null) { await Task.Delay(1, timeout.Token); }
+            await transaction.CommitAsync(timeout.Token);
+            (await ddl.ExecuteAsync(command, cancellationToken: timeout.Token)).Status.ShouldBe(DatabaseResultStatus.Success);
 
-            // Assert: both deferred steps completed, and the requested schema DDL also committed.
-            steps.ShouldBe(2);
+            // Assert: both trees publish together and the metadata lease is released.
+            refusals.ShouldBeGreaterThanOrEqualTo(10);
+            trees.ShouldBe(2);
+            resumed.ShouldBe(1);
+            database.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
             database.IsOffline.ShouldBeFalse();
             engine.OfflineDatabases.ShouldBeEmpty();
             database.Catalog.PendingMigration.ShouldBeNull();
             database.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(target.Hash);
+            database.Catalog.GetIndexes(database.Catalog.Tables.Single(table => table.Name == "items").ObjectId).Count.ShouldBe(2);
             database.Catalog.Namespaces.Any(value => value.Name == (drop ? "sales" : "other")).ShouldBe(!drop);
         }
-        finally
-        {
-            storage.StorageWriteStarting = null;
-            releaseWorker.Set();
-            releaseDdl.Set();
-        }
+        finally { releaseWorker.Set(); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - A namespace changed during DROP's lock wait receives a coded retry refusal")]

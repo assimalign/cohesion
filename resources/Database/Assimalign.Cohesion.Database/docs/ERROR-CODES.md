@@ -44,6 +44,10 @@ This registry covers the Database edit boundary. CK does not reserve codes for u
 Cohesion libraries or resource areas. Cache has its prefix reserved even when an operation
 reports through the existing cache result vocabulary rather than an exception diagnostic.
 
+Language stack backstops use SQL `CS05004`, Graph `CG05008` and Documents `CD05021`.
+Each refuses the statement while keeping the session usable, including over TCP; none ends
+the process. The per-model rows below describe the guarded stages.
+
 Process-crash test reopening (#1713) changes no error identity or engine behavior. An underlying
 sharing/lock violation (Windows HRESULT 0x80070020/0x80070021, or EWOULDBLOCK/EAGAIN errno
 11 on Linux and 35 on macOS) still fails open with Blob CB06005,
@@ -56,6 +60,12 @@ error and has no production diagnostic code.
 | Previous code | Code | Condition family |
 |---|---|---|
 | COHDBL001 | CK00001 | Unsupported language clause |
+| New (#1789, EN-X1) | CK05001 | Engine temporary physical-byte quota exceeded |
+| New (#1789, EN-X1) | CK05002 | Statement temporary physical-byte quota exceeded |
+| New (#1789, EN-X1) | CK05003 | Temporary page would cross the engine free-space reserve |
+| New (#1789, EN-X1) | CK05004 | Temporary page/record integrity failure or retry of a failed reader; retries raise no damage event/counter (no durable-storage fence) |
+| New (#1789, EN-X1) | CK05005 | Temporary space unavailable: probe, lease, sweep, create, read, write or close I/O failure |
+| New (#1789, EN-X1) | CK05006 | Encoded sort record exceeds its declared maximum |
 | COHDBS001 | CK06001 | Storage format refusal |
 | COHDBS002 | CK06002 | Storage offline |
 | COHDBS003 | CK06003 | Record or page corruption |
@@ -243,9 +253,9 @@ structured-carrier messages remain unprefixed.
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
-| COHSQLP004 | CS03104 | Schema/constraints |
+| COHSQLP004 | CS03104 | Inline per-step schema application/compensation failure; deferred jobs use CS03402 |
 | COHSQLP005 | CS03105 | Schema/constraints |
-| New (#1447, SQ-A3) | CS03402 | Joint preparation or space admission failed; old schema retained, unsafe-storage latches still apply |
+| New (#1447, SQ-A3) | CS03402 | Joint preparation/space admission failed or unpublished target/route discarded; old schema retained, unsafe-storage latches still apply |
 | New (#1447, SQ-A3 fix) | CS03403 | Joint publication commit unconfirmed; recovery determines old/new schema |
 | New (#1447, SQ-A3 fix) | CS03404 | Session relation creation or table rename names an unpublished table reserved by a pending joint plan |
 | COHSQLS001 | CS03201 | Schema/constraints |
@@ -277,7 +287,7 @@ structured-carrier messages remain unprefixed.
 | New (#1012, SQ-I1) | CS04073 | SERIALIZABLE text transaction isolation is unsupported (0A000) |
 | New (#1726, XT-4) | CS04074 | SET TRANSACTION inside an active named savepoint (25001) |
 | New (#1724, SQ-C1) | CS04075 | COPY inside an explicit transaction (25001, Cohesion policy) |
-| COHSQLE004 | CS05004 | Execution/budgets |
+| COHSQLE004 | CS05004 | Statement parsing, planning or execution needs more execution stack than the executing thread has left; the statement fails and the session stays open (SQLSTATE 54001) |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
 | COHSQLE017 | CS05017 | Execution/budgets |
@@ -289,7 +299,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); sequence sorting follows ordinary, uncharged sort accounting |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); plain SELECT join buffers, matches, groups, aggregate inputs, sorting/top-N, output/DISTINCT, retained results, relation/subquery caches and set state share the grant; CTAS admits kept rows, independent of capacity (#1776, #1762) |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
@@ -364,7 +374,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
 | New (#1729, OQ-G2) | CD00012 | Language/syntax — GROUP AS without preceding GROUP BY terms |
 | New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
-| New (#1731, OQ-Q1) | CD00014 | Language/syntax — IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand; nested compounds currently retain CK00001) |
+| New (#1731, OQ-Q1) | CD00014 | Language/syntax — IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand) |
 | New (#1731, OQ-Q2) | CD00015 | Language/syntax — derived FROM subquery has no alias |
 | Retired (#1767) | CD00016 | Reserved — former JOIN/NEST statement-wide explicit-alias requirement |
 | COHDOC002 | CD01002 | Binding/names |
@@ -460,6 +470,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1738, GQ-D1) | CG01021 | Binding/names — named index or constraint to drop is absent |
 | New (#1738, GQ-D2) | CG01022 | Binding/names — schema property references a variable other than its FOR declaration |
 | New (#1249, #1738, GQ-D3) | CG01023 | Warning — statically named entity property is unknown database-wide in a read-only statement |
+| New (#1807, GQ-N1) | CG01024 | Binding/names — a CALL result shadows an outer binding, including imported names and star expansion |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
@@ -483,7 +494,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1738, GQ-D2) | CG04025 | Transactions — schema DDL inside an explicit transaction (Cohesion policy) |
 | COHDBG001 | CG05001 | Execution/budgets |
 | COHDBG004 | CG05004 | Execution/budgets — physical work or qualifying 65th hop, including selector search |
-| COHDBG008 | CG05008 | Execution/budgets |
+| COHDBG008 | CG05008 | Statement parsing, planning or execution needs more execution stack than the executing thread has left; the statement fails and the session stays open |
 | COHDBG020 | CG05020 | Execution/budgets — retained statement memory, including selector history and output |
 | New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
 | New (#1735, GQ-M1) | CG05023 | Execution — invalid bound MERGE pattern lock identity |
@@ -586,9 +597,10 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
-| CD05018 | Retained SELECT sources/groups, compound equality/sort/output state, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
+| CD05018 | Retained SELECT sources/groups, compound equality/multiset/sort/output state, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
 | CD05020 | Shared expression/lookup/set-operation work budget exhausted across a statement's subqueries, expression sources, key joins and compounds (#1731, #1732) | — |
+| CD05021 | Statement planning, EXPLAIN or evaluation needs more execution stack than the executing thread has left; the statement fails and the session stays open (#1803) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

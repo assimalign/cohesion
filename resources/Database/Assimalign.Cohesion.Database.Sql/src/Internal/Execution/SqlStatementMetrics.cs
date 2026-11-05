@@ -63,15 +63,35 @@ internal sealed class SqlStatementMetrics
     internal long ConstraintKeyComparisons { get; set; }
 
     /// <summary>Catalog tables visited while discovering incoming references.</summary>
-    internal long ReferenceCatalogTableVisits { get; set; }
+    internal long ReferenceCatalogTableVisits
+    {
+        get => References?.ReferenceCatalogTableVisits ?? 0;
+        set => (References ??= new()).ReferenceCatalogTableVisits = value;
+    }
 
     /// <summary>Incoming reference lists built for distinct tables in this statement.</summary>
-    internal int IncomingReferenceBuilds { get; set; }
+    internal int IncomingReferenceBuilds
+    {
+        get => References?.IncomingReferenceBuilds ?? 0;
+        set => (References ??= new()).IncomingReferenceBuilds = value;
+    }
 
-    internal int ReferenceIntentLockBatches { get; set; }
+    internal int ReferenceIntentLockBatches
+    {
+        get => References?.ReferenceIntentLockBatches ?? 0;
+        set => (References ??= new()).ReferenceIntentLockBatches = value;
+    }
 
-    internal int ConstraintLookupBuilds { get; set; }
-    internal int LiveIndexBuilds { get; set; }
+    internal int ConstraintLookupBuilds
+    {
+        get => References?.ConstraintLookupBuilds ?? 0;
+        set => (References ??= new()).ConstraintLookupBuilds = value;
+    }
+    internal int LiveIndexBuilds
+    {
+        get => References?.LiveIndexBuilds ?? 0;
+        set => (References ??= new()).LiveIndexBuilds = value;
+    }
 
     internal SqlStatementReferences? References { get; set; }
 
@@ -95,8 +115,6 @@ internal sealed class SqlStatementMetrics
                     work.Paths = prior.Paths;
                     work.ScalarPath = prior.ScalarPath;
                     work.CandidatePairs = prior.CandidatePairs;
-                    work.MemoryBytes = prior.MemoryBytes;
-                    work.PeakMemoryBytes = prior.PeakMemoryBytes;
                     work.ObservationState = prior.ObservationState;
                 }
                 _accessPath = work;
@@ -163,8 +181,6 @@ internal sealed class SqlStatementMetrics
             previous.Paths = prior.Paths;
             previous.ScalarPath = prior.ScalarPath;
             previous.CandidatePairs = prior.CandidatePairs;
-            previous.MemoryBytes = prior.MemoryBytes;
-            previous.PeakMemoryBytes = prior.PeakMemoryBytes;
             previous.ObservationState = prior.ObservationState;
         }
         var work = new ReferentialDmlWork(previous);
@@ -216,8 +232,11 @@ internal sealed class SqlStatementMetrics
         if (_accessPath is JoinWork work) { work.CandidatePairs++; }
     }
 
-    internal long HashMemoryBytes => (_accessPath as JoinWork)?.MemoryBytes ?? 0;
-    internal long PeakHashMemoryBytes => (_accessPath as JoinWork)?.PeakMemoryBytes ?? 0;
+    private long _memoryBytes;
+    internal long PlainSelectMemoryBytes { get; private set; }
+    private long _peakMemoryBytes;
+    internal long HashMemoryBytes => _memoryBytes;
+    internal long PeakHashMemoryBytes => _peakMemoryBytes;
 
     internal const long StatementWorkVisitLimit = 1_000_000;
     internal long WindowFrameWorkVisits => (_accessPath as JoinWork)?.ObservationState is WindowFrameWork work ? work.Visits : 0;
@@ -287,25 +306,40 @@ internal sealed class SqlStatementMetrics
         }
     }
 
+    internal static Action<SqlStatementMetrics, long>? AfterMemoryReservation { get; set; }
+
     internal void ReserveHashMemory(long bytes, long budget)
     {
-        if (_accessPath is not JoinWork work) { work = new([]) { ScalarPath = _accessPath as string }; _accessPath = work; }
-        if (bytes > budget - work.MemoryBytes)
+        if (bytes > budget - _memoryBytes)
         {
             throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, budget));
         }
-        work.MemoryBytes += bytes;
-        work.PeakMemoryBytes = Math.Max(work.PeakMemoryBytes, work.MemoryBytes);
+        _memoryBytes += bytes;
+        _peakMemoryBytes = Math.Max(_peakMemoryBytes, _memoryBytes);
+        try { AfterMemoryReservation?.Invoke(this, bytes); }
+        catch { _memoryBytes -= bytes; throw; }
+    }
+
+    internal void ReservePlainSelectMemory(long bytes, long budget)
+    {
+        ReserveHashMemory(bytes, budget);
+        PlainSelectMemoryBytes += bytes;
+    }
+
+    internal void ReleasePlainSelectMemory(long bytes)
+    {
+        ReleaseHashMemory(bytes);
+        PlainSelectMemoryBytes -= bytes;
     }
 
     internal void ReleaseHashMemory(long bytes)
     {
-        if (_accessPath is JoinWork work) { work.MemoryBytes -= bytes; }
+        _memoryBytes -= bytes;
     }
 
-    // Budget and join telemetry share the existing path slot. Ordinary scalar statements keep
-    // exactly their previous instance layout and allocate no new telemetry object.
+    // Join telemetry never owns the plain SELECT reservations. Reference-discovery
+    // counters live in the existing reference state, keeping ordinary metrics compact.
     [global::System.Diagnostics.DebuggerDisplay("JoinWork")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.JoinWork.DebugView))]
     private class JoinWork
@@ -318,8 +352,6 @@ internal sealed class SqlStatementMetrics
         internal IReadOnlyList<string> Paths { get; set; }
         internal string? ScalarPath;
         internal long CandidatePairs;
-        internal long MemoryBytes;
-        internal long PeakMemoryBytes;
         // Reuse the analysis reference slot for window work. Statements without OVER
         // keep their existing object sizes, including joins and EXPLAIN ANALYZE.
         internal object? ObservationState;
@@ -357,8 +389,6 @@ internal sealed class SqlStatementMetrics
             Paths = previous.Paths;
             ScalarPath = previous.ScalarPath;
             CandidatePairs = previous.CandidatePairs;
-            MemoryBytes = previous.MemoryBytes;
-            PeakMemoryBytes = previous.PeakMemoryBytes;
             ObservationState = previous.ObservationState;
             DmlStatement = previous.DmlStatement;
             RowReads = previous.RowReads;

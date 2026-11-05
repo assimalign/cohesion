@@ -30,6 +30,7 @@ internal static class DocumentJsonValue
     internal static async ValueTask<JsonElement> ObjectAsync(IAsyncEnumerable<KeyValuePair<string, object?>> members,
         string? writeVerb, int maxDepth, string resultClause)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         var keyed = new Dictionary<string, object?>(StringComparer.Ordinal);
         await foreach (var member in members.ConfigureAwait(false)) { AddMember(keyed, member); }
         return Object(keyed, writeVerb, maxDepth, resultClause);
@@ -88,6 +89,7 @@ internal static class DocumentJsonValue
     internal static async ValueTask<JsonElement> ArrayAsync(IAsyncEnumerable<object?> elements,
         string? writeVerb, int maxDepth, string resultClause)
     {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         try
         {
             var buffer = new ArrayBufferWriter<byte>();

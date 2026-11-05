@@ -12,6 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     internal static Action<string, ulong>? TableAsStage { get; set; }
+    internal static Action<long>? TableAsSourceAdmitted { get; set; }
 
     private async Task<DatabaseResult> ExecuteCreateTableAsAsync(SqlCreateTableAsPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
@@ -58,6 +59,7 @@ internal sealed partial class SqlPlanExecutor
                     await using var source = (SqlMaterializedResultSet)await ExecuteAsync(
                         Cost(plan.Source, statement, cancellationToken), statement, cancellationToken).ConfigureAwait(false);
                     sourceBytes = source.ReserveMemory(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken);
+                    TableAsSourceAdmitted?.Invoke(sourceBytes);
                     statement.Metrics.ReserveHashMemory(24L + 64L * 8, _definitions.StatementMemoryBudget);
                     bufferBytes = 24L + 64L * 8;
                     var batch = new List<byte[]>(64);

@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 [Collection(DatabaseProvisioningHealthCollection.Name)]
 public sealed class DatabaseProvisioningHealthTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - 49a: real deferred DDL reports its step and rows through root health, then Healthy")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Joint deferred: real validation reports its job and rows through root health, then Healthy")]
     public async Task CheckAsync_DeferredCheck_ShouldReportProgressThenHealthy()
     {
         // Arrange: the immutable test function pauses validation of the second existing row.
@@ -53,10 +53,10 @@ public sealed class DatabaseProvisioningHealthTests
 
                 // Assert: Hosting depends only on the root instance's general state.
                 degraded.Status.ShouldBe(HealthStatus.Degraded);
-                degraded.Description.ShouldNotBeNull().ShouldContain("AddConstraint items");
+                degraded.Description.ShouldNotBeNull().ShouldContain("Joint/AddConstraint items");
                 degraded.Description.ShouldContain("step 1 of 1");
                 degraded.Data.ShouldNotBeNull()["engine.0.provisioning.0.rowsProcessed"].ShouldBe(1L);
-                degraded.Data["engine.0.provisioning.0.totalRows"].ShouldBe(3L);
+                degraded.Data.ContainsKey("engine.0.provisioning.0.totalRows").ShouldBeFalse();
             }
             finally
             {

@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>Executes normalized joins, including FULL's independently tracked build rows.</summary>
     private async IAsyncEnumerable<object?[]> EnumerateNormalizedJoinRowsAsync(SqlJoinPlan plan,
         SqlStatementContext statement, Func<int, IEnumerable<object?[]>> readInput,
-        [EnumeratorCancellation] CancellationToken cancellationToken, int? dmlTarget = null)
+        [EnumeratorCancellation] CancellationToken cancellationToken, int? dmlTarget = null, bool streamRoot = false)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var indexes = new Dictionary<SqlJoinStep, BTreeIndex>(ReferenceEqualityComparer.Instance);
@@ -36,7 +36,7 @@ internal sealed partial class SqlPlanExecutor
         // Postorder work avoids recursive MoveNext/async calls for arbitrarily long join chains.
         // Each child result is released after its parent consumes it.
         var pending = new Stack<(SqlJoinTree Node, int Phase)>();
-        var results = new Dictionary<SqlJoinTree, (List<object?[]> Rows, int Start, int End)>(ReferenceEqualityComparer.Instance);
+        var results = new Dictionary<SqlJoinTree, (SelectJoinBuffer Rows, int Start, int End)>(ReferenceEqualityComparer.Instance);
         var builds = new Dictionary<SqlJoinTree, SqlHashJoinTable>(ReferenceEqualityComparer.Instance);
         var sinks = new Dictionary<SqlJoinTree, SqlHashJoinTable>(ReferenceEqualityComparer.Instance);
         try
@@ -49,16 +49,17 @@ internal sealed partial class SqlPlanExecutor
                 if (node.Step is not { } step)
                 {
                     var binding = plan.Bindings[node.Binding];
-                    var rows = new List<object?[]>();
+                    var rows = new SelectJoinBuffer();
+                    results.Add(node, (rows, binding.Offset, binding.Offset + binding.Source.Columns.Count));
                     foreach (var input in readInput(node.Binding))
                     {
                         if (ReferenceEquals(node, plan.Tree) && statement.Metrics.Analysis(plan) is { } work) { work.Candidates++; }
                         var frame = new object?[plan.Columns.Count + (dmlTarget is null ? 0 : 2)];
                         input.CopyTo(frame, binding.Offset);
                         if (node.Binding == dmlTarget) { frame[^2] = input; }
-                        Retain(node, frame, rows);
+                        if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return frame; }
+                        else { Retain(node, frame, rows); }
                     }
-                    results.Add(node, (rows, binding.Offset, binding.Offset + binding.Source.Columns.Count));
                     continue;
                 }
                 bool seek = indexes.TryGetValue(step, out var index);
@@ -95,9 +96,10 @@ internal sealed partial class SqlPlanExecutor
                         continue;
                     }
                 }
-                (List<object?[]> Rows, int Start, int End) inner = seek ? (new List<object?[]>(), plan.Bindings[node.Right!.Binding].Offset,
+                (SelectJoinBuffer Rows, int Start, int End) inner = seek ? (new SelectJoinBuffer(), plan.Bindings[node.Right!.Binding].Offset,
                     plan.Bindings[node.Right.Binding].Offset + plan.Bindings[node.Right.Binding].Source.Columns.Count) : results[node.Right!];
-                var output = new List<object?[]>();
+                var output = new SelectJoinBuffer();
+                results.Add(node, (output, Math.Min(outer.Start, inner.Start), Math.Max(outer.End, inner.End)));
                 SqlHashJoinTable? hash = null;
                 try
                 {
@@ -142,9 +144,14 @@ internal sealed partial class SqlPlanExecutor
                                 hash!.MarkMatched(candidate.Entry);
                                 FullJoinProgress?.Invoke("match", statement.Metrics, cancellationToken);
                             }
-                            Retain(node, joined, output);
+                            if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return joined; }
+                            else { Retain(node, joined, output); }
                         }
-                        if (!matched && step.Kind is SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.FullOuter) { Retain(node, left, output); }
+                        if (!matched && step.Kind is SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.FullOuter)
+                        {
+                            if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return left; }
+                            else { Retain(node, left, output); }
+                        }
                     }
                     if (step.Kind == SqlJoinType.FullOuter)
                     {
@@ -152,7 +159,8 @@ internal sealed partial class SqlPlanExecutor
                         {
                             FullJoinProgress?.Invoke("unmatched", statement.Metrics, cancellationToken);
                             cancellationToken.ThrowIfCancellationRequested();
-                            Retain(node, row, output);
+                            if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return row; }
+                            else { Retain(node, row, output); }
                         }
                     }
 
@@ -175,10 +183,18 @@ internal sealed partial class SqlPlanExecutor
                         foreach (var row in candidates) { yield return (row, -1); }
                     }
                 }
-                finally { hash?.Dispose(); }
+                finally
+                {
+                    hash?.Dispose();
+                    ReleaseSelectRows(ref outer.Rows.Memory, outer.Rows);
+                    // The iterator can hoist these lists beyond their dictionary entries.
+                    // Drop consumed cells as soon as their charge is released.
+                    outer.Rows.Clear();
+                    if (!seek) { ReleaseSelectRows(ref inner.Rows.Memory, inner.Rows); }
+                    inner.Rows.Clear();
+                }
                 results.Remove(node.Left!);
                 results.Remove(node.Right!);
-                results.Add(node, (output, Math.Min(outer.Start, inner.Start), Math.Max(outer.End, inner.End)));
             }
             foreach (var row in results[plan.Tree!].Rows)
             {
@@ -189,9 +205,10 @@ internal sealed partial class SqlPlanExecutor
         finally
         {
             foreach (var build in builds.Values) { build.Dispose(); }
+            foreach (var result in results.Values) { ReleaseSelectMemory(ref result.Rows.Memory); }
         }
 
-        void Retain(SqlJoinTree node, object?[] row, List<object?[]> buffer)
+        void Retain(SqlJoinTree node, object?[] row, SelectJoinBuffer buffer)
         {
             // Presence is independent of user NULLs, including an all-NULL derived source.
             // The target's original array survives both FULL build output and join clones.
@@ -209,8 +226,14 @@ internal sealed partial class SqlPlanExecutor
                     memory.Retain(row);
                     memory.Reserve(32); // list storage, including growth
                 }
+                RetainSelectRow(ref buffer.Memory, row, includeWindow: true);
                 buffer.Add(row);
             }
         }
+    }
+
+    private sealed class SelectJoinBuffer : List<object?[]>
+    {
+        internal SqlSelectMemory Memory;
     }
 }

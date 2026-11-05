@@ -253,6 +253,9 @@ await using (var known = (DatabaseResultSet)await session.ExecuteAsync(
 foreach (string command in new[] { "BEGIN", "SAVEPOINT parent", "SAVEPOINT duplicate", "INSERT (:SavepointNative {n:1})", "SAVEPOINT duplicate", "INSERT (:SavepointNative {n:2})", "ROLLBACK TO duplicate", "RELEASE duplicate", "ROLLBACK TO duplicate", "INSERT (:SavepointNative {n:3})", "RELEASE parent", "COMMIT" })
 { await session.ExecuteAsync(command, cancellationToken: CancellationToken.None); }
 await Check("MATCH (n:SavepointNative) RETURN n.n", [[3L]]);
+await Check("FOR x IN [1,2] CALL (x) { RETURN x+1 AS y UNION RETURN x+2 AS y } RETURN y ORDER BY y", [[2L],[3L],[3L],[4L]]);
+await Check("FOR x IN [1,2] OPTIONAL CALL (x) { FILTER x=1 RETURN x+1 AS y } RETURN coalesce(y,0) ORDER BY x", [[2L],[0L]]);
+await Check("LET x=4 CALL (x) { WITH 1 AS z RETURN x+z AS y } RETURN y", [[5L]]);
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)

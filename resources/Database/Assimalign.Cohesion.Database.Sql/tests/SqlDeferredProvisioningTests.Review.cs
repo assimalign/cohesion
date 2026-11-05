@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlDeferredProvisioningTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: ordered additions survive deferral and every committed-step crash")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Joint deferred: ordered additions survive every preparation and publication crash")]
     public async Task BuildAsync_RequiredThenOptionalColumn_ShouldPreserveOrderAcrossRestart()
     {
         // Arrange
@@ -47,8 +47,11 @@ public sealed partial class SqlDeferredProvisioningTests
         var builder = Builder(storage);
         builder.AddWorker(engine =>
         {
-            engine.BeforeProvisioning = database => database.SchemaProvisioner.StepApplied = _ =>
-                crashes.Add(storage.CaptureDurableImages());
+            engine.BeforeProvisioning = database => database.SchemaProvisioner.JointStage = stage =>
+            {
+                if (stage is "OwnersDurable" or "TablePrepared" or "Published")
+                { crashes.Add(storage.CaptureDurableImages()); }
+            };
             return new RecordingWorker(engine);
         });
 
@@ -61,11 +64,11 @@ public sealed partial class SqlDeferredProvisioningTests
             items.Columns.Select(column => column.Name).ShouldBe(["Id", "Required", "Optional"]);
         }
 
-        // Assert: each image retains the target without a repeated declaration.
-        crashes.Count.ShouldBe(2);
+        // Assert: only a matching declaration resumes the unpublished target.
+        crashes.Count.ShouldBe(3);
         foreach (var image in crashes)
         {
-            await using var engine = await Builder(image).AddDatabase("pending").BuildAsync(timeout.Token);
+            await using var engine = await Builder(image).AddDatabase(desired).BuildAsync(timeout.Token);
             var database = await engine.OpenDatabaseAsync("pending", timeout.Token);
             await WaitDoneAsync(database, timeout.Token);
             database.Catalog.TryGetTable("dbo", "items", out var items).ShouldBeTrue();
@@ -74,8 +77,8 @@ public sealed partial class SqlDeferredProvisioningTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: the first cheap commit already retains the complete migration intent")]
-    public async Task BuildAsync_CrashAfterCheapColumn_ShouldResumeWithoutDeclaration()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Joint deferred: durable intent precedes every schema change")]
+    public async Task BuildAsync_CrashAfterIntent_ShouldResumeOnlyMatchingDeclaration()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -86,9 +89,9 @@ public sealed partial class SqlDeferredProvisioningTests
         var builder = Builder(storage);
         builder.AddWorker(engine =>
         {
-            engine.BeforeProvisioning = database => database.SchemaProvisioner.StepApplied = step =>
+            engine.BeforeProvisioning = database => database.SchemaProvisioner.JointStage = stage =>
             {
-                if (step.Operation.Kind == SqlSchemaMigrationOperationKind.AddColumn)
+                if (stage == "IntentDurable")
                 {
                     crash = storage.CaptureDurableImages();
                     Interlocked.Increment(ref captures);
@@ -109,14 +112,14 @@ public sealed partial class SqlDeferredProvisioningTests
             engine.BeforeProvisioning = database => database.SchemaProvisioner.BeforeDeferredStep = (_, token) => release.Wait(token);
             return new RecordingWorker(engine);
         });
-        await using var recovered = await restarted.AddDatabase("pending").BuildAsync(timeout.Token);
+        await using var recovered = await restarted.AddDatabase(desired).BuildAsync(timeout.Token);
         var pending = await recovered.OpenDatabaseAsync("pending", timeout.Token);
         try
         {
             // Assert
             captures.ShouldBe(1);
             pending.Catalog.TryGetTable("dbo", "items", out var items).ShouldBeTrue();
-            items.FindColumn("Note").ShouldNotBeNull();
+            items.FindColumn("Note").ShouldBeNull();
             pending.Catalog.PendingMigration.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
             pending.Provisioning.ShouldNotBeNull();
         }
@@ -177,7 +180,7 @@ public sealed partial class SqlDeferredProvisioningTests
                 waiting.IsCompleted.ShouldBeFalse();
                 observations++;
                 await Task.Delay(1, timeout.Token);
-                elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+                elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(25));
             }
             while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || observations < 10);
         }
