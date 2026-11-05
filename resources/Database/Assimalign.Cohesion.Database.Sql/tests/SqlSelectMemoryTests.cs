@@ -435,7 +435,7 @@ public sealed partial class SqlSelectMemoryTests
     [InlineData(false, false, 35656720L, 35656720L)]
     [InlineData(false, true, 35657112L, 35657112L)]
     [InlineData(true, false, 2103128L, 2103128L)]
-    public async Task ExecuteAsync_WireSizedProjection_ShouldPinStatementCost(bool manyRows, bool explicitTransaction, long expectedRefusal, long expectedPeak)
+    public async Task ExecuteAsync_WireSizedProjection_ShouldPinStatementCost(bool manyRows, bool explicitTransaction, long expectedDefaultPeak, long expectedPeak)
     {
         // Arrange: retain the wire tests' complete inputs and outputs; only their grant differs.
         // Wide identities share within each buffer, including constant-folded projections.
@@ -477,7 +477,7 @@ public sealed partial class SqlSelectMemoryTests
             }
         }
         // Assert
-        peaks.ShouldBe([expectedRefusal, expectedPeak]);
+        peaks.ShouldBe([expectedDefaultPeak, expectedPeak]);
     }
 
     private static async Task VerifyEveryUnwind(string sql, bool forceBase)
@@ -499,6 +499,7 @@ public sealed partial class SqlSelectMemoryTests
         finally { SqlStatementMetrics.AfterMemoryReservation = null; }
         count.ShouldBeGreaterThan(0);
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
         for (int point = 1; point <= count; point++)
         {
             foreach (bool cancel in new[] { false, true })
@@ -520,6 +521,7 @@ public sealed partial class SqlSelectMemoryTests
                     { (await Should.ThrowAsync<InvalidOperationException>(() => Read(session, sql))).ShouldBeSameAs(fault); }
                     visited.ShouldBeGreaterThanOrEqualTo(point);
                     session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+                    session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
                 }
                 finally { SqlStatementMetrics.AfterMemoryReservation = null; }
             }

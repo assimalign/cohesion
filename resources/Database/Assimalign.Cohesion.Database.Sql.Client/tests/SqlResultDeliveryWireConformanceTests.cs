@@ -72,13 +72,13 @@ public sealed class SqlResultDeliveryWireConformanceTests
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
-    public async Task QueryAsync_ResultAbove64MiB_ShouldRespectStatementGrant(bool returning, bool defaultGrant)
+    public async Task QueryAsync_SharedPayloadAbove64MiB_ShouldDeliverAllRows(bool returning, bool useDefaultGrant)
     {
         // Arrange: sixty-five 1 MiB strings exceed the former cap; every row fits one frame.
         // SELECT's shared string pays once per buffer; the response still exceeds 64 MiB.
         // Both the default and larger SELECT grants admit the same wire-delivery case.
         await using var harness = await SqlClientTestHarness.StartAsync(configureEngine: options =>
-        { if (!returning && !defaultGrant) { options.StatementMemoryBudget = 256L * 1024 * 1024; } });
+        { if (!returning && !useDefaultGrant) { options.StatementMemoryBudget = 256L * 1024 * 1024; } });
         await using var connection = await harness.Client.ConnectAsync(CancellationToken.None);
         await connection.ExecuteAsync("CREATE TABLE large_results(id INT)", cancellationToken: CancellationToken.None);
         const string source = "WITH c AS (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 " +

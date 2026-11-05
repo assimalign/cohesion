@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -150,14 +151,16 @@ public sealed partial class SqlSelectWideMemoryTests
         owner.HasWideCells.ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - wide SELECT memory: narrow ordered admission allocates no dictionary or per-row object (#1776)")]
-    public void Add_NarrowOrderedHeap_ShouldAllocateZeroPerOperation()
+    [Fact(DisplayName = "Cohesion Test [Sql] - wide SELECT memory: narrow ordered replacement allocates no dictionary or per-row object (#1776)")]
+    public void Add_NarrowOrderedHeap_ShouldAllocateZeroPerReplacement()
     {
         // Arrange: prebuilt rows, a warm one-entry heap, and three measured rounds.
         var metrics = new SqlStatementMetrics();
         using var collector = Collector(metrics, 1);
         object?[] row = [1];
-        collector.Add(row, row);
+        object?[][] keys = Enumerable.Range(0, 40001).Select(i => new object?[] { 40001 - i }).ToArray();
+        int position = 0;
+        collector.Add(row, keys[position++]);
         Measure();
 
         // Act
@@ -174,7 +177,7 @@ public sealed partial class SqlSelectWideMemoryTests
         long Measure()
         {
             long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 10000; i++) { collector.Add(row, row); }
+            for (int i = 0; i < 10000; i++) { collector.Add(row, keys[position++]); }
             return GC.GetAllocatedBytesForCurrentThread() - before;
         }
     }
