@@ -63,6 +63,30 @@ public sealed class SqlDatabaseEngineOptions
     /// Budget exhaustion refuses the statement. CTAS publishes only after all copying succeeds; query buffers do not spill yet.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
+    /// <summary>Gets or sets a dedicated spill directory. File engines default to RootPath/.cohesion-temp;
+    /// an override must remain below RootPath, with a first segment no database could take (a leading dot is safe) and without
+    /// link components. In-memory engines have no spill space unless set.</summary>
+    /// <remarks>One directory belongs to one spilling engine; choose a different TempDirectory for
+    /// each engine. A lease conflict warns at startup and refuses a later spill with CK05005.
+    /// Unix directories are created 0700, files 0600; group/other-writable directories are refused.
+    /// On Windows an explicit directory keeps its inherited ACL. Data is unencrypted. Unix runs survive a kill until the next sweep; Windows
+    /// deletes runs on process exit. Power loss can leave runs on every OS. OS backups of RootPath can capture live temp files.
+    /// File engines reserve 2.54 GiB per open database at defaults. For N = max(1, open databases),
+    /// C = 1 MiB + N * (BufferPoolCapacity + 128 * 8192 + 2 * (JournalSizeLimit +
+    /// reclamation bracket bytes for 32 rows)), the floor is C + max(1 MiB, ceil(C / 4)).
+    /// An in-memory engine reserves only 1 MiB on this volume.</remarks>
+    public FileSystemPath? TempDirectory { get; set; }
+
+    /// <summary>Gets or sets the engine's physical temporary-byte quota. Null fixes the quota at
+    /// min(10 GiB, 25% of available volume bytes), measured after startup sweeping; an unavailable probe uses zero until the first run retries.
+    /// Zero refuses all growth. Must be nonnegative. The live free-space floor always applies.</summary>
+    public long? TempSpaceQuota { get; set; }
+
+    /// <summary>Gets or sets the statement's physical temporary-byte quota. Null uses four times
+    /// StatementMemoryBudget, saturating at Int64.MaxValue. Zero refuses growth. Must be nonnegative.
+    /// SQL operators retain their existing CS05067 memory-budget refusal.</summary>
+    public long? StatementTempSpaceQuota { get; set; }
+
     /// <summary>
     /// Gets or sets the checkpoint time backstop: the longest a file set (data or catalog) whose
     /// journal received records waits for a checkpoint, which durably flushes its pages and
@@ -249,6 +273,9 @@ public sealed class SqlDatabaseEngineOptions
         StatementTimeout = StatementTimeout,
         LockTimeout = LockTimeout,
         StatementMemoryBudget = StatementMemoryBudget,
+        TempDirectory = TempDirectory,
+        TempSpaceQuota = TempSpaceQuota,
+        StatementTempSpaceQuota = StatementTempSpaceQuota,
         CheckpointInterval = CheckpointInterval,
         CheckpointJournalSize = CheckpointJournalSize,
         WorkerFailureWindow = WorkerFailureWindow,
@@ -279,6 +306,9 @@ public sealed class SqlDatabaseEngineOptions
         public global::System.TimeSpan StatementTimeout => _target.StatementTimeout;
         public global::System.TimeSpan LockTimeout => _target.LockTimeout;
         public long StatementMemoryBudget => _target.StatementMemoryBudget;
+        public global::System.IO.FileSystemPath? TempDirectory => _target.TempDirectory;
+        public long? TempSpaceQuota => _target.TempSpaceQuota;
+        public long? StatementTempSpaceQuota => _target.StatementTempSpaceQuota;
         public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
         public long CheckpointJournalSize => _target.CheckpointJournalSize;
         public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;

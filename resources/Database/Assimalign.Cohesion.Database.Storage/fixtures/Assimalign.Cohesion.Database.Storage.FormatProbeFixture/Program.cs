@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Diagnostics.Tracing;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,8 +25,53 @@ namespace Assimalign.Cohesion.Database.Storage.FormatProbeFixture;
 
 internal static class Program
 {
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_TempSpace")]
+    private static extern StorageTempSpace? TempSpace(SqlDatabaseEngine engine);
+
+    private static async Task TempLeaseProbeAsync(string root)
+    {
+        string temp = Path.Combine(root, ".cohesion-temp"); CreateTempDirectory(temp);
+        string orphan = Path.Combine(temp, "cohesion-00000000000000000000000000000001.ctmp"); File.WriteAllBytes(orphan, [1]);
+        using var events = new TempWarnings();
+        await using (var seed = SqlDatabaseEngine.Create("seed", new() { RootPath = root, CheckpointJournalSize = 65536 }))
+        { await seed.CreateDatabaseAsync("online", CancellationToken.None); }
+        await using var engine = SqlDatabaseEngine.Create("reopen", new() { RootPath = root, CheckpointJournalSize = 65536 });
+        await engine.OpenDatabaseAsync("online", CancellationToken.None);
+        using var statement = TempSpace(engine)!.CreateStatement(8192);
+        try
+        {
+            using var run = statement.CreateRun(); run.Append([1]); run.Seal();
+            if (!OperatingSystem.IsWindows()) { throw new InvalidOperationException("disabled locking admitted a run"); }
+            Console.WriteLine("TEMP_LEASE_OK online");
+        }
+        catch (StorageTempException error) when (!OperatingSystem.IsWindows())
+        {
+            if (error.Code != "CK05005" || events.Warnings < 2 || !File.Exists(orphan))
+            { throw new InvalidOperationException("missing coded refusal, warning or orphan"); }
+            Console.WriteLine("TEMP_LEASE_REFUSED CK05005 online warnings=" + events.Warnings);
+            Console.WriteLine(error.InnerException!.Message);
+        }
+    }
+    private sealed class TempWarnings : EventListener
+    {
+        public int Warnings;
+        protected override void OnEventSourceCreated(EventSource source)
+        {
+            if (source.Name == "Assimalign.Cohesion.Database.Storage") { EnableEvents(source, EventLevel.Warning); }
+        }
+        protected override void OnEventWritten(EventWrittenEventArgs data)
+        { if (data.EventId == 23) { Interlocked.Increment(ref Warnings); } }
+    }
+
+    private static void CreateTempDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows()) { Directory.CreateDirectory(path); }
+        else { Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+    }
+
     private static async Task Main(string[] args)
     {
+        if (args[0] == "temp-lease-probe") { await TempLeaseProbeAsync(args[1]); return; }
         // This process deliberately exits with live physical brackets. Never dispose them before Exit.
         string model = args[0];
         string root = args[1];

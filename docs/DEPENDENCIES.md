@@ -29,7 +29,7 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 590 |
+| Projects indexed | 591 |
 | Shipped library/resource projects | 236 |
 | Library areas | 21 |
 | Resource areas | 18 |
@@ -1092,7 +1092,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-272 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+273 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1105,7 +1105,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | Kind | Count |
 | --- | --- |
 | `examples/` | 5 |
-| `fixtures/` | 15 |
+| `fixtures/` | 16 |
 | `samples/` | 9 |
 | `tests/` | 243 |
 
