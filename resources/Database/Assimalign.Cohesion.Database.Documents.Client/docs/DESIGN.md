@@ -92,7 +92,7 @@ DocumentSetOperationWireTests exercises equality, NULL/MISSING, numeric widening
 arity/modes, operand and compound pages, LIMIT 0, EXPLAIN operands and located CD01037/CD01038
 refusals over InMemory and TCP. Memory/work refusals retain CD05018/CD05020; rollback and a
 subsequent query prove connection reuse. The NativeAOT consumer checks headers, value equality,
-pages, multiset counts and every query position on both transports.
+pages, multiset counts, expression arrays, derived FROM and INSERT/UPSERT SELECT on both transports.
 The deterministic engine oracle also runs its first 16 trials for each RAW/whole-document/typed-column
 and ALL/distinct/operator combination over TCP (288 comparisons). Matching named projections exercise typed
 headers; Json cells preserve first representatives' member order and numeric scale, while numeric
