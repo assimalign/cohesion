@@ -66,7 +66,7 @@ internal class SqlSubqueryValues
         if (this is not BudgetedValues budgeted) { return; }
         bool windowOwned = SqlWindowMemory.For(budgeted.Metrics) is not null;
         if (windowOwned && correlated) { return; }
-        long bytes = 32L + SqlHashJoinTable.RowBytes(values);
+        long bytes = SqlSelectMemory.VectorBytes(values);
         if (!correlated)
         {
             for (var frame = _parent; frame is not null; frame = frame._parent)
@@ -82,10 +82,10 @@ internal class SqlSubqueryValues
     {
         get
         {
-            long bytes = 0;
+            BudgetedValues? owner = null;
             for (var frame = this; frame is not null; frame = frame._parent)
-            { if (frame is BudgetedValues budgeted) { bytes += budgeted.PendingStatementBytes; } }
-            return bytes;
+            { if (frame is BudgetedValues budgeted) { owner = budgeted; } }
+            return owner?.PendingStatementBytes ?? 0;
         }
     }
 

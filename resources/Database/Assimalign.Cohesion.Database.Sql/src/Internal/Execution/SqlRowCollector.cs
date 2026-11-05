@@ -25,7 +25,7 @@ internal sealed class SqlRowCollector : IDisposable
     private readonly List<object?[]> _rows = [];
     private readonly long _budget;
     private readonly bool _publishPeak;
-    private long _reserved;
+    private SqlSelectMemory _memory;
     private long _visited;
     private int _comparisons;
     private bool _collationsInitialized;
@@ -72,7 +72,7 @@ internal sealed class SqlRowCollector : IDisposable
         long ordinal = _visited++;
         if (_orderBy.Count == 0)
         {
-            if (ordinal >= _offset) { Reserve(32L + SqlHashJoinTable.RowBytes(output)); _rows.Add(output); return null; }
+            if (ordinal >= _offset) { if (ChargesPlainMemory) { ReserveRow(output); } _rows.Add(output); return null; }
             windowMemory?.ReleaseRow(output);
             return output;
         }
@@ -83,7 +83,7 @@ internal sealed class SqlRowCollector : IDisposable
         if (!_canBound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
-            if (ChargesPlainMemory) { Reserve(EntryBytes(entry)); }
+            if (ChargesPlainMemory) { ReserveEntry(entry); }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -94,7 +94,7 @@ internal sealed class SqlRowCollector : IDisposable
         if (_ordered.Count < Bound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
-            if (ChargesPlainMemory) { Reserve(EntryBytes(entry)); }
+            if (ChargesPlainMemory) { ReserveEntry(entry); }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -114,9 +114,13 @@ internal sealed class SqlRowCollector : IDisposable
         {
             var replaced = _ordered[0];
             // Credit the replaced entry before admitting its replacement.
-            long difference = ChargesPlainMemory ? EntryBytes(entry) - EntryBytes(replaced) : 0;
+            bool wide = false;
+            long difference = ChargesPlainMemory
+                ? _memory.ReplacementBytes(entry.Output, entry.Keys, replaced.Output, replaced.Keys, out wide) : 0;
             if (difference > 0) { Reserve(difference); }
             SiftDown(0, entry);
+            if (ChargesPlainMemory && (_memory.HasWideCells || wide))
+            { _memory.Replace(entry.Output, entry.Keys, replaced.Output, replaced.Keys); }
             if (difference < 0) { Release(-difference); }
             windowMemory?.ReleaseRow(replaced.Output);
             windowMemory?.ReleaseRow(replaced.Keys);
@@ -160,8 +164,19 @@ internal sealed class SqlRowCollector : IDisposable
         return _rows;
     }
 
-    private static long EntryBytes(Entry entry)
-        => 32L + SqlHashJoinTable.RowBytes(entry.Output) + SqlHashJoinTable.RowBytes(entry.Keys);
+    private void ReserveRow(object?[] output)
+    {
+        long bytes = _memory.RowBytes(output, out bool wide);
+        Reserve(bytes);
+        if (wide) { _memory.AddRow(output); }
+    }
+
+    private void ReserveEntry(Entry entry)
+    {
+        long bytes = _memory.EntryBytes(entry.Output, entry.Keys, out bool wide);
+        Reserve(bytes);
+        if (wide) { _memory.AddRow(entry.Output); _memory.AddRow(entry.Keys); }
+    }
 
     private bool ChargesPlainMemory => _budget != 0 && _metrics is not null && SqlWindowMemory.For(_metrics) is null;
 
@@ -169,20 +184,20 @@ internal sealed class SqlRowCollector : IDisposable
     {
         if (_budget == 0 || _metrics is null || SqlWindowMemory.For(_metrics) is not null) { return; }
         _metrics.ReservePlainSelectMemory(bytes, _budget);
-        _reserved += bytes;
+        _memory.Bytes += bytes;
     }
 
     private void Release(long bytes)
     {
-        if (_reserved == 0) { return; }
+        if (_memory.Bytes == 0) { return; }
         _metrics!.ReleasePlainSelectMemory(bytes);
-        _reserved -= bytes;
+        _memory.Bytes -= bytes;
     }
 
     public void Dispose()
     {
-        _metrics?.ReleasePlainSelectMemory(_reserved);
-        _reserved = 0;
+        _metrics?.ReleasePlainSelectMemory(_memory.Bytes);
+        _memory.Clear();
     }
 
     private void RecordRetainedCount()

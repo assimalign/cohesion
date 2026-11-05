@@ -68,17 +68,17 @@ public sealed class SqlResultDeliveryWireConformanceTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Result delivery: large SELECT respects its statement grant and RETURNING keeps its ledger")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Result delivery: shared wide SELECT fits the default grant and RETURNING keeps its ledger")]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
-    public async Task QueryAsync_ResultAbove64MiB_ShouldRespectStatementGrant(bool returning, bool defaultGrant)
+    public async Task QueryAsync_SharedPayloadAbove64MiB_ShouldDeliverAllRows(bool returning, bool useDefaultGrant)
     {
         // Arrange: sixty-five 1 MiB strings exceed the former cap; every row fits one frame.
-        // The 65 SELECT outputs alone cost 136,320,600 B, plus narrow join/cache buffers.
-        // Keep a default-grant refusal and a separately admitted wire-delivery case.
+        // SELECT's shared string pays once per buffer; the response still exceeds 64 MiB.
+        // Both the default and larger SELECT grants admit the same wire-delivery case.
         await using var harness = await SqlClientTestHarness.StartAsync(configureEngine: options =>
-        { if (!returning && !defaultGrant) { options.StatementMemoryBudget = 256L * 1024 * 1024; } });
+        { if (!returning && !useDefaultGrant) { options.StatementMemoryBudget = 256L * 1024 * 1024; } });
         await using var connection = await harness.Client.ConnectAsync(CancellationToken.None);
         await connection.ExecuteAsync("CREATE TABLE large_results(id INT)", cancellationToken: CancellationToken.None);
         const string source = "WITH c AS (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 " +
@@ -89,18 +89,7 @@ public sealed class SqlResultDeliveryWireConformanceTests
 
         // Act
         var parameters = new Dictionary<string, object?> { ["payload"] = new string('x', 1048576) };
-        if (defaultGrant)
-        {
-            var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
-            var failure = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(statement, parameters, CancellationToken.None));
-            failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            failure.Message.ShouldContain("67108864", Case.Sensitive);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
-            failure.ConnectionUsable.ShouldBeTrue();
-            (await connection.QueryAsync("SELECT 42", cancellationToken: CancellationToken.None))[0].GetInt32(0).ShouldBe(42);
-            harness.Server.Sessions.ShouldHaveSingleItem().ShouldBeSameAs(serverSession);
-            return;
-        }
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var rows = await connection.QueryAsync(statement, parameters, cancellationToken: CancellationToken.None);
 
         // Assert: the deterministic row count and payload lengths exceed 64 MiB without timing checks.
@@ -117,6 +106,7 @@ public sealed class SqlResultDeliveryWireConformanceTests
         payloadBytes.ShouldBeGreaterThan(64L * 1024 * 1024);
         (await connection.QueryAsync("SELECT id FROM large_results", cancellationToken: CancellationToken.None)).Count.ShouldBe(returning ? 65 : 0);
         (await connection.QueryAsync("SELECT 42", cancellationToken: CancellationToken.None))[0].GetInt32(0).ShouldBe(42);
+        harness.Server.Sessions.ShouldHaveSingleItem().ShouldBeSameAs(serverSession);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Result header: a repeated MiB CTE alias is a reusable statement error")]

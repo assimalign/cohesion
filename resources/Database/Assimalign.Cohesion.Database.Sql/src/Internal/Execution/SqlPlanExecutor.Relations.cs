@@ -28,7 +28,8 @@ internal sealed partial class SqlPlanExecutor
         if (relation.CatalogView is not null) { _materializedRelations = new RelationRows(statement.TransactionStart); }
         _subqueryValues = relation.CatalogView is not null ? null : parent is null ? null : new SqlSubqueryValues(parent);
         var rows = new List<object?[]>();
-        long retainedBytes = 0, resultBytes = 0;
+        SqlSelectMemory retainedBytes = default;
+        long resultBytes = 0;
         try
         {
             using var analysis = statement.Metrics.EnterRelationAnalysis(relation);
@@ -55,8 +56,8 @@ internal sealed partial class SqlPlanExecutor
                 var destination = relation.CatalogView is not null ? previousRelations : _materializedRelations;
                 destination ??= new RelationRows();
                 destination.Add(relation, rows);
-                destination.Reserved += retainedBytes;
-                retainedBytes = 0;
+                destination.Reserved += retainedBytes.Bytes;
+                retainedBytes.Clear();
                 if (relation.CatalogView is not null) { previousRelations = destination; }
                 else { _materializedRelations = destination; }
             }

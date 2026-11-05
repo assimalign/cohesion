@@ -22,7 +22,8 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        long matchBytes = 0, derivedBytes = 0;
+        SqlSelectMemory matchBytes = default;
+        long derivedBytes = 0;
         try
         {
             Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
@@ -187,8 +188,7 @@ internal sealed partial class SqlPlanExecutor
         }
         bool reversed = plan is not SqlSearchedJoinPlan && plan.FirstBinding == 1;
         var initial = plan.Bindings[plan.FirstBinding];
-        long bufferBytes = 0;
-        var buffered = new List<object?[]>?[plan.Steps.Count];
+        var buffered = new (List<object?[]>? Rows, SqlSelectMemory Memory)[plan.Steps.Count];
         var hashes = new SqlHashJoinTable?[plan.Steps.Count];
         var cursors = new IEnumerator<object?[]>?[plan.Steps.Count];
         var matched = new bool[plan.Steps.Count];
@@ -240,7 +240,7 @@ internal sealed partial class SqlPlanExecutor
                         }
                         else if (accesses[level] is not { } access)
                         {
-                            if (buffered[level] is null)
+                            if (buffered[level].Rows is null)
                             {
                                 var buffer = new List<object?[]>();
                                 foreach (var item in ReadInput(innerBinding))
@@ -250,12 +250,12 @@ internal sealed partial class SqlPlanExecutor
                                         memory.Retain(item);
                                         memory.Reserve(32); // list storage, including growth
                                     }
-                                    RetainSelectRow(ref bufferBytes, item, includeWindow: true);
+                                    RetainSelectRow(ref buffered[level].Memory, item, includeWindow: true);
                                     buffer.Add(item);
                                 }
-                                buffered[level] = buffer;
+                                buffered[level].Rows = buffer;
                             }
-                            candidates = buffered[level]!;
+                            candidates = buffered[level].Rows!;
                         }
                         else
                         {
@@ -299,7 +299,7 @@ internal sealed partial class SqlPlanExecutor
         {
             foreach (var cursor in cursors) { cursor?.Dispose(); }
             foreach (var hash in hashes) { hash?.Dispose(); }
-            ReleaseSelectMemory(ref bufferBytes);
+            for (int index = 0; index < buffered.Length; index++) { ReleaseSelectMemory(ref buffered[index].Memory); }
         }
 
         IEnumerable<object?[]> ReadInput(int binding)

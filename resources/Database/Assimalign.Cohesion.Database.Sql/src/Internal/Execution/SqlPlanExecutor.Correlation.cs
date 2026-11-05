@@ -286,7 +286,7 @@ internal sealed partial class SqlPlanExecutor
         SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken,
         SqlBoundExpression? where)
     {
-        long retainedBytes = 0;
+        SqlSelectMemory retainedBytes = default;
         try
         {
             var returned = new List<object?[]>();
@@ -351,7 +351,8 @@ internal sealed partial class SqlPlanExecutor
         SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken,
         SqlBoundExpression? where, HashSet<int> orderingSlots)
     {
-        long retainedBytes = 0, selectedBytes = 0;
+        SqlSelectMemory retainedBytes = default;
+        long selectedBytes = 0;
         try
         {
             if (limit?.Count == 0) { return MaterializeProjected(projections, []); }

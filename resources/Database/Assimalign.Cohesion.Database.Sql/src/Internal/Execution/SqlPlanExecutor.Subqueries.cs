@@ -47,7 +47,8 @@ internal sealed partial class SqlPlanExecutor
     private async Task<object?[]> MaterializePlainSubqueryAsync(SqlSubqueryBinding query, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        long retainedBytes = 0;
+        long resultBytes = 0;
+        SqlSelectMemory retainedBytes = default, vectorBytes = default;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -62,7 +63,7 @@ internal sealed partial class SqlPlanExecutor
                 await using var result = (DatabaseResultSet)await (boundedBody
                     ? ExecuteBoundedSubqueryBodyAsync(query.Query, statement, cancellationToken, 2)
                     : ExecuteAsync(query.Query, statement, cancellationToken)).ConfigureAwait(false);
-                retainedBytes += AdmitSelectResult(result, cancellationToken);
+                resultBytes += AdmitSelectResult(result, cancellationToken);
                 if (!boundedBody && result is SqlMaterializedResultSet body)
                 { _definitions.ObserveSelectRetention?.Invoke("subquery-body", false, body.Rows.Count); }
                 var rows = new List<object?>();
@@ -77,7 +78,7 @@ internal sealed partial class SqlPlanExecutor
                     found = true;
                     if (query.Kind == SqlSubqueryKind.Exists) { break; }
                     var value = SqlCharacter.Input(row.GetValue(0), result.Columns[0].Type);
-                    ReserveSelectMemory(ref retainedBytes, 8L + SqlHashJoinTable.ValueBytes(value));
+                    RetainSelectValue(ref retainedBytes, value, 8);
                     rows.Add(value);
                 }
                 if (query.Kind == SqlSubqueryKind.Exists) { rows.Add(query.IsNegated ? !found : found); }
@@ -88,23 +89,20 @@ internal sealed partial class SqlPlanExecutor
                 // before a subsequent window acquires its grant.
                 if (result is SqlMaterializedResultSet materialized)
                 {
-                    long released = 0;
                     for (int index = 0; index < materialized.Rows.Count; index++)
                     {
-                        if (ChargesSelectBuffers) { released += 32L + SqlHashJoinTable.RowBytes(materialized.Rows[index]); }
                         Array.Clear(materialized.Rows[index]);
                     }
                     materialized.ClearRows();
-                    _metrics?.ReleasePlainSelectMemory(released);
-                    retainedBytes -= released;
+                    ReleaseSelectMemory(ref resultBytes);
                 }
-                ReserveSelectMemory(ref retainedBytes, 24L + 8L * rows.Count);
-                foreach (var value in rows) { ReserveSelectMemory(ref retainedBytes, SqlHashJoinTable.ValueBytes(value)); }
+                ReserveSelectMemory(ref vectorBytes, 24L + 8L * rows.Count);
+                foreach (var value in rows) { RetainSelectValue(ref vectorBytes, value); }
                 return rows.ToArray();
             }
             finally { _subqueryValues = parent; }
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); }
+        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref vectorBytes); ReleaseSelectMemory(ref resultBytes); }
     }
 
     // This separate state machine charges child result buffers only inside a window.

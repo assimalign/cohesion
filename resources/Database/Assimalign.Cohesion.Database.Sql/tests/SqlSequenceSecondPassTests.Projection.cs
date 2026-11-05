@@ -82,7 +82,7 @@ public sealed partial class SqlSequenceSecondPassTests
     [InlineData(8192L, false)]
     public async Task Execute_DeferredSequenceLargeInput_ShouldChargeActualSource(long budget, bool refuses)
     {
-        // Arrange: deferral retains the existing full source (2256 B per sort entry).
+        // Arrange: deferral retains the existing full source, including its wide cell's 64 B entry.
         // An ordinary projection keeps only its two narrow outputs. No retention changes.
         await using var engine = SqlDatabaseEngine.Create("second-pass", new() { StatementMemoryBudget = budget });
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
@@ -107,9 +107,10 @@ public sealed partial class SqlSequenceSecondPassTests
         else
         {
             (await Rows(session, query)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, null });
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(2512);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(2576);
         }
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
         (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(refuses ? 1L : 2L);
     }
 }

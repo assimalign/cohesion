@@ -53,13 +53,16 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     // statement reservations. The caller releases this grant after source disposal.
     internal long ReserveMemory(SqlStatementMetrics metrics, long budget, CancellationToken cancellationToken, bool plainSelect = false)
     {
+        SqlSelectMemory memory = default;
         long reserved = 0;
         try
         {
             foreach (var row in _rows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Reserve(32L + SqlHashJoinTable.RowBytes(row));
+                long bytes = memory.RowBytes(row, out bool wide);
+                Reserve(bytes);
+                if (wide) { memory.AddRow(row); }
             }
             return reserved;
         }
