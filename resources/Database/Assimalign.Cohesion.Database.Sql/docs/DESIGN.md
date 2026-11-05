@@ -28,8 +28,12 @@ estimate. Pool reserves apply even when physical data growth is nonsparse. It ca
 than a particular migration's estimate. File defaults retain a 2.54 GiB floor per open database. Storage probes free space outside the
 accounting monitor after 128 reserved pages or a sample age above one second, subtracting
 reservations since the sample and pending unwritten pages present at the sample. Before CK05003
-it re-measures once, so freed disk permits recovery; concurrent releases invalidate a sample
-without losing or doubling their credits. Ordinary refresh does not wait on a contended probe gate. It does not reserve blocks against unrelated writers.
+it re-measures once and accepts the fresh value even if a release races it, treating that release
+as already reflected. Concurrent releases invalidate ordinary samples. A close reflected in a
+sample before its release accounting can be credited twice until the next accepted sample.
+Ordinary refresh does not wait on a contended probe gate; while stalled, the estimate still
+subtracts the engine's own reservations but has no page-count or age bound on staleness.
+It does not reserve blocks against unrelated writers.
 
 One directory belongs to one spilling engine. Two engines over one root start and can open
 different databases; the second spill refuses with CK05005 and names TempDirectory as the way out.

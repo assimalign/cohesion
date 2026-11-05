@@ -78,6 +78,7 @@ public sealed class StorageTempRegressionTests : IDisposable
         using var events = new StorageEventRecorder(EventLevel.Warning);
         using var space = StorageTempSpace.CreateCore(DirectoryPath, null, () => 0,
             () => { probes++; if (fail) { throw cause; } return 1024 * 1024; });
+        space.ProbeMaximumAgeMilliseconds = int.MaxValue;
         using var statement = space.CreateStatement(8192);
 
         // Act
@@ -339,7 +340,7 @@ public sealed class StorageTempRegressionTests : IDisposable
             if (captured is not null && Monitor.IsEntered(captured.Gate)) { underGate++; }
             return long.MaxValue;
         });
-        captured = space;
+        space.ProbeMaximumAgeMilliseconds = int.MaxValue; captured = space;
         using var statement = space.CreateStatement(16 * 1024 * 1024); using var run = statement.CreateRun();
 
         // Act

@@ -126,7 +126,7 @@ internal sealed class StorageEventSource : EventSource
         Interlocked.Increment(ref _tempDamage);
         if (IsEnabled(EventLevel.Error, Keywords.TempSpace)) { TempSpaceDamaged(code); }
     }
-    [Event(23, Level = EventLevel.Warning, Keywords = Keywords.TempSpace, Message = "Temporary storage unavailable during setup: {0}; {1}.")]
+    [Event(23, Level = EventLevel.Warning, Keywords = Keywords.TempSpace, Message = "Temporary storage unavailable: {0}; {1}.")]
     private void TempSpaceUnavailable(string code, string exceptionType) => WriteEvent(23, code, exceptionType);
     [Event(24, Level = EventLevel.Error, Keywords = Keywords.TempSpace, Message = "Temporary storage integrity failed: {0}.")]
     private void TempSpaceDamaged(string code) => WriteEvent(24, code);

@@ -39,6 +39,7 @@ public sealed class StorageTempSpace : IDisposable
     // registries. No syscall or event listener runs under it. Future callers must not hold
     // a storage page latch across temporary-space calls. Directory/probe gates never enter runs.
     internal readonly object Gate = new();
+    internal int ProbeMaximumAgeMilliseconds { get; set; } = 1000;
     internal Action? BeforeFileCreate { get; set; }
     internal Action? BeforePageWrite { get; set; }
     internal Action? BeforePageRead { get; set; }
@@ -231,7 +232,7 @@ public sealed class StorageTempSpace : IDisposable
         }
     }
     private bool ProbeDue() => _reservedTotal - _probeReserved >= 128L * PageSize ||
-        Environment.TickCount64 - _probeTick > 1000;
+        Environment.TickCount64 - _probeTick > ProbeMaximumAgeMilliseconds;
 
     private void RefreshProbe(bool required = false)
     {
@@ -249,12 +250,12 @@ public sealed class StorageTempSpace : IDisposable
             long free = ProbeAvailable(); // Never a syscall under Gate.
             lock (Gate)
             {
-                // A close may already be reflected in free. Keep the preceding sample and its
-                // credits rather than either dropping that release or crediting it twice.
-                // The unchanged window/timestamp makes the next reservation eligible to retry.
-                if (_releasedTotal != released) { return; }
+                // An ordinary sample raced by a release keeps the old sample and leaves the window due.
+                // Required samples accept free, conservatively treating racing releases as reflected.
+                // A close reflected before its accounting can still get double credit until the next sample.
+                if (_releasedTotal != released && !required) { return; }
                 _availableAtProbe = Math.Max(0, free - pending); _probeReserved = reserved;
-                _probeReleased = released; _probeTick = Environment.TickCount64;
+                _probeReleased = required ? _releasedTotal : released; _probeTick = Environment.TickCount64;
             }
         }
         finally { Monitor.Exit(_probeGate); }

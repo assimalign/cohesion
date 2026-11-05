@@ -30,7 +30,7 @@ public sealed class StorageTempRunReader : IDisposable
     /// <returns>True for a record, including an empty record; false at end.</returns>
     /// <exception cref="ArgumentException">The destination cannot fit the run's largest record.</exception>
     /// <exception cref="StorageTempException">Integrity failed, a previous read failed (CK05004), or temporary I/O failed (CK05005).</exception>
-    /// <exception cref="ObjectDisposedException">The reader, run or statement is disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The reader is disposed, or the run or statement is disposed on the first failed read; retries raise CK05004.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested; subsequent reads fail with CK05004.</exception>
     /// <remarks>Every failure after argument validation permanently fails this reader, including
     /// cancellation before any record bytes were consumed. Argument refusals leave it usable.</remarks>

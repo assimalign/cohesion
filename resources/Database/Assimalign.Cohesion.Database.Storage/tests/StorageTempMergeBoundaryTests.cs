@@ -103,6 +103,34 @@ public sealed class StorageTempMergeBoundaryTests : IDisposable
         _output.WriteLine($"boundary runs={runs}; peak={statement.PeakBytes}; largest merge={cost.LargestMerge}; writes={sorter.RecordsWritten}");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Storage] - Deferred merges: two thousand runs bound writes and depth with stable differential output")]
+    public void Complete_RepeatedFullDirectories_ShouldBoundWritesAndPreserveStability()
+    {
+        // Arrange: 216 framed rows fill each initial run at fan-in three.
+        const int runs = 2000, count = runs * 216;
+        using var space = StorageTempSpace.CreateCore(_directory, 2L * 1024 * 1024 * 1024, () => 0, () => long.MaxValue);
+        using var statement = space.CreateStatement(2L * 1024 * 1024 * 1024);
+        using var sorter = StorageTempSorter.Create(statement, 65536, 128);
+        byte[] key = new byte[5], value = new byte[100];
+        using var expected = Enumerable.Range(0, count).OrderBy(i => i * 7919L % 7).GetEnumerator();
+
+        // Act
+        for (int i = 0; i < count; i++)
+        {
+            key[0] = (byte)(i * 7919L % 7); BinaryPrimitives.WriteInt32LittleEndian(value, i); sorter.Append(key, value);
+        }
+        using var reader = sorter.Complete(); int rows = 0; bool stable = true;
+        while (reader.MoveNext())
+        { stable &= expected.MoveNext() && BinaryPrimitives.ReadInt32LittleEndian(reader.Value.Span) == expected.Current; rows++; }
+        _output.WriteLine($"large directory: runs={sorter.RunsCreated}; rows={rows}; writes={sorter.RecordsWritten}; amplification={(double)sorter.RecordsWritten / count:F6}; depth={sorter.MergePasses}; peak={statement.PeakBytes}");
+
+        // Assert
+        sorter.FanIn.ShouldBe(3); sorter.RunsCreated.ShouldBe(runs); rows.ShouldBe(count);
+        stable.ShouldBeTrue(); expected.MoveNext().ShouldBeFalse();
+        sorter.MergePasses.ShouldBeLessThanOrEqualTo(8);
+        sorter.RecordsWritten.ShouldBeLessThanOrEqualTo(7L * count); statement.PhysicalBytes.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Deferred merges: a full directory bounds live handles and preserves ordinal stability")]
     public void Append_FullDirectory_ShouldBoundHandlesAndKeepStableOrder()
     {

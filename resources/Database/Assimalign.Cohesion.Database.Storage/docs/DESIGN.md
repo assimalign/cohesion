@@ -26,9 +26,12 @@ The space caches available bytes, refreshing outside Gate after 128 reserved pag
 (1 MiB) or a sample age above one second (Environment.TickCount64). A would-be CK05003
 re-measures once before refusing, so freeing disk after a refusal permits a later reservation.
 Ordinary refresh uses TryEnter on _probeGate; a stalled probe lets other statements use the
-bounded stale sample. The before-refusal refresh may wait. A release during a probe invalidates
-that sample, preserving the previous sample and its release credits without double credit; the
-unchanged page window/timestamp makes the next reservation eligible to retry. It subtracts
+stale sample with the engine's own reservations still subtracted; a stalled or repeatedly discarded
+probe has no page-count or age bound on staleness. The before-refusal refresh may wait and accepts
+its fresh value even when a release races it, treating that release as already reflected. A release
+during an ordinary probe invalidates that sample and leaves the next reservation eligible to retry.
+A close reflected in a sample before its release accounting can be credited twice until the next
+accepted sample. The estimate subtracts
 reservations since the sample and buffered unwritten pages present at the sample, crediting
 releases after the sample. Other processes and database writes can consume
 space inside that window; this is admission headroom, not an OS disk reservation.
@@ -79,7 +82,8 @@ The sorter uses a grant of at least 64 KiB, an explicit maximum framed record (k
 and a grant-minus-32-KiB workspace. Its separate 8-KiB output page and bounded 64 * FanIn run
 directory fit the rest; one directory slot is reserved for merge output.
 FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2. Runs accumulate during
-generation until the directory is full apart from that output slot, then the FanIn smallest merge.
+generation until the directory is full apart from that output slot, then the FanIn smallest merge
+repeatedly until the directory is at most half full.
 Complete flushes and merges
 the smallest remaining runs down to FanIn, doing the partial group first to minimize writes
 (Huffman-style); the global input ordinal makes merge-tree shape irrelevant to stability. It returns
@@ -87,7 +91,8 @@ StorageTempSortReader owning those runs; the final heap merge runs in MoveNext w
 output file. At most FanIn initial runs write each row once. The reader retains count times
 (8 KiB + maximum record) and Complete releases the rest of the workspace. It refills the previous
 winner at the next MoveNext, preserving borrowed Key/Value until then. An exhausted owned input
-immediately closes its reader and run, returning quota and disk as the merge proceeds. Reader
+immediately closes its reader and run, returning quota as the merge proceeds; a close failure is
+counted without failing MoveNext. Reader
 disposal deletes its remaining inputs; statement disposal also closes them. Statement
 PhysicalBytes/PeakBytes expose live and peak reservations. RecordsWritten/KeyComparisons are internal test counters; two input sizes
 bound merge depth and write growth, while differential cases cover several grants and levels.
@@ -106,18 +111,24 @@ can stay on disk until an engine next opens that directory. Windows process exit
 delete-on-close runs; OS-level backups of RootPath can capture live temp files. Unix creates
 new directories 0700 and run/lease files 0600, deliberately stricter than data-file permissions,
 and refuses group- or other-writable directories. On Windows an explicit directory keeps its
-inherited ACL. File-engine option checks reject a database-named first segment below RootPath
+inherited ACL. File-engine option checks reject a first segment a database could take
+(a leading dot is safe) below RootPath
 and any link component below the root. Encryption at rest must cover these files when it arrives.
 
 Limits: peak disk is bounded by compact data pages (including the 4-byte run prefix per sort
 frame), plus the largest intermediate merge, plus one 8-KiB rounding page per initial run
 (and one output page). This is not a
 (1 + 1 / FanIn) bound: at 2 * FanIn - 1 equal runs, the largest merge includes FanIn runs,
-so FanIn 16 can peak near 1.52 times the data. Seventeen 52,608-row runs of 1,020-byte sort
+giving a ratio of 1 + F / (2F - 1), where F = FanIn, before page rounding. Seventeen 52,608-row runs of 1,020-byte sort
 frames finish inside a 1-GiB quota; a late larger merge can still need more headroom.
-At most 64 * FanIn run handles are live (1,024 at FanIn 16), plus the directory lease.
-File handle exhaustion (EMFILE) surfaces as CK05005 and releases all owned runs; no handle
-virtualization or operator spilling is introduced. Failed closes return accounting but credit
+At FanIn 3, 2,000 equal 216-row runs (51.7 MiB) measured 6.9535 times input writes at depth 7;
+500, 5,000 and 20,000 runs measured 5.7720, 7.8458 and 9.2722 times at depths 6, 8 and 10.
+At most 64 * FanIn run handles are live per sorter (1,024 at FanIn 16), plus the directory lease;
+concurrent statements add up. File handle exhaustion (EMFILE) surfaces as CK05005 and releases
+the failing sorter's owned runs. EMFILE is process-wide, so other opens in the process can fail
+while a sort is at the limit. FileStream objects, handles, paths and statement run-registry entries
+are outside the fixed-buffer grant and grow with the live run count. No handle virtualization or
+operator spilling is introduced. Failed closes return accounting but credit
 only unwritten pages as free headroom, since disk reclamation was not confirmed.
 The arena is allocated for the full grant at creation; growing it on demand, multi-page
 merge input buffers and dynamic fan-in remain for SQ-L2 to measure with a real consumer. A record
@@ -3103,7 +3114,7 @@ session enables.
 | 20 | `CheckpointJournalPeak` | Verbose | Checkpoints | `database`, `peakLength` | exact journal high-water mark since open, before an admitted checkpoint |
 | 21 | `TempSpaceBytes` | Verbose | TempSpace | `deltaBytes`, `currentBytes` | temporary physical-page reservation or release |
 | 22 | `TempSpaceRefused` | Verbose | TempSpace | `code` | every temporary quota, floor, unavailable I/O (CK05005) or oversized-record (CK05006) refusal |
-| 23 | `TempSpaceUnavailable` | Warning | TempSpace | `code`, `exceptionType` | first optional temporary setup failure, at startup or first failed use |
+| 23 | `TempSpaceUnavailable` | Warning | TempSpace | `code`, `exceptionType` | first temporary unavailability, at startup or first failed use |
 | 24 | `TempSpaceDamaged` | Error | TempSpace | `code` | temporary validation failure; a retry of a failed reader raises no damage event/counter |
 | 7 | `PagesWrittenBack` | Verbose | `WriteBack` | `database`, `pages`, `durationMilliseconds` | `WriteBackDirtyPages`, when the pass wrote a page |
 | 8 | `PendingCommitsFlushed` | Verbose | `GroupCommit` | `database`, `durableLsn` | the gate's `FlushPending` (a flush worker's `FlushPendingCommits`), when it flushed |

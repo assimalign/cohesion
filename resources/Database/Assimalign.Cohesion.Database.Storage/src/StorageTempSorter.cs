@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
-/// <summary>A stable external balanced merge sorter over already encoded byte-comparable keys.</summary>
+/// <summary>A stable external merge sorter over already encoded byte-comparable keys.</summary>
 /// <remarks>The caller encodes direction, collation and NULL placement in each key. No SQL value
 /// interpretation occurs here. Instances require serialized use; cancellation or failure disposes
 /// all intermediate files. Complete transfers its input runs to a streaming reader.</remarks>
@@ -85,7 +85,7 @@ public sealed class StorageTempSorter : IDisposable
     /// <param name="cancellationToken">Observed before run generation and during merging.</param>
     /// <exception cref="InvalidOperationException">Complete already ran.</exception>
     /// <exception cref="ObjectDisposedException">The sorter is disposed.</exception>
-    /// <exception cref="StorageTempException">A quota, floor, oversized record (CK05006), or unavailable temporary storage (CK05005) refused a run.</exception>
+    /// <exception cref="StorageTempException">A quota, floor, integrity check (CK05004), oversized record (CK05006), or unavailable temporary storage (CK05005) refused a run.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public void Append(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value, CancellationToken cancellationToken = default)
     {
@@ -142,7 +142,8 @@ public sealed class StorageTempSorter : IDisposable
     {
         _levels[_runCount] = run; _depths[_runCount++] = 0;
         // The last directory slot is reserved for a merge output beside its inputs.
-        if (_runCount == _levels.Length - 1) { MergeSmallest(FanIn, token); }
+        if (_runCount == _levels.Length - 1)
+        { while (_runCount > _levels.Length / 2) { MergeSmallest(FanIn, token); } }
     }
 
     private void MergeSmallest(int count, CancellationToken token)

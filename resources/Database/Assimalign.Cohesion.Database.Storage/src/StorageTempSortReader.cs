@@ -88,7 +88,7 @@ public sealed class StorageTempSortReader : IDisposable
         else if (_ownsRuns)
         {
             _readers[input]!.Dispose(); _readers[input] = null;
-            _runs[input].Dispose();
+            _runs[input].DisposeAfterFailure();
         }
     }
     private int CompareHeads(int left, int right)

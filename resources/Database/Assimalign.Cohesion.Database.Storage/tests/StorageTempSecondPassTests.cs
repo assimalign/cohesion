@@ -27,7 +27,10 @@ public sealed class StorageTempSecondPassTests : IDisposable
     public StorageTempSecondPassTests(ITestOutputHelper output) { _output = output; }
     public void Dispose() { if (Directory.Exists(_root)) { Directory.Delete(_root, true); } }
     private StorageTempSpace Create(Func<long>? probe = null, long floor = 0)
-        => StorageTempSpace.CreateCore(Path.Combine(_root, "spill"), 64 * 1024 * 1024, () => floor, probe ?? (() => long.MaxValue));
+    {
+        var space = StorageTempSpace.CreateCore(Path.Combine(_root, "spill"), 64 * 1024 * 1024, () => floor, probe ?? (() => long.MaxValue));
+        space.ProbeMaximumAgeMilliseconds = int.MaxValue; return space;
+    }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Temp floor: page 129 observes a drop at the 128-page probe window")]
     public void Append_DroppedFreeSpace_ShouldRefuseAtProbeWindow()
@@ -79,29 +82,56 @@ public sealed class StorageTempSecondPassTests : IDisposable
     }
 
     [Theory(DisplayName = "Cohesion Test [Storage] - Temp floor: releases during a probe remain credited exactly once")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Append_ReleaseDuringProbe_ShouldRetainCredit(bool includesRelease)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Append_ReleaseDuringProbe_ShouldRetainCredit(bool includesRelease, bool raiseFloor)
     {
         // Arrange: a probe can observe either side of the concurrent close.
         using var entered = new ManualResetEventSlim(); using var released = new ManualResetEventSlim();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(35));
-        int probes = 0;
-        using var space = Create(() =>
+        int probes = 0; long floor = 8192;
+        using var space = StorageTempSpace.CreateCore(Path.Combine(_root, "spill"), 64 * 1024 * 1024, () => floor, () =>
         {
             if (Interlocked.Increment(ref probes) == 1) { return 129 * 8192; }
             entered.Set(); released.Wait(timeout.Token); return includesRelease ? 129 * 8192 : 8192;
-        }, 8192);
+        });
+        space.ProbeMaximumAgeMilliseconds = int.MaxValue;
         using var statement = space.CreateStatement(16 * 1024 * 1024);
         using var prior = statement.CreateRun();
         for (int i = 0; i < 128; i++) { prior.Append(_pageRecord); }
         using var next = statement.CreateRun();
+        if (raiseFloor) { floor = 130 * 8192; }
         var writer = Task.Factory.StartNew(() => next.Append(_pageRecord), timeout.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
         // Act
         try { entered.Wait(timeout.Token); prior.Dispose(); }
         finally { released.Set(); }
-        await writer.WaitAsync(timeout.Token);
+        if (raiseFloor)
+        { (await Should.ThrowAsync<StorageTempException>(async () => await writer.WaitAsync(timeout.Token))).Code.ShouldBe("CK05003"); }
+        else { await writer.WaitAsync(timeout.Token); }
+
+        // Assert
+        probes.ShouldBe(raiseFloor ? 3 : 2); statement.PhysicalBytes.ShouldBe(raiseFloor ? 0 : 8192); space.PendingBytes.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Temp floor: a required sample accepts freed space despite a concurrent release")]
+    public void Append_ReleaseDuringRequiredProbe_ShouldUseFreshHeadroom()
+    {
+        // Arrange: the cached two pages cannot admit at the new floor, even with the released page.
+        int probes = 0; long floor = 8192; StorageTempRun? prior = null;
+        using var space = StorageTempSpace.CreateCore(Path.Combine(_root, "spill"), 64 * 1024 * 1024, () => floor, () =>
+        {
+            if (++probes == 1) { return 2 * 8192; }
+            prior!.Dispose(); return 5 * 8192;
+        });
+        space.ProbeMaximumAgeMilliseconds = int.MaxValue;
+        using var statement = space.CreateStatement(32768);
+        using var first = statement.CreateRun(); prior = first; first.Append(_pageRecord); first.Seal();
+        using var next = statement.CreateRun(); floor = 3 * 8192;
+
+        // Act
+        next.Append(_pageRecord); next.Seal();
 
         // Assert
         probes.ShouldBe(2); statement.PhysicalBytes.ShouldBe(8192); space.PendingBytes.ShouldBe(0);
@@ -114,6 +144,7 @@ public sealed class StorageTempSecondPassTests : IDisposable
         int probes = 0;
         using var space = Create(() => ++probes == 1 ? long.MaxValue : 8192, 8192);
         using var statement = space.CreateStatement(8192); using var run = statement.CreateRun();
+        space.ProbeMaximumAgeMilliseconds = 1000;
         long started = Environment.TickCount64;
         while (Environment.TickCount64 - started <= 1100) { Thread.Sleep(10); }
 
@@ -122,7 +153,7 @@ public sealed class StorageTempSecondPassTests : IDisposable
         probes.ShouldBe(3); statement.PhysicalBytes.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Temp probe: a stalled refresh lets another statement use bounded stale headroom")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Temp probe: a stalled refresh lets another statement use stale headroom minus its own reservations")]
     public async Task Append_ContendedProbe_ShouldAllowIndependentReservation()
     {
         // Arrange
@@ -200,14 +231,18 @@ public sealed class StorageTempSecondPassTests : IDisposable
         (StorageEventSource.Log.TempRefusals - refusals).ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Temp reader: exhausted owned inputs return quota before final EOF")]
-    public void MoveNext_ExhaustedInput_ShouldReleaseRunImmediately()
+    [Theory(DisplayName = "Cohesion Test [Storage] - Temp reader: exhausted owned inputs release quota and close failures preserve later rows")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MoveNext_ExhaustedInput_ShouldReleaseRunImmediately(bool failClose)
     {
         // Arrange
         using var space = Create(); using var statement = space.CreateStatement(16384);
         var first = statement.CreateRun(); var second = statement.CreateRun();
         byte[] row = new byte[17]; BinaryPrimitives.WriteInt32LittleEndian(row, 1);
         first.Append(row); first.Seal(); row[16] = 1; second.Append(row); second.Append(row); second.Seal();
+        long refusals = StorageEventSource.Log.TempRefusals;
+        if (failClose) { RunFile(first) = new FailedCloseStream(RunFile(first).SafeFileHandle, new IOException("injected exhausted close")); }
         using var reader = new StorageTempSortReader(statement, [first, second], 17, new byte[2 * 8209], true);
         reader.MoveNext().ShouldBeTrue(); statement.PhysicalBytes.ShouldBe(16384);
 
@@ -217,6 +252,22 @@ public sealed class StorageTempSecondPassTests : IDisposable
         // Assert
         statement.PhysicalBytes.ShouldBe(8192);
         reader.MoveNext().ShouldBeTrue(); reader.MoveNext().ShouldBeFalse(); statement.PhysicalBytes.ShouldBe(0);
+        (StorageEventSource.Log.TempRefusals - refusals).ShouldBe(failClose ? 1 : 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Temp concurrency: disposal during file creation refuses and deletes the unregistered run")]
+    public void CreateRun_DisposedDuringFileCreate_ShouldDeleteUnregisteredRun()
+    {
+        // Arrange
+        using var space = Create(); using var statement = space.CreateStatement(8192);
+        int creates = 0; space.BeforeFileCreate = () => { creates++; statement.Dispose(); };
+
+        // Act
+        Should.Throw<ObjectDisposedException>(() => statement.CreateRun());
+
+        // Assert
+        creates.ShouldBe(1); statement.PhysicalBytes.ShouldBe(0); space.Bytes.ShouldBe(0); space.PendingBytes.ShouldBe(0);
+        Directory.GetFiles(Path.Combine(_root, "spill"), "*.ctmp").ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Temp concurrency: CreateRun racing statement disposal releases every file")]
@@ -234,7 +285,7 @@ public sealed class StorageTempSecondPassTests : IDisposable
             using var start = new ManualResetEventSlim(); using var ready = new CountdownEvent(2);
             var creator = Task.Factory.StartNew(() =>
             {
-                using (var seed = statement.CreateRun()) { Interlocked.Increment(ref created); }
+                using (var seed = statement.CreateRun()) { }
                 ready.Signal(); start.Wait(timeout.Token);
                 try
                 {
@@ -364,9 +415,10 @@ public sealed class StorageTempSecondPassTests : IDisposable
         {
             // Act
             using var space = Create(); using var statement = space.CreateStatement(8192);
-            Should.Throw<StorageTempException>(() => statement.CreateRun()).Code.ShouldBe("CK05005");
+            var error = Should.Throw<StorageTempException>(() => statement.CreateRun());
 
             // Assert
+            error.Code.ShouldBe("CK05005"); error.InnerException.ShouldBeOfType<IOException>();
             File.ReadAllBytes(victim).ShouldBe([3, 1, 4]); Directory.GetFiles(target).Length.ShouldBe(1);
             _output.WriteLine("Lease-path junction safety regression executed.");
         }
