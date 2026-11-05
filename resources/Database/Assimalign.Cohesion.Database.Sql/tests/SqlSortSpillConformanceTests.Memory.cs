@@ -73,6 +73,33 @@ public sealed partial class SqlSortSpillConformanceTests
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
         }
         finally { SqlRowCollector.ObserveSpill = null; }
+
+        // Watch the row vectors themselves as well as their payload identities. Clearing
+        // cells in a still-rooted buffer is insufficient evidence that drained rows died.
+        var vectors = new List<WeakReference>(); bool vectorsDrained = false;
+        var vectorMetrics = new SqlStatementMetrics();
+        using var collector = new SqlRowCollector([new(SqlBoundConstant.Null, false, true, new SqlBoundCollation(Collation.Binary))],
+            null, null, null, CancellationToken.None, vectorMetrics, grant);
+        SqlRowCollector.ObserveSpill = phase =>
+        {
+            if (phase != "drained") { return; }
+            GC.GetTotalMemory(true); vectors.Count.ShouldBe(200);
+            vectors.Count(reference => reference.IsAlive).ShouldBe(0); vectorsDrained = true;
+        };
+        try
+        {
+            for (int i = 0; i < 4000; i++)
+            {
+                object?[] row = [i, new string('v', 512)];
+                if (i < 200) { vectors.Add(new WeakReference(row)); }
+                collector.Add(row, [i], session);
+            }
+            await using var vectorResult = collector.TakeSpilled([], 0, -1);
+            vectorsDrained.ShouldBeTrue(); vectorMetrics.HashMemoryBytes.ShouldBe(0);
+            vectorMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+            _output.WriteLine("WEAK_ROWS|vectors=200|alive=0");
+        }
+        finally { SqlRowCollector.ObserveSpill = null; }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Spill capacity: default quota accepts ten ASCII grants and pins both sides for three-byte text (#1789)")]
