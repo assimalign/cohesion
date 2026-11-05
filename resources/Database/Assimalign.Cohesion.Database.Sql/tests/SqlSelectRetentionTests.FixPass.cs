@@ -121,8 +121,8 @@ public sealed partial class SqlSelectRetentionTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - SELECT retention: CTAS DISTINCT preserves capacity admission and leaves no refused table (#1776)")]
-    public async Task ExecuteAsync_TableAsDistinctBoundary_ShouldRefuseWithoutTable()
+    [Fact(DisplayName = "Cohesion Test [Sql] - SELECT retention: CTAS DISTINCT charges kept rows on both retention paths (#1776)")]
+    public async Task ExecuteAsync_TableAsDistinctBoundary_ShouldChargeKeptRows()
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("retention-table-as");
@@ -137,12 +137,12 @@ public sealed partial class SqlSelectRetentionTests
             database.Definitions.ForceSelectRetentionBasePath = forceBase;
 
             // Act
-            var failure = await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE d AS SELECT DISTINCT k FROM t"));
+            await Execute(session, "CREATE TABLE d AS SELECT DISTINCT k FROM t");
 
             // Assert
-            failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
-            (await Rows(session, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='d'")).ShouldBe([[0L]]);
+            (await Rows(session, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='d'")).ShouldBe([[1L]]);
+            await Execute(session, "DROP TABLE d");
         }
     }
 

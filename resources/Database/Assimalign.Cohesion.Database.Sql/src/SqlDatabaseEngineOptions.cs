@@ -55,12 +55,12 @@ public sealed class SqlDatabaseEngineOptions
     /// </summary>
     public TimeSpan LockTimeout { get; set; }
 
-    /// <summary>Gets or sets the maximum accounted bytes retained by hash builds, joined DML and CREATE TABLE AS copying in one statement.</summary>
-    /// <remarks>Defaults to 64 MiB. Must be positive. Joined DML charges retained inputs, associations and selected writes. CREATE TABLE AS charges retained query output and batch buffers. Grouping sets charge group and aggregate state. Ordered sequence deferral uses ordinary uncharged sorting, including LIMIT and OFFSET; it adds no charge on plain, correlated, grouped or grouping-set paths. Unordered sequence projection streams without retaining inputs.
+    /// <summary>Gets or sets the maximum accounted bytes retained by query buffers and writes in one statement.</summary>
+    /// <remarks>Defaults to 64 MiB. Must be positive. Joined DML charges retained inputs, associations and selected writes. CREATE TABLE AS charges retained query output and batch buffers. Grouping sets charge group and aggregate state. Plain SELECT charges nested-loop and normalized join buffers, staged matches, group keys and aggregate state, sorting and top-N entries, output rows, DISTINCT state, relation and subquery caches, and set operands and state. Each buffer reserves before retaining a row and releases when consumed or its owning scope ends. Consumers re-admit materialized results after child execution releases its charge. Charges follow retained rows, never collection capacity. Ordered sequence deferral shares sorting charges; CTAS source construction is exempt from the new plain SELECT reservations, while existing hash, window, recursive and grouping-set grants remain active; CTAS admits only output rows kept after pagination. Source relation caches remain exempt through statement exit. Unordered sequence projection streams without retaining inputs.
     /// Plain ON DELETE CASCADE closures charge about 840 bytes per two-column row: the default
     /// 64 MiB grant caps such a closure at about 79,900 rows, less when other work retains memory.
     /// A 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget.
-    /// Exceeding the budget fails before writes or publication; hash joins never spill.</remarks>
+    /// Exceeding the budget fails before writes or publication; query buffers do not spill yet.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>

@@ -171,8 +171,9 @@ public sealed partial class SqlSelectRetentionTests
                 }
             }
             var metrics = executionSession.LastStatementMetrics!;
+            Check(() => metrics.HashMemoryBytes.ShouldBe(0, sql));
             captured.Add($"work={metrics.RecordsExamined}:{metrics.JoinCandidatePairs}:{metrics.AccessPath}:{metrics.PeakOrderedRows}:" +
-                $"{metrics.PeakHashMemoryBytes}:{metrics.HashMemoryBytes}:" + string.Join(",", metrics.JoinAccessPaths ?? []));
+                $"{metrics.HashMemoryBytes}:" + string.Join(",", metrics.JoinAccessPaths ?? []));
             captured.Add("calls=" + string.Join(",", calls));
             if (row.TableAs && code is null && prefix != "EXPLAIN ")
             { captured.AddRange(await Read("SELECT * FROM d")); }
@@ -285,11 +286,11 @@ public sealed partial class SqlSelectRetentionTests
         yield return Pipeline("SELECT EXISTS(SELECT id FROM t LIMIT 1 OFFSET 1)", "subquery-body");
         yield return Pipeline("SELECT (SELECT id FROM t LIMIT 1 OFFSET 1)", "subquery-body");
         yield return Pipeline("SELECT EXISTS(SELECT a.id FROM t a JOIN u b ON a.k=b.k LIMIT 1 OFFSET 1)", "subquery-body", "join-matches");
-        yield return Fallback("CREATE TABLE d AS SELECT DISTINCT k FROM t", "distinct") with { TableAs = true };
-        yield return Fallback("CREATE TABLE d AS SELECT DISTINCT t.k FROM t JOIN u ON t.k=u.k", "join-matches", "distinct") with { TableAs = true };
-        yield return Fallback("CREATE TABLE d AS SELECT k,COUNT(*) AS n FROM t GROUP BY k", "group-input") with { TableAs = true };
-        yield return Fallback("CREATE TABLE d AS SELECT t.id,u.k FROM t JOIN u ON t.k=u.k", "join-matches") with { TableAs = true };
-        yield return Fallback("CREATE TABLE d AS SELECT id,(SELECT u.id FROM u WHERE u.id=t.id) AS n FROM t", "subquery-body") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT DISTINCT k FROM t", "distinct") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT DISTINCT t.k FROM t JOIN u ON t.k=u.k", "join-matches", "distinct") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT k,COUNT(*) AS n FROM t GROUP BY k", "group-input") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT t.id,u.k FROM t JOIN u ON t.k=u.k", "join-matches") with { TableAs = true };
+        yield return Pipeline("CREATE TABLE d AS SELECT id,(SELECT u.id FROM u WHERE u.id=t.id) AS n FROM t", "subquery-body") with { TableAs = true };
     }
 
     private static string Cell(object? value) => value switch

@@ -19,11 +19,11 @@ internal sealed partial class SqlPlanExecutor
         using var memory = new SqlWindowMemory(statement.Metrics, _definitions.StatementMemoryBudget);
         // WITH and independent subqueries can complete outside the window stage.
         // Their caches remain reachable throughout it and belong to this grant too.
-        if (_subqueryValues is { } subqueries)
+        if (_subqueryValues is { MemoryMetrics: null } subqueries)
         {
             foreach (var values in subqueries.StatementValues.Values) { memory.AdoptResult(values); }
         }
-        if (_materializedRelations is { } relations)
+        if (_materializedRelations is { Reserved: 0 } relations)
         {
             foreach (var relation in relations.Values)
             { foreach (var row in relation) { memory.AdoptResult(row); } }
@@ -213,15 +213,15 @@ internal sealed partial class SqlPlanExecutor
                             : function.Name is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE"
                                 ? await ValueFrameAsync(function, position, members).ConfigureAwait(false)
                                 : function.Name switch
-                        {
-                            "ROW_NUMBER" => (long)(position - start + 1),
-                            "RANK" => (long)(peerStart - start + 1),
-                            "DENSE_RANK" => dense,
-                            "PERCENT_RANK" => size == 1 ? 0d : (double)(peerStart - start) / (size - 1),
-                            "CUME_DIST" => (double)(peerEnd - start) / size,
-                            "NTILE" => buckets[f] is { } count ? Tile(position - start, size, count) : null,
-                            _ => await NavigateAsync(function, position, start, end).ConfigureAwait(false),
-                        };
+                                {
+                                    "ROW_NUMBER" => (long)(position - start + 1),
+                                    "RANK" => (long)(peerStart - start + 1),
+                                    "DENSE_RANK" => dense,
+                                    "PERCENT_RANK" => size == 1 ? 0d : (double)(peerStart - start) / (size - 1),
+                                    "CUME_DIST" => (double)(peerEnd - start) / size,
+                                    "NTILE" => buckets[f] is { } count ? Tile(position - start, size, count) : null,
+                                    _ => await NavigateAsync(function, position, start, end).ConfigureAwait(false),
+                                };
                         if (result is not null) { memory.RetainValue(result); }
                         row[function.Ordinal] = result;
                     }
@@ -434,7 +434,10 @@ internal sealed partial class SqlPlanExecutor
             long number = value switch
             {
                 null => throw new SqlExecutionException("CS02071", ErrorMessages.WindowFrameNull),
-                sbyte n => n, short n => n, int n => n, long n => n,
+                sbyte n => n,
+                short n => n,
+                int n => n,
+                long n => n,
                 _ => throw new SqlExecutionException("CS02070", ErrorMessages.WindowFrameInteger),
             };
             if (number < 0) { throw new SqlExecutionException("CS02072", ErrorMessages.WindowFrameNegative); }
@@ -564,7 +567,10 @@ internal sealed partial class SqlPlanExecutor
 
     private static long WindowInteger(object value, SqlWindowFunction function) => value switch
     {
-        sbyte number => number, short number => number, int number => number, long number => number,
+        sbyte number => number,
+        short number => number,
+        int number => number,
+        long number => number,
         _ => throw new SqlExecutionException(function.Name == "NTH_VALUE" ? "CS02073" : "CS02068",
             function.Name == "NTH_VALUE" ? ErrorMessages.WindowNthInteger : ErrorMessages.WindowIntegerArgument, location: function.Expression.Location),
     };

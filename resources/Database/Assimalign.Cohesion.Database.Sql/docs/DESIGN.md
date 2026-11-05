@@ -980,12 +980,12 @@ projects and returns each qualifying pair as its Limit node pulls it, and stops 
 nodeLimit.c:153-159). With two rows in t, the four-pair query
 `SELECT nextval('s') FROM t a CROSS JOIN t b WHERE nextval('s') > 0 LIMIT 1` returns 2 in
 PostgreSQL and 5 here.
-Ordered deferral keeps filtering before retention and uses the ordinary uncharged sort collector
+Ordered deferral keeps filtering before retention and uses the ordinary budgeted sort collector
 on plain, correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages.
 Plain and correlated top-N retention stays bounded by OFFSET + LIMIT when ordering collations are
 fixed; grouped and grouping-set deferral retains every group that passes HAVING, as the
 sequence-free grouped sort does, and deferred ordering collations require full retention.
-Neither form adds a StatementMemoryBudget charge. Grouping-set group/aggregate state retains its
+Both forms charge the buffers they retain to StatementMemoryBudget. Grouping-set group/aggregate state retains its
 existing charge for both sequence and sequence-free queries. Ordinary collectors retain their instance layout.
 Cached sort aliases retain the declared output type, including numeric CASE promotion.
 DISCARD ALL clears sequence state and restores the timeout values configured before the first
@@ -1646,7 +1646,7 @@ DISTINCT with fixed collations keeps the first projected occurrence in input ord
 consumes all input before pagination. CHAR cells cross the same output/input normalization as a
 materialized row, and retained binary cells are detached from reusable producers.
 
-Each pipeline keeps the materialized path for recursive evaluation, every DML and CTAS source, a current
+Each pipeline keeps the materialized path for recursive evaluation, every DML source, a current
 window owner, a SQL/JSON statement grant, a frame with correlated/deferred queries, or a subquery
 in its own expressions. SQL/JSON keeps staging so scalar grants never acquire a new overlap
 with a live input hash build.
@@ -1670,29 +1670,32 @@ An eligibility walk reaching its stack guard also selects the original path.
 These pipelines never stop evaluation early: joins drain all candidates and WHERE predicates even
 at LIMIT 0 or after the output window fills; bounded subquery bodies run every projection that
 the original body ran, and scalar cardinality is checked afterwards. Existing stored-scan early
-stops remain unchanged. Statement memory charges and refusal conditions are unchanged in this
-retention-only step (#1776, SQ-L1a). CTAS sources and their nested plans fall back to preserve
-capacity-based source admission; SQ-L1b decides their charge. Per-database internal test seams
+stops remain unchanged. Every retained plain SELECT buffer now reserves statement memory before adding an entry
+(#1776, SQ-L1b). CS05067 is the only new outcome. CTAS sources use the same pipelines; their
+source admission counts only rows kept after pagination, independent of list capacity (#1762). The CTAS source exception described below also exempts its relation caches through statement exit. Per-database internal test seams
 force the original collectors, observe operator entry and count retained DISTINCT/subquery rows.
 The separate forced-GC regression proves streamed group/join inputs retain no growing list.
 
-SQ-L1b attaches accounting at these code boundaries:
+Each buffer has one reservation owner at these code boundaries. A child releases its result
+charge before returning; the consumer admits the materialized rows for its own retention scope.
+All operator reservations unwind in finally or collector disposal, including refusal, other
+failures, cancellation and abandoned enumeration. Cache reservations hold no row references.
 
-| Pipeline | Retention boundary |
-|---|---|
-| Group input | `EnumerateGroupInputAsync` delivers `GroupInputRow` directly to `ExecutePipelinedGroupAsync`; keys and aggregate state survive at its accumulation step, including aggregate DISTINCT tuples and ordered-input buffers. `groups` and their accumulators live until `ExecutePipelinedGroupAsync` returns. The base counterpart is `ExecuteMaterializedPlainGroupAsync`'s input result, held until that method returns; its groups have the same method lifetime. |
-| Join output | `ProjectJoinRowsAsync` retains outputs at `rows.Add` or `SqlRowCollector.Add`; `rows` passes to the result set. `EnumerateJoinRowsAsync` retains each flat step with no index or hash in `buffered[level]` until the enumerator finishes. `EnumerateNormalizedJoinRowsAsync` retains child buffers at `Retain`; `outer.Rows` and `results[...]` live until the parent node finishes; on the materialized fallback, the root output also stays in `results[plan.Tree]` until enumeration finishes. Hash builds keep their existing admission; normalized builds are disposed after their parent consumes them, and flat builds in the enumerator's `finally`. The base counterpart is `ExecuteJoinAsync`'s matches list, held through projection until that method returns. |
-| Bounded body | `ExecuteBoundedSubqueryBodyAsync` passes its explicit retention argument to `ProjectAndSortRows` or `ProjectJoinRowsAsync`; their output-list additions retain at most two rows. The unordered `ProjectAndSortRows` addition is shared by every unordered SELECT using the materialized projection path, including unbounded scans and fallbacks. `rows` passes to the result set; bounded-body rows are cleared in `MaterializePlainSubqueryAsync` after copying values into the existing statement/frame cache. |
-| Unordered DISTINCT | `ProjectUnorderedDistinct` and the DISTINCT branch in `ProjectJoinRowsAsync` retain the same first output in `seen.Add` and `rows.Add`; `seen` lives until the pipeline returns, and `rows` passes to the result set after pagination following the full drain. The base counterpart is `Deduplicate` over the full projected list; its `seen` lives until `Deduplicate` returns. |
-| Ordering and output | All plain scan, system-view, constant, join and group outputs retain lists in `ProjectAndSortRows`, `ProjectJoinRowsAsync` or `SqlRowCollector.Add`. The collector keeps output rows, ordering-key arrays and stable-sort entries in `_rows`/`_ordered` until `Finish`, which clears entries and transfers output rows to the result set; the collector's backing-array capacity lives until its consumer returns. Unbounded or deferred-collation sorts keep every entry; bounded sorts keep at most OFFSET + LIMIT. Volatile and sequence fallbacks also retain source/completed-group lists (`sources`, `selected`, `matches`) through projection. `SortRows` keeps evaluated keys and LINQ stable-sort scratch until the sort returns; its sorted list lives through its consumer. Output list capacity survives pagination and belongs to `SqlMaterializedResultSet` until cleared or released with that result. |
-| Correlated and sequence output | `MaterializeOrdinaryCorrelatedSelectAsync` and `MaterializeSequenceSelectAsync` retain the same collector rows/keys; the latter keeps augmented source rows until its final projection completes. Their output lists, and `MaterializeUnorderedSequenceSelectAsync`'s `returned`, pass to the result set. The enclosing frame's current `Row` and prepared-expression `Evaluated` values survive until the next row or frame release. |
-| Materialized relations and subqueries | `MaterializeRelationAsync` copies derived/view rows into lists cached in `_materializedRelations`; independent relation and CTE caches live for the statement executor, with catalog-view scopes restored after materialization. Join-local `derivedRows` references last through the join consumer. `MaterializePlainSubqueryAsync` copies scalar/EXISTS/IN values into statement/frame arrays: independent values live for the statement, correlated values until the frame advances or clears; child result rows and temporary copy lists also overlap during materialization. |
-| Set operands | `MaterializeSetOperandAsync` retains converted operand rows; `ExecuteSetOperationAsync` retains output `rows`, a UNION DISTINCT `seen`, or INTERSECT/EXCEPT `left`, `right`, `counts` and optional `seen` through the set consumer. Its final `MaterializeSelect` can overlap these with projected/sorted output; that output passes to the result set. |
+| Pipeline | Reservation owner and release | Retention boundary |
+|---|---|---|
+| Group input | Group method, released in finally; staged input has a separate result reservation. | `EnumerateGroupInputAsync` delivers `GroupInputRow` directly to `ExecutePipelinedGroupAsync`; keys and aggregate state survive at its accumulation step, including aggregate DISTINCT tuples and ordered-input buffers. `groups` and their accumulators live until `ExecutePipelinedGroupAsync` returns. The base counterpart is `ExecuteMaterializedPlainGroupAsync`'s input result, held until that method returns; its groups have the same method lifetime. |
+| Join output | Projection method and enumerator locals; normalized child charges release when the parent drops those lists, all remaining charges in finally. | `ProjectJoinRowsAsync` retains outputs at `rows.Add` or `SqlRowCollector.Add`; `rows` passes to the result set. `EnumerateJoinRowsAsync` retains each flat step with no index or hash in `buffered[level]` until the enumerator finishes. `EnumerateNormalizedJoinRowsAsync` retains child buffers at `Retain`; `outer.Rows` and `results[...]` live until the parent node finishes; on the materialized fallback, the root output also stays in `results[plan.Tree]` until enumeration finishes. Hash builds keep their existing admission; normalized builds are disposed after their parent consumes them, and flat builds in the enumerator's `finally`. The base counterpart is `ExecuteJoinAsync`'s matches list, held through projection until that method returns. |
+| Bounded body | Projection method until return, then subquery materializer until copying finishes. | `ExecuteBoundedSubqueryBodyAsync` passes its explicit retention argument to `ProjectAndSortRows` or `ProjectJoinRowsAsync`; their output-list additions retain at most two rows. The unordered `ProjectAndSortRows` addition is shared by every unordered SELECT using the materialized projection path, including unbounded scans and fallbacks. `rows` passes to the result set; bounded-body rows are cleared in `MaterializePlainSubqueryAsync` after copying values into the existing statement/frame cache. |
+| Unordered DISTINCT | Projection method owns both seen and rows until return; Deduplicate owns base seen until it returns. | `ProjectUnorderedDistinct` and the DISTINCT branch in `ProjectJoinRowsAsync` retain the same first output in `seen.Add` and `rows.Add`; `seen` lives until the pipeline returns, and `rows` passes to the result set after pagination following the full drain. The base counterpart is `Deduplicate` over the full projected list; its `seen` lives until `Deduplicate` returns. |
+| Ordering and output | Collector until Finish/disposal; explicit sources, selected lists and outputs until their consumer returns; SortRows owns evaluated keys until sorting returns. | All plain scan, system-view, constant, join and group outputs retain lists in `ProjectAndSortRows`, `ProjectJoinRowsAsync` or `SqlRowCollector.Add`. The collector keeps output rows, ordering-key arrays and stable-sort entries in `_rows`/`_ordered` until `Finish`, which clears entries and transfers output rows to the result set; the collector's backing-array capacity lives until its consumer returns. Unbounded or deferred-collation sorts keep every entry; bounded sorts keep at most OFFSET + LIMIT. Volatile and sequence fallbacks also retain source/completed-group lists (`sources`, `selected`, `matches`) through projection. `SortRows` keeps evaluated keys and LINQ stable-sort scratch until the sort returns; its sorted list lives through its consumer. Output list capacity survives pagination but is never an admission cost; only the kept row count is charged. |
+| Correlated and sequence output | Each materialization method until return; collector entries until Finish/disposal. | `MaterializeOrdinaryCorrelatedSelectAsync` and `MaterializeSequenceSelectAsync` retain the same collector rows/keys; the latter keeps augmented source rows until its final projection completes. Their output lists, and `MaterializeUnorderedSequenceSelectAsync`'s `returned`, pass to the result set. The enclosing frame's current `Row` and prepared-expression `Evaluated` values survive until the next row or frame release. |
+| Materialized relations and subqueries | RelationRows.Reserved until executor exit (nested view scope until restoration); frame value reservations until frame release, correlated vectors until BeginRow. | `MaterializeRelationAsync` copies derived/view rows into lists cached in `_materializedRelations`; independent relation and CTE caches live for the statement executor, with catalog-view scopes restored after materialization. Join-local `derivedRows` references last through the join consumer. `MaterializePlainSubqueryAsync` copies scalar/EXISTS/IN values into statement/frame arrays: independent values live for the statement, correlated values until the frame advances or clears; child result rows and temporary copy lists also overlap during materialization. |
+| Set operands | Operand method until return, then set consumer until it returns; seen/counts have the set consumer lifetime. | `MaterializeSetOperandAsync` retains converted operand rows; `ExecuteSetOperationAsync` retains output `rows`, a UNION DISTINCT `seen`, or INTERSECT/EXCEPT `left`, `right`, `counts` and optional `seen` through the set consumer. Its final `MaterializeSelect` can overlap these with projected/sorted output; that output passes to the result set. |
 
 Ordered peaks publish only after input succeeds, before a deferred consumer failure is surfaced.
 Eligibility caches only static plan inspection in a lazily created, reference-keyed executor map
 for correlated statements. It uses a subtype in the existing optional relation-state slot so
-ordinary statements and CTEs pay no extra allocation. The window owner, DML/CTAS flags,
+ordinary statements and CTEs pay no extra allocation. The window owner, DML flag,
 recursive state, current frame's correlated queries, SQL/JSON scope and forced-base switch are
 read on every check. LIMIT/OFFSET execution copies keep their original static plan as the map key.
 Join consumers defer stack-guard failures until input drains; cancellation and out-of-memory
@@ -1704,7 +1707,8 @@ collation arrays also live through their enumerator or consumer; their size foll
 not input cardinality. Recursive, window, grouping-set and SQL/JSON owners keep their existing
 accounting and fallback paths. Below the relational operators, `ScanVersions` keeps its
 owner-scoped storage iterator
-(page-id vector, one page pin and copied current record) until enumeration/disposal, and
+(page-id vector: a 24-byte array header plus 8 bytes per table page; one page pin and copied
+current record) until enumeration/disposal, and
 `SeekRows` keeps its index cursor's copied entry batch and key bounds until cursor disposal.
 System-view enumeration reads the statement's retained catalog snapshot and can retain
 `SystemKeyConstraints` name sets or referenced-key ordering scratch until that enumeration
@@ -10435,18 +10439,35 @@ SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default
 statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
-Ordered sequence deferral uses the same uncharged collector as sequence-free sorting (#1717),
-including bounded top-N selection and deep OFFSET pages on plain, correlated, grouped and
-grouping-set paths. LIMIT controls retention, without introducing a separate accounting rule.
-Unordered grouped/correlated sequence projection streams without retaining inputs. Plain grouping
-remains uncharged; grouping-set group/aggregate state retains its existing charge on both paths.
-The limit governs accounted live hash-build memory, joined-DML retention and CTAS retention described above. General
-result materialization, planning and transient scalar hashing remain outside this grant. Hash-build
-reservation precedes retained allocation; CTAS admits the completed query output before copying.
+Plain SELECT uses per-operator long reservations, without reference owners, lending or eviction.
+For a retained row R, the cost is 32 + SqlHashJoinTable.RowBytes(R): a fixed list slot plus
+its array and conservative boxed/text/binary/CHAR payload. DISTINCT/seen/count entries cost
+64 + RowBytes(key). A group costs 128 + 128 per aggregate, plus its retained key;
+aggregate DISTINCT tuples and ordered inputs reserve their own rows and entry slots. Native
+variable-width extrema and string aggregate state also charge retained payload growth.
+A collector entry costs 32 + RowBytes(output) + RowBytes(keys), including bounded top-N heaps.
+Full SortRows key scratch costs 64 + RowBytes(keys) per row. Each concurrently retained
+buffer pays independently, so a shared wide value can charge repeatedly until SQ-L1c.
+
+Unordered output lists, staged join matches, flat nested-loop inners, normalized child lists,
+volatile source sorts, completed group lists, result consumers, relation caches, independent
+subquery values, correlated vectors, set operands and set hash state all share this grant.
+Charges follow retained rows, never capacity or growth history. CTAS admits only the rows
+kept after pagination. Sequence deferral retains its original source shape and evaluation;
+sorting charges can therefore differ with source width, while CTAS admission of equal kept
+outputs is equal. CTAS source construction is exempt from these new plain SELECT reservations: its specific
+kept-output admission policy overrides them. Existing hash, window, recursive and grouping-set
+grants remain active. Thus the original 1,001-key grouped CTAS fits 8 KiB, whereas the same
+standalone SELECT refuses while retaining its groups. This exception leaves CTAS grouping/sort
+scratch outside the new grant until source construction ends, and source relation caches until
+statement exit.
+Planning, traversal stacks, current row/evaluated frames, collation arrays and storage-level
+scan/seek/system-view scratch remain outside the grant. COUNT(*) and low-cardinality GROUP BY
+can consume input much larger than the budget on the pipelined path.
 Every exit releases reservations, including cancellation, failed decoding and budget refusal.
 CS05067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
-message and one diagnostic code. There is no partitioning or spill. Persisted statistics,
-standalone ANALYZE and spill remain post-T2 Hardening work under D3.
+message and one diagnostic code. These operators do not partition or spill yet; the T3 spill
+family adds that support. Standalone ANALYZE remains later work.
 
 Joined UPDATE FROM, DELETE USING and MERGE also reserve retained decoded target identities,
 non-hash input buffers, derived-source copies, normalized intermediate frames, associations,
@@ -10457,7 +10478,7 @@ releases every reservation on success, refusal, constraint failure and cancellat
 WITH/subquery work and cascade retries. Plain UPDATE, DELETE and ON CONFLICT retain their
 existing allocation paths and do not create this owner.
 
-The join-only metrics state lazily owns a reference-identity ledger. Arrays and shared
+The joined-DML metrics state lazily owns its existing reference-identity ledger. Arrays and shared
 boxed/text/binary/CHAR cells use the hash table's conservative size rules; each retained object
 is charged once. The ledger reserves 320 bytes for its owner/promoted metrics/headers and 160 per tracked slot
 for entries/buckets, including simultaneous arrays during growth; vacated hash-only slots are reused.
@@ -10470,7 +10491,7 @@ disposing the hash releases its charge and transfers surviving retained payload 
 Unselected hash objects leave the ledger when their last hash owner releases them. Thus hash
 storage is never charged a second time merely because an association aliases it. The existing
 HashMemoryBytes/PeakHashMemoryBytes internal metrics report the combined statement grant.
-General query-result materialization and transient expression values remain outside the grant;
+Transient expression values remain outside the grant;
 derived-source copies and selected write values are admitted as they are retained.
 
 Plain EXPLAIN never executes the SELECT/DML. Probes can read indexes; actual_rows stays NULL.

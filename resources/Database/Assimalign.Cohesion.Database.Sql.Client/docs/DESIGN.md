@@ -497,6 +497,11 @@ result failures and size refusals use CS05045 (size refusals: SQLSTATE 54000). E
 has a 16 MiB frame limit; there is no aggregate result cap. Writes retain prepared payloads until
 delivery; reads retain only the current encoded frame. Transport failures during delivery are
 terminal. ParseFailure after result frames and terminal errors still invalidate the rental.
+Server SELECT buffers separately share StatementMemoryBudget (default 64 MiB); CS05067 can
+precede frame encoding when retained rows exhaust that grant (#1776, SQ-L1b). Wire-limit tests
+use an explicit 256 MiB SELECT grant to reach the 16 MiB frame refusal, and large-result tests
+retain both the default-grant refusal and successful delivery with a sufficient grant.
+RETURNING keeps its existing DML accounting and test grants.
 
 Application function cancellation follows the statement token (#1419): an
 `OperationCanceledException` from a scalar, any aggregate phase or a domain CHECK is

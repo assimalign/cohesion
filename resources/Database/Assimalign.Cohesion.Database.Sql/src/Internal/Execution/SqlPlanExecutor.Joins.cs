@@ -22,53 +22,59 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
-        foreach (var binding in plan.Bindings)
+        long matchBytes = 0;
+        try
         {
-            if (binding.Source.Derived is not { } derived) { continue; }
-            (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] =
-                await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
-        }
-        foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
-        {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
-            // Only read-only statements may use an immutable retired TRUNCATE owner.
-            // INSERT sources and DML subqueries inherit the enclosing statement's check.
-            if (_isDml || !_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
-        }
-        // Require binding's image even when an empty outer input would skip virtual enumeration.
-        if (plan.Bindings.Any(binding => binding.Source.View is not null))
-        {
-            _ = statement.RequireCatalogSnapshot();
-        }
-
-        var sharedColumns = new bool[plan.Columns.Count];
-        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
-        var matches = new List<object?[]>();
-        await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows).ConfigureAwait(false))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await PrepareSubqueriesAsync(plan.Where, row, statement, cancellationToken).ConfigureAwait(false);
-            if (evaluator.Matches(plan.Where, row))
+            Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
+            foreach (var binding in plan.Bindings)
             {
-                if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
-                {
-                    memory.Retain(row);
-                    memory.Reserve(32);
-                }
-                matches.Add(row);
+                if (binding.Source.Derived is not { } derived) { continue; }
+                (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] =
+                    await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
             }
-        }
+            foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>().DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
+            {
+                await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
+                    LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
+                // Only read-only statements may use an immutable retired TRUNCATE owner.
+                // INSERT sources and DML subqueries inherit the enclosing statement's check.
+                if (_isDml || !_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
+            }
+            // Require binding's image even when an empty outer input would skip virtual enumeration.
+            if (plan.Bindings.Any(binding => binding.Source.View is not null))
+            {
+                _ = statement.RequireCatalogSnapshot();
+            }
 
-        _definitions.ObserveSelectRetention?.Invoke("join-matches", false, matches.Count);
-        if (_subqueryValues is { HasCorrelatedQueries: true })
-        {
-            return await MaterializeCorrelatedSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-                plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
+            var sharedColumns = new bool[plan.Columns.Count];
+            var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
+            var matches = new List<object?[]>();
+            await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows).ConfigureAwait(false))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await PrepareSubqueriesAsync(plan.Where, row, statement, cancellationToken).ConfigureAwait(false);
+                if (evaluator.Matches(plan.Where, row))
+                {
+                    if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                    {
+                        memory.Retain(row);
+                        memory.Reserve(32);
+                    }
+                    RetainSelectRow(ref matchBytes, row);
+                    matches.Add(row);
+                }
+            }
+
+            _definitions.ObserveSelectRetention?.Invoke("join-matches", false, matches.Count);
+            if (_subqueryValues is { HasCorrelatedQueries: true })
+            {
+                return await MaterializeCorrelatedSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+                    plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
+            }
+            return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+                plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
         }
-        return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+        finally { ReleaseSelectMemory(ref matchBytes); }
     }
 
     private async ValueTask<DatabaseResult> ExecutePipelinedJoinAsync(SqlJoinPlan plan,
@@ -118,200 +124,211 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derivedRows,
         (int Binding, IReadOnlyList<object?[]> Rows)? dmlTarget = null, bool streamRoot = false)
     {
-        // Every earlier step is retained by a later loop. Only the final index inner
-        // is a fresh read for each delivered pair. Delivery detaches selected binary cells only.
-        Array.Fill(sharedColumns, true);
-        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
-        var inputEvaluator = ExecutionEvaluator(null, cancellationToken);
-        var inputIndexes = new BTreeIndex?[plan.Bindings.Count];
-        for (int i = 0; i < plan.Inputs.Count; i++)
-        {
-            if (plan.Inputs[i].Access is SqlIndexSeekPath seek &&
-                TryResolveSeekTree(plan.Bindings[i].Source.Table!, seek.Index, out var tree)) { inputIndexes[i] = tree; }
-        }
-        if (plan.Tree is not null)
-        {
-            // All tree inputs may be reused by a parent; delivery detaches selected cells.
-            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken, dmlTarget?.Binding, streamRoot).ConfigureAwait(false))
-            {
-                yield return row;
-            }
-            yield break;
-        }
-        if (plan.Steps.Count == 0)
-        {
-            var work = statement.Metrics.Analysis(plan);
-            foreach (var row in ReadInput(0))
-            {
-                if (work is not null) { work.Candidates++; }
-                yield return row;
-            }
-            yield break;
-        }
-        var accesses = new SqlJoinIndexPath?[plan.Steps.Count];
-        var indexes = new BTreeIndex?[plan.Steps.Count];
-        var paths = new string[plan.Steps.Count];
-        for (int i = 0; i < plan.Steps.Count; i++)
-        {
-            var access = plan.Steps[i].Access;
-            if (access is not null && TryResolveSeekTree(plan.Bindings[access.InnerBinding].Source.Table!, access.Index, out var index))
-            {
-                accesses[i] = access;
-                indexes[i] = index;
-            }
-            paths[i] = plan.Steps[i].Hash is not null ? "join-hash"
-                : accesses[i] is { } chosen ? $"join-seek:{chosen.Index.Name}" : "join-scan";
-        }
-        statement.Metrics.JoinAccessPaths = paths;
-        if (accesses[^1] is { } last)
-        {
-            var fresh = plan.Bindings[last.InnerBinding];
-            Array.Fill(sharedColumns, false, fresh.Offset, fresh.Source.Columns.Count);
-        }
-        bool reversed = plan is not SqlSearchedJoinPlan && plan.FirstBinding == 1;
-        var initial = plan.Bindings[plan.FirstBinding];
-        var buffered = new List<object?[]>?[plan.Steps.Count];
-        var hashes = new SqlHashJoinTable?[plan.Steps.Count];
-        var cursors = new IEnumerator<object?[]>?[plan.Steps.Count];
-        var matched = new bool[plan.Steps.Count];
-        var extended = new bool[plan.Steps.Count];
-        var rows = new object?[plan.Steps.Count + 1][];
+        long derivedBytes = 0;
         try
         {
-            foreach (var first in ReadInput(plan.FirstBinding))
+            if (derivedRows is not null)
+            { foreach (var pair in derivedRows) { if (pair.Key.IsCorrelated) { derivedBytes += AdmitSelectRows(pair.Value, cancellationToken); } } }
+
+            // Every earlier step is retained by a later loop. Only the final index inner
+            // is a fresh read for each delivered pair. Delivery detaches selected binary cells only.
+            Array.Fill(sharedColumns, true);
+            var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+            var inputEvaluator = ExecutionEvaluator(null, cancellationToken);
+            var inputIndexes = new BTreeIndex?[plan.Bindings.Count];
+            for (int i = 0; i < plan.Inputs.Count; i++)
             {
-                rows[0] = new object?[plan.Columns.Count + (dmlTarget is null ? 0 : 1)];
-                first.CopyTo(rows[0], initial.Offset);
-                if (dmlTarget?.Binding == plan.FirstBinding) { rows[0][^1] = first; }
-                // An explicit cursor stack keeps N inputs from becoming N recursive
-                // MoveNext calls. Query text controls N independently of expression depth.
-                int level = 0;
-                while (level >= 0)
+                if (plan.Inputs[i].Access is SqlIndexSeekPath seek &&
+                    TryResolveSeekTree(plan.Bindings[i].Source.Table!, seek.Index, out var tree)) { inputIndexes[i] = tree; }
+            }
+            if (plan.Tree is not null)
+            {
+                // All tree inputs may be reused by a parent; delivery detaches selected cells.
+                await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken, dmlTarget?.Binding, streamRoot).ConfigureAwait(false))
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (level == plan.Steps.Count)
+                    yield return row;
+                }
+                yield break;
+            }
+            if (plan.Steps.Count == 0)
+            {
+                var work = statement.Metrics.Analysis(plan);
+                foreach (var row in ReadInput(0))
+                {
+                    if (work is not null) { work.Candidates++; }
+                    yield return row;
+                }
+                yield break;
+            }
+            var accesses = new SqlJoinIndexPath?[plan.Steps.Count];
+            var indexes = new BTreeIndex?[plan.Steps.Count];
+            var paths = new string[plan.Steps.Count];
+            for (int i = 0; i < plan.Steps.Count; i++)
+            {
+                var access = plan.Steps[i].Access;
+                if (access is not null && TryResolveSeekTree(plan.Bindings[access.InnerBinding].Source.Table!, access.Index, out var index))
+                {
+                    accesses[i] = access;
+                    indexes[i] = index;
+                }
+                paths[i] = plan.Steps[i].Hash is not null ? "join-hash"
+                    : accesses[i] is { } chosen ? $"join-seek:{chosen.Index.Name}" : "join-scan";
+            }
+            statement.Metrics.JoinAccessPaths = paths;
+            if (accesses[^1] is { } last)
+            {
+                var fresh = plan.Bindings[last.InnerBinding];
+                Array.Fill(sharedColumns, false, fresh.Offset, fresh.Source.Columns.Count);
+            }
+            bool reversed = plan is not SqlSearchedJoinPlan && plan.FirstBinding == 1;
+            var initial = plan.Bindings[plan.FirstBinding];
+            long bufferBytes = 0;
+            var buffered = new List<object?[]>?[plan.Steps.Count];
+            var hashes = new SqlHashJoinTable?[plan.Steps.Count];
+            var cursors = new IEnumerator<object?[]>?[plan.Steps.Count];
+            var matched = new bool[plan.Steps.Count];
+            var extended = new bool[plan.Steps.Count];
+            var rows = new object?[plan.Steps.Count + 1][];
+            try
+            {
+                foreach (var first in ReadInput(plan.FirstBinding))
+                {
+                    rows[0] = new object?[plan.Columns.Count + (dmlTarget is null ? 0 : 1)];
+                    first.CopyTo(rows[0], initial.Offset);
+                    if (dmlTarget?.Binding == plan.FirstBinding) { rows[0][^1] = first; }
+                    // An explicit cursor stack keeps N inputs from becoming N recursive
+                    // MoveNext calls. Query text controls N independently of expression depth.
+                    int level = 0;
+                    while (level >= 0)
                     {
-                        yield return rows[level];
-                        level--;
-                        continue;
-                    }
-                    if (extended[level])
-                    {
-                        extended[level] = false;
-                        level--;
-                        continue;
-                    }
-                    var step = plan.Steps[level];
-                    int innerBinding = level == 0 && reversed ? 0 : step.Binding;
-                    var inner = plan.Bindings[innerBinding];
-                    var outer = rows[level];
-                    if (cursors[level] is null)
-                    {
-                        IEnumerable<object?[]> candidates;
-                        if (step.Hash is { } hashKeys)
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (level == plan.Steps.Count)
                         {
-                            if (hashes[level] is null)
-                            {
-                                // Publish before reading: cancellation, decode and budget failures all
-                                // release every reservation in the enclosing finally.
-                                var table = new SqlHashJoinTable(hashKeys, statement.Metrics, _definitions.StatementMemoryBudget);
-                                hashes[level] = table;
-                                foreach (var item in ReadInput(innerBinding)) { table.Add(item, cancellationToken); }
-                            }
-                            candidates = hashes[level]!.Probe(outer, cancellationToken);
+                            yield return rows[level];
+                            level--;
+                            continue;
                         }
-                        else if (accesses[level] is not { } access)
+                        if (extended[level])
                         {
-                            if (buffered[level] is null)
+                            extended[level] = false;
+                            level--;
+                            continue;
+                        }
+                        var step = plan.Steps[level];
+                        int innerBinding = level == 0 && reversed ? 0 : step.Binding;
+                        var inner = plan.Bindings[innerBinding];
+                        var outer = rows[level];
+                        if (cursors[level] is null)
+                        {
+                            IEnumerable<object?[]> candidates;
+                            if (step.Hash is { } hashKeys)
                             {
-                                var buffer = new List<object?[]>();
-                                foreach (var item in ReadInput(innerBinding))
+                                if (hashes[level] is null)
                                 {
-                                    if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
-                                    {
-                                        memory.Retain(item);
-                                        memory.Reserve(32); // list storage, including growth
-                                    }
-                                    buffer.Add(item);
+                                    // Publish before reading: cancellation, decode and budget failures all
+                                    // release every reservation in the enclosing finally.
+                                    var table = new SqlHashJoinTable(hashKeys, statement.Metrics, _definitions.StatementMemoryBudget);
+                                    hashes[level] = table;
+                                    foreach (var item in ReadInput(innerBinding)) { table.Add(item, cancellationToken); }
                                 }
-                                buffered[level] = buffer;
+                                candidates = hashes[level]!.Probe(outer, cancellationToken);
                             }
-                            candidates = buffered[level]!;
+                            else if (accesses[level] is not { } access)
+                            {
+                                if (buffered[level] is null)
+                                {
+                                    var buffer = new List<object?[]>();
+                                    foreach (var item in ReadInput(innerBinding))
+                                    {
+                                        if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                                        {
+                                            memory.Retain(item);
+                                            memory.Reserve(32); // list storage, including growth
+                                        }
+                                        RetainSelectRow(ref bufferBytes, item);
+                                        buffer.Add(item);
+                                    }
+                                    buffered[level] = buffer;
+                                }
+                                candidates = buffered[level]!;
+                            }
+                            else
+                            {
+                                var values = JoinProbeValues(access, outer);
+                                candidates = values is null ? [] : FilterInput(SeekRows(inner.Source.Table!,
+                                    new SqlIndexSeekPath(access.Index, values, null, null), indexes[level]!, statement, cancellationToken)
+                                    .Select(row => row.Values), innerBinding);
+                            }
+                            cursors[level] = candidates.GetEnumerator();
+                            matched[level] = false;
+                        }
+                        if (cursors[level]!.MoveNext())
+                        {
+                            statement.Metrics.RecordJoinCandidate();
+                            if (statement.Metrics.Analysis(step) is { } work) { work.Candidates++; }
+                            var joined = (object?[])outer.Clone();
+                            cursors[level]!.Current.CopyTo(joined, inner.Offset);
+                            if (dmlTarget?.Binding == innerBinding) { joined[^1] = cursors[level]!.Current; }
+                            await PrepareSubqueriesAsync(step.Condition, joined, statement, cancellationToken).ConfigureAwait(false);
+                            if (evaluator.Matches(step.Condition, joined))
+                            {
+                                matched[level] = true;
+                                rows[++level] = joined;
+                            }
                         }
                         else
                         {
-                            var values = JoinProbeValues(access, outer);
-                            candidates = values is null ? [] : FilterInput(SeekRows(inner.Source.Table!,
-                                new SqlIndexSeekPath(access.Index, values, null, null), indexes[level]!, statement, cancellationToken)
-                                .Select(row => row.Values), innerBinding);
+                            cursors[level]!.Dispose();
+                            cursors[level] = null;
+                            if (!matched[level] && step.Kind == SqlJoinType.LeftOuter)
+                            {
+                                extended[level] = true;
+                                rows[++level] = outer;
+                            }
+                            else { level--; }
                         }
-                        cursors[level] = candidates.GetEnumerator();
-                        matched[level] = false;
-                    }
-                    if (cursors[level]!.MoveNext())
-                    {
-                        statement.Metrics.RecordJoinCandidate();
-                        if (statement.Metrics.Analysis(step) is { } work) { work.Candidates++; }
-                        var joined = (object?[])outer.Clone();
-                        cursors[level]!.Current.CopyTo(joined, inner.Offset);
-                        if (dmlTarget?.Binding == innerBinding) { joined[^1] = cursors[level]!.Current; }
-                        await PrepareSubqueriesAsync(step.Condition, joined, statement, cancellationToken).ConfigureAwait(false);
-                        if (evaluator.Matches(step.Condition, joined))
-                        {
-                            matched[level] = true;
-                            rows[++level] = joined;
-                        }
-                    }
-                    else
-                    {
-                        cursors[level]!.Dispose();
-                        cursors[level] = null;
-                        if (!matched[level] && step.Kind == SqlJoinType.LeftOuter)
-                        {
-                            extended[level] = true;
-                            rows[++level] = outer;
-                        }
-                        else { level--; }
                     }
                 }
             }
-        }
-        finally
-        {
-            foreach (var cursor in cursors) { cursor?.Dispose(); }
-            foreach (var hash in hashes) { hash?.Dispose(); }
-        }
-
-        IEnumerable<object?[]> ReadInput(int binding)
-        {
-            // Joined DML already applied this binding's pushed filter before retaining identities.
-            if (dmlTarget?.Binding == binding) { return dmlTarget.Value.Rows; }
-            var source = plan.Bindings[binding].Source;
-            var rows = inputIndexes[binding] is { } tree && plan.Inputs[binding].Access is SqlIndexSeekPath seek
-                ? SeekRows(source.Table!, seek, tree, statement, cancellationToken).Select(row => row.Values)
-                : ReadRelation(source, statement, cancellationToken, derivedRows);
-            return FilterInput(rows, binding);
-        }
-
-        IEnumerable<object?[]> FilterInput(IEnumerable<object?[]> candidates, int binding)
-        {
-            var filter = plan.Inputs.Count == 0 ? null : plan.Inputs[binding].Filter;
-            // One scratch frame per enumeration, never one joined-row clone per rejected pair.
-            // Filters retain the original bound ordinals, including merged USING expressions.
-            var frame = filter is null ? null : new object?[plan.Columns.Count];
-            var work = statement.Metrics.Analysis(plan.Bindings[binding]);
-            foreach (var candidate in candidates)
+            finally
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (work is not null) { work.Candidates++; }
-                if (frame is not null)
+                foreach (var cursor in cursors) { cursor?.Dispose(); }
+                foreach (var hash in hashes) { hash?.Dispose(); }
+                ReleaseSelectMemory(ref bufferBytes);
+            }
+
+            IEnumerable<object?[]> ReadInput(int binding)
+            {
+                // Joined DML already applied this binding's pushed filter before retaining identities.
+                if (dmlTarget?.Binding == binding) { return dmlTarget.Value.Rows; }
+                var source = plan.Bindings[binding].Source;
+                var rows = inputIndexes[binding] is { } tree && plan.Inputs[binding].Access is SqlIndexSeekPath seek
+                    ? SeekRows(source.Table!, seek, tree, statement, cancellationToken).Select(row => row.Values)
+                    : ReadRelation(source, statement, cancellationToken, derivedRows);
+                return FilterInput(rows, binding);
+            }
+
+            IEnumerable<object?[]> FilterInput(IEnumerable<object?[]> candidates, int binding)
+            {
+                var filter = plan.Inputs.Count == 0 ? null : plan.Inputs[binding].Filter;
+                // One scratch frame per enumeration, never one joined-row clone per rejected pair.
+                // Filters retain the original bound ordinals, including merged USING expressions.
+                var frame = filter is null ? null : new object?[plan.Columns.Count];
+                var work = statement.Metrics.Analysis(plan.Bindings[binding]);
+                foreach (var candidate in candidates)
                 {
-                    candidate.CopyTo(frame, plan.Bindings[binding].Offset);
-                    if (!inputEvaluator.Matches(filter, frame)) { continue; }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (work is not null) { work.Candidates++; }
+                    if (frame is not null)
+                    {
+                        candidate.CopyTo(frame, plan.Bindings[binding].Offset);
+                        if (!inputEvaluator.Matches(filter, frame)) { continue; }
+                    }
+                    yield return candidate;
                 }
-                yield return candidate;
             }
         }
+        finally { ReleaseSelectMemory(ref derivedBytes); }
     }
 
     /// <summary>Reads a bound source without giving virtual rows an object lock or index path.</summary>

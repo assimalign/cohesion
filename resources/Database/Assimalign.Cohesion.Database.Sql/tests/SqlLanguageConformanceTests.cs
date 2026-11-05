@@ -24,6 +24,33 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: retained SELECT output obeys statement memory admission (#1776)")]
+    [InlineData(95L, true)]
+    [InlineData(96L, false)]
+    public async Task ExecuteAsync_SelectMemoryCorpus_ShouldRefuseBeforeRetainingOutput(long budget, bool refuses)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("memory-conformance");
+        builder.Options.StatementMemoryBudget = budget;
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+
+        // Act / Assert
+        if (refuses)
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT 1", cancellationToken: CancellationToken.None));
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05067");
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(0);
+        }
+        else
+        {
+            await ExpectRowsAsync(session, "SELECT 1", [[1]]);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(96);
+        }
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Conformance: bound MERGE above the heuristic limit reports its written normalization (#1629)")]
     public async Task ExecuteAsync_LargeBoundMergeCorpus_ShouldKeepReorderedFalse()
     {
@@ -367,9 +394,9 @@ public sealed class SqlLanguageConformanceTests
         failure.Table.ShouldBe(table);
         diagnostic.Message!.ShouldContain(constraint, Case.Sensitive);
         if (table.Length > 0) { diagnostic.Message!.ShouldContain(table, Case.Sensitive); }
-        await ExpectRowsAsync(session, "SELECT id, u, qty, d, pid FROM t ORDER BY id", [[1,10,1,1,1],[2,20,2,2,1]]);
+        await ExpectRowsAsync(session, "SELECT id, u, qty, d, pid FROM t ORDER BY id", [[1, 10, 1, 1, 1], [2, 20, 2, 2, 1]]);
         await ExecuteAsync(session, "COMMIT");
-        await ExpectRowsAsync(session, "SELECT id FROM p ORDER BY id", [[1],[9]]);
+        await ExpectRowsAsync(session, "SELECT id FROM p ORDER BY id", [[1], [9]]);
     }
 
     private static readonly string[] _seed =
@@ -654,7 +681,7 @@ public sealed class SqlLanguageConformanceTests
         var rows = await RowsAsync(session, sql);
 
         // Assert
-        object?[][] expected = detail ? [[2,1L], [1,2L], [3,3L], [null,null]] : [[2L], [3L], [4L], [5L]];
+        object?[][] expected = detail ? [[2, 1L], [1, 2L], [3, 3L], [null, null]] : [[2L], [3L], [4L], [5L]];
         rows.Count.ShouldBe(expected.Length);
         for (int i = 0; i < expected.Length; i++) { rows[i].ShouldBe(expected[i]); }
     }
@@ -874,7 +901,7 @@ public sealed class SqlLanguageConformanceTests
 
     private static IReadOnlyDictionary<string, FunctionCase> CreateFunctionCases()
     {
-        var cases =        new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
+        var cases = new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
         {
             ["COUNT"] = new("COUNT(*)", 3L),
             ["SUM"] = new("SUM(age)", 122m),
@@ -1008,7 +1035,7 @@ public sealed class SqlLanguageConformanceTests
         [SqlClauses.Except] = Query("SELECT id FROM t EXCEPT SELECT id FROM t WHERE id <> 2;",
             expression => expression is SqlSetOperationExpression { Operator: SqlSetOperator.Except }, [[2]]),
         [SqlClauses.Recursive] = new("WITH RECURSIVE a AS (SELECT 7 AS n) SELECT n FROM a;", [],
-            expression => expression is SqlQueryBodyExpression { CommonTables: [ { IsRecursiveScope: true } ] },
+            expression => expression is SqlQueryBodyExpression { CommonTables: [{ IsRecursiveScope: true }] },
             async (session, result) =>
             {
                 (await ReadRowsAsync((DatabaseResultSet)result)).ShouldHaveSingleItem().ShouldBe([7L]);
@@ -1092,21 +1119,21 @@ public sealed class SqlLanguageConformanceTests
             "VAR_POP(COALESCE(CASE WHEN id=1 THEN 16777217 ELSE CAST(16777216 AS REAL) END, CAST(0 AS DOUBLE PRECISION))) FILTER (WHERE id > 0) FROM t;",
             expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlFunctionCallExpression { Filter: not null }, [[2L, 86m, 0d]]),
         [SqlClauses.Over] = Query("SELECT ROW_NUMBER() OVER(ORDER BY id) FROM t ORDER BY id;",
-            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L],[2L],[3L]]),
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L], [2L], [3L]]),
         [SqlClauses.Partition] = Query("SELECT RANK() OVER(PARTITION BY id ORDER BY age) FROM t ORDER BY id;",
-            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L],[1L],[1L]]),
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L], [1L], [1L]]),
         [SqlClauses.Window] = Query("SELECT ROW_NUMBER() OVER w FROM t WINDOW w AS(ORDER BY id) ORDER BY id;",
-            expression => expression is SqlSelectExpression { Windows.Count: 1 }, [[1L],[2L],[3L]]),
+            expression => expression is SqlSelectExpression { Windows.Count: 1 }, [[1L], [2L], [3L]]),
         [SqlClauses.WindowRows] = Query("SELECT SUM(age ORDER BY id DESC) FILTER(WHERE age>0) OVER(ORDER BY id ROWS 1 PRECEDING) FROM t ORDER BY id;",
-            expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Rows }, [[36m],[81m],[86m]]),
+            expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Rows }, [[36m], [81m], [86m]]),
         [SqlClauses.WindowGroups] = Query("SELECT SUM(age) OVER(ORDER BY id GROUPS 1 PRECEDING) FROM t ORDER BY id;",
-            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[36m],[81m],[86m]]),
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[36m], [81m], [86m]]),
         [SqlClauses.WindowExclude] = Query("SELECT SUM(age) OVER(ORDER BY id ROWS 1 PRECEDING EXCLUDE CURRENT ROW) FROM t ORDER BY id;",
-            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null],[36m],[45m]]),
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null], [36m], [45m]]),
         [SqlClauses.WindowNullTreatment] = Query("SELECT LAG(age) IGNORE NULLS OVER(ORDER BY id) FROM t ORDER BY id;",
-            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null],[36],[45]]),
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null], [36], [45]]),
         [SqlClauses.WindowRange] = Query("SELECT LAST_VALUE(age) OVER(ORDER BY id RANGE 1 PRECEDING) FROM t ORDER BY id;",
-            expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Range }, [[36],[45],[41]]),
+            expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Range }, [[36], [45], [41]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
         [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC NULLS LAST, 1 DESC;",
@@ -1364,7 +1391,7 @@ public sealed class SqlLanguageConformanceTests
             async (session, _) =>
             {
                 await ExecuteAsync(session, "INSERT INTO t VALUES(4,'Ada',-1);");
-                await ExpectRowsAsync(session, "SELECT id FROM t WHERE name='Ada' ORDER BY id+0;", [[1],[4]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE name='Ada' ORDER BY id+0;", [[1], [4]]);
                 session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
                 await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE t SET age=1 WHERE id=4;"));
             }),
@@ -1379,11 +1406,11 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE age=36 ORDER BY name DESC NULLS LAST LIMIT 1;", [[1]]);
                 session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix_order:backward");
                 session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
-                await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id LIMIT 2;", [[1],[2]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id LIMIT 2;", [[1], [2]]);
                 session.LastStatementMetrics!.RecordsExamined.ShouldBe(2);
                 session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
                 await ExecuteAsync(session, "CREATE INDEX ix_age_default ON t(age);");
-                await ExpectRowsAsync(session, "SELECT id FROM t WHERE age>35 ORDER BY age LIMIT 2;", [[1],[3]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE age>35 ORDER BY age LIMIT 2;", [[1], [3]]);
                 session.LastStatementMetrics!.PeakOrderedRows.ShouldBe(0);
             }),
         [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", _seed,
@@ -1442,8 +1469,8 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT pid FROM c_image;", [["ADA"]]);
                 await ExecuteAsync(session, "CREATE TABLE self_update(id INT PRIMARY KEY,pid INT REFERENCES self_update(id) ON UPDATE CASCADE);");
                 await ExecuteAsync(session, "INSERT INTO self_update VALUES(1,NULL),(2,1);");
-                await ExpectRowsAsync(session, "UPDATE self_update SET id=id+10,pid=pid RETURNING id,pid;", [[11,null],[12,1]]);
-                await ExpectRowsAsync(session, "SELECT id,pid FROM self_update ORDER BY id;", [[11,null],[12,11]]);
+                await ExpectRowsAsync(session, "UPDATE self_update SET id=id+10,pid=pid RETURNING id,pid;", [[11, null], [12, 1]]);
+                await ExpectRowsAsync(session, "SELECT id,pid FROM self_update ORDER BY id;", [[11, null], [12, 11]]);
                 string[] actions = ["SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"];
                 for (int index = 0; index < actions.Length; index++)
                 {
@@ -1454,18 +1481,18 @@ public sealed class SqlLanguageConformanceTests
                     await ExecuteAsync(session, $"INSERT INTO {child} VALUES(1);");
                     if (index < 2)
                     {
-                        await ExecuteAsync(session,$"UPDATE {parent} SET id=9 WHERE id=1;");
-                        await ExpectRowsAsync(session,$"SELECT pid FROM {child};",index == 0 ? [[null]] : [[2]]);
+                        await ExecuteAsync(session, $"UPDATE {parent} SET id=9 WHERE id=1;");
+                        await ExpectRowsAsync(session, $"SELECT pid FROM {child};", index == 0 ? [[null]] : [[2]]);
                     }
                     else if (index == 2)
                     {
-                        var restrict = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,$"UPDATE {parent} SET id=3-id;"));
+                        var restrict = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"UPDATE {parent} SET id=3-id;"));
                         restrict.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03039");
                     }
                     else
                     {
-                        await ExecuteAsync(session,$"UPDATE {parent} SET id=3-id;");
-                        await ExpectRowsAsync(session,$"SELECT pid FROM {child};",[[1]]);
+                        await ExecuteAsync(session, $"UPDATE {parent} SET id=3-id;");
+                        await ExpectRowsAsync(session, $"SELECT pid FROM {child};", [[1]]);
                     }
                 }
             }),

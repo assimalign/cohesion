@@ -181,7 +181,7 @@ public sealed class SqlCostAndHashJoinTests
     [Fact(DisplayName = "Cohesion Test [Sql] - Hash NULL keys: all-null inputs allocate no buckets and preserve LEFT rows (#1522)")]
     public async Task ExecuteAsync_AllNullHashKeys_ShouldAvoidRetainedRows()
     {
-        await using var engine = SqlDatabaseEngine.Create("hash-nulls", new() { StatementMemoryBudget = 1024 });
+        await using var engine = SqlDatabaseEngine.Create("hash-nulls", new() { StatementMemoryBudget = 21760 });
         var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         foreach (string table in new[] { "l", "r" })
@@ -197,7 +197,17 @@ public sealed class SqlCostAndHashJoinTests
         var metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.JoinAccessPaths.ShouldBe(["join-hash"]);
         metrics.JoinCandidatePairs.ShouldBe(0);
-        metrics.PeakHashMemoryBytes.ShouldBe(104);
+        // The 80 output/sort entries now cost 21760 B. Independently pin the
+        // unchanged all-NULL hash build at its original 104 B / 1024 B grant.
+        metrics.PeakHashMemoryBytes.ShouldBe(21760);
+        var direct = new SqlStatementMetrics();
+        using (var hash = new SqlHashJoinTable(new SqlHashJoinPath([0], [0], [Assimalign.Cohesion.Database.Types.Collation.Binary]), direct, 1024))
+        {
+            for (int i = 0; i < 80; i++) { hash.Add([null], CancellationToken.None); }
+            direct.HashMemoryBytes.ShouldBe(104);
+            direct.PeakHashMemoryBytes.ShouldBe(104);
+        }
+        direct.HashMemoryBytes.ShouldBe(0);
         metrics.HashMemoryBytes.ShouldBe(0);
     }
 

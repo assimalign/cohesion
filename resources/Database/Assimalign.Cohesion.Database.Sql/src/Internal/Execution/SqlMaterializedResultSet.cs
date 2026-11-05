@@ -56,11 +56,10 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
         long reserved = 0;
         try
         {
-            Reserve(24L + 8L * _rows.Capacity);
             foreach (var row in _rows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Reserve(SqlHashJoinTable.RowBytes(row));
+                Reserve(32L + SqlHashJoinTable.RowBytes(row));
             }
             return reserved;
         }
