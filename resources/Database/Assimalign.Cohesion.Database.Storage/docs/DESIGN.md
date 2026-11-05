@@ -81,7 +81,11 @@ Keys encode direction, collation and NULL placement; a unique Int64 input ordina
 The sorter uses a grant of at least 64 KiB, an explicit maximum framed record (key + value + 16)
 and a grant-minus-32-KiB workspace. Its separate 8-KiB output page and bounded 64 * FanIn run
 directory fit the rest; one directory slot is reserved for merge output.
-FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2. Runs accumulate during
+FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2.
+Create and CreateWithSortedPrefix overloads accept maximumOpenRuns (at least FanIn + 1),
+reducing the directory and merging sooner; the ordinary overloads keep 64 * FanIn. SQL
+uses 64 including a merge-output slot. The ceiling is exercised by a counted 20,000-row
+test; concurrent sorts/results still add up across the process. Runs accumulate during
 generation until the directory is full apart from that output slot, then the FanIn smallest merge
 repeatedly until the directory is at most half full.
 CreateWithSortedPrefix writes a caller-sorted prefix before allocating the arena. The caller

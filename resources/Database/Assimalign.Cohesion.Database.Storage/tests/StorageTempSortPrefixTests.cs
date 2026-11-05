@@ -83,4 +83,29 @@ public sealed class StorageTempSortPrefixTests : IDisposable
             yield return (new byte[] { 2 }, new byte[200]);
         }
     }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Sort handles: an explicit run ceiling exercises early merges and bounds open files (#1789)")]
+    public void Append_RunCeiling_ShouldMergeBeforeOpeningTooManyFiles()
+    {
+        // Arrange
+        const int count = 20000;
+        using var space = StorageTempSpace.Create(_directory, 32 * 1024 * 1024, () => 0);
+        using var statement = space.CreateStatement(32 * 1024 * 1024);
+        int peak = 0;
+        space.BeforeFileCreate = () => peak = Math.Max(peak, Directory.GetFiles(_directory, "*.ctmp").Length + 1);
+        using var sort = StorageTempSorter.Create(statement, 65536, 128, 64);
+        byte[] value = new byte[100];
+
+        // Act
+        for (int i = 0; i < count; i++) { BinaryPrimitives.WriteInt32LittleEndian(value, i); sort.Append([1], value); }
+        using var reader = sort.Complete();
+        int visited = 0;
+        while (reader.MoveNext()) { BinaryPrimitives.ReadInt32LittleEndian(reader.Value.Span).ShouldBe(visited++); }
+
+        // Assert: progress pins that the ceiling was exercised, rather than an input that never filled it.
+        peak.ShouldBe(64); visited.ShouldBe(count); sort.RunsCreated.ShouldBeGreaterThan(64);
+        sort.KeyComparisons.ShouldBeLessThan(count * 100L); sort.RecordsWritten.ShouldBeLessThan(count * 20L);
+        reader.Dispose(); statement.PhysicalBytes.ShouldBe(0); space.Bytes.ShouldBe(0);
+        Should.Throw<ArgumentOutOfRangeException>(() => StorageTempSorter.Create(statement, 262144, 128, 16));
+    }
 }
