@@ -113,8 +113,15 @@ internal sealed partial class SqlPlanExecutor
         {
             if (isDistinct)
             {
-                result.Deduplicate(new GroupKeyComparer(projectionCollations ?? projections
-                    .Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray()),
+                // Keep the fitting return above free of a compiler-generated evaluator closure.
+                // A captured lambda here allocates even when the spill branch is not taken.
+                if (projectionCollations is null)
+                {
+                    projectionCollations = new Collation[projections.Count];
+                    for (int i = 0; i < projectionCollations.Length; i++)
+                    { projectionCollations[i] = projections[i].Collation.Resolve(evaluator.SubqueryValues); }
+                }
+                result.Deduplicate(new GroupKeyComparer(projectionCollations),
                     _metrics!, _definitions.StatementMemoryBudget, cancellationToken);
             }
             result.CaptureMetrics(_metrics!);
