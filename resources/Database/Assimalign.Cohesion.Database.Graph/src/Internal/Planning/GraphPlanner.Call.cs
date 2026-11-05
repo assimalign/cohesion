@@ -9,7 +9,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal sealed partial class GraphPlanner
 {
-    private GraphCallStagePlan PlanCall(GqlCallStage call, IReadOnlyDictionary<string, GraphBindingShape> outer,
+    private GraphCallStagePlan PlanCall(GqlCallStage call, GqlQueryExpression statement, IReadOnlyDictionary<string, BindingKind> outer,
+        Func<string, GraphBindingShape> inputShape,
         GraphTokenResolver tokens, GraphReductionWork work, CancellationToken token, out IReadOnlyList<GraphBindingShape> outputShapes)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -23,13 +24,14 @@ internal sealed partial class GraphPlanner
         foreach (string name in names)
         {
             token.ThrowIfCancellationRequested();
-            if (string.IsNullOrEmpty(name) || !outer.TryGetValue(name, out var shape))
+            if (string.IsNullOrEmpty(name) || !outer.ContainsKey(name))
             { throw new GraphPlanningException("CG05001", ErrorMessages.CallImportMissing, call.Location); }
-            if (!imports.TryAdd(name, shape))
+            if (!imports.TryAdd(name, inputShape(name)))
             { throw new GraphPlanningException("CG03003", ErrorMessages.CallImportDuplicate, call.Location); }
         }
         var planner = new GraphPlanner(_database, _snapshot)
-        { _nativeExpressions = new ReductionPlanningState(null) { SharedWork = work } };
+        { _parsed = statement.Text is not null || _parsed,
+            _nativeExpressions = new ReductionPlanningState(null) { SharedWork = work } };
         GraphCompositePlan? composite = null;
         GraphPlan inner;
         if (body.Composite is not null)
@@ -48,7 +50,6 @@ internal sealed partial class GraphPlanner
             {
                 if (inner.Projections[i].Expression is not GqlLiteralExpression literal) { continue; }
                 shapes[i] = shapes[i] with { Type = GraphCompositeMetadata.Type(literal.Value),
-                    ValueKind = literal.Value is null ? GraphFunctionKind.Null : shapes[i].ValueKind,
                     ResultNullable = literal.Value is null };
             }
             outputShapes = shapes;
@@ -80,15 +81,19 @@ internal sealed partial class GraphPlanner
             IReadOnlyList<string> imported = [];
             if (stages.FirstOrDefault() is GqlReturnStage { IsWith: true } leading)
             {
+                if (leading.Projections is null)
+                { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, leading.Location); }
                 if (leading.SetQuantifier != GqlSetQuantifier.All || leading.GroupBy is not null || leading.OrderBy is null or { Count: > 0 } ||
                     leading.Offset is not null || leading.Limit is not null || leading.Predicate is not null ||
                     leading.Projections.Any(item => item.Alias is not null || item.Expression is not GqlVariableExpression))
                 { throw new GraphPlanningException("CK00001", ErrorMessages.CallImportWithUnsupported, leading.Location); }
                 all = leading.ReturnStar;
                 imported = leading.Projections.Select(item => ((GqlVariableExpression)item.Expression).Variable).ToArray();
+                if (stages.Skip(1).Any(stage => stage is GqlReturnStage { IsWith: true } or GqlNextStage or GqlCompositeStage))
+                { throw new GraphPlanningException("CK00001", ErrorMessages.CallImportWithUnsupported, leading.Location); }
                 query = new GqlQueryExpression(stages.Skip(1).ToArray(), query.Location);
             }
-            // One scope clause must describe every composite operand without changing visibility.
+            // Translate only when no later scope boundary changes importing WITH visibility.
             if (all) { imported = outer.Keys.ToArray(); }
             if (legacyImports is not null && !legacyImports.Order(StringComparer.Ordinal).SequenceEqual(imported.Order(StringComparer.Ordinal)))
             { throw new GraphPlanningException("CK00001", ErrorMessages.CallImportWithUnsupported, query.Location); }

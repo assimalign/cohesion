@@ -74,7 +74,8 @@ internal sealed partial class GraphPlanner
             // Each planner owns its lexical and correlated caches; operands never import bindings.
             var shapes = new List<GraphBindingShape>();
             var planner = new GraphPlanner(_database, _snapshot)
-            { _nativeExpressions = new ReductionPlanningState(null) { SharedWork = reductionWork } };
+            { _parsed = query.Text is not null || _parsed,
+                _nativeExpressions = new ReductionPlanningState(null) { SharedWork = reductionWork } };
             var plan = planner.Plan(operand, normalized, paths, token,
                 normalizedParameters: true, resultShapes: shapes, inputShapes: inputShapes, tokens: tokens, callImports: callImports);
             if (plan.Projections.Count == 0)

@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
 public sealed class GraphCallSubqueryWireTests
@@ -21,6 +23,12 @@ public sealed class GraphCallSubqueryWireTests
         var result = await connection.QueryAsync("FOR x IN [1,3] OPTIONAL CALL (x) { MATCH (n:N {k:x}) RETURN n.k AS y } RETURN x,y ORDER BY x", cancellationToken: harness.Token);
         result.Count.ShouldBe(2); result[0].ToArray().ShouldBe(new object?[] { 1L, 1L });
         result[1].ToArray().ShouldBe(new object?[] { 3L, null });
+        var typed = await connection.QueryAsync("OPTIONAL CALL () { FILTER FALSE RETURN 1 AS y } RETURN y", cancellationToken: harness.Token);
+        typed.Columns.ShouldHaveSingleItem().Type.ShouldBe(DatabaseType.Int64);
+        typed.ShouldHaveSingleItem()[0].ShouldBeNull();
+        var required = await connection.QueryAsync("CALL () { RETURN 1 AS y } RETURN y", cancellationToken: harness.Token);
+        required.Columns.ShouldHaveSingleItem().Type.ShouldBe(DatabaseType.Int64);
+        required.ShouldHaveSingleItem()[0].ShouldBe(1L);
         (await connection.QueryAsync("CALL () { RETURN 1 AS y UNION RETURN 2 AS y } CALL (y) { RETURN y+1 AS z } RETURN z ORDER BY z", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { 2L, 3L });
         var paths = 0;

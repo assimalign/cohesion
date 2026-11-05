@@ -130,6 +130,12 @@ public sealed class GqlCallSubqueryTests
                 .ShouldBe(await Rows(session, start + "FOR y IN [x,x+1]" + projected));
             (await Rows(session, start + "OPTIONAL CALL (x) { MATCH (n:N {k:x}) RETURN n.k AS y }" + projected))
                 .ShouldBe(await Rows(session, start + "OPTIONAL MATCH (n:N {k:x}) LET y=n.k" + projected));
+            (await Rows(session, start + "CALL (x) { RETURN x AS y UNION ALL RETURN x+1 AS y }" + projected))
+                .ShouldBe(await Rows(session, start + "FOR y IN [x,x+1]" + projected));
+            (await Rows(session, start + "CALL (x) { FOR z IN [x,x+1,x+2] RETURN sum(z) AS y }" + projected))
+                .ShouldBe(await Rows(session, start + "LET y=3*x+3" + projected));
+            (await Rows(session, start + "CALL (x) { CALL (x) { RETURN x+1 AS z } RETURN z+1 AS y }" + projected))
+                .ShouldBe(await Rows(session, start + "LET y=x+2" + projected));
         }
     }
 
@@ -189,10 +195,14 @@ public sealed class GqlCallSubqueryTests
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         // Act
-        var description = await Rows(session, "EXPLAIN CALL () { RETURN 1 AS x UNION RETURN 2 AS x } OPTIONAL CALL (x) { FILTER FALSE RETURN x AS y } RETURN y");
+        await using var description = (DatabasePlanDescription)await session.ExecuteAsync("EXPLAIN CALL () { RETURN 1 AS x UNION RETURN 2 AS x } OPTIONAL CALL (x) { FILTER FALSE RETURN x AS y } RETURN y", cancellationToken: CancellationToken.None);
+        var nodes = new List<string>();
+        await foreach (var row in description.GetRowsAsync(CancellationToken.None))
+        { nodes.Add($"{row.GetValue(0)}:{row.GetValue(1) ?? "root"}:{row.GetValue(2)}"); }
         // Assert
-        description.ShouldContain("Apply", Case.Sensitive); description.ShouldContain("OptionalApply", Case.Sensitive);
-        description.ShouldContain("Union", Case.Sensitive); description.ShouldContain("shared_snapshot=True", Case.Sensitive);
+        nodes.ShouldBe(new[] { "0:root:Pipeline", "1:0:Apply", "2:1:Union", "3:2:Return", "4:3:Project",
+            "5:2:Return", "6:5:Project", "7:0:OptionalApply", "8:7:Pipeline", "9:8:Filter", "10:8:Return",
+            "11:10:Project", "12:0:Return", "13:12:Project" });
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - CALL shares the enclosing snapshot and function registries")]

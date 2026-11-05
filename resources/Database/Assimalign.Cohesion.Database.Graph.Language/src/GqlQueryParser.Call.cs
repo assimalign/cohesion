@@ -26,6 +26,7 @@ public sealed partial class GqlQueryParser
         GqlQueryExpression body;
         try { body = Current.Type == TokenType.RightBrace ? EmptyExpression() : ParseNextQuery(hasInput: all || imports is null || imports.Count != 0); }
         finally { _callDepth--; }
+        body.SetStatementText(_source);
         Expect(TokenType.RightBrace, "'}'");
         if (!Failed && Take("IN")) { Unsupported("CALL IN TRANSACTIONS", Previous); }
         return new GqlCallStage(body, imports?.AsReadOnly(), all, optional, Span(start, Previous));
@@ -51,7 +52,7 @@ public sealed partial class GqlQueryParser
             index = System.Math.Min(cursor - 1, end - 1);
             return true;
         }
-        if (!HasStackToNest(_tokens[index])) { return true; }
+        if (!HasStackToNest(_tokens[index])) { index = end; return true; }
         int first = ++cursor;
         int braces = 1;
         while (cursor < end)

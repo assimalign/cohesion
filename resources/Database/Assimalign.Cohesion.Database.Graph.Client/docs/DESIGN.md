@@ -49,6 +49,9 @@ and TCP conformance cases cover explicit imports, per-row fan-out, composite bod
 optional results, entity delivery, structured CG01024 collisions and capability refusals. The
 same authenticated session remains usable after refusal. No client API, capability, protocol
 version or encoding changes are needed; only final columns govern scalar/path admission.
+CALL regressions pin Int64 result-header types for both required values and optional NULL rows
+on InMemory and TCP. The current header contains only names and type bytes; it carries no
+nullability field. Static column nullability remains an in-process engine metadata contract.
 
 ## Schema text DDL (#1738, GQ-D2)
 

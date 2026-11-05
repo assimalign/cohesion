@@ -774,12 +774,16 @@ inside the call. Returned bare variables or aliased expressions add bindings to 
 computed results require aliases (CG05001). Every returned name, including RETURN * expansions,
 must be absent from the outer scope (CG01024), even when it names an import. This strict rule
 follows the owner requirement rather than Neo4j's exemption for imported star results.
+RETURN * still expands imports after an inner WITH, so a body with imports conservatively
+refuses that form with CG01024 even when WITH projects only local names.
 
 For omitted scopes only, a leading importing WITH translates to a scope clause when it contains
 only bare variables without aliases, or star, and no DISTINCT, GROUP BY, ORDER BY, paging or
-WHERE. Explicit ALL is harmless. Composite operands must import the same set (order may differ);
-otherwise the translation is CK00001. With an explicit scope, WITH is an ordinary inner
-projection. Imports cannot be rebound (CG03003); a missing import is CG05001. Variables
+WHERE. Explicit ALL is harmless. After the importing WITH, no later WITH, NEXT or composite
+stage may occur: its scope lifetime must map exactly to one scope clause. Composite operands
+must import the same set (order may differ); otherwise the translation is CK00001. With an
+explicit scope, WITH is an ordinary inner projection. Imports cannot be rebound (CG03003);
+a missing import is CG05001, and importing a deleted variable is CG03003. Variables
 introduced inside one invocation cannot escape except through its final RETURN.
 
 The existing read-only UNION, EXCEPT, INTERSECT, OTHERWISE and NEXT rules apply inside the
@@ -807,6 +811,13 @@ community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clau
 checks isolated imported scope and outer output collisions;
 community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Query.scala:698-711
 requires a returning subquery to be followed by a concluding clause.
+community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Query.scala:876-911
+refuses rebinding scope-clause imports;
+community/cypher/front-end/frontend-tests/src/test/scala/org/neo4j/cypher/internal/frontend/ScopeTreeTest.scala:307-320
+and scoping/checker/GQL_42N44_InaccessibleVariableTest.scala:66-73 in that same frontend directory
+pin scope-clause import persistence across WITH.
+scoping/checker/GQL_42N62_VariableNotDefinedTest.scala:89-99,858-868 in that directory
+pins the different lifetime and permitted rebinding of legacy importing WITH.
 The Cypher 25 grammar is
 community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:320-357.
 ISO GQL inline-call clause numbers remain unverified; this is no claim of full ISO conformance.
@@ -818,6 +829,9 @@ retain the CALL vocabulary refusal even though the profile advertises inline CAL
 write/unit bodies available for one planner admission check; no write can execute through this run.
 Rendering walks semantic children through the existing explicit-stack renderer. Parser, keyword,
 live-profile, generated oracle, InMemory/TCP and NativeAOT cases cover the admitted surface.
+Nested operands retain the parser's one captured source string instead of overlapping substrings;
+body rendering uses semantic children, never that retained text. Parser-built NEXT operands also
+retain the source marker, so child planning preserves parsed provenance after normalization.
 
 ## Linear composition (#1145)
 
@@ -1209,7 +1223,7 @@ FUNCTION and the spelling; these table entries apply only before `(` in value po
 `date` and `duration` remain legal variables. `id(n)` specifically directs callers to element_id.
 CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are recognized unsupported niladic expressions.
 CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher toStringList/toIntegerList/
-toFloatList/toBooleanList are recognized unsupported calls. Procedures/CALL, temporal
+toFloatList/toBooleanList are recognized unsupported calls. Named procedures, temporal
 constructors, ELEMENTS and head/last/tail/reverse/range remain outside this subset.
 
 The table distinguishes ISO clause 20 forms, direct Cypher aliases, and Cohesion extensions.
