@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -89,17 +90,23 @@ public sealed partial class SqlSortSpillConformanceTests
         try
         {
             for (int i = 0; i < 4000; i++)
-            {
-                object?[] row = [i, new string('v', 512)];
-                if (i < 200) { vectors.Add(new WeakReference(row)); }
-                collector.Add(row, [i], session);
-            }
+            { AddObservedVector(collector, i, vectors, session); }
             await using var vectorResult = collector.TakeSpilled([], 0, -1);
             vectorsDrained.ShouldBeTrue(); vectorMetrics.HashMemoryBytes.ShouldBe(0);
             vectorMetrics.PlainSelectMemoryBytes.ShouldBe(0);
             _output.WriteLine("WEAK_ROWS|vectors=200|alive=0");
         }
         finally { SqlRowCollector.ObserveSpill = null; }
+    }
+
+    // A Debug async frame can retain the last WeakReference-constructor argument as a
+    // hidden temporary. Keep construction on a returned frame so the observer owns no row.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AddObservedVector(SqlRowCollector collector, int value, List<WeakReference> vectors, SqlDatabaseSession owner)
+    {
+        object?[] row = [value, new string('v', 512)];
+        if (value < 200) { vectors.Add(new WeakReference(row)); }
+        collector.Add(row, [value], owner);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Spill capacity: default quota accepts ten ASCII grants and pins both sides for three-byte text (#1789)")]
