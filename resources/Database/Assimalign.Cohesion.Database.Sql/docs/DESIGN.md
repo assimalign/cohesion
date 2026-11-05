@@ -47,6 +47,44 @@ Windows process exit deletes delete-on-close runs; OS backups of RootPath can ca
 No durable data, catalog, journal, record-space or wire format changes.
 
 
+### Temp encoding (#1789, SQ-L2a)
+
+SqlTempRowCodec and SqlTempSortKeyCodec are internal and have no operator callers yet.
+The private row format is version 1: a byte version, little-endian Int32 cell count, then
+typed payloads without MVCC stamps. Length-prefixed raw UTF-16 preserves NULs and unpaired
+surrogates; CHAR preserves its padded Value and reconstructs Text; binary decoding owns a
+new array. Decimal bits, IEEE payloads/signed zero, all DateTime bits and DateTimeOffset's
+offset survive unchanged. JSON/JSONB projections are strings. Signed SQL numerics, Boolean,
+string, CHAR, binary, DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan and Guid are
+supported, as are uncoerced byte/ushort/uint/ulong/char parameters. Unknown objects refuse
+TryEncode; malformed or unknown row formats refuse TryDecode. Caller-owned TryWrite scratch
+avoids per-row encoding allocation. No persistent or wire version changes.
+
+Sort columns receive direction, NULL placement and a resolved Collation explicitly. Callers
+must use one final collation snapshot for the entire sort: the collector's deferred collation
+follows the last qualifying row, so resolve that snapshot before encoding any keys, or keep
+refusing spill. The codec accepts only the three pinned index-backed collations; invariant,
+unknown objects and malformed UTF-16 text keys return false. Comparable numeric/text/temporal
+families share identities; other types require the same comparable CLR family in a column.
+Every component is prefix-free; DESC complements the complete non-NULL component, with NULL
+placement independent of direction. Finite numerics use a common 10^28 scale, a signed base-256
+exponent and canonical significant digits, preserving exact mixed IEEE/decimal order without
+rounding or decimal-scale tie breakers. NaNs and signed zeros canonicalize only in keys.
+The sorter supplies the stable input ordinal separately. CompareKeys is a test-only internal
+seam into the collector's existing comparison, with equal ordinals.
+
+StorageTempSorter's bound includes key + row + 16 bytes. A wider record needs a larger bound
+chosen before Create or receives CK05006. At the default 64 MiB grant, bounds of 1 MiB,
+4,184,064 bytes, 4 MiB, 8 MiB and 16 MiB give fan-ins 16, 16, 15, 7 and 3 respectively.
+SQ-L2b should initially use 4,184,064 bytes, the largest bound retaining fan-in 16, and retain
+the coded oversize refusal; this recommendation implements no limit or quota here. A row
+(INTEGER id, TEXT value), ordered by its ASCII text, takes 55/115 row bytes for 20/50
+characters and 23/53 key bytes: 94/184 sorter-record bytes or 98/188 run-stream bytes before
+32-byte framing per 8 KiB page and per-run tail rounding. Merge inputs and outputs both
+consume the existing physical-byte quota; these row sizes are not a grant-capacity promise.
+Seeded differential pairs and row round trips cover every supported value family and stable
+collation, wide keys, all direction/NULL combinations, and stable multi-run merging.
+
 ## Refused opens preserve every file (#1744)
 
 The catalog preflight loads catalog metadata, checks the record-space marker and recorded schema
