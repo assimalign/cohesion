@@ -37,7 +37,10 @@ releases after the sample. Other processes and database writes can consume
 space inside that window; this is admission headroom, not an OS disk reservation.
 Gate covers accounting and the statement/run registries only. Each run locks its own reads,
 writes and disposal. Lock order is run lock, then _probeGate, then Gate, never the reverse;
-no syscall, sort, merge or event callback runs under Gate. Parent disposal snapshots registries under Gate,
+no syscall, sort, merge or event callback runs under Gate. The internal pre-create fault hook
+runs after directory setup, outside its monitor; creation rechecks disposal before opening.
+Injected cancellation therefore cannot carry directory ownership into asynchronous cleanup.
+Parent disposal snapshots registries under Gate,
 then releases it before disposing children, continuing after close failures. Callers must not
 hold a storage page latch across these calls. An unrelated statement can read, cancel, dispose
 or create a run while another statement is blocked in page I/O.

@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -18,6 +19,30 @@ public sealed class StorageTempSortPrefixTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "sort-prefix-" + Guid.NewGuid().ToString("N"));
     public void Dispose() { if (Directory.Exists(_directory)) { Directory.Delete(_directory, true); } }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Temp creation: injected cancellation releases directory ownership before cross-thread disposal (#1789)")]
+    public async Task CreateRun_CanceledCallback_ShouldAllowDisposalOnAnotherThread()
+    {
+        // Arrange
+        using var space = StorageTempSpace.Create(_directory, 1048576, () => 0);
+        using var statement = space.CreateStatement(1048576);
+        space.BeforeFileCreate = () =>
+        {
+            Monitor.IsEntered(DirectoryGate(space)).ShouldBeFalse();
+            throw new OperationCanceledException();
+        };
+
+        // Act
+        Should.Throw<OperationCanceledException>(() => statement.CreateRun());
+        await Task.Run(space.Dispose).WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        statement.PhysicalBytes.ShouldBe(0); space.Bytes.ShouldBe(0);
+        Directory.GetFiles(_directory).ShouldBeEmpty();
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_directoryGate")]
+    private static extern ref object DirectoryGate(StorageTempSpace space);
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Sort prefix: drain before arena creation and independent readers preserve stable ties (#1789)")]
     public async Task Complete_SortedPrefix_ShouldSupportConcurrentRewind()
