@@ -295,10 +295,12 @@ internal sealed partial class SqlPlanExecutor
                     LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
                 _definitions.Get(table, cancellationToken);
             }
+            statement.ObserveCopyJournalStart(_storage.JournalLength);
             statement.CheckCopySpace(roots.Length);
             long journalStart = 0;
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
             {
+                statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
                 statement.CheckCopySpace(roots.Length);
                 long allocationStart = statement.CaptureCopyAllocations();
                 journalStart = _storage.JournalLength - 38; // Include this bracket's already appended Begin frame.

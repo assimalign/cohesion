@@ -129,6 +129,17 @@ internal readonly struct SqlStatementContext
 
     internal void SetCopyJournalBytes(long bytes) => ((JointProvisioningNames)_names).JournalBytes = bytes;
 
+    internal void ObserveCopyJournalStart(long length)
+    {
+        if (_names is not JointProvisioningNames joint) { return; }
+        // A checkpoint between brackets flushes all earlier allocations. Regrowth
+        // by other writers past the previous end can hide truncation; that only
+        // over-charges pending pages and can conservatively refuse a space check.
+        if (joint.PreviousJournalLength is { } previous && length < previous) { joint.UnflushedPages = 0; }
+    }
+
+    internal void RememberCopyJournalEnd(long length) => ((JointProvisioningNames)_names).PreviousJournalLength = length;
+
     internal void ClearUnflushedCopyPages() => ((JointProvisioningNames)_names).UnflushedPages = 0;
 
     internal void ResetCopyJournalBytes()
@@ -206,6 +217,7 @@ internal readonly struct SqlStatementContext
         internal Action<long>? CheckPublication { get; set; }
         internal Func<long>? CountAllocations { get; set; }
         internal long JournalBytes { get; set; }
+        internal long? PreviousJournalLength { get; set; }
         internal long UnflushedPages { get; set; }
         internal long PreparedPages { get; set; }
         internal long CheckpointBytes { get; set; } = SqlSchemaProvisioner.JointCopyCheckpointBytes;
