@@ -57,7 +57,9 @@ public sealed class StorageTempSortPrefixTests : IDisposable
 
         // Act
         using var owner = sort.Complete();
-        var rounds = await Task.WhenAll(Task.Run(Read), Task.Run(Read), Task.Run(Read));
+        // Fork the template serially; only the independent cursor reads run concurrently.
+        var first = owner.OpenReader(); var second = owner.OpenReader(); var third = owner.OpenReader();
+        var rounds = await Task.WhenAll(Task.Run(() => Read(first)), Task.Run(() => Read(second)), Task.Run(() => Read(third)));
 
         // Assert
         foreach (var rows in rounds) { rows.ShouldBe(Enumerable.Range(0, 8000)); }
@@ -72,9 +74,9 @@ public sealed class StorageTempSortPrefixTests : IDisposable
             for (int i = 0; i < 1000; i++) { yield return (new byte[] { 1 }, BitConverter.GetBytes(i)); }
             drained = true;
         }
-        int[] Read()
+        int[] Read(StorageTempSortReader reader)
         {
-            using var reader = owner.OpenReader();
+            using var cursor = reader;
             var values = new List<int>();
             while (reader.MoveNext()) { values.Add(BinaryPrimitives.ReadInt32LittleEndian(reader.Value.Span)); }
             return values.ToArray();
