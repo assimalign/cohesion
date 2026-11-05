@@ -129,6 +129,8 @@ internal readonly struct SqlStatementContext
 
     internal void SetCopyJournalBytes(long bytes) => ((JointProvisioningNames)_names).JournalBytes = bytes;
 
+    internal void ClearUnflushedCopyPages() => ((JointProvisioningNames)_names).UnflushedPages = 0;
+
     internal void ResetCopyJournalBytes()
     {
         var joint = (JointProvisioningNames)_names;

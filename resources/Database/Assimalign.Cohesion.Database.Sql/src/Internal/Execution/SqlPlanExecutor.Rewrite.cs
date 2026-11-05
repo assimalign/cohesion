@@ -302,16 +302,18 @@ internal sealed partial class SqlPlanExecutor
     private async Task CheckpointReplacementCopyAsync(SqlStatementContext statement, long journalStart, CancellationToken token)
     {
         if (!statement.CheckpointCopy) { return; }
-        // Sample at commit, before checkpoint truncation; include only deltas across
-        // our brackets, never untouched writers' WAL accumulated between brackets.
+        // Size-due checkpoints run at gate release, before this sample, so a
+        // truncated bracket's delta can clamp to zero. A length below its own
+        // start proves every copy allocation so far was flushed by that checkpoint.
         long length = _storage.JournalLength;
+        if (length < journalStart) { statement.ClearUnflushedCopyPages(); }
         long added = statement.AddCopyJournalBytes(length - journalStart);
         RewriteStage?.Invoke("CopyCommitted", length);
         if (added < statement.CopyCheckpointBytes) { return; }
         if (length < statement.CopyCheckpointBytes)
         {
             // Only truncation can put the journal below our accumulated deltas.
-            // Retain its remaining bytes; no flush of ours cleared pending pages.
+            // Re-base on the whole remaining journal, including other writers.
             statement.SetCopyJournalBytes(length);
             RewriteStage?.Invoke("CopyCheckpointObserved", length);
             return;

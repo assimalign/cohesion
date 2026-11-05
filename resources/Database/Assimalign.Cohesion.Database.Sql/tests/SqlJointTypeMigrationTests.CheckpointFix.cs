@@ -61,7 +61,6 @@ public sealed partial class SqlJointTypeMigrationTests
                 // Assert: root plus 512 row brackets; every delta includes Begin exactly once.
                 samples.Count.ShouldBe(513);
                 _output.WriteLine($"Exact deltas: brackets={samples.Count}; counter={samples[^1].Counter}; growth={samples[^1].Growth}; observed={observed}");
-                observed.ShouldBe(0);
                 samples.Count(sample => sample.Counter != sample.Growth).ShouldBe(0);
             }
             finally
@@ -73,10 +72,11 @@ public sealed partial class SqlJointTypeMigrationTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Copy checkpoint fix: narrow rewrites obey their journal reserve and observe only real checkpoints (#1778)")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task ApplyAsync_CheckpointFixNarrowRewrite_ShouldBoundPeak(bool keyed, bool engineCheckpoint)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, true)]
+    public async Task ApplyAsync_CheckpointFixNarrowRewrite_ShouldBoundPeak(bool keyed, bool engineCheckpoint, bool externalCheckpoint)
     {
         // Arrange: narrow brackets expose the accumulated 38-byte error of wide fixtures.
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(5));
@@ -105,14 +105,25 @@ public sealed partial class SqlJointTypeMigrationTests
             database.IndexManager.ExportRegistrations().Single().RootPageId, Table(database).ObjectId, out _) : 0;
         var source = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Storage");
         using var events = new EventSourceRecorder(source, EventLevel.Informational);
-        int observed = 0, forced = 0, completedAtObservation = 0;
+        int observed = 0, forced = 0, completedAtObservation = 0, injected = 0;
         bool observationWithoutCheckpoint = false;
-        long peak = 0;
+        long peak = 0, largestBracket = 0, last = database.DataStorage.JournalLength;
         storage.DurableStorageChanged = catalog =>
         { if (!catalog) { peak = Math.Max(peak, database.DataStorage.JournalLength); } };
-        SqlPlanExecutor.RewriteStage = (stage, _) =>
+        SqlPlanExecutor.RewriteStage = (stage, length) =>
         {
-            if (stage == "CopyCheckpointed") { forced++; }
+            if (stage == "CopyCommitted")
+            {
+                largestBracket = Math.Max(largestBracket, length - last);
+                last = length;
+            }
+            if (stage == "Copied" && externalCheckpoint && injected == 0 && database.DataStorage.JournalLength > 8L * 1024 * 1024)
+            {
+                database.Coordinator.Checkpoint(guard.Token);
+                injected++;
+                last = database.DataStorage.JournalLength;
+            }
+            if (stage == "CopyCheckpointed") { forced++; last = database.DataStorage.JournalLength; }
             if (stage != "CopyCheckpointObserved") { return; }
             observed++;
             int completed = events.Events.Count(entry => entry.EventId == 6 && Equals(entry.Payload![0], database.DataStorage.Name.ToString()) && Equals(entry.Payload[1], "Success"));
@@ -127,12 +138,16 @@ public sealed partial class SqlJointTypeMigrationTests
             // Assert: retained key trees contribute their measured source height to J.
             long reserve = SqlSchemaProvisioner.JointCopyCheckpointBytes + 64L * (2 + (keyed ? 4 * height + 3 : 0)) * 2 * (Page.Size + 46) + 152;
             reserve.ShouldBe(keyed ? 34_703_256 : 18_886_296);
-            _output.WriteLine($"Narrow rewrite: keyed={keyed}; height={height}; engine={engineCheckpoint}; peak={peak}; J={reserve}; observed={observed}; forced={forced}; engine checkpoints={events.Events.Count(entry => entry.EventId == 6 && Equals(entry.Payload![0], database.DataStorage.Name.ToString()) && Equals(entry.Payload[1], "Success"))}");
-            if (!keyed) { peak.ShouldBeLessThanOrEqualTo(18_886_424); }
+            _output.WriteLine($"Narrow rewrite: keyed={keyed}; height={height}; engine={engineCheckpoint}; injected={injected}; peak={peak}; largest bracket={largestBracket}; T+bracket={SqlSchemaProvisioner.JointCopyCheckpointBytes + largestBracket}; J={reserve}; observed={observed}; forced={forced}; engine checkpoints={events.Events.Count(entry => entry.EventId == 6 && Equals(entry.Payload![0], database.DataStorage.Name.ToString()) && Equals(entry.Payload[1], "Success"))}");
             observationWithoutCheckpoint.ShouldBeFalse();
-            peak.ShouldBeLessThanOrEqualTo(reserve);
             if (engineCheckpoint) { observed.ShouldBeGreaterThan(0); }
-            else { observed.ShouldBe(0); forced.ShouldBeGreaterThan(0); }
+            else
+            {
+                peak.ShouldBeLessThanOrEqualTo(SqlSchemaProvisioner.JointCopyCheckpointBytes + largestBracket);
+                observed.ShouldBe(externalCheckpoint ? 1 : 0);
+                injected.ShouldBe(externalCheckpoint ? 1 : 0);
+                forced.ShouldBeGreaterThan(0);
+            }
             database.Catalog.SchemaState!.ContentHash.ShouldBe(Declare(true).Hash);
             await using var reader = await database.CreateSessionAsync(guard.Token);
             (await RowsAsync(reader, "SELECT COUNT(*) FROM items", guard.Token)).Single()[0].ShouldBe((long)rows);

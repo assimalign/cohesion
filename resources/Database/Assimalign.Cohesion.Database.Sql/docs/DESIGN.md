@@ -8757,8 +8757,9 @@ row; the charge is rows plus allocated pages. Retained
 trees use their measured heights in the admission WAL estimate. C is the maximum 64-row
 page-touch bound, T the root count, Q the sum of all row-touch bounds plus T, and K the
 number of copy/root brackets. Copy-owned WAL is accumulated from journal-length deltas across
-its brackets, including their begin/commit frames; existing WAL and writes between brackets
-never trigger its checkpoint. J = min(Q*2(B+46)+152K, H + max(C,T)*2(B+46)+152).
+its brackets, including their begin/commit frames. Existing WAL and writes between brackets
+are excluded from those deltas. An observed truncation re-bases the counter on the whole
+remaining journal, including other writers' bytes, which can force a little earlier. J = min(Q*2(B+46)+152K, H + max(C,T)*2(B+46)+152).
 H is 16 MiB for any job that rewrites an existing table. When every plan table keeps its owner or is new, H may
 instead use the engine's larger nonzero CheckpointJournalSize if this same admission formula
 fits the available space; otherwise H falls back to 16 MiB without refusing the job.
@@ -8771,13 +8772,20 @@ storage brackets retry the same checkpoint after a cancellation-aware delay unti
 Bracket deltas use logical journal length, including buffered Begin frames exactly once.
 When accumulated copy bytes reach H but the logical journal length is below H, a storage
 checkpoint has truncated the journal: exact deltas cannot exceed an untruncated journal.
-The copy counter then retains that remaining length without clearing pending pages; only a
-forced copy checkpoint resets both counters. Peak-WAL tests sample at durable commit before
-truncation. Narrow keyless and sequential-key rewrites assert J; the kept-owner fallback
-asserts H plus its largest observed bracket with engine size checkpoints disabled or above
-the job total. A real-engine-checkpoint rewrite requires a completed storage checkpoint
-before each observed-checkpoint callback; a checkpoint-disabled negative control must violate
-the bound.
+The copy counter then retains that remaining length. Independently, a post-bracket sample
+below that bracket's own journal start proves a checkpoint flushed every copy allocation
+counted so far, including that bracket's, and clears their pending-page charge. Size-due
+checkpoints run at gate release before this sample. An interval checkpoint between brackets
+can leave an over-estimate until the next proven flush or forced checkpoint; observing the
+remaining length alone never clears pages allocated since truncation. A forced copy
+checkpoint resets both counters. Peak-WAL tests sample at durable commit before truncation.
+Engine-disabled narrow keyless and keyed rewrites, including one keyed run with an injected
+checkpoint above 8 MiB, assert H plus the largest observed bracket. The injected run requires
+one observed truncation and further forced checkpoints, binding the retained journal length.
+The kept-owner fallback asserts the same peak bound with engine size checkpoints disabled
+or above the job total. A real-engine-checkpoint rewrite requires a completed storage
+checkpoint before each observed-checkpoint callback. Sparse exact-admission tests cover a
+wide rewrite with a 1 MiB engine budget and a kept-owner additive index at the engine threshold.
 Reclamation-backlog tests prove event-21 SqlTableReclamation deferral at the gate, release the
 batch, then require zero CheckpointBusy callbacks, a completed copy checkpoint and the peak bound,
 including after failed preparation and cancellation after a completed copy checkpoint.
@@ -8826,8 +8834,10 @@ N=R+J+ceil((R+J)/4)+V+E. Before every root/copy bracket the watchdog requires
 D+E, where D=(A-min(A,FreePageCount))*B+touches*2(B+46)+152, plus copy-owned
 unflushed allocation bytes only for sparse data growth, capped at the data pool capacity because eviction or an engine
 checkpoint may already have flushed earlier allocations. It rechecks under the apply gate before the first mutation.
-Copy-owned allocation counts accumulate until a successful forced checkpoint flushes them;
-that checkpoint resets both the pending allocation and WAL counters. PageCount/FreePageCount
+Copy-owned allocation counts accumulate until a successful forced checkpoint or a
+post-bracket journal sample below that bracket's own start proves they were flushed.
+The forced checkpoint also resets the WAL counter; the proven engine flush clears only
+pending allocations. PageCount/FreePageCount
 deltas plus reclamation frees are sampled at both ends of each copy/root bracket, under its
 apply gate. A private reclamation accounting monitor pairs its allocator releases at commit
 with the reclaimed-page counter update, making each sample exact across concurrent frees.
