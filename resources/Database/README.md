@@ -181,7 +181,7 @@ architecture test is deferred until implementation.
 | `Assimalign.Cohesion.Database.KeyValuePair.Protocol` | Single owner of KeyValuePair wire messages, codecs, model family and transfer DTOs; independently consumed by engine and client |
 | `Assimalign.Cohesion.Database.Blob.Protocol` | Single owner of Blob wire messages, codecs, model family and transfer DTOs; independently consumed by engine and client |
 
-DatabaseRow is the shared NVI row boundary: every ordinal is checked in the base, and six
+DatabaseRow is the shared NVI row boundary: the base checks ordinals after capability checks, and six
 sealed model, client and plan-description leaves supply typed cores with their existing
 conversions. See [Execution DESIGN](Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#row-access-contract-1264).
 

@@ -41,18 +41,22 @@ or compatibility shims. Model-specific language results retain names such as `Sq
 DatabaseRow is the NVI seam for six sealed leaves: SqlMaterializedRow,
 KeyValueMaterializedRow, DocumentQueryRow, GraphQueryRow, the remote DocumentRow and
 DatabasePlanDescriptionRow. FieldCount remains abstract because each leaf owns its shape.
-Every public ordinal accessor validates 0 <= ordinal < FieldCount before calling its
-protected core. Framework ArgumentOutOfRangeException guards own the ordinal failure,
-including IsMissing on unsupported rows; valid unsupported MISSING access still throws
-NotSupportedException. No diagnostic identity or new value kind is introduced.
+Public ordinal accessors validate 0 <= ordinal < FieldCount before calling their protected
+cores. IsMissing first checks its capability: unsupported rows throw NotSupportedException
+for every ordinal. On supporting rows it uses the same framework ArgumentOutOfRangeException
+guards as the value accessors. No diagnostic identity or new value kind is introduced.
 
 The typed cores retain each leaf's conversions, NULL/MISSING behavior and conversion
 failures; GetValue retains the original boxed value or model-specific output mapping.
 Calls between cores reuse the already validated ordinal rather than repeat public checks.
 Typed access does not allocate a new box. SQL's materialized wrapper keeps its instance
 layout, and the per-row allocation guard compares construction with all typed accessors
-and GetValue through a DatabaseRow reference. Existing Release allocation guards cover
-statement and wire consumers. These checks make no wall-clock or dispatch-throughput claim.
+and GetValue through a DatabaseRow reference. The wrapper is pinned to exactly 32 bytes on
+64-bit runtimes (16 bytes for header and method table, 8 for the SupportsMissing field slot,
+8 for the values reference), using the minimum of five measurement attempts. Existing Release
+allocation guards cover Graph and Documents client encoders. SQL's EncodeRow/MeasureRow and
+the KeyValuePair session encoding loop still lack allocation guards. These checks make no
+wall-clock or dispatch-throughput claim.
 DatabaseResultSet.GetRowsAsync keeps its existing shape: the paused benchmark suite
 provides no per-row dispatch evidence to justify replacing it.
 
@@ -60,8 +64,8 @@ provides no per-row dispatch evidence to justify replacing it.
 
 MISSING is an optional capability (owner ruling, 2026-10-16). The protected constructor's
 `supportsMissing = false` value backs non-virtual `SupportsMissing`. The non-virtual
-`IsMissing(int)` validates the ordinal, throws NotSupportedException for a valid ordinal
-while unsupported, then calls protected virtual `IsMissingCore(int)`. The default core throws too, following
+`IsMissing(int)` throws NotSupportedException while unsupported, then validates the ordinal
+and calls protected virtual `IsMissingCore(int)`. The default core throws too, following
 database-area.md rules 4 and 6. This capability is the authorized shared boundary change;
 no public sentinel or model-specific type enters Execution.
 

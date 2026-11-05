@@ -28,16 +28,15 @@ public sealed class SqlMaterializedRowAllocationTests
         // Act: compare identical row construction with and without base-typed access.
         long construction = long.MaxValue;
         long access = long.MaxValue;
-        for (int round = 0; round < 3; round++)
+        for (int round = 0; round < 5; round++)
         {
             construction = Math.Min(construction, Measure(values, iterations, read: false));
             access = Math.Min(access, Measure(values, iterations, read: true));
         }
         _output.WriteLine($"Construction: {construction / (double)iterations} B/row; with accessors: {access / (double)iterations} B/row");
 
-        // Assert: the pre-NVI wrapper is 32 bytes on 64-bit runtimes; allow layout headroom.
-        construction.ShouldBeGreaterThan(0);
-        construction.ShouldBeLessThanOrEqualTo(40L * iterations);
+        // Assert: 16 B header/method table + 8 B _supportsMissing slot + 8 B _values = 32 B.
+        construction.ShouldBe(32L * iterations);
         access.ShouldBe(construction);
     }
 

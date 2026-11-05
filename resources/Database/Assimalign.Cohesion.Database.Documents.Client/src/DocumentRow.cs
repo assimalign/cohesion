@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Database.Documents.Client;
 /// <remarks>
 /// Inherited ordinal accessors validate bounds in <see cref="DatabaseRow"/>. Byte access returns
 /// original JSON for bare rows, unquoted UTF-8 for named strings and empty bytes for named NULL/MISSING.
+/// GetBytes throws <see cref="InvalidOperationException"/> when a named value is neither JSON,
+/// a string nor NULL/MISSING.
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("DocumentRow Count={Count}")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Client.DocumentRow.DebugView))]

@@ -152,13 +152,15 @@ throughput window. Slow-cadence, producer and observer regressions cover runner 
 No public type, visibility grant, project reference or storage format changed. Storage exposes
 its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
 
-## Result diagnostics (#1264)
+## Row access contract (#1264)
 
 DocumentQueryRow supplies protected typed cores behind DatabaseRow's non-virtual ordinal
 guards. Valid-ordinal invariant conversions, MISSING, JSON text, bare/raw bytes and coded
 NULL/type failures retain their existing results. Out-of-range access now throws
 ArgumentOutOfRangeException from the base instead of array indexing; a raw first-column
 shortcut cannot bypass the guard. Internal core calls reuse the validated ordinal.
+
+## Result diagnostics (#1264)
 
 Document command and query results return a non-null Diagnostics collection, empty when
 there is nothing to report (#1264). Failure frames retain their existing diagnostic payload.

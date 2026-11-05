@@ -68,7 +68,7 @@ public sealed class GraphRowAccessorTests
         Should.Throw<InvalidCastException>(() => row.GetInt32(0));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Every ordinal row accessor uses the base bounds guard")]
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Value accessor bounds and unsupported MISSING retain their guard order")]
     [InlineData(-1)]
     [InlineData(1)]
     [InlineData(int.MinValue)]
@@ -77,12 +77,13 @@ public sealed class GraphRowAccessorTests
     {
         // Arrange
         DatabaseRow row = CreateRow(["value"]);
-        Action[] accessors = [() => row.IsNull(ordinal), () => row.IsMissing(ordinal),
+        Action[] accessors = [() => row.IsNull(ordinal),
             () => row.GetValue(ordinal), () => row.GetBytes(ordinal), () => row.GetString(ordinal),
             () => row.GetInt32(ordinal), () => row.GetInt64(ordinal),
             () => row.GetBoolean(ordinal), () => row.GetDouble(ordinal)];
 
         // Act / Assert
+        Should.Throw<NotSupportedException>(() => row.IsMissing(ordinal));
         foreach (var accessor in accessors)
         {
             Should.Throw<ArgumentOutOfRangeException>(accessor).ParamName.ShouldBe("ordinal");

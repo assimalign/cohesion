@@ -45,7 +45,7 @@ public sealed class DatabasePlanRowAccessorTests
         count.ShouldBe(1);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Execution] - Plan rows use the common ordinal guard")]
+    [Theory(DisplayName = "Cohesion Test [Execution] - Plan rows guard value ordinals and refuse unsupported MISSING first")]
     [InlineData(-1)]
     [InlineData(8)]
     [InlineData(int.MinValue)]
@@ -58,10 +58,11 @@ public sealed class DatabasePlanRowAccessorTests
         // Act / Assert
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {
-            Action[] accessors = [() => row.IsNull(ordinal), () => row.IsMissing(ordinal),
+            Action[] accessors = [() => row.IsNull(ordinal),
                 () => row.GetValue(ordinal), () => row.GetBytes(ordinal), () => row.GetString(ordinal),
                 () => row.GetInt32(ordinal), () => row.GetInt64(ordinal),
                 () => row.GetBoolean(ordinal), () => row.GetDouble(ordinal)];
+            Should.Throw<NotSupportedException>(() => row.IsMissing(ordinal));
             foreach (var accessor in accessors)
             {
                 Should.Throw<ArgumentOutOfRangeException>(accessor).ParamName.ShouldBe("ordinal");

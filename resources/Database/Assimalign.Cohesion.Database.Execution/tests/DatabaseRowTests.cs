@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Execution.Tests;
 
 public sealed class DatabaseRowTests
 {
-    [Fact(DisplayName = "Cohesion Test [Execution] - Unsupported rows refuse MISSING for a valid ordinal")]
+    [Fact(DisplayName = "Cohesion Test [Execution] - Unsupported rows refuse MISSING before inspecting the ordinal")]
     public void IsMissing_UnsupportedRow_ShouldThrowBeforeCallingCore()
     {
         // Arrange
@@ -44,7 +44,7 @@ public sealed class DatabaseRowTests
     {
         // Arrange
         var row = new TestRow(supportsMissing, fieldCount);
-        Action[] accessors = [() => row.IsNull(ordinal), () => row.IsMissing(ordinal),
+        Action[] accessors = [() => row.IsNull(ordinal),
             () => row.GetValue(ordinal), () => row.GetBytes(ordinal), () => row.GetString(ordinal),
             () => row.GetInt32(ordinal), () => row.GetInt64(ordinal),
             () => row.GetBoolean(ordinal), () => row.GetDouble(ordinal)];
@@ -53,6 +53,14 @@ public sealed class DatabaseRowTests
         foreach (var accessor in accessors)
         {
             Should.Throw<ArgumentOutOfRangeException>(accessor).ParamName.ShouldBe("ordinal");
+        }
+        if (supportsMissing)
+        {
+            Should.Throw<ArgumentOutOfRangeException>(() => row.IsMissing(ordinal)).ParamName.ShouldBe("ordinal");
+        }
+        else
+        {
+            Should.Throw<NotSupportedException>(() => row.IsMissing(ordinal));
         }
         row.CoreCalls.ShouldBe(0);
     }

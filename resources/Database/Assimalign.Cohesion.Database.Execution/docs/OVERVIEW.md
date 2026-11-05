@@ -10,8 +10,9 @@ The model-neutral request/result vocabulary of the Cohesion Data Platform:
   requests own a typed `Statement` and `Parameters`; key-value requests carry command operands.
 - **Results:** `DatabaseResult` reports status, affected count and non-null diagnostics (empty when none).
   `DatabaseResultSet` streams `DatabaseRow` values described by `DatabaseColumn` metadata.
-  Each model supplies the result implementations it needs. DatabaseRow validates every ordinal
-  before dispatching to typed leaf cores; conversions and NULL/MISSING semantics remain model-owned.
+  Each model supplies the result implementations it needs. DatabaseRow validates ordinals
+  before dispatching to typed leaf cores; unsupported IsMissing first refuses the capability.
+  Conversions and NULL/MISSING semantics remain model-owned.
 
 Planning, parsing, execution and transaction brackets belong to model engines. Blob sessions
 operate through their own storage API and have no execute member.

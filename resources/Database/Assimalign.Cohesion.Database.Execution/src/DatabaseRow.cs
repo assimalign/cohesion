@@ -8,6 +8,7 @@ namespace Assimalign.Cohesion.Database.Execution;
 /// <remarks>
 /// Ordinal accessors validate bounds before dispatching to model-specific cores. Each model
 /// retains its conversions and failures for a valid ordinal, including NULL and MISSING behavior.
+/// IsMissing checks its optional capability before validating the ordinal.
 /// </remarks>
 public abstract class DatabaseRow
 {
@@ -26,12 +27,12 @@ public abstract class DatabaseRow
     /// <summary>Gets whether the field at the specified ordinal is MISSING.</summary>
     /// <param name="ordinal">The zero-based column ordinal.</param>
     /// <returns>True for an absent value; false for NULL or a present value.</returns>
-    /// <exception cref="NotSupportedException">The ordinal is valid but MISSING is unavailable on this row.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The ordinal is outside the row.</exception>
+    /// <exception cref="NotSupportedException">MISSING is unavailable on this row.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">MISSING is supported and the ordinal is outside the row.</exception>
     public bool IsMissing(int ordinal)
     {
-        ValidateOrdinal(ordinal);
         if (!_supportsMissing) { throw new NotSupportedException(ErrorMessages.MissingNotSupported); }
+        ValidateOrdinal(ordinal);
         return IsMissingCore(ordinal);
     }
 
@@ -58,9 +59,9 @@ public abstract class DatabaseRow
         return IsNullCore(ordinal);
     }
 
-    /// <summary>Reads the field after the base has validated its ordinal.</summary>
+    /// <summary>Reports whether the validated field is NULL.</summary>
     /// <param name="ordinal">The validated zero-based column ordinal.</param>
-    /// <returns>The field result with the model's conversion and null semantics.</returns>
+    /// <returns>True when the field is NULL; false for a present or MISSING value.</returns>
     protected abstract bool IsNullCore(int ordinal);
 
     /// <summary>
@@ -75,9 +76,9 @@ public abstract class DatabaseRow
         return GetBytesCore(ordinal);
     }
 
-    /// <summary>Reads the field after the base has validated its ordinal.</summary>
+    /// <summary>Reads the validated field as bytes.</summary>
     /// <param name="ordinal">The validated zero-based column ordinal.</param>
-    /// <returns>The field result with the model's conversion and null semantics.</returns>
+    /// <returns>The field bytes, using the model's binary or text encoding and NULL/MISSING semantics.</returns>
     protected abstract ReadOnlyMemory<byte> GetBytesCore(int ordinal);
 
     /// <summary>
@@ -92,9 +93,9 @@ public abstract class DatabaseRow
         return GetStringCore(ordinal);
     }
 
-    /// <summary>Reads the field after the base has validated its ordinal.</summary>
+    /// <summary>Reads the validated field as a string.</summary>
     /// <param name="ordinal">The validated zero-based column ordinal.</param>
-    /// <returns>The field result with the model's conversion and null semantics.</returns>
+    /// <returns>The field string using model conversions, or null for NULL/MISSING.</returns>
     protected abstract string? GetStringCore(int ordinal);
 
     /// <summary>
@@ -109,9 +110,9 @@ public abstract class DatabaseRow
         return GetInt32Core(ordinal);
     }
 
-    /// <summary>Reads the field after the base has validated its ordinal.</summary>
+    /// <summary>Reads the validated field as a 32-bit integer.</summary>
     /// <param name="ordinal">The validated zero-based column ordinal.</param>
-    /// <returns>The field result with the model's conversion and null semantics.</returns>
+    /// <returns>The field converted to a 32-bit integer using model conversion and null rules.</returns>
     protected abstract int GetInt32Core(int ordinal);
 
     /// <summary>
@@ -126,9 +127,9 @@ public abstract class DatabaseRow
         return GetInt64Core(ordinal);
     }
 
-    /// <summary>Reads the field after the base has validated its ordinal.</summary>
+    /// <summary>Reads the validated field as a 64-bit integer.</summary>
     /// <param name="ordinal">The validated zero-based column ordinal.</param>
-    /// <returns>The field result with the model's conversion and null semantics.</returns>
+    /// <returns>The field converted to a 64-bit integer using model conversion and null rules.</returns>
     protected abstract long GetInt64Core(int ordinal);
 
     /// <summary>
@@ -143,9 +144,9 @@ public abstract class DatabaseRow
         return GetBooleanCore(ordinal);
     }
 
-    /// <summary>Reads the field after the base has validated its ordinal.</summary>
+    /// <summary>Reads the validated field as Boolean.</summary>
     /// <param name="ordinal">The validated zero-based column ordinal.</param>
-    /// <returns>The field result with the model's conversion and null semantics.</returns>
+    /// <returns>The field converted to Boolean using model conversion and null rules.</returns>
     protected abstract bool GetBooleanCore(int ordinal);
 
     /// <summary>
@@ -160,9 +161,9 @@ public abstract class DatabaseRow
         return GetDoubleCore(ordinal);
     }
 
-    /// <summary>Reads the field after the base has validated its ordinal.</summary>
+    /// <summary>Reads the validated field as a double-precision number.</summary>
     /// <param name="ordinal">The validated zero-based column ordinal.</param>
-    /// <returns>The field result with the model's conversion and null semantics.</returns>
+    /// <returns>The field converted to double precision using model conversion and null rules.</returns>
     protected abstract double GetDoubleCore(int ordinal);
 
     /// <summary>
@@ -177,9 +178,9 @@ public abstract class DatabaseRow
         return GetValueCore(ordinal);
     }
 
-    /// <summary>Reads the field after the base has validated its ordinal.</summary>
+    /// <summary>Reads the validated field as an object.</summary>
     /// <param name="ordinal">The validated zero-based column ordinal.</param>
-    /// <returns>The field result with the model's conversion and null semantics.</returns>
+    /// <returns>The existing boxed value or model output value, or null for NULL/MISSING.</returns>
     protected abstract object? GetValueCore(int ordinal);
 
     private void ValidateOrdinal(int ordinal)

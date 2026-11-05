@@ -1177,13 +1177,16 @@ request. A slow-lane regression allows a stuck advisory and requires it to clear
 No public type, visibility grant, project reference or storage format changed. Storage exposes
 its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
 
-## Result diagnostics (#1264)
+## Row access contract (#1264)
 
 SqlMaterializedRow supplies protected typed cores behind DatabaseRow's non-virtual ordinal
 guards. Valid-ordinal invariant conversions, padded CHAR output, binary borrowing and NULL/type
-failures retain their existing results. Out-of-range access now throws ArgumentOutOfRangeException
+failures retain their existing results. Out-of-range value access now throws ArgumentOutOfRangeException
 from the base instead of the array's IndexOutOfRangeException. Only override names change in
-the leaf; its instance layout and GetRowsAsync are unchanged.
+the leaf; its instance layout and GetRowsAsync are unchanged. IsMissing retains its capability-first
+NotSupportedException for every ordinal.
+
+## Result diagnostics (#1264)
 
 SQL command and row results return a non-null Diagnostics collection, empty when there is
 nothing to report (#1264). SQL wire diagnostic framing is unchanged: empty diagnostics emit no frame.
