@@ -107,7 +107,7 @@ public sealed class DocumentMultisetOperationTests
     [InlineData("SELECT RAW x FROM [1/0] AS x INTERSECT SELECT RAW y FROM [1/0] AS y LIMIT 0")]
     [InlineData("SELECT RAW x FROM [1/0] AS x EXCEPT ALL SELECT RAW y FROM [1/0] AS y LIMIT 0")]
     [InlineData("SELECT RAW q FROM (SELECT x AS n FROM [1/0] AS x INTERSECT SELECT y AS n FROM [1/0] AS y ORDER BY n LIMIT 0) AS q")]
-    [InlineData("SELECT RAW (SELECT RAW x FROM [1/0] AS x EXCEPT SELECT RAW y FROM [1/0] AS y LIMIT 0) FROM [] AS seed")]
+    [InlineData("SELECT RAW (SELECT RAW x FROM [1/0] AS x EXCEPT SELECT RAW y FROM [1/0] AS y LIMIT 0) FROM [0] AS seed")]
     public async Task ExecuteAsync_ZeroLimit_ShouldOpenNoSourceAsync(string text)
     {
         // Arrange
@@ -115,7 +115,7 @@ public sealed class DocumentMultisetOperationTests
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         // Act / Assert
-        (await ValuesAsync(session, text)).ShouldBeEmpty();
+        (await ValuesAsync(session, text)).ShouldBe(text.EndsWith("FROM [0] AS seed", StringComparison.Ordinal) ? new[] { "[]" } : Array.Empty<string>());
         session.LastQueryDocumentsRead.ShouldBe(0);
     }
 
@@ -213,8 +213,10 @@ public sealed class DocumentMultisetOperationTests
         }, CancellationToken.None);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Compounds: omitted DML VALUE uses the complete RAW row")]
-    public async Task ExecuteAsync_RawWriteSource_ShouldStoreCompleteValueAsync()
+    [Theory(DisplayName = "Cohesion Test [Documents] - Compounds: omitted DML VALUE pins plain and compound RAW write shapes")]
+    [InlineData(false, "{\"value\":\"a\"}")]
+    [InlineData(true, "a|b")]
+    public async Task ExecuteAsync_RawWriteSource_ShouldStoreCompleteValueAsync(bool compound, string expected)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("multiset-raw-write", new());
@@ -222,10 +224,11 @@ public sealed class DocumentMultisetOperationTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.CreateCollectionAsync("dest", CancellationToken.None);
         // Act
-        var result = await session.ExecuteAsync("INSERT INTO dest (KEY \"value\") SELECT RAW 'a' FROM [0] AS x UNION SELECT RAW 'b' FROM [0] AS y", cancellationToken: CancellationToken.None);
+        var result = await session.ExecuteAsync("INSERT INTO dest (KEY \"value\") SELECT RAW 'a' FROM [0] AS x" +
+            (compound ? " UNION SELECT RAW 'b' FROM [0] AS y" : ""), cancellationToken: CancellationToken.None);
         // Assert
-        result.AffectedCount.ShouldBe(2);
-        (await ValuesAsync(session, "SELECT RAW dest FROM dest")).ShouldBe(new[] { "a", "b" });
+        result.AffectedCount.ShouldBe(compound ? 2 : 1);
+        string.Join("|", await ValuesAsync(session, "SELECT RAW dest FROM dest")).ShouldBe(expected);
     }
 
     private static async Task<List<string>> ValuesAsync(DocumentDatabaseSession session, string text)

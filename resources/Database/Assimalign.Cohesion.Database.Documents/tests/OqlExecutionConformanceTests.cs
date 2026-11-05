@@ -636,6 +636,24 @@ public sealed class OqlExecutionConformanceTests
         _cases.Keys.Except(profile.Clauses, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty("Retired capabilities must not remain positive conformance cases.");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents] - Conformance: set-operation coverage requires the actual nested operator")]
+    [InlineData(OqlClauses.Intersect, "INTERSECT")]
+    [InlineData(OqlClauses.Except, "EXCEPT")]
+    public void ContainsClause_NestedCompound_ShouldRequireOperator(string clause, string operation)
+    {
+        // Arrange
+        var parser = new OqlQueryParser();
+        var plain = (OqlQueryStatement)parser.Parse("SELECT RAW 1 FROM [0] AS x");
+        var nested = (OqlQueryStatement)parser.Parse("SELECT RAW (SELECT RAW 1 FROM [0] AS x " + operation + " SELECT RAW 1 FROM [0] AS y) FROM [0] AS z");
+        // Act / Assert
+        ContainsClause(plain.OqlExpression, clause).ShouldBeFalse();
+        ContainsClause(nested.OqlExpression, clause).ShouldBeTrue();
+    }
+
+    private static bool ContainsOperation(OqlExpression expression, OqlSetOperation operation)
+        => expression is OqlSetOperationExpression compound && compound.Operation == operation ||
+            Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.NestedChildren(expression).Any(child => ContainsOperation(child, operation));
+
     private static bool ContainsClause(OqlExpression expression, string clause) => clause switch
     {
         OqlClauses.Returning => expression is OqlInsertExpression { Returning: not null } or OqlUpsertExpression { Returning: not null }
@@ -653,9 +671,9 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Update => expression is OqlUpdateExpression,
         OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
-        OqlClauses.Union => expression is OqlSetOperationExpression { Operation: OqlSetOperation.Union },
-        OqlClauses.Intersect => expression is OqlSetOperationExpression { Operation: OqlSetOperation.Intersect } or OqlSelectExpression,
-        OqlClauses.Except => expression is OqlSetOperationExpression { Operation: OqlSetOperation.Except } or OqlSelectExpression,
+        OqlClauses.Union => ContainsOperation(expression, OqlSetOperation.Union),
+        OqlClauses.Intersect => ContainsOperation(expression, OqlSetOperation.Intersect),
+        OqlClauses.Except => ContainsOperation(expression, OqlSetOperation.Except),
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
         OqlClauses.Subquery => Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.HasSubquery(expression),
         OqlClauses.Exists => expression is OqlSelectExpression exists && exists.Projections.Any(p => p.Expression is OqlUnaryExpression { Operator: "EXISTS" }),
