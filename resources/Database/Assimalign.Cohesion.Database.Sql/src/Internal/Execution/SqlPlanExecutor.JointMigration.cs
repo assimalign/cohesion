@@ -137,6 +137,16 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             var tableIndexes = indexes.Where(index => index.TableObjectId == table.ObjectId).ToArray();
+            if (old is not null)
+            {
+                // GetIndexes follows the durable registration vector, including after
+                // Load; physical catalog slots and declared/preserved lists need not.
+                // Preserve surviving names' relative order, then append additions in
+                // plan order. Selection and declared/drop precedence remain unchanged.
+                var order = _catalog.GetIndexes(old.ObjectId).Select((index, ordinal) => (index.Name, ordinal))
+                    .ToDictionary(item => item.Name, item => item.ordinal, StringComparer.OrdinalIgnoreCase);
+                tableIndexes = tableIndexes.OrderBy(index => order.GetValueOrDefault(index.Name, int.MaxValue)).ToArray();
+            }
             bool keepsOwner = old is not null && old.Columns.Count == table.Columns.Count &&
                 table.Columns.Select((column, ordinal) =>
                     column.Name.Equals(old.Columns[ordinal].Name, StringComparison.OrdinalIgnoreCase) &&
