@@ -46,9 +46,6 @@ public sealed partial class GqlQueryParser : QueryParser
     protected override QueryLanguageProfile Profile => GqlLanguageProfile.Instance;
 
     /// <inheritdoc />
-    protected override void CompleteParseCore(QueryStatement statement, ReadOnlySpan<char> query) { }
-
-    /// <inheritdoc />
     protected override QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query)
     {
         _source = query.ToString();

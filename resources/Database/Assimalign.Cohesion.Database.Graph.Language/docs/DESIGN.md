@@ -3,7 +3,7 @@
 ## Parser entry contract (#1264)
 
 GQL uses the shared non-virtual QueryParser.Parse template. The model supplies protected
-grammar and completion cores; the base constructs the profile lexer and runs analyzers.
+grammar core; the base constructs the profile lexer and runs analyzers.
 GQL opts into base-owned serialization through analyzer completion, preserving its existing per-instance gate.
 The [Language audit](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parser-and-analyzer-type-shape-audit-1264)
 records the constructor, options and analyzer decisions. Grammar, diagnostics and conformance

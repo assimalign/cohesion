@@ -71,7 +71,7 @@ public sealed class QueryNviTests
         Should.Throw<ArgumentNullException>(() => new AnalyzerTestParser(null!)).ParamName.ShouldBe("options");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Language] - Parse completes source retention after successful analysis")]
+    [Fact(DisplayName = "Cohesion Test [Database.Language] - Parse runs grammar before successful analysis")]
     public void Parse_SuccessfulAnalyzer_ShouldRetainCoreOrdering()
     {
         // Arrange
@@ -84,11 +84,11 @@ public sealed class QueryNviTests
         parser.Parse("source");
 
         // Assert
-        order.ShouldBe(["parse:source", "analyze", "complete:source"]);
+        order.ShouldBe(["parse:source", "analyze"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Language] - Failed analysis skips completion and permits another parse")]
-    public void Parse_FaultedAnalyzer_ShouldSkipCompletionAndRetainConfiguration()
+    [Fact(DisplayName = "Cohesion Test [Database.Language] - Failed analysis propagates and permits another parse")]
+    public void Parse_FaultedAnalyzer_ShouldPropagateAndRetainConfiguration()
     {
         // Arrange
         var order = new List<string>();
@@ -103,7 +103,7 @@ public sealed class QueryNviTests
         parser.Parse("second");
 
         // Assert
-        order.ShouldBe(["parse:first", "parse:second", "complete:second"]);
+        order.ShouldBe(["parse:first", "parse:second"]);
     }
 
     private static QueryAnalyzerContext CaptureContext()

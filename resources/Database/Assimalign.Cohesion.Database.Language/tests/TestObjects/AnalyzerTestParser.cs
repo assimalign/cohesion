@@ -13,6 +13,4 @@ internal sealed class AnalyzerTestParser : QueryParser
     protected override QueryLanguageProfile Profile => _profile;
 
     protected override QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query) => new AnalyzerTestStatement();
-
-    protected override void CompleteParseCore(QueryStatement statement, ReadOnlySpan<char> query) { }
 }

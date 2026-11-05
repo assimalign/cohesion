@@ -23,12 +23,12 @@ analyzer behavior are unchanged. The parser owns analyzer orchestration; model g
 
 QueryParser remains an abstract base: SQL, OQL and GQL supply real grammar variants in
 other shipped assemblies, so its constructor stays protected. Parse is non-virtual and
-owns lexer construction, the chosen serialization policy, analyzer orchestration and
-post-analysis completion. CreateLexer is non-virtual because profiles already determine
-lexing and no leaf overrides it. ParseCore receives both the configured lexer and the
-borrowed source span so leaves can retain their source before parsing. CompleteParseCore
-preserves SQL's source stamp after successful analysis; OQL/GQL need no completion work.
-Both cores are protected abstract, with no fallback body.
+owns lexer construction, the chosen serialization policy and analyzer orchestration.
+CreateLexer is private because profiles already determine lexing and leaves receive the
+configured lexer. Protected abstract ParseCore also receives the borrowed source span.
+Each model retains and stamps its root source text inside ParseCore, before analyzers run;
+SQL now matches OQL and GQL, including empty and diagnostic-only statements. No completion
+hook is needed on the public base.
 
 Serialization is a constructor policy, defaulting to false to retain SQL and application
 parser behavior. OQL and GQL opt in, moving their existing gate into the base and keeping
@@ -39,10 +39,14 @@ QueryAnalyzer remains an abstract inverted seam implemented by applications. Its
 protected constructor permits those external leaves. Non-virtual AnalyzeAsync rejects a
 null context before checking cancellation, then returns AnalyzeCoreAsync's task unchanged;
 it adds no async wrapper or allocation. Pre-canceled calls never enter the protected
-abstract core. Existing asynchronous failures, timeout handling and late-fault observation
-remain in QueryParser. Dispatch also observes tasks already returned if a later analyzer
-throws synchronously, including cancellation between analyzer starts, then rethrows that
-original startup exception. This prevents the cancellation fast path from orphaning earlier faults.
+abstract core. Parser-owned dispatch calls the core through an internal member: every
+registered analyzer starts even if a synchronous predecessor runs past the timer. The timeout
+applies to the wait for their tasks; an analyzer that finishes past the timer does not fail
+the parse when all tasks have completed. A zero timeout still checks cancellation before
+dispatch. Asynchronous failures and late-fault observation remain in QueryParser. If a later
+analyzer throws during startup, dispatch cancels earlier analyzers and observes their tasks,
+then rethrows the original startup exception. A cancellation callback exception cannot
+replace that failure.
 
 QueryParserOptions stays a concrete, unsealed configuration base because the shipped
 sealed SqlQueryParserOptions derives from it to add the SQL expression nesting limit.

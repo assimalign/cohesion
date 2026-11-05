@@ -39,9 +39,6 @@ public sealed partial class OqlQueryParser : QueryParser
     protected override QueryLanguageProfile Profile => OqlLanguageProfile.Instance;
 
     /// <inheritdoc />
-    protected override void CompleteParseCore(QueryStatement statement, ReadOnlySpan<char> query) { }
-
-    /// <inheritdoc />
     protected override QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query)
     {
         _source = query.ToString();

@@ -62,7 +62,7 @@ public abstract class QueryParser
     /// </summary>
     /// <param name="query">The query source to tokenize.</param>
     /// <returns>A lexer positioned at the beginning of <paramref name="query"/>.</returns>
-    protected TokenLexer CreateLexer(ReadOnlySpan<char> query) =>
+    private TokenLexer CreateLexer(ReadOnlySpan<char> query) =>
         new(query, Profile.ToLexerOptions());
 
     /// <summary>
@@ -73,17 +73,12 @@ public abstract class QueryParser
     /// <returns>The parsed query statement.</returns>
     protected abstract QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query);
 
-    /// <summary>Completes model-specific source retention after all analyzers succeed.</summary>
-    /// <param name="statement">The parsed and analyzed statement.</param>
-    /// <param name="query">The original query source.</param>
-    protected abstract void CompleteParseCore(QueryStatement statement, ReadOnlySpan<char> query);
-
     /// <summary>
     /// Parses a query and runs the configured analyzers over its statement.
     /// </summary>
     /// <param name="query">The query source to parse.</param>
     /// <returns>The parsed and analyzed query statement.</returns>
-    /// <exception cref="OperationCanceledException">An analyzer was canceled or the analyzer timeout expired.</exception>
+    /// <exception cref="OperationCanceledException">An analyzer or the wait for its task was canceled.</exception>
     /// <remarks>Serialization follows the constructor policy and covers analyzer completion. Analyzer failures propagate to the caller. Analyzers must observe cancellation and must not depend on the caller's synchronization context.</remarks>
     public QueryStatement Parse(ReadOnlySpan<char> query)
     {
@@ -108,7 +103,6 @@ public abstract class QueryParser
             Analyze(new QueryAnalyzerContext(statement), _options.AnalyzerTimeout);
         }
 
-        CompleteParseCore(statement, query);
         return statement;
     }
 
@@ -122,12 +116,20 @@ public abstract class QueryParser
         {
             foreach (var analyzer in _options.Analyzers)
             {
-                analyzers.Add(analyzer.AnalyzeAsync(context, cancellationTokenSource.Token));
+                analyzers.Add(analyzer.DispatchAsync(context, cancellationTokenSource.Token));
             }
         }
         catch
         {
             // Startup can fail synchronously after earlier analyzers returned tasks.
+            try
+            {
+                cancellationTokenSource.Cancel();
+            }
+            catch (AggregateException)
+            {
+                // Cancellation callbacks must not replace the original startup failure.
+            }
             // Observe their later faults while preserving the original startup exception.
             ObserveLateFaults(Task.WhenAll(analyzers));
             throw;

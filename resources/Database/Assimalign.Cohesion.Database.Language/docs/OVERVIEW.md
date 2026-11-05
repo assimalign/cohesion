@@ -11,8 +11,9 @@ case policy, then derives from `QueryParser` to build its statement and expressi
 Configure `QueryParserOptions.Analyzers` before parsing to run custom `QueryAnalyzer` instances
 over the parsed statement. Analyzers add diagnostics through `QueryAnalyzerContext.Statement`;
 the parser constructs this sealed context internally. Parse and AnalyzeAsync are non-virtual;
-implementations supply protected grammar, completion and analysis cores.
-Parsing waits for all analyzers within the shared `AnalyzerTimeout` (five seconds by default);
+implementations supply protected grammar and analysis cores.
+Every analyzer starts; the shared `AnalyzerTimeout` (five seconds by default) bounds the wait
+for their tasks. Already completed tasks succeed even after a synchronous overrun;
 analyzers must honor cancellation and avoid depending on the parsing caller's synchronization
 context. Analyzer failures propagate to the caller. Statements reject null diagnostics and
 expose diagnostics ordered by severity and then source end position.

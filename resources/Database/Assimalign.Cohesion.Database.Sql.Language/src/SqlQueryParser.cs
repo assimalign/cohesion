@@ -42,18 +42,6 @@ public sealed partial class SqlQueryParser : QueryParser
     protected override QueryLanguageProfile Profile => SqlLanguageProfile.Instance;
 
     /// <inheritdoc />
-    protected override void CompleteParseCore(QueryStatement statement, ReadOnlySpan<char> query)
-    {
-        // Stamp the raw statement text so downstream consumers (planners, tooling,
-        // the wire protocol) can carry the source without re-threading it through
-        // every expression constructor. Analyzer callbacks run before this stamp.
-        if (statement is SqlQueryStatement { SqlExpression: { } expression })
-        {
-            expression.SetStatementText(query.ToString());
-        }
-    }
-
-    /// <inheritdoc />
     protected override QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query)
     {
         _sourceText = query.ToString();
@@ -93,6 +81,7 @@ public sealed partial class SqlQueryParser : QueryParser
                 Severity = DiagnosticSeverity.Error,
                 Location = DiagnosticLocation.Absolute,
             });
+            emptyExpr.SetStatementText(_sourceText);
             return emptyStmt;
         }
 
@@ -291,6 +280,9 @@ public sealed partial class SqlQueryParser : QueryParser
             });
         }
 
+        // Retain source for analyzers and downstream consumers on every statement kind,
+        // including recovery expressions that keep only the inferred command type.
+        expression.SetStatementText(_sourceText);
         return statement;
     }
 

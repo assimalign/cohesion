@@ -23,7 +23,10 @@ public abstract class QueryAnalyzer
         return AnalyzeCoreAsync(context, cancellationToken);
     }
 
-    /// <summary>Analyzes a validated context after the cancellation fast path.</summary>
+    internal Task DispatchAsync(QueryAnalyzerContext context, CancellationToken cancellationToken)
+        => AnalyzeCoreAsync(context, cancellationToken);
+
+    /// <summary>Analyzes a non-null parsed context with cancellation managed by the caller.</summary>
     /// <param name="context">The non-null parsed statement context.</param>
     /// <param name="cancellationToken">Cancellation requested when the parser's analyzer timeout expires.</param>
     /// <returns>The analyzer's completion task.</returns>

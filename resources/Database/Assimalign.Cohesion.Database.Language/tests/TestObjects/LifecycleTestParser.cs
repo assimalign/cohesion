@@ -20,7 +20,4 @@ internal sealed class LifecycleTestParser : QueryParser
         _order.Add("parse:" + query.ToString());
         return new AnalyzerTestStatement();
     }
-
-    protected override void CompleteParseCore(QueryStatement statement, ReadOnlySpan<char> query)
-        => _order.Add("complete:" + query.ToString());
 }
