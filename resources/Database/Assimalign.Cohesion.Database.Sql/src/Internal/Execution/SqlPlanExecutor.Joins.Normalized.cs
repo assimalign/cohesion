@@ -187,7 +187,11 @@ internal sealed partial class SqlPlanExecutor
                 {
                     hash?.Dispose();
                     ReleaseSelectRows(ref outer.Rows.Memory, outer.Rows);
+                    // The iterator can hoist these lists beyond their dictionary entries.
+                    // Drop consumed cells as soon as their charge is released.
+                    outer.Rows.Clear();
                     if (!seek) { ReleaseSelectRows(ref inner.Rows.Memory, inner.Rows); }
+                    inner.Rows.Clear();
                 }
                 results.Remove(node.Left!);
                 results.Remove(node.Right!);

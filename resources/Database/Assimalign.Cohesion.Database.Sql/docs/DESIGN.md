@@ -570,7 +570,7 @@ The WindowAgg stage groups equal partition/order specifications and processes lo
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
 functions and sort_shared for each group. Window inputs, augmented result rows, sort indexes,
 key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
-an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first and every reservation unwinds on success, error or cancellation. Whole input and
+an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first. Every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
 Reference-identity ownership avoids duplicate payload charges; consumed input rows and
 partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
@@ -1767,13 +1767,15 @@ Each live buffer charges independently, including a relation cache and its colle
 remaining payload overcharge is bounded by simultaneously live buffer owners, rather than row
 count or repeated columns. Maps never lend values or transfer with byte-only reservations.
 Admission reserves before recording references. Sequential release removes the last holder's
-payload and entry charge immediately; heap replacement reserves only a positive net change
+payload and entry charge immediately, then clears consumed normalized child lists so an async
+iterator cannot keep their cells alive after release; heap replacement reserves only a positive net change
 after crediting the leaving entry. Empty maps keep capacity until wholesale release, which
 drops the map and all bytes. Window, DML, recursive scratch and hash-build ledgers keep their
 existing accounting; repeated wide hash-build cells can still charge per reference.
 Aggregate maps span every group at the same aggregate position: DISTINCT tuples, ordered
 inputs and native extrema each have an owner, so group count does not multiply one shared
-payload. Extrema preserve the fixed state's existing 32-byte value-ABI allowance. STRING_AGG
+payload. Extrema preserve the fixed state's existing 32-byte value-ABI allowance; narrow extrema
+allocate no identity-owner array. STRING_AGG
 builder growth represents real copies and keeps its existing charge. All-distinct wide values
 add 64 B per identity, which can reduce capacity at an admission boundary.
 
