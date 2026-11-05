@@ -30,8 +30,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// <b>Schema provisioning</b> belongs to the SQL model (owner decisions 50 and 53 of 2026-10-09).
-/// The engine's builder applies cheap schema steps before returning and reserves populated tables
-/// for its worker to finish persisted data-scaling steps. <see cref="ApplySchemaAsync"/> applies a
+/// The engine's builder reserves every table in a deferred plan before returning; its worker
+/// prepares and publishes the complete target jointly. <see cref="ApplySchemaAsync"/> applies a
 /// compiled schema inline for tools, Studio and tests. The root <see cref="DatabaseInstance"/>
 /// exposes model-neutral progress without a schema capability API.
 /// </para>
@@ -77,18 +77,26 @@ public sealed partial class SqlDatabase : DatabaseInstance
     {
         if (_catalog.PendingMigration is not { } pending)
         {
+            // A completed Build cannot schedule work on reopen. A prior job may have
+            // failed and discarded its intent before an independent storage latch.
+            if (_engine.ProvisioningBuildComplete && _engine.FindDeclaration(Name)?.Schema is { } target &&
+                !string.Equals(target.Hash, _catalog.SchemaState?.ContentHash, StringComparison.Ordinal))
+            {
+                ReportProvisioning(new DatabaseProvisioningProgress("JointMigration", Name.ToString(), 1, 1,
+                    false, failureCode: SqlProvisioningCodes.JointFailed));
+            }
             return;
         }
         if (pending.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))
         {
-            // SQL format 34 gates this new kind-9 meaning from earlier 49a-only readers.
+            // SQL format 37 fences every per-step 49a kind-9 intent.
             // Only the application that still declares this target may resume it.
             // Recovery reclaims abandoned kind-14 owners; matching Build replans their
             // preparation from the trusted old marker, retaining the durable intent.
             // A rolled-back application (or a plain open) discards it without fencing.
-            if (_engine.FindDeclaration(Name)?.Schema is not { } target ||
-                !string.Equals(target.Hash, pending.ContentHash, StringComparison.Ordinal))
-            { await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false); }
+            var target = _engine.FindDeclaration(Name)?.Schema;
+            if (_engine.ProvisioningBuildComplete || target is null || !string.Equals(target.Hash, pending.ContentHash, StringComparison.Ordinal))
+            { await _schemaProvisioner.DiscardUnpublishedIntentAsync(target, cancellationToken).ConfigureAwait(false); }
             return;
         }
         var schema = SqlCompiledSchemaSerializer.Deserialize(pending.CanonicalDocument);
@@ -197,7 +205,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
             // Journal append/drain/flush (including ENOSPC and zero-byte failures),
             // unconfirmed commit, durable data flush, issued checkpoint header write,
             // engine failure windows (write-back/checkpoint/WAL flush/version purge),
-            // failed-checkpoint journal limit, 49a failure and interrupted recovery
+            // failed-checkpoint journal limit, post-commit publication faults and interrupted recovery
             // retain the kernel latch. Reads and unpublished prepared-page write refusals
             // stay online unless an independent kernel/worker latch was raised.
             _catalogStorage.TakeOffline(error);

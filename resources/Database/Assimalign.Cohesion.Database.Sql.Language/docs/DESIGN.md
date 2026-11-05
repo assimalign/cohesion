@@ -23,6 +23,8 @@ formatting differences, parenthesized-only option grammar and deliberate refusal
 invalid option; CS01071 is an invalid output-column selection. No persisted syntax changes.
 The execution corpus also verifies table-scoped COPY scan cost, byte-sized delivery batches,
 deferred migration admission and shared embedded-session admission; DIALECT records these contracts.
+Deferred admission includes new table names before binding and reserves FK neighbours only when
+their constraints, either owner or matching parent key trees change (#1778).
 
 ## Savepoint grammar and rendering (#1726, XT-4)
 
@@ -48,11 +50,11 @@ directions and zero retained sort rows (see DIALECT). NULL placement is ignored 
 keys proven non-NULL by declarations, equality prefixes, mandatory local NULL rejection or a
 proven partial predicate. Strict comparison NULL rejection shares SQ-P2's rule, including
 parameter operands; OR/NOT and outer NULL extension provide no proof. The live corpus also
-covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 36 and compiled v12 fence the
+covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 37 and compiled v12 fence the
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
-The current record-space format is 36; index predicates are persisted by Sql, independently
+The current record-space format is 37; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -180,7 +182,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 36's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 37's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL

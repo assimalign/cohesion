@@ -77,12 +77,19 @@ public sealed partial class SqlJointTypeMigrationTests
         try
         {
             // Act
-            await Should.ThrowAsync<DatabaseException>(async () =>
-                await writer.ExecuteAsync("INSERT INTO notes VALUES(999)", cancellationToken: timeout.Token));
-            var index = writer.ExecuteAsync("CREATE INDEX ix ON users(legacy)", cancellationToken: timeout.Token).AsTask();
+            // #1778 admits pending new names before binding: this INSERT waits,
+            // then enforces the published FK instead of failing as undefined.
+            var insert = writer.ExecuteAsync("INSERT INTO notes VALUES(999)", cancellationToken: timeout.Token).AsTask();
+            (await Task.WhenAny(waiting.Task, insert).WaitAsync(timeout.Token)).ShouldBeSameAs(waiting.Task);
+            insert.IsCompleted.ShouldBeFalse();
+            waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using var indexer = await database.CreateSessionAsync(timeout.Token);
+            var index = indexer.ExecuteAsync("CREATE INDEX ix ON users(legacy)", cancellationToken: timeout.Token).AsTask();
             await waiting.Task.WaitAsync(timeout.Token);
             index.IsCompleted.ShouldBeFalse();
             release.Set();
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await insert);
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03039");
             await Should.ThrowAsync<DatabaseException>(async () => await index);
             await WaitDoneAsync(database, timeout.Token);
 

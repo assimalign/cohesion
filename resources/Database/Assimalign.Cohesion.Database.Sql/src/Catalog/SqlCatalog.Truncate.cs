@@ -218,6 +218,16 @@ public sealed partial class SqlCatalog
                 EnsurePhysicalLayoutKept(previous, table, keptTable: true);
             }
             var allReplacements = replacements.Concat(kept).ToArray();
+            foreach (var table in allReplacements)
+            {
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var index in indexes.Where(index => index.TableObjectId == table.ObjectId))
+                {
+                    if (!names.Add(index.Name))
+                    { throw new SqlCatalogException("CS05060", string.Format(CultureInfo.CurrentCulture,
+                        ErrorMessages.PublishTableCoreAsyncSqlCatalog4, index.Name, table.Schema, table.Name)); }
+                }
+            }
             ValidateStorageReplacement(dropped, null);
             foreach (var table in replacements)
             {

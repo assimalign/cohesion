@@ -148,7 +148,7 @@ internal sealed partial class SqlPlanExecutor
             try
             {
                 await AcquireDmlSourceIntentLocksAsync(scope.Plan, statement, cancellationToken, cascade: true).ConfigureAwait(false);
-                await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
+                await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken, cascade: true, assignments: plan.Assignments).ConfigureAwait(false);
                 return;
             }
             catch (SqlCascadeLockRetry refused)

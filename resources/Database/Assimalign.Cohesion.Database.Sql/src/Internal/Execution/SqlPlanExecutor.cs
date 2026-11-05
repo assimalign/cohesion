@@ -766,7 +766,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecutePlainUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken, assignments: plan.Assignments).ConfigureAwait(false);
         if (HasUpdateActions(plan.Table, plan.Assignments))
         { return await ExecuteReferentialUpdateAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);

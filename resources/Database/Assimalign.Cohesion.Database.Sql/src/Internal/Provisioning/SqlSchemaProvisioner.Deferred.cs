@@ -6,8 +6,6 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Schema;
-using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -19,6 +17,7 @@ internal sealed partial class SqlSchemaProvisioner
     // Instance-local test hooks: the same real worker, storage and locks as production.
     internal Action<SqlMigrationScriptStep, CancellationToken>? BeforeDeferredStep { get; set; }
     internal Action<long, long?>? DeferredProgress { get; set; }
+    internal Action<Exception>? DeferredFailed { get; set; }
 
     internal SqlDeferredMigration? Deferred => Volatile.Read(ref _deferred);
 
@@ -91,185 +90,21 @@ internal sealed partial class SqlSchemaProvisioner
             type.Precision is { } precision && (previousType.Precision is null || precision < previousType.Precision);
     }
 
-    private SqlCatalogPendingMigration CreateDeferredIntent(SqlCompiledSchema schema, List<SqlMigrationScriptStep> steps,
-        int stepCount)
-    {
-        var previous = _catalog.PendingMigration;
-        bool resuming = previous is not null && string.Equals(previous.ContentHash, schema.Hash, StringComparison.Ordinal);
-        var positions = new List<SqlCatalogMigrationStep>(steps.Count);
-        int next = stepCount - steps.Count + 1;
-        foreach (var step in steps)
-        {
-            var operation = step.Operation;
-            var recorded = resuming ? previous!.Steps.FirstOrDefault(value =>
-                value.Kind == operation.Kind.ToString() &&
-                string.Equals(value.Table, operation.ParentName, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(value.ObjectName, operation.ObjectName, StringComparison.OrdinalIgnoreCase)) : null;
-            positions.Add(recorded ?? new SqlCatalogMigrationStep(operation.Kind.ToString(), operation.ParentName!, operation.ObjectName, next));
-            next++;
-        }
-        var ordered = steps.Zip(positions).OrderBy(pair => pair.Second.Position).ToArray();
-        return new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument,
-            ordered.Select(pair => pair.Second).ToArray(), resuming ? previous!.StepCount : stepCount);
-    }
-
-    private async ValueTask PrepareDeferredAsync(SqlCompiledSchema schema, List<SqlMigrationScriptStep> steps,
-        int stepCount, CancellationToken cancellationToken)
-    {
-        var intent = CreateDeferredIntent(schema, steps, stepCount);
-        steps = intent.Steps.Select(position => steps.Single(step =>
-            step.Operation.Kind.ToString() == position.Kind &&
-            string.Equals(step.Operation.ParentName, position.Table, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(step.Operation.ObjectName, position.ObjectName, StringComparison.OrdinalIgnoreCase))).ToList();
-
-        TransactionContext locks = await _database.Coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var tables = new SortedSet<ulong>();
-            foreach (var step in steps)
-            {
-                if (_catalog.TryGetTable(SqlPlanner.DefaultSchema, step.Operation.ParentName!, out var table))
-                {
-                    tables.Add(table.ObjectId);
-                }
-                if (step.Operation.Constraint?.ReferencedObject is { } parent &&
-                    _catalog.TryGetTable(SqlPlanner.DefaultSchema, parent, out var referenced))
-                {
-                    tables.Add(referenced.ObjectId);
-                }
-            }
-            // Retained owned-sequence X grants precede all retained table X grants.
-            // Worker DDL reuses this owner; catalog/apply/storage latches remain innermost.
-            var owned = _catalog.Sequences.Where(sequence => tables.Contains(sequence.OwnerTableId)).OrderBy(sequence => sequence.ObjectId).ToArray();
-            foreach (var sequence in owned)
-            {
-                await _database.Coordinator.LockManager.AcquireAsync(locks.Sequence,
-                    LockResource.Object(sequence.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
-                if (locks.State != TransactionState.Active) { throw new TransactionAbortedException(ErrorMessages.SequenceTransactionEnded); }
-            }
-            foreach (ulong table in tables)
-            {
-                await _database.Coordinator.LockManager.AcquireAsync(locks.Sequence, LockResource.Object(table),
-                    LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
-            }
-            if (locks.State != TransactionState.Active) { throw new TransactionAbortedException(ErrorMessages.SequenceTransactionEnded); }
-            if (_catalog.Sequences.Any(sequence => tables.Contains(sequence.OwnerTableId) && !owned.Any(previous => previous.ObjectId == sequence.ObjectId)))
-            { throw new SqlCatalogException("CS04067", ErrorMessages.SequenceChanged); }
-            var migration = new SqlDeferredMigration(this, schema, steps, intent, locks, tables);
-            PublishProgress(intent.Steps[0], intent.StepCount, running: false);
-            Volatile.Write(ref _deferred, migration);
-        }
-        catch
-        {
-            if (!_database.IsOffline)
-            {
-                await _database.Coordinator.RollbackAsync(locks, CancellationToken.None).ConfigureAwait(false);
-            }
-            throw;
-        }
-    }
-
     internal async Task RunDeferredAsync(SqlDeferredMigration migration, CancellationToken cancellationToken, bool propagateJointFailure = false)
     {
-        if (migration.JointPlan is not null)
+        try { await RunJointMigrationAsync(migration, cancellationToken).ConfigureAwait(false); }
+        catch (Exception failure) when (!propagateJointFailure)
         {
-            try { await RunJointMigrationAsync(migration, cancellationToken).ConfigureAwait(false); }
-            catch (Exception) when (!propagateJointFailure)
-            {
-                // The joint boundary already recorded the coded failure, including OOM
-                // and cancellation. The engine pump must continue with another database.
-            }
-            finally
-            {
-                try { await RollbackRewriteAsync(migration.Locks).ConfigureAwait(false); }
-                finally
-                {
-                    migration.JointMetadata?.Dispose();
-                    Volatile.Write(ref _deferred, null);
-                    _applyGate.Release();
-                }
-            }
-            return;
-        }
-        int index = 0;
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await using var session = _database.CreateSchemaSession(migration.Schema.Name, cancellationToken, migration.Locks.Sequence);
-            for (; index < migration.Steps.Count; index++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                SqlCatalogMigrationStep position = migration.Intent.Steps[index];
-                BeginDeferredTrace(migration, index);
-                PublishProgress(position, migration.Intent.StepCount, running: true, 0);
-                session.ProvisioningProgress = (processed, total) =>
-                {
-                    PublishProgress(position, migration.Intent.StepCount, running: true, processed, total);
-                    TraceDeferredProgress(migration, position, processed, total);
-                    DeferredProgress?.Invoke(processed, total);
-                };
-                var step = migration.Steps[index];
-                BeforeDeferredStep?.Invoke(step, cancellationToken);
-                await session.ExecuteAsync(step.Request, cancellationToken).ConfigureAwait(false);
-                StepApplied?.Invoke(step);
-                EndDeferredTrace(migration, index, "Applied");
-            }
-
-            // The table locks protect this migration. Unrelated DDL may advance the
-            // catalog generation while we compare; retry its optimistic generation check.
-            // Do not wait for the DDL interlock while owning table locks.
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                ulong generation = _catalog.DdlGeneration;
-                if (FirstCatalogDifference(migration.Schema) is { } difference)
-                {
-                    throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerRunDeferredAsyncFailure, difference));
-                }
-                try
-                {
-                    await _catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(migration.Schema.Hash,
-                        migration.Schema.CanonicalDocument, generation), cancellationToken).ConfigureAwait(false);
-                    _formatCheckedStateDocument = migration.Schema.CanonicalDocument;
-                    break;
-                }
-                catch (SqlCatalogException) when (!_database.IsOffline && _catalog.DdlGeneration != generation)
-                {
-                    // A completed unrelated DDL operation invalidated the comparison.
-                }
-            }
-            _database.ReportProvisioning(null);
-        }
-        catch (Exception failure) when (failure is not OutOfMemoryException)
-        {
-            if (!cancellationToken.IsCancellationRequested && !_database.IsClosed)
-            {
-                FailDeferredTrace(migration, index, failure);
-                EndDeferredTrace(migration, index, "Error");
-                var position = migration.Intent.Steps[Math.Min(index, migration.Steps.Count - 1)];
-                var coded = new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerRunDeferredAsyncFailure2, SqlProvisioningCodes.StepFailed, Describe(), position.Position, migration.Intent.StepCount, position.Kind, position.Table, position.ObjectName), failure);
-                var progress = _database.Provisioning;
-                _database.ReportProvisioning(new DatabaseProvisioningProgress(position.Kind, position.Table,
-                    position.Position, migration.Intent.StepCount, false, progress?.RowsProcessed, progress?.TotalRows,
-                    SqlProvisioningCodes.StepFailed));
-                if (!_database.IsOffline)
-                {
-                    _database.DataStorage.TakeOffline(StorageOfflineCause.ProvisioningFailure, coded.Message, coded);
-                }
-            }
+            // The joint boundary records every failure, including OOM and cancellation.
+            // The engine pump must continue serving the other databases.
+            DeferredFailed?.Invoke(failure);
         }
         finally
         {
-            try
-            {
-                if (migration.Locks.State == TransactionState.Active && !_database.IsOffline)
-                {
-                    await _database.Coordinator.RollbackAsync(migration.Locks, CancellationToken.None).ConfigureAwait(false);
-                }
-            }
+            try { await RollbackRewriteAsync(migration.Locks).ConfigureAwait(false); }
             finally
             {
-                EndDeferredTrace(migration, index, "Cancelled");
+                migration.JointMetadata?.Dispose();
                 Volatile.Write(ref _deferred, null);
                 _applyGate.Release();
             }
