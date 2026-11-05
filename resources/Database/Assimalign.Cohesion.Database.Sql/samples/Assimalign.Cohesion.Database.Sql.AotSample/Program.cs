@@ -192,7 +192,10 @@ internal static class Program
         string root = Path.Combine(Path.GetTempPath(), "cohesion-sql-sort-aot-" + Guid.NewGuid().ToString("N"));
         try
         {
-            await using var engine = SqlDatabaseEngine.Create("aot-sort", new() { RootPath = root, StatementMemoryBudget = 262144 });
+            var builder = SqlDatabaseEngine.CreateBuilder("aot-sort");
+            builder.Options.RootPath = root; builder.Options.StatementMemoryBudget = 262144;
+            builder.Functions.Add(SqlScalarFunction.Create("observe_value", (long value) => value));
+            await using var engine = await builder.BuildAsync();
             var database = await engine.CreateDatabaseAsync("sort");
             await using var session = await database.CreateSessionAsync();
             await session.ExecuteAsync("CREATE TABLE t(id INT,k INT)");
@@ -210,7 +213,7 @@ internal static class Program
                 }
             }
             Check("spilled ORDER BY releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
-            await using (var deferred = (DatabaseResultSet)await session.ExecuteAsync("SELECT random(),id FROM t WHERE id<1000 ORDER BY id"))
+            await using (var deferred = (DatabaseResultSet)await session.ExecuteAsync("SELECT observe_value(id),id FROM t WHERE id<1000 ORDER BY id"))
             {
                 Check("deferred ORDER BY spills", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length > 0, true);
                 int count = 0;
