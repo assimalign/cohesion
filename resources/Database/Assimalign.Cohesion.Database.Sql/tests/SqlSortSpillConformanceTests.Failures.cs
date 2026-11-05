@@ -19,6 +19,42 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Spill close errors: every owner releases files; session close still joins COPY (#1789)")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task DisposeAsync_TempCloseFails_ShouldReleaseAllOwners(int owner)
+    {
+        // Arrange
+        await using var engine = await Create("close-fault", 262144);
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync();
+        await Seed(session);
+        var result = (SqlSpilledResultSet)await session.ExecuteAsync("SELECT id,k FROM t ORDER BY k");
+        var run = Runs(Sorted(result)!)[0];
+        RunFile(run) = new FailedCloseStream(RunFile(run).SafeFileHandle);
+        using var output = new SqlCopyGateStream();
+        Task<long>? copying = owner == 1 ? session.CopyToAsync("COPY t TO STDOUT", output).AsTask() : null;
+        if (copying is not null) { await output.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30)); }
+
+        // Act
+        Exception? error;
+        try { error = await Record.ExceptionAsync(async () =>
+            { if (owner == 0) { await result.DisposeAsync(); } else if (owner == 1) { await session.DisposeAsync(); } else { await engine.DisposeAsync(); } }); }
+        finally { output.Release.TrySetResult(); }
+
+        // Assert
+        error.ShouldNotBeNull(); ContainsTempFailure(error).ShouldBeTrue();
+        if (copying is not null) { await Should.ThrowAsync<OperationCanceledException>(async () => await copying); }
+        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        await result.DisposeAsync();
+
+        static bool ContainsTempFailure(Exception exception) => exception is SqlExecutionException sql
+            && sql.Diagnostics[0].Code == "CK05005" || exception is AggregateException aggregate
+            && aggregate.InnerExceptions.Any(ContainsTempFailure) || exception.InnerException is { } inner && ContainsTempFailure(inner);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Spill publication: owner close before result attachment releases every reservation (#1789)")]
     [InlineData(false)]
     [InlineData(true)]
@@ -183,4 +219,12 @@ public sealed partial class SqlSortSpillConformanceTests
     private static extern ref StorageTempRun[] Runs(StorageTempSortReader reader);
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_handle")]
     private static extern ref SafeFileHandle Handle(StorageTempRun run);
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_file")]
+    private static extern ref FileStream RunFile(StorageTempRun run);
+    private sealed class FailedCloseStream : FileStream
+    {
+        internal FailedCloseStream(SafeFileHandle handle) : base(handle, FileAccess.ReadWrite) { }
+        protected override void Dispose(bool disposing)
+        { base.Dispose(disposing); if (disposing) { throw new IOException("injected temporary close failure"); } }
+    }
 }
