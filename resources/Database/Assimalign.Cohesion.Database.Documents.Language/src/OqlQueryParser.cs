@@ -308,7 +308,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 index > 1 && IsWord(_tokens[index - 1], "NOT") && IsWord(_tokens[index - 2], "IS"))) { continue; }
             if (IsDistinctFromToken(index)) { continue; }
 
-            // Set clauses are parsed even while INTERSECT/EXCEPT execution is deferred.
+            // Set clauses are parsed at their shared query-expression precedence.
             // Their modifier belongs to the same construct, including refused DISTINCT.
             if (value is "UNION" or "INTERSECT" or "EXCEPT" && index > 0 && EndsOperand(index - 1))
             {

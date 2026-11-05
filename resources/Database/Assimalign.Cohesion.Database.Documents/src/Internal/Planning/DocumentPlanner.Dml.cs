@@ -146,9 +146,8 @@ internal sealed partial class DocumentPlanner
                 ? new DocumentUpsertPlan(collection, upsert, Returning: returning)
                 : new DocumentInsertPlan(collection, (OqlInsertExpression)statement, returning);
         }
-        _ = RequireQueryBlock(select);
         var source = PlanCore(select, nested);
-        var logical = QueryLogical(source);
+        var columns = SetColumns(source);
         int keyOrdinal = Bind(keyName);
         int? valueOrdinal = valueName is null ? null : Bind(valueName);
         return statement is OqlUpsertExpression upsertSelect
@@ -157,9 +156,15 @@ internal sealed partial class DocumentPlanner
 
         int Bind(string? name)
         {
-            for (int i = 0; i < logical.Projections.Count; i++)
+            if (source is DocumentSetOperationPlan { Shape: DocumentSetResultShape.Document } compound)
             {
-                if (logical.Projections[i].Name == name) { return i; }
+                // The static document header carries the row value; bind its member by name at execution.
+                if (name is not null && (compound.HasOpenMembers || compound.MemberNames.Contains(name))) { return -1; }
+            }
+            else
+            {
+                for (int i = 0; i < columns.Count; i++)
+                { if (columns[i].Name == name) { return i; } }
             }
             throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.WriteOutputMissing, verb, name), statement.Location);

@@ -15,8 +15,7 @@ internal sealed partial class DocumentPlanner
 {
     internal static string DescribeOperator(object plan) => plan switch
     {
-        DocumentSetOperationPlan { Query.IsAll: true } => "UnionAll",
-        DocumentSetOperationPlan => "Union",
+        DocumentSetOperationPlan compound => compound.Query.Operation.ToString() + (compound.Query.IsAll ? "All" : ""),
         DocumentNestedPlan => "SelectWithSubqueries",
         DocumentNestedQueryPlan => "Subquery",
         DocumentJoinPlan => "Select",

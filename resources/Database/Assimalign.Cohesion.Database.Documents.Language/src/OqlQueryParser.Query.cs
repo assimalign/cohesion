@@ -12,7 +12,6 @@ public sealed partial class OqlQueryParser
     {
         var start = Current;
         var query = ParseQueryTerm();
-        List<(string Name, Lexeme Start, Lexeme End)> deferred = [];
         int operations = 0;
         while (!Failed && IsSetOperator())
         {
@@ -27,8 +26,6 @@ public sealed partial class OqlQueryParser
             };
             Advance();
             bool all = Take("ALL");
-            if (operation != OqlSetOperation.Union)
-            { deferred.Add((operatorToken.Text.ToUpperInvariant(), operatorToken, Previous)); }
             // The final grammar admits only ALL; explicit DISTINCT is not SQL++ syntax.
             var right = ParseQueryTerm();
             // Leaves have zero operators. Include parenthesized subtrees without counting
@@ -86,8 +83,6 @@ public sealed partial class OqlQueryParser
             if (isLimit) { limit = count; }
             else { offset = count; }
         }
-        foreach (var refused in deferred)
-        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(refused.Name, Profile.Language, Span(refused.Start, refused.End))); }
         if (ordering.Count == 0 && limit is null && offset is null) { return query; }
         if (query.OrderBy.Count > 0 || query.Limit is not null || query.Offset is not null)
         {
@@ -127,12 +122,6 @@ public sealed partial class OqlQueryParser
         }
         Expect("SELECT");
         return EmptyExpression();
-    }
-
-    private void RefuseNestedCompound(OqlQueryExpression query)
-    {
-        if (!Failed && query is OqlSetOperationExpression)
-        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("compound query in a nested query position", Profile.Language, query.Location!)); }
     }
 
     private bool IsParenthesizedQuery(bool expressionOperand = false, bool requireQueryContinuation = false)

@@ -20,14 +20,26 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentSetOperationTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents] - UNION: a generated concatenation and distinct oracle preserves first representatives")]
-    [InlineData(false, "raw")]
-    [InlineData(true, "raw")]
-    [InlineData(false, "document")]
-    [InlineData(true, "document")]
-    [InlineData(false, "columns")]
-    [InlineData(true, "columns")]
-    public async Task ExecuteAsync_GeneratedValues_ShouldMatchOracleAsync(bool all, string mode)
+    [Theory(DisplayName = "Cohesion Test [Documents] - Set operations: a generated multiset oracle preserves counts and first representatives")]
+    [InlineData(false, "raw", "UNION")]
+    [InlineData(true, "raw", "UNION")]
+    [InlineData(false, "document", "UNION")]
+    [InlineData(true, "document", "UNION")]
+    [InlineData(false, "columns", "UNION")]
+    [InlineData(true, "columns", "UNION")]
+    [InlineData(false, "raw", "INTERSECT")]
+    [InlineData(true, "raw", "INTERSECT")]
+    [InlineData(false, "document", "INTERSECT")]
+    [InlineData(true, "document", "INTERSECT")]
+    [InlineData(false, "columns", "INTERSECT")]
+    [InlineData(true, "columns", "INTERSECT")]
+    [InlineData(false, "raw", "EXCEPT")]
+    [InlineData(true, "raw", "EXCEPT")]
+    [InlineData(false, "document", "EXCEPT")]
+    [InlineData(true, "document", "EXCEPT")]
+    [InlineData(false, "columns", "EXCEPT")]
+    [InlineData(true, "columns", "EXCEPT")]
+    public async Task ExecuteAsync_GeneratedValues_ShouldMatchOracleAsync(bool all, string mode, string operation)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("set-oracle", new());
@@ -53,10 +65,25 @@ public sealed class DocumentSetOperationTests
             using var projected = JsonDocument.Parse("[" + string.Join(",", a.RootElement.EnumerateArray().Select(value => Project(value, named, false))
                 .Concat(b.RootElement.EnumerateArray().Select(value => Project(value, named, mode == "document")))) + "]");
             IEnumerable<JsonElement> expected = projected.RootElement.EnumerateArray();
-            if (!all) { expected = expected.DistinctBy(Canonical, StringComparer.Ordinal); }
+            if (operation != "UNION")
+            {
+                var values = expected.ToArray();
+                var counts = values.Skip(left.Length).GroupBy(Canonical).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+                var kept = new List<JsonElement>();
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var value in values.Take(left.Length))
+                {
+                    string key = Canonical(value);
+                    bool present = counts.GetValueOrDefault(key) > 0;
+                    if (all && present) { counts[key]--; }
+                    if (present == (operation == "INTERSECT") && (all || seen.Add(key))) { kept.Add(value); }
+                }
+                expected = kept;
+            }
+            else if (!all) { expected = expected.DistinctBy(Canonical, StringComparer.Ordinal); }
             // Act
-            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a UNION " + (all ? "ALL " : "") + (mode == "columns" ? "SELECT b.a AS a,b.b AS b FROM @b AS b" : "SELECT b.b AS b,b.a AS a FROM @b AS b")
-                : "SELECT RAW a FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT RAW b FROM @b AS b";
+            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a " + operation + " " + (all ? "ALL " : "") + (mode == "columns" ? "SELECT b.a AS a,b.b AS b FROM @b AS b" : "SELECT b.b AS b,b.a AS a FROM @b AS b")
+                : "SELECT RAW a FROM @a AS a " + operation + " " + (all ? "ALL " : "") + "SELECT RAW b FROM @b AS b";
             await using var result = (DatabaseResultSet)await session.ExecuteAsync(text,
                 new Dictionary<string, object?> { ["a"] = a.RootElement, ["b"] = b.RootElement }, CancellationToken.None);
             var actual = new List<string>();
@@ -65,7 +92,7 @@ public sealed class DocumentSetOperationTests
             {
                 if (mode == "columns")
                 {
-                    if (trial == 0 && !all)
+                    if (trial == 0 && !all && operation == "UNION")
                     { ((decimal)row.GetValue(1)!).ToString(CultureInfo.InvariantCulture).ShouldBe(cells.Count == 0 ? "3.00" : "4.50"); }
                     cells.Add((row.GetValue(0).ShouldBeOfType<JsonElement>().GetRawText(), Convert.ToDecimal(row.GetValue(1), CultureInfo.InvariantCulture)));
                 }
@@ -78,7 +105,7 @@ public sealed class DocumentSetOperationTests
                 result.Columns.Select(column => column.Type).ShouldBe(expected.Any()
                     ? new[] { DatabaseType.Json, DatabaseType.Decimal } : new[] { DatabaseType.Null, DatabaseType.Null });
                 cells.ShouldBe(expected.Select(value => (value.GetProperty("a").GetRawText(), value.GetProperty("b").GetDecimal())));
-                if (trial == 0 && !all)
+                if (trial == 0 && !all && operation == "UNION")
                 { cells.ShouldBe(new[] { ("{\"z\":1,\"a\":2}", 3m), ("{\"r\":4,\"q\":5}", 4.5m) }); }
             }
             else
@@ -178,12 +205,12 @@ public sealed class DocumentSetOperationTests
         session.LastQueryDocumentsRead.ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - UNION: hand-built nested ASTs retain eager capability backstops")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - UNION: hand-built nested ASTs eagerly bind every operand")]
     [InlineData("INSERT")]
     [InlineData("UPSERT")]
     [InlineData("SUBQUERY")]
     [InlineData("FROM")]
-    public async Task Plan_DirectNestedCompound_ShouldRefuseBeforeCatalogAccessAsync(string position)
+    public async Task Plan_DirectNestedCompound_ShouldBindCatalogBeforeExecutionAsync(string position)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("set-ast-refusal", new());
@@ -203,7 +230,7 @@ public sealed class DocumentSetOperationTests
         await database.RunAsync(session, operation =>
         {
             var error = Should.Throw<DatabaseException>(() => new DocumentPlanner(database.Catalog, operation.Context.Snapshot, null).Plan(expression));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD01002");
             return ValueTask.FromResult(true);
         }, CancellationToken.None);
         session.LastQueryDocumentsRead.ShouldBe(0);
@@ -442,8 +469,13 @@ public sealed class DocumentSetOperationTests
             .ShouldBe(new[] { "1.00" });
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - UNION: cancellation releases source distinct sort and output reservations")]
-    public async Task ExecuteAsync_CanceledProjection_ShouldReleaseEveryReservationAsync()
+    [Theory(DisplayName = "Cohesion Test [Documents] - Set operations: cancellation releases every reservation")]
+    [InlineData("UNION")]
+    [InlineData("INTERSECT")]
+    [InlineData("INTERSECT ALL")]
+    [InlineData("EXCEPT")]
+    [InlineData("EXCEPT ALL")]
+    public async Task ExecuteAsync_CanceledProjection_ShouldReleaseEveryReservationAsync(string operationName)
     {
         // Arrange
         using var cancellation = new CancellationTokenSource();
@@ -454,7 +486,7 @@ public sealed class DocumentSetOperationTests
         await using var engine = builder.Build();
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        string text = "SELECT observe(x) AS n FROM [1,2,3,4] AS x UNION SELECT 5 AS n FROM [1] AS y ORDER BY n";
+        string text = "SELECT observe(x) AS n FROM [1,2,3,4] AS x " + operationName + " SELECT 5 AS n FROM [1] AS y ORDER BY n";
         // Act / Assert
         await database.RunAsync(session, async operation =>
         {
@@ -495,9 +527,13 @@ public sealed class DocumentSetOperationTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - UNION: a commit between operands cannot change the statement snapshot")]
-    [InlineData(IsolationLevel.Snapshot)]
-    [InlineData(IsolationLevel.ReadCommitted)]
-    public async Task ExecuteAsync_BetweenOperandCommit_ShouldKeepOneSnapshotAsync(IsolationLevel isolation)
+    [InlineData(IsolationLevel.Snapshot, "UNION ALL")]
+    [InlineData(IsolationLevel.ReadCommitted, "UNION ALL")]
+    [InlineData(IsolationLevel.Snapshot, "INTERSECT ALL")]
+    [InlineData(IsolationLevel.ReadCommitted, "INTERSECT ALL")]
+    [InlineData(IsolationLevel.Snapshot, "EXCEPT ALL")]
+    [InlineData(IsolationLevel.ReadCommitted, "EXCEPT ALL")]
+    public async Task ExecuteAsync_BetweenOperandCommit_ShouldKeepOneSnapshotAsync(IsolationLevel isolation, string setOperation)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -509,7 +545,7 @@ public sealed class DocumentSetOperationTests
         builder.Functions.Add(DocumentScalarFunction.Create<decimal, decimal>("publish", value =>
         {
             calls++;
-            // The commit finishes before the right operand is opened; no timing decides the outcome.
+            // The callback commits during one operand; both operands still use the statement snapshot.
             target!.PutAsync(writer!, "a", changed, cancellationToken: guard.Token).AsTask().GetAwaiter().GetResult();
             return value;
         }));
@@ -523,10 +559,12 @@ public sealed class DocumentSetOperationTests
         target = await writer.GetCollectionAsync("items", guard.Token);
         await using var transaction = await session.BeginTransactionAsync(isolation, guard.Token);
         // Act
-        var values = await ValuesAsync(session, "SELECT publish(v) AS n FROM items UNION ALL SELECT v AS n FROM items");
+        var values = await ValuesAsync(session, setOperation == "UNION ALL"
+            ? "SELECT publish(v) AS n FROM items UNION ALL SELECT v AS n FROM items"
+            : "SELECT v AS n FROM items " + setOperation + " SELECT publish(v) AS n FROM items");
         // Assert
         calls.ShouldBe(1);
-        values.ShouldBe(new[] { "1", "1" });
+        values.ShouldBe(setOperation == "UNION ALL" ? new[] { "1", "1" } : setOperation == "INTERSECT ALL" ? new[] { "1" } : Array.Empty<string>());
         await transaction.RollbackAsync(guard.Token);
         (await ValuesAsync(session, "SELECT RAW v FROM items")).ShouldBe(new[] { "2" });
     }

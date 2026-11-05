@@ -55,7 +55,7 @@ internal sealed partial class DocumentPlanner
     {
         if (expression is OqlSubqueryExpression subquery && aggregateInput)
         {
-            ValidateGroupedCaptures(RequireQueryBlock(subquery.Query), query, null, scopes, functions, local, null, groupArrayInput: true);
+            ValidateGroupedCaptures(subquery.Query, query, null, scopes, functions, local, null, groupArrayInput: true);
             return;
         }
         if (expression is OqlPathExpression { Segments.Count: > 0 } path && aggregateInput &&

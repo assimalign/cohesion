@@ -782,13 +782,12 @@ may be normalized. A successful UPDATE returns the matched count, including unch
 and allocates fresh versions. Failure or cancellation writes nothing under the transaction rules
 above. EXPLAIN UPDATE describes the access without writing. USE KEYS, LIMIT and FOR remain CK00001. DocumentUpdateTests covers paths, atomicity, serialization and matched counts.
 
-## Set operations (#1803, OQ-S1)
+## Set operations (#1803, OQ-S1 and OQ-S2)
 
 `query ::= term ((UNION | INTERSECT | EXCEPT) ALL? term)* ORDER BY? LIMIT? OFFSET?`,
 where a term is a SELECT block or a parenthesized query. All three operators have equal,
-left-associative precedence, following Couchbase rather than ISO SQL. UNION executes now;
-INTERSECT and EXCEPT, with or without ALL, parse into the same tree but retain one CK00001
-at the operator and optional modifier until OQ-S2. UNION without ALL eliminates duplicates;
+left-associative precedence, following Couchbase rather than ISO SQL. All three operators execute.
+UNION without ALL eliminates duplicates;
 UNION ALL preserves every occurrence. Explicit UNION DISTINCT is not SQL++ grammar and
 retains one CK00001 spanning both words. UNION, INTERSECT and EXCEPT stay contextual names.
 The vocabulary dispositions are:
@@ -796,7 +795,7 @@ The vocabulary dispositions are:
 | Construct | Disposition |
 | --- | --- |
 | UNION, UNION ALL | Executable, distinct by default |
-| INTERSECT [ALL], EXCEPT [ALL] | Parsed with equal precedence, execution refused with CK00001 |
+| INTERSECT [ALL], EXCEPT [ALL] | Executable, distinct by default |
 | UNION DISTINCT, INTERSECT DISTINCT, EXCEPT DISTINCT | One CK00001 for the complete construct |
 
 ORDER BY, LIMIT and OFFSET after a compound belong to that compound. An operand can order or
@@ -810,11 +809,18 @@ silently replaced; the refusal spans only the outer tail. A chain or parenthesiz
 admits exactly 128 operators along a path; CD00005 locates the operator that would add level 129.
 Query parentheses retain the separate 128-level expression nesting bound.
 
-Rows are values, with no equal-arity requirement. UNION reuses DISTINCT/grouping structural
+Rows are values, with no equal-arity requirement. Every set operator reuses DISTINCT/grouping structural
 equality: numeric 1 and 1.0 compare equal, object member order does not matter, arrays remain
 ordered, named MISSING members are omitted, and RAW/VALUE MISSING becomes NULL before equality.
 The first representative survives, in left-input order followed by unseen right-input values.
-UNION ALL concatenates in that order. A compound's header shape is chosen statically at planning
+UNION ALL concatenates in that order. For a value occurring m times on the left and n times on
+the right, INTERSECT ALL retains min(m,n) occurrences and EXCEPT ALL retains max(m-n,0).
+INTERSECT and EXCEPT without ALL retain the first qualifying left representative, in left order.
+EXCEPT ALL consumes right counts against successive left occurrences, retaining the later
+unmatched occurrences in left order. Right operands are read before left operands for these two
+operators; only equality keys and occurrence counters are retained from the right. Even an empty
+left input does not suppress right evaluation, except when the compound LIMIT is zero.
+A compound's header shape is chosen statically at planning
 (owner decision T3-30), even when the page is empty:
 
 | Operands | Header |
@@ -833,28 +839,37 @@ any source, evaluating a callback or running a blocking stage.
 
 Compound ORDER BY expressions address the result members declared by any operand. A member absent
 from a particular row evaluates to MISSING; input collection aliases are outside this result scope.
+Enclosing aliases do not shadow result members, and absent members stay MISSING even when an
+enclosing binding has that name.
 Wildcard document operands leave their member names open. Scalar expressions and existing null
 placement rules apply; ties preserve concatenation order. CD01038 rejects an unbound result member,
 META or star in this result-only scope. CD01037 refuses ORDER BY on an all-RAW/VALUE compound,
 which has no named result members. Subqueries within compound ORDER BY remain CK00001 in this run.
 
 UNION ALL pulls one operand row at a time without retaining operand results. An operand's own
-GROUP BY, DISTINCT or ORDER BY still owns its necessary blocking stages. UNION's distinct keys,
-compound sort buffers and retained output share StatementMemoryBudget (CD05018); row processing,
+GROUP BY, DISTINCT or ORDER BY still owns its necessary blocking stages. Distinct keys,
+right-side multiset keys/counters, compound sort buffers and retained output share
+StatementMemoryBudget (CD05018); row processing,
 equality comparisons and sorting consume StatementWorkBudget (CD05020). Each top-level operand
 follows standalone SELECT's work rule: only its own subqueries, expression sources or
 key joins enable expression charges; plain collection scans remain uncharged beside charged siblings.
-Fixed-type unordered pages stop pulling as soon as the window is complete. EXPLAIN reports Union/UnionAll and both
+Fixed-type unordered pages stop pulling as soon as the window is complete. EXPLAIN reports
+Union/UnionAll, Intersect/IntersectAll or Except/ExceptAll and both
 operand trees, header shape, order-key count and resolved paging, without executing sources.
 
-This run supports top-level compounds and parenthesized set operands. Compound expression
-subqueries, derived FROM and INSERT/UPSERT sources have the new query-expression AST type but
-retain one CK00001 until OQ-S2, including forms whose first query term is parenthesized.
-INTERSECT/EXCEPT's operator refusal already owns that construct and is not reported again for
-its nested position. A lone parenthesized SELECT is now a valid INSERT/UPSERT source, where
-it previously failed CD00002 (for example, INSERT INTO c (KEY k) (SELECT k FROM d)).
+Compounds execute in expression subqueries as arrays, derived FROM, INSERT/UPSERT SELECT and
+correlated operands, including forms whose first query term is parenthesized. Their values follow
+the static header shape in every position: whole-document cells become array elements or derived
+rows directly, with no additional document member. Each operand has its own lexical scope;
+explicit outer aliases can supply expression sources while implicit collection names retain
+independent collection reads. Nested-query caching requires every operand to be uncorrelated
+and cacheable. INSERT/UPSERT bind KEY/VALUE names against the static columns or declared result
+members; heterogeneous rows resolve those members per row. An omitted VALUE retains the complete
+compound row value. A missing key/value uses the existing write diagnostic, and all source rows
+are staged and validated before any mutation. Subqueries within compound ORDER BY stay CK00001.
+A lone parenthesized SELECT is also a valid INSERT/UPSERT source.
 Inside IN or NOT IN, a compound whose first operand is parenthesized is a query, subject to the
-same membership rules and current nested-compound capability gate as a directly written query.
+same RAW/VALUE membership requirement as a directly written query.
 Redundant wrappers around a single query, with no set operator or query tail after it, retain the
 signed-off value-list grammar: one item containing the subquery array, with no CD00014.
 A scalar operator or comma following any leading wrapper's matching close also keeps the
@@ -867,11 +882,11 @@ The pinned grammar is [dql.ebnf:12-32](https://github.com/couchbaselabs/docs-dev
 equal precedence is [n1ql.y:387](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/parser/n1ql/n1ql.y#L387).
 OqlSetOperationParserTests, DocumentSetOperationTests, OqlExecutionConformanceTests,
 DocumentSetOperationWireTests and the NativeAOT guard cover this contract, including a deterministic
-384-case concatenation/deduplication oracle over RAW values, whole documents and matching named
+1,152-case concatenation/deduplication/multiset oracle over RAW values, whole documents and matching named
 projections with typed columns. Canonical keys choose the first representative; Json cells retain
 original member order and numeric scale, while generated numeric cells compare by value. A fixed
 typed-column trial pins the surviving left and right representatives through Json text and Decimal
-scale (3.00 and 4.50). The same generator runs 96 cases over TCP; the wider conformance corpus
+scale (3.00 and 4.50). The same generator runs 288 cases over TCP; the wider conformance corpus
 checks equality, budgets and both transports.
 
 ## ORDER BY null placement (#1730)

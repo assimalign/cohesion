@@ -36,6 +36,8 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.Values)]
     [InlineData(OqlClauses.Select)]
     [InlineData(OqlClauses.Union)]
+    [InlineData(OqlClauses.Intersect)]
+    [InlineData(OqlClauses.Except)]
     [InlineData(OqlClauses.Subquery)]
     [InlineData(OqlClauses.Exists)]
     [InlineData(OqlClauses.Distinct)]

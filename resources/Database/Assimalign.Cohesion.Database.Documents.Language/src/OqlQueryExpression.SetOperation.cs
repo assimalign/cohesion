@@ -40,7 +40,7 @@ public sealed class OqlSetOperationExpression : OqlQueryExpression
     public OqlQueryExpression Left { get; }
     /// <summary>Gets the right query operand.</summary>
     public OqlQueryExpression Right { get; }
-    /// <summary>Gets the set operation. INTERSECT and EXCEPT are currently recognized but refused.</summary>
+    /// <summary>Gets the set operation.</summary>
     public OqlSetOperation Operation { get; }
     /// <summary>Gets whether duplicate occurrences are preserved.</summary>
     public bool IsAll { get; }
@@ -67,8 +67,8 @@ public enum OqlSetOperation
 {
     /// <summary>Concatenates operands, eliminating duplicates unless ALL is specified.</summary>
     Union,
-    /// <summary>Keeps values present in both operands; execution is deferred.</summary>
+    /// <summary>Keeps shared values, with minimum occurrence counts for ALL.</summary>
     Intersect,
-    /// <summary>Keeps values from the left operand absent from the right; execution is deferred.</summary>
+    /// <summary>Subtracts right occurrence counts for ALL, or keeps absent left values.</summary>
     Except,
 }

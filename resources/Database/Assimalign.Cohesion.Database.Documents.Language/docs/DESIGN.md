@@ -119,7 +119,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `RELEASE [SAVEPOINT]` | Yes | Cohesion extension; releases the target and descendants |
 | `SELECT` | Yes | One or more projected expressions, optional `AS` labels; a lone `*` returns the stored document |
 | `UNION` | Yes | Query-value union, distinct by default; ALL streams both operands |
-| `INTERSECT` / `EXCEPT` | No | Parsed at UNION precedence; one CK00001 until OQ-S2 |
+| `INTERSECT` / `EXCEPT` | Yes | Equal precedence; ALL uses minimum/subtracted occurrence counts |
 | `DISTINCT` | Yes | Optional quantifier directly after SELECT; ALL is the default |
 | `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
 | `OBJECT CONSTRUCTOR` | Yes | Named members in braces; last non-MISSING member wins |
@@ -262,7 +262,7 @@ literal comparisons, NULL/MISSING tests, AND/OR/NOT, within 32 levels and 128 pr
 The [dialect](DIALECT.md#index-ddl-1135) records matching ANY and UNNEST access, residuals,
 canonical catalog rendering and the measured fetch bound/limit. The existing v3 format is unchanged.
 
-### Query-expression variants and set operations (#1803, OQ-S1)
+### Query-expression variants and set operations (#1803, OQ-S1 and OQ-S2)
 
 OqlQueryExpression is a closed abstract base with a private protected constructor, nonvirtual
 state accessors and two sealed leaves: OqlSelectExpression and OqlSetOperationExpression.
@@ -277,24 +277,24 @@ cross-assembly visibility grant is added.
 
 The parser separates a SELECT block, query terms and the query's tail. Its loop builds equal-
 precedence, left-associated UNION/INTERSECT/EXCEPT nodes; parentheses recurse into a complete
-query. INTERSECT/EXCEPT retain located CK00001 without changing the final grammar. The capability
-scan leaves these clauses to the query parser, including their ALL modifier, while explicit
+query. All three operators execute in every query position. The capability scan leaves these
+clauses to the query parser, including their ALL modifier, while explicit
 DISTINCT remains one complete capability refusal. Contextual identifiers and AS labels stay names.
 An unparenthesized local tail followed by a set operator remains CD00002. Additional outer tails
 on a lone already-paged parenthesized term are explicitly CK00001 rather than overwriting state.
 That refusal locates the outer tail. Both flat and parenthesized trees admit exactly 128 operators
 along a path; CD00005 locates the operator that would introduce level 129. Parentheses retain
 their separate 128-level expression guard. All nested entry points recognize parenthesized query
-terms; a deferred operator owns its one CK00001 without an additional nested-position refusal.
+terms, including expression subqueries, derived FROM and INSERT/UPSERT sources.
 Expression lookahead checks each leading wrapper at its matching close, innermost first, retaining
 scalar operators and IN lists following a parenthesized subquery through redundant nested wrappers.
 IN additionally requires a set operator or query tail after a leading parenthesized term to select
 query membership; redundant wrappers alone retain a one-item value list and no CD00014.
 Array subscripts currently require a named path; a subscript on a subquery result remains CD00002.
 
-The [set-operation dialect](DIALECT.md#set-operations-1803-oq-s1) records value equality, T3-30's
+The [set-operation dialect](DIALECT.md#set-operations-1803-oq-s1-and-oq-s2) records value equality, T3-30's
 static header choice, result-member ORDER BY binding, paging, first-representative order, budgets
-and the OQ-S2 position gates. Compound ORDER BY over RAW/VALUE is CD01037; a member not declared
+and every query position. Compound ORDER BY over RAW/VALUE is CD01037; a member not declared
 by any named operand is CD01038, except wildcard shapes whose members remain open. Subqueries in
 compound ordering remain a located CK00001. Parser and execution corpora, both wire transports
 and the NativeAOT consumer cover the same behavior without a format change.
@@ -446,8 +446,8 @@ a name:
 A statement whose first word is unsupported, such as `MERGE INTO c ...`, is one construct:
 the scan reports that word and nothing after it. Each
 operand of a set operation starts its own `SELECT`, which is not reported as a subquery, and a
-set operation with `ALL` or `DISTINCT` is one construct spanning both words. UNION [ALL] executes;
-INTERSECT/EXCEPT [ALL] are parsed and then refused, and explicit DISTINCT retains its refusal.
+set operation with `ALL` or `DISTINCT` is one construct spanning both words. All three operators execute;
+INTERSECT/EXCEPT [ALL] use the same query grammar; explicit DISTINCT retains its refusal.
 `OqlKeywordDispositionTests` enumerates the profile's keywords plus the table. Every word needs
 a supported parse case or a case with exactly one `CK00001` naming its construct, and for a
 table entry that diagnostic must also name the construct the table records. A word added
@@ -801,8 +801,7 @@ OqlInExpression retains either a nonempty Values list or an Array expression; ev
 `x IN (d.tags)` compares x with the whole array as one structural item. The array operand
 parses above comparison precedence, so `x IN d.tags AND p` is a conjunction. A nested SELECT
 uses the approved RAW/VALUE array operand exception for a direct SELECT or a compound whose
-first operand is parenthesized; a non-RAW query gives CD00014, subject to the nested-compound
-capability gate.
+first operand is parenthesized; a non-RAW query gives CD00014; all compound positions execute.
 The other public nodes are OqlBetweenExpression, OqlLikeExpression and OqlCaseExpression.
 Negated predicates preserve unknown results. Structural equality returns NULL for otherwise equal
 arrays/objects containing NULL, so IN and simple CASE do not match them. A definite structural
@@ -872,7 +871,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
 | `CD00011` | ALL/DISTINCT on a scalar or star call, at the quantifier |
 | `CD00013` | NULLS without FIRST or LAST, at the expected option |
-| `CD00014` | IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand; nested compounds currently retain CK00001) |
+| `CD00014` | IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand) |
 | `CD00015` | Derived FROM subquery requires an alias |
 | `CD00016` | Retired and reserved: former joined-statement explicit-alias requirement (#1767) |
 | `CD01033` | FROM expression requires an explicit alias or implicit field name |
