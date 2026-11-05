@@ -22,7 +22,7 @@ public sealed partial class SqlJointTypeMigrationTests
     [InlineData(true)]
     public async Task ApplyAsync_NonTypeDefaultChange_ShouldPublishJointly(bool notNull)
     {
-        // Arrange: precision narrowing stays on 49a; unlike VARCHAR narrowing it never trims.
+        // Arrange: precision narrowing validates kept values; unlike VARCHAR narrowing it never trims.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await using var engine = await Builder(await SeedAsync(guard.Token, 0)).BuildAsync(guard.Token);
         var database = await engine.OpenDatabaseAsync("typed", guard.Token);

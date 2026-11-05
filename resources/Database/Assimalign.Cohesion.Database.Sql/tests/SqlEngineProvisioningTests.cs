@@ -247,7 +247,12 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Assert
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+        failure.Message.ShouldContain("SQL engine 'steps', database 'shop'", Case.Sensitive);
+        failure.Message.ShouldContain("applying schema 'shop'", Case.Sensitive);
+        failure.Message.ShouldContain("AddConstraint", Case.Sensitive);
+        failure.Message.ShouldContain("children", Case.Sensitive);
         failure.InnerException.ShouldNotBeNull();
+        failure.Message.ShouldContain(failure.InnerException.InnerException!.Message, Case.Sensitive);
         await using var rollback = await CreateBuilder("steps").AddDatabase(_unreferenced).BuildAsync();
         rollback.TryGetDatabase("shop", out SqlDatabase? old).ShouldBeTrue();
         old!.IsOffline.ShouldBeFalse();

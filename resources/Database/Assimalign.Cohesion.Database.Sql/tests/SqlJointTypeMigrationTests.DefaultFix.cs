@@ -89,7 +89,7 @@ public sealed partial class SqlJointTypeMigrationTests
     [Theory(DisplayName = "Cohesion Test [Sql] - Non-TYPE Build: changed defaults publish jointly and retain existing values")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task BuildAsync_NonTypeDefaultChange_ShouldKeepOldApplicationAvailable(bool notNull)
+    public async Task BuildAsync_NonTypeDefaultChange_ShouldPublishDefaultAndRetainRows(bool notNull)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));

@@ -11,7 +11,7 @@ internal sealed partial class SqlSchemaProvisioner
 {
     // Apply/Verify own the admission gate throughout this trace. The deferred trace
     // belongs to the single claimed worker, after ownership was transferred. Both
-    // owners retain the executing step so a listener can attach after entry.
+    // owners retain the joint plan identity so a listener can attach after entry.
     private bool _jointTraceEntered;
     private SqlProvisioningTrace? _trace;
     private SqlProvisioningTrace? _deferredTrace;
@@ -170,7 +170,7 @@ internal sealed partial class SqlSchemaProvisioner
         {
             return;
         }
-        // Marker failure follows completed steps and must not blame the last successful DDL.
+        // Attribute failure to the joint plan, including marker-only reconciliation.
         SqlDatabaseEventSource.Log.DeferredStepFailed(_database, _deferredTrace ?? new SqlProvisioningTrace(migration.Schema)
         {
             Kind = index < migration.Steps.Count ? migration.Intent.Steps[index].Kind : "Finalize",

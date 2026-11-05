@@ -1458,7 +1458,8 @@ target Build resumes interrupted preparation; a different-target Build discards 
 from the stored schema. A no-target open discards without a provisioning report or trace; a
 successful Verify clears a declared discard observation. RunMigrationsInline, empty-table Build
 and ApplySchemaAsync use the same joint executor inline. Default-only changes publish jointly
-(SET or DROP DEFAULT), with CS03402 before publication and CS03403 for an unconfirmed commit.
+(SET or DROP DEFAULT) with destructive opt-in (CS03105 without it), with CS03402 before
+publication and CS03403 for an unconfirmed commit.
 
 Referential SET NULL and SET DEFAULT update only matching foreign-key columns, using the
 ordinary domain, nullability, CHECK, outgoing/incoming FK, MVCC and index machinery.
@@ -1915,9 +1916,10 @@ destructive opt-in (CS03105 before any step); exact widening can run without it.
 refusals, old snapshots and retryable CS04006 writers retain the single-statement contract.
 VARCHAR narrowing always takes the joint TYPE path because assignment may trim excess spaces;
 CHAR width changes also rewrite. Default changes without a TYPE rewrite publish jointly,
-including SET and DROP DEFAULT; a frozen missing value retains its original value.
-Metadata planning refusals report CS03105; joint reservation failures agree on CS03402 in the
-exception and provisioning report. Before intent save, Build checks only the metadata space floor, without owner snapshots or row
+including SET and DROP DEFAULT with destructive opt-in (CS03105 without it); a frozen missing value retains its original value.
+Metadata planning refusals report CS03105; joint reservation failures throw CS03402. Imperative
+interruption clears Provisioning; deferred failures remain sticky. Before intent save, Build
+checks only the metadata space floor, without owner snapshots or row
 decodes. The worker measures actual rewritten record/key bytes and conversion growth before prepared writes.
 A volume watchdog checks each copy/index bracket and the catalog publication bracket after
 validation. An engine reserve covers discard, old/prepared-owner reclamation WAL up to the
@@ -1945,9 +1947,11 @@ values, non-identity logical backfills, DROP COLUMN, VARCHAR widening, same-scal
 changes, aliases and defaults also keep it (#1778, SQ-A6). Surviving physical ordinals and value
 representations remain identical. Precision tightening scans and refuses invalid rows; dropped
 column bytes remain intact until publication. Reserved-table writers wait, then enforce the new
-declaration or receive a stale-plan retry. A statement naming a dropped column is refused. Dropping or replacing a heap-owned index
-forces a rewrite; alternate-tree drops and replacements can keep the heap and reclaim kind-14
-owners. General heap-owned dropped-index reclamation is tracked by #1808.
+declaration or receive a stale-plan retry. A statement naming a dropped column is refused.
+Dropping a heap-owned index without a same-name replacement keeps the heap; its pages remain
+until the table retires (DROP TABLE or a later TYPE rewrite). IX-S1 (#1808) will give indexes
+separate pages and reclaim them on drop. A same-name heap-owned replacement still rewrites;
+alternate-tree drops and replacements retain their heaps and retire separate owners.
 New trees build unpublished against that heap; added constraints validate existing rows under
 the joint X locks before tree builds. Index-only changes need no additional validation scan;
 unchanged foreign-key pairs are skipped. Drops, new trees and rewritten tables publish in the same single commit.
@@ -5095,9 +5099,13 @@ The ISO `DEFAULT X'007FFF'` spelling also works. Quoted backslash-x defaults kee
 resolving after reopen; COLUMN_DEFAULT reports the resolved value as X hex.
 General text-to-BYTEA conversion is separately defined by the [CAST contract](#explicit-conversion-cast-1022-e3).
 
-While a compiled-schema apply runs, ordinary session DDL is refused with
-`DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the
-apply, including any compensation, finishes; unrelated table reads and writes continue.
+While a compiled-schema apply runs, plain readers, writers and session DDL naming a touched
+table wait through the whole job and cleanup, then bind the published schema. This includes
+inline ApplySchemaAsync scans/builds. Unrelated table reads and writes continue; unrelated
+session DDL is refused with DatabaseObjectLockedException while apply admission is held.
+A configured engine LockTimeout bounds Build and ApplySchemaAsync reservation; zero has no
+timeout. Imperative cancellation/timeout clears its Provisioning report; deferred failures stay
+sticky. Build-time inline jobs have no user sessions. Sql DESIGN lists each step's lock window.
 
 ## SQL definitions and declared scripts (E4)
 

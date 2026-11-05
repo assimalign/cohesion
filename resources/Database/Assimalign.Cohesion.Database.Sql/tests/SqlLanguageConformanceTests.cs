@@ -187,7 +187,7 @@ public sealed class SqlLanguageConformanceTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await using var engine = SqlDatabaseEngine.Create("typed-type-conformance", new());
         var database = await engine.CreateDatabaseAsync("db", timeout.Token);
-        SqlCompiledSchema Declare(DatabaseType type) => new(SqlCompiledSchema.CurrentFormat, "db", true, [],
+        SqlCompiledSchema Declare(DatabaseType type) => new(SqlCompiledSchema.CurrentFormat, "db", false, [],
             [new("items", "row", [new("v", type, true)], null, [], [])], []);
         await database.ApplySchemaAsync(Declare(DatabaseType.Int32), timeout.Token);
         await using var session = await database.CreateSessionAsync(timeout.Token);

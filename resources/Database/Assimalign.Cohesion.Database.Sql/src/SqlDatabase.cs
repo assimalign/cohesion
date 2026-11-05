@@ -87,8 +87,8 @@ public sealed partial class SqlDatabase : DatabaseInstance
             }
             return;
         }
-        // SQL format 37 fences every per-step 49a kind-9 intent. Recovery already
-        // validates Joint/ identities; no ordinary-intent fallback can be reached.
+        // The sole production intent writer records Joint/ kinds. Preparation checks
+        // their classifications against the current plan before resuming work.
         // Only a Build declaring the same target may resume unpublished work.
         var targetSchema = _engine.FindDeclaration(Name)?.Schema;
         if (_engine.ProvisioningBuildComplete || targetSchema is null ||
@@ -581,6 +581,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     internal SqlDatabaseSession CreateSchemaSession(string provisioningSchema, CancellationToken cancellationToken,
         TransactionSequence? ddlLockOwner = null)
     {
+        // Test seam: retain one lock owner for parity/cost baselines and adjacent-FK lock probes.
         ThrowIfDisposed();
         ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
@@ -632,6 +633,10 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// the token, then the offline refusal, then the declaration.
     /// Potentially lossy TYPE conversions, including reverse migrations after application rollback,
     /// require the declaration's destructive-change opt-in before any step runs.
+    /// Readers, writers and session DDL naming a touched table wait through the joint job before
+    /// binding the published schema. The engine's configured LockTimeout bounds reservation;
+    /// zero waits without a timeout. Imperative cancellation or reservation timeout clears the
+    /// provisioning observation because this caller receives the exception.
     /// </remarks>
     public ValueTask<SqlSchemaMigrationResult> ApplySchemaAsync(SqlCompiledSchema schema, CancellationToken cancellationToken = default)
     {

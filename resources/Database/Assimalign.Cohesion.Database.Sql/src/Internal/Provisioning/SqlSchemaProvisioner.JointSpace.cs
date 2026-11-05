@@ -63,7 +63,10 @@ internal sealed partial class SqlSchemaProvisioner
                 // depends on declaration size, without visiting a 500M-row heap.
                 if (item.KeepsOwner && item.Indexes.All(index => SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(item.Previous!.ObjectId))))
                 {
+                    // Heap-owned dropped trees stay on the heap until its retirement;
+                    // neither traverse them nor charge their pages as reclamation work.
                     foreach (var registration in registrations.Where(value => value.ObjectId == item.Previous!.ObjectId &&
+                        _database.IndexManager.PageOwner(value) != item.Previous!.ObjectId &&
                         !item.Indexes.Any(index => index.Name.Equals(value.Definition.Name, StringComparison.OrdinalIgnoreCase))))
                     {
                         var size = CountJointIndexPages(registration.RootPageId, _database.IndexManager.PageOwner(registration), token);
@@ -157,7 +160,7 @@ internal sealed partial class SqlSchemaProvisioner
                 foreach (var registration in registrations.Where(value => value.ObjectId == table.ObjectId))
                 { oldPages += CountJointIndexPages(registration.RootPageId, _database.IndexManager.PageOwner(registration), token).Pages; }
             }
-            ConfigureJointEngineReserve(plan, intent, Math.Max(oldPages, replacementPages));
+            ConfigureJointEngineReserve(plan, intent, Math.Max(oldPages, replacementPages), replacementPages != 0);
             long replacement = Math.Max(0, replacementPages - _database.DataStorage.PageManager.FreePageCount) * Page.Size;
             JointSpaceReplacementBytes = replacement;
             // RegisterTouch may log a full pre-image (including spill); commit logs
@@ -183,7 +186,10 @@ internal sealed partial class SqlSchemaProvisioner
             if (plan.Tables.All(item => item.KeepsOwner || item.Previous is null) && preferred > JointCopyCheckpointBytes &&
                 Need(preferred) <= _database.Engine.GetAvailableMigrationBytes(_database.Name))
             { JointCopyCheckpointThreshold = preferred; }
-            JointSpaceNeed = Need(JointCopyCheckpointThreshold);
+            JointSpaceNeed = plan.Tables.Length == 0 && plan.Dropped.Length == 0
+                ? JointSpaceFloor(intent) : Need(JointCopyCheckpointThreshold);
+            if (plan.Tables.Length == 0 && plan.Dropped.Length == 0)
+            { JointSpaceDiscardBytes = JointSpaceNeed; JointSpacePublicationBytes = 0; }
             JointSpaceIndexPages = actualIndexPages;
             CheckJointSpace(JointSpaceNeed);
         }
@@ -235,7 +241,7 @@ internal sealed partial class SqlSchemaProvisioner
     // checks before EVERY owner's bracket, independently of worker cadence.
     // Include both page images and bracket frames in that overshoot. Dirty
     // pools need extra disk blocks only on strategies with sparse data growth.
-    private void ConfigureJointEngineReserve(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent, long minimumPages)
+    private void ConfigureJointEngineReserve(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent, long minimumPages, bool allocatesPages)
     {
         checked
         {
@@ -255,7 +261,7 @@ internal sealed partial class SqlSchemaProvisioner
             long overshoot = JointBracketBytes(SqlTableReclamation.BatchSize, 0);
             long threshold = _database.Engine.EngineOptions.CheckpointJournalSize;
             _jointReclamationLimit = threshold == 0 ? long.MaxValue : threshold + overshoot;
-            long dirtyPools = _database.Engine.SparseDataGrowth(_database.Name)
+            long dirtyPools = allocatesPages && _database.Engine.SparseDataGrowth(_database.Name)
                 ? _database.Engine.EngineOptions.BufferPoolCapacity + SqlDatabaseEngine.CatalogBufferPoolPages * Page.Size : 0;
             _jointReserveBase = JointSpaceFloor(intent) + dirtyPools;
         }

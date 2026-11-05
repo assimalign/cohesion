@@ -365,7 +365,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
         if (trace.Failure is { } failure && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
             ProvisioningFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Schema.Name, maxNameLength),
-                trace.Position, trace.Kind, trace.Code, failure.GetType().FullName ?? failure.GetType().Name);
+                trace.Position, trace.Kind, trace.Code, failure.GetBaseException().GetType().FullName ?? failure.GetBaseException().GetType().Name);
         }
     }
 
@@ -409,7 +409,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
         {
             DeferredStepFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, maxNameLength), Bound(trace.ObjectName, maxNameLength),
                 trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows,
-                database.Provisioning?.FailureCode ?? SqlProvisioningCodes.JointFailed, failure.GetType().FullName ?? failure.GetType().Name);
+                database.Provisioning?.FailureCode ?? SqlProvisioningCodes.JointFailed, failure.GetBaseException().GetType().FullName ?? failure.GetBaseException().GetType().Name);
         }
     }
 

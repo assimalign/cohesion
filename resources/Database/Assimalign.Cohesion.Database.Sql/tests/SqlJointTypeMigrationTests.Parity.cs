@@ -67,7 +67,7 @@ public sealed partial class SqlJointTypeMigrationTests
     [MemberData(nameof(KeepParityCases))]
     public async Task ApplyAsync_KeepParity_ShouldRetainLayoutKeyNamesAndCost(string kind, bool composite, bool ordinaryCreation)
     {
-        // Arrange: both historical per-step keys and keys created by a joint job.
+        // Arrange: both ordinary statement keys and keys created by a joint job.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         var source = KeepParitySchema(kind, false, composite);
         var target = KeepParitySchema(kind, true, composite);
@@ -78,8 +78,8 @@ public sealed partial class SqlJointTypeMigrationTests
             var initial = kind == "drop-index" ? target : source;
             if (ordinaryCreation) { await ApplyOrdinaryParityAsync(database, null, initial, guard.Token); }
             else { await database.ApplySchemaAsync(initial, guard.Token); }
-            // Build an alternate-owned tree on the real keyed heap. Heap-owned
-            // removal remains #1808 and is measured by the separate negative control.
+            // Exercise the alternate-owned drop here. ReviewHeapDrop separately
+            // drives a first-Build declared index through deferred Build on the heap.
             if (kind == "drop-index") { await database.ApplySchemaAsync(source, guard.Token); }
             await using var writer = await database.CreateSessionAsync(guard.Token);
             await writer.ExecuteAsync("INSERT INTO items VALUES " + string.Join(',', Enumerable.Range(1, 128).Select(id => $"({id},{id % 7},42,'ok',9)")), cancellationToken: guard.Token);

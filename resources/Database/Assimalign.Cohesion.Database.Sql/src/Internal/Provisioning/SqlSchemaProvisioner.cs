@@ -181,13 +181,13 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 script = new SqlMigrationScript(plan, script.Steps);
                 TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: script.Steps.Count);
-                var joint = await PrepareJointMigrationAsync(schema, script, preparation.Stop.Token).ConfigureAwait(false);
+                var joint = await PrepareJointMigrationAsync(schema, script, preparation.Stop.Token, deferDataScalingSteps).ConfigureAwait(false);
                 Volatile.Write(ref _deferred, joint);
                 try
                 {
                     JointStage?.Invoke("Handoff");
-                    if (jointDeferred || deferDataScalingSteps && jointRewrite &&
-                        joint.JointPlan.Touched.Any(table => _database.DataStorage.HasOwnerPages(table.ObjectId)))
+                    if (jointDeferred || deferDataScalingSteps && joint.JointPlan.Tables.Any(table =>
+                        !table.KeepsOwner && table.Previous is { } old && _database.DataStorage.HasOwnerPages(old.ObjectId)))
                     {
                         PublishProgress(joint.Intent.Steps[0], joint.ProvisioningStepCount, running: false);
                         TraceOutcome("Deferred");
@@ -204,9 +204,9 @@ internal sealed partial class SqlSchemaProvisioner
                     // Reservation succeeded, but no execution/handoff was accepted.
                     // Do not let the outer finally enqueue work after this failure.
                     try { await joint.StopAsync().ConfigureAwait(false); }
-                    catch (Exception cleanup) { throw JointFailure(new AggregateException(failure, cleanup)); }
+                    catch (Exception cleanup) { throw JointFailure(new AggregateException(failure, cleanup), schema, script.Steps); }
                     if (failure is OperationCanceledException or OutOfMemoryException) { throw; }
-                    throw JointFailure(failure);
+                    throw JointFailure(failure, schema, script.Steps);
                 }
                 await joint.RunInlineAsync(preparation.Stop.Token).ConfigureAwait(false);
                 TraceOutcome("Applied");
@@ -619,7 +619,7 @@ internal sealed partial class SqlSchemaProvisioner
         CompiledSchemaColumn? declared = desiredTable?.Columns.FirstOrDefault(candidate =>
             string.Equals(candidate.Name, column.Name, StringComparison.OrdinalIgnoreCase));
         string? defaultLiteral = declared is not null &&
-            string.Equals(CanonicalDefault(declared.DefaultLiteral), column.DefaultLiteral, StringComparison.Ordinal)
+            string.Equals(EffectiveDeclaredDefault(declared, column), column.DefaultLiteral, StringComparison.Ordinal)
                 ? declared.DefaultLiteral : column.DefaultLiteral;
         bool nullable = declared is not null &&
             column.IsNullable == (declared.IsNullable && !IsPrimaryKeyColumn(desiredTable!.PrimaryKey, column.Name))
@@ -746,7 +746,15 @@ internal sealed partial class SqlSchemaProvisioner
         return null;
     }
 
-    // The first column of a table that differs from its declaration, described for a message.
+    // An omitted column DEFAULT inherits a SQL domain default, including on reconciliation.
+    private string? EffectiveDeclaredDefault(CompiledSchemaColumn declared, SqlCatalogColumn actual)
+    {
+        if (declared.DefaultLiteral is not null) { return CanonicalDefault(declared.DefaultLiteral); }
+        if (actual.DomainName is null || DescribeTypeDifference(declared, actual) is not null) { return null; }
+        return _catalog.Domains.FirstOrDefault(domain => domain.Name.Equals(actual.DomainName, StringComparison.OrdinalIgnoreCase))?.DefaultLiteral;
+    }
+
+// The first column of a table that differs from its declaration, described for a message.
     private string? DescribeColumnDifference(CompiledSchemaTable expected, SqlCatalogTable actual)
     {
         if (actual.Columns.Count != expected.Columns.Count)
@@ -792,7 +800,7 @@ internal sealed partial class SqlSchemaProvisioner
                 return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnIdentityUndeclared, expected.Name, expectedColumn.Name);
             }
 
-            if (!string.Equals(actualColumn.DefaultLiteral, CanonicalDefault(expectedColumn.DefaultLiteral), StringComparison.Ordinal))
+            if (!string.Equals(actualColumn.DefaultLiteral, EffectiveDeclaredDefault(expectedColumn, actualColumn), StringComparison.Ordinal))
             {
                 return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnDefaultMismatch, expected.Name, expectedColumn.Name);
             }

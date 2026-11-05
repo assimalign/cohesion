@@ -147,7 +147,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         {
             var failed = NewEvent(recorder, 15, "ProvisioningFailed", "engineName", "database", "schema", "position", "kind", "code", "exceptionType");
             failed.Level.ShouldBe(EventLevel.Error);
-            failed.Payload.ShouldBe([engine.Name, "traced", "traced", 0, "JointMigration", "CS03402", typeof(SqlSchemaMigrationException).FullName]);
+            failed.Payload.ShouldBe([engine.Name, "traced", "traced", 0, "JointMigration", "CS03402", typeof(InvalidOperationException).FullName]);
         }
         recorder.Events.SelectMany(entry => entry.Payload ?? []).ShouldNotContain(value => Equals(value, failure.Message));
     }
@@ -468,7 +468,7 @@ public sealed partial class SqlDatabaseEventSourceTests
 
             // Assert
             var failed = NewEvent(recorder.ShouldNotBeNull(), 15, "ProvisioningFailed", "engineName", "database", "schema", "position", "kind", "code", "exceptionType");
-            failed.Payload!.Skip(3).ShouldBe([0, "JointMigration", "CS03402", typeof(SqlSchemaMigrationException).FullName]);
+            failed.Payload!.Skip(3).ShouldBe([0, "JointMigration", "CS03402", typeof(InvalidOperationException).FullName]);
             recorder.Events.ShouldNotContain(entry => entry.EventId == 13 || entry.EventId == 14);
         }
         finally

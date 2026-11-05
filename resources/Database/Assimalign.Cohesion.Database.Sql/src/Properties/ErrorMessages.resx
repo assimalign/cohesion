@@ -851,7 +851,7 @@
     <value>The unpublished migration target or resolved route no longer matches; preparation was discarded and the stored schema remains online.</value>
   </data>
   <data name="JointMigrationFailed" xml:space="preserve">
-    <value>Unpublished joint migration failed. The published schema is unchanged; correct the cause and retry.</value>
+    <value>{0}: applying schema '{1}': joint steps ({2}) failed: {3} The published schema is unchanged; correct the cause and retry.</value>
   </data>
   <data name="JointPlanningRefused" xml:space="preserve"><value>Schema migration planning refused: {0} Nothing was changed.</value></data>
   <data name="JointSpaceInsufficient" xml:space="preserve"><value>Joint migration space refused: {0} bytes needed, {1} bytes available. The published schema is unchanged.</value></data>

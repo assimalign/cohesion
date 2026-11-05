@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlSchemaProvisioner
 {
     internal Action<string>? JointStage { get; set; }
+    // Test-only differential oracle: force the same target through physical replacement.
+    internal bool ForceJointRewrite { get; set; }
     // Test-only observation after execution cleanup, before the lifecycle lease ends.
     internal Action? JointPreparationFinishing { get; set; }
     internal Action? JointSpaceCounting { get; set; }
@@ -88,14 +90,14 @@ internal sealed partial class SqlSchemaProvisioner
     }
 
     private async ValueTask<SqlDeferredMigration> PrepareJointMigrationAsync(SqlCompiledSchema schema,
-        SqlMigrationScript script, CancellationToken cancellationToken)
+        SqlMigrationScript script, CancellationToken cancellationToken, bool deferredBuild)
     {
         var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
         SqlJointMigrationPlan plan;
         try
         {
             JointStage?.Invoke("Planning");
-            plan = executor.PlanJointMigration(schema, script, cancellationToken);
+            plan = executor.PlanJointMigration(schema, script, cancellationToken, ForceJointRewrite);
             if (_catalog.PendingMigration is { } recorded)
             {
                 var choices = recorded.Steps.Where(step => step.Kind is "Joint/KeepOwner" or "Joint/RewriteOwner").ToArray();
@@ -110,7 +112,7 @@ internal sealed partial class SqlSchemaProvisioner
                     // Registered domains are outside the schema hash. The old schema
                     // is still online: discard unpublished work and plan with today's types.
                     await DiscardMismatchedIntentAsync(schema, script.Steps.Count, cancellationToken).ConfigureAwait(false);
-                    plan = executor.PlanJointMigration(schema, script, cancellationToken);
+                    plan = executor.PlanJointMigration(schema, script, cancellationToken, ForceJointRewrite);
                 }
             }
         }
@@ -194,7 +196,7 @@ internal sealed partial class SqlSchemaProvisioner
         }
         catch (Exception failure)
         {
-            _database.ReportProvisioning(failed);
+            _database.ReportProvisioning(!deferredBuild && IsImperativeInterruption(failure) ? null : failed);
             failures.Add(failure);
             try
             {
@@ -206,7 +208,7 @@ internal sealed partial class SqlSchemaProvisioner
             catch (Exception cleanup) { failures.Add(cleanup); }
             finally { metadata?.Dispose(); }
             Exception cause = failures.Count == 1 ? failure : new AggregateException(failures);
-            var coded = JointFailure(cause);
+            var coded = JointFailure(cause, schema, script.Steps);
             EnsureFailureTrace(schema);
             TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: script.Steps.Count);
             TraceFailure(coded);
@@ -268,15 +270,17 @@ internal sealed partial class SqlSchemaProvisioner
             if (migration.Steps.Count > 0) { BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken); }
             AdmitJointSpace(migration.JointPlan, migration.Intent, cancellationToken);
             bool sparseGrowth = _database.Engine.SparseDataGrowth(_database.Name);
+            bool markerOnly = migration.JointPlan.Tables.Length == 0 && migration.JointPlan.Dropped.Length == 0;
             statement.ConfigureCopySpace((touches, allocations, unflushed, prepared) =>
             {
+                if (markerOnly) { CheckJointSpace(JointSpaceNeed); return; }
                 JointSpaceDiscardBytes = JointEngineReserve(prepared);
                 long reused = Math.Min(allocations, _database.DataStorage.PageManager.FreePageCount);
                 // Eviction and engine checkpoints may have flushed earlier copy
                 // allocations. The unwritten backlog cannot exceed the data pool.
                 long pending = sparseGrowth ? Math.Min(checked(unflushed * Page.Size), _database.Engine.EngineOptions.BufferPoolCapacity) : 0;
                 CheckJointSpace(checked(JointBracketBytes(touches, allocations - reused) + pending + JointSpaceDiscardBytes));
-            }, unflushed => CheckJointSpace(checked(JointSpacePublicationBytes + JointSpaceDiscardBytes +
+            }, unflushed => CheckJointSpace(markerOnly ? JointSpaceNeed : checked(JointSpacePublicationBytes + JointSpaceDiscardBytes +
                 (sparseGrowth ? Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity) : 0))), _database.TableReclamation.CaptureAllocationCount,
                 JointCopyCheckpointThreshold);
             var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
@@ -316,11 +320,11 @@ internal sealed partial class SqlSchemaProvisioner
             }
             // No compensation: published objects and committed rows were never changed.
             // Remove the intent; retry/next Build replans from the old applied marker.
-            _database.ReportProvisioning(failed);
+            _database.ReportProvisioning(!migration.ReleaseApplyGate && IsImperativeInterruption(failure) ? null : failed);
             Exception cause = failure;
             try { await _catalog.DiscardJointIntentAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception cleanup) { cause = new AggregateException(failure, cleanup); }
-            var coded = JointFailure(cause);
+            var coded = JointFailure(cause, migration.Schema, migration.Steps);
             if (!migration.ReleaseApplyGate)
             { EnsureFailureTrace(migration.Schema); TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: migration.ProvisioningStepCount); }
             FailDeferredTrace(migration, 0, coded);
@@ -335,12 +339,16 @@ internal sealed partial class SqlSchemaProvisioner
         }
     }
 
-    private static SqlSchemaMigrationException JointFailure(Exception failure)
+    private static bool IsImperativeInterruption(Exception failure)
+        => failure is OperationCanceledException or TransactionLockTimeoutException;
+
+    private SqlSchemaMigrationException JointFailure(Exception failure, SqlCompiledSchema schema,
+        System.Collections.Generic.IReadOnlyList<SqlMigrationScriptStep> steps)
     {
-        // Preserve space admission's byte counts in the caller-visible report.
-        if (failure is SqlSchemaMigrationException migration && migration.Diagnostics.Any(diagnostic => diagnostic.Code == SqlProvisioningCodes.JointFailed))
-        { return migration; }
-        return CodedMigrationFailure(SqlProvisioningCodes.JointFailed, ErrorMessages.JointMigrationFailed, failure);
+        string work = steps.Count == 0 ? "Joint/Schema" : string.Join("; ", steps.Select(step => Describe(step.Operation)));
+        string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.JointMigrationFailed,
+            Describe(), schema.Name, work, failure.Message);
+        return CodedMigrationFailure(SqlProvisioningCodes.JointFailed, message, failure);
     }
 
     private SqlSchemaMigrationException PlanningRefusal(SqlCompiledSchema schema, int steps, Exception refusal, string? message = null)

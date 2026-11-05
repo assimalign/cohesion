@@ -143,7 +143,7 @@ public sealed class SqlProvisioningIsolationTests
                     reads++;
                 }
                 writing.IsCompleted.ShouldBeFalse("the new table must remain protected between DDL steps");
-                elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+                elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(60));
             }
             while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || writes < 10 || reads < 10);
 

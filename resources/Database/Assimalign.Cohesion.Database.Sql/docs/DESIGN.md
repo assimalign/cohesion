@@ -3564,6 +3564,12 @@ binary values. Stored row bytes and canonical DEFAULT text retain their existing
 
 ## Compiled-schema provisioning
 
+Joint space admission charges sparse dirty buffer pools only when the job allocates pages.
+A zero-operation marker refresh (including an empty Build) admits on the declaration-derived
+metadata floor alone. Heap-owned dropped-index pages are not retirement pages for a kept heap
+and do not enter the reclamation estimate. Existing defaults inherited from a catalog SQL domain
+are the effective default of a typed column with no explicit DEFAULT during reconciliation.
+
 Namespace targeting (#1030) remains fixed at dbo for compiled declarations and migration SQL.
 SqlNamespaceNames.Default is the shared spelling used by runtime and SDK rendering. CREATE SCHEMA
 creates a SQL namespace only; a compiled schema's name remains its ownership identity and never
@@ -3634,12 +3640,11 @@ A different hash with the same generation can use the recorded document after va
 hash. A moved generation never trusts that document: planning starts from the live schema-owned
 objects. Ad-hoc objects survive reconciliation and still cannot be adopted. Even unrelated ad-hoc
 DDL forces this path; a zero-step plan refreshes the marker. Verify mode reports the changed state
-without writing it. After all statements, the live catalog is checked once more against the
-declaration, so a concurrent name collision cannot be recorded as convergence. The marker is
-saved last with the generation captured before that check, which the catalog checks
-under its metadata lock. For inline plans without a TYPE rewrite, a failed or crashed multi-statement apply leaves earlier committed steps
-visible; recovery restores their counter atomically with their DDL, and the next Build plans only
-the uncommitted tail. That per-step path makes no multi-statement atomicity claim.
+without writing it. Prospective joint binding validates the complete target before any published object changes.
+Publication rechecks names and expected descriptions under the catalog monitor, and commits the
+complete target with its applied marker. Failed or crashed preparation leaves the old schema
+online; recovery chooses the old or complete new publication. This applies to inline and deferred
+jobs, including plans without a TYPE rewrite.
 
 The snapshot covers ordered columns, storage types and bounds, named SQL types/domains, effective
 primary-key nullability, literal DEFAULTs, composite primary keys, ordinary and unique indexes,
@@ -3706,12 +3711,14 @@ creation, nullable additions and drops. Otherwise cheap and empty-table work rem
 `SqlDatabaseBuilder.RunMigrationsInline = true` keeps all work in Build.
 Imperative `ApplySchemaAsync` remains inline. Outside a deferred joint plan, nullable additions validate their immutable missing
 value once and existing rows resolve it from the catalog without a rewrite. In a deferred plan,
-nullable append, DROP COLUMN and facet-only changes rewrite until SQ-A6; space admission counts
-that rewrite, which re-evaluates every CHECK and domain on every row.
+nullable append, DROP COLUMN and compatible facet changes keep their heap. Validation coerces
+only new required columns or columns with tighter nullability/facets, and checks only new or
+changed domains. Unrelated JSON and registered-domain columns are not revalidated; unchanged DEFAULTs also
+skip domain checks during planning.
 Column additions retain declaration order in the jointly prepared target.
 
 Decision 77 (#1443) makes every `DROP TABLE` unpublish inline and reclaim afterwards. The
-statement, typed migration, compensation and declared-script paths all use the catalog's single
+statement, joint migration and declared-script paths all use the catalog's single
 publication transaction. It deletes the table/index metadata and writes kind 14, a reclamation
 intent naming the retired object identity. A script's statement receipt shares that commit.
 None walks data or index pages during Build, including `RunMigrationsInline` and imperative
@@ -3940,7 +3947,7 @@ stateDiagram-v2
    when the database does not exist; an existing database whose collation is not the declared one
    (an unset declaration meaning `Binary`) is refused with `CS03102`, because a key's collation id
    cannot change (decision 56). Then `Apply` skips a schema whose cached hash and catalog DDL generation match its marker,
-   and otherwise plans and applies it with compensation; `Verify` runs
+   and otherwise plans and publishes it jointly after unpublished preparation; `Verify` runs
    no DDL and creates nothing, and refuses a missing database or any difference with `CS03103`.
    A declaration without a schema only ensures the database exists. Last, every stored
    definition must bind to the catalog (decision 65): a CHECK, declared or ad hoc, that calls a
@@ -3983,37 +3990,50 @@ deferred migration: Build transfers it to the worker, which releases it only aft
 Even an equal-schema imperative apply is refused while another apply or its worker is active.
 The internal deferred-open path may return the already scheduled target without waiting.
 
-An inline apply holds the database's internal DDL admission interlock from its initial catalog check
-through its final marker, compensation and lock cleanup. Ordinary session DDL is refused with
-`DatabaseObjectLockedException` while it is held; an apply likewise refuses before changing
-anything if ordinary DDL is already running. This fail-fast admission avoids a second waiting
-graph outside the lock manager. It excludes unrelated DDL too, an intentional cost of protecting
-names that do not have an object id yet and keeping the planning snapshot stable.
+Every apply holds the database's DDL admission interlock from its initial catalog check
+through publication/discard and lock cleanup. Session DDL naming a touched table first waits
+on the joint reservation, then binds and runs against the published schema. Unrelated session
+DDL is refused with `DatabaseObjectLockedException` while apply admission is held. An apply
+likewise refuses if ordinary DDL already owns admission. This fail-fast admission excludes
+unrelated definition DDL to protect names without identities and keep planning stable.
 
-The apply also owns a read-only coordinator context solely for table locks. Each DDL statement
-uses that context's sequence for Exclusive table locks (including referenced parents), while
-its data and catalog work keep their original per-statement commits. A new table is locked
-after id reservation and before catalog publication. Those locks stay held through every step,
-the final marker, and reverse compensation, then the read-only context rolls back to release
-them. PostgreSQL likewise takes `AccessExclusiveLock` on a new relation and retains it to
-transaction end (`src/backend/commands/tablecmds.c:1112-1118,1390-1394` in the reference clone).
-This engine's simple MVCC readers remain lock-free; writers to an affected table wait on its
-existing table-lock protocol. Readers and writers on unrelated tables continue, and no coordinator
-apply gate is held between statements. The lifetime protects compensation: no other session can
-commit a row or a dependent index on a newly created table before compensation can drop it.
+A read-only coordinator context reserves owned sequences and every touched table X, in ascending
+identity order, before intent publication. Both plain readers and writers naming these tables
+wait before binding or snapshot capture for the entire job, including cleanup. This also applies
+to imperative `ApplySchemaAsync`, which runs inline; no production module currently calls that
+API. Independent tables continue serving reads and writes. Build-time inline jobs have no user
+sessions. A configured engine `LockTimeout` bounds Build and `ApplySchemaAsync` reservation;
+zero waits without a timeout. Cancellation/timeout of an imperative job clears its Provisioning
+report because the caller receives the exception. Deferred failures remain sticky until a
+successful apply/skip/verify clears them.
 
-Provisioning refuses a table or index that appears after planning, even when its
-generated CREATE uses `IF NOT EXISTS`: an operation that created nothing must not
-enter the compensation list and later delete an independently created object.
-Ordinary ad-hoc `IF NOT EXISTS` keeps its no-op behavior.
-On a later failure, completed reversible steps run their compensating requests
-in reverse order and the applied-schema marker remains unchanged. The marker is
-written only after all steps succeed, and a repeated apply is a no-op only when
-the stored hash and DDL generation match the declaration and current catalog. Full atomicity
-for a destructive multi-statement migration is deliberately not claimed: the
-current catalog has no transaction spanning DDL statements, and irreversible
-data loss cannot be compensated. That kernel seam is recorded as the remaining
-gap rather than hidden behind the content hash.
+New-table-only jobs reserve synthetic `Object(0)`. Admission to a pending new name rendezvous
+on that reservation using the live transaction owner for deadlock detection. Since zero is not
+a data identity, its IS grant is released after admission even in a user transaction; it cannot
+block the next unrelated new-table-only job until user commit. Positive table grants retain
+their ordinary transaction lifetime. The optional `ddlLockOwner` schema-session argument remains
+a test seam for parity/cost baselines and adjacent-FK lock probes that prehold X under the
+same owner used by real statement DDL (SqlReferenceLockTests).
+
+Publication checks namespace collisions and commits the complete prepared target and marker
+once. Failure discards unpublished work. Ordinary ad-hoc `IF NOT EXISTS` retains its no-op
+behavior. There is no production per-step migration executor or reverse compensation.
+
+For populated tables, R means a plain reader and W a writer on a touched table. Cheap steps in
+a plan with any worker work retain their reservation for that whole job as well.
+
+| Step kind | Default Build, 49a (pre-A5) | Default Build, SQ-A6 | ApplySchemaAsync, base | ApplySchemaAsync, SQ-A6 |
+|---|---|---|---|---|
+| Nullable append, DROP COLUMN, VARCHAR/DECIMAL widening, alias, DROP CHECK/FK, nullability relax | Inline O(1); no sessions | Inline keep; no sessions | X from step to apply end; R free, W waits | X on all touched tables before intent; R/W wait through cleanup |
+| Same cheap step with worker work on another table | Published in Build; R/W then serve | Kept unpublished; R/W wait for the whole worker job | No deferral | R/W wait for the whole inline job |
+| SET/DROP DEFAULT (destructive opt-in required) | Refused CS03105 | Inline keep; no sessions | Refused CS03105 | Short X; R/W wait |
+| SET NOT NULL, DECIMAL/VARBINARY tightening, ADD CHECK, required/checked-domain append | Worker X; R/W wait for scan | Worker X; R/W wait; coerces only changed columns/domains | X; R free, W waits | R/W wait for the whole scan |
+| ADD FK validation | Worker; child/parent X; R/W wait | Same | X; R free, W waits | R/W wait for validation |
+| ADD INDEX | Worker X; R/W wait for build | Same; alternate tree on existing heap | X; R free, W waits | R/W wait for build |
+| Alternate-owned DROP INDEX | Not present | Inline keep; retires separate owner | O(1); R free | Short X; R/W wait |
+| Heap-owned DROP INDEX; DROP COLUMN with its declared index | Inline keep; pages stranded | Inline keep; pages stranded until heap retirement or IX-S1 (#1808) | O(1); R free | Short X; R/W wait; no table copy |
+| Same-name heap-owned index replacement | Per-step drop/build | Worker replacement; R/W wait | Per-step X; R free | Full replacement; R/W wait |
+| TYPE rewrite or another required physical replacement | TYPE joint | Worker for every populated replacement unless RunMigrationsInline | Joint; R already waits | R/W wait through copy/publication/cleanup |
 
 ### Provisioning wait inventory (B2 second review, #1355)
 
@@ -4021,22 +4041,21 @@ The provisioner's semaphore and the coordinator's physical statement gate have d
 lifetimes. Serializing whole migrations with a waiting semaphore hid a cycle: apply A held
 `a_first` and waited for transaction T's `z_existing`, while T's owner awaited apply B, which
 waited for A's semaphore. Zero-timeout admission removes that edge, including after transfer to
-the worker and throughout compensation. `SqlProvisioningAdmissionTests` observes A's actual
+the worker and throughout publication/discard. `SqlProvisioningAdmissionTests` observes A's actual
 lock-wait event before B, proves the worker holds its reserved table, and repeatedly checks
 immediate refusal for at least 150 ms and ten attempts, with a ten-second ceiling. T commits
 before A or the paused worker finishes; both migrations then converge and T's row survives.
 
 Every synchronization wait reached by these paths has the following owner and termination rule:
 
-| Wait or retry | Apply, worker and compensation rule |
+| Wait or retry | Apply and worker rule |
 |---|---|
-| Provisioner semaphore | Apply and Verify use `WaitAsync(0, token)` and refuse contention. The worker inherits ownership and never reacquires it. Compensation stays inside its owner's reservation. |
-| DDL admission monitor | Its critical section only checks/updates the schema name and statement count. Ownership contention throws immediately. Inline apply keeps the apply lease through compensation and cleanup; the worker never requests it. A deferred step waits cancellably for a definition metadata lease to clear, without failing the migration. Definition DDL never waits for transaction locks while holding that lease. |
-| Table, referenced-parent, row and index-key locks | Real waits use `LockManager.AcquireAsync` with a live transaction sequence, so the wait-for graph and cycle detector see them. Apply keeps a read-only owner across its self-committing DDL. Handoff reserves pending tables and FK parents in object-id order before publication; the worker reuses that owner. Caller/worker cancellation and database-offline abandonment also end waits. |
-| Coordinator statement gate | Acquired after transaction-lock pre-acquisition, with cancellation. Its holder performs one physical bracket; the lock manager rejects a request that would wait while that gate is held. Worker index population releases it after each batch of at most 64 versions. Table reclamation takes the same gate for batches of at most 32 retired pages, then releases it before awaiting commit durability. Other inline data work can scale with table size; the gate is not a wall-clock deadline. |
+| Provisioner semaphore | Apply and Verify use `WaitAsync(0, token)` and refuse contention. The worker inherits ownership and never reacquires it. Publication/discard stays inside its owner's reservation. |
+| DDL admission monitor | Its critical section only checks/updates the schema name and statement count. Ownership contention throws immediately. Apply keeps admission through publication/discard and cleanup; metadata admission transfers with the worker reservation. Definition DDL never waits for transaction locks while holding that lease. |
+| Table, referenced-parent, row and index-key locks | Real waits use `LockManager.AcquireAsync` with a live transaction sequence, so the wait-for graph and cycle detector see them. Apply keeps one read-only reservation owner through the joint job; configured LockTimeout bounds reservation acquisition. Handoff reserves pending tables and FK parents in object-id order before publication; the worker reuses that owner. Caller/worker cancellation and database-offline abandonment also end waits. |
+| Coordinator statement gate | Acquired after transaction-lock pre-acquisition, with cancellation. Its holder performs one physical bracket; the lock manager rejects a request that would wait while that gate is held. Worker index population releases it after each batch of at most 64 versions. Table reclamation takes the same gate for batches of at most 32 retired pages, then releases it before awaiting commit durability. RunMigrationsInline and imperative copy work can scale with table size; the gate is not a wall-clock deadline. |
 | Catalog, index and storage metadata/page monitors; journal durability | Internal critical sections perform finite local work and do not await SQL transaction locks. Physical page ownership conflicts fail immediately. Group commit waits at most its configured batching window before flushing itself; journal durability failures take the database offline. Synchronous filesystem I/O has no hard completion deadline, so cancellation does not promise an OS-I/O timeout. |
-| Final worker marker retry | An unrelated DDL generation change retries the optimistic comparison/save, checking worker cancellation each iteration. It never waits for the DDL interlock while holding table reservations. Sustained unrelated DDL can delay convergence until cancellation. |
-| Compensation and reservation rollback | Compensation traverses the finite completed-step list in reverse, with `CancellationToken.None` so caller cancellation cannot interrupt cleanup. It retains the live lock owner, or creates a fresh one if handoff already ended that owner. Any reacquisition is still a lock-manager wait, detectable and offline-abandonable, with no extra semaphore/DDL lease wait. The read-only reservation has no row versions to undo; statement cleanup drains its admitted physical work before rollback. |
+| Publication and reservation rollback | Publication validates the expected catalog under its monitor and commits once. Discard uses CancellationToken.None to finish cleanup, then rolls back the read-only reservation. It never reacquires another lock owner or definition lease. |
 | Worker build/queue triggers and stop join | `_ready` and `_signal` observe engine cancellation; build completion needs no lock held by the worker. Database disposal cancels the migration, executes an unclaimed queued migration's cleanup or joins the claimed migration's completion before closing storage. The join inherits the cleanup/I/O limits above. |
 
 PostgreSQL makes the same distinction between internal lightweight locks without deadlock
@@ -7923,8 +7942,7 @@ A listener attached after entry can see a failure without an unmatched Stop.
 Failures carry a code assigned at the known operation boundary and an exception type, never
 exception text, SQL, literals or values. Position zero denotes validation, planning, handoff or
 finalization rather than a DDL step; `Unknown` with an empty code is possible for a listener
-attached after an unclassified operation began. An inline step reports the original exception
-under compensation's wrapper. Failure capture never writes from an exception filter; the
+attached after an unclassified operation began. Joint failure events report the inner cause's exception type rather than the migration wrapper. Failure capture never writes from an exception filter; the
 finally reports after inline table-lock cleanup and DDL lease disposal, while admission is still
 reserved. Synchronous listeners must not block waiting for that same admission reservation.
 
@@ -8877,12 +8895,12 @@ through copy checkpoints and cleanup.
 Every compiled-schema apply containing a physical TYPE rewrite uses one joint executor:
 empty-table Build, RunMigrationsInline, ApplySchemaAsync and populated-table worker work.
 Every deferred migration also uses this executor (#1778, SQ-A5); single-statement TYPE retains SQ-A2.
-Non-TYPE inline applications keep the per-step executor until SQ-A6.
+Non-TYPE inline applications use that same joint executor (#1778, SQ-A6).
 Every VARCHAR narrowing can trim assignment values and uses
 TYPE, even if the current values already fit; CHAR width changes also require a rewrite.
-This classification reads metadata only. Without a TYPE rewrite anywhere in the plan, a
-changed default retains the base generator's CS03105 refusal before intent save. A joint
-plan carries every final default, including changes to columns with no TYPE change.
+This classification reads metadata only. Default-only changes publish jointly with destructive
+opt-in, including SET and DROP DEFAULT; without that opt-in the planner refuses CS03105.
+A joint plan carries every final default, including changes to columns with no TYPE change.
 The generator lowers type, default and nullability changes separately and never advertises
 a reverse TYPE statement as compensation. Same-name compiled domains are diffed through their
 effective storage facets so their referring columns cannot be skipped.
@@ -8908,14 +8926,14 @@ the dialect and does not enter this namespace. Planning checks all table names a
 views and sequences, refusing CS03105 before intent save; publication rechecks that namespace
 under the catalog monitor before its commit, using the same collision rules as catalog load,
 excluding permanently abandoned owned sequences. Those surrender their names in the joint
-publication transaction, as CREATE TABLE does; planning also skips them on the 49a path.
+publication transaction, as CREATE TABLE does; planning also skips them in ordinary table creation.
 Implicit CREATE TABLE / ADD COLUMN identity-sequence candidates skip pending joint table names,
 including suffixed candidates. PostgreSQL similarly checks its shared relation
 namespace before creation (src/backend/catalog/heap.c:1191-1198) and rename
 (src/backend/commands/tablecmds.c:4362-4367); SQL retains its own table/view/sequence namespace.
 Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 through both the thrown
-diagnostic and Provisioning before an intent is saved. A reservation timeout uses CS03402 in
-both places, retaining its lock-manager cause rather than throwing an unrelated timeout code.
+diagnostic and Provisioning before an intent is saved. A reservation timeout throws CS03402 with its lock-manager cause. Imperative interruption clears
+Provisioning; a deferred job's failure remains sticky.
 
 Space admission has two phases. Before saving kind 9, Build checks only
 F = 1 MiB + (ceil(I / 3072) + 4) * (5*B + 168), where I is the UTF-8 byte length of
@@ -9045,8 +9063,8 @@ U=32*2*(B+46)+152=527384 bytes, independent of O, poll cadence and refused attem
 W=min(P*(B+46)+152*(ceil(P/32)+O), C+U), or the whole first term if C=0.
 The 152-byte framing allowance includes the checkpoint record's 38-byte base and the bracket's
 38-byte Begin and Commit frames; an active-writer list consumes the other-writer margin below.
-Let K=BufferPoolCapacity+1 MiB on strategies whose data-file extensions can be sparse,
-and K=0 otherwise. The file strategy conservatively uses sparse growth on non-Windows platforms.
+Let K=BufferPoolCapacity+1 MiB only for jobs that allocate pages on strategies whose data-file
+extensions can be sparse, and K=0 otherwise. The file strategy conservatively uses sparse growth on non-Windows platforms.
 On Windows it decides per database data file and its containing directory: COMPRESSED,
 SPARSE_FILE or INTEGRITY_STREAM on either, a UNC path (including extended UNC and \\wsl$),
 or a remote/network volume counts as sparse. The volume is resolved from the file's actual
@@ -9064,7 +9082,7 @@ The publication bound V is F plus (old/new kind-6 chunks + catalog record bound)
 The record bound includes table/index descriptions, registrations, dependent views, old and
 new owned sequences, retirement intents and catalog counters. Declaration and metadata
 supply these counts, with one full page per record. Admission requires
-N=R+J+ceil((R+J)/4)+V+E. Before every root/copy bracket the watchdog requires
+N=R+J+ceil((R+J)/4)+V+E. A zero-operation job uses N=F alone, including each watchdog check. Before every root/copy bracket the watchdog requires
 D+E, where D=(A-min(A,FreePageCount))*B+touches*2(B+46)+152, plus copy-owned
 unflushed allocation bytes only for sparse data growth, capped at the data pool capacity because eviction or an engine
 checkpoint may already have flushed earlier allocations. It rechecks under the apply gate before the first mutation.
@@ -9197,7 +9215,8 @@ append (including frozen immutable defaults and checked domains), logical non-id
 DROP COLUMN, VARCHAR widening/unbounded length, same-scale DECIMAL precision widening or
 validation-only tightening, declaration/alias changes, nullability and insert-default changes
 can keep the heap (#1778, SQ-A6). Native/domain/scale changes that require conversion, CHAR
-repadding, VARCHAR narrowing, column reorder and primary-key changes still rewrite. A stored primary-key tree is
+repadding and VARCHAR narrowing still rewrite. Column reorder and primary-key changes require
+another TYPE rewrite in the plan; alone they are refused CS03105 by script generation. A stored primary-key tree is
 identified by its primary-key marker and columns; joint planning inherits its generated name
 across both keep and rewrite. A new joint table uses the per-step constraint definition and
 ordinal to generate that same name. TABLE_CONSTRAINTS, violation messages and ON CONFLICT
@@ -9207,10 +9226,12 @@ unless the declaration has that index name or the plan drops it. A declared name
 a script claim, including a stale receipt. Publication refuses duplicate index names with
 CS05060 before opening its catalog transaction. Dropping a preserved index dependency column
 refuses before intent save with CS03105, naming the blocking index through CS03056 (#1821).
-Dropping or replacing any
-heap-owned tree also forces RewriteOwner so its pages are reclaimed. Drops and replacements
-of alternate trees can keep the heap because kind 14 reclaims their separate owners. General
-heap-owned DROP INDEX page reclamation remains #1808. Kind 9 records Joint/KeepOwner or
+Dropping a heap-owned tree without a same-name replacement keeps the heap. Its pages remain
+on that owner and are reclaimed when the table retires (DROP TABLE or a later TYPE rewrite),
+and by IX-S1 (#1808) once indexes have their own pages. This is the owner-directed exception to
+SQ-A4's rewrite-for-reclamation rule (#1778 review fix). A same-name heap-owned replacement
+still forces RewriteOwner. Alternate-tree drops/replacements can keep the heap; kind 14
+reclaims their separate owners. Kind 9 records Joint/KeepOwner or
 Joint/RewriteOwner for each existing target. Empty Build, RunMigrationsInline, ApplySchemaAsync
 and the worker use this same metadata classification. The joint X-lock protocol is unchanged:
 owned sequences, then every touched table, in ascending identity order, through publication.
@@ -9318,8 +9339,8 @@ Before any inline DDL commits, the provisioner classifies the complete rendered 
 49a data-scaling step would defer, the entire plan goes to joint preparation: indexes, CHECK,
 UNIQUE, FK and NOT NULL validation, bounded facet changes and required/domain column backfills.
 Cheap additions, drops and other steps in that plan remain unpublished too. Additive index
-changes and changes to alternate trees keep their heaps using SQ-A4; dropping or replacing a
-heap-owned tree rewrites its table until #1808. One catalog commit publishes every change and
+changes and changes to alternate trees keep their heaps using SQ-A4; dropping a
+heap-owned tree keeps its pages until table retirement or IX-S1 (#1808); a same-name replacement still rewrites. One catalog commit publishes every change and
 the applied marker.
 RunMigrationsInline, empty-table Build and ApplySchemaAsync use the same joint executor inline
 (#1778, SQ-A6). Default-only changes publish jointly, including SET and DROP DEFAULT.
@@ -9382,8 +9403,8 @@ publication writes 202; both rewrite zero rows and decode 65,536 versions. Colum
 primary-key tables with three columns measure 227 to 228 pages; adding a new keyed table in
 that plan measures 228 to 230. At the measured 64 MiB engine budget, the ten-percent page-write
 bound covers additive index builds, including plans that add a table. Page-write costs for
-changes to alternate trees remain unmeasured. The bound excludes drops or replacements of
-heap-owned trees until #1808. Shuffled-key measurements
+changes to alternate trees remain unmeasured. Heap-owned drops keep the heap with zero row rewrites; the bound excludes same-name heap-owned
+replacements until #1808. Shuffled-key measurements
 count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
 already completed by the engine must not be followed by a redundant forced copy checkpoint.
 
@@ -9426,8 +9447,9 @@ Nullable checked-domain missing values validate once; only an invalid missing va
 emptiness probe. An empty or fully tombstoned table retains 49a's exception for that missing value. NOT NULL, new CHECKs and tighter precision use validation scans, with one bound
 table and evaluator per scan. Metadata-only admission visits no heap rows or retained trees;
 JointSpace still supplies the metadata floor, publication bound, engine reserve and watchdog.
-Dropping/replacing a heap-owned tree retains the rewrite until #1808 separates its ownership;
-alternate-tree drops and constraint removal keep the heap. Script-index preservation and the
+Dropping a heap-owned tree without replacement keeps the heap and strands its pages until
+the table retires, and IX-S1 (#1808) will reclaim each index separately. Same-name heap-owned
+replacement retains the rewrite; alternate-tree drops and constraint removal keep the heap. Script-index preservation and the
 existing declared-name precedence remain unchanged; promotion policy is not changed here.
 
 No new durable boundary is introduced. Inline/default/kept-layout crash images cover every
@@ -9887,10 +9909,9 @@ recognizes the old shape to refuse it; it does not load an older catalog. A curr
 malformed or ambiguous marker, duplicate counter or unknown record kind preserves
 the original catalog error; successful opens require no additional traversal.
 
-The retained inline per-step path has no transaction across provisioning statements. A crash after a committed step
-leaves the previous recorded generation behind the live counter. The SQL provisioner
-then takes a complete snapshot of owned objects and plans only the remaining work;
-the state is recorded last. The catalog keeps types and their bounds, domain names,
+Every typed apply prepares unpublished work and commits the complete target with its marker.
+A crash before publication leaves the prior schema; recovery decides any unconfirmed commit.
+An unrelated ad-hoc DDL generation change reconstructs owned objects and reconciles jointly. The catalog keeps types and their bounds, domain names,
 nullability, canonical defaults, primary keys, unique and foreign-key constraints,
 checks and indexes so that reconciliation can represent each provisionable kind.
 Engine-registered domains remain code and are represented by their column references.
@@ -10106,9 +10127,9 @@ Dropping a table or column removes its owned sequences in the catalog publicatio
 
 - Permissions remain a future SQL engine feature (#177). Virtual system views are engine
   projections of this catalog and require no view records here.
-- Multi-statement DDL atomicity (see self-committing DDL above). The migration
-  layer compensates completed reversible statements on failure; an MVCC bracket
-  spanning catalog and data DDL requires a future catalog batch-transaction seam.
+- Ordinary multi-statement session DDL and declared scripts retain per-statement commits.
+  Typed migrations instead prepare unpublished owners/descriptions and publish jointly; an MVCC
+  bracket spanning arbitrary session catalog/data DDL remains a future seam.
 
 #### Catalog: AOT posture
 

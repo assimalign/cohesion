@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanExecutor
 {
     // Metadata only. This runs in Build/open: never enumerate stored rows here.
     internal SqlJointMigrationPlan PlanJointMigration(SqlCompiledSchema schema, SqlMigrationScript script,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool forceRewrite = false)
     {
         var names = script.Plan.Operations.Where(operation => operation.Kind is not (SqlSchemaMigrationOperationKind.AddDomain or SqlSchemaMigrationOperationKind.DropDomain))
             .Select(operation => operation.ParentName ?? operation.ObjectName)
@@ -129,6 +129,10 @@ internal sealed partial class SqlPlanExecutor
             var evaluator = ExecutionEvaluator(null, cancellationToken);
             for (int ordinal = 0; ordinal < table.Columns.Count; ordinal++)
             {
+                var column = table.Columns[ordinal];
+                if (old?.FindColumn(column.Name) is { } previous && previous.DefaultLiteral == column.DefaultLiteral &&
+                    previous.Type.Equals(column.Type) && previous.IsNullable == column.IsNullable &&
+                    string.Equals(previous.DomainName, column.DomainName, StringComparison.OrdinalIgnoreCase)) { continue; }
                 if (!(old is not null && table.Columns[ordinal].IsNullable && old.FindColumn(table.Columns[ordinal].Name) is null) &&
                     bound.DefaultValues[ordinal] is SqlBoundConstant constant && bound.DomainAt(ordinal) is { } domain)
                 {
@@ -149,11 +153,11 @@ internal sealed partial class SqlPlanExecutor
                 tableIndexes = tableIndexes.OrderBy(index => order.GetValueOrDefault(index.Name, int.MaxValue)).ToArray();
             }
             // A keep promises identical stored values at identical physical ordinals.
-            // Dropped components remain in old rows until the joint commit; appends
+            // Dropped components remain on kept owners; publication hides them. Appends
             // use frozen missing literals. X reservations exclude writers throughout
             // validation/publication, and stale writers retry against the new layout.
             var oldSurvivors = old?.Columns.Where(column => table.FindColumn(column.Name) is not null).ToArray() ?? [];
-            bool keepsOwner = old is not null && table.PrimaryKeyColumns.SequenceEqual(old.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase) &&
+            bool keepsOwner = !forceRewrite && old is not null && table.PrimaryKeyColumns.SequenceEqual(old.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase) &&
                 table.Columns.Take(oldSurvivors.Length).Select(column => column.Name)
                     .SequenceEqual(oldSurvivors.Select(column => column.Name), StringComparer.OrdinalIgnoreCase) &&
                 table.Columns.Skip(oldSurvivors.Length).All(column => old.FindColumn(column.Name) is null && column.Identity is null) &&
@@ -164,6 +168,7 @@ internal sealed partial class SqlPlanExecutor
                         previous.Collation == column.Collation && previous.Identity == column.Identity;
                 }) &&
                 image.GetIndexes(old.ObjectId).Where(index => !SameJointIndex(index, tableIndexes)).All(index =>
+                    !tableIndexes.Any(replacement => replacement.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase)) ||
                     !registrations.Any(registration => registration.ObjectId == old.ObjectId &&
                         registration.Definition.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase) &&
                         _indexManager.PageOwner(registration) == old.ObjectId));
@@ -242,16 +247,20 @@ internal sealed partial class SqlPlanExecutor
             {
                 var parent = all.FirstOrDefault(table => table.Schema.Equals(reference.ReferencedSchema, StringComparison.OrdinalIgnoreCase) && table.Name.Equals(reference.ReferencedTable, StringComparison.OrdinalIgnoreCase));
                 if (parent is null) { throw new SqlExecutionException(SqlExecutionException.DependentObjectsCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableForeignKeyDependent, reference.ReferencedTable)); }
-                _ = new SqlBoundReference(child, reference, parent, _definitions);
                 for (int key = 0; key < reference.Columns.Count; key++)
                 {
-                    if (child.FindColumn(reference.Columns[key])!.Type.Type != parent.FindColumn(reference.ReferencedColumns![key])!.Type.Type)
+                    var childColumn = child.FindColumn(reference.Columns[key]);
+                    var parentColumn = parent.FindColumn(reference.ReferencedColumns![key]);
+                    if (childColumn is null || parentColumn is null)
+                    { throw new SqlExecutionException(SqlExecutionException.DependentObjectsCode,
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogDropColumnCoreAsyncSqlCatalog2, reference.ReferencedColumns![key], reference.Name)); }
+                    if (childColumn.Type.Type != parentColumn.Type.Type)
                     { throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyColumnTypes, reference.Name)); }
-                    if (child.FindColumn(reference.Columns[key])!.Type.Type is DatabaseType.String or DatabaseType.Character &&
-                        (child.FindColumn(reference.Columns[key])!.Collation ?? _catalog.DefaultCollation) !=
-                        (parent.FindColumn(reference.ReferencedColumns![key])!.Collation ?? _catalog.DefaultCollation))
+                    if (childColumn.Type.Type is DatabaseType.String or DatabaseType.Character &&
+                        (childColumn.Collation ?? _catalog.DefaultCollation) != (parentColumn.Collation ?? _catalog.DefaultCollation))
                     { throw new SqlExecutionException(SqlExecutionException.CollationMismatchCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyColumnCollations, reference.Name)); }
                 }
+                _ = new SqlBoundReference(child, reference, parent, _definitions);
                 if (!allIndexes.Any(index => index.TableObjectId == parent.ObjectId && index.IsUnique && index.Predicate is null &&
                     SameConstraintColumns(index.ColumnNames, reference.ReferencedColumns!)))
                 { throw new SqlExecutionException(SqlExecutionException.InvalidForeignKeyCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyUniqueRequired, reference.Name)); }
@@ -301,11 +310,14 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
                 if (!NeedsJointRowValidation(item.Previous!, item.Shape)) { continue; }
+                var changedColumns = item.Shape.Columns.Select((column, ordinal) => (column, ordinal))
+                    .Where(pair => NeedsJointColumnValidation(item.Previous!, pair.column)).Select(pair => pair.ordinal).ToArray();
+                var domainColumns = changedColumns.Where(ordinal => item.Shape.Columns[ordinal].DomainName is not null).ToArray();
                 long processed = 0;
                 statement.ProvisioningProgress?.Invoke(0, null);
                 foreach (var row in Scan(item.Shape, statement, cancellationToken, ConstraintCurrentSnapshot(statement)))
                 {
-                    for (int ordinal = 0; ordinal < row.Values.Length; ordinal++)
+                    foreach (int ordinal in changedColumns)
                     {
                         var column = item.Shape.Columns[ordinal];
                         object? value = row.Values[ordinal];
@@ -314,7 +326,7 @@ internal sealed partial class SqlPlanExecutor
                         { throw new SqlExecutionException(SqlExecutionException.UnsupportedCode,
                             string.Format(CultureInfo.CurrentCulture, ErrorMessages.AlterColumnRewrite, column.Name)); }
                     }
-                    CheckDomains(bound, row.Values, evaluator);
+                    CheckDomains(bound, row.Values, evaluator, domainColumns);
                     ValidateRows(item.Shape, [row.Values], statement, cancellationToken, checksOnly: true);
                     statement.ProvisioningProgress?.Invoke(++processed, null);
                 }
@@ -485,13 +497,17 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static bool NeedsJointRowValidation(SqlCatalogTable previous, SqlCatalogTable target)
-        => target.Columns.Any(column => previous.FindColumn(column.Name) is { } old
-                ? old.IsNullable && !column.IsNullable ||
-                    column.Type.MaxLength is { } length && (old.Type.MaxLength is null || length < old.Type.MaxLength) ||
-                    column.Type.Precision is { } precision && (old.Type.Precision is null || precision < old.Type.Precision)
-                : !column.IsNullable) ||
+        => target.Columns.Any(column => NeedsJointColumnValidation(previous, column)) ||
             target.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Check &&
                 !previous.Constraints.Any(old => SameJointConstraint(constraint, old)));
+
+    private static bool NeedsJointColumnValidation(SqlCatalogTable previous, SqlCatalogColumn column)
+        => previous.FindColumn(column.Name) is { } old
+            ? old.IsNullable && !column.IsNullable ||
+                column.Type.MaxLength is { } length && (old.Type.MaxLength is null || length < old.Type.MaxLength) ||
+                column.Type.Precision is { } precision && (old.Type.Precision is null || precision < old.Type.Precision) ||
+                !string.Equals(old.DomainName, column.DomainName, StringComparison.OrdinalIgnoreCase)
+            : !column.IsNullable;
 
     private bool NeedsJointReferenceValidation(SqlCatalogTable child, SqlCatalogConstraint constraint,
         SqlCatalogTable parent, IReadOnlyList<SqlCatalogIndex> descriptions)
