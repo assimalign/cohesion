@@ -107,23 +107,35 @@ public sealed partial class SqlJointTypeMigrationTests
         using var events = new EventSourceRecorder(source, EventLevel.Informational);
         int observed = 0, forced = 0, completedAtObservation = 0, injected = 0;
         bool observationWithoutCheckpoint = false;
-        long peak = 0, largestBracket = 0, last = database.DataStorage.JournalLength;
+        long peak = 0, largestBracket = 0, bracketStart = 0;
+        bool copyingBracket = false;
         storage.DurableStorageChanged = catalog =>
-        { if (!catalog) { peak = Math.Max(peak, database.DataStorage.JournalLength); } };
+        {
+            if (catalog) { return; }
+            long length = database.DataStorage.JournalLength;
+            peak = Math.Max(peak, length);
+            if (copyingBracket) { largestBracket = Math.Max(largestBracket, length - bracketStart); }
+        };
+        database.SchemaProvisioner.JointStage = stage =>
+        {
+            if (stage != "CatalogPublished") { return; }
+            storage.DurableStorageChanged?.Invoke(false);
+            storage.DurableStorageChanged = null;
+        };
         SqlPlanExecutor.RewriteStage = (stage, length) =>
         {
-            if (stage == "CopyCommitted")
+            if (stage == "CopyAllocationsCaptured")
             {
-                largestBracket = Math.Max(largestBracket, length - last);
-                last = length;
+                bracketStart = database.DataStorage.JournalLength - 38;
+                copyingBracket = true;
             }
+            if (stage == "CopyCommitted") { copyingBracket = false; }
             if (stage == "Copied" && externalCheckpoint && injected == 0 && database.DataStorage.JournalLength > 8L * 1024 * 1024)
             {
                 database.Coordinator.Checkpoint(guard.Token);
                 injected++;
-                last = database.DataStorage.JournalLength;
             }
-            if (stage == "CopyCheckpointed") { forced++; last = database.DataStorage.JournalLength; }
+            if (stage == "CopyCheckpointed") { forced++; }
             if (stage != "CopyCheckpointObserved") { return; }
             observed++;
             int completed = events.Events.Count(entry => entry.EventId == 6 && Equals(entry.Payload![0], database.DataStorage.Name.ToString()) && Equals(entry.Payload[1], "Success"));
@@ -140,6 +152,9 @@ public sealed partial class SqlJointTypeMigrationTests
             reserve.ShouldBe(keyed ? 34_703_256 : 18_886_296);
             _output.WriteLine($"Narrow rewrite: keyed={keyed}; height={height}; engine={engineCheckpoint}; injected={injected}; peak={peak}; largest bracket={largestBracket}; T+bracket={SqlSchemaProvisioner.JointCopyCheckpointBytes + largestBracket}; J={reserve}; observed={observed}; forced={forced}; engine checkpoints={events.Events.Count(entry => entry.EventId == 6 && Equals(entry.Payload![0], database.DataStorage.Name.ToString()) && Equals(entry.Payload[1], "Success"))}");
             observationWithoutCheckpoint.ShouldBeFalse();
+            peak.ShouldBeGreaterThan(0);
+            largestBracket.ShouldBeGreaterThan(0);
+            peak.ShouldBeLessThanOrEqualTo(reserve);
             if (engineCheckpoint) { observed.ShouldBeGreaterThan(0); }
             else
             {
@@ -153,6 +168,6 @@ public sealed partial class SqlJointTypeMigrationTests
             (await RowsAsync(reader, "SELECT COUNT(*) FROM items", guard.Token)).Single()[0].ShouldBe((long)rows);
             database.IsOffline.ShouldBeFalse();
         }
-        finally { SqlPlanExecutor.RewriteStage = null; storage.DurableStorageChanged = null; }
+        finally { SqlPlanExecutor.RewriteStage = null; storage.DurableStorageChanged = null; database.SchemaProvisioner.JointStage = null; }
     }
 }

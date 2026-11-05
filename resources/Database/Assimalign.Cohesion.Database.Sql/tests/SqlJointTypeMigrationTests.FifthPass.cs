@@ -221,7 +221,10 @@ public sealed partial class SqlJointTypeMigrationTests
             {
                 heapPages = database.DataStorage.GetOwnerPages(preparedOwner).Count;
                 database.Coordinator.Checkpoint(guard.Token);
-                storage.MigrationAvailableBytes = database.SchemaProvisioner.JointSpaceDiscardBytes + heapPages * Page.Size + 512 * 1024;
+                // The checkpoint flushed the heap: its pages need no pending-write
+                // allowance. Leave headroom for the smaller allocation-only bound,
+                // but refuse the next bracket's 64 existing-page touches.
+                storage.MigrationAvailableBytes = database.SchemaProvisioner.JointSpaceDiscardBytes + 512 * 1024;
             }
         };
         try

@@ -235,12 +235,24 @@ public sealed partial class SqlJointTypeMigrationTests
         database.Coordinator.Checkpoint(guard.Token);
         int checkpoints = 0, observed = 0;
         long peak = 0, largestBracket = 0, last = database.DataStorage.JournalLength;
+        storage.DurableStorageChanged = catalog =>
+        {
+            if (catalog) { return; }
+            long length = database.DataStorage.JournalLength;
+            peak = Math.Max(peak, length);
+            largestBracket = Math.Max(largestBracket, length - last);
+        };
+        database.SchemaProvisioner.JointStage = stage =>
+        {
+            if (stage != "CatalogPublished") { return; }
+            storage.DurableStorageChanged?.Invoke(false);
+            storage.DurableStorageChanged = null;
+        };
         SqlPlanExecutor.RewriteStage = (phase, bytes) =>
         {
             if (phase == "CopyCommitted")
             {
                 peak = Math.Max(peak, bytes);
-                largestBracket = Math.Max(largestBracket, bytes - last);
                 last = bytes;
             }
             if (phase == "CopyCheckpointObserved") { observed++; }
@@ -255,6 +267,8 @@ public sealed partial class SqlJointTypeMigrationTests
             // Assert: actual copy checkpoints prove the smaller threshold was used.
             _output.WriteLine($"Checkpoint fallback: disabled={disabled}; admission={database.SchemaProvisioner.JointSpaceNeed}; checkpoints={checkpoints}; observed={observed}; peak WAL={peak}; largest bracket={largestBracket}");
             checkpoints.ShouldBeGreaterThan(0);
+            peak.ShouldBeGreaterThan(0);
+            largestBracket.ShouldBeGreaterThan(0);
             database.SchemaProvisioner.JointCopyCheckpointThreshold.ShouldBe(SqlSchemaProvisioner.JointCopyCheckpointBytes);
             peak.ShouldBeLessThanOrEqualTo(SqlSchemaProvisioner.JointCopyCheckpointBytes + largestBracket);
             observed.ShouldBe(0);
@@ -263,6 +277,6 @@ public sealed partial class SqlJointTypeMigrationTests
             database.Provisioning.ShouldBeNull();
             storage.CapacityFailures.ShouldBe(0);
         }
-        finally { SqlPlanExecutor.RewriteStage = null; }
+        finally { SqlPlanExecutor.RewriteStage = null; storage.DurableStorageChanged = null; database.SchemaProvisioner.JointStage = null; }
     }
 }
