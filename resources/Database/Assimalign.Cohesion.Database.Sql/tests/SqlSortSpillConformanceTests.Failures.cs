@@ -156,7 +156,7 @@ public sealed partial class SqlSortSpillConformanceTests
         (await session.ExecuteAsync("SELECT 1")).Status.ShouldBe(DatabaseResultStatus.Success);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Spill damage: a run changed before delivery raises located CK05004 and releases its owner (#1789)")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Spill damage: a run changed after delivery starts raises located CK05004 and releases its owner (#1789)")]
     public async Task GetRowsAsync_DamagedRun_ShouldReportIntegrityAndRelease()
     {
         // Arrange
@@ -164,11 +164,15 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await Seed(session);
         await using var result = (SqlSpilledResultSet)await session.ExecuteAsync("SELECT id,k FROM t ORDER BY k");
-        var run = Runs(Sorted(result)!)[0];
-        RandomAccess.Write(Handle(run), new byte[] { 255 }, 0);
+        await using var reader = result.GetRowsAsync().GetAsyncEnumerator();
+        (await reader.MoveNextAsync()).ShouldBeTrue();
+        var run = Runs(Sorted(result)!).First(input => RandomAccess.GetLength(Handle(input)) > StorageTempSpace.PageSize);
+        // The first page is cached in each merge input; corrupt an unread page.
+        RandomAccess.Write(Handle(run), new byte[] { 255 }, StorageTempSpace.PageSize);
 
         // Act / Assert
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await Rows(result));
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            { while (await reader.MoveNextAsync()) { } });
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK05004"); failure.Diagnostics[0].Start.ShouldNotBeNull();
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         (await session.ExecuteAsync("SELECT 1")).Status.ShouldBe(DatabaseResultStatus.Success);

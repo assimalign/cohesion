@@ -85,6 +85,13 @@ public sealed partial class SqlSortSpillConformanceTests
             var result = await connection.QueryAsync("SELECT id,k FROM t ORDER BY k", cancellationToken: ceiling.Token);
             result.Count.ShouldBe(4000);
         }
+        else if (exit == 1)
+        {
+            var failure = await Should.ThrowAsync<SqlClientException>(async () =>
+                await connection.QueryAsync("SELECT id,k FROM t ORDER BY k", cancellationToken: ceiling.Token));
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK05004");
+            failure.Diagnostics[0].Start.ShouldNotBeNull(); failure.Diagnostics[0].End.ShouldNotBeNull();
+        }
         else
         {
             await Should.ThrowAsync<Exception>(async () => await connection.QueryAsync("SELECT id,k FROM t ORDER BY k", cancellationToken: ceiling.Token));
@@ -93,6 +100,7 @@ public sealed partial class SqlSortSpillConformanceTests
         while (TempBytes(engine.TempSpace!) != 0) { ceiling.Token.ThrowIfCancellationRequested(); await Task.Delay(10, ceiling.Token); }
         Files(engine).ShouldBe(0); TempBytes(engine.TempSpace!).ShouldBe(0);
         SqlSortSpillMetrics.For(serverSession.DatabaseSession!.LastStatementMetrics!).ShouldNotBeNull();
+        if (exit == 1) { (await connection.QueryAsync("SELECT 1", cancellationToken: ceiling.Token)).Count.ShouldBe(1); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Spill TCP: a reset during delivery releases temp bytes and files (#1789)")]
