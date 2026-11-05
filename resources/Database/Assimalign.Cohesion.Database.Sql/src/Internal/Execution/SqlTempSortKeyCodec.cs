@@ -12,15 +12,17 @@ internal static class SqlTempSortKeyCodec
 {
     private static readonly BigInteger[] _powersOfFive = CreatePowersOfFive();
 
-    // The caller supplies one FINAL resolved collation per column for the entire sort.
-    // A deferred ORDER BY follows the last qualifying row in SqlRowCollector: resolve that
-    // snapshot before encoding ANY keys, or refuse spill. Per-row snapshots cannot be mixed.
+    // SQ-L2b refuses to spill when any SqlBoundOrdering.Collation.IsFixed is false.
+    // The last qualifying row determines a deferred collation, after earlier rows must spill.
+    // Fixed columns use the same resolved collation for the entire sort.
     internal readonly record struct Column(bool IsDescending, bool NullsFirst, Collation Collation);
 
-    internal static bool TryEncode(ReadOnlySpan<object?> keys, ReadOnlySpan<Column> columns, out byte[] bytes)
+    // The caller retains one initially zero family per column for the whole sort, including
+    // rows buffered before the first spill. Any false result terminates encoding that sort.
+    internal static bool TryEncode(ReadOnlySpan<object?> keys, ReadOnlySpan<Column> columns, Span<byte> families, out byte[] bytes)
     {
         bytes = [];
-        if (keys.Length != columns.Length) { return false; }
+        if (keys.Length != columns.Length || families.Length != columns.Length) { return false; }
         var writer = new ArrayBufferWriter<byte>();
         int[]? rented = null;
         Span<int> ends = keys.Length <= 64 ? stackalloc int[keys.Length] : (rented = ArrayPool<int>.Shared.Rent(keys.Length));
@@ -29,10 +31,12 @@ internal static class SqlTempSortKeyCodec
             for (int i = 0; i < keys.Length; i++)
             {
                 var column = columns[i];
-                if (column.Collation is null || !column.Collation.IsIndexBacked) { return false; }
                 if (keys[i] is null) { Append(writer, column.NullsFirst ? (byte)0 : (byte)255); }
                 else
                 {
+                    byte family = FamilyOf(keys[i]!);
+                    if (family == 0 || families[i] != 0 && families[i] != family) { return false; }
+                    families[i] = family;
                     // NULL placement is independent of DESC. Values start with an interior marker.
                     Append(writer, 128);
                     if (!TryAppendValue(writer, keys[i]!, column.Collation)) { return false; }
@@ -50,6 +54,26 @@ internal static class SqlTempSortKeyCodec
         }
         finally { if (rented is not null) { ArrayPool<int>.Shared.Return(rented); } }
     }
+
+    // Exactly the cross-type families accepted by SqlValueComparer.Compare. Raw parameter
+    // primitives are separate: its numeric path recognizes only signed SQL numerics.
+    private static byte FamilyOf(object value) => value switch
+    {
+        sbyte or short or int or long or float or double or decimal => 1,
+        string or SqlCharacter => 2,
+        DateOnly or DateTime or DateTimeOffset => 3,
+        byte[] => 4,
+        bool => 5,
+        TimeOnly => 6,
+        TimeSpan => 7,
+        Guid => 8,
+        byte => 9,
+        ushort => 10,
+        uint => 11,
+        ulong => 12,
+        char => 13,
+        _ => 0,
+    };
 
     private static bool TryAppendValue(ArrayBufferWriter<byte> writer, object value, Collation collation)
     {
@@ -80,6 +104,7 @@ internal static class SqlTempSortKeyCodec
 
     private static bool TryAppendText(ArrayBufferWriter<byte> writer, string text, Collation collation)
     {
+        if (collation is null || !collation.IsIndexBacked) { return false; }
         // The row codec preserves arbitrary UTF-16. The comparator and stable collations
         // reject malformed UTF-16; never replace surrogates to manufacture a sortable key.
         ReadOnlySpan<char> remaining = text;

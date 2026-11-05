@@ -1,6 +1,9 @@
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Unicode;
 
 using Assimalign.Cohesion.Database.Types;
 
@@ -9,9 +12,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>Private, versioned output tuples; representation is independent of sort identity.</summary>
 internal static class SqlTempRowCodec
 {
-    private const byte version = 1;
+    private const byte version = 2;
     // Parameters can also deliver these CLR primitives without SqlValue coercion.
     private const byte byteTag = 20, ushortTag = 21, uintTag = 22, ulongTag = 23, charTag = 24;
+
+    private const byte utf8StringTag = 25, utf8CharacterTag = 26;
 
     internal static bool TryGetLength(ReadOnlySpan<object?> row, out int length)
     {
@@ -27,8 +32,8 @@ internal static class SqlTempRowCodec
                 long or ulong or double or TimeOnly or DateTime or TimeSpan => 8,
                 DateTimeOffset => 10,
                 decimal or Guid => 16,
-                string text when text.Length <= (int.MaxValue - 4) / 2 => 4 + text.Length * 2,
-                SqlCharacter character when character.Value.Length <= (int.MaxValue - 4) / 2 => 4 + character.Value.Length * 2,
+                string text => TextLength(text),
+                SqlCharacter character => TextLength(character.Value),
                 byte[] bytes when bytes.Length <= int.MaxValue - 4 => 4 + bytes.Length,
                 _ => -1,
             };
@@ -103,16 +108,50 @@ internal static class SqlTempRowCodec
                 case byte[] item:
                     BinaryPrimitives.WriteInt32LittleEndian(target, item.Length);
                     item.CopyTo(target[4..]); offset += 4 + item.Length; break;
-                case string item: offset += WriteText(item, target); break;
-                case SqlCharacter item: offset += WriteText(item.Value, target); break;
+                case string item:
+                    int textBytes = WriteText(item, target, out bool utf8Text);
+                    if (utf8Text) { destination[offset - 1] = utf8StringTag; }
+                    offset += textBytes; break;
+                case SqlCharacter item:
+                    int characterBytes = WriteText(item.Value, target, out bool utf8Character);
+                    if (utf8Character) { destination[offset - 1] = utf8CharacterTag; }
+                    offset += characterBytes; break;
             }
         }
         written = offset;
         return true;
     }
 
-    private static int WriteText(string text, Span<byte> target)
+    private static bool TryGetUtf8Length(string text, out int length)
     {
+        long size = 0;
+        ReadOnlySpan<char> remaining = text;
+        while (!remaining.IsEmpty)
+        {
+            if (Rune.DecodeFromUtf16(remaining, out var rune, out int consumed) != OperationStatus.Done)
+            { length = 0; return false; }
+            size += rune.Utf8SequenceLength;
+            remaining = remaining[consumed..];
+        }
+        length = size <= int.MaxValue - 4 ? (int)size : -1;
+        return true;
+    }
+
+    private static int TextLength(string text)
+    {
+        if (TryGetUtf8Length(text, out int length)) { return length < 0 ? -1 : 4 + length; }
+        return text.Length <= (int.MaxValue - 4) / 2 ? 4 + text.Length * 2 : -1;
+    }
+
+    private static int WriteText(string text, Span<byte> target, out bool utf8)
+    {
+        utf8 = TryGetUtf8Length(text, out _);
+        if (utf8)
+        {
+            Utf8.FromUtf16(text, target[4..], out _, out int written, replaceInvalidSequences: false);
+            BinaryPrimitives.WriteInt32LittleEndian(target, written);
+            return 4 + written;
+        }
         BinaryPrimitives.WriteInt32LittleEndian(target, text.Length * 2);
         for (int i = 0; i < text.Length; i++) { BinaryPrimitives.WriteUInt16LittleEndian(target[(4 + i * 2)..], text[i]); }
         return 4 + text.Length * 2;
@@ -132,27 +171,47 @@ internal static class SqlTempRowCodec
             byte tag = bytes[offset++];
             int size = tag switch
             {
-                0 => 0, 1 or 2 or byteTag => 1, 3 or ushortTag or charTag => 2,
-                4 or 6 or 11 or uintTag => 4, 5 or 7 or 12 or 13 or 15 or ulongTag => 8,
-                14 => 10, 8 or 16 => 16, 9 or 10 or 19 => -1, _ => -2,
+                (byte)DatabaseType.Null => 0,
+                (byte)DatabaseType.Boolean or (byte)DatabaseType.Int8 or byteTag => 1,
+                (byte)DatabaseType.Int16 or ushortTag or charTag => 2,
+                (byte)DatabaseType.Int32 or (byte)DatabaseType.Float32 or (byte)DatabaseType.Date or uintTag => 4,
+                (byte)DatabaseType.Int64 or (byte)DatabaseType.Float64 or (byte)DatabaseType.Time
+                    or (byte)DatabaseType.DateTime or (byte)DatabaseType.TimeSpan or ulongTag => 8,
+                (byte)DatabaseType.DateTimeOffset => 10,
+                (byte)DatabaseType.Decimal or (byte)DatabaseType.Guid => 16,
+                (byte)DatabaseType.String or (byte)DatabaseType.Binary or (byte)DatabaseType.Character
+                    or utf8StringTag or utf8CharacterTag => -1,
+                _ => -2,
             };
             if (size == -2) { return false; }
             if (size == -1)
             {
                 if (bytes.Length - offset < 4) { return false; }
                 size = BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..]); offset += 4;
-                if (size < 0 || size > bytes.Length - offset || tag != 10 && (size & 1) != 0) { return false; }
-                if (tag == 10)
+                if (size < 0 || size > bytes.Length - offset || (tag is (byte)DatabaseType.String or (byte)DatabaseType.Character) && (size & 1) != 0) { return false; }
+                if (tag == (byte)DatabaseType.Binary)
                 {
                     var binary = new byte[size];
                     bytes.Slice(offset, size).CopyTo(binary); result[i] = binary;
                 }
                 else
                 {
-                    var chars = new char[size / 2];
-                    for (int j = 0; j < chars.Length; j++) { chars[j] = (char)BinaryPrimitives.ReadUInt16LittleEndian(bytes[(offset + j * 2)..]); }
-                    string text = new(chars);
-                    result[i] = tag == 19 ? new SqlCharacter(text) : text;
+                    var sourceText = bytes.Slice(offset, size);
+                    string text;
+                    if (tag is utf8StringTag or utf8CharacterTag)
+                    {
+                        if (!Utf8.IsValid(sourceText)) { return false; }
+                        text = Encoding.UTF8.GetString(sourceText);
+                    }
+                    else
+                    {
+                        text = string.Create(size / 2, sourceText, static (chars, source) =>
+                        {
+                            for (int j = 0; j < chars.Length; j++)
+                            { chars[j] = (char)BinaryPrimitives.ReadUInt16LittleEndian(source[(j * 2)..]); }
+                        });
+                    }
+                    result[i] = tag is (byte)DatabaseType.Character or utf8CharacterTag ? new SqlCharacter(text) : text;
                 }
                 offset += size; continue;
             }
@@ -160,39 +219,39 @@ internal static class SqlTempRowCodec
             var source = bytes.Slice(offset, size); offset += size;
             switch (tag)
             {
-                case 0: break;
-                case 1: if (source[0] > 1) { return false; } result[i] = source[0] != 0; break;
-                case 2: result[i] = unchecked((sbyte)source[0]); break;
-                case 3: result[i] = BinaryPrimitives.ReadInt16LittleEndian(source); break;
-                case 4: result[i] = BinaryPrimitives.ReadInt32LittleEndian(source); break;
-                case 5: result[i] = BinaryPrimitives.ReadInt64LittleEndian(source); break;
-                case 6: result[i] = BinaryPrimitives.ReadSingleLittleEndian(source); break;
-                case 7: result[i] = BinaryPrimitives.ReadDoubleLittleEndian(source); break;
-                case 8:
+                case (byte)DatabaseType.Null: break;
+                case (byte)DatabaseType.Boolean: if (source[0] > 1) { return false; } result[i] = source[0] != 0; break;
+                case (byte)DatabaseType.Int8: result[i] = unchecked((sbyte)source[0]); break;
+                case (byte)DatabaseType.Int16: result[i] = BinaryPrimitives.ReadInt16LittleEndian(source); break;
+                case (byte)DatabaseType.Int32: result[i] = BinaryPrimitives.ReadInt32LittleEndian(source); break;
+                case (byte)DatabaseType.Int64: result[i] = BinaryPrimitives.ReadInt64LittleEndian(source); break;
+                case (byte)DatabaseType.Float32: result[i] = BinaryPrimitives.ReadSingleLittleEndian(source); break;
+                case (byte)DatabaseType.Float64: result[i] = BinaryPrimitives.ReadDoubleLittleEndian(source); break;
+                case (byte)DatabaseType.Decimal:
                     int flags = BinaryPrimitives.ReadInt32LittleEndian(source[12..]);
                     if ((flags & 0x7f00ffff) != 0 || ((flags >> 16) & 255) > 28) { return false; }
                     result[i] = new decimal(BinaryPrimitives.ReadInt32LittleEndian(source), BinaryPrimitives.ReadInt32LittleEndian(source[4..]),
                         BinaryPrimitives.ReadInt32LittleEndian(source[8..]), flags < 0, (byte)(flags >> 16)); break;
-                case 11:
+                case (byte)DatabaseType.Date:
                     int day = BinaryPrimitives.ReadInt32LittleEndian(source);
                     if ((uint)day > DateOnly.MaxValue.DayNumber) { return false; }
                     result[i] = DateOnly.FromDayNumber(day); break;
-                case 12:
+                case (byte)DatabaseType.Time:
                     long time = BinaryPrimitives.ReadInt64LittleEndian(source);
                     if ((ulong)time >= (ulong)TimeSpan.TicksPerDay) { return false; }
                     result[i] = new TimeOnly(time); break;
-                case 13:
+                case (byte)DatabaseType.DateTime:
                     ulong date = BinaryPrimitives.ReadUInt64LittleEndian(source);
                     if ((date & 0x3fffffffffffffff) > (ulong)DateTime.MaxValue.Ticks) { return false; }
                     result[i] = Unsafe.BitCast<ulong, DateTime>(date); break;
-                case 14:
+                case (byte)DatabaseType.DateTimeOffset:
                     long ticks = BinaryPrimitives.ReadInt64LittleEndian(source);
                     short minutes = BinaryPrimitives.ReadInt16LittleEndian(source[8..]);
                     long utc = ticks - minutes * TimeSpan.TicksPerMinute;
                     if ((ulong)ticks > (ulong)DateTime.MaxValue.Ticks || minutes is < -840 or > 840 || (ulong)utc > (ulong)DateTime.MaxValue.Ticks) { return false; }
                     result[i] = new DateTimeOffset(ticks, TimeSpan.FromMinutes(minutes)); break;
-                case 15: result[i] = new TimeSpan(BinaryPrimitives.ReadInt64LittleEndian(source)); break;
-                case 16: result[i] = new Guid(source); break;
+                case (byte)DatabaseType.TimeSpan: result[i] = new TimeSpan(BinaryPrimitives.ReadInt64LittleEndian(source)); break;
+                case (byte)DatabaseType.Guid: result[i] = new Guid(source); break;
                 case byteTag: result[i] = source[0]; break;
                 case ushortTag: result[i] = BinaryPrimitives.ReadUInt16LittleEndian(source); break;
                 case uintTag: result[i] = BinaryPrimitives.ReadUInt32LittleEndian(source); break;
