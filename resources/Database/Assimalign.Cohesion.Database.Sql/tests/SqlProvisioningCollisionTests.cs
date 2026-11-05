@@ -24,7 +24,7 @@ public sealed class SqlProvisioningCollisionTests
         var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "collisions", false, [],
             [Table("a_first"), Table("z_collision")], []);
         int completed = 0;
-        database.SchemaProvisioner.StepApplied = step =>
+        database.SchemaProvisioner.BeforeJointPublication = step =>
         {
             completed++;
             step.Operation.Kind.ShouldBe(SqlSchemaMigrationOperationKind.AddTable);
@@ -39,8 +39,8 @@ public sealed class SqlProvisioningCollisionTests
 
         // Assert: only the completed schema-owned step was compensated.
         completed.ShouldBe(1);
-        failure.Message.ShouldStartWith("CS03104:");
-        failure.InnerException.ShouldBeOfType<DatabaseObjectLockedException>();
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+        failure.InnerException!.InnerException.ShouldBeOfType<Catalog.SqlCatalogException>().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03404");
         database.Catalog.TryGetTable("dbo", "a_first", out _).ShouldBeFalse();
         database.Catalog.TryGetTable("dbo", "z_collision", out _).ShouldBeFalse();
         database.Catalog.TryGetTable("dbo", "preserved", out var preserved).ShouldBeTrue();
@@ -66,11 +66,11 @@ public sealed class SqlProvisioningCollisionTests
         await adhoc.ExecuteAsync("CREATE INDEX ix_preserved ON orders (id)", cancellationToken: CancellationToken.None);
         await adhoc.ExecuteAsync("INSERT INTO orders (id) VALUES (42)", cancellationToken: CancellationToken.None);
         int completed = 0;
-        database.SchemaProvisioner.StepApplied = step =>
+        database.SchemaProvisioner.BeforeJointPublication = step =>
         {
             completed++;
             step.Operation.Kind.ShouldBe(SqlSchemaMigrationOperationKind.AddColumn);
-            adhoc.ExecuteAsync("CREATE INDEX ix_orders_id ON orders (id)", cancellationToken: CancellationToken.None)
+            adhoc.ExecuteAsync("CREATE TABLE refused_ddl (id INT)", cancellationToken: CancellationToken.None)
                 .AsTask().GetAwaiter().GetResult();
         };
 
@@ -80,8 +80,8 @@ public sealed class SqlProvisioningCollisionTests
 
         // Assert
         completed.ShouldBe(1);
-        failure.Message.ShouldStartWith("CS03104:");
-        failure.InnerException.ShouldBeOfType<DatabaseObjectLockedException>();
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+        failure.InnerException!.InnerException.ShouldBeOfType<DatabaseObjectLockedException>();
         database.Catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         table.FindColumn("note").ShouldBeNull();
         database.Catalog.TryGetIndex(table.ObjectId, "ix_orders_id", out _).ShouldBeFalse();

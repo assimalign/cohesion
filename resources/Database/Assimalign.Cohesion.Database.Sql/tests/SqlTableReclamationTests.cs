@@ -441,7 +441,7 @@ public sealed class SqlTableReclamationTests
             engine.BeforeProvisioning = database =>
             {
                 database.TableReclamation.BeforeBatch = (_, token) => pause.Wait(token);
-                database.SchemaProvisioner.StepApplied = _ =>
+                database.SchemaProvisioner.BeforeJointPublication = _ =>
                 {
                     database.TableReclamation.RunBatch(timeout.Token);
                     database.TableReclamation.ReclaimedPages.ShouldBe(0);

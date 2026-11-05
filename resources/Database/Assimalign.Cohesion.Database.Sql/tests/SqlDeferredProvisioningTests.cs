@@ -60,7 +60,7 @@ public sealed partial class SqlDeferredProvisioningTests
             database.Catalog.TryGetTable("dbo", "items", out var items).ShouldBeTrue();
             items.FindColumn("Note").ShouldBeNull();
             var pending = database.Catalog.PendingMigration.ShouldNotBeNull();
-            pending.Steps.Select(step => step.Kind).ShouldBe(["Joint/AlterColumn", "Joint/AddColumn", "Joint/AddIndex", "Joint/AddConstraint", "Joint/RewriteOwner"]);
+            pending.Steps.Select(step => step.Kind).ShouldBe(["Joint/AlterColumn", "Joint/AddColumn", "Joint/AddIndex", "Joint/AddConstraint", "Joint/KeepOwner"]);
             pending.Steps.Select(step => step.Position).ShouldBe([1, 2, 3, 4, 5]);
             database.Provisioning.ShouldNotBeNull().IsRunning.ShouldBeTrue();
             await using var blocked = await database.CreateSessionAsync(timeout.Token);
@@ -130,8 +130,9 @@ public sealed partial class SqlDeferredProvisioningTests
         {
             engine.BeforeProvisioning = database =>
             {
-                database.SchemaProvisioner.StepApplied = _ => Interlocked.Increment(ref applied);
-                database.SchemaProvisioner.BeforeDeferredStep = (_, _) => throw new InvalidOperationException("An empty table was deferred.");
+                database.SchemaProvisioner.BeforeJointPublication = _ => Interlocked.Increment(ref applied);
+                database.SchemaProvisioner.JointStage = phase =>
+                { if (phase == "Published") { database.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1); } };
             };
             return new RecordingWorker(engine);
         });

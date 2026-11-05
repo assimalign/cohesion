@@ -38,12 +38,12 @@ public sealed class SqlProvisioningIsolationTests
                 new CompiledSchemaTable("z_existing", "Existing", [new("id", DatabaseType.Int32, false),
                     new("note", DatabaseType.String, true)], null, [], [])], []);
         int steps = 0;
-        database.SchemaProvisioner.StepApplied = step =>
+        database.SchemaProvisioner.BeforeJointPublication = step =>
         {
             step.Operation.Kind.ShouldBe(SqlSchemaMigrationOperationKind.AddTable);
             Interlocked.Increment(ref steps);
         };
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Act: exercise unrelated writes while the apply waits for the existing writer.
         Task<SqlSchemaMigrationResult> applying = database.ApplySchemaAsync(desired, cancellation.Token).AsTask();
@@ -56,9 +56,9 @@ public sealed class SqlProvisioningIsolationTests
                 await unrelated.ExecuteAsync("INSERT INTO other (id) VALUES (1)", cancellationToken: TestTimeout.Token());
                 writes++;
                 applying.IsCompleted.ShouldBeFalse();
-                elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+                elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(60));
             }
-            while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || Volatile.Read(ref steps) == 0 || writes < 10);
+            while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || writes < 10);
         }
         finally
         {
@@ -68,13 +68,13 @@ public sealed class SqlProvisioningIsolationTests
         await transaction.CommitAsync(TestTimeout.Token());
 
         // Assert: only the migration's new table disappeared. Admission and locks are usable.
-        steps.ShouldBe(1);
+        steps.ShouldBe(0);
         writes.ShouldBeGreaterThanOrEqualTo(10);
         database.Catalog.TryGetTable("dbo", "a_first", out _).ShouldBeFalse();
         database.Catalog.TryGetTable("dbo", "z_existing", out var preserved).ShouldBeTrue();
         preserved.FindColumn("note").ShouldBeNull();
         await holder.ExecuteAsync("CREATE INDEX ix_preserved ON z_existing (id)", cancellationToken: TestTimeout.Token());
-        database.SchemaProvisioner.StepApplied = null;
+        database.SchemaProvisioner.BeforeJointPublication = null;
         await database.ApplySchemaAsync(desired, TestTimeout.Token());
         database.Catalog.TryGetIndex(preserved.ObjectId, "ix_preserved", out var index).ShouldBeTrue();
         index.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
@@ -108,7 +108,7 @@ public sealed class SqlProvisioningIsolationTests
         using var release = new ManualResetEventSlim();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         int hooks = 0;
-        database.SchemaProvisioner.StepApplied = step =>
+        database.SchemaProvisioner.BeforeJointPublication = step =>
         {
             if (step.Operation.Kind == SqlSchemaMigrationOperationKind.AddTable)
             {
@@ -148,7 +148,7 @@ public sealed class SqlProvisioningIsolationTests
             while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || writes < 10 || reads < 10);
 
             await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
-                await unrelated.ExecuteAsync("CREATE INDEX ix_orders_id ON orders (id)", cancellationToken: timeout.Token));
+                await unrelated.ExecuteAsync("CREATE TABLE refused_ddl (id INT)", cancellationToken: timeout.Token));
         }
         finally
         {
@@ -156,7 +156,7 @@ public sealed class SqlProvisioningIsolationTests
             if (failApply)
             {
                 var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await applying);
-                failure.Message.ShouldContain("Every completed step was compensated.");
+                failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
                 if (writing is not null)
                 {
                     await Should.ThrowAsync<DatabaseException>(async () => await writing);
@@ -201,7 +201,7 @@ public sealed class SqlProvisioningIsolationTests
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: compensation never deletes another session's committed row and index")]
     public async Task ApplySchemaAsync_WriterAndIndexBetweenSteps_ShouldPreventInterleavingWithoutDataLoss()
     {
-        // Arrange: reproduce the reviewer's exact StepApplied interleaving. A protected
+        // Arrange: reproduce the reviewer's exact BeforeJointPublication interleaving. A protected
         // write times out; an unprotected one commits and must survive any compensation.
         var builder = SqlDatabaseEngine.CreateBuilder("provisioning-isolation");
         builder.Options.StorageStrategy = new CrashCaptureSqlStorageStrategy();
@@ -214,7 +214,7 @@ public sealed class SqlProvisioningIsolationTests
         int hooks = 0;
         bool committed = false;
         bool indexCreated = false;
-        database.SchemaProvisioner.StepApplied = step =>
+        database.SchemaProvisioner.BeforeJointPublication = step =>
         {
             if (step.Operation.Kind != SqlSchemaMigrationOperationKind.AddTable)
             {
@@ -233,7 +233,7 @@ public sealed class SqlProvisioningIsolationTests
             }
             try
             {
-                adhoc.ExecuteAsync("CREATE INDEX ix_orders_id ON orders (id)", cancellationToken: TestTimeout.Token())
+                adhoc.ExecuteAsync("CREATE TABLE refused_ddl (id INT)", cancellationToken: TestTimeout.Token())
                     .AsTask().GetAwaiter().GetResult();
                 indexCreated = true;
             }

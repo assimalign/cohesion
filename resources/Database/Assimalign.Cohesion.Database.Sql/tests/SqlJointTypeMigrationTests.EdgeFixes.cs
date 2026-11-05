@@ -17,10 +17,10 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlJointTypeMigrationTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Non-TYPE defaults: deferred Build admission refuses before saving anything")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Non-TYPE defaults: deferred Build publishes the complete target once")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ApplyAsync_NonTypeDefaultChange_ShouldRefuseBeforeIntent(bool notNull)
+    public async Task ApplyAsync_NonTypeDefaultChange_ShouldPublishJointly(bool notNull)
     {
         // Arrange: precision narrowing stays on 49a; unlike VARCHAR narrowing it never trims.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -35,22 +35,19 @@ public sealed partial class SqlJointTypeMigrationTests
         await using var session = await database.CreateSessionAsync(guard.Token);
         await session.ExecuteAsync("INSERT INTO items VALUES(1)", cancellationToken: guard.Token);
         var target = Named(Compiled(new CompiledSchemaTable("items", "row", [new("code", DatabaseType.Decimal, !notNull, Precision: 5, Scale: 0, DefaultLiteral: "2")], null, [], [])));
-        int writes = 0;
-        database.Catalog.BeforeJointDiscard = () => throw new InvalidOperationException("No joint cleanup should run");
+        ulong owner = Table(database).ObjectId;
         var before = database.Catalog.DdlGeneration;
-        // Act: this is the same deferDataScalingSteps entry used by typed Build.
-        var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
-            await database.SchemaProvisioner.ApplyAsync(target, guard.Token, deferDataScalingSteps: true));
+        // Act
+        await database.SchemaProvisioner.ApplyAsync(target, guard.Token, deferDataScalingSteps: true);
+        await WaitDoneAsync(database, guard.Token);
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03105");
         database.Catalog.PendingMigration.ShouldBeNull();
-        database.Catalog.DdlGeneration.ShouldBe(before);
-        database.Catalog.SchemaState!.ContentHash.ShouldBe(source.Hash);
+        database.Catalog.DdlGeneration.ShouldBe(before + 1);
+        database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
         database.OfflineError.ShouldBeNull();
-        database.SchemaProvisioner.StepApplied = _ => writes++;
-        (await database.SchemaProvisioner.ApplyAsync(source, guard.Token, true)).WasAlreadyApplied.ShouldBeTrue();
-        writes.ShouldBe(0);
-        (await RowsAsync(session, "SELECT code FROM items", guard.Token)).Single()[0].ShouldBe(1m);
+        Table(database).ObjectId.ShouldBe(owner);
+        await session.ExecuteAsync("INSERT INTO items DEFAULT VALUES", cancellationToken: guard.Token);
+        (await RowsAsync(session, "SELECT code FROM items ORDER BY code", guard.Token)).Select(row => row[0]).ShouldBe(new object?[] { 1m, 2m });
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - VARCHAR narrowing: assignment trimming uses joint publication and rollback Build stays available")]
@@ -177,17 +174,21 @@ public sealed partial class SqlJointTypeMigrationTests
         finally { release.Set(); }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint publication: unknown commit outcome keeps trees and reports unconfirmed")]
-    public async Task ApplyAsync_UnconfirmedPublication_ShouldReportUnknownAndRecoverNew()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint publication: unknown commit outcome keeps trees and reports unconfirmed")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApplyAsync_UnconfirmedPublication_ShouldReportUnknownAndRecoverNew(bool defaultOnly)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         await using var engine = SqlDatabaseEngine.Create("joint-unconfirmed", new() { StorageStrategy = strategy, Durability = StorageCommitDurability.Grouped });
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
-        await database.ApplySchemaAsync(Source().Compile(), guard.Token);
+        var source = defaultOnly ? KeepParitySchema("default", false, true) : Source().Compile();
+        var target = defaultOnly ? KeepParitySchema("default", true, true) : Target().Compile();
+        await database.ApplySchemaAsync(source, guard.Token);
         await using var writer = await database.CreateSessionAsync(guard.Token);
-        await writer.ExecuteAsync("INSERT INTO items VALUES(1,1)", cancellationToken: guard.Token);
+        await writer.ExecuteAsync(defaultOnly ? "INSERT INTO items VALUES(1,1,42,'ok',9)" : "INSERT INTO items VALUES(1,1)", cancellationToken: guard.Token);
         database.SchemaProvisioner.JointStage = stage =>
         {
             if (stage == "Publishing")
@@ -200,7 +201,7 @@ public sealed partial class SqlJointTypeMigrationTests
             }
         };
         // Act
-        var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(Target().Compile(), guard.Token));
+        var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(target, guard.Token));
         // Assert
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03403");
         failure.Message.ShouldContain("unconfirmed");
@@ -208,10 +209,10 @@ public sealed partial class SqlJointTypeMigrationTests
         database.Provisioning!.FailureCode.ShouldBe("CS03403");
         database.IsOffline.ShouldBeTrue();
         var reopened = await engine.OpenDatabaseAsync("typed", guard.Token);
-        reopened.Catalog.SchemaState!.ContentHash.ShouldBe(Target().Compile().Hash);
+        reopened.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
         reopened.Catalog.PendingMigration.ShouldBeNull();
         await using var reader = await reopened.CreateSessionAsync(guard.Token);
-        (await RowsAsync(reader, "SELECT Value FROM items", guard.Token)).Single()[0].ShouldBe(1L);
+        (await RowsAsync(reader, "SELECT Value FROM items", guard.Token)).Single()[0].ShouldBe(defaultOnly ? (object)42m : 1L);
     }
 
     private static SqlSchema TextDeclaration(int width, string defaultValue) => SqlSchema.Create("typed", schema =>

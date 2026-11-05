@@ -98,7 +98,7 @@ public sealed partial class SqlJointTypeMigrationTests
             // differs while the operation describes only the NOT NULL transition.
             var portableSource = Compiled(new CompiledSchemaTable("items", "items",
                 [new("v", newType.Storage.Type, true, CustomType: "native_value")], null, [], []));
-            var script = SqlMigrationScriptGenerator.GenerateJoint(SqlSchemaMigrationPlanner.Plan(portableSource, target), portableSource);
+            var script = SqlMigrationScriptGenerator.Generate(SqlSchemaMigrationPlanner.Plan(portableSource, target), portableSource);
             var executor = new SqlPlanExecutor(current.DataStorage, current.Catalog, current.IndexManager, current.Definitions);
             var plan = executor.PlanJointMigration(target, script, guard.Token);
             classification = plan.Tables.Single().KeepsOwner ? "Joint/KeepOwner" : "Joint/RewriteOwner";
@@ -136,7 +136,9 @@ public sealed partial class SqlJointTypeMigrationTests
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
         await database.ApplySchemaAsync(OwnerDeclaration(false), guard.Token);
         SeedRaw(database, [7, 8], 1024);
-        await database.ApplySchemaAsync(OwnerDeclaration(false, [new("ix_v", ["w"], false)]), guard.Token);
+        // Seed the historical heap-owned tree explicitly; normal applies now
+        // create an alternate tree on an existing heap.
+        await ApplyOrdinaryParityAsync(database, OwnerDeclaration(false), OwnerDeclaration(false, [new("ix_v", ["w"], false)]), guard.Token);
         ulong heap = Table(database).ObjectId;
         IndexOwnerPages(database, heap).ShouldBeGreaterThan(1);
         string? classification = null;

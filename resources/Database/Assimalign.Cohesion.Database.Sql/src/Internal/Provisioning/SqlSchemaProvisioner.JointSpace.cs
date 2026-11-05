@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
@@ -58,6 +59,19 @@ internal sealed partial class SqlSchemaProvisioner
                 long[] keyColumnBytes = new long[columnBytes.Length];
                 long[] nonNullRows = new long[columnBytes.Length];
                 var trees = new Dictionary<string, (long Pages, int Height, long Bytes)>(StringComparer.OrdinalIgnoreCase);
+                // Metadata/validation-only keeps allocate no heap or trees. Admission
+                // depends on declaration size, without visiting a 500M-row heap.
+                if (item.KeepsOwner && item.Indexes.All(index => SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(item.Previous!.ObjectId))))
+                {
+                    foreach (var registration in registrations.Where(value => value.ObjectId == item.Previous!.ObjectId &&
+                        !item.Indexes.Any(index => index.Name.Equals(value.Definition.Name, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        var size = CountJointIndexPages(registration.RootPageId, _database.IndexManager.PageOwner(registration), token);
+                        actualIndexPages += size.Pages;
+                        oldPages += size.Pages;
+                    }
+                    continue;
+                }
                 if (item.Previous is { } previous)
                 {
                     var missing = _database.Definitions.Get(previous, token).MissingValues;
@@ -199,7 +213,7 @@ internal sealed partial class SqlSchemaProvisioner
             using var handle = storage.PageManager.GetPage((PageId)root);
             var body = handle.Page.AsBodySpan();
             if (handle.Page.Type != PageType.Index || handle.Page.OwnerId != owner ||
-                BinaryPrimitives.ReadUInt16LittleEndian(body) != 0x5442 || body[2] != 2 || body[3] is not (1 or 2))
+                BinaryPrimitives.ReadUInt16LittleEndian(body) != 0x5442 || body[2] != BTreeIndexManager.FormatVersion || body[3] is not (1 or 2))
             { throw new StorageCorruptionException(handle.Id, ErrorMessages.JointIndexShapeInvalid); }
             if (height == 1)
             {
@@ -426,7 +440,7 @@ internal sealed partial class SqlSchemaProvisioner
             using var handle = _database.DataStorage.PageManager.GetPage((PageId)next.Page);
             var body = handle.Page.AsBodySpan();
             if (handle.Page.Type != PageType.Index || handle.Page.OwnerId != owner ||
-                BinaryPrimitives.ReadUInt16LittleEndian(body) != 0x5442 || body[2] != 2 || body[3] is not (1 or 2))
+                BinaryPrimitives.ReadUInt16LittleEndian(body) != 0x5442 || body[2] != BTreeIndexManager.FormatVersion || body[3] is not (1 or 2))
             { throw new StorageCorruptionException(handle.Id, ErrorMessages.JointIndexShapeInvalid); }
             height = Math.Max(height, next.Depth);
             int count = BinaryPrimitives.ReadUInt16LittleEndian(body[4..]);

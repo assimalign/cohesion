@@ -1456,8 +1456,9 @@ complete target in one catalog commit, including cheap additions and drops (#177
 Before publication a failure reports CS03402 and keeps the old schema online. Only a matching
 target Build resumes interrupted preparation; a different-target Build discards it and replans
 from the stored schema. A no-target open discards without a provisioning report or trace; a
-successful Verify clears a declared discard observation. Non-TYPE inline and empty-table paths retain their existing behavior
-until SQ-A6; default-only changes still refuse CS03105.
+successful Verify clears a declared discard observation. RunMigrationsInline, empty-table Build
+and ApplySchemaAsync use the same joint executor inline. Default-only changes publish jointly
+(SET or DROP DEFAULT), with CS03402 before publication and CS03403 for an unconfirmed commit.
 
 Referential SET NULL and SET DEFAULT update only matching foreign-key columns, using the
 ordinary domain, nullability, CHECK, outgoing/incoming FK, MVCC and index machinery.
@@ -1895,8 +1896,8 @@ Full-definition identity-type changes retain their refusal; use explicit TYPE fo
 Typed-schema plans containing a TYPE rewrite and every deferred migration prepare their complete target unpublished, using
 the same assignment conversion/copy path, then publish every table, index, constraint and applied
 marker in one commit (#1447, SQ-A3). Build defers populated work to the provisioning worker.
-For TYPE-rewrite plans, empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same
-joint executor inline; their non-TYPE paths retain their existing behavior until SQ-A6.
+Empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same
+joint executor inline for every plan, including default-only changes (#1778, SQ-A6).
 Before publication users on touched tables wait through the lock manager; DML on other tables
 proceeds. Definition DDL is refused database-wide from Build through queue time and worker completion.
 CREATE TABLE, CTAS, CREATE VIEW, CREATE SEQUENCE and ALTER TABLE RENAME TO cannot claim an
@@ -1913,8 +1914,8 @@ Narrowing length, precision or scale, rounding and every conversion not proven l
 destructive opt-in (CS03105 before any step); exact widening can run without it. Dependent-view
 refusals, old snapshots and retryable CS04006 writers retain the single-statement contract.
 VARCHAR narrowing always takes the joint TYPE path because assignment may trim excess spaces;
-CHAR width changes also rewrite. Default changes in a plan without any TYPE rewrite retain
-the base generator's CS03105 refusal before saving anything. The joint plan publishes all defaults.
+CHAR width changes also rewrite. Default changes without a TYPE rewrite publish jointly,
+including SET and DROP DEFAULT; a frozen missing value retains its original value.
 Metadata planning refusals report CS03105; joint reservation failures agree on CS03402 in the
 exception and provisioning report. Before intent save, Build checks only the metadata space floor, without owner snapshots or row
 decodes. The worker measures actual rewritten record/key bytes and conversion growth before prepared writes.
@@ -1939,8 +1940,12 @@ offline. An unconfirmed publication uses CS03403 and leaves recovery to decide o
 Deferred Build does not copy data; RunMigrationsInline or any declared script forces the typed
 copy inline during Build. The executable SqlJointTypeMigrationTests corpus covers these edges.
 In every joint plan, additive indexes and CHECK, NOT NULL, UNIQUE and foreign-key constraint
-changes can keep the physical heap owner (#1777, SQ-A4). Stored column types and facets must
-remain identical, including native-domain bounds. Dropping or replacing a heap-owned index
+changes can keep the physical heap owner (#1777, SQ-A4). Nullable appends with immutable missing
+values, non-identity logical backfills, DROP COLUMN, VARCHAR widening, same-scale DECIMAL precision
+changes, aliases and defaults also keep it (#1778, SQ-A6). Surviving physical ordinals and value
+representations remain identical. Precision tightening scans and refuses invalid rows; dropped
+column bytes remain intact until publication. Reserved-table writers wait, then enforce the new
+declaration or receive a stale-plan retry. A statement naming a dropped column is refused. Dropping or replacing a heap-owned index
 forces a rewrite; alternate-tree drops and replacements can keep the heap and reclaim kind-14
 owners. General heap-owned dropped-index reclamation is tracked by #1808.
 New trees build unpublished against that heap; added constraints validate existing rows under

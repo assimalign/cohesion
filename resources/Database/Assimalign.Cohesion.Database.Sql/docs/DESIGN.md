@@ -3592,10 +3592,9 @@ recording a false applied hash. Foreign keys and checks now render into provisio
 DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
 the engine and the database. A plan the planner refuses (a destructive step the schema does not
 allow) and a schema that would adopt a table or index it did not create lead with `CS03105`,
-before any step runs; an inline per-step failure leads with `CS03104` and names "step k of n" and its
-operation. Deferred preparation uses `CS03402` and the joint boundary below. A failed inline apply whose token was canceled throws `OperationCanceledException` once its
-completed steps are compensated: a canceled commit surfaces as the aborted transaction of the step
-it interrupted, so the token decides, not the failure's type. The skip checks the cached declaration hash and catalog DDL generation. When either differs,
+before any step runs. Every apply uses joint publication: preparation failure reports `CS03402`
+with the old schema online, and an unconfirmed commit reports `CS03403` for recovery to decide.
+Cancellation before publication discards unpublished work and throws `OperationCanceledException`. The skip checks the cached declaration hash and catalog DDL generation. When either differs,
 `Verify` describes the first live object that differs (a missing table, column, constraint or
 index, an undeclared one, or a column's type, nullability or default).
 
@@ -7462,8 +7461,8 @@ unresolved, above), but fails the build of an engine that declares the database 
 `SqlSchemaMigrationException` led by a `COHSQLP` code (`Internal/Provisioning/SqlProvisioningCodes`):
 `CS03101` a declaration refused before any file is touched, `CS03102` an existing database's
 collation that is not the declared one, `CS03103` a `Verify` declaration that drifted or does not
-exist, `CS03104` a failed schema step after compensation, `CS03105` an apply refused before
-any step runs (a destructive step not allowed, or a table or index the schema did not create).
+exist, `CS03402` failed unpublished joint preparation, `CS03403` unconfirmed publication,
+`CS03105` an apply refused before any step runs (a destructive step not allowed, or a table or index the schema did not create).
 
 A row page the statement cannot read fails the statement with the storage
 library's own error, on every access path: a page that fails its checksum or
@@ -9193,9 +9192,12 @@ rewrite locks; tablecmds.c:15618-15624 refuses dependent views. No reference cod
 
 Within every joint migration, classification is per table. Additive indexes and constraint
 changes (CHECK, NOT NULL, UNIQUE and either end of a foreign key) can keep the heap owner.
-Every column must be an identity conversion at the same ordinal, with equal counts and names;
-only IsNullable changes on the old physical column facets. Native-domain storage or facet
-changes, defaults, column order and primary-key changes rewrite. A stored primary-key tree is
+Surviving columns retain their physical ordinals and stored value representation. Nullable
+append (including frozen immutable defaults and checked domains), logical non-identity backfill,
+DROP COLUMN, VARCHAR widening/unbounded length, same-scale DECIMAL precision widening or
+validation-only tightening, declaration/alias changes, nullability and insert-default changes
+can keep the heap (#1778, SQ-A6). Native/domain/scale changes that require conversion, CHAR
+repadding, VARCHAR narrowing, column reorder and primary-key changes still rewrite. A stored primary-key tree is
 identified by its primary-key marker and columns; joint planning inherits its generated name
 across both keep and rewrite. A new joint table uses the per-step constraint definition and
 ordinal to generate that same name. TABLE_CONSTRAINTS, violation messages and ON CONFLICT
@@ -9248,8 +9250,8 @@ owner is live or pending reclamation, so joins in older snapshots can scan that 
 These markers allocate after publication-space and catalog-checkpoint admission and before commit;
 canceled admission installs none, and a failed transaction removes this attempt's markers, leaving
 current descriptions on the read fast path. Weak keys cannot retain table histories forever.
-Publication checks physical layout, exact types and ObjectId under the catalog lock for every kept
-description. CS05060 names the mismatched physical field and, for a column-level mismatch, its column.
+Publication checks physical ordinals, native type/scale/domain/collation and ObjectId under the catalog lock for every kept
+description. Length widening and validated precision changes retain their stored representation. CS05060 names the mismatched physical field and, for a column-level mismatch, its column.
 Layout refusals distinguish a joint kept table from a generic ALTER replacement; both preserve
 the published layout and retain CS05060.
 Kept columns retain their declared spelling while preserving physical ordinals and facets.
@@ -9257,7 +9259,7 @@ Before commit, the index directory refuses any prepared
 key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
 Registered domains are outside the schema hash. A matching interrupted intent is discarded and
 replanned when registration changes switch an existing joint table between KeepOwner and
-RewriteOwner, or an inline replan no longer needs a joint job. The old schema remains online until
+RewriteOwner. Every inline replan uses the same joint executor. The old schema remains online until
 the new plan publishes. Joint copy uses its bounded DML memory ledger and direct scans; neither
 copy nor deferred index build uses plain SELECT buffers. A declared script CTAS still charges
 StatementMemoryBudget and can refuse with CS05067 while the database stays online; its next Build
@@ -9319,8 +9321,8 @@ Cheap additions, drops and other steps in that plan remain unpublished too. Addi
 changes and changes to alternate trees keep their heaps using SQ-A4; dropping or replacing a
 heap-owned tree rewrites its table until #1808. One catalog commit publishes every change and
 the applied marker.
-Non-TYPE RunMigrationsInline, empty-table Build and ApplySchemaAsync retain their per-step
-behavior until SQ-A6. Default-only changes still refuse CS03105 in this run.
+RunMigrationsInline, empty-table Build and ApplySchemaAsync use the same joint executor inline
+(#1778, SQ-A6). Default-only changes publish jointly, including SET and DROP DEFAULT.
 
 Build reserves every plan table and the required FK neighbours before returning. The original 49a path held
 X on each deferred table from reservation through its steps, but cheap steps had already committed
@@ -9352,7 +9354,7 @@ Every job reuses JointSpace's metadata floor, measured admission, engine reserve
 watchdog, including index-only jobs. Constraint-only validation reports an unknown total while
 scanning and the exact count on completion; it adds no counting scan. Provisioning and DeferredStep
 events describe the complete joint job using Joint/ kinds. Cancellation reports CS03402 and Error
-after discarding unpublished work; inline per-step CS03104 remains unchanged. A different-target
+after discarding unpublished work; CS03104 is retired on every provisioning entry point. A different-target
 Build discards kind 9, reports CS03402, and replans from the stored schema. Discard ends the prior
 trace with Restarted and uses Replan; recovery completes that trace with Discarded. A no-target
 open discards without parsing the abandoned target and sets no provisioning report or trace.
@@ -9388,6 +9390,55 @@ already completed by the engine must not be followed by a redundant forced copy 
 SQL record-space format 37 requires this joint kind-9 meaning for every deferred job and refuses
 36 before any write through the existing format gate. Compiled-schema v12 and wire messages
 are unchanged; no upgrade reader or new public boundary is added.
+
+#### Joint inline parity and kept layouts (#1778, SQ-A6)
+
+Every apply prepares the complete target and records its marker in the joint catalog commit.
+SET/DROP DEFAULT retain the planner's existing destructive opt-in requirement; SQ-A6 changes
+publication, without broadening that safety classification.
+Data-scaling populated work may run on the worker; plans without deferred admission, empty-table
+Build, RunMigrationsInline and ApplySchemaAsync execute inline. Checked-domain additions retain
+the existing conservative worker classification even when their missing-value check is constant work. A zero-executable-step reconciliation
+uses Joint/Schema in the existing kind-9 envelope and one progress position; no format changes.
+An empty reservation set uses object-lock resource zero (never a catalog identity) as the
+new-name admission rendezvous. It precedes positive sequence/table locks. Inline execution
+retains apply admission through preparation and trace cleanup; only an accepted worker handoff
+transfers its release. All paths retain the existing lock/latch order documented at reservation.
+
+A keep promises that while writers can run, every old constraint or every new constraint is
+enforced. Plan targets hold X from reservation through validation and publication. A writer
+already holding the table finishes before validation takes its current snapshot; one queued
+behind preparation binds the published declaration or receives the existing stale-plan retry.
+For DROP COLUMN, queued statements naming the removed field are refused after publication.
+No component is erased or renumbered before the commit; discard leaves the heap and published
+trees untouched. Precision tightening validates every current value without rewriting it;
+a prior violating writer is caught by validation, and a queued violating writer is refused
+against the new bound. PostgreSQL likewise uses AccessExclusiveLock for ALTER TYPE and DROP
+COLUMN (src/backend/commands/tablecmds.c:4689-4690,4717-4724); its dropped-attribute model retains
+the old component (src/backend/catalog/heap.c:1692-1732). PostgreSQL NUMERIC narrowing may rewrite
+through its typmod coercion; Cohesion's established same-scale path validates without changing
+values. Rollback across a successfully published DROP COLUMN remains SQ-A7 (#1779).
+
+Frozen missing values remain independent of later insert-default changes. Existing dropped
+ordinals persist, newly dropped ordinals are added, and appended columns start beyond all
+old physical components. Same-name re-addition therefore cannot decode a dropped value.
+Nullable checked-domain missing values validate once; only an invalid missing value needs an
+emptiness probe. An empty or fully tombstoned table retains 49a's exception for that missing value. NOT NULL, new CHECKs and tighter precision use validation scans, with one bound
+table and evaluator per scan. Metadata-only admission visits no heap rows or retained trees;
+JointSpace still supplies the metadata floor, publication bound, engine reserve and watchdog.
+Dropping/replacing a heap-owned tree retains the rewrite until #1808 separates its ownership;
+alternate-tree drops and constraint removal keep the heap. Script-index preservation and the
+existing declared-name precedence remain unchanged; promotion policy is not changed here.
+
+No new durable boundary is introduced. Inline/default/kept-layout crash images cover every
+write, flush and length mutation plus IntentDurable, LocksReserved, Handoff, OwnersDurable,
+TreesDurable, KeepPrepared, Validated, Publishing, CatalogPublished and Published. Reopen converges to exactly
+the old or complete new declaration. Failure before publication reports CS03402 online at the
+old schema; unconfirmed publication retains CS03403 and recovery's old/new decision. The old
+ordinary-intent resume fallback, per-step execution/compensation, compensation result carrier,
+step-failure tracing and CS03104 production identity are removed. Prospective joint binding and
+catalog invariants establish the final shape; FirstCatalogDifference remains verification's
+read-only drift diagnostic, without an extra post-commit traversal or debug-only assertion.
 
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 

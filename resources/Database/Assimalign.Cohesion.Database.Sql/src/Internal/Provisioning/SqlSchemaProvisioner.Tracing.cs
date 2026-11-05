@@ -12,13 +12,14 @@ internal sealed partial class SqlSchemaProvisioner
     // Apply/Verify own the admission gate throughout this trace. The deferred trace
     // belongs to the single claimed worker, after ownership was transferred. Both
     // owners retain the executing step so a listener can attach after entry.
-    private SqlMigrationScriptStep? _executingStep;
+    private bool _jointTraceEntered;
     private SqlProvisioningTrace? _trace;
     private SqlProvisioningTrace? _deferredTrace;
 
     private void BeginTrace(SqlCompiledSchema schema, string mode)
     {
-        _executingStep = null;
+        _jointTraceEntered = false;
+        _trace = null;
         if (SqlDatabaseEventSource.Log.IsEnabled())
         {
             _trace = new SqlProvisioningTrace(schema);
@@ -28,7 +29,6 @@ internal sealed partial class SqlSchemaProvisioner
 
     private void TraceStage(string kind, string code = "", int position = 0, int stepCount = -1)
     {
-        _executingStep = null;
         if (_trace is { } trace)
         {
             trace.Kind = kind;
@@ -37,23 +37,6 @@ internal sealed partial class SqlSchemaProvisioner
             if (stepCount >= 0)
             {
                 trace.StepCount = stepCount;
-            }
-        }
-    }
-
-    private void TraceStep(SqlMigrationScript script, SqlMigrationScriptStep step)
-    {
-        _executingStep = step;
-        if (_trace is { } trace)
-        {
-            trace.Kind = step.Operation.Kind.ToString();
-            for (int index = 0; index < script.Steps.Count; index++)
-            {
-                if (ReferenceEquals(script.Steps[index], step))
-                {
-                    trace.Position = index + 1;
-                    break;
-                }
             }
         }
     }
@@ -68,22 +51,6 @@ internal sealed partial class SqlSchemaProvisioner
                 trace.StepCount = stepCount;
             }
         }
-    }
-
-    private void TraceStepFailure(SqlCompiledSchema schema, SqlMigrationScript script, Exception failure)
-    {
-        bool late = _trace is null;
-        EnsureFailureTrace(schema);
-        if (late && _trace is not null)
-        {
-            var executingStep = _executingStep;
-            TraceStage("Finalize", SqlProvisioningCodes.StepFailed, stepCount: script.Steps.Count);
-            if (executingStep is { } step)
-            {
-                TraceStep(script, step);
-            }
-        }
-        TraceFailure(failure);
     }
 
     private void EnsureFailureTrace(SqlCompiledSchema schema)
@@ -123,7 +90,7 @@ internal sealed partial class SqlSchemaProvisioner
 
     private void EndTrace()
     {
-        _executingStep = null;
+        _jointTraceEntered = false;
         if (_trace is { } trace)
         {
             _trace = null;
@@ -134,7 +101,7 @@ internal sealed partial class SqlSchemaProvisioner
 
     private void BeginDeferredTrace(SqlDeferredMigration migration, int index)
     {
-        _executingStep = migration.Steps[index];
+        _jointTraceEntered = true;
         if (SqlDatabaseEventSource.Log.IsEnabled())
         {
             _deferredTrace = CreateDeferredTrace(migration, migration.Intent.Steps[index]);
@@ -180,7 +147,7 @@ internal sealed partial class SqlSchemaProvisioner
     {
         // The existing step reference distinguishes cancellation before entry and
         // finalization after completion from an entered step whose Bound was missed.
-        if (_executingStep is null)
+        if (!_jointTraceEntered)
         {
             return;
         }
@@ -188,7 +155,7 @@ internal sealed partial class SqlSchemaProvisioner
         {
             _deferredTrace = CreateDeferredTrace(migration, migration.Intent.Steps[index]);
         }
-        _executingStep = null;
+        _jointTraceEntered = false;
         if (_deferredTrace is { } trace)
         {
             _deferredTrace = null;

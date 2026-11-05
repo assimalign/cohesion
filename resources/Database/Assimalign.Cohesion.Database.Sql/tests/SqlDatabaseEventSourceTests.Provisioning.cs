@@ -118,7 +118,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         var database = await engine.CreateDatabaseAsync("traced", timeout.Token);
         var schema = TraceSchema(false).Compile();
         var failure = new InvalidOperationException("private user payload");
-        database.SchemaProvisioner.StepApplied = _ =>
+        database.SchemaProvisioner.BeforeJointPublication = _ =>
         {
             if (cancel) { cancellation.Cancel(); throw new OperationCanceledException(cancellation.Token); }
             throw failure;
@@ -133,7 +133,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         else
         {
             var thrown = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(schema, timeout.Token));
-            thrown.InnerException.ShouldBeSameAs(failure);
+            thrown.InnerException!.InnerException.ShouldBeSameAs(failure);
         }
 
         // Assert
@@ -147,7 +147,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         {
             var failed = NewEvent(recorder, 15, "ProvisioningFailed", "engineName", "database", "schema", "position", "kind", "code", "exceptionType");
             failed.Level.ShouldBe(EventLevel.Error);
-            failed.Payload.ShouldBe([engine.Name, "traced", "traced", 1, "AddTable", "CS03104", typeof(InvalidOperationException).FullName]);
+            failed.Payload.ShouldBe([engine.Name, "traced", "traced", 0, "JointMigration", "CS03402", typeof(SqlSchemaMigrationException).FullName]);
         }
         recorder.Events.SelectMany(entry => entry.Payload ?? []).ShouldNotContain(value => Equals(value, failure.Message));
     }
@@ -454,7 +454,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("traced", CancellationToken.None);
         EventSourceRecorder? recorder = null;
-        database.SchemaProvisioner.StepApplied = _ =>
+        database.SchemaProvisioner.BeforeJointPublication = _ =>
         {
             recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Informational);
             throw new InvalidOperationException("private user value");
@@ -468,7 +468,7 @@ public sealed partial class SqlDatabaseEventSourceTests
 
             // Assert
             var failed = NewEvent(recorder.ShouldNotBeNull(), 15, "ProvisioningFailed", "engineName", "database", "schema", "position", "kind", "code", "exceptionType");
-            failed.Payload!.Skip(3).ShouldBe([1, "AddTable", "CS03104", typeof(InvalidOperationException).FullName]);
+            failed.Payload!.Skip(3).ShouldBe([0, "JointMigration", "CS03402", typeof(SqlSchemaMigrationException).FullName]);
             recorder.Events.ShouldNotContain(entry => entry.EventId == 13 || entry.EventId == 14);
         }
         finally

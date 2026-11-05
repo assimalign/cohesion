@@ -95,8 +95,8 @@ public sealed partial class SqlJointTypeMigrationTests
         await database.ApplySchemaAsync(Target().Compile(), timeout.Token);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Non-TYPE apply: compatible widening retains reversible 49a execution and usable tables")]
-    public async Task ApplySchemaAsync_CompatibleFacetFailure_ShouldCompensateWithoutJointFence()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Non-TYPE apply: compatible widening fails jointly with the old table usable")]
+    public async Task ApplySchemaAsync_CompatibleFacetFailure_ShouldDiscardJointWork()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -115,7 +115,8 @@ public sealed partial class SqlJointTypeMigrationTests
         await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(target, timeout.Token));
 
         // Assert
-        jointStages.ShouldBe(0);
+        jointStages.ShouldBeGreaterThan(0);
+        database.Provisioning!.FailureCode.ShouldBe("CS03402");
         Table(database).FindColumn("v")!.Type.MaxLength.ShouldBe(8);
         database.Catalog.PendingMigration.ShouldBeNull();
         database.OfflineError.ShouldBeNull();

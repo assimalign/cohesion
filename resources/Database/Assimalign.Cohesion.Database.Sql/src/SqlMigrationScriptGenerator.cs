@@ -24,14 +24,9 @@ public static class SqlMigrationScriptGenerator
     public static SqlMigrationScript Generate(
         SqlSchemaMigrationPlan plan,
         SqlCompiledSchema? currentSchema = null)
-        => GenerateCore(plan, currentSchema, joint: false);
+        => GenerateCore(plan, currentSchema);
 
-    // The engine can prove a rewrite from a native domain's live facets, which
-    // portable declarations alone cannot resolve. Keep that decision authoritative.
-    internal static SqlMigrationScript GenerateJoint(SqlSchemaMigrationPlan plan, SqlCompiledSchema? currentSchema)
-        => GenerateCore(plan, currentSchema, joint: true);
-
-    private static SqlMigrationScript GenerateCore(SqlSchemaMigrationPlan plan, SqlCompiledSchema? currentSchema, bool joint)
+    private static SqlMigrationScript GenerateCore(SqlSchemaMigrationPlan plan, SqlCompiledSchema? currentSchema)
     {
         ArgumentNullException.ThrowIfNull(plan);
         if (currentSchema is not null &&
@@ -41,16 +36,6 @@ public static class SqlMigrationScriptGenerator
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptGeneratorGenerateFailure, plan.SourceHash ?? "<empty>", currentSchema.Hash));
         }
 
-        // A default change needs publication of the complete target. Preserve the base
-        // generator's refusal when no operation in the plan requires a TYPE rewrite.
-        joint = joint || plan.Operations.Any(operation => RenderChecked(operation, () =>
-        {
-            if (operation.Kind != SqlSchemaMigrationOperationKind.AlterColumn ||
-                operation.Column is not { } column || operation.PreviousColumn is not { } previous) { return false; }
-            var type = ResolveAlterColumnType(column, out string? domain);
-            var old = ResolveAlterColumnType(previous, out string? oldDomain);
-            return RequiresTypeRewrite(old, oldDomain, type, domain);
-        }));
         var steps = new List<SqlMigrationScriptStep>(plan.Operations.Count);
 
         foreach (SqlSchemaMigrationOperation operation in plan.Operations)
@@ -64,7 +49,7 @@ public static class SqlMigrationScriptGenerator
             }
 
             if (operation.Kind == SqlSchemaMigrationOperationKind.AlterColumn)
-            { RenderChecked(operation, () => { RenderAlterColumns(operation, steps, joint); return true; }); }
+            { RenderChecked(operation, () => { RenderAlterColumns(operation, steps); return true; }); }
             else { steps.Add(Render(operation, currentSchema)); }
         }
 
@@ -164,7 +149,7 @@ public static class SqlMigrationScriptGenerator
         }
     }
 
-    private static void RenderAlterColumns(SqlSchemaMigrationOperation operation, List<SqlMigrationScriptStep> steps, bool joint)
+    private static void RenderAlterColumns(SqlSchemaMigrationOperation operation, List<SqlMigrationScriptStep> steps)
     {
         if (operation.Column is not { } column || operation.PreviousColumn is not { } previous)
         {
@@ -175,10 +160,6 @@ public static class SqlMigrationScriptGenerator
         DatabaseTypeInfo previousType = ResolveAlterColumnType(previous, out string? previousDomain);
         bool changesDefault = !string.Equals(SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral),
             SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral), StringComparison.Ordinal);
-        if (changesDefault && !joint)
-        {
-            throw Unsupported(operation, "ALTER metadata requiring a storage-type, domain, scale or default rewrite is not implemented");
-        }
         string table = RequireParent(operation);
         bool changesType = type.Type != previousType.Type || type.MaxLength != previousType.MaxLength ||
             type.Precision != previousType.Precision || type.Scale != previousType.Scale ||
@@ -241,8 +222,8 @@ public static class SqlMigrationScriptGenerator
         }
     }
 
-    // Precision and widening length bounds retain 49a's validation-only path
-    // outside deferred plans. Joint plans rewrite these tables until SQ-A6.
+    // Same-storage precision and widening length bounds need validation or metadata
+    // publication only. Changes to physical values still require a new owner.
     internal static bool RequiresTypeRewrite(DatabaseTypeInfo previous, string? previousDomain, DatabaseTypeInfo type, string? domain)
         => type.Type != previous.Type || type.Scale != previous.Scale ||
             !string.Equals(domain, previousDomain, StringComparison.OrdinalIgnoreCase) ||

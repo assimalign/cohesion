@@ -466,7 +466,8 @@ public sealed partial class SqlJointTypeMigrationTests
         _output.WriteLine($"seed={seed}; pairs=96; both-success={both}; KeepOwner={keep}; keyedKeep={keyedKeep}; RewriteOwner={rewrite}; differences={differences.Count}");
         foreach (string difference in differences) { _output.WriteLine(difference); }
         both.ShouldBe(96);
-        keep.ShouldBe(33); keyedKeep.ShouldBe(27); rewrite.ShouldBe(63);
+        // SQ-A6 keeps 16 more logical appends (12 keyed) in this fixed seed.
+        keep.ShouldBe(49); keyedKeep.ShouldBe(39); rewrite.ShouldBe(47);
         differences.ShouldBeEmpty();
     }
 

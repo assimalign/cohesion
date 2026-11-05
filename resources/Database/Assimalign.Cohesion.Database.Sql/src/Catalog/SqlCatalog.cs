@@ -2532,9 +2532,9 @@ public sealed partial class SqlCatalog
     /// <summary>
     /// Refuses a published definition that would move a stored component to another
     /// column. A new table starts with no dropped column. A replacement keeps the
-    /// definition it replaces as its prefix: the same dropped ordinals and the same live
-    /// columns, by name, at the same positions, so every column keeps its physical
-    /// ordinal; it may only append columns. Every stored version is decoded through these
+    /// definition it replaces as its prefix for ordinary ALTER publication. A joint
+    /// kept table may also mark dropped components, while surviving columns retain
+    /// their physical ordinals and new columns append beyond the old physical count. Every stored version is decoded through these
     /// ordinals, so a replacement that renumbered them would read each value from
     /// another column's component.
     /// </summary>
@@ -2554,15 +2554,28 @@ public sealed partial class SqlCatalog
             return;
         }
 
-        bool kept = existing.DroppedColumnOrdinals.SequenceEqual(table.DroppedColumnOrdinals) &&
-            table.Columns.Count >= existing.Columns.Count;
+        bool kept = keptTable
+            ? existing.DroppedColumnOrdinals.All(table.DroppedColumnOrdinals.Contains) && table.PhysicalColumnCount >= existing.PhysicalColumnCount
+            : existing.DroppedColumnOrdinals.SequenceEqual(table.DroppedColumnOrdinals) && table.Columns.Count >= existing.Columns.Count;
         for (int ordinal = 0; kept && ordinal < existing.Columns.Count; ordinal++)
         {
-            kept = string.Equals(existing.Columns[ordinal].Name, table.Columns[ordinal].Name, StringComparison.OrdinalIgnoreCase);
-            if (!string.Equals(existing.Columns[ordinal].MissingValueLiteral, table.Columns[ordinal].MissingValueLiteral, StringComparison.Ordinal))
+            var column = existing.Columns[ordinal];
+            int targetOrdinal = -1;
+            for (int index = 0; index < table.Columns.Count; index++)
+            { if (table.Columns[index].Name.Equals(column.Name, StringComparison.OrdinalIgnoreCase)) { targetOrdinal = index; break; } }
+            int physical = existing.GetPhysicalOrdinal(ordinal);
+            if (keptTable && targetOrdinal < 0)
+            { kept = table.DroppedColumnOrdinals.Contains(physical); continue; }
+            kept = targetOrdinal >= 0 && table.GetPhysicalOrdinal(targetOrdinal) == physical;
+            if (kept && !string.Equals(column.MissingValueLiteral, table.Columns[targetOrdinal].MissingValueLiteral, StringComparison.Ordinal))
             {
-                throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog2, existing.Columns[ordinal].Name));
+                throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog2, column.Name));
             }
+        }
+        if (keptTable)
+        {
+            for (int ordinal = 0; kept && ordinal < table.Columns.Count; ordinal++)
+            { if (existing.FindColumn(table.Columns[ordinal].Name) is null) { kept = table.GetPhysicalOrdinal(ordinal) >= existing.PhysicalColumnCount; } }
         }
 
         if (!kept)

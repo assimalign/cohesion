@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlSchemaProvisioner
 {
     internal Action<string>? JointStage { get; set; }
+    // Test-only observation after execution cleanup, before the lifecycle lease ends.
+    internal Action? JointPreparationFinishing { get; set; }
     internal Action? JointSpaceCounting { get; set; }
     internal long JointSpaceNeed { get; private set; }
     internal long JointSpaceIndexPages { get; private set; }
@@ -44,12 +46,16 @@ internal sealed partial class SqlSchemaProvisioner
 
     private void EndJointPreparation((CancellationTokenSource Stop, TaskCompletionSource Finished) preparation)
     {
-        lock (_rewriteSync)
+        try { JointPreparationFinishing?.Invoke(); }
+        finally
         {
-            _jointPreparing = null;
-            preparation.Stop.Dispose();
+            lock (_rewriteSync)
+            {
+                _jointPreparing = null;
+                preparation.Stop.Dispose();
+            }
+            preparation.Finished.TrySetResult();
         }
-        preparation.Finished.TrySetResult();
     }
 
     private async ValueTask StopJointPreparationAsync()
@@ -90,11 +96,6 @@ internal sealed partial class SqlSchemaProvisioner
         {
             JointStage?.Invoke("Planning");
             plan = executor.PlanJointMigration(schema, script, cancellationToken);
-            if (_catalog.PendingMigration is { } ordinary && !ordinary.Steps.Any(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))
-            {
-                await DiscardMismatchedIntentAsync(schema, script.Steps.Count, cancellationToken).ConfigureAwait(false);
-                plan = executor.PlanJointMigration(schema, script, cancellationToken);
-            }
             if (_catalog.PendingMigration is { } recorded)
             {
                 var choices = recorded.Steps.Where(step => step.Kind is "Joint/KeepOwner" or "Joint/RewriteOwner").ToArray();
@@ -135,12 +136,14 @@ internal sealed partial class SqlSchemaProvisioner
             steps.Add(new SqlCatalogMigrationStep(table.KeepsOwner ? "Joint/KeepOwner" : "Joint/RewriteOwner",
                 table.Shape.Name, table.Shape.Name, steps.Count + 1));
         }
+        if (steps.Count == 0)
+        { steps.Add(new SqlCatalogMigrationStep("Joint/Schema", schema.Name, schema.Name, 1)); }
         var intent = new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument, steps.ToArray(), steps.Count);
         TransactionContext? locks = null;
         IDisposable? metadata = null;
         bool saved = false;
         bool spaceRefused = false;
-        var failed = new DatabaseProvisioningProgress("JointMigration", schema.Name, 1, script.Steps.Count, false,
+        var failed = new DatabaseProvisioningProgress("JointMigration", schema.Name, 1, Math.Max(1, script.Steps.Count), false,
             failureCode: SqlProvisioningCodes.JointFailed);
         var failures = new System.Collections.Generic.List<Exception>(3);
         try
@@ -149,7 +152,8 @@ internal sealed partial class SqlSchemaProvisioner
             // metadata lease with the reservation; the worker must never reacquire it.
             metadata = _database.DdlInterlock.EnterMetadata(_database.Name, definition: false);
             locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
-            // Lock/latch order: fail-fast apply admission -> owned sequence X (ascending)
+            // Lock/latch order: fail-fast apply admission -> object zero X when no
+            // old table exists -> owned sequence X (ascending)
             // -> every old/touched table X (ascending) BEFORE queueing -> prepared owners X
             // -> coordinator apply gate -> tree/page latches. No queue monitor spans work.
             // Every deferred job uses this order, including its cheap-step tables and required FK neighbours.
@@ -159,6 +163,12 @@ internal sealed partial class SqlSchemaProvisioner
             // one lock owner, including user admission with the user's live transaction owner.
             using var timeout = _database.Engine.EngineOptions.LockTimeout == TimeSpan.Zero ? null
                 : _database.Coordinator.LockManager.EnterLockTimeout(_database.Engine.EngineOptions.LockTimeout);
+            // New-table-only jobs have no old heap to rendezvous on. Object zero
+            // is not a catalog identity; reserve it before any positive identities.
+            // Admission uses this same lock-manager resource, including deadlock,
+            // cancellation and disposal handling, rather than a private task wait.
+            if (plan.Touched.Length == 0)
+            { await _database.Coordinator.LockManager.AcquireAsync(locks.Sequence, LockResource.Object(0), LockMode.Exclusive, cancellationToken).ConfigureAwait(false); }
             var owned = _catalog.Sequences.Where(sequence => plan.Touched.Any(table => table.ObjectId == sequence.OwnerTableId))
                 .OrderBy(sequence => sequence.ObjectId).ToArray();
             foreach (var sequence in owned)
@@ -179,7 +189,7 @@ internal sealed partial class SqlSchemaProvisioner
             JointStage?.Invoke("IntentDurable");
             JointStage?.Invoke("LocksReserved");
             return new SqlDeferredMigration(this, schema, script.Steps, intent, locks,
-                plan.Touched.Select(table => table.ObjectId).ToHashSet(), cancellationToken)
+                plan.Touched.Select(table => table.ObjectId).DefaultIfEmpty(0UL).ToHashSet(), cancellationToken)
                 { JointPlan = plan, JointFailureProgress = failed, JointMetadata = metadata };
         }
         catch (Exception failure)
@@ -255,7 +265,7 @@ internal sealed partial class SqlSchemaProvisioner
                     DeferredProgress?.Invoke(processed, total);
                 }, checkpointCopy: true);
             JointMetrics = statement.Metrics;
-            BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken);
+            if (migration.Steps.Count > 0) { BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken); }
             AdmitJointSpace(migration.JointPlan, migration.Intent, cancellationToken);
             bool sparseGrowth = _database.Engine.SparseDataGrowth(_database.Name);
             statement.ConfigureCopySpace((touches, allocations, unflushed, prepared) =>
@@ -271,7 +281,12 @@ internal sealed partial class SqlSchemaProvisioner
                 JointCopyCheckpointThreshold);
             var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
             await executor.ExecuteJointMigrationAsync(migration.JointPlan, migration.Schema, statement,
-                phase => JointStage?.Invoke(phase), cancellationToken).ConfigureAwait(false);
+                phase =>
+                {
+                    if (phase == "Publishing")
+                    { foreach (var step in migration.Steps) { BeforeJointPublication?.Invoke(step); } }
+                    JointStage?.Invoke(phase);
+                }, cancellationToken).ConfigureAwait(false);
             _formatCheckedStateDocument = migration.Schema.CanonicalDocument;
             EndDeferredTrace(migration, 0, "Applied");
             _database.ReportProvisioning(null);
@@ -293,6 +308,8 @@ internal sealed partial class SqlSchemaProvisioner
                     1, migration.ProvisioningStepCount, false, failureCode: SqlProvisioningCodes.JointUnconfirmed));
                 var unconfirmed = CodedMigrationFailure(SqlProvisioningCodes.JointUnconfirmed,
                     ErrorMessages.JointPublicationUnconfirmed, failure);
+                if (!migration.ReleaseApplyGate)
+                { EnsureFailureTrace(migration.Schema); TraceStage("JointMigration", SqlProvisioningCodes.JointUnconfirmed, stepCount: migration.ProvisioningStepCount); }
                 FailDeferredTrace(migration, 0, unconfirmed);
                 EndDeferredTrace(migration, 0, "Unconfirmed");
                 throw unconfirmed;
@@ -304,6 +321,8 @@ internal sealed partial class SqlSchemaProvisioner
             try { await _catalog.DiscardJointIntentAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception cleanup) { cause = new AggregateException(failure, cleanup); }
             var coded = JointFailure(cause);
+            if (!migration.ReleaseApplyGate)
+            { EnsureFailureTrace(migration.Schema); TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: migration.ProvisioningStepCount); }
             FailDeferredTrace(migration, 0, coded);
             EndDeferredTrace(migration, 0, "Error");
             if (ReferenceEquals(cause, failure) && (failure is OperationCanceledException or OutOfMemoryException)) { throw; }

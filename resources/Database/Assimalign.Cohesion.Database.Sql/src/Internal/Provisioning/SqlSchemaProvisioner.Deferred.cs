@@ -106,7 +106,9 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 migration.JointMetadata?.Dispose();
                 Volatile.Write(ref _deferred, null);
-                _applyGate.Release();
+                // Inline execution retains admission through preparation and trace
+                // cleanup in ApplyAsync. Only a handed-off worker releases it here.
+                if (migration.ReleaseApplyGate) { _applyGate.Release(); }
             }
         }
     }

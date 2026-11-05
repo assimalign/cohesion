@@ -24,6 +24,34 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: compiled SET and DROP DEFAULT publish without a TYPE rewrite (#1778)")]
+    [InlineData("2", 2)]
+    [InlineData(null, null)]
+    public async Task ApplySchemaAsync_DefaultOnlyCorpus_ShouldPublishOnceAndKeepExistingRows(string? literal, int? expected)
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var engine = SqlDatabaseEngine.Create("default-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", guard.Token);
+        SqlCompiledSchema Declare(string? value) => new(SqlCompiledSchema.CurrentFormat, "db", true, [],
+            [new CompiledSchemaTable("items", "row", [new("id", DatabaseType.Int32, false), new("value", DatabaseType.Int32, true, DefaultLiteral: value)],
+                new("pk_items", ["id"]), [], [])], []);
+        var source = Declare("1");
+        var target = Declare(literal);
+        await database.ApplySchemaAsync(source, guard.Token);
+        await using var session = await database.CreateSessionAsync(guard.Token);
+        await session.ExecuteAsync("INSERT INTO items(id) VALUES(1)", cancellationToken: guard.Token);
+        ulong owner = database.Catalog.Tables.Single().ObjectId;
+        // Act
+        await database.ApplySchemaAsync(target, guard.Token);
+        await session.ExecuteAsync("INSERT INTO items(id) VALUES(2)", cancellationToken: guard.Token);
+        // Assert
+        database.Catalog.Tables.Single().ObjectId.ShouldBe(owner);
+        database.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
+        database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
+        await ExpectRowsAsync(session, "SELECT value FROM items ORDER BY id", [[1], [expected]]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: retained SELECT output obeys statement memory admission (#1776)")]
     [InlineData(95L, true)]
     [InlineData(96L, false)]
@@ -159,7 +187,7 @@ public sealed class SqlLanguageConformanceTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await using var engine = SqlDatabaseEngine.Create("typed-type-conformance", new());
         var database = await engine.CreateDatabaseAsync("db", timeout.Token);
-        SqlCompiledSchema Declare(DatabaseType type) => new(SqlCompiledSchema.CurrentFormat, "db", false, [],
+        SqlCompiledSchema Declare(DatabaseType type) => new(SqlCompiledSchema.CurrentFormat, "db", true, [],
             [new("items", "row", [new("v", type, true)], null, [], [])], []);
         await database.ApplySchemaAsync(Declare(DatabaseType.Int32), timeout.Token);
         await using var session = await database.CreateSessionAsync(timeout.Token);

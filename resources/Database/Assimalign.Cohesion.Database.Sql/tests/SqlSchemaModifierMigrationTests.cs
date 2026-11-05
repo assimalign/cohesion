@@ -118,7 +118,7 @@ public sealed class SqlSchemaModifierMigrationTests
                     entered.TrySetResult();
                     release.Wait(token);
                 };
-                database.SchemaProvisioner.StepApplied = _ => Interlocked.Increment(ref applied);
+                database.SchemaProvisioner.BeforeJointPublication = _ => Interlocked.Increment(ref applied);
             };
             return new RecordingWorker(engine);
         });
@@ -152,7 +152,7 @@ public sealed class SqlSchemaModifierMigrationTests
             await Task.Delay(1, timeout.Token);
         }
         result.OfflineError.ShouldBeNull();
-        applied.ShouldBe(0);
+        applied.ShouldBe(1);
         result.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
         result.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
         await using var writer = await result.CreateSessionAsync(timeout.Token);
