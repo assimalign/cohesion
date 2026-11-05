@@ -217,12 +217,19 @@ public sealed partial class SqlSelectRetentionTests
             long reads = session.LastStatementMetrics!.RecordsExamined;
             long pairs = session.LastStatementMetrics.JoinCandidatePairs;
             database.Definitions.ForceSelectRetentionBasePath = false;
-            observations.Clear();
-            calls = 0;
-            startingLive = GC.GetTotalMemory(forceFullCollection: true);
-            var actual = await Rows(session, shape.Item2);
-            calls.ShouldBe(count);
-            long afterLive = sampledLive - startingLive;
+            // Minimum of up to 3 rounds: a retained list reads high in every round, and the heap is
+            // process-wide, so transient background work only ever adds to one reading.
+            var actual = baseline;
+            long afterLive = long.MaxValue;
+            for (int round = 0; round < 3 && afterLive >= 2_000_000; round++)
+            {
+                observations.Clear();
+                calls = 0;
+                startingLive = GC.GetTotalMemory(forceFullCollection: true);
+                actual = await Rows(session, shape.Item2);
+                calls.ShouldBe(count);
+                afterLive = Math.Min(afterLive, sampledLive - startingLive);
+            }
 
             // Assert: bounded retention via independent GC evidence, identical rows and complete work.
             actual.ShouldBe(baseline);
