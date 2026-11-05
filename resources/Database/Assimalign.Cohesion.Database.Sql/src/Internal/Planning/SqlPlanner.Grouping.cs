@@ -181,7 +181,7 @@ internal sealed partial class SqlPlanner
             if (outputSlots is null || !outputSlots.ContainsKey(expression))
             {
                 // Ordinary nonvolatile calls still reach FindIndex. COUNT(*) and SUM(column)
-                // walk without allocating; a compound input costs one iterator per key.
+                // walk without allocating; each compound node of a bound aggregate's input costs one iterator per key.
                 for (int i = 0; i < aggregates.Count; i++)
                 {
                     if (!HasVolatileAggregateInputs(aggregates[i].Call, evaluator)) { continue; }

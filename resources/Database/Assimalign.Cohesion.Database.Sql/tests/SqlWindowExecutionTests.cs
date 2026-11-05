@@ -133,6 +133,7 @@ public sealed class SqlWindowExecutionTests
         var namedSubtotal = await RowsAsync(session, "SELECT ROW_NUMBER() OVER w+1 FROM t GROUP BY ROLLUP(p) WINDOW w AS(ORDER BY GROUPING(p),p) ORDER BY 1;");
         var inlineSubtotal = await RowsAsync(session, "SELECT ROW_NUMBER() OVER (ORDER BY GROUPING(p), p) + 1 FROM t GROUP BY ROLLUP(p) ORDER BY 1;");
         var detailRanks = await RowsAsync(session, "SELECT p, CASE WHEN GROUPING(p) = 0 THEN RANK() OVER (PARTITION BY GROUPING(p) ORDER BY SUM(v) DESC) END FROM t GROUP BY ROLLUP(p) ORDER BY GROUPING(p), 2;");
+        var wrappedDetailRanks = await RowsAsync(session, "SELECT CASE WHEN GROUPING(p) = 0 THEN ABS(RANK() OVER (ORDER BY SUM(v))) END FROM t GROUP BY ROLLUP(p) ORDER BY 1;");
         var scalar = await RowsAsync(session, "SELECT p,(SELECT RANK() OVER() FROM t x WHERE x.v=t.v) FROM t WHERE v=40;");
         await ExecuteAsync(session, "CREATE TABLE u(id INT,n BIGINT);");
         await ExecuteAsync(session, "INSERT INTO u VALUES(1,0),(2,0),(3,0);");
@@ -149,6 +150,7 @@ public sealed class SqlWindowExecutionTests
         detailRanks.Count.ShouldBe(4);
         detailRanks[0].ShouldBe([2,1L]); detailRanks[1].ShouldBe([1,2L]);
         detailRanks[2].ShouldBe([3,3L]); detailRanks[3].ShouldBe([null,null]);
+        wrappedDetailRanks.Select(row => row[0]).ShouldBe([null,1L,2L,3L]);
         scalar.ShouldHaveSingleItem().ShouldBe([2,1L]);
         updated[0].ShouldBe([1,2L]); updated[1].ShouldBe([2,3L]); updated[2].ShouldBe([3,1L]);
     }
@@ -160,11 +162,16 @@ public sealed class SqlWindowExecutionTests
         {
             yield return [wrapper, "GROUPING(p), p", "ROLLUP(p)", false];
             yield return [wrapper, "GROUPING(p)", "ROLLUP(p)", true];
+            yield return [wrapper, "GROUPING(p) + 0, p", "ROLLUP(p)", false];
+            yield return [wrapper, "CASE WHEN GROUPING(p) = 0 THEN SUM(v) END, p", "ROLLUP(p)", false];
             foreach (string grouping in new[] { "p", "ROLLUP(p)" })
             {
                 foreach (string key in new[] { "SUM(v)", "ABS(p)", "CAST(p AS TEXT) COLLATE case_insensitive",
                     "(SELECT 1)", "(SELECT SUM(x.v) FROM t x WHERE x.p=t.p)", "SUM(v) FILTER (WHERE v > 0)" })
-                { yield return [wrapper, key + ", p", grouping, false]; }
+                {
+                    yield return [wrapper, key + ", p", grouping, false];
+                    if (grouping == "ROLLUP(p)") { yield return [wrapper, "GROUPING(p), " + key + ", p", grouping, false]; }
+                }
             }
         }
     }

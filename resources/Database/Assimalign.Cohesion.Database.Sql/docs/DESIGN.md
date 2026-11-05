@@ -220,11 +220,12 @@ storage type. Non-NULL ascending values keep their previous bytes, except floati
 zero and NaN: SQL canonicalizes signed zeros and moves NaN below negative infinity to match
 SqlValueComparer. The shared Indexing/Types encodings and page layouts are unchanged, so their
 format versions do not change. Row storage retains the original values. SQL catalog/record-space
-format 37 and mandatory index extension 3 fence these SQL-specific keys and metadata. Compiled
+format 36 introduced the default key order (#1787); current format 37 and mandatory index
+extension 3 fence these SQL-specific keys and metadata. Compiled
 schema v12 carries the same effective orders. All three enums use AscendingNullsFirst = 0,
 AscendingNullsLast = 1, DescendingNullsFirst = 2 and DescendingNullsLast = 3; bit 0 means NULLS
 LAST and bit 1 means DESC. Null and zero-filled key vectors, PRIMARY KEY and UNIQUE-constraint
-indexes use ASC NULLS FIRST. Format 35 and earlier databases and v11 and earlier artifacts are
+indexes use ASC NULLS FIRST. Format 36 and earlier databases and v11 and earlier artifacts are
 refused through the existing recovered read-only gate before any write; no upgrade is added.
 A format-35 refusal preserves every file byte for byte on both clean and crash opens,
 including repeated refusals after disposing the engine (#1744).
@@ -2814,8 +2815,8 @@ flowchart LR
   (SameGroupExpression) to a select-list expression or an earlier whole key reuse that occurrence's
   aggregate slots before allocation. One parallel tree walk maps the calls; the executor adds no reuse.
   Select-list aggregates bind before window keys, including targets following the window expression.
-  Inline window keys register GROUPING masks before an enclosing scalar expression validates;
-  registration is idempotent and leaves aggregate binding after the select list (parse_agg.c:423-428).
+  Inline window keys register GROUPING masks (parse_agg.c:423-428) before an enclosing scalar expression validates;
+  registration is idempotent and leaves aggregate binding after the select list.
   Scalar output evaluation is unchanged; ORDER BY aliases and ordinals still read completed outputs.
   Stable and Immutable inputs retain sharing. Separate child-query occurrences never share states:
   PostgreSQL expands each child to a separate SubPlan before prepagg.c, so equal() fails
@@ -9232,7 +9233,11 @@ key that still names a heap-owned tree; its old heap must be replaced to reclaim
 Registered domains are outside the schema hash. A matching interrupted intent is discarded and
 replanned when registration changes switch an existing joint table between KeepOwner and
 RewriteOwner, or an inline replan no longer needs a joint job. The old schema remains online until
-the new plan publishes. Format 37 fences the per-step kind-9 meaning; no old partially published
+the new plan publishes. Joint copy uses its bounded DML memory ledger and direct scans; neither
+copy nor deferred index build uses plain SELECT buffers. A declared script CTAS still charges
+StatementMemoryBudget and can refuse with CS05067 while the database stays online; its next Build
+resumes at the refused statement when given a larger budget. Optional temp-space setup failures
+do not affect joint intent resume or discard. Format 37 fences the per-step kind-9 meaning; no old partially published
 job resumes. A fresh replan uses its new script's executable step total.
 Discard ends the current provisioning trace with outcome Restarted and starts mode Replan.
 Joint intents with malformed ownership choices still fail CS06059 when the replan is joint.
