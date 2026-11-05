@@ -1,6 +1,6 @@
 # Database convention audit (#1470)
 
-Public leaves remain sealed; the five Database interface contracts are listed in the area rule.
+Public leaves remain sealed; the four Database interface contracts are listed in the area rule.
 `LockManager()` and `StoragePageLatch()` are public parameterless constructors (decision 61).
 Error identities use the [error-code registry](ERROR-CODES.md); structured carriers keep the code
 outside message text. Standard framework argument guards retain their exception contracts.
@@ -46,7 +46,7 @@ protocol overflow notices are wire warning descriptions, rather than exception-m
 their invariant wording and transport limits remain unchanged. Exception prose and its explanatory
 format fragments live in generated resources. No storage or wire version changes are required.
 
-The post-main rules audit also checks private field/constant naming, explicit constructors, partial extension containers, internal helper placement and build item-group structure. Database source now also follows the debugger-view rule described below. Pure naming and constructor-syntax changes preserve message text, diagnostic identities, work accounting, ownership and all statement budgets. Deferred P8/D9 surfaces and the documented hosting ownership exception are retained.
+The post-main rules audit also checks private field/constant naming, explicit constructors, partial extension containers, internal helper placement and build item-group structure. Database source now also follows the debugger-view rule described below. Pure naming and constructor-syntax changes preserve message text, diagnostic identities, work accounting, ownership and all statement budgets. DatabaseRow and the parser/analyzer bases follow NVI (#1264); the documented hosting ownership exception is retained.
 
 
 ## Debugger inspection

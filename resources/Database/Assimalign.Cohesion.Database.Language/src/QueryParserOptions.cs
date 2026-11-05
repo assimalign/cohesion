@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
 
 namespace Assimalign.Cohesion.Database.Language;
 
 /// <summary>Configures the analyzers run after parsing and their shared completion timeout.</summary>
+/// <remarks>Model options may derive from this non-virtual configuration carrier; SQL adds its expression nesting limit.</remarks>
 public class QueryParserOptions
 {
     /// <summary>

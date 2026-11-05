@@ -13,7 +13,6 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser.DebugView))]
 public sealed partial class OqlQueryParser : QueryParser
 {
-    private readonly object _gate = new();
     private readonly bool _allowUnregisteredFunctions;
     private string _source = string.Empty;
     private readonly List<Lexeme> _tokens = [];
@@ -31,7 +30,7 @@ public sealed partial class OqlQueryParser : QueryParser
     /// <summary>Initializes a parser which can defer named function resolution to an engine.</summary>
     /// <param name="allowUnregisteredFunctions">Defers unknown function binding to an engine catalog; the default keeps standalone unknown-name diagnostics.</param>
     /// <param name="options">Optional shared analyzer configuration.</param>
-    public OqlQueryParser(bool allowUnregisteredFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions())
+    public OqlQueryParser(bool allowUnregisteredFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions(), serializeCalls: true)
     {
         _allowUnregisteredFunctions = allowUnregisteredFunctions;
     }
@@ -40,18 +39,12 @@ public sealed partial class OqlQueryParser : QueryParser
     protected override QueryLanguageProfile Profile => OqlLanguageProfile.Instance;
 
     /// <inheritdoc />
-    public override QueryStatement Parse(ReadOnlySpan<char> query)
-    {
-        lock (_gate)
-        {
-            _source = query.ToString();
-            return base.Parse(query);
-        }
-    }
+    protected override void CompleteParseCore(QueryStatement statement, ReadOnlySpan<char> query) { }
 
     /// <inheritdoc />
-    protected override QueryStatement ParseCore(TokenLexer lexer)
+    protected override QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query)
     {
+        _source = query.ToString();
         _tokens.Clear();
         _diagnostics.Clear();
         _parameterFormPositions.Clear();

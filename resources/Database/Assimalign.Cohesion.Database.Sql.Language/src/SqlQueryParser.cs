@@ -42,25 +42,21 @@ public sealed partial class SqlQueryParser : QueryParser
     protected override QueryLanguageProfile Profile => SqlLanguageProfile.Instance;
 
     /// <inheritdoc />
-    public override QueryStatement Parse(ReadOnlySpan<char> query)
+    protected override void CompleteParseCore(QueryStatement statement, ReadOnlySpan<char> query)
     {
-        _sourceText = query.ToString();
-        var statement = base.Parse(query);
-
         // Stamp the raw statement text so downstream consumers (planners, tooling,
         // the wire protocol) can carry the source without re-threading it through
-        // every expression constructor.
+        // every expression constructor. Analyzer callbacks run before this stamp.
         if (statement is SqlQueryStatement { SqlExpression: { } expression })
         {
             expression.SetStatementText(query.ToString());
         }
-
-        return statement;
     }
 
     /// <inheritdoc />
-    protected override QueryStatement ParseCore(TokenLexer lexer)
+    protected override QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query)
     {
+        _sourceText = query.ToString();
         _sawSemicolon = false;
         _sawUnrecognizedCharacter = false;
         _lastTokenEnd = 0;

@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Parser entry contract (#1264)
+
+SQL uses the shared non-virtual QueryParser.Parse template. The model supplies protected
+grammar and completion cores; the base constructs the profile lexer and runs analyzers.
+SQL retains source before grammar work and stamps the root text only after successful analysis; it keeps its existing caller-managed threading policy.
+The [Language audit](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parser-and-analyzer-type-shape-audit-1264)
+records the constructor, options and analyzer decisions. Grammar, diagnostics and conformance
+corpora retain their existing behavior.
+
+
 ## COPY table export grammar (#1724)
 
 SqlCopyToExpression retains the ordered table column list and immutable resolved SqlCopyOptions.
