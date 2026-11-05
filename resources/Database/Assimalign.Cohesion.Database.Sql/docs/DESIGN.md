@@ -8775,10 +8775,22 @@ checkpoint has truncated the journal: exact deltas cannot exceed an untruncated 
 The copy counter then retains that remaining length. Independently, a post-bracket sample
 below that bracket's own journal start proves a checkpoint flushed every copy allocation
 counted so far, including that bracket's, and clears their pending-page charge. Size-due
-checkpoints run at gate release before this sample. An interval checkpoint between brackets
-can leave an over-estimate until the next proven flush or forced checkpoint; observing the
-remaining length alone never clears pages allocated since truncation. A forced copy
-checkpoint resets both counters. Peak-WAL tests sample at durable commit before truncation.
+checkpoints run at gate release before this sample. Each exit also retains the current journal
+length, including after a forced checkpoint. Before the next bracket's space checks, a length
+below that previous end (excluding an already appended 38-byte Begin frame) proves an interval
+checkpoint flushed all earlier allocations and clears their pending-page charge. The current
+bracket's allocations are added afterwards and remain charged. A first bracket has no previous
+end. A truncation followed by other writers regrowing the journal past the previous end goes
+undetected: it can only over-charge pending pages, which can conservatively refuse a space
+check until the next proven flush. A forced copy checkpoint resets both counters. Peak-WAL
+tests sample both journal length and the bracket delta at durable commit before truncation;
+a post-release sample can miss the largest threshold-crossing bracket. Their asserted window
+runs from job start through the CatalogPublished stage, immediately after the publication
+commit and before old-owner reclamation is released. This applies to the wide keyed rewrite,
+narrow rewrite, kept-owner fallback, wide-copy and reclamation-backlog tests. J covers the
+job's copy-owned WAL through publication; it does not bound post-publication reclamation or
+unrelated writers. Reclamation after publication uses the ordinary engine checkpoint budget
+and reserve E below; its later sampled peak is diagnostic only.
 Engine-disabled narrow keyless and keyed rewrites, including one keyed run with an injected
 checkpoint above 8 MiB, assert H plus the largest observed bracket. The injected run requires
 one observed truncation and further forced checkpoints, binding the retained journal length.
@@ -8835,7 +8847,8 @@ D+E, where D=(A-min(A,FreePageCount))*B+touches*2(B+46)+152, plus copy-owned
 unflushed allocation bytes only for sparse data growth, capped at the data pool capacity because eviction or an engine
 checkpoint may already have flushed earlier allocations. It rechecks under the apply gate before the first mutation.
 Copy-owned allocation counts accumulate until a successful forced checkpoint or a
-post-bracket journal sample below that bracket's own start proves they were flushed.
+post-bracket journal sample below that bracket's own start proves they were flushed, or
+the next bracket's start falls below the previous bracket's recorded end.
 The forced checkpoint also resets the WAL counter; the proven engine flush clears only
 pending allocations. PageCount/FreePageCount
 deltas plus reclamation frees are sampled at both ends of each copy/root bracket, under its
@@ -9103,6 +9116,10 @@ catalog. Session writes continue to bind the live schema under the table reserva
 | A child DELETE | Reserved parent | Waits, same as base |
 | MERGE UPDATE | Reserved adjacent table | Waits, same as base |
 | ON CONFLICT DO UPDATE | Reserved adjacent table | Waits, same as base |
+
+Joint jobs retain existing indexes in their durable registration order, regardless of whether
+their final descriptions are declared or preserved; added indexes follow in plan order. This
+preserves the first duplicate-key diagnostic through publication and catalog Load on restart.
 
 Every job reuses JointSpace's metadata floor, measured admission, engine reserve and per-bracket
 watchdog, including index-only jobs. Constraint-only validation reports an unknown total while
