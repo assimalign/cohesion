@@ -47,7 +47,7 @@ internal sealed partial class SqlPlanExecutor
                 statement.AddCopyAllocations(allocationStart);
                 return createdIndex;
             },
-            durable: true, cancellationToken).ConfigureAwait(false);
+            durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
         await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
         // A root never moves on splits. Capture once, outside the row-bracket loop;
         // per-bracket costing must not walk/allocate the whole database directory.
@@ -89,7 +89,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 statement.AddCopyAllocations(allocationStart);
                 return true;
-            }, durable: true, cancellationToken).ConfigureAwait(false);
+            }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             processed += batch.Length;
             statement.ProvisioningProgress?.Invoke(processed, Math.Max(processed, total));

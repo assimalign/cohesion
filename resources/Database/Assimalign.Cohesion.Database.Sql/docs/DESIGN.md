@@ -2,22 +2,41 @@
 
 ## Journal admission backstop (#1283, EN-C2)
 
-The engine configures every independently checkpointed file set with its resolved journal
-limit before publishing a database. At half the limit with a checkpoint pending (size-due
-included), new physical write brackets wait for a successful sharp checkpoint. The database
-stays online; health reports Degraded/CK06006. Whole/partial undo and nested brackets drain;
-reads retain ordinary MVCC and model-lock rules. Root close wakes waiters before disposal.
-Checkpoint failures while paused retry without escalating offline. Storage-safety fences and
-the single-huge-bracket overshoot residual remain. See Transactions DESIGN for lock order,
-attribution and exact pause/wait/duration counters. The four-writer load compares the internal
-switch enabled/disabled, with one controlled long-holder window before free-running writes.
-No format or crash-recovery changes.
+At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
+ordinary size trigger is disabled. New physical brackets wait while that checkpoint is
+pending. A long holder or a checkpoint that has not run never takes the database offline,
+regardless of the pause's duration. Undo and nested brackets drain; health reports
+Degraded/CK06006 while admission is paused.
 
-| Code | Admission condition | SQLSTATE |
+Checkpoint and page write-back failures retain owner decisions 25, 41 and 42: every operational
+failure counts while paused too. A persistent failure takes its database offline after the
+failure window (100 seconds by default, across at least three failed passes); two failed
+checkpoints with a journal past the cap can take it offline sooner. Every parked writer wakes
+with the existing offline error. A successful checkpoint inside the window resumes admission;
+a reopen recovers an offline database. Blob refuses its failing database while its worker
+failure is held. Storage safety fences and single-admitted-bracket/mandatory-undo overshoot
+remain. Reads retain ordinary MVCC and model-lock rules while the database remains online.
+
+The free-run four-writer phase asserts zero pauses. Three repeated blocked-checkpoint episodes
+compare the internal switch on/off with the same four writers: each writer records admission
+waits with the switch on and the peak stays at or below J; without the switch the peak passes J.
+Writers' wait counts and total pause duration per episode are diagnostics; no duration decides
+a test. Transactions DESIGN records the lock order, events and exact counters. No format change.
+
+SQL catalog writes use non-waiting admission under _sync. Ordinary sequence/identity reservations
+release that monitor, wait with the statement token, then retry and revalidate the incarnation.
+Other catalog mutations retain validated metadata and refuse immediately with CK04014. DDL,
+copy, index and provisioning applies also refuse admission while retaining metadata or apply
+gates. Ordinary physical semaphore acquisition remains cancellable and a new pause interrupts
+it immediately, so no guarded caller waits on the pause task. Publication never parks under TruncateSnapshotGate, and reclamation yields rather
+than parking under its run monitor. Mandatory joint-intent cleanup drains through a pause.
+Open arms journal admission after ResumeProvisioningAsync, so a recovered catalog beyond J/2
+can discard its pending intent before any checkpoint worker can see the instance.
+
+| Code | Condition | SQLSTATE |
 | --- | --- | --- |
-| CK04014 | Statement deadline expired while waiting for a journal checkpoint | 57014 |
-| CK06006 | Write admission paused for a pending checkpoint (Degraded health) | — |
-
+| CK04014 | Checkpoint admission deadline or non-waiting refusal while retaining metadata/gates | 57014 |
+| CK06006 | Admission paused for a pending checkpoint (Degraded health) | — |
 ## Temporary space options and lifetime (#1789, EN-X1)
 
 SqlDatabaseEngine owns and disposes an internal nullable StorageTempSpace. A file engine defaults

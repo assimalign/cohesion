@@ -827,17 +827,22 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// the statement and repair failures in an inner <see cref="AggregateException"/>.
     /// </exception>
     /// <exception cref="OperationCanceledException">Gate acquisition or a wait for a memory-only undo control was canceled.</exception>
+    /// <param name="waitForAdmission">False to refuse a pause immediately, including a pause that begins during physical acquisition while the caller retains a monitor or metadata lease.</param>
+    /// <exception cref="TransactionAdmissionCanceledException">Admission was refused without waiting, or a pause wait was canceled.</exception>
+    /// <exception cref="StorageOfflineException">The storage is offline.</exception>
+    /// <exception cref="ObjectDisposedException">Admission has closed.</exception>
     /// <remarks>Waits for the database apply gate and any admitted marker create or release.</remarks>
     public async ValueTask<T> ApplyStatementAsync<T>(
         TransactionContext context,
         Func<StorageTransaction, ValueTask<T>> apply,
         bool durable = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, bool waitForAdmission = true)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(apply);
 
-        await _applyGate.WaitAsync(cancellationToken, "Statement", unchecked((long)context.Sequence.Value)).ConfigureAwait(false);
+        await _applyGate.WaitAsync(cancellationToken, "Statement", unchecked((long)context.Sequence.Value),
+            waitForAdmission: waitForAdmission).ConfigureAwait(false);
         _insideApply.Value = true;
 
         try
@@ -985,7 +990,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </summary>
     /// <exception cref="StorageTransactionException">
     /// A storage-level bracket is still active, or the call came from inside a statement apply
-    /// of this coordinator (<see cref="ApplyStatementAsync{T}(TransactionContext, Func{StorageTransaction, ValueTask{T}}, bool, CancellationToken)"/>),
+    /// of this coordinator (<see cref="ApplyStatementAsync{T}(TransactionContext, Func{StorageTransaction, ValueTask{T}}, bool, CancellationToken, bool)"/>),
     /// whose apply gate the checkpoint would wait for forever.
     /// </exception>
     public void Checkpoint() => Checkpoint(CancellationToken.None);
@@ -1170,7 +1175,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             try
             {
-                _applyGate.Wait(cancellationToken, "IndexPrune");
+                _applyGate.Wait(cancellationToken, "IndexPrune", waitForAdmission: false);
                 try
                 {
                     var pending = _indexPruner(bound, cancellationToken);
@@ -1178,6 +1183,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 }
                 finally { _applyGate.Release(); }
             }
+            catch (TransactionAdmissionCanceledException) when (!cancellationToken.IsCancellationRequested) { }
             catch (Exception exception) when (exception is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
                 && !cancellationToken.IsCancellationRequested)
             {

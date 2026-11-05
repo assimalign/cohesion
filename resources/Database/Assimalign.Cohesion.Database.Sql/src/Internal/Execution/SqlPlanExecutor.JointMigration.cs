@@ -322,7 +322,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 statement.AddCopyAllocations(allocationStart);
                 return true;
-            }, durable: true, cancellationToken).ConfigureAwait(false);
+            }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             stage("TreesDurable");
             foreach (var item in keeping)
@@ -432,7 +432,7 @@ internal sealed partial class SqlPlanExecutor
             if (!published && !unconfirmed)
             {
                 _indexManager.DiscardPrepared();
-                try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared, reservedTrees).ConfigureAwait(false); }
+                try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared, reservedTrees, drain: true).ConfigureAwait(false); }
                 catch (Exception cleanup) { failures.Add(cleanup); }
                 finally { _catalog.AbandonStorageReplacement(prepared); _catalog.AbandonJointTreeOwners(reservedTrees); }
             }

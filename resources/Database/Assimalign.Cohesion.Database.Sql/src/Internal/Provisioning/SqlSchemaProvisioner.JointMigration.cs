@@ -189,7 +189,7 @@ internal sealed partial class SqlSchemaProvisioner
             try
             {
                 if (!spaceRefused && (saved || _catalog.PendingMigration is not null))
-                { await _catalog.DiscardJointIntentAsync(CancellationToken.None).ConfigureAwait(false); }
+                { await _catalog.DiscardJointIntentAsync(CancellationToken.None, drain: true).ConfigureAwait(false); }
             }
             catch (Exception cleanup) { failures.Add(cleanup); }
             try { await RollbackRewriteAsync(locks).ConfigureAwait(false); }
@@ -301,7 +301,7 @@ internal sealed partial class SqlSchemaProvisioner
             // Remove the intent; retry/next Build replans from the old applied marker.
             _database.ReportProvisioning(failed);
             Exception cause = failure;
-            try { await _catalog.DiscardJointIntentAsync(CancellationToken.None).ConfigureAwait(false); }
+            try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, drain: true).ConfigureAwait(false); }
             catch (Exception cleanup) { cause = new AggregateException(failure, cleanup); }
             var coded = JointFailure(cause);
             FailDeferredTrace(migration, 0, coded);

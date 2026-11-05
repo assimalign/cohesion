@@ -59,9 +59,10 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
     private int _disposed;
     private DatabaseProvisioningProgress? _provisioning;
     private TransactionCheckpointInterlock[] _journalAdmissions = [];
+    private int _journalAdmissionConfigured;
 
     /// <summary>Gets whether a storage of this database has paused new write brackets for a pending checkpoint.</summary>
-    /// <remarks>The database remains online. Reads use their ordinary snapshot and locking rules.</remarks>
+    /// <remarks>A pending pause leaves the database online; persistent worker failures retain the offline window. Reads use their ordinary snapshot and locking rules.</remarks>
     public bool IsJournalAdmissionPaused
     {
         get
@@ -72,7 +73,12 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
         }
     }
 
-    internal void AttachJournalAdmission(TransactionCheckpointInterlock[] admissions) => _journalAdmissions = admissions;
+    internal void AttachJournalAdmission(TransactionCheckpointInterlock[] admissions)
+    {
+        if (Interlocked.Exchange(ref _journalAdmissionConfigured, 1) != 0)
+        { throw new InvalidOperationException(ErrorMessages.JournalAdmissionAlreadyConfigured); }
+        _journalAdmissions = admissions;
+    }
 
     private void DrainJournalAdmission()
     {

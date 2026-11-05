@@ -58,13 +58,7 @@ namespace Assimalign.Cohesion.Database;
 /// offline.
 /// </para>
 /// <para>
-/// <b>T3-27 keeps paused journal admission online (#1283).</b> While a database reports a
-/// journal admission pause, checkpoint failures are observational: retries and Degraded health
-/// persist, without either the worker-window or journal-cap give-up. Undo and checkpoint work
-/// can drain while new writers wait. Storage safety failures retain their own offline fence.
-/// </para>
-/// <para>
-/// <b>An unpaused database whose checkpoints keep failing goes offline</b> (owner decision 25 of
+/// <b>A database whose checkpoints keep failing goes offline</b> (owner decision 25 of
 /// 2026-10-06), on whichever comes first. Once its checkpoints have kept failing for the engine's
 /// worker failure window across its minimum of failed passes (owner decision 42 of 2026-10-07),
 /// the worker base takes it offline with <see cref="StorageOfflineCause.CheckpointFailures"/>. A
@@ -101,7 +95,7 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseLaneWorker
     /// </summary>
     internal const int JournalSizeLimitFailures = 2;
 
-    internal readonly record struct CheckpointAttempt(bool Completed, Exception? Failure, bool WasPaused);
+    internal readonly record struct CheckpointAttempt(bool Completed, Exception? Failure);
 
     private readonly long _journalSizeLimit;
     private TDatabase? _lastServed;
@@ -279,19 +273,14 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseLaneWorker
     {
         bool ended = Lanes.Run(database, () =>
         {
-            bool paused = database is DatabaseInstance instance && instance.IsJournalAdmissionPaused;
             try
             {
                 BeforeCheckpoint?.Invoke(database);
-                return new CheckpointAttempt(Checkpoint(database, interval, cancellationToken), null, paused);
+                return new CheckpointAttempt(Checkpoint(database, interval, cancellationToken), null);
             }
             catch (Exception failure) when (failure is not OutOfMemoryException and not OperationCanceledException)
             {
-                // The pump may collect this outcome after an explicit checkpoint has
-                // recovered admission. Retain the attempt's pause witness so a stale
-                // failure cannot invoke the old offline policy after recovery.
-                return new CheckpointAttempt(false, failure,
-                    paused || (database is DatabaseInstance current && current.IsJournalAdmissionPaused));
+                return new CheckpointAttempt(false, failure);
             }
         }, CheckpointNeededSignal, wait, cancellationToken, out outcome, visit, GetName(database));
         if (ended || Lanes.HasLane(database)) { _lastServed = database; }
@@ -333,18 +322,17 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseLaneWorker
                 if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Failed; }
                 // A failure that took the database offline (#1243, #1252, #1268) is reported through
                 // the engine's offline list, and the next pass skips the database; any other is
-                // this pass's failure, and a later pass retries the checkpoint. Unless journal
-                // admission is paused, reporting it takes
+                // this pass's failure, and a later pass retries the checkpoint. Reporting it takes
+                // the database offline at the existing failure window:
                 // the database offline once its checkpoints kept failing for the engine's window
                 // across its minimum of passes (owner decision 42); a second failure in a row with
                 // the journal past the engine's cap takes it offline sooner (owner decisions 25
                 // and 41).
                 if (!IsOffline(database))
                 {
-                    bool paused = outcome.Result.WasPaused || (database is DatabaseInstance instance && instance.IsJournalAdmissionPaused);
-                    int failures = ReportFailure(name, failure, FailureBackoff, countsTowardOffline: !paused);
+                    int failures = ReportFailure(name, failure, FailureBackoff);
                     if (visit is not null) { visit.Backoff = FailureBackoff; }
-                    if (!paused && failures >= JournalSizeLimitFailures)
+                    if (failures >= JournalSizeLimitFailures)
                     {
                         GiveUpOnJournal(database, name, failures, failure, visit);
                     }

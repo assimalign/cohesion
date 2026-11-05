@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
@@ -30,7 +31,7 @@ public sealed partial class SqlCatalog
     // Create/replace/drop and allocation use the same monitor, preventing stale owners
     // from allocating after retirement. Storage commits finish before publishing cursors.
     private bool TryAllocate(SqlSequenceCounter counter, ulong id, int kind, long increment,
-        long minimum, long maximum, bool cycle, out long value)
+        long minimum, long maximum, bool cycle, out long value, CancellationToken cancellationToken)
     {
         Int128 next = counter.Next;
         if (next < minimum || next > maximum)
@@ -46,7 +47,7 @@ public sealed partial class SqlCatalog
             int count = (int)Int128.Min(allocationReservationSize, distance / step + 1);
             long last = (long)(next + (Int128)(count - 1) * increment);
             var record = EncodeAllocation(kind, id, last, isCalled: true);
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)id));
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)id), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)id));
             var location = UpsertRecord(transaction, counter.Location, record);
             ReservationCommitting?.Invoke();

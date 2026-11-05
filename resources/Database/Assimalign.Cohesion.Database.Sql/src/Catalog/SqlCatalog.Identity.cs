@@ -45,14 +45,18 @@ public sealed partial class SqlCatalog
     }
     /// <summary>Allocates through the column's owned sequence.</summary>
     /// <param name="table">The current table description.</param>
+    /// <param name="cancellationToken">Cancels a reservation before it enters storage admission.</param>
     /// <returns>The next generated value.</returns>
     /// <exception cref="ArgumentNullException">The table is null.</exception>
     /// <exception cref="SqlCatalogException">The table is stale, has no identity, or its sequence is exhausted.</exception>
     /// <exception cref="StorageException">The reservation cannot be persisted.</exception>
     /// <exception cref="ObjectDisposedException">Allocation has closed.</exception>
-    public long AllocateIdentity(SqlCatalogTable table)
+    /// <exception cref="TransactionAdmissionCanceledException">A checkpoint prevents immediate reservation admission.</exception>
+    /// <exception cref="OperationCanceledException">Reservation was canceled.</exception>
+    public long AllocateIdentity(SqlCatalogTable table, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(table);
+        cancellationToken.ThrowIfCancellationRequested();
         AllocationEntering?.Invoke();
         lock (_sync)
         {
@@ -62,7 +66,7 @@ public sealed partial class SqlCatalog
             { throw new SqlCatalogException("CS04064", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IdentityTableChanged, table.Schema, table.Name)); }
             if (!_identitySequences.TryGetValue(table.ObjectId, out var sequence))
             { throw new SqlCatalogException("CS01015", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IdentityColumnMissing, table.Schema, table.Name)); }
-            return AllocateSequenceCore(sequence);
+            return AllocateSequenceCore(sequence, cancellationToken);
         }
     }
 
@@ -242,7 +246,7 @@ public sealed partial class SqlCatalog
             var slot = GetSlot(expected.Schema, expected.Name);
             if (!ReferenceEquals(slot.Table, expected)) { throw new SqlCatalogException("CS04064", ErrorMessages.SequenceChanged); }
             ValidateColumns(updated.Schema, updated.Name, updated.Columns, updated.PrimaryKeyColumns);
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)expected.ObjectId));
             ulong next = _nextObjectId;
             var owned = StageOwnedSequences(transaction, expected, updated, ref next);

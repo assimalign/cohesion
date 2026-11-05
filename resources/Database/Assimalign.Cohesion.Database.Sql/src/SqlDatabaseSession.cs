@@ -374,8 +374,10 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
             return await ExecuteStatementAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
         }
         catch (Exception exception) when (_database.TranslateFailure(exception, selfCommitted: SelfCommitted(request, previousMetrics)) is var translated
-            && !ReferenceEquals(translated, exception))
+            && (!ReferenceEquals(translated, exception) || exception is TransactionAdmissionCanceledException && !cancellationToken.IsCancellationRequested))
         {
+            if (exception is TransactionAdmissionCanceledException)
+            { throw SqlTimeoutException.Statement(exception, request.Statement.SqlExpression.Location); }
             // A statement that met the offline storage (#1243) gets the coded refusal, unless its
             // work may survive the reopen: a self-committing DDL statement that already committed a
             // catalog change a reopened database shows, or a bracket whose commit record was
@@ -682,6 +684,7 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
                     throw SqlExecutionException.Deadlock((TransactionDeadlockException)exception);
                 }
                 catch (Exception exception) when (exception is TransactionLockTimeoutException
+                    || exception is TransactionAdmissionCanceledException && !cancellationToken.IsCancellationRequested
                     || (exception is OperationCanceledException && _statementTimer?.IsCancellationRequested == true
                         && !_statementCallerToken.IsCancellationRequested))
                 {

@@ -1379,72 +1379,79 @@ format or checkpoint-model change; EN-C2 adds admission policy and coded refusal
 
 ### Bounded journal admission (#1283, EN-C2)
 
-T3-27 retains the sharp, truncating checkpoint and changes no format. With a checkpoint
-pending (including the size-only due predicate), observing appended bytes at or above
-ceil(JournalSizeLimit / 2) pauses all new physical write scopes on that storage. The journal's
-completed checkpoint record is excluded. Engine limits retain their 4x size-trigger default
-(1 GiB at the 256 MiB trigger, or with the trigger disabled). Standalone interlocks default to
-a disabled limit; engine composition configures every data and catalog interlock before
-publishing the database. A successful checkpoint ends the pause automatically. Operational
-failures keep admission paused and health Degraded (CK06006), with original failure reporting
-and independent checkpoint retries intact. A storage safety failure still fences storage.
+T3-27 retains the sharp checkpoint and changes no format. Observing appended bytes at or above
+ceil(JournalSizeLimit / 2) requests a checkpoint and pauses new physical write scopes, including
+when the ordinary size trigger is disabled. The completed checkpoint record is excluded:
+JournalLength includes that record and would immediately repause small positive limits after
+successful checkpoints, so JournalBytesSinceCheckpoint remains necessary. IsAdmissionPaused
+is a pure volatile read; ObserveAdmissionPause is the named observation/request operation.
+Engine composition arms every data/catalog interlock after open-time provisioning and before
+publication. A live pause is due in both the worker predicate and its checkpoint body.
 
-Waiters hold no admission semaphore, page latch or storage/log monitor. Model grants precede
-admission; catalog _sync precedes its independent catalog interlock. Checkpoints never ask for
-model locks or catalog _sync. Whole/partial undo and explicit/worker checkpoints bypass only
-the pause, retaining semaphore exclusion; nested scopes reuse their holder. Thus undo can
-release grants needed by a waiter, and a checkpoint never waits on itself. Reclamation yields
-at its pending predicate. EN-C1 still checkpoints at release before the next admission.
-Explicit checkpoint success clears foreground retry suppression without dropping an uncollected
-deferred failure; a later failing cycle cannot overwrite that first uncollected identity.
-Unconfigure clears failure, busy/request/suppression state and the standalone
-limit. CloseAdmission wakes paused callers, preserving a storage offline error when present
-and otherwise refusing them with ObjectDisposedException. Shutdown disables the backstop
-before server/worker joins or database cleanup: closing engine/database entry points reject new work,
-while already accepted catalog operations and intent-discard/undo cleanup drain before storage
-disposal. Setting the standalone limit to zero ends a pause as Disabled.
-An outer lease identity is recorded at depth 0->1; older outer copies return before thread
-affinity validation. Ended nested copies in that same outer acquisition remain refused on
-another thread.
+A pending, non-failing checkpoint may pause indefinitely without going offline. An operational
+failure inside the window leaves admission paused and health Degraded (CK06006); checkpoint
+success resumes admission. Persistent checkpoint and write-back failures count while paused
+and take the database offline at the existing time window (100 s by default, at least three
+failed passes), whatever the journal size. The second failed checkpoint with a journal past J
+can take it offline sooner. Blob refuses its failing database while that worker failure is held.
+The offline fence wakes every parked writer with the original error, including physical
+semaphore waiters queued just before the pause; reopening runs recovery.
+The policy follows owner decisions 25, 41 and 42, unchanged by T3-27. Neo4j's scheduler clears
+failures after success and panics after persistent failure (community/kernel/src/main/java/org/
+neo4j/wal/checkpoint/CheckPointScheduler.java:62-79).
 
-Reads needing no physical write bracket continue under ordinary MVCC and model-lock rules.
-They can wait on a writer's logical grants or checkpoint I/O, but never on the admission-pause
-task. Catalog reads can wait behind _sync held by a paused catalog writer until that
-catalog checkpoint completes; the checkpoint itself never needs _sync. Blob wire reads also stay available for a paused checkpoint failure. A SQL statement
-deadline at admission returns CK04014 / SQLSTATE 57014, rolling back the failed statement and
-releasing its new lock resources; caller cancellation keeps its cancellation semantics. The internal test
-switch disables only this backstop, retaining EN-C1. A single huge admitted bracket, and
-mandatory undo of existing work, can exceed the limit (#1270); there is no mid-bracket refusal.
+Order is model grants, the data admission semaphore, catalog _sync, the independent catalog
+admission semaphore, log monitor, storage transaction/header locks, then page/pool latches.
+A caller parked on the pause task may retain model grants but owns neither admission semaphore, catalog monitor,
+TruncateSnapshotGate, reclamation run lock, provisioner apply gate, DDL metadata lease nor page
+latch. SQL and key/value catalog mutations and SQL DDL/copy paths use non-waiting admission while guards
+retain validated metadata; a pause refuses with TransactionAdmissionCanceledException / CK04014
+(57014). Ordinary physical semaphore exclusion remains cancellable; a lazy cancellation notice
+interrupts every guarded acquisition when a pause begins, before it can wait on the pause task.
+The _sync and _runLock transition regressions record physical wait entry, publish a pause and
+prove the guard is released while the original holder still runs.
+Ordinary identity/sequence reservation leaves _sync, waits with the caller token, then retakes
+_sync and revalidates. Data DML may wait without metadata leases. Reads that name tables, seeks
+and BEGIN plus reads remain available during a waiting identity reservation. Publication cannot
+park under TruncateSnapshotGate. Reclamation and version pruning yield on refused admission,
+so the maintenance lane can retry deferred undo. Whole/partial undo and the three mandatory
+joint-intent cleanup discards drain through a pause. Nested scopes reuse outer admission;
+checkpoint work bypasses the pause. No holder waits for model grants.
 
-Healthy admission adds flag/counter reads, no lock or allocation: only the existing semaphore
-and holder-state monitor are taken. Pause tasks and timestamps are created only on a pause.
-Exact process totals publish as journal-admission-pauses, journal-admission-waits and
-journal-admission-pause-milliseconds. Duration sums completed episodes, including close and
-unconfigure; durations never decide a test. The five model probes compare enabled/disabled
-with four continuous writers on three Windows process cores. One controlled long-holder window
-exercises the backstop before at least two seconds of counter-driven write progress. This is
-not a claim that EN-C1 normally reaches the backstop. Append-locked high-water events decide
-the journal bound; paused operational failures also cross the old worker window in each model.
+Every admission back-out releases under _state, ordered with TryCheckpoint's second look, and
+signals pending work. The state monitor never spans storage/model work or event callbacks.
+Explicit checkpoint success clears foreground retry suppression while retaining an uncollected
+deferred failure's identity. Unconfigure clears failure, busy/request/suppression state and the
+standalone limit. CloseAdmission is private; the interlock composes the completed model's
+offline hook when the positive limit is armed. Shutdown disables pausing before server/worker
+joins and mandatory database cleanup; accepted cleanup can finish before storage disposal.
 
-Reference: PostgreSQL permits max_wal_size overshoot under heavy load
-(doc/src/sgml/config.sgml:4010-4018), the soft-limit behavior T3-27 rejects.
-[InnoDB redo-log rules](https://dev.mysql.com/doc/dev/mysql-server/latest/PAGE_INNODB_REDO_LOG.html)
-(rules 14-15) permit requesting a checkpoint and waiting for log-file space. Its
-[checkpoint manual](https://dev.mysql.com/doc/refman/8.4/en/innodb-checkpoints.html) describes
-fuzzy flushing, which Cohesion cannot adopt without segmented recovery retention. No reference
-code is copied; the halfway threshold is owner policy.
-
-The Transactions source adds Verbose / Checkpoints events, outside the state monitor:
+Healthy admission adds volatile reads without allocation. Running and completed episodes both
+contribute to journal-admission-pause-milliseconds. Events are listener-gated and emitted outside
+_state; process-unique episodeId pairs pause, failure-transition and resume even if callbacks
+arrive out of order. Counters are maintained without listeners.
 
 | Id | Event | Payload |
 | --- | --- | --- |
-| 23 | AdmissionPaused | database, reason (CheckpointPending/CheckpointFailure/BracketOpen), bracketClass, owner, journalBytes, journalSizeLimit |
-| 24 | AdmissionResumed | database, reason (CheckpointCompleted/Closing/Unconfigured/Disabled), durationMilliseconds |
+| 23 | AdmissionPaused | database, reason (CheckpointPending/CheckpointFailure/BracketOpen), bracketClass, owner, journalBytes, journalSizeLimit, episodeId |
+| 24 | AdmissionResumed | database, reason (CheckpointCompleted/Closing/Unconfigured/Disabled), durationMilliseconds, episodeId |
 | 25 | AdmissionWait | database, bracketClass, owner |
+| 26 | AdmissionPauseFailed | database, reason (CheckpointFailure), episodeId |
 
-Counters update without listeners; event payload construction is listener-gated. Every pause
-carries its cause and observed holder identity. Storage events 19/20 retain physical blocker
-and append-locked peak attribution. Synchronous event observers must not reenter engine work.
+Four-writer load asserts zero pauses during free run. Three repeated blocked episodes record
+each writer's waits and total pause time per checkpoint; enabled peaks stay at or below J with
+no further writes after all four park, and disabled peaks pass J with a progress ceiling.
+Graph, Documents and Blob serialize writers through a retained database grant; their probes
+cancel only after each recorded wait, finish cleanup and hold that writer outside the engine
+until recovery so
+all four can reach admission. Other models retain their paused kernel waiters.
+Durations remain diagnostics. The non-parallel admission race runs for at least a second and
+until at least 1,000 pause/resume/back-out cycles complete, with a 45-second ceiling.
+One admitted huge bracket, mandatory undo and already-enrolled lifecycle records can overshoot J;
+there is no mid-bracket refusal. An untimed pending checkpoint wait has no new deadline option.
+The provisioning queue remains serial across databases. Its true bound is the current job and
+mandatory cleanup, including object-lock, forced-checkpoint and device waits, so it has no finite
+deadline. Admission under the retained apply/metadata gates now refuses rather than parking.
 
 The merged raw-site audit covers every BeginTransaction call under Database src and shared:
 SQL catalog (including ReserveJointTreeOwner), key/value catalog, reclamation, statement apply,
@@ -1784,6 +1791,10 @@ events check `EventKeywords.None`.
 | 20 | `TransactionIsolationChanged` | Verbose | Transactions | `database`, `transactionSequence`, `isolationLevel` | successful `ReplaceIsolationLevel`, only when the effective level changes; no rate or gauge transition |
 | 21 | `CheckpointBlocked` | Verbose | Checkpoints | `database`, `bracketClass`, `owner` | each deferred checkpoint, attributed to the gate holder or the next admitted handoff |
 | 22 | `CheckpointLeaseThreadMismatch` | Error | Checkpoints | `database`, `enteringThread`, `disposingThread` | cross-thread disposal while its entering thread holds admission is refused, including an ended nested copy within the same outer acquisition; older outer copies are inert after re-entry; leaves admission unchanged |
+| 23 | `AdmissionPaused` | Verbose | Checkpoints | `database`, `reason`, `bracketClass`, `owner`, `journalBytes`, `journalSizeLimit`, `episodeId` | threshold observation |
+| 24 | `AdmissionResumed` | Verbose | Checkpoints | `database`, `reason`, `durationMilliseconds`, `episodeId` | checkpoint, offline, disable or unconfigure |
+| 25 | `AdmissionWait` | Verbose | Checkpoints | `database`, `bracketClass`, `owner` | first pause wait or non-waiting refusal |
+| 26 | `AdmissionPauseFailed` | Verbose | Checkpoints | `database`, `reason`, `episodeId` | pending episode later fails |
 
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow
@@ -1835,6 +1846,9 @@ reads exact values.
 | `rollbacks-per-second` | rate | a context other than a snapshot pin ends rolled back or aborted, including an aborted commit or disposal's abort |
 | `total-deadlocks` | total | each deadlock victim (event 6) |
 | `lock-waits-per-second` | rate | each queued request (event 7) |
+| `journal-admission-pauses` | total | each pause episode |
+| `journal-admission-waits` | total | each first wait or non-waiting refusal |
+| `journal-admission-pause-milliseconds` | total | completed and currently running pause time |
 
 The transaction rates and gauge exclude snapshot pins. GetOpenContexts and PruneBound still
 expose retained pin registrations. A pin keeps its ordinary manager registration, sequence, fixed snapshot,

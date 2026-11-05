@@ -774,9 +774,9 @@ ordinary storage transaction contention is retried as busy.
     alone", below).
   - *Journal admission (T3-27, #1283).* The limit still defaults to 4x CheckpointJournalSize
     (1 GiB at the default trigger, or with the trigger off). Each model attaches every data
-    and catalog interlock through ConfigureJournalAdmission before publishing DatabaseInstance.
-    IsJournalAdmissionPaused folds those live states for health. At half the limit with a pending
-    checkpoint (size-due included), new physical brackets wait for a successful checkpoint. Undo
+    and catalog interlock through ConfigureJournalAdmission after open-time provisioning and before publishing DatabaseInstance.
+    IsJournalAdmissionPaused folds pure live-state reads for health. Reaching half the limit
+    requests a checkpoint even with the size trigger off; while it is pending, new physical brackets wait for a successful checkpoint. Undo
     and nested scopes drain; readers retain ordinary snapshot and locking rules. The root disables
     the backstop before server disposal or worker joins, then before individual database cleanup.
     Engine entry points reject new work while model operations and unpublished
@@ -786,13 +786,13 @@ ordinary storage transaction contention is retried as busy.
     late registration during engine close has pausing disabled immediately. It also composes each
     storage offline hook to wake paused
     callers before forwarding its safety fence; undo can drain. Checkpoint
-    failures while paused report with countsTowardOffline=false; neither the worker window nor
-    journal-cap give-up takes a paused database offline. Lane results retain whether admission
-    was paused at the attempt, so delayed settlement after recovery cannot escalate that stale
-    failure. HasFailingWorker excludes this paused
-    checkpoint condition even if its first failure preceded the pause, preserving Blob read
-    service. Storage-safety and other worker fences remain. The earlier two-failure cap/window
-    fallback remains for an unpaused database. Transactions DESIGN records exact counters,
+    failures and page write-back failures count toward the existing offline window while paused too.
+    Persistent failures take the database offline at the window; the two-failure journal-cap path
+    remains for a single admitted bracket that crosses J. The offline transition wakes all parked
+    writers with the existing cause. A successful checkpoint inside the window resumes admission.
+    HasFailingWorker reads only the lock-free worker snapshot and retains Blob refusal for the
+    failing database, including while admission is paused. A non-failing pending pause never
+    takes the database offline, however long it lasts. Transactions DESIGN records exact counters,
     lock order, CK04014 deadline and CK06006 health reason. One huge admitted bracket and mandatory
     undo retain #1270's overshoot residual. No format change.
   - *The give-up never runs on a worker's thread.* Taking a storage offline latches its

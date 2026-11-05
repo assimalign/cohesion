@@ -899,7 +899,7 @@ internal sealed partial class SqlPlanExecutor
 
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
                     : MaterializeProjected(plan.Returning!, returned, replacements.Count), cancellationToken).ConfigureAwait(false);
-            }, durable: false, cancellationToken).ConfigureAwait(false);
+            }, durable: false, cancellationToken, waitForAdmission: statement.ProvisioningSchema is null).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)
         {
@@ -1018,7 +1018,7 @@ internal sealed partial class SqlPlanExecutor
                         }
                         return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, targets.Count)
                             : MaterializeProjected(plan.Returning!, returned, targets.Count), cancellationToken).ConfigureAwait(false);
-                    }, durable: false, cancellationToken).ConfigureAwait(false);
+                    }, durable: false, cancellationToken, waitForAdmission: statement.ProvisioningSchema is null).ConfigureAwait(false);
                 }
                 catch (SqlCascadeLockRetry refused)
                 {
@@ -1787,7 +1787,7 @@ internal sealed partial class SqlPlanExecutor
                     }
                     await ValidateBuiltUniqueIndexAsync(plan.Table, index, statement, cancellationToken, ordinals, metadata.Predicate is not null).ConfigureAwait(false);
                     return true;
-                }, durable: true, cancellationToken).ConfigureAwait(false);
+                }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
             }
             // Metadata + registrations persist in ONE catalog self-commit: a crash
             // cannot leave a described index without a tree registration (or the

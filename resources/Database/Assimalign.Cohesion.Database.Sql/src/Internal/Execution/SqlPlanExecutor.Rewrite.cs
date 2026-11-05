@@ -98,7 +98,7 @@ internal sealed partial class SqlPlanExecutor
                         created.Add(index);
                     }
                     return true;
-                }, durable: true, cancellationToken).ConfigureAwait(false);
+                }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
             }
             if (copyRows)
             {
@@ -287,7 +287,7 @@ internal sealed partial class SqlPlanExecutor
                     RewriteStage?.Invoke("CopyAllocationsAdded", statement.CaptureCopyAllocations() - allocationStart);
                 }
                 return true;
-            }, durable: true, cancellationToken).ConfigureAwait(false);
+            }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             ForgetIndexRows(converted);
             processed += batch.Count;

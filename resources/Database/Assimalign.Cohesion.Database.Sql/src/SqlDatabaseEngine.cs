@@ -945,10 +945,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 // The spelling the database was created with, which its data set's header kept,
                 // whatever spelling opened it (#1392).
                 var database = new SqlDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, catalog, recover: true, cancellationToken);
-                ConfigureJournalAdmission(database, JournalSizeLimit, storage, catalogStorage);
                 try
                 {
                     database.ResumeProvisioningAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+                    ConfigureJournalAdmission(database, JournalSizeLimit, storage, catalogStorage);
                 }
                 catch
                 {

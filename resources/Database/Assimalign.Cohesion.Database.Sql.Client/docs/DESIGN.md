@@ -838,3 +838,10 @@ Connection inspection reads its existing database name without checking connecti
 taking the shared exchange lock, dialing, or returning a lease. Result views read already
 materialized columns/diagnostics and row counts; row and parameter views do not enumerate values
 or call typed conversions. Client exchange behavior and wire framing remain unchanged.
+
+## Journal admission refusal (#1283)
+
+CK04014 crosses TCP as an execution failure with structured diagnostics. The refused statement
+leaves its explicit transaction active and authenticated session usable; a later table read,
+write and commit succeed after checkpoint admission resumes. SQLSTATE 57014 remains a
+documented mapping, not a new wire field.

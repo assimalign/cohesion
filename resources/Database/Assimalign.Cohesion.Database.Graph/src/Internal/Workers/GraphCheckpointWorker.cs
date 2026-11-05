@@ -65,7 +65,7 @@ internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphData
     protected override bool IsCheckpointDue(GraphDatabase database, TimeSpan interval, DatabaseWorkerPass.Visit? visit)
     {
         bool closed = database.IsClosed;
-        bool dataDue = !closed && database.DataStorage.IsCheckpointDue(interval);
+        bool dataDue = !closed && (database.DataStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage).ObserveAdmissionPause());
         bool catalogDue = false;
         if (visit is not null)
         {
@@ -81,7 +81,7 @@ internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphData
     /// checkpoint never waits on the database's own statements either.
     /// </remarks>
     protected override bool Checkpoint(GraphDatabase database, TimeSpan interval, CancellationToken cancellationToken)
-        => !database.DataStorage.IsCheckpointDue(interval) || database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
+        => !(database.DataStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage).ObserveAdmissionPause()) || database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
 
     private sealed class DebugView
     {

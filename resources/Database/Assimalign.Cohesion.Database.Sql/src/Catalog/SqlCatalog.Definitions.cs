@@ -225,7 +225,7 @@ public sealed partial class SqlCatalog
             {
                 throw new SqlCatalogException(value is SqlCatalogFunction ? "CS03065" : "CS03050", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreateDefinitionAsyncSqlCatalog2, key));
             }
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             var location = _storage.InsertRow(transaction, record);
             CommitCatalogChange(transaction, publication: publication, actualObject: actualObject,
@@ -259,7 +259,7 @@ public sealed partial class SqlCatalog
             }
             var dependentView = _views.Values.Select(value => value.Value).FirstOrDefault(view => view.Dependencies.Contains(actualObject, StringComparer.OrdinalIgnoreCase) || view.FunctionCalls.Contains(actualObject, StringComparer.OrdinalIgnoreCase));
             if (dependentView is not null) { RefuseViewDependency(dependentView); }
-            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
             CommitCatalogChange(transaction, publication: publication, actualObject: actualObject,

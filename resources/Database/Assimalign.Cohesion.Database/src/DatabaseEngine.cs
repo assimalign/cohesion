@@ -110,27 +110,22 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <param name="storages">Every independently checkpointed storage belonging to the database.</param>
     /// <exception cref="ArgumentNullException">A database, storage array or storage is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The limit is negative.</exception>
+    /// <exception cref="InvalidOperationException">Admission was already configured for this database.</exception>
     protected void ConfigureJournalAdmission(DatabaseInstance database, long journalSizeLimit, params Storage.Storage[] storages)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(storages);
         ArgumentOutOfRangeException.ThrowIfNegative(journalSizeLimit);
+        foreach (var storage in storages) { ArgumentNullException.ThrowIfNull(storage); }
         var admissions = new TransactionCheckpointInterlock[storages.Length];
         for (int i = 0; i < storages.Length; i++)
         {
             var storage = storages[i];
             var admission = TransactionCheckpointInterlock.ForStorage(storage);
             admissions[i] = admission;
-            admission.JournalSizeLimit = journalSizeLimit;
-            var onOffline = storage.OnOffline;
-            storage.OnOffline = error =>
-            {
-                try { admission.CloseAdmission(); }
-                finally { onOffline?.Invoke(error); }
-            };
-            if (storage.IsOffline) { admission.CloseAdmission(); }
         }
         database.AttachJournalAdmission(admissions);
+        foreach (var admission in admissions) { admission.JournalSizeLimit = journalSizeLimit; }
         bool closing;
         // Model construction may hold its registry lock. Root _sync protects only
         // membership; it never spans gate notifications, model work or joins.
@@ -495,14 +490,6 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             var worker = workers[index];
             if (worker.TakesDatabasesOffline && worker.HoldsFailure(name))
             {
-                // T3-27 owns backpressure while checkpoint admission is paused.
-                // Keep read service, including Blob wire service, available even
-                // when a failure first appeared before the halfway threshold.
-                // Healthy requests take no inventory lock: this lookup is only
-                // needed for a checkpoint that already holds a failure record.
-                if (worker.Kind == DatabaseEngineWorkerKind.Checkpoint &&
-                    TryGetDatabaseCore(name, out var database) && database.IsJournalAdmissionPaused)
-                { continue; }
                 return true;
             }
         }
@@ -744,9 +731,8 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
                 admissions = _journalAdmissions.SelectMany(static entry => entry.Value).ToArray();
             }
 
-            // Disable the backstop before servers or worker joins. A paused catalog
-            // caller can hold catalog _sync while a maintenance lane waits for
-            // that monitor; joining the lane before waking the caller deadlocks.
+            // Disable the backstop before servers or worker joins so accepted
+            // writers and mandatory cleanup can finish before storage closes.
             // Engine entry points reject new work; model operations and migration
             // intent discard must still drain before storage closes. Snapshot under
             // root _sync, then notify with no root/model lock held.

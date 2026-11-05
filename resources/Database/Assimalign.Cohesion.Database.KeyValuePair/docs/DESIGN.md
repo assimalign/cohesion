@@ -2,18 +2,29 @@
 
 ## Journal admission backstop (#1283, EN-C2)
 
-The engine configures every independently checkpointed file set with its resolved journal
-limit before publishing a database. At half the limit with a checkpoint pending (size-due
-included), new physical write brackets wait for a successful sharp checkpoint. The database
-stays online; health reports Degraded/CK06006. Whole/partial undo and nested brackets drain;
-reads retain ordinary MVCC and model-lock rules. Root close wakes waiters before disposal.
-Checkpoint failures while paused retry without escalating offline. Storage-safety fences and
-the single-huge-bracket overshoot residual remain. See Transactions DESIGN for lock order,
-attribution and exact pause/wait/duration counters. The four-writer load compares the internal
-switch enabled/disabled, with one controlled long-holder window before free-running writes.
-No format or crash-recovery changes.
-The checkpointer performs no catalog metadata read or registration re-export: a paused catalog
-writer can own _sync and needs the pure storage checkpoint to wake it. Bootstrap durably
+At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
+ordinary size trigger is disabled. New physical brackets wait while that checkpoint is
+pending. A long holder or a checkpoint that has not run never takes the database offline,
+regardless of the pause's duration. Undo and nested brackets drain; health reports
+Degraded/CK06006 while admission is paused.
+
+Checkpoint and page write-back failures retain owner decisions 25, 41 and 42: every operational
+failure counts while paused too. A persistent failure takes its database offline after the
+failure window (100 seconds by default, across at least three failed passes); two failed
+checkpoints with a journal past the cap can take it offline sooner. Every parked writer wakes
+with the existing offline error. A successful checkpoint inside the window resumes admission;
+a reopen recovers an offline database. Blob refuses its failing database while its worker
+failure is held. Storage safety fences and single-admitted-bracket/mandatory-undo overshoot
+remain. Reads retain ordinary MVCC and model-lock rules while the database remains online.
+
+The free-run four-writer phase asserts zero pauses. Three repeated blocked-checkpoint episodes
+compare the internal switch on/off with the same four writers: each writer records admission
+waits with the switch on and the peak stays at or below J; without the switch the peak passes J.
+Writers' wait counts and total pause duration per episode are diagnostics; no duration decides
+a test. Transactions DESIGN records the lock order, events and exact counters. No format change.
+
+Both catalog mutators refuse a pause immediately while retaining _sync, preserving their
+validated metadata. The checkpointer performs no catalog metadata read or registration re-export. Bootstrap durably
 persists the sole primary registration before database publication; BTreeIndex root IDs stay
 fixed through splits (Indexing/src/BTreeIndex.cs:132 and BTreeIndexManager.cs:27). The existing
 disposal-time registration backstop remains.

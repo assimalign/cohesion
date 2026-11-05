@@ -314,7 +314,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, writes.Count)
                     : MaterializeProjected(returning!, returned, writes.Count), cancellationToken).ConfigureAwait(false);
-            }, durable: false, cancellationToken).ConfigureAwait(false);
+            }, durable: false, cancellationToken, waitForAdmission: statement.ProvisioningSchema is null).ConfigureAwait(false);
 
         }
         catch when (!applyStarted)

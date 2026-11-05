@@ -87,14 +87,14 @@ internal sealed partial class SqlQueryExecutor
         if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
         using (SqlJsonPathExecution.BeginPlanning(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken))
         { plan = executor.Cost(plan, statement, cancellationToken); }
-        return sequenceUsage is not null ? ExecuteSequencesAsync(executor, plan, statement, session, cancellationToken, sequenceUsage)
+        return sequenceUsage is not null ? ExecuteSequencesAsync(executor, plan, statement, session, cancellationToken, sequenceUsage, request.Statement.SqlExpression.CommandType is not (SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop or SqlQueryCommandType.Truncate))
             : executor.ExecuteAsync(plan, statement, cancellationToken);
     }
 
     internal async Task<DatabaseResult> ExecuteSequencesAsync(SqlPlanExecutor executor, SqlPlan plan, SqlStatementContext statement,
-        SqlDatabaseSession? session, CancellationToken cancellationToken, SqlSequenceUsage? usage = null)
+        SqlDatabaseSession? session, CancellationToken cancellationToken, SqlSequenceUsage? usage = null, bool waitForAdmission = true)
     {
-        using var sequences = await SqlSequenceExecution.OpenAsync(_catalog, statement, session?.SequenceState ?? new SqlSequenceSessionState(), cancellationToken, usage ?? plan.SequenceUsage).ConfigureAwait(false);
+        using var sequences = await SqlSequenceExecution.OpenAsync(_catalog, statement, session?.SequenceState ?? new SqlSequenceSessionState(), cancellationToken, usage ?? plan.SequenceUsage, waitForAdmission && statement.ProvisioningSchema is null).ConfigureAwait(false);
         sequences.Enter();
         return await executor.ExecuteAsync(plan, statement, cancellationToken).ConfigureAwait(false);
     }

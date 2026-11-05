@@ -60,9 +60,19 @@ internal sealed class TransactionEventSource : EventSource
     private long _admissionPauses;
     private long _admissionWaits;
     private long _admissionPauseTicks;
+    private readonly object _admissionClock = new();
+    private long _runningPauseStarts;
+    private long _runningPauses;
     internal long AdmissionPauses => Interlocked.Read(ref _admissionPauses);
     internal long AdmissionWaits => Interlocked.Read(ref _admissionWaits);
-    internal long AdmissionPauseTicks => Interlocked.Read(ref _admissionPauseTicks);
+    internal long AdmissionPauseTicks
+    {
+        get
+        {
+            lock (_admissionClock)
+            { return _admissionPauseTicks + Stopwatch.GetTimestamp() * _runningPauses - _runningPauseStarts; }
+        }
+    }
     private double _slowLockWaitThresholdMilliseconds = DefaultSlowLockWaitThresholdMilliseconds;
 
     private TransactionEventSource()
@@ -509,19 +519,36 @@ internal sealed class TransactionEventSource : EventSource
         => WriteEvent(19, database, transactionSequence, resource, mode, durationMilliseconds, blockers);
 
     [NonEvent]
-    internal void AdmissionPaused(Storage.Storage storage, string reason, string bracketClass, long owner, long journalBytes, long journalSizeLimit)
+    internal void AdmissionPauseOpened(long started)
     {
-        Interlocked.Increment(ref _admissionPauses);
-        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
-        { AdmissionPaused(storage.Name, reason, bracketClass, owner, journalBytes, journalSizeLimit); }
+        lock (_admissionClock)
+        { Interlocked.Increment(ref _runningPauses); Interlocked.Add(ref _runningPauseStarts, started); }
     }
 
     [NonEvent]
-    internal void AdmissionResumed(Storage.Storage storage, string reason, long ticks)
+    internal void AdmissionPauseClosed(long started)
     {
-        Interlocked.Add(ref _admissionPauseTicks, ticks);
+        lock (_admissionClock)
+        {
+            Interlocked.Decrement(ref _runningPauses);
+            Interlocked.Add(ref _runningPauseStarts, -started);
+            Interlocked.Add(ref _admissionPauseTicks, Stopwatch.GetTimestamp() - started);
+        }
+    }
+
+    [NonEvent]
+    internal void AdmissionPaused(Storage.Storage storage, string reason, string bracketClass, long owner, long journalBytes, long journalSizeLimit, long episodeId)
+    {
+        Interlocked.Increment(ref _admissionPauses);
         if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
-        { AdmissionResumed(storage.Name, reason, ticks * 1000.0 / Stopwatch.Frequency); }
+        { AdmissionPaused(storage.Name, reason, bracketClass, owner, journalBytes, journalSizeLimit, episodeId); }
+    }
+
+    [NonEvent]
+    internal void AdmissionResumed(Storage.Storage storage, string reason, long ticks, long episodeId)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        { AdmissionResumed(storage.Name, reason, ticks * 1000.0 / Stopwatch.Frequency, episodeId); }
     }
 
     [NonEvent]
@@ -533,12 +560,23 @@ internal sealed class TransactionEventSource : EventSource
     }
 
     [Event(23, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' paused write admission: {1}, holder {2}, owner {3}, journal {4} bytes, limit {5} bytes.")]
-    private void AdmissionPaused(string database, string reason, string bracketClass, long owner, long journalBytes, long journalSizeLimit)
-        => WriteEvent(23, database, reason, bracketClass, owner, journalBytes, journalSizeLimit);
+    private void AdmissionPaused(string database, string reason, string bracketClass, long owner, long journalBytes, long journalSizeLimit, long episodeId)
+        => WriteEvent(23, database, reason, bracketClass, owner, journalBytes, journalSizeLimit, episodeId);
 
     [Event(24, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' resumed write admission: {1}, after {2} ms.")]
-    private void AdmissionResumed(string database, string reason, double durationMilliseconds)
-        => WriteEvent(24, database, reason, durationMilliseconds);
+    private void AdmissionResumed(string database, string reason, double durationMilliseconds, long episodeId)
+        => WriteEvent(24, database, reason, durationMilliseconds, episodeId);
+
+    [NonEvent]
+    internal void AdmissionPauseFailed(Storage.Storage storage, long episodeId)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        { AdmissionPauseFailed(storage.Name, "CheckpointFailure", episodeId); }
+    }
+
+    [Event(26, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' admission pause failed: {1}, episode {2}.")]
+    private void AdmissionPauseFailed(string database, string reason, long episodeId)
+        => WriteEvent(26, database, reason, episodeId);
 
     [Event(25, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' admission waits for a checkpoint: {1}, owner {2}.")]
     private void AdmissionWait(string database, string bracketClass, long owner)

@@ -2,12 +2,15 @@
 
 ## Journal admission health (#1283)
 
-DatabaseInstance.IsJournalAdmissionPaused folds live per-storage checkpoint admission state.
+DatabaseInstance.IsJournalAdmissionPaused folds pure reads of live per-storage admission state;
+health reads do not create pauses. The checkpoint worker and admission paths observe thresholds.
 Health is Degraded while paused, with journalAdmissionPauseCode=CK06006,
 journalAdmissionPausedDatabaseCount and journalAdmissionPausedDatabases. Existing health
 transition events 16/17 use reason JournalAdmissionPaused:CK06006. Worker faults can also
 degrade health; offline storage keeps its Unhealthy priority. A successful checkpoint clears
-the pause without reopen. Reads retain ordinary snapshot and locking rules. Root close wakes
+the pause without reopen inside the failure window. Persistent worker failures retain the
+100-second default offline window while paused; that fence wakes all parked writers, and reopen
+recovers the database. A non-failing pending pause never goes offline merely because time passes. Reads retain ordinary snapshot and locking rules. Root close wakes
 paused writers before cleanup, including raw catalog callers.
 
 ## Joint SQL migration health (#1447, SQ-A3)
