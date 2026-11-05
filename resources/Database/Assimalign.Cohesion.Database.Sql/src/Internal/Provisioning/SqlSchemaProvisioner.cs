@@ -204,7 +204,15 @@ internal sealed partial class SqlSchemaProvisioner
                     // Reservation succeeded, but no execution/handoff was accepted.
                     // Do not let the outer finally enqueue work after this failure.
                     try { await joint.StopAsync().ConfigureAwait(false); }
-                    catch (Exception cleanup) { throw JointFailure(new AggregateException(failure, cleanup), schema, script.Steps); }
+                    catch (Exception cleanup)
+                    {
+                        _database.ReportProvisioning(joint.JointFailureProgress);
+                        throw JointFailure(new AggregateException(failure, cleanup), schema, script.Steps);
+                    }
+                    // Stop uses a cancelled execution token to discard the reservation.
+                    // Report the producer's actual outcome, not that cleanup cancellation.
+                    _database.ReportProvisioning(deferDataScalingSteps || !IsImperativeInterruption(failure)
+                        ? joint.JointFailureProgress : null);
                     if (failure is OperationCanceledException or OutOfMemoryException) { throw; }
                     throw JointFailure(failure, schema, script.Steps);
                 }
@@ -749,12 +757,17 @@ internal sealed partial class SqlSchemaProvisioner
     // An omitted column DEFAULT inherits a SQL domain default, including on reconciliation.
     private string? EffectiveDeclaredDefault(CompiledSchemaColumn declared, SqlCatalogColumn actual)
     {
-        if (declared.DefaultLiteral is not null) { return CanonicalDefault(declared.DefaultLiteral); }
-        if (actual.DomainName is null || DescribeTypeDifference(declared, actual) is not null) { return null; }
-        return _catalog.Domains.FirstOrDefault(domain => domain.Name.Equals(actual.DomainName, StringComparison.OrdinalIgnoreCase))?.DefaultLiteral;
+        string? inherited = actual.DomainName is null ? null : _catalog.Domains
+            .FirstOrDefault(domain => domain.Name.Equals(actual.DomainName, StringComparison.OrdinalIgnoreCase))?.DefaultLiteral;
+        if (declared.DefaultLiteral is not null)
+        {
+            // Planner keeps an explicit NULL to override a SQL domain's inherited default.
+            return CanonicalDefault(declared.DefaultLiteral) ?? (inherited is null ? null : "NULL");
+        }
+        return inherited is not null && DescribeTypeDifference(declared, actual) is null ? inherited : null;
     }
 
-// The first column of a table that differs from its declaration, described for a message.
+    // The first column of a table that differs from its declaration, described for a message.
     private string? DescribeColumnDifference(CompiledSchemaTable expected, SqlCatalogTable actual)
     {
         if (actual.Columns.Count != expected.Columns.Count)

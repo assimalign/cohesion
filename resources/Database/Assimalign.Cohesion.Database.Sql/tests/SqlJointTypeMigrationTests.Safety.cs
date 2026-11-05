@@ -50,7 +50,8 @@ public sealed partial class SqlJointTypeMigrationTests
         database.SchemaProvisioner.Deferred.ShouldBeNull();
         database.Catalog.PendingMigration.ShouldBeNull();
         database.Catalog.SchemaState!.ContentHash.ShouldBe(Source().Compile().Hash);
-        database.Provisioning!.FailureCode.ShouldBe("CS03402");
+        if (deferred || kind != "cancel") { database.Provisioning!.FailureCode.ShouldBe("CS03402"); }
+        else { database.Provisioning.ShouldBeNull(); }
         database.OfflineError.ShouldBeNull();
         await using var writer = await database.CreateSessionAsync(timeout.Token);
         await writer.ExecuteAsync("INSERT INTO items VALUES(1000,9)", cancellationToken: timeout.Token);

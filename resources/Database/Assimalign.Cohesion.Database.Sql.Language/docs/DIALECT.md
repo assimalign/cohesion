@@ -1916,7 +1916,9 @@ destructive opt-in (CS03105 before any step); exact widening can run without it.
 refusals, old snapshots and retryable CS04006 writers retain the single-statement contract.
 VARCHAR narrowing always takes the joint TYPE path because assignment may trim excess spaces;
 CHAR width changes also rewrite. Default changes without a TYPE rewrite publish jointly,
-including SET and DROP DEFAULT with destructive opt-in (CS03105 without it); a frozen missing value retains its original value.
+including SET and DROP DEFAULT with destructive opt-in (CS03105 without it); a frozen missing
+value retains its original value. Typed reconciliation preserves inherited SQL-domain defaults
+and explicit DEFAULT NULL overrides.
 Metadata planning refusals report CS03105; joint reservation failures throw CS03402. Imperative
 interruption clears Provisioning; deferred failures remain sticky. Before intent save, Build
 checks only the metadata space floor, without owner snapshots or row

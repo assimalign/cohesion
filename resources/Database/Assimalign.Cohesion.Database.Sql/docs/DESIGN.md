@@ -3569,6 +3569,9 @@ A zero-operation marker refresh (including an empty Build) admits on the declara
 metadata floor alone. Heap-owned dropped-index pages are not retirement pages for a kept heap
 and do not enter the reclamation estimate. Existing defaults inherited from a catalog SQL domain
 are the effective default of a typed column with no explicit DEFAULT during reconciliation.
+An explicit DEFAULT NULL retains its override of that inherited default. Column defaults take
+precedence over type defaults (PostgreSQL src/backend/rewrite/rewriteHandler.c:1296-1312);
+reconciliation preserves that precedence.
 
 Namespace targeting (#1030) remains fixed at dbo for compiled declarations and migration SQL.
 SqlNamespaceNames.Default is the shared spelling used by runtime and SDK rendering. CREATE SCHEMA
@@ -3711,7 +3714,7 @@ creation, nullable additions and drops. Otherwise cheap and empty-table work rem
 `SqlDatabaseBuilder.RunMigrationsInline = true` keeps all work in Build.
 Imperative `ApplySchemaAsync` remains inline. Outside a deferred joint plan, nullable additions validate their immutable missing
 value once and existing rows resolve it from the catalog without a rewrite. In a deferred plan,
-nullable append, DROP COLUMN and compatible facet changes keep their heap. Validation coerces
+nullable append, DROP COLUMN and compatible facet changes keep their heap. Kept-table validation coerces
 only new required columns or columns with tighter nullability/facets, and checks only new or
 changed domains. Unrelated JSON and registered-domain columns are not revalidated; unchanged DEFAULTs also
 skip domain checks during planning.
@@ -4005,7 +4008,8 @@ API. Independent tables continue serving reads and writes. Build-time inline job
 sessions. A configured engine `LockTimeout` bounds Build and `ApplySchemaAsync` reservation;
 zero waits without a timeout. Cancellation/timeout of an imperative job clears its Provisioning
 report because the caller receives the exception. Deferred failures remain sticky until a
-successful apply/skip/verify clears them.
+successful apply/skip/verify clears them. A rejected handoff reports its producer failure;
+the cancelled token used only to discard its reservation does not replace that outcome.
 
 New-table-only jobs reserve synthetic `Object(0)`. Admission to a pending new name rendezvous
 on that reservation using the live transaction owner for deadlock detection. Since zero is not
