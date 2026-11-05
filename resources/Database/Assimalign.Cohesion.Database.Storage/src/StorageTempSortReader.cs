@@ -24,6 +24,7 @@ public sealed class StorageTempSortReader : IDisposable
     private Memory<byte> _workspace;
     private int _pending = -1;
     private bool _started;
+    private bool _forked;
     private bool _disposed;
     internal long KeyComparisons { get; private set; }
 
@@ -42,6 +43,24 @@ public sealed class StorageTempSortReader : IDisposable
     public ReadOnlyMemory<byte> Value { get; private set; }
     internal ReadOnlySpan<byte> Record => _workspace.Span.Slice(_pending * _stride + StorageTempSpace.PageSize, _lengths[_pending]);
 
+    /// <summary>Gets the required page and record buffer size for an active cursor over these runs.</summary>
+    public long BufferBytes => (long)_runs.Length * _stride;
+
+    /// <summary>Opens an independent reader over an unstarted final merge's immutable runs.</summary>
+    /// <returns>A reader with independent buffers; the original reader or statement retains file ownership.</returns>
+    /// <exception cref="ObjectDisposedException">This reader or its statement is disposed.</exception>
+    /// <exception cref="InvalidOperationException">This reader has already started or does not own its runs.</exception>
+    /// <remarks>Keep this owner unstarted and alive until all readers finish. Disposing a fork releases
+    /// only its buffers. Disposing the owner or statement invalidates every fork. Each fork requires serialized use.</remarks>
+    public StorageTempSortReader OpenReader()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this); _statement.Check();
+        if (_started || !_ownsRuns) { throw new InvalidOperationException(ErrorMessages.TempSortCompleted); }
+        _forked = true;
+        _workspace = default; // ownership-only template; no second copy of the read workspace
+        return new StorageTempSortReader(_statement, _runs, _maximumRecordLength, new byte[checked((int)BufferBytes)], false);
+    }
+
     /// <summary>Reads the next sorted key and value without rewriting the final merge.</summary>
     /// <param name="cancellationToken">Cancels before reading each input page or emitting a record.</param>
     /// <returns>True for a record; false at end.</returns>
@@ -51,6 +70,7 @@ public sealed class StorageTempSortReader : IDisposable
     public bool MoveNext(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_forked) { throw new InvalidOperationException(ErrorMessages.TempSortCompleted); }
         Key = Value = default;
         try
         {
