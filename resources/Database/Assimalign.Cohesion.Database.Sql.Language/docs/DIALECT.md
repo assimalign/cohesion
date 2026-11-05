@@ -329,7 +329,7 @@ The WindowAgg stage groups equal partition/order specifications and processes lo
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
 functions and sort_shared for each group. Window inputs, augmented result rows, sort indexes,
 key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
-an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first and every reservation unwinds on success, error or cancellation. Whole input and
+an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first. Every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
 Reference-identity ownership avoids duplicate payload charges; consumed input rows and
 partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
@@ -5387,7 +5387,8 @@ buffer owner by reference identity, plus a fixed 64 B per distinct wide-cell map
 (#1776, SQ-L1c). Further references pay their array slots; smaller cells still pay per
 reference. Equal but separate objects, including binary clones, each pay. Output and ordering
 keys share their collector map. Two live buffers each pay, bounding repeated-payload
-overcharge by simultaneously live owners rather than rows. Maps release with their buffer;
+overcharge by simultaneously live owners rather than rows. Hash builds still charge each reference.
+Maps release with their buffer;
 heap replacement removes dead identities immediately. Plan-sized traversal and
 current-row state, storage iterator scratch and transient planning remain outside the grant.
 SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and
