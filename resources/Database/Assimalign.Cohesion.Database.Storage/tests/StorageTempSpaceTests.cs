@@ -270,7 +270,7 @@ public sealed class StorageTempSpaceTests : IDisposable
     {
         // Arrange
         using (var absent = Create()) { Directory.Exists(_directory).ShouldBeFalse(); }
-        Directory.CreateDirectory(_directory);
+        TempTestDirectory.Create(_directory);
         string orphan = Path.Combine(_directory, "cohesion-" + Guid.NewGuid().ToString("N") + ".ctmp");
         string unrelated = Path.Combine(_directory, "cohesion-user.ctmp");
         File.WriteAllText(orphan, "orphan"); File.WriteAllText(unrelated, "keep");

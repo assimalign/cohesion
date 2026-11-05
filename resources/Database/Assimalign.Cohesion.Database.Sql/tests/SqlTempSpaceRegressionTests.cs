@@ -32,7 +32,7 @@ public sealed class SqlTempSpaceRegressionTests : IDisposable
         FileStream? lease = null;
         if (heldLease)
         {
-            Directory.CreateDirectory(temp);
+            TempTestDirectory.Create(temp);
             lease = new FileStream(Path.Combine(temp, ".cohesion-temp.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         }
         else { File.WriteAllBytes(temp, [1]); }

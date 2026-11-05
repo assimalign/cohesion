@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlTempSpaceTests : IDisposable
@@ -50,7 +52,7 @@ public sealed class SqlTempSpaceTests : IDisposable
     {
         // Arrange
         string temp = Path.Combine(_root, ".cohesion-temp");
-        Directory.CreateDirectory(temp);
+        TempTestDirectory.Create(temp);
         string orphan = Path.Combine(temp, "cohesion-" + Guid.NewGuid().ToString("N") + ".ctmp");
         File.WriteAllBytes(orphan, [1]);
         var options = new SqlDatabaseEngineOptions { RootPath = _root, TempSpaceQuota = 65536, StatementTempSpaceQuota = 8192 };

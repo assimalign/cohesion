@@ -30,7 +30,7 @@ internal static class Program
 
     private static async Task TempLeaseProbeAsync(string root)
     {
-        string temp = Path.Combine(root, ".cohesion-temp"); Directory.CreateDirectory(temp);
+        string temp = Path.Combine(root, ".cohesion-temp"); CreateTempDirectory(temp);
         string orphan = Path.Combine(temp, "cohesion-00000000000000000000000000000001.ctmp"); File.WriteAllBytes(orphan, [1]);
         using var events = new TempWarnings();
         await using (var seed = SqlDatabaseEngine.Create("seed", new() { RootPath = root, CheckpointJournalSize = 65536 }))
@@ -61,6 +61,12 @@ internal static class Program
         }
         protected override void OnEventWritten(EventWrittenEventArgs data)
         { if (data.EventId == 23) { Interlocked.Increment(ref Warnings); } }
+    }
+
+    private static void CreateTempDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows()) { Directory.CreateDirectory(path); }
+        else { Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }
 
     private static async Task Main(string[] args)

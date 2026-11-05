@@ -7,11 +7,17 @@ namespace Assimalign.Cohesion.Database.Storage.TempFixture;
 
 internal static class Program
 {
+    private static void CreateTempDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows()) { Directory.CreateDirectory(path); }
+        else { Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+    }
+
     private static async Task Main(string[] args)
     {
         if (args.Length > 1 && args[1] == "lease-probe")
         {
-            Directory.CreateDirectory(args[0]);
+            CreateTempDirectory(args[0]);
             File.WriteAllBytes(Path.Combine(args[0], "cohesion-00000000000000000000000000000001.ctmp"), [1]);
             try
             {

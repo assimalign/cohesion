@@ -5,6 +5,7 @@ using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -31,7 +32,7 @@ public sealed class StorageTempRegressionTests : IDisposable
     public void Create_LinkedLease_ShouldPreserveTargetBytes()
     {
         // Arrange
-        Directory.CreateDirectory(DirectoryPath);
+        TempTestDirectory.Create(DirectoryPath);
         string target = Path.Combine(_root, "victim");
         byte[] bytes = [3, 1, 4, 1, 5]; File.WriteAllBytes(target, bytes);
         File.CreateSymbolicLink(Path.Combine(DirectoryPath, ".cohesion-temp.lock"), target);
@@ -95,7 +96,7 @@ public sealed class StorageTempRegressionTests : IDisposable
     public void Create_QuotaProbe_ShouldMeasureAfterSweepAndAcceptOverflow()
     {
         // Arrange
-        Directory.CreateDirectory(DirectoryPath);
+        TempTestDirectory.Create(DirectoryPath);
         string orphan = Path.Combine(DirectoryPath, "cohesion-" + Guid.NewGuid().ToString("N") + ".ctmp");
         File.WriteAllBytes(orphan, [1]);
 
@@ -108,11 +109,11 @@ public sealed class StorageTempRegressionTests : IDisposable
         Should.Throw<ArgumentException>(() => StorageTempSpace.Create(default, null, () => 0));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Temp security: Unix directory, lease and run are private and writable public directories refuse")]
+    [UnixFact(DisplayName = "Cohesion Test [Storage] - Temp security: Unix directory, lease and run are private and writable public directories refuse")]
+    [UnsupportedOSPlatform("windows")]
     public void Create_UnixModes_ShouldProtectFilesAndRefuseWritableDirectory()
     {
         // Arrange
-        if (OperatingSystem.IsWindows()) { return; }
         using var space = Create(); using var statement = space.CreateStatement(8192);
         using var run = statement.CreateRun(); run.Append([1]);
 
@@ -183,12 +184,16 @@ public sealed class StorageTempRegressionTests : IDisposable
         int reads = 0;
         if (betweenPages) { space.BeforePageRead = () => { if (++reads == 2) { cancellation.Cancel(); } }; }
         else { cancellation.Cancel(); }
-        byte[] row = new byte[20000];
+        byte[] row = new byte[20000]; long damage = StorageEventSource.Log.TempDamage;
+        using var events = new StorageEventRecorder(EventLevel.Error);
 
         // Act
         Should.Throw<OperationCanceledException>(() => reader.TryRead(row, out _, cancellation.Token));
         int before = reads;
-        Should.Throw<StorageTempException>(() => reader.TryRead(row, out _)).Code.ShouldBe("CK05004");
+        var retry = Should.Throw<StorageTempException>(() => reader.TryRead(row, out _));
+        StorageEventSource.Log.TempDamage.ShouldBe(damage);
+        events.Events.ShouldNotContain(e => e.EventId == 24);
+        retry.Code.ShouldBe("CK05004"); retry.Message.ShouldContain("previous read", Case.Sensitive);
 
         // Assert
         reads.ShouldBe(before); reads.ShouldBe(betweenPages ? 2 : 0);
@@ -346,12 +351,11 @@ public sealed class StorageTempRegressionTests : IDisposable
         run.Dispose(); space.Bytes.ShouldBe(0); space.PendingBytes.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Temp availability: a blocked sweep warns at startup and retries after the obstruction closes")]
+    [WindowsFact(DisplayName = "Cohesion Test [Storage] - Temp availability: a blocked sweep warns at startup and retries after the obstruction closes")]
     public void Create_BlockedSweep_ShouldRetryAtFirstRun()
     {
         // Arrange: Windows sharing enforces an undeletable orphan without permission changes.
-        if (!OperatingSystem.IsWindows()) { return; }
-        Directory.CreateDirectory(DirectoryPath);
+        TempTestDirectory.Create(DirectoryPath);
         string orphan = Path.Combine(DirectoryPath, "cohesion-" + Guid.NewGuid().ToString("N") + ".ctmp");
         File.WriteAllBytes(orphan, [1]);
         using var obstruction = new FileStream(orphan, FileMode.Open, FileAccess.Read, FileShare.Read);
