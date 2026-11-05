@@ -23,7 +23,12 @@ public sealed partial class GqlQueryParser
                 break;
             }
             if (stages.Count != 0 && stages[^1] is GqlReturnStage { IsWith: false }) { break; }
-            if (Is("MATCH") || Is("OPTIONAL"))
+            if (Is("CALL") || Is("OPTIONAL") && IsWordAt(_position + 1, "CALL"))
+            {
+                stages.Add(ParseCall());
+                hasNamedBinding = true;
+            }
+            else if (Is("MATCH") || Is("OPTIONAL"))
             {
                 bool optional = Take("OPTIONAL");
                 Expect("MATCH");
@@ -208,8 +213,8 @@ public sealed partial class GqlQueryParser
             { Unsupported("STANDALONE ORDER BY AND PAGE STATEMENT", Current); }
             else { break; }
         }
-        if (!Failed && (stages.Count != 0 && stages[^1] is GqlReturnStage { IsWith: true } ||
-            !segmentWrites && (stages.Count == 0 || stages[^1] is not GqlReturnStage { IsWith: false })))
+        if (!Failed && _callDepth == 0 && (stages.Count != 0 && stages[^1] is GqlReturnStage { IsWith: true } ||
+            !segmentWrites && (stages.Count == 0 || stages[^1] is not (GqlReturnStage { IsWith: false } or GqlCallStage))))
         { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid5, Current); }
         return new GqlQueryExpression(stages.AsReadOnly(), Span(start, Previous));
     }

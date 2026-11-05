@@ -52,6 +52,13 @@
   <data name="ProjectionExpressionRequired" xml:space="preserve"><value>A projection requires an expression.</value></data>
   <data name="PatternOrReturnRequired" xml:space="preserve"><value>A graph statement requires a pattern or RETURN items.</value></data>
   <data name="ProjectionUnsupported" xml:space="preserve"><value>Unsupported graph projection.</value></data>
+  <data name="CallImportMissing" xml:space="preserve"><value>CALL imports an unknown variable.</value></data>
+  <data name="CallImportDuplicate" xml:space="preserve"><value>An imported CALL variable cannot be redeclared.</value></data>
+  <data name="CallConclusionRequired" xml:space="preserve"><value>A returning CALL cannot conclude a query by itself.</value></data>
+  <data name="CallReturnAliasRequired" xml:space="preserve"><value>A computed CALL result requires an alias.</value></data>
+  <data name="CallReturnShadow" xml:space="preserve"><value>CALL result '{0}' is already declared in the outer scope.</value></data>
+  <data name="CallImportWithUnsupported" xml:space="preserve"><value>The importing WITH cannot be represented by one CALL scope clause.</value></data>
+  <data name="CallReadOnlyReturnRequired" xml:space="preserve"><value>CALL currently requires a read-only query with RETURN.</value></data>
   <data name="DuplicateResultColumn" xml:space="preserve"><value>Result column '{0}' is declared more than once.</value></data>
   <data name="PathProjectionRequired" xml:space="preserve"><value>Path execution requires a read-only MATCH with exactly one path or bound entity projection.</value></data>
   <data name="OptionalPathProjection" xml:space="preserve"><value>Path execution cannot project a variable bound only by OPTIONAL MATCH.</value></data>

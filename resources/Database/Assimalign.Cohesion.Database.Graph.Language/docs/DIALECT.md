@@ -245,6 +245,53 @@ Negotiated value encoding accounts for values from all operands. EXPLAIN retains
 correlated subplans. The #1662 entity-list wire gate is checked for every operand, including empty
 ones, before execution. No disk or wire format changes are needed.
 
+## Inline CALL subqueries (#1807, GQ-N1)
+
+[OPTIONAL] CALL [(a, b) | (*) | ()] { query } runs a read-only query with RETURN for each
+incoming row. An omitted scope imports nothing; () explicitly imports nothing; (*) imports
+all current bindings; a name list imports exactly those names. Imports retain their binding kinds
+and remain visible across inner WITH, NEXT and composite boundaries. Inner declarations stay
+inside the call. Returned bare variables or aliased expressions add bindings to the outer row;
+computed results require aliases (CG05001). Every returned name, including RETURN * expansions,
+must be absent from the outer scope (CG01024), even when it names an import. This strict rule
+follows the owner requirement rather than Neo4j's exemption for imported star results.
+
+For omitted scopes only, a leading importing WITH translates to a scope clause when it contains
+only bare variables without aliases, or star, and no DISTINCT, GROUP BY, ORDER BY, paging or
+WHERE. Explicit ALL is harmless. Composite operands must import the same set (order may differ);
+otherwise the translation is CK00001. With an explicit scope, WITH is an ordinary inner
+projection. Imports cannot be rebound (CG03003); a missing import is CG05001. Variables
+introduced inside one invocation cannot escape except through its final RETURN.
+
+The existing read-only UNION, EXCEPT, INTERSECT, OTHERWISE and NEXT rules apply inside the
+braces, including validation of operands that will be empty or skipped. CALL joins every result
+row; zero results remove the input row. OPTIONAL CALL instead emits exactly one row with NULL
+for each returned binding when the invocation is empty; an existing NULL result is a real row.
+Empty outer input invokes nothing. Inner grouping, DISTINCT, ordering and paging apply separately
+to each invocation. A returning CALL cannot conclude the enclosing query by itself (CG05001);
+existing RETURN or mutation conclusions apply. Uncorrelated bodies are
+also evaluated per input row, without caching.
+
+The inner query shares the GraphOperation, snapshot, parameters, transaction clock, cancellation,
+physical-work budget and retained-memory budget. Each invocation and emitted CALL row consumes
+one work unit in addition to its inner operators. Borrowed arguments/results, grouping state,
+composite state and cursors release their grants on completion, early exit, refusal or cancellation.
+EXPLAIN describes Apply or OptionalApply and their nested plans without executing them.
+A read-only body can follow an outer write and sees that statement's update overlay.
+
+Writes and bodies without RETURN remain CK00001 at GraphPlanner.ValidateCallReadOnly, the single
+admission boundary GQ-N2 will lift. Named CALL proc(...) YIELD, FOREACH and CALL ... IN TRANSACTIONS
+remain CK00001. There is no wire or disk-format change.
+
+Behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j:
+community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:2501-2530,2663-2750
+checks isolated imported scope and outer output collisions;
+community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Query.scala:698-711
+requires a returning subquery to be followed by a concluding clause.
+The Cypher 25 grammar is
+community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:320-357.
+ISO GQL inline-call clause numbers remain unverified; this is no claim of full ISO conformance.
+
 ## EXISTS and NOT EXISTS
 
 EXISTS { MATCH pattern [WHERE predicate] ... } and EXISTS { pattern [, pattern] [WHERE predicate] }
@@ -531,7 +578,7 @@ WITH supports GROUP BY, ORDER BY, OFFSET/SKIP, LIMIT and WHERE. Without DISTINCT
 
 NEXT requires RETURN on a read segment, and cannot trail a statement. A modifying segment without RETURN passes one empty binding and no variables to NEXT. INSERT and DELETE run in source order; deleted variables leave scope (a later reference is CG03003). Statements see their own writes, so INSERT (:T {k:1}) MATCH (t:T) RETURN t.k works even for a new label. INSERT maps evaluate scalar expressions against each row, enabling FOR name IN $names INSERT (:Person {name:name}); composite properties remain unsupported.
 
-LET/FOR cannot rebind a name in scope (CG03003). Dropped or unaliased variables are unbound (CG05001). Standalone ordering/page stages remain CK00001, including after the new clauses. Immediate RETURN after DELETE remains CK00001. FOREACH, CALL and NEXT YIELD remain excluded; UNION combines complete read-only operands. Read stages stream owned slot bindings; mutation target tables materialize within the shared memory budget. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
+LET/FOR cannot rebind a name in scope (CG03003). Dropped or unaliased variables are unbound (CG05001). Standalone ordering/page stages remain CK00001, including after the new clauses. Immediate RETURN after DELETE remains CK00001. FOREACH, named CALL and NEXT YIELD remain excluded; inline CALL with RETURN executes as described above; UNION combines complete read-only operands. Read stages stream owned slot bindings; mutation target tables materialize within the shared memory budget. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
 
 ## Aggregates and GROUP BY
 
@@ -661,7 +708,7 @@ CAST is contextual: followed by `(` it starts CAST; elsewhere it is an identifie
 Recognized unsupported calls (temporal constructors, head/last/tail/reverse/range,
 ELEMENTS, CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher
 toStringList/toIntegerList/toFloatList/toBooleanList) keep CK00001 in call position, preserving variables such as date.
-CURRENT_TIME/LOCAL_TIME/LOCAL_TIMESTAMP and procedures/CALL also remain CK00001.
+CURRENT_TIME/LOCAL_TIME/LOCAL_TIMESTAMP and named procedure calls also remain CK00001.
 Runtime errors precede ResultHeader and retain the pooled session. Every declared function
 and alias has live evidence in the profile coverage guard.
 

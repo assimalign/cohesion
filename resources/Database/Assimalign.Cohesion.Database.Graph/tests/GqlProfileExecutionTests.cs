@@ -229,6 +229,12 @@ public sealed class GqlProfileExecutionTests
                 new("RETURN null AS k NEXT RETURN k AS x UNION ALL RETURN k AS x", [[null], [null]]),
                 new("LET x = $value RETURN x NEXT RETURN x + 1 AS y", [[6L]], Parameters: new Dictionary<string, object?> { ["value"] = 5L }),
             ],
+            [GqlClauses.Call] =
+            [
+                new("FOR x IN [1,2] CALL (x) { RETURN x+1 AS y } RETURN y ORDER BY y", [[2L], [3L]]),
+                new("OPTIONAL CALL () { MATCH (n:Person {name:'Absent'}) RETURN n.age AS y } RETURN y", [[null]]),
+                new("CALL { RETURN 1 AS y UNION RETURN 2 AS y } RETURN y ORDER BY y", [[1L], [2L]]),
+            ],
             [GqlClauses.With] =
             [
                 new("MATCH (a:Person) WITH a WHERE a.age > $age RETURN a.name ORDER BY a.name", [["Alice"], ["Isolated"]], Parameters: new Dictionary<string, object?> { ["age"] = 18L }),
@@ -640,6 +646,7 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.For => query.Stages.Any(stage => stage is GqlForStage { IsUnwind: false }),
         GqlClauses.Unwind => query.Stages.Any(stage => stage is GqlForStage { IsUnwind: true }),
         GqlClauses.Next => query.Stages.Any(stage => stage is GqlNextStage),
+        GqlClauses.Call => query.Stages.Any(stage => stage is GqlCallStage),
         GqlClauses.With => query.Stages.Any(stage => stage is GqlReturnStage { IsWith: true }),
         GqlClauses.Return => query.Projections.Count != 0 || query.ReturnStar,
         GqlClauses.GroupBy => query.GroupBy is not null,

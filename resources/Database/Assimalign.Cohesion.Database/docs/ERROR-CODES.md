@@ -466,6 +466,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1738, GQ-D1) | CG01021 | Binding/names — named index or constraint to drop is absent |
 | New (#1738, GQ-D2) | CG01022 | Binding/names — schema property references a variable other than its FOR declaration |
 | New (#1249, #1738, GQ-D3) | CG01023 | Warning — statically named entity property is unknown database-wide in a read-only statement |
+| New (#1807, GQ-N1) | CG01024 | Binding/names — a CALL result shadows an outer binding, including imported names and star expansion |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |

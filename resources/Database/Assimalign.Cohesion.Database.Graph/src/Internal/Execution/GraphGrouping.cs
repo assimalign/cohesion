@@ -23,7 +23,7 @@ internal static class GraphGrouping
     }
 
     internal static GraphGroupingPlan? Plan(GqlQueryExpression query, IReadOnlyList<GraphProjectionPlan> projections, CancellationToken token,
-        Action<GqlExpression>? validateKey = null, GraphFunctionCatalog? functions = null, IReadOnlyDictionary<GqlExpression, GraphCorrelatedSubplan>? subplans = null)
+        Action<GqlExpression>? validateKey = null, GraphFunctionCatalog? functions = null, IReadOnlyDictionary<GqlExpression, GraphCorrelatedSubplan>? subplans = null, IEnumerable<string>? constants = null)
     {
         var shape = new GraphExpressionShape(token);
         var aggregates = new HashSet<GqlExpression>(shape);
@@ -74,7 +74,7 @@ internal static class GraphGrouping
             if (explicitKeys.Count != keys.Count || !keys.SetEquals(explicitKeys))
             { throw new GraphPlanningException("CG05001", ErrorMessages.GroupByMismatch, query.Location); }
         }
-        var scope = new GraphGroupingScope(keyList, aggregateList, shape, token, functions);
+        var scope = new GraphGroupingScope(keyList, aggregateList, shape, token, functions, constants);
         var plan = new GraphGroupingPlan(keyList.AsReadOnly(), aggregateList.AsReadOnly(), scope);
         foreach (var projection in projections) { scope.Validate(projection.Expression, subplans: subplans); }
         return plan;

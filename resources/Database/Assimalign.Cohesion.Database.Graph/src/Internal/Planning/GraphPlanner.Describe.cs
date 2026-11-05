@@ -16,6 +16,8 @@ internal sealed partial class GraphPlanner
         GraphPlan => "Match",
         GraphCompositePlan composite => composite.Operator.ToString(),
         GraphCorrelatedSubplan => "CorrelatedSubplan",
+        GraphCallStagePlan { Call.Optional: true } => "OptionalApply",
+        GraphCallStagePlan => "Apply",
         GraphStagePlan => "Stage",
         GqlSetStage => "Set",
         GqlRemoveStage => "Remove",
@@ -46,7 +48,7 @@ internal sealed partial class GraphPlanner
     private void AppendDescription(GraphPlan plan, List<DatabasePlanNode> nodes, int? rootParent, GraphPlanExecutor.ExpansionBudget? budget)
     {
         int descriptionRoot = nodes.Count;
-        bool pipeline = plan.Stages.Any(item => item.Stage is GqlCompositeStage or GqlMergeStage or GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
+        bool pipeline = plan.Stages.Any(item => item.Stage is GqlCallStage or GqlCompositeStage or GqlMergeStage or GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
             plan.Stages.Select((item, i) => item.Stage is GqlMatchStage && plan.Stages.Take(i).Any(earlier => earlier.Stage is GqlInsertStage or GqlDeleteStage)).Any(value => value) ||
             plan.Stages.Count(item => item.Stage is GqlInsertStage or GqlDeleteStage) > 1;
         if (pipeline)
@@ -56,6 +58,14 @@ internal sealed partial class GraphPlanner
             {
                 if (item is GraphCompositeStagePlan composite)
                 { AppendCompositeDescription(composite.Composite, nodes, descriptionRoot, budget); continue; }
+                if (item is GraphCallStagePlan call)
+                {
+                    int apply = Add(call.Call.Optional ? "OptionalApply" : "Apply", descriptionRoot,
+                        detail: $"imports={string.Join(",", call.Imports)}; per_input=True; shared_snapshot=True; shared_budget=True");
+                    if (call.Composite is { } body) { AppendCompositeDescription(body, nodes, apply, budget); }
+                    else { AppendDescription(call.Inner, nodes, apply, budget); }
+                    continue;
+                }
                 int stageRoot = nodes.Count;
                 Append(item.Plan, descriptionRoot, StageName(item.Stage));
                 if (item.Stage is GqlMergeStage merge)

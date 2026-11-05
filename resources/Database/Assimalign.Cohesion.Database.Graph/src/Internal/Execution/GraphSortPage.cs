@@ -14,6 +14,9 @@ internal static class GraphSortPage
         var slots = binding is GraphBindingRow current ? current.Fork() : null;
         Dictionary<string, object?>? dictionary = slots is not null ? null : binding is GraphGroupedBinding grouped
             ? new GraphGroupedBinding(grouped.ValuesByExpression, stage.GroupedExpressions) : new Dictionary<string, object?>(binding, StringComparer.Ordinal);
+        // CALL imports are invocation constants retained alongside grouped expressions.
+        if (binding is GraphGroupedBinding && dictionary!.Count != binding.Count)
+        { foreach (var pair in binding) { dictionary[pair.Key] = pair.Value; } }
         for (int i = 0; i < plan.Projections.Count; i++)
         {
             token.ThrowIfCancellationRequested();

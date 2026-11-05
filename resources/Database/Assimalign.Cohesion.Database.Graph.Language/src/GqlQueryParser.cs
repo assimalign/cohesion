@@ -25,6 +25,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private string _source = string.Empty;
     private int _position;
     private int _collectionBar = -1;
+    private int _callDepth;
 
     // A statement that nests deeper than the stack the parsing thread has left. The same text
     // parses on a thread with more stack: the statement is within the language, the thread is too
@@ -56,6 +57,7 @@ public sealed partial class GqlQueryParser : QueryParser
         _lineComments.Clear();
         _position = 0;
         _collectionBar = -1;
+        _callDepth = 0;
         int line = 1;
         int scanned = 0;
         while (lexer.MoveNext())
@@ -310,6 +312,8 @@ public sealed partial class GqlQueryParser : QueryParser
                 _tokens[i - 1].Type == TokenType.Colon && i - 1 != mapSeparatorPosition)) { continue; }
             if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Colon) { continue; }
             string value = token.Text.ToUpperInvariant();
+            if (!existsPattern && patternDepth == 0 && value == "CALL" && ScanInlineCall(ref i, endExclusive ?? _tokens.Count))
+            { inValueExpression = false; inPattern = false; inUpdate = false; continue; }
             if (valuePosition && (value is "WALK" or "TRAIL" or "SIMPLE" or "ACYCLIC" or "ANY" or "ALL" or "SHORTEST") &&
                 TryPatternComprehensionPrefix(i, out int patternPrefixEnd))
             {
@@ -619,7 +623,7 @@ public sealed partial class GqlQueryParser : QueryParser
         AfterPrimary,
     }
 
-    private bool IsQueryStart() => Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("MERGE") || Is("RETURN") ||
+    private bool IsQueryStart() => Is("CALL") || Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("MERGE") || Is("RETURN") ||
         Is("LET") || Is("FILTER") || Is("FOR") || Is("UNWIND") || Is("WITH");
 
     private bool IsConjunctionAt(int index) => index >= 0 &&
@@ -641,7 +645,7 @@ public sealed partial class GqlQueryParser : QueryParser
         token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR");
     private static bool IsReservedTemporal(Lexeme token) => token.Type is not (TokenType.String or TokenType.QuotedIdentifier) &&
         token.Text.ToUpperInvariant() is "CURRENT_DATE" or "CURRENT_TIMESTAMP" or "CURRENT_TIME" or "LOCAL_TIME" or "LOCAL_TIMESTAMP";
-    private bool IsQueryStartAt(int index) => IsWordAt(index, "MATCH") || IsWordAt(index, "OPTIONAL") || IsWordAt(index, "CREATE") ||
+    private bool IsQueryStartAt(int index) => IsWordAt(index, "CALL") || IsWordAt(index, "MATCH") || IsWordAt(index, "OPTIONAL") || IsWordAt(index, "CREATE") ||
         IsWordAt(index, "INSERT") || IsWordAt(index, "MERGE") || IsWordAt(index, "RETURN") || IsWordAt(index, "LET") || IsWordAt(index, "FILTER") ||
         IsWordAt(index, "FOR") || IsWordAt(index, "UNWIND") || IsWordAt(index, "WITH");
 
@@ -651,7 +655,7 @@ public sealed partial class GqlQueryParser : QueryParser
 
     private bool UnsupportedConstruct(string construct, Lexeme start, Lexeme end)
     {
-        if (Supports(construct)) { return false; }
+        if (construct != "CALL" && Supports(construct)) { return false; }
         _diagnostics.Add(QueryDiagnostics.UnsupportedClause(construct, Profile.Language, Span(start, end)));
         return true;
     }
