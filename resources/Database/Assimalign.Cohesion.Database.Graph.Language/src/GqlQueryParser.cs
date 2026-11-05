@@ -15,7 +15,6 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 public sealed partial class GqlQueryParser : QueryParser
 {
     private readonly bool _allowCustomFunctions;
-    private readonly object _gate = new();
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
     private readonly HashSet<int> _parameterFormPositions = [];
@@ -40,25 +39,16 @@ public sealed partial class GqlQueryParser : QueryParser
     /// <summary>Initializes a parser which can defer named function resolution to an engine.</summary>
     /// <param name="allowCustomFunctions">Whether ordinary named calls are admitted.</param>
     /// <param name="options">Optional shared analyzer configuration.</param>
-    public GqlQueryParser(bool allowCustomFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions())
+    public GqlQueryParser(bool allowCustomFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions(), serializeCalls: true)
     { _allowCustomFunctions = allowCustomFunctions; }
 
     /// <inheritdoc />
     protected override QueryLanguageProfile Profile => GqlLanguageProfile.Instance;
 
     /// <inheritdoc />
-    public override QueryStatement Parse(ReadOnlySpan<char> query)
+    protected override QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query)
     {
-        lock (_gate)
-        {
-            _source = query.ToString();
-            return base.Parse(query);
-        }
-    }
-
-    /// <inheritdoc />
-    protected override QueryStatement ParseCore(TokenLexer lexer)
-    {
+        _source = query.ToString();
         _tokens.Clear();
         _diagnostics.Clear();
         _parameterFormPositions.Clear();

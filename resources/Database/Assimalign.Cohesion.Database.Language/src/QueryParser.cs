@@ -11,13 +11,18 @@ namespace Assimalign.Cohesion.Database.Language;
 public abstract class QueryParser
 {
     private readonly QueryParserOptions _options;
+    private readonly object? _gate;
 
     /// <summary>
     /// Initializes a query parser with its analyzer options.
     /// </summary>
     /// <param name="options">The analyzers and analyzer timeout applied after parsing.</param>
-    protected QueryParser(QueryParserOptions options)
+    /// <param name="serializeCalls">Whether calls on this parser serialize through analyzer completion.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    protected QueryParser(QueryParserOptions options, bool serializeCalls = false)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        _gate = serializeCalls ? new object() : null;
         _options = options;
     }
 
@@ -57,35 +62,46 @@ public abstract class QueryParser
     /// </summary>
     /// <param name="query">The query source to tokenize.</param>
     /// <returns>A lexer positioned at the beginning of <paramref name="query"/>.</returns>
-    protected virtual TokenLexer CreateLexer(ReadOnlySpan<char> query) =>
+    private TokenLexer CreateLexer(ReadOnlySpan<char> query) =>
         new(query, Profile.ToLexerOptions());
 
     /// <summary>
     /// Parses a query from its configured lexer.
     /// </summary>
     /// <param name="lexer">The lexer configured from <see cref="Profile"/>.</param>
+    /// <param name="query">The source being parsed, for model-specific locations and retained text.</param>
     /// <returns>The parsed query statement.</returns>
-    protected abstract QueryStatement ParseCore(TokenLexer lexer);
+    protected abstract QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query);
 
     /// <summary>
     /// Parses a query and runs the configured analyzers over its statement.
     /// </summary>
     /// <param name="query">The query source to parse.</param>
     /// <returns>The parsed and analyzed query statement.</returns>
-    /// <exception cref="OperationCanceledException">An analyzer was canceled or the analyzer timeout expired.</exception>
-    /// <remarks>Analyzer failures propagate to the caller. Analyzers must observe cancellation and must not depend on the caller's synchronization context.</remarks>
-    public virtual QueryStatement Parse(ReadOnlySpan<char> query)
+    /// <exception cref="OperationCanceledException">An analyzer or the wait for its task was canceled.</exception>
+    /// <remarks>Serialization follows the constructor policy and covers analyzer completion. Analyzer failures propagate to the caller. Analyzers must observe cancellation and must not depend on the caller's synchronization context.</remarks>
+    public QueryStatement Parse(ReadOnlySpan<char> query)
     {
-        TokenLexer lexer = CreateLexer(query);
-
-        QueryStatement statement = ParseCore(lexer);
-
-        if (_options.Analyzers.Count == 0)
+        if (_gate is null)
         {
-            return statement;
+            return ParseAndAnalyze(query);
         }
 
-        Analyze(new QueryAnalyzerContext(statement), _options.AnalyzerTimeout);
+        lock (_gate)
+        {
+            return ParseAndAnalyze(query);
+        }
+    }
+
+    private QueryStatement ParseAndAnalyze(ReadOnlySpan<char> query)
+    {
+        TokenLexer lexer = CreateLexer(query);
+        QueryStatement statement = ParseCore(lexer, query);
+
+        if (_options.Analyzers.Count != 0)
+        {
+            Analyze(new QueryAnalyzerContext(statement), _options.AnalyzerTimeout);
+        }
 
         return statement;
     }
@@ -96,9 +112,27 @@ public abstract class QueryParser
         cancellationTokenSource.Token.ThrowIfCancellationRequested();
         var analyzers = new List<Task>();
 
-        foreach (var analyzer in _options.Analyzers)
+        try
         {
-            analyzers.Add(analyzer.AnalyzeAsync(context, cancellationTokenSource.Token));
+            foreach (var analyzer in _options.Analyzers)
+            {
+                analyzers.Add(analyzer.DispatchAsync(context, cancellationTokenSource.Token));
+            }
+        }
+        catch
+        {
+            // Startup can fail synchronously after earlier analyzers returned tasks.
+            try
+            {
+                cancellationTokenSource.Cancel();
+            }
+            catch (AggregateException)
+            {
+                // Cancellation callbacks must not replace the original startup failure.
+            }
+            // Observe their later faults while preserving the original startup exception.
+            ObserveLateFaults(Task.WhenAll(analyzers));
+            throw;
         }
         var completion = Task.WhenAll(analyzers);
         try
@@ -108,9 +142,14 @@ public abstract class QueryParser
         catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
         {
             // An analyzer may ignore cancellation and fault after the caller has left.
-            _ = completion.ContinueWith(static task => { _ = task.Exception; }, CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            ObserveLateFaults(completion);
             throw;
         }
+    }
+
+    private static void ObserveLateFaults(Task completion)
+    {
+        _ = completion.ContinueWith(static task => { _ = task.Exception; }, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 }

@@ -1,3 +1,5 @@
+using System;
+
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Language.Tests;
@@ -10,5 +12,5 @@ internal sealed class AnalyzerTestParser : QueryParser
 
     protected override QueryLanguageProfile Profile => _profile;
 
-    protected override QueryStatement ParseCore(TokenLexer lexer) => new AnalyzerTestStatement();
+    protected override QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query) => new AnalyzerTestStatement();
 }

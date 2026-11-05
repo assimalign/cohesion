@@ -271,6 +271,13 @@ for either. An internal undefined JsonElement marks absence without crossing an 
 boundary as a sentinel type. Bare-value rows retain their original JSON and are never MISSING.
 The engine requires unique projection names; duplicate header names and unknown or duplicate
 object members are malformed responses. This follows the authorized concrete-first row capability.
+All ordinal methods now enter DatabaseRow's non-virtual bounds guard before protected typed
+cores (#1264), including raw GetBytes shortcuts. Value accessors and the ordinal indexer
+now throw ArgumentOutOfRangeException from the base instead of IndexOutOfRangeException.
+IsMissing retains its existing ArgumentOutOfRangeException for an invalid ordinal; an empty
+row's raw GetBytes shortcut now also reaches the bounds guard.
+Valid ordinals retain existing invariant conversions, JSON NULL/MISSING distinctions, original
+bare bytes and InvalidOperationException for absent required values or non-JSON/string byte access.
 
 CRUD uses `DocumentId`, `DocumentVersion` and `Document` from the model assembly. Get returns
 null when absent; Put returns the new stored version; Delete returns whether it removed a document.

@@ -23,10 +23,10 @@ internal sealed class SqlMaterializedRow : DatabaseRow
     public override int FieldCount => _values.Length;
 
     /// <inheritdoc />
-    public override bool IsNull(int ordinal) => _values[ordinal] is null;
+    protected override bool IsNullCore(int ordinal) => _values[ordinal] is null;
 
     /// <inheritdoc />
-    public override ReadOnlyMemory<byte> GetBytes(int ordinal) => _values[ordinal] switch
+    protected override ReadOnlyMemory<byte> GetBytesCore(int ordinal) => _values[ordinal] switch
     {
         null => ReadOnlyMemory<byte>.Empty,
         byte[] bytes => bytes,
@@ -34,7 +34,7 @@ internal sealed class SqlMaterializedRow : DatabaseRow
     };
 
     /// <inheritdoc />
-    public override string? GetString(int ordinal) => _values[ordinal] switch
+    protected override string? GetStringCore(int ordinal) => _values[ordinal] switch
     {
         null => null,
         string text => text,
@@ -43,19 +43,19 @@ internal sealed class SqlMaterializedRow : DatabaseRow
     };
 
     /// <inheritdoc />
-    public override int GetInt32(int ordinal) => Convert.ToInt32(RequireValue(ordinal), CultureInfo.InvariantCulture);
+    protected override int GetInt32Core(int ordinal) => Convert.ToInt32(RequireValue(ordinal), CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
-    public override long GetInt64(int ordinal) => Convert.ToInt64(RequireValue(ordinal), CultureInfo.InvariantCulture);
+    protected override long GetInt64Core(int ordinal) => Convert.ToInt64(RequireValue(ordinal), CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
-    public override bool GetBoolean(int ordinal) => Convert.ToBoolean(RequireValue(ordinal), CultureInfo.InvariantCulture);
+    protected override bool GetBooleanCore(int ordinal) => Convert.ToBoolean(RequireValue(ordinal), CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
-    public override double GetDouble(int ordinal) => Convert.ToDouble(RequireValue(ordinal), CultureInfo.InvariantCulture);
+    protected override double GetDoubleCore(int ordinal) => Convert.ToDouble(RequireValue(ordinal), CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
-    public override object? GetValue(int ordinal) => SqlCharacter.Output(_values[ordinal]);
+    protected override object? GetValueCore(int ordinal) => SqlCharacter.Output(_values[ordinal]);
 
     private object RequireValue(int ordinal)
         => SqlCharacter.Output(_values[ordinal]) ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MaterializedRowRequireValueDatabase, ordinal));
