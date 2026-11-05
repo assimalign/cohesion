@@ -47,6 +47,75 @@ Windows process exit deletes delete-on-close runs; OS backups of RootPath can ca
 No durable data, catalog, journal, record-space or wire format changes.
 
 
+### Temp encoding (#1789, SQ-L2a)
+
+SqlTempRowCodec and SqlTempSortKeyCodec are internal and have no operator callers yet.
+The private row format is version 2: a byte version, little-endian Int32 cell count, then
+typed payloads without MVCC stamps. Valid text uses length-prefixed UTF-8 written with
+Utf8.FromUtf16; malformed text retains raw UTF-16 tags so NULs and unpaired surrogates survive
+exactly. Text decoding allocates one string without an intermediate char array. CHAR preserves
+its padded Value and reconstructs Text; binary decoding owns a new array. Decimal bits, IEEE
+payloads/signed zero, all DateTime bits and DateTimeOffset's offset survive unchanged.
+JSON projections are strings; JSONB projections are byte[]. Signed SQL numerics, Boolean,
+string, CHAR, binary, DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan and Guid are
+supported, as are uncoerced byte/ushort/uint/ulong/char parameters. Unknown objects refuse
+TryEncode; malformed or unknown row formats refuse TryDecode. Caller-owned TryWrite scratch
+avoids per-row encoding allocation. No persistent or wire version changes.
+
+Sort columns receive direction, NULL placement and a resolved Collation explicitly.
+SQ-L2b refuses to spill when any SqlBoundOrdering.Collation.IsFixed is false: the collector's
+deferred collation follows the last qualifying row, but row 1 would have to be encoded before
+the last qualifying row exists. Fixed columns use one resolved collation throughout the sort.
+Only text keys require an index-backed collation; invariant text, unknown objects and malformed
+UTF-16 text keys return false. Non-text and NULL keys can encode under invariant.
+The caller holds an initially zero family per key column for the whole sort, including rows
+buffered before the first spill. A non-NULL value establishes its column's family; a second
+family returns false so SQ-L2b keeps CS05067. NULL establishes nothing. Families follow
+SqlValueComparer exactly: signed SQL numerics together, string/SqlCharacter together,
+DateOnly/DateTime/DateTimeOffset together, and separate byte[], Boolean, TimeOnly, TimeSpan,
+Guid, byte, ushort, uint, ulong and char families. This may refuse even when an earlier key
+column would prevent the incompatible values from being compared; over-refusal is accepted
+because refusal is today's behavior. Every component is prefix-free within a family, which
+the encoder enforces; DESC complements the complete non-NULL component, with NULL placement
+independent of direction. Finite numerics use a common 10^28 scale, a signed base-256 exponent
+and canonical significant digits, preserving exact mixed IEEE/decimal order without rounding
+or decimal-scale tie breakers. NaNs and signed zeros canonicalize only in keys. The existing
+key writer was not reused because its storage-type tag would separate 1 from 1.0.
+The sorter supplies the stable input ordinal separately. CompareKeys is a test-only internal
+seam into the collector's existing comparison, with equal ordinals. Key buffer and numeric
+allocation changes await SQ-L2b's measurements.
+
+StorageTempSorter's bound includes key + row + 16 bytes. A wider record needs a larger bound
+chosen before Create or receives CK05006. SQ-L2b's initial rule is integer arithmetic:
+bound = (grant - 32768) / 16 - 8192. StorageTempSorter.Create computes
+fanIn = min(16, (grant - 32768) / (8192 + bound)), so this is the largest bound retaining
+fan-in 16. SQ-L2b must refuse with CS05067 when the grant is under 65,536 B or the bound is
+too small to hold the encoded row, including its key and 16 bytes (and the minimum record
+bound of 16). At the default 64 MiB grant the rule yields 4,184,064 B. Bounds of 1 MiB,
+4,184,064 B, 4 MiB, 8 MiB and 16 MiB give fan-ins 16, 16, 15, 7 and 3 respectively.
+These are caller rules for SQ-L2b; this codec adds no operator limit or quota.
+
+For (INTEGER id, TEXT value) ORDER BY value at default settings, the measured run stream
+includes the 16-byte sorter record header and 4-byte run length. SqlSelectMemory.EntryBytes
+charges 32 B entry overhead + 40 B output array + 32 B key array + 32 B boxed id + twice
+align8(24 + 2 * characters) for these narrow strings, yielding 264/392 B. The 256 MiB physical
+quota provides 32,768 pages x 8,160 B payload = 267,386,880 B:
+
+| Text | Run stream B/row | Memory charge B/row | Rows in 256 MiB quota | Multiple of 64 MiB grant |
+| --- | ---: | ---: | ---: | ---: |
+| 20 ASCII characters | 78 | 264 | 3,428,036 | 13.49x |
+| 50 ASCII characters | 138 | 392 | 1,937,586 | 11.32x |
+| 20 three-byte characters (界) | 158 | 264 | 1,692,322 | 6.66x |
+
+These payload capacities precede per-run tail-page rounding and assume no merge rewrite;
+these shapes fit at most 16 initial runs. Merge inputs and outputs both consume the existing
+physical-byte quota. The 50-ASCII-character shape previously used raw UTF-16 (188 B/row,
+8.3x); UTF-8 raises it to 11.3x. Three-byte scripts still fall below 10x; T3-2's quota is
+unchanged. Seeded differential pairs and row round trips cover every supported value family,
+JSONB keys and row values, mixed-domain composites, stable collations, wide keys, all direction/
+NULL combinations and stable multi-run merging. Non-text domains run under one collation;
+identical (ordered row representations, flags, effective collation) evaluations count once.
+
 ## Refused opens preserve every file (#1744)
 
 The catalog preflight loads catalog metadata, checks the record-space marker and recorded schema
