@@ -52,7 +52,9 @@ A root plain SELECT may spill ORDER BY, its bounded OFFSET + LIMIT heap, and ord
 DISTINCT when the existing reservation refuses CS05067. A fitting collector keeps its
 existing charges and representation. Permission is an explicit root argument; nested
 ExecuteAsync calls never inherit it. Subqueries, derived/CTE bodies, correlated frames,
-recursion, windows, grouping sets, CTAS and DML sources retain their existing refusals.
+recursion, windows, grouping sets and CTAS retain their existing refusals. DML sources
+gain no spill permission and keep their existing policy: INSERT SELECT sort/output
+buffers bypass SELECT charging under _isDml; that budgeting gap belongs to #1828.
 An ordered index scan does not introduce a sort or a new result-spooling permission.
 Ordered sequence deferral stays in memory. A staged volatile input or join writes its
 already evaluated source rows in input order on refusal, finishing all predicates before

@@ -138,7 +138,6 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
     [InlineData(6)]
     [InlineData(7)]
     [InlineData(8)]
-    [InlineData(9)]
     [InlineData(10)]
     [InlineData(11)]
     public async Task ExecuteAsync_UnavailablePermission_ShouldRefuseAndRelease(int refusal)
@@ -150,7 +149,6 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         await using var engine = await builder.BuildAsync();
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await Seed(session);
-        if (refusal == 9) { await session.ExecuteAsync("CREATE TABLE c(id INT,k INT)"); }
         string sql = refusal switch
         {
             2 => "SELECT COUNT(*) FROM (SELECT id,k FROM t ORDER BY k) d",
@@ -160,7 +158,6 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
             6 => "SELECT id,COUNT(*) OVER() FROM (SELECT id,k FROM t ORDER BY k) d",
             7 => "SELECT t.id,(SELECT u.id FROM u WHERE u.id=t.id) AS value FROM t ORDER BY t.k",
             8 => "WITH RECURSIVE r(id) AS (SELECT 0 UNION ALL SELECT id+1 FROM r WHERE id<4000) SELECT id FROM r ORDER BY id",
-            9 => "INSERT INTO c SELECT id,k FROM t ORDER BY k",
             10 => "SELECT k,COUNT(*) FROM t GROUP BY GROUPING SETS ((k)) ORDER BY k",
             11 => "SELECT nextval('s'),id FROM t ORDER BY k",
             _ => "SELECT id,k FROM t ORDER BY k",
@@ -172,6 +169,24 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
         if (engine.TempSpace is not null) { TempBytes(engine.TempSpace).ShouldBe(0); Files(engine).ShouldBe(0); }
         (await session.ExecuteAsync("SELECT 1")).Status.ShouldBe(DatabaseResultStatus.Success);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Spill exclusion: INSERT SELECT retains its unbudgeted source policy pending #1828 (#1789)")]
+    public async Task ExecuteAsync_InsertSource_ShouldKeepExistingUnspilledPolicy()
+    {
+        // Arrange: _isDml bypasses SELECT charging; this run must not silently start #1828.
+        await using var engine = await Create("insert-source-policy", 262144);
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        await Seed(session); await session.ExecuteAsync("CREATE TABLE c(id INT,k INT)");
+
+        // Act
+        var result = await session.ExecuteAsync("INSERT INTO c SELECT id,k FROM t ORDER BY k");
+
+        // Assert
+        result.AffectedCount.ShouldBe(4000);
+        SqlSortSpillMetrics.For(session.LastStatementMetrics!).ShouldBeNull();
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
     }
 
     private async Task<SqlDatabaseEngine> Create(string name, long budget, List<long>? log = null)
