@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(nameof(SqlDatabaseEventSourceCollection))]
-public sealed class SqlSelectMemoryTests
+public sealed partial class SqlSelectMemoryTests
 {
     private readonly ITestOutputHelper _output;
 
@@ -50,17 +50,29 @@ public sealed class SqlSelectMemoryTests
             "SELECT record_value(k),k FROM t ORDER BY k",
             "SELECT MIN(note) FROM a",
             "SELECT MAX(note) FROM a",
+            "SELECT STRING_AGG(CAST(v AS TEXT),',') FROM t",
+            "SELECT DISTINCT t.k FROM t CROSS JOIN u",
+            "SELECT t.k FROM t CROSS JOIN u ORDER BY t.k",
+            "SELECT STRING_AGG(DISTINCT note,',' ORDER BY note) FROM spell",
+            "SELECT nextval('s'),(SELECT u.k FROM u WHERE u.k=t.k) FROM t LIMIT 2",
+            "SELECT nextval('s') AS id,(SELECT note FROM wide WHERE wide.k=t.k) AS note,t.k FROM t ORDER BY t.k",
+            "SELECT (SELECT COUNT(*) FROM t),COUNT(*) OVER() FROM u",
+            "SELECT (SELECT COUNT(*) OVER() FROM (SELECT k FROM t) d LIMIT 1) AS c,u.k FROM u ORDER BY u.k",
+            "SELECT (SELECT CASE WHEN COUNT(*) OVER()>0 THEN (SELECT COUNT(*) FROM t) ELSE 0 END FROM u LIMIT 1),u.k FROM u ORDER BY u.k",
+            "SELECT k,(SELECT COUNT(*) FROM (SELECT * FROM t WHERE t.k=u.k) d1 JOIN (SELECT * FROM t WHERE t.k=u.k) d2 ON d1.v=d2.v) FROM u",
+            "SELECT t.k,COUNT(*),(SELECT a.note FROM a WHERE a.id=t.k) FROM t GROUP BY ROLLUP(t.k) ORDER BY (SELECT a.id FROM a WHERE a.id=t.k)",
+            "SELECT nextval('s'),k FROM t GROUP BY ROLLUP(k) ORDER BY k",
         ];
         long[][] charges =
         [
             [288, 192, 288, 192],
-            [768, 672, 768, 672],
-            [256, 160, 256, 160],
+            [480, 320, 480, 320],
+            [160, 0, 160, 0],
             [448, 352, 544, 416],
             [352, 256, 760, 664],
             [976, 840, 1384, 1248],
-            [736, 640, 1144, 1048],
-            [1696, 1520, 2104, 1928],
+            [960, 864, 1368, 1272],
+            [2016, 1840, 2424, 2248],
             [768, 672, 1632, 1536],
             [600, 536, 944, 832],
             [1392, 1296, 1632, 1456],
@@ -78,6 +90,19 @@ public sealed class SqlSelectMemoryTests
             [1224, 1200, 1224, 1200],
             [368, 264, 648, 544],
             [352, 264, 632, 544],
+            [370, 266, 778, 674],
+            [640, 544, 1888, 1760],
+            [1152, 992, 2016, 1856],
+            [1432, 1256, 1736, 1560],
+            [368, 272, 368, 272],
+            [17072, 16936, 17072, 16936],
+            [4272, 4248, 4272, 4248],
+            [4676, 4652, 4676, 4652],
+            [4176, 4152, 4176, 4152],
+            [1480, 1376, 1656, 1440],
+            [5332, 5132, 5332, 5132],
+            [3868, 3732, 3868, 3732],
+
         ];
         for (int i = 0; i < queries.Length; i++)
         {
@@ -172,16 +197,19 @@ public sealed class SqlSelectMemoryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - CTAS memory: sequence OFFSET source admission follows kept rows (#1762)")]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task ExecuteAsync_SequenceOffset_ShouldAdmitOnlyKeptRows(bool grouped, bool forceBase)
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public async Task ExecuteAsync_SequenceOffset_ShouldAdmitOnlyKeptRows(bool grouped, bool forceBase, bool sequence)
     {
-        // Arrange: the specific CTAS policy admits only kept output. Ordinary
-        // SELECT grouping still charges its retained keys (covered separately).
+        // Arrange: source buffers charge normally; CTAS admission counts only kept output.
         var builder = SqlDatabaseEngine.CreateBuilder("ctas-offset");
-        builder.Options.StatementMemoryBudget = 8192;
+        builder.Options.StatementMemoryBudget = 1_048_576;
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -190,33 +218,38 @@ public sealed class SqlSelectMemoryTests
         await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 1001).Select(k => $"({k})")), cancellationToken: CancellationToken.None);
         database.Definitions.ForceSelectRetentionBasePath = forceBase;
         var admitted = new List<long>();
+        string expression = sequence ? "nextval('s')" : "CAST(k AS BIGINT)";
         try
         {
             SqlPlanExecutor.TableAsSourceAdmitted = admitted.Add;
+
             // Act
-            foreach (var (table, expression) in new[] { ("p", "nextval('s')"), ("q", "CAST(k AS BIGINT)") })
-            {
-                await session.ExecuteAsync($"CREATE TABLE {table} AS SELECT {expression} AS id,k FROM t " +
-                    (grouped ? "GROUP BY k ORDER BY k " : "") + "LIMIT 1 OFFSET 1000", cancellationToken: CancellationToken.None);
-                session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
-                session.LastStatementMetrics.PeakHashMemoryBytes.ShouldBe(743);
-                _output.WriteLine($"CTAS|{grouped}|base={forceBase}|{expression}|peak={session.LastStatementMetrics.PeakHashMemoryBytes}");
-                await using var kept = (DatabaseResultSet)await session.ExecuteAsync($"SELECT id,k FROM {table}", cancellationToken: CancellationToken.None);
-                int count = 0;
-                await foreach (var row in kept.GetRowsAsync(CancellationToken.None))
-                { row.GetValue(0).ShouldBe(table == "p" ? 1001L : 1000L); row.GetValue(1).ShouldBe(1000); count++; }
-                count.ShouldBe(1);
-            }
+            await session.ExecuteAsync($"CREATE TABLE p AS SELECT {expression} AS id,k FROM t " +
+                (grouped ? "GROUP BY k ORDER BY k " : "") + "LIMIT 1 OFFSET 1000", cancellationToken: CancellationToken.None);
+            var metrics = session.LastStatementMetrics.ShouldNotBeNull();
+            _output.WriteLine($"CTAS|{grouped}|base={forceBase}|{expression}|peak={metrics.PeakHashMemoryBytes}");
+
             // Assert
-            admitted.ShouldBe([136L, 136L]);
+            metrics.HashMemoryBytes.ShouldBe(0);
+            metrics.PeakHashMemoryBytes.ShouldBe(grouped ? sequence ? forceBase ? 664664 : 568568 : forceBase ? 520520 : 424424 : 743);
+            admitted.ShouldBe([136L]);
+            await using var kept = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,k FROM p", cancellationToken: CancellationToken.None);
+            int count = 0;
+            await foreach (var row in kept.GetRowsAsync(CancellationToken.None))
+            { row.GetValue(0).ShouldBe(sequence ? 1001L : 1000L); row.GetValue(1).ShouldBe(1000); count++; }
+            count.ShouldBe(1);
             await using var next = (DatabaseResultSet)await session.ExecuteAsync("SELECT nextval('s')", cancellationToken: CancellationToken.None);
-            await foreach (var row in next.GetRowsAsync(CancellationToken.None)) { row.GetValue(0).ShouldBe(1002L); }
+            await foreach (var row in next.GetRowsAsync(CancellationToken.None)) { row.GetValue(0).ShouldBe(sequence ? 1002L : 1L); }
         }
         finally { SqlPlanExecutor.TableAsSourceAdmitted = null; }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - CTAS memory: the original grouped OFFSET statement fits its kept-output grant (#1762)")]
-    public async Task ExecuteAsync_GroupedOffsetSmallGrant_ShouldAdmitKeptOutput()
+    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS memory: grouped OFFSET sources refuse at 8 KiB (#1762)")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ExecuteAsync_GroupedOffsetSmallGrant_ShouldRefuseSource(bool forceBase, bool sequence)
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("ctas-small-group");
@@ -227,19 +260,22 @@ public sealed class SqlSelectMemoryTests
         await session.ExecuteAsync("CREATE SEQUENCE s", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t(k INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 1001).Select(k => $"({k})")), cancellationToken: CancellationToken.None);
+        database.Definitions.ForceSelectRetentionBasePath = forceBase;
+        string expression = sequence ? "nextval('s')" : "CAST(k AS BIGINT)";
 
-        // Act / Assert
-        var standalone = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
-            "SELECT k FROM t GROUP BY k ORDER BY k LIMIT 1 OFFSET 1000", cancellationToken: CancellationToken.None));
-        standalone.Diagnostics.ShouldContain(item => item.Code == "CS05067");
-        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(8160);
-        foreach (string expression in new[] { "nextval('s')", "CAST(k AS BIGINT)" })
-        {
-            await session.ExecuteAsync($"CREATE TABLE p AS SELECT {expression} AS id,k FROM t GROUP BY k ORDER BY k LIMIT 1 OFFSET 1000", cancellationToken: CancellationToken.None);
-            session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
-            database.Catalog.TryGetTable("dbo", "p", out _).ShouldBeTrue();
-            await session.ExecuteAsync("DROP TABLE p", cancellationToken: CancellationToken.None);
-        }
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            $"CREATE TABLE p AS SELECT {expression} AS id,k FROM t GROUP BY k ORDER BY k LIMIT 1 OFFSET 1000", cancellationToken: CancellationToken.None));
+
+        // Assert
+        failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        session.LastStatementMetrics.PeakHashMemoryBytes.ShouldBe(8160);
+        session.LastStatementMetrics.RecordsExamined.ShouldBe(forceBase ? 86 : 37);
+        database.Catalog.TryGetTable("dbo", "p", out _).ShouldBeFalse();
+        _output.WriteLine($"CTAS_REFUSAL|base={forceBase}|{expression}|{session.LastStatementMetrics.PeakHashMemoryBytes}");
+        await using var next = (DatabaseResultSet)await session.ExecuteAsync("SELECT nextval('s')", cancellationToken: CancellationToken.None);
+        await foreach (var row in next.GetRowsAsync(CancellationToken.None)) { row.GetValue(0).ShouldBe(1L); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT memory: wide grouped DML preserves its original ledger (#1776)")]
@@ -275,8 +311,8 @@ public sealed class SqlSelectMemoryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT memory: top N charges binary clones and credits null replacements (#1776)")]
-    [InlineData(8239L, true)]
-    [InlineData(8240L, false)]
+    [InlineData(4343L, true)]
+    [InlineData(4344L, false)]
     public async Task ExecuteAsync_BinaryHeapReplacement_ShouldChargeRealClones(long budget, bool refuses)
     {
         // Arrange: delivery clones shared binary cells. NULL replaces a binary candidate
@@ -298,12 +334,12 @@ public sealed class SqlSelectMemoryTests
         {
             var failure = await Should.ThrowAsync<DatabaseException>(() => Read(session, sql));
             failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(4344);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(192);
         }
         else
         {
             await Read(session, sql);
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(8240);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(4344);
         }
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
     }
@@ -339,17 +375,30 @@ public sealed class SqlSelectMemoryTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t(k INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 4096).Select(i => $"({i})")), cancellationToken: CancellationToken.None);
+        long before = GC.GetTotalMemory(forceFullCollection: true);
         string payload = new('x', 1048576);
-        // Act
-        await using var rows = (DatabaseResultSet)await session.ExecuteAsync("SELECT @p AS p FROM t ORDER BY k,p",
-            new Dictionary<string, object?> { ["p"] = payload }, CancellationToken.None);
-        int count = 0;
-        await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
-        { row.GetValue(0).ShouldBeSameAs(payload); count++; }
-        // Assert: entry outputs, keys and Finish's output list each charge the value.
-        count.ShouldBe(4096);
-        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(25770917888);
-        session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
+        long retainedHeap = 0;
+        try
+        {
+            SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
+            {
+                if (metrics.HashMemoryBytes is 17180622848L or 25770917888L)
+                { retainedHeap = GC.GetTotalMemory(forceFullCollection: true) - before; }
+            };
+            // Act
+            await using var rows = (DatabaseResultSet)await session.ExecuteAsync("SELECT @p AS p FROM t ORDER BY k,p",
+                new Dictionary<string, object?> { ["p"] = payload }, CancellationToken.None);
+            int count = 0;
+            await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
+            { row.GetValue(0).ShouldBeSameAs(payload); count++; }
+            // Assert: the output and key buffers each charge the shared value.
+            count.ShouldBe(4096);
+            var metrics = session.LastStatementMetrics.ShouldNotBeNull();
+            _output.WriteLine($"SHARED_RATIO|charged={metrics.PeakHashMemoryBytes}|retainedHeap={retainedHeap}|ratio={metrics.PeakHashMemoryBytes / (double)retainedHeap:F2}");
+            metrics.PeakHashMemoryBytes.ShouldBe(17180622848);
+            metrics.HashMemoryBytes.ShouldBe(0);
+        }
+        finally { SqlStatementMetrics.AfterMemoryReservation = null; }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - SELECT memory: counters and reservations preserve the ordinary DML ledger (#1776)")]
@@ -377,8 +426,8 @@ public sealed class SqlSelectMemoryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT memory: wire-sized projections pin their independent statement cost (#1776)")]
-    [InlineData(false, false, 35656232L, 71308960L)]
-    [InlineData(false, true, 35654544L, 142614480L)]
+    [InlineData(false, false, 35654544L, 35654544L)]
+    [InlineData(false, true, 35654544L, 71307336L)]
     [InlineData(true, false, 65016168L, 136322328L)]
     public async Task ExecuteAsync_WireSizedProjection_ShouldPinStatementCost(bool manyRows, bool explicitTransaction, long expectedRefusal, long expectedPeak)
     {
@@ -407,7 +456,7 @@ public sealed class SqlSelectMemoryTests
                     "SELECT @payload AS payload FROM c a CROSS JOIN c b LIMIT 65"
                 : $"SELECT {columns} FROM users ORDER BY id";
             // Act
-            if (round == 0)
+            if (round == 0 && (manyRows || explicitTransaction))
             {
                 var failure = await Should.ThrowAsync<DatabaseException>(ReadOutput);
                 failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
@@ -480,6 +529,10 @@ public sealed class SqlSelectMemoryTests
     {
         foreach (string sql in new[]
         {
+            "CREATE SEQUENCE s",
+            "CREATE TABLE spell(note TEXT COLLATE case_accent_insensitive,v INT)",
+            "INSERT INTO spell VALUES('a',1),('Á́́́́́́́́́́́́́́́́',2)",
+            "CREATE TABLE wide(k INT PRIMARY KEY,note TEXT)", "INSERT INTO wide VALUES(1,'" + new string('x', 2000) + "'),(2,'" + new string('y', 2000) + "')",
             "CREATE TABLE t(k INT,v INT)", "INSERT INTO t VALUES(1,1),(1,2),(2,3)",
             "CREATE VIEW view_t AS SELECT k FROM t",
             "CREATE TABLE u(k INT)", "INSERT INTO u VALUES(1),(2)",

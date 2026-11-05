@@ -1649,12 +1649,16 @@ materialized row, and retained binary cells are detached from reusable producers
 Each pipeline keeps the materialized path for recursive evaluation, every DML source, a current
 window owner, a SQL/JSON statement grant, a frame with correlated/deferred queries, or a subquery
 in its own expressions. SQL/JSON keeps staging so scalar grants never acquire a new overlap
-with a live input hash build.
+with a live input hash build. Scalar grants can overlap retained output and sort buffers;
+only newly charged plain bytes causing refusal report CS05067, while an exhausted scalar
+grant with those bytes excluded keeps CS05079 (window) or CS05094 (SQL/JSON).
 Grouping also checks keys, arguments, FILTER, inner ordering, HAVING and output expressions,
 and keeps deferred key/aggregate collations on the original path.
 Application aggregates, volatile/sequence group transitions and join outputs keep the staged path: a later input error
 must not observe consumer calls that base never reached. Consumer failures drain remaining
-input predicates before surfacing, preserving their calls and work. Tree joins keep volatile
+input predicates before surfacing, preserving their calls and work. Statement memory refusal
+(CS05067), cancellation and out-of-memory abort input immediately. If later input would also
+have failed, CS05067 now wins; that statement was going to fail either way. Tree joins keep volatile
 WHERE predicates on the staged path; a nonvolatile WHERE failure drains all remaining ON work.
 Bounded bodies and plain DISTINCT also fall back when both input and output are volatile,
 preserving the staged call order.
@@ -1667,12 +1671,13 @@ keep the full source sort, which is required to evaluate those projections in so
 Derived tables, views and CTE caches retain their existing statement lifetime and materialization.
 An eligibility walk reaching its stack guard also selects the original path.
 
-These pipelines never stop evaluation early: joins drain all candidates and WHERE predicates even
+On success these pipelines never stop evaluation early: joins drain all candidates and WHERE predicates even
 at LIMIT 0 or after the output window fills; bounded subquery bodies run every projection that
 the original body ran, and scalar cardinality is checked afterwards. Existing stored-scan early
 stops remain unchanged. Every retained plain SELECT buffer now reserves statement memory before adding an entry
-(#1776, SQ-L1b). CS05067 is the only new outcome. CTAS sources use the same pipelines; their
-source admission counts only rows kept after pagination, independent of list capacity (#1762). The CTAS source exception described below also exempts its relation caches through statement exit. Per-database internal test seams
+(#1776, SQ-L1b). Newly charged buffers refuse with CS05067. CTAS sources use the same
+pipelines and charge like any SELECT; CTAS itself admits only rows kept after pagination,
+independent of list capacity (#1762). Per-database internal test seams
 force the original collectors, observe operator entry and count retained DISTINCT/subquery rows.
 The separate forced-GC regression proves streamed group/join inputs retain no growing list.
 
@@ -1692,20 +1697,42 @@ failures, cancellation and abandoned enumeration. Cache reservations hold no row
 | Materialized relations and subqueries | RelationRows.Reserved until executor exit (nested view scope until restoration); frame value reservations until frame release, correlated vectors until BeginRow. | `MaterializeRelationAsync` copies derived/view rows into lists cached in `_materializedRelations`; independent relation and CTE caches live for the statement executor, with catalog-view scopes restored after materialization. Join-local `derivedRows` references last through the join consumer. `MaterializePlainSubqueryAsync` copies scalar/EXISTS/IN values into statement/frame arrays: independent values live for the statement, correlated values until the frame advances or clears; child result rows and temporary copy lists also overlap during materialization. |
 | Set operands | Operand method until return, then set consumer until it returns; seen/counts have the set consumer lifetime. | `MaterializeSetOperandAsync` retains converted operand rows; `ExecuteSetOperationAsync` retains output `rows`, a UNION DISTINCT `seen`, or INTERSECT/EXCEPT `left`, `right`, `counts` and optional `seen` through the set consumer. Its final `MaterializeSelect` can overlap these with projected/sorted output; that output passes to the result set. |
 
+The two retention paths have these charge relationships; successful results and evaluation
+order remain the same. A pipelined peak can exceed base when group state overlaps a live
+hash input, or when a later projection failure prevents base from reaching DISTINCT state.
+
+| Shape | Charge comparison between pipelined and forced base |
+|---|---|
+| Unordered scan and ordered collector | Equal for the same retained rows and keys; Finish transfers kept output without a second row charge. |
+| Plain groups | Equal keys, state, native payload and aggregate inputs; base also holds the complete projected input. Pipeline state can overlap an input hash build. DISTINCT/ordered state includes its comparer and ordering records. |
+| Join projection and DISTINCT join | Equal inner/child/hash buffers and output costs; base additionally stages all qualifying matches. |
+| Unordered DISTINCT scan | Equal per retained output and seen entry; base holds every projected input, including duplicates. A failing projection can make its peak lower before DISTINCT runs. |
+| Correlated and sequence materialization | Equal charges for the same collector, selected sources, final returned rows and current correlated vectors. Derived inputs charge before a sibling materializes. |
+| Relations and subquery caches | Equal retained rows/vectors for the same child paths; child pipelines may retain less scratch. Independent caches remain charged through the statement. |
+| Set operations | Equal converted operands, seen/count state and outputs for the same operand paths; child pipelines may retain less scratch. |
+| Window, recursion and grouping sets | Their fallback paths and ledger charges agree across the switch. Window buffers outside its ledger and completed grouping-set matches add separate plain charges. |
+| CTAS | Equal admission for equal kept output, after pagination; source charges follow the selected path and sequence source width. Sequence deferral keeps its sources and can peak above a sequence-free form. |
+
 Ordered peaks publish only after input succeeds, before a deferred consumer failure is surfaced.
 Eligibility caches only static plan inspection in a lazily created, reference-keyed executor map
 for correlated statements. It uses a subtype in the existing optional relation-state slot so
 ordinary statements and CTEs pay no extra allocation. The window owner, DML flag,
 recursive state, current frame's correlated queries, SQL/JSON scope and forced-base switch are
 read on every check. LIMIT/OFFSET execution copies keep their original static plan as the map key.
-Join consumers defer stack-guard failures until input drains; cancellation and out-of-memory
-failures in join consumers still abort immediately. The group path's `finally` attempts to drain
-on every failure.
+Join consumers defer stack-guard failures until input drains; cancellation, out-of-memory
+and statement memory failures abort immediately. The group path drains
+other consumer failures, preserving the original input evaluation.
 
 The cursor/normalized traversal stacks, current joined-row frames, shared-column flags and
 collation arrays also live through their enumerator or consumer; their size follows the plan,
-not input cardinality. Recursive, window, grouping-set and SQL/JSON owners keep their existing
-accounting and fallback paths. Below the relational operators, `ScanVersions` keeps its
+not input cardinality. Recursive, window, grouping-set and SQL/JSON ledgers keep their existing charges and
+fallback paths. A window statement additionally charges join buffers, groups, relation copies
+and set state absent from its ledger. Collector/projected rows, Deduplicate scratch and
+subquery vectors remain exclusive to the window ledger. Independent vectors created there
+transfer a byte-only reservation to the enclosing registration frame when their owning
+window ends; an inner stage transfers only its additions, preserving parent-ledger ownership; relation copies keep a statement reservation from creation. Every SELECT outside DML and recursive evaluation
+uses this rule for registration frames and relation caches, so a later charged cache cannot suppress
+adoption of an earlier uncharged SELECT cache. Below the relational operators, `ScanVersions` keeps its
 owner-scoped storage iterator
 (page-id vector: a 24-byte array header plus 8 bytes per table page; one page pin and copied
 current record) until enumeration/disposal, and
@@ -10442,11 +10469,14 @@ boxed/text/binary cells, including both padded CHAR payloads and trimmed compari
 Plain SELECT uses per-operator long reservations, without reference owners, lending or eviction.
 For a retained row R, the cost is 32 + SqlHashJoinTable.RowBytes(R): a fixed list slot plus
 its array and conservative boxed/text/binary/CHAR payload. DISTINCT/seen/count entries cost
-64 + RowBytes(key). A group costs 128 + 128 per aggregate, plus its retained key;
+64 + RowBytes(key). A group costs 128 plus its retained key and 128 per ordinary
+aggregate; each DISTINCT or ordered aggregate instead costs 320 + 128 per ordering key +
+32 per argument collation, matching the grouping-set per-aggregate allowance;
 aggregate DISTINCT tuples and ordered inputs reserve their own rows and entry slots. Native
 variable-width extrema and string aggregate state also charge retained payload growth.
-A collector entry costs 32 + RowBytes(output) + RowBytes(keys), including bounded top-N heaps.
-Full SortRows key scratch costs 64 + RowBytes(keys) per row. Each concurrently retained
+A collector entry costs 32 + RowBytes(output) + RowBytes(keys), including bounded top-N heaps;
+its slot covers kept output through Finish, without a second row charge. Full SortRows key
+scratch costs 64 + RowBytes(keys) per row, plus 32 + RowBytes(row) for its sorted list. Each concurrently retained
 buffer pays independently, so a shared wide value can charge repeatedly until SQ-L1c.
 
 Unordered output lists, staged join matches, flat nested-loop inners, normalized child lists,
@@ -10455,12 +10485,10 @@ subquery values, correlated vectors, set operands and set hash state all share t
 Charges follow retained rows, never capacity or growth history. CTAS admits only the rows
 kept after pagination. Sequence deferral retains its original source shape and evaluation;
 sorting charges can therefore differ with source width, while CTAS admission of equal kept
-outputs is equal. CTAS source construction is exempt from these new plain SELECT reservations: its specific
-kept-output admission policy overrides them. Existing hash, window, recursive and grouping-set
-grants remain active. Thus the original 1,001-key grouped CTAS fits 8 KiB, whereas the same
-standalone SELECT refuses while retaining its groups. This exception leaves CTAS grouping/sort
-scratch outside the new grant until source construction ends, and source relation caches until
-statement exit.
+outputs is equal. CTAS sources charge like every SELECT, including group/sort state and
+relation caches. Both forms of the 1,001-key grouped OFFSET CTAS refuse at 8 KiB; at a
+sufficient grant they each admit 136 B of kept output. INSERT SELECT and DML subquery
+sources retain their existing uncharged policy; recursive state uses its existing ledger.
 Planning, traversal stacks, current row/evaluated frames, collation arrays and storage-level
 scan/seek/system-view scratch remain outside the grant. COUNT(*) and low-cardinality GROUP BY
 can consume input much larger than the budget on the pipelined path.

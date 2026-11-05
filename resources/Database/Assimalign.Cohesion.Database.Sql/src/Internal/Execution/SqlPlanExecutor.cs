@@ -317,7 +317,7 @@ internal sealed partial class SqlPlanExecutor
         SqlRowCount? limit, SqlRowCount? offset, bool isDistinct, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken,
         Collation[]? projectionCollations = null)
     {
-        long retainedBytes = AdmitSelectRows(projected, cancellationToken);
+        long retainedBytes = isDistinct ? AdmitSelectRows(projected, cancellationToken) : 0;
         try
         {
             if (isDistinct)
@@ -433,11 +433,11 @@ internal sealed partial class SqlPlanExecutor
                 // volatile outputs. Aliases/ordinals still require projection before sorting.
                 var sources = new List<object?[]>();
                 foreach (var source in matches)
-                { RetainSelectRow(ref sourceBytes, source); sources.Add(source); }
+                { RetainSelectRow(ref sourceBytes, source, includeWindow: true); sources.Add(source); }
                 if (_metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, sources.Count); }
                 if (sources.Count == 0) { return []; }
                 var sorted = SortRows(sources, orderBy, evaluator, cancellationToken);
-                foreach (var source in sorted) { RetainSelectRow(ref sortedBytes, source); }
+                foreach (var source in sorted) { RetainSelectRow(ref sortedBytes, source, includeWindow: true); }
                 var projected = new List<object?[]>(sorted.Count);
                 foreach (var source in sorted)
                 {
@@ -637,9 +637,9 @@ internal sealed partial class SqlPlanExecutor
                     PollCancellation();
                     keys[i] = evaluator.Evaluate(orderBy[i].Key, row);
                 }
-                ReserveSelectMemory(ref keyBytes, 64L + SqlHashJoinTable.RowBytes(keys));
+                ReserveSelectMemory(ref keyBytes, 64L + SqlHashJoinTable.RowBytes(keys), includeWindow: true);
                 // Admit the fixed sorted-output slot with its input, before ToList retains it.
-                RetainSelectRow(ref sortedBytes, row);
+                RetainSelectRow(ref sortedBytes, row, includeWindow: true);
                 return keys;
             }
 

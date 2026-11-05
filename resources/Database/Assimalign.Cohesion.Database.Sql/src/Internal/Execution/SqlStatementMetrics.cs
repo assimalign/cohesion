@@ -233,6 +233,7 @@ internal sealed class SqlStatementMetrics
     }
 
     private long _memoryBytes;
+    internal long PlainSelectMemoryBytes { get; private set; }
     private long _peakMemoryBytes;
     internal long HashMemoryBytes => _memoryBytes;
     internal long PeakHashMemoryBytes => _peakMemoryBytes;
@@ -318,6 +319,18 @@ internal sealed class SqlStatementMetrics
         _peakMemoryBytes = Math.Max(_peakMemoryBytes, _memoryBytes);
         try { AfterMemoryReservation?.Invoke(this, bytes); }
         catch { _memoryBytes -= bytes; throw; }
+    }
+
+    internal void ReservePlainSelectMemory(long bytes, long budget)
+    {
+        ReserveHashMemory(bytes, budget);
+        PlainSelectMemoryBytes += bytes;
+    }
+
+    internal void ReleasePlainSelectMemory(long bytes)
+    {
+        ReleaseHashMemory(bytes);
+        PlainSelectMemoryBytes -= bytes;
     }
 
     internal void ReleaseHashMemory(long bytes)

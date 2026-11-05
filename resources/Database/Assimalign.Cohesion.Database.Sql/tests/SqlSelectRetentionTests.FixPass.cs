@@ -121,8 +121,10 @@ public sealed partial class SqlSelectRetentionTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - SELECT retention: CTAS DISTINCT charges kept rows on both retention paths (#1776)")]
-    public async Task ExecuteAsync_TableAsDistinctBoundary_ShouldChargeKeptRows()
+    [Theory(DisplayName = "Cohesion Test [Sql] - SELECT retention: CTAS DISTINCT source follows its retention path (#1776)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_TableAsDistinctBoundary_ShouldRespectSourcePath(bool forceBase)
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("retention-table-as");
@@ -132,18 +134,26 @@ public sealed partial class SqlSelectRetentionTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t(k INT)");
         await Execute(session, "INSERT INTO t VALUES" + string.Join(",", Enumerable.Repeat("(1)", 1000)));
-        foreach (bool forceBase in new[] { true, false })
+        database.Definitions.ForceSelectRetentionBasePath = forceBase;
+
+        // Act
+        if (forceBase)
         {
-            database.Definitions.ForceSelectRetentionBasePath = forceBase;
-
-            // Act
-            await Execute(session, "CREATE TABLE d AS SELECT DISTINCT k FROM t");
-
-            // Assert
+            var failure = await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE d AS SELECT DISTINCT k FROM t"));
+            failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
-            (await Rows(session, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='d'")).ShouldBe([[1L]]);
-            await Execute(session, "DROP TABLE d");
+            session.LastStatementMetrics.PeakHashMemoryBytes.ShouldBe(4032);
+            session.LastStatementMetrics.RecordsExamined.ShouldBe(43);
+            return;
         }
+        await Execute(session, "CREATE TABLE d AS SELECT DISTINCT k FROM t");
+
+        // Assert
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        session.LastStatementMetrics.PeakHashMemoryBytes.ShouldBe(694);
+        session.LastStatementMetrics.RecordsExamined.ShouldBe(1000);
+        (await Rows(session, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='d'")).ShouldBe([[1L]]);
+        await Execute(session, "DROP TABLE d");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - SELECT retention: join consumer stack guards drain all base input work (#1776)")]

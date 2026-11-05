@@ -71,7 +71,7 @@ public sealed partial class SqlSequenceSecondPassTests
             rows.Length.ShouldBe(filtered ? 3 : 10);
             _output.WriteLine($"input=4096; filtered={filtered}; peak retained={peak}; charged peak={session.LastStatementMetrics!.PeakHashMemoryBytes}");
             peak.ShouldBe(filtered ? 3 : 10);
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(filtered ? 864 : 2880);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(filtered ? 864 : 2376);
             session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
         }
         finally { SqlPlanExecutor.SequenceCandidatesRetained = null; }
@@ -107,7 +107,7 @@ public sealed partial class SqlSequenceSecondPassTests
         else
         {
             (await Rows(session, query)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, null });
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(4448);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(2512);
         }
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(refuses ? 1L : 2L);

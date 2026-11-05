@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanExecutor
         var parent = _subqueryValues;
         bool deferred = false;
         for (int index = 0; index < queries.Count; index++) { deferred |= queries[index].IsDeferred; }
-        var frame = ChargesSelectBuffers
+        var frame = ChargesAdditionalSelectBuffers
             ? SqlSubqueryValues.WithMemory(parent, queries[0].ScopeId, queries, deferred, statement.Metrics, _definitions.StatementMemoryBudget)
             : new SqlSubqueryValues(parent, queries[0].ScopeId, queries, lazy: deferred);
         _subqueryValues = frame;
@@ -95,7 +95,7 @@ internal sealed partial class SqlPlanExecutor
                         Array.Clear(materialized.Rows[index]);
                     }
                     materialized.ClearRows();
-                    _metrics?.ReleaseHashMemory(released);
+                    _metrics?.ReleasePlainSelectMemory(released);
                     retainedBytes -= released;
                 }
                 ReserveSelectMemory(ref retainedBytes, 24L + 8L * rows.Count);

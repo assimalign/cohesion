@@ -5373,10 +5373,14 @@ values and correlated vectors, and set operands, seen sets and counts. Each oper
 before retaining an entry and releases on consumption or scope exit, including cancellation
 and failure. Child result charges unwind before return; consumers re-admit retained results.
 Costs follow retained rows, never list capacity. CTAS source admission counts only rows kept
-after pagination, including sequence OFFSET queries (#1762). CTAS source construction is exempt from these new plain SELECT reservations, retaining
-existing hash/window/recursive/grouping-set grants; its source relation caches remain exempt
-until statement exit. The original 1,001-key grouped CTAS fits
-8 KiB; its standalone SELECT counterpart charges groups and refuses at that grant. Shared values pay once per retaining buffer in
+after pagination, including sequence OFFSET queries (#1762). CTAS sources charge like any
+SELECT, including sort/group state and relation caches; both sequence and sequence-free
+1,001-key grouped OFFSET forms refuse at 8 KiB, while equal kept outputs have equal admission.
+Window buffers absent from the window ledger also charge; ledger-owned rows and vectors
+keep that owner. An independent cache first materialized in a window remains charged for
+the statement. New refusals caused only by plain bytes report CS05067; base window and
+SQL/JSON grant refusals retain CS05079 and CS05094. Statement memory refusal aborts input
+immediately, including input with a later error. Shared values pay once per retaining buffer in
 this step (#1776, SQ-L1b); SQ-L1c addresses repeated wide payloads. Plan-sized traversal and
 current-row state, storage iterator scratch and transient planning remain outside the grant.
 SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and

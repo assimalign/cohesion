@@ -19,8 +19,8 @@ public sealed partial class SqlSequenceThirdPassTests
         var limit = new SqlRowCount(null, "LIMIT", null, 1);
         var offset = new SqlRowCount(null, "OFFSET", null, 3);
         var metrics = new SqlStatementMetrics();
-        using var ordinary = new SqlRowCollector(order, null, limit, offset, CancellationToken.None);
-        using var sequence = new SqlRowCollector(order, null, limit, offset, CancellationToken.None, metrics);
+        using var ordinary = new SqlRowCollector(order, null, limit, offset, CancellationToken.None, null, 0);
+        using var sequence = new SqlRowCollector(order, null, limit, offset, CancellationToken.None, metrics, 67108864);
 
         // Act
         for (int value = 128; value > 0; value--)
@@ -36,8 +36,8 @@ public sealed partial class SqlSequenceThirdPassTests
         for (int index = 0; index < selected.Count; index++) { selected[index].ShouldBe(new object?[] { index + 1 }); }
         selected[3].ShouldBe(ordinary.Finish().ShouldHaveSingleItem());
         metrics.PeakOrderedRows.ShouldBe(128);
-        metrics.PeakHashMemoryBytes.ShouldBe(20864);
+        metrics.PeakHashMemoryBytes.ShouldBe(20480);
         metrics.HashMemoryBytes.ShouldBe(0);
-        _output.WriteLine("LIMIT=1; OFFSET=3; retained=128; selected for projection=4; charged peak=20864; final grant=0");
+        _output.WriteLine("LIMIT=1; OFFSET=3; retained=128; selected for projection=4; charged peak=20480; final grant=0");
     }
 }

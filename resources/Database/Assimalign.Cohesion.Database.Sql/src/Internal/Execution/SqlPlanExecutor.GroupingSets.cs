@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteGroupingSetsAsync(SqlGroupingSetsPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        long inputBytes = 0;
+        long inputBytes = 0, matchBytes = 0;
         try
         {
             await using var input = (DatabaseResultSet)await (RecursiveState is null
@@ -183,7 +183,7 @@ internal sealed partial class SqlPlanExecutor
                     row[projectionStart + i] = NormalizeGroupValue(
                         evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
                 }
-                if (correlatedOrdering) { matches.Add(row); }
+                if (correlatedOrdering) { RetainSelectRow(ref matchBytes, row, includeWindow: true); matches.Add(row); }
                 else
                 {
                     if (plan.IsDistinct)
@@ -235,103 +235,108 @@ internal sealed partial class SqlPlanExecutor
                 return states;
             }
         }
-        finally { ReleaseSelectMemory(ref inputBytes); }
+        finally { ReleaseSelectMemory(ref matchBytes); ReleaseSelectMemory(ref inputBytes); }
     }
 
     private async Task<DatabaseResult> ProjectSequenceGroupingSetsAsync(SqlGroupingSetsPlan plan,
         Dictionary<object?[], GroupAggregateState[]> groups, SqlExpressionEvaluator evaluator,
         Collation[] aggregateCollations, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var keys = plan.Keys;
-        var aggregates = plan.Aggregates;
-        int projectionStart = keys.Count + aggregates.Count + (plan.GroupingArguments?.Length ?? 0);
-        var matches = new List<object?[]>();
-        var sequenceOrdering = !plan.IsDistinct && HasSequenceProjection(plan.Projections)
-            ? OrderingOutputSlots(plan.OrderBy, projectionStart) : null;
-        bool deferredSequence = sequenceOrdering is not null && plan.OrderBy.Count > 0 && !OrderingUsesSequence(plan.Projections, sequenceOrdering);
-        bool correlatedOrdering = _subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0;
-        using var collected = new SqlRowCollector(plan.OrderBy, _subqueryValues,
-            plan.IsDistinct ? null : plan.Limit, plan.IsDistinct ? null : plan.Offset, cancellationToken, statement.Metrics, SelectBufferBudget);
-        Collation[]? projectionCollations = null;
-        foreach (var (key, states) in groups)
+        long matchBytes = 0;
+        try
         {
-            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!deferredSequence && !correlatedOrdering && collected.IsComplete) { break; }
-            var row = new object?[projectionStart + plan.Projections.Count];
-            Array.Copy(key, row, keys.Count);
-            for (int i = 0; i < states.Length; i++)
+            var keys = plan.Keys;
+            var aggregates = plan.Aggregates;
+            int projectionStart = keys.Count + aggregates.Count + (plan.GroupingArguments?.Length ?? 0);
+            var matches = new List<object?[]>();
+            var sequenceOrdering = !plan.IsDistinct && HasSequenceProjection(plan.Projections)
+                ? OrderingOutputSlots(plan.OrderBy, projectionStart) : null;
+            bool deferredSequence = sequenceOrdering is not null && plan.OrderBy.Count > 0 && !OrderingUsesSequence(plan.Projections, sequenceOrdering);
+            bool correlatedOrdering = _subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0;
+            using var collected = new SqlRowCollector(plan.OrderBy, _subqueryValues,
+                plan.IsDistinct ? null : plan.Limit, plan.IsDistinct ? null : plan.Offset, cancellationToken, statement.Metrics, SelectBufferBudget);
+            Collation[]? projectionCollations = null;
+            foreach (var (key, states) in groups)
             {
-                // Once per group, the implicit empty group included.
-                var state = states[i];
-                if (state.Inputs is not null)
+                using var rowScope = SqlSequenceExecution.Current?.BeginRow();
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!deferredSequence && !correlatedOrdering && collected.IsComplete) { break; }
+                var row = new object?[projectionStart + plan.Projections.Count];
+                Array.Copy(key, row, keys.Count);
+                for (int i = 0; i < states.Length; i++)
                 {
-                    var ordered = SortRows(state.Inputs, state.Ordering, evaluator, cancellationToken);
-                    foreach (var values in ordered)
+                    // Once per group, the implicit empty group included.
+                    var state = states[i];
+                    if (state.Inputs is not null)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        AddAggregateValues(state.Accumulator, aggregates[i], aggregateCollations[i], values, cancellationToken, statement.TransactionStart);
+                        var ordered = SortRows(state.Inputs, state.Ordering, evaluator, cancellationToken);
+                        foreach (var values in ordered)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            AddAggregateValues(state.Accumulator, aggregates[i], aggregateCollations[i], values, cancellationToken, statement.TransactionStart);
+                        }
+                    }
+                    row[keys.Count + i] = state.Accumulator.Finish(cancellationToken).ToObject();
+                }
+                if (plan.GroupingArguments is { } groupingArguments)
+                {
+                    int[]? included = plan.GroupingSets is null ? null : plan.GroupingSets[(int)key[keys.Count]!];
+                    for (int i = 0; i < groupingArguments.Length; i++)
+                    {
+                        int mask = 0;
+                        foreach (int argument in groupingArguments[i])
+                        { mask = (mask << 1) | (included is null || Array.IndexOf(included, argument) >= 0 ? 0 : 1); }
+                        row[keys.Count + aggregates.Count + i] = mask;
                     }
                 }
-                row[keys.Count + i] = state.Accumulator.Finish(cancellationToken).ToObject();
-            }
-            if (plan.GroupingArguments is { } groupingArguments)
-            {
-                int[]? included = plan.GroupingSets is null ? null : plan.GroupingSets[(int)key[keys.Count]!];
-                for (int i = 0; i < groupingArguments.Length; i++)
+                await PrepareSubqueriesAsync(plan.Having, row, statement, cancellationToken).ConfigureAwait(false);
+                if (!evaluator.Matches(plan.Having, row))
                 {
-                    int mask = 0;
-                    foreach (int argument in groupingArguments[i])
-                    { mask = (mask << 1) | (included is null || Array.IndexOf(included, argument) >= 0 ? 0 : 1); }
-                    row[keys.Count + aggregates.Count + i] = mask;
+                    continue;
+                }
+                if (deferredSequence) { var retained = row[..projectionStart]; RetainSelectRow(ref matchBytes, retained, includeWindow: true); matches.Add(retained); continue; }
+                for (int i = 0; i < plan.Projections.Count; i++)
+                {
+                    await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
+                    row[projectionStart + i] = NormalizeGroupValue(
+                        evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
+                }
+                if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
+                if (correlatedOrdering) { RetainSelectRow(ref matchBytes, row, includeWindow: true); matches.Add(row); }
+                else
+                {
+                    if (plan.IsDistinct)
+                    {
+                        projectionCollations = CaptureProjectionCollations(plan.Projections, evaluator, projectionCollations, cancellationToken);
+                    }
+                    var orderingKeys = plan.OrderBy.Count == 0 ? Array.Empty<object?>() : new object?[plan.OrderBy.Count];
+                    for (int i = 0; i < orderingKeys.Length; i++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        orderingKeys[i] = evaluator.Evaluate(plan.OrderBy[i].Key, row);
+                    }
+                    collected.Add(row[projectionStart..], orderingKeys);
                 }
             }
-            await PrepareSubqueriesAsync(plan.Having, row, statement, cancellationToken).ConfigureAwait(false);
-            if (!evaluator.Matches(plan.Having, row))
+            if (deferredSequence)
             {
-                continue;
+                return await MaterializeSequenceSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+                    evaluator, statement, cancellationToken, null, sequenceOrdering!).ConfigureAwait(false);
             }
-            if (deferredSequence) { matches.Add(row[..projectionStart]); continue; }
-            for (int i = 0; i < plan.Projections.Count; i++)
+            if (correlatedOrdering)
             {
-                await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
-                row[projectionStart + i] = NormalizeGroupValue(
-                    evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
-            }
-            if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
-            if (correlatedOrdering) { matches.Add(row); }
-            else
-            {
-                if (plan.IsDistinct)
+                var output = plan.Projections.Select((projection, i) => projection with
                 {
-                    projectionCollations = CaptureProjectionCollations(plan.Projections, evaluator, projectionCollations, cancellationToken);
-                }
-                var orderingKeys = plan.OrderBy.Count == 0 ? Array.Empty<object?>() : new object?[plan.OrderBy.Count];
-                for (int i = 0; i < orderingKeys.Length; i++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    orderingKeys[i] = evaluator.Evaluate(plan.OrderBy[i].Key, row);
-                }
-                collected.Add(row[projectionStart..], orderingKeys);
+                    Value = new SqlBoundSlot(projectionStart + i),
+                    ColumnOrdinal = null,
+                }).ToArray();
+                return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
+                    plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
             }
+            return FinishSelect(collected.Finish(), plan.Projections, plan.Limit, plan.Offset,
+                plan.IsDistinct, evaluator, cancellationToken, projectionCollations);
         }
-        if (deferredSequence)
-        {
-            return await MaterializeSequenceSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-                evaluator, statement, cancellationToken, null, sequenceOrdering!).ConfigureAwait(false);
-        }
-        if (correlatedOrdering)
-        {
-            var output = plan.Projections.Select((projection, i) => projection with
-            {
-                Value = new SqlBoundSlot(projectionStart + i),
-                ColumnOrdinal = null,
-            }).ToArray();
-            return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
-                plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
-        }
-        return FinishSelect(collected.Finish(), plan.Projections, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, cancellationToken, projectionCollations);
+        finally { ReleaseSelectMemory(ref matchBytes); }
     }
 
     private static void AddGroupingSetInput(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,

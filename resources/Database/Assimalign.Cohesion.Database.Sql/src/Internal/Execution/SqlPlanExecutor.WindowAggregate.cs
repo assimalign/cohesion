@@ -16,6 +16,7 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteWindowAggregateAsync(SqlWindowAggregatePlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
+        long previousPending = _subqueryValues?.PendingStatementMemoryBytes ?? 0;
         using var memory = new SqlWindowMemory(statement.Metrics, _definitions.StatementMemoryBudget);
         // WITH and independent subqueries can complete outside the window stage.
         // Their caches remain reachable throughout it and belong to this grant too.
@@ -136,11 +137,14 @@ internal sealed partial class SqlPlanExecutor
                 partitionStart = partitionEnd;
             }
         }
-        return _subqueryValues is { HasCorrelatedQueries: true }
+        var result = _subqueryValues is { HasCorrelatedQueries: true }
             ? await ExecuteCorrelatedSelectAsync(rows, plan.Projections, null, plan.OrderBy, plan.Limit, plan.Offset,
                 plan.IsDistinct, statement, cancellationToken).ConfigureAwait(false)
             : MaterializeSelect(rows, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset, plan.IsDistinct,
                 evaluator, plan.OrderByProjections, cancellationToken);
+        memory.Dispose();
+        _subqueryValues?.AdmitPendingStatementMemory(previousPending);
+        return result;
 
         void ReserveKeys(long bytes) { memory.Reserve(bytes); keyBytes += bytes; }
 

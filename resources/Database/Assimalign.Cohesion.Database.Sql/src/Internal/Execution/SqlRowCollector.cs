@@ -32,7 +32,7 @@ internal sealed class SqlRowCollector : IDisposable
     private bool _isHeap;
 
     internal SqlRowCollector(IReadOnlyList<SqlBoundOrdering> orderBy, SqlSubqueryValues? subqueries,
-        SqlRowCount? limit, SqlRowCount? offset, CancellationToken cancellationToken, SqlStatementMetrics? metrics = null, long budget = 67108864, bool publishPeak = true)
+        SqlRowCount? limit, SqlRowCount? offset, CancellationToken cancellationToken, SqlStatementMetrics? metrics, long budget, bool publishPeak = true)
     {
         _orderBy = orderBy;
         _subqueries = subqueries;
@@ -83,7 +83,7 @@ internal sealed class SqlRowCollector : IDisposable
         if (!_canBound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
-            Reserve(EntryBytes(entry));
+            if (ChargesPlainMemory) { Reserve(EntryBytes(entry)); }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -94,7 +94,7 @@ internal sealed class SqlRowCollector : IDisposable
         if (_ordered.Count < Bound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
-            Reserve(EntryBytes(entry));
+            if (ChargesPlainMemory) { Reserve(EntryBytes(entry)); }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -114,7 +114,7 @@ internal sealed class SqlRowCollector : IDisposable
         {
             var replaced = _ordered[0];
             // Credit the replaced entry before admitting its replacement.
-            long difference = EntryBytes(entry) - EntryBytes(replaced);
+            long difference = ChargesPlainMemory ? EntryBytes(entry) - EntryBytes(replaced) : 0;
             if (difference > 0) { Reserve(difference); }
             SiftDown(0, entry);
             if (difference < 0) { Release(-difference); }
@@ -145,7 +145,6 @@ internal sealed class SqlRowCollector : IDisposable
         for (int i = start; i < start + count; i++)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            Reserve(32L + SqlHashJoinTable.RowBytes(_ordered[i].Output));
             _rows.Add(_ordered[i].Output);
         }
         if (SqlWindowMemory.For(_metrics) is { } windowMemory)
@@ -164,23 +163,25 @@ internal sealed class SqlRowCollector : IDisposable
     private static long EntryBytes(Entry entry)
         => 32L + SqlHashJoinTable.RowBytes(entry.Output) + SqlHashJoinTable.RowBytes(entry.Keys);
 
+    private bool ChargesPlainMemory => _budget != 0 && _metrics is not null && SqlWindowMemory.For(_metrics) is null;
+
     private void Reserve(long bytes)
     {
         if (_budget == 0 || _metrics is null || SqlWindowMemory.For(_metrics) is not null) { return; }
-        _metrics.ReserveHashMemory(bytes, _budget);
+        _metrics.ReservePlainSelectMemory(bytes, _budget);
         _reserved += bytes;
     }
 
     private void Release(long bytes)
     {
         if (_reserved == 0) { return; }
-        _metrics!.ReleaseHashMemory(bytes);
+        _metrics!.ReleasePlainSelectMemory(bytes);
         _reserved -= bytes;
     }
 
     public void Dispose()
     {
-        _metrics?.ReleaseHashMemory(_reserved);
+        _metrics?.ReleasePlainSelectMemory(_reserved);
         _reserved = 0;
     }
 

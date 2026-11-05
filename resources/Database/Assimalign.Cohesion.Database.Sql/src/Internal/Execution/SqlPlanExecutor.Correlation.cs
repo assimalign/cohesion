@@ -408,6 +408,7 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
                 SqlWindowMemory.For(statement.Metrics)?.Retain(output);
+                RetainSelectRow(ref retainedBytes, output);
                 returned.Add(output);
             }
             return MaterializeProjected(projections, ApplyRowWindow(returned, limit, offset));

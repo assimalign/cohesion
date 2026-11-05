@@ -347,15 +347,8 @@ internal sealed partial class SqlPlanExecutor
             var projections = ((SqlRelationPlan)input).OutputProjections;
             if (input is SqlJoinPlan joined)
             {
-                var derived = await PrepareJoinInputsAsync(joined, statement, cancellationToken).ConfigureAwait(false);
-                var shared = new bool[joined.Columns.Count];
-                var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, shared);
-                await foreach (var source in EnumerateRetentionJoinRowsAsync(joined, statement, shared, derived,
-                    evaluator, cancellationToken).ConfigureAwait(false))
-                {
-                    if (joined.Tree is null && !evaluator.Matches(joined.Where, source)) { continue; }
-                    yield return GroupInputRow(source, projections, evaluator, cancellationToken);
-                }
+                await foreach (var row in EnumerateJoinGroupInputAsync(joined, projections, statement, cancellationToken).ConfigureAwait(false))
+                { yield return row; }
             }
             else
             {
@@ -388,6 +381,26 @@ internal sealed partial class SqlPlanExecutor
             _definitions.ObserveSelectRetention?.Invoke("group-input", true, 0);
             if (frame is not null) { metrics.EndAnalysisFrame(frame); }
         }
+    }
+
+    // Join-only reservation state must not enlarge every correlated scan iterator.
+    private async IAsyncEnumerable<object?[]> EnumerateJoinGroupInputAsync(SqlJoinPlan joined,
+        IReadOnlyList<SqlProjection> projections, SqlStatementContext statement,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var (derived, derivedBytes) = await PrepareJoinInputsAsync(joined, statement, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var shared = new bool[joined.Columns.Count];
+            var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, shared);
+            await foreach (var source in EnumerateRetentionJoinRowsAsync(joined, statement, shared, derived,
+                evaluator, cancellationToken).ConfigureAwait(false))
+            {
+                if (joined.Tree is null && !evaluator.Matches(joined.Where, source)) { continue; }
+                yield return GroupInputRow(source, projections, evaluator, cancellationToken);
+            }
+        }
+        finally { ReleaseSelectMemory(ref derivedBytes); }
     }
 
     private static object?[] GroupInputRow(object?[] source, IReadOnlyList<SqlProjection> projections,
@@ -441,9 +454,10 @@ internal sealed partial class SqlPlanExecutor
     }
 
     // As in grouped consumption, stack-guard failures wait for the base input drain.
-    // Cancellation and OOM still abort immediately.
+    // Cancellation, OOM and statement memory refusal still abort immediately.
     private static bool CanDeferRetentionFailure(Exception failure)
-        => failure is not (OperationCanceledException or OutOfMemoryException);
+        => failure is not (OperationCanceledException or OutOfMemoryException)
+            && (failure is not SqlExecutionException sql || sql.Diagnostics[0].Code != SqlExecutionException.StatementMemoryBudgetCode);
 
     private IAsyncEnumerable<object?[]> EnumerateRetentionJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,

@@ -83,7 +83,7 @@ internal sealed partial class SqlPlanExecutor
                 if (!groups.TryGetValue(key, out var states))
                 {
                     RecursiveScratch?.Retain(key);
-                    RetainSelectRow(ref retainedBytes, key);
+                    RetainSelectRow(ref retainedBytes, key, includeWindow: true);
                     states = CreateStates();
                     groups.Add(key, states);
                 }
@@ -112,7 +112,7 @@ internal sealed partial class SqlPlanExecutor
                     else
                     {
                         AddAggregateInput(state, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken,
-                        statement.TransactionStart, RecursiveScratch, RecursiveScratch is not null, ref retainedBytes, ChargesSelectBuffers ? _metrics : null, _definitions.StatementMemoryBudget);
+                        statement.TransactionStart, RecursiveScratch, RecursiveScratch is not null, ref retainedBytes, ChargesAdditionalSelectBuffers ? _metrics : null, _definitions.StatementMemoryBudget);
                     }
                 }
             }
@@ -140,8 +140,8 @@ internal sealed partial class SqlPlanExecutor
                     if (state.Inputs is not null)
                     {
                         var ordered = SortRows(state.Inputs, state.Ordering, evaluator, cancellationToken);
-                        long orderedBytes = AdmitSelectRows(ordered, cancellationToken);
-                        if (ChargesSelectBuffers && aggregates[i].Function is SqlStringAggregateFunction)
+                        long orderedBytes = AdmitSelectRows(ordered, cancellationToken, includeWindow: true);
+                        if (ChargesAdditionalSelectBuffers && aggregates[i].Function is SqlStringAggregateFunction)
                         { state.StringLength = 0; state.StringCount = 0; }
                         try
                         {
@@ -160,7 +160,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     continue;
                 }
-                if (deferredSequence) { var retained = row[..projectionStart]; RecursiveScratch?.Retain(retained); RetainSelectRow(ref retainedBytes, retained); matches.Add(retained); continue; }
+                if (deferredSequence) { var retained = row[..projectionStart]; RecursiveScratch?.Retain(retained); RetainSelectRow(ref retainedBytes, retained, includeWindow: true); matches.Add(retained); continue; }
                 for (int i = 0; i < plan.Projections.Count; i++)
                 {
                     await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
@@ -168,7 +168,7 @@ internal sealed partial class SqlPlanExecutor
                         evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
                 }
                 if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
-                if (correlatedOrdering) { RecursiveScratch?.Retain(row); RetainSelectRow(ref retainedBytes, row); matches.Add(row); }
+                if (correlatedOrdering) { RecursiveScratch?.Retain(row); RetainSelectRow(ref retainedBytes, row, includeWindow: true); matches.Add(row); }
                 else
                 {
                     if (plan.IsDistinct)
@@ -206,14 +206,14 @@ internal sealed partial class SqlPlanExecutor
             GroupAggregateState[] CreateStates()
             {
                 RecursiveScratch?.Reserve(128L + 128L * aggregates.Count);
-                ReserveSelectMemory(ref retainedBytes, 128L + 128L * aggregates.Count);
+                ReserveSelectMemory(ref retainedBytes, PlainGroupStateBytes(aggregates), includeWindow: true);
                 var states = new GroupAggregateState[aggregates.Count];
                 for (int i = 0; i < states.Length; i++)
                 {
                     var aggregate = aggregates[i];
                     var accumulator = aggregate.Function.CreateAccumulator(
                         new SqlFunctionContext(aggregate.Database, aggregateCollations[i], cancellationToken, statement.TransactionStart));
-                    states[i] = ChargesSelectBuffers && aggregate.Function is SqlExtremumFunction
+                    states[i] = ChargesAdditionalSelectBuffers && aggregate.Function is SqlExtremumFunction
                         ? new ExtremumGroupAggregateState(accumulator, aggregate, _subqueryValues)
                         : new GroupAggregateState(accumulator, aggregate, _subqueryValues);
                 }
@@ -228,6 +228,7 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken)
     {
         long retainedBytes = 0;
+        bool drainInput = true;
         try
         {
             await using var inputRows = EnumerateGroupInputAsync(plan, statement, cancellationToken).GetAsyncEnumerator(cancellationToken);
@@ -268,7 +269,7 @@ internal sealed partial class SqlPlanExecutor
                     if (!groups.TryGetValue(key, out var states))
                     {
                         RecursiveScratch?.Retain(key);
-                        RetainSelectRow(ref retainedBytes, key);
+                        RetainSelectRow(ref retainedBytes, key, includeWindow: true);
                         states = CreateStates();
                         groups.Add(key, states);
                     }
@@ -297,7 +298,7 @@ internal sealed partial class SqlPlanExecutor
                         else
                         {
                             AddAggregateInput(state, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken,
-                            statement.TransactionStart, RecursiveScratch, RecursiveScratch is not null, ref retainedBytes, ChargesSelectBuffers ? _metrics : null, _definitions.StatementMemoryBudget);
+                            statement.TransactionStart, RecursiveScratch, RecursiveScratch is not null, ref retainedBytes, ChargesAdditionalSelectBuffers ? _metrics : null, _definitions.StatementMemoryBudget);
                         }
                     }
                 }
@@ -325,8 +326,8 @@ internal sealed partial class SqlPlanExecutor
                         if (state.Inputs is not null)
                         {
                             var ordered = SortRows(state.Inputs, state.Ordering, evaluator, cancellationToken);
-                            long orderedBytes = AdmitSelectRows(ordered, cancellationToken);
-                            if (ChargesSelectBuffers && aggregates[i].Function is SqlStringAggregateFunction)
+                            long orderedBytes = AdmitSelectRows(ordered, cancellationToken, includeWindow: true);
+                            if (ChargesAdditionalSelectBuffers && aggregates[i].Function is SqlStringAggregateFunction)
                             { state.StringLength = 0; state.StringCount = 0; }
                             try
                             {
@@ -345,7 +346,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         continue;
                     }
-                    if (deferredSequence) { var retained = row[..projectionStart]; RecursiveScratch?.Retain(retained); RetainSelectRow(ref retainedBytes, retained); matches.Add(retained); continue; }
+                    if (deferredSequence) { var retained = row[..projectionStart]; RecursiveScratch?.Retain(retained); RetainSelectRow(ref retainedBytes, retained, includeWindow: true); matches.Add(retained); continue; }
                     for (int i = 0; i < plan.Projections.Count; i++)
                     {
                         await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
@@ -353,7 +354,7 @@ internal sealed partial class SqlPlanExecutor
                             evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
                     }
                     if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
-                    if (correlatedOrdering) { RecursiveScratch?.Retain(row); RetainSelectRow(ref retainedBytes, row); matches.Add(row); }
+                    if (correlatedOrdering) { RecursiveScratch?.Retain(row); RetainSelectRow(ref retainedBytes, row, includeWindow: true); matches.Add(row); }
                     else
                     {
                         if (plan.IsDistinct)
@@ -391,14 +392,14 @@ internal sealed partial class SqlPlanExecutor
                 GroupAggregateState[] CreateStates()
                 {
                     RecursiveScratch?.Reserve(128L + 128L * aggregates.Count);
-                    ReserveSelectMemory(ref retainedBytes, 128L + 128L * aggregates.Count);
+                    ReserveSelectMemory(ref retainedBytes, PlainGroupStateBytes(aggregates), includeWindow: true);
                     var states = new GroupAggregateState[aggregates.Count];
                     for (int i = 0; i < states.Length; i++)
                     {
                         var aggregate = aggregates[i];
                         var accumulator = aggregate.Function.CreateAccumulator(
                             new SqlFunctionContext(aggregate.Database, aggregateCollations[i], cancellationToken, statement.TransactionStart));
-                        states[i] = ChargesSelectBuffers && aggregate.Function is SqlExtremumFunction
+                        states[i] = ChargesAdditionalSelectBuffers && aggregate.Function is SqlExtremumFunction
                             ? new ExtremumGroupAggregateState(accumulator, aggregate, _subqueryValues)
                             : new GroupAggregateState(accumulator, aggregate, _subqueryValues);
                     }
@@ -406,14 +407,28 @@ internal sealed partial class SqlPlanExecutor
                     return states;
                 }
             }
+            catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
+            { drainInput = false; throw; }
             finally
             {
                 // Base completed this input before any key/transition could fail. Preserve its
                 // predicate calls and visits on consumer failure; cancellation still disposes it.
-                while (await inputRows.MoveNextAsync().ConfigureAwait(false)) { }
+                if (drainInput) { while (await inputRows.MoveNextAsync().ConfigureAwait(false)) { } }
             }
         }
         finally { ReleaseSelectMemory(ref retainedBytes); }
+    }
+
+    private static long PlainGroupStateBytes(IReadOnlyList<SqlGroupAggregate> aggregates)
+    {
+        long bytes = 128;
+        for (int index = 0; index < aggregates.Count; index++)
+        {
+            var aggregate = aggregates[index];
+            bytes += aggregate.Call.Quantifier == Language.SqlSetQuantifier.Distinct || aggregate.OrderBy.Count > 0
+                ? 320L + 128L * aggregate.OrderBy.Count + 32L * aggregate.ArgumentCollations.Count : 128L;
+        }
+        return bytes;
     }
 
     // DISTINCT belongs to the executor so an application's accumulator sees the same
@@ -494,10 +509,10 @@ internal sealed partial class SqlPlanExecutor
                 // the representative occurring first under the independently collated keys.
                 if (state.Inputs is not null && CompareAggregateInputs(row, previous, aggregate, evaluator, cancellationToken) < 0)
                 {
-                    long difference = metrics is null ? 0 : (state.Inputs is null ? 1L : 2L) * (SqlHashJoinTable.RowBytes(row) - SqlHashJoinTable.RowBytes(previous));
-                    if (difference > 0 && metrics is not null) { metrics.ReserveHashMemory(difference, budget); reserved += difference; }
+                    long difference = metrics is null ? 0 : 2L * (SqlHashJoinTable.RowBytes(row) - SqlHashJoinTable.RowBytes(previous));
+                    if (difference > 0 && metrics is not null) { metrics.ReservePlainSelectMemory(difference, budget); reserved += difference; }
                     row.CopyTo(previous, 0);
-                    if (difference < 0 && metrics is not null) { metrics.ReleaseHashMemory(-difference); reserved += difference; }
+                    if (difference < 0 && metrics is not null) { metrics.ReleasePlainSelectMemory(-difference); reserved += difference; }
                 }
                 return 0;
             }
@@ -506,7 +521,7 @@ internal sealed partial class SqlPlanExecutor
             if (metrics is not null)
             {
                 long charge = 64L + SqlHashJoinTable.RowBytes(tuple) + SqlHashJoinTable.RowBytes(row);
-                metrics.ReserveHashMemory(charge, budget); reserved += charge;
+                metrics.ReservePlainSelectMemory(charge, budget); reserved += charge;
             }
             state.Distinct.Add(tuple, row);
         }
@@ -514,7 +529,7 @@ internal sealed partial class SqlPlanExecutor
         {
             long credit = AdmitNativeAggregateState(state, aggregate, collation, values, cancellationToken, ref reserved, metrics, budget);
             state.Accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken, transactionTimestamp));
-            if (credit != 0) { metrics!.ReleaseHashMemory(credit); reserved -= credit; }
+            if (credit != 0) { metrics!.ReleasePlainSelectMemory(credit); reserved -= credit; }
             return 0;
         }
         if (aggregate.Function is SqlStringAggregateFunction)
@@ -528,7 +543,7 @@ internal sealed partial class SqlPlanExecutor
         long bytes = windowMemory is null ? 0 : 128L + row.Length * 16L + SqlHashJoinTable.RowBytes(row);
         windowMemory?.Reserve(bytes);
         if (metrics is not null)
-        { long charge = 32L + SqlHashJoinTable.RowBytes(row); metrics.ReserveHashMemory(charge, budget); reserved += charge; }
+        { long charge = 32L + SqlHashJoinTable.RowBytes(row); metrics.ReservePlainSelectMemory(charge, budget); reserved += charge; }
         state.Inputs.Add(row);
         return bytes;
     }
@@ -536,14 +551,14 @@ internal sealed partial class SqlPlanExecutor
     private void AddPlainGroupRow(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,
         SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken, DateTimeOffset timestamp, ref long reserved)
     {
-        if (!ChargesSelectBuffers || aggregate.Function is not (SqlExtremumFunction or SqlStringAggregateFunction))
+        if (!ChargesAdditionalSelectBuffers || aggregate.Function is not (SqlExtremumFunction or SqlStringAggregateFunction))
         { AddRow(state.Accumulator, aggregate, collation, evaluator, row, cancellationToken, timestamp); return; }
         SqlValueBuffer buffer = default;
         Span<SqlValue> values = buffer[..aggregate.Arguments.Length];
         EvaluateArguments(aggregate, evaluator, row, values);
         long credit = AdmitNativeAggregateState(state, aggregate, collation, values, cancellationToken, ref reserved, _metrics, _definitions.StatementMemoryBudget);
         state.Accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken, timestamp));
-        if (credit != 0) { _metrics!.ReleaseHashMemory(credit); reserved -= credit; }
+        if (credit != 0) { _metrics!.ReleasePlainSelectMemory(credit); reserved -= credit; }
     }
 
     private static long AdmitNativeAggregateState(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,
@@ -559,7 +574,7 @@ internal sealed partial class SqlPlanExecutor
             if (previous.IsNull || Math.Sign(SqlValue.Compare(values[0], previous, collation)) == (aggregate.Function.Name == "MAX" ? 1 : -1))
             {
                 long difference = PayloadBytes(values[0]) - PayloadBytes(previous);
-                if (difference > 0) { metrics.ReserveHashMemory(difference, budget); reserved += difference; }
+                if (difference > 0) { metrics.ReservePlainSelectMemory(difference, budget); reserved += difference; }
                 else if (difference < 0) { credit = -difference; }
                 extreme.Value = values[0];
             }
@@ -569,7 +584,7 @@ internal sealed partial class SqlPlanExecutor
             long characters = ((string)values[0].ToObject()!).Length
                 + (state.StringCount == 0 || values.Length == 1 ? 0 : ((string?)values[1].ToObject())?.Length ?? 0);
             SqlBuiltinScalarFunction.CheckLength(state.StringLength + characters);
-            metrics.ReserveHashMemory(2L * characters, budget); reserved += 2L * characters;
+            metrics.ReservePlainSelectMemory(2L * characters, budget); reserved += 2L * characters;
             state.StringLength += characters; state.StringCount++;
         }
 
@@ -587,9 +602,9 @@ internal sealed partial class SqlPlanExecutor
         var values = new SqlValue[aggregate.Arguments.Length];
         for (int i = 0; i < values.Length; i++) { values[i] = SqlValue.FromObject(row[i]); }
         long credit = AdmitNativeAggregateState(state, aggregate, collation, values, cancellationToken, ref reserved,
-            ChargesSelectBuffers ? _metrics : null, _definitions.StatementMemoryBudget);
+            ChargesAdditionalSelectBuffers ? _metrics : null, _definitions.StatementMemoryBudget);
         state.Accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken, timestamp));
-        if (credit != 0) { _metrics!.ReleaseHashMemory(credit); reserved -= credit; }
+        if (credit != 0) { _metrics!.ReleasePlainSelectMemory(credit); reserved -= credit; }
     }
 
     private static int CompareAggregateInputs(object?[] left, object?[] right, SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator,

@@ -5,41 +5,43 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    // CTAS retains its specific kept-output admission policy. Its source still
-    // pipelines, with existing hash/window/recursive/grouping-set grants unchanged.
-    private bool _tableAsOutputAdmissionOnly;
-    private long SelectBufferBudget => _isDml || _tableAsOutputAdmissionOnly || RecursiveState is not null ? 0 : _definitions.StatementMemoryBudget;
+    private long SelectBufferBudget => _isDml || RecursiveState is not null ? 0 : _definitions.StatementMemoryBudget;
 
     // Plain operators own byte counts only. Existing ledgers remain exclusive.
-    private bool ChargesSelectBuffers => !_isDml && !_tableAsOutputAdmissionOnly && RecursiveState is null && SqlWindowMemory.For(_metrics) is null;
+    private bool ChargesSelectBuffers => ChargesAdditionalSelectBuffers && SqlWindowMemory.For(_metrics) is null;
 
-    private void ReserveSelectMemory(ref long reserved, long bytes)
+    // These buffers are absent from the window ledger.
+    private bool ChargesAdditionalSelectBuffers => !_isDml && RecursiveState is null;
+
+    private void ReserveSelectMemory(ref long reserved, long bytes, bool includeWindow = false)
     {
-        if (!ChargesSelectBuffers || _metrics is null) { return; }
-        _metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget);
+        if (!(includeWindow ? ChargesAdditionalSelectBuffers : ChargesSelectBuffers) || _metrics is null) { return; }
+        _metrics.ReservePlainSelectMemory(bytes, _definitions.StatementMemoryBudget);
         reserved += bytes;
     }
 
-    private void RetainSelectRow(ref long reserved, object?[] row)
+    private void RetainSelectRow(ref long reserved, object?[] row, bool includeWindow = false)
     {
-        if (!ChargesSelectBuffers || _metrics is null) { return; }
-        ReserveSelectMemory(ref reserved, 32L + SqlHashJoinTable.RowBytes(row));
+        if (!(includeWindow ? ChargesAdditionalSelectBuffers : ChargesSelectBuffers) || _metrics is null) { return; }
+        long bytes = 32L + SqlHashJoinTable.RowBytes(row);
+        _metrics.ReservePlainSelectMemory(bytes, _definitions.StatementMemoryBudget);
+        reserved += bytes;
     }
 
     private void ReleaseSelectMemory(ref long reserved)
     {
-        _metrics?.ReleaseHashMemory(reserved);
+        _metrics?.ReleasePlainSelectMemory(reserved);
         reserved = 0;
     }
 
-    private long AdmitSelectRows(IReadOnlyList<object?[]> rows, CancellationToken cancellationToken)
+    private long AdmitSelectRows(IReadOnlyList<object?[]> rows, CancellationToken cancellationToken, bool includeWindow = false)
     {
-        if (!ChargesSelectBuffers || _metrics is null) { return 0; }
+        if (!(includeWindow ? ChargesAdditionalSelectBuffers : ChargesSelectBuffers) || _metrics is null) { return 0; }
         long reserved = 0;
         try
         {
             for (int i = 0; i < rows.Count; i++)
-            { cancellationToken.ThrowIfCancellationRequested(); RetainSelectRow(ref reserved, rows[i]); }
+            { cancellationToken.ThrowIfCancellationRequested(); RetainSelectRow(ref reserved, rows[i], includeWindow); }
             return reserved;
         }
         catch { ReleaseSelectMemory(ref reserved); throw; }
@@ -47,7 +49,7 @@ internal sealed partial class SqlPlanExecutor
 
     private long AdmitSelectResult(object result, CancellationToken cancellationToken)
         => ChargesSelectBuffers && result is SqlMaterializedResultSet rows && _metrics is not null
-            ? rows.ReserveMemory(_metrics, _definitions.StatementMemoryBudget, cancellationToken) : 0;
+            ? rows.ReserveMemory(_metrics, _definitions.StatementMemoryBudget, cancellationToken, plainSelect: true) : 0;
 
     private void ReleaseSelectRows(ref long reserved, List<object?[]> rows)
     {
@@ -55,7 +57,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var row in rows)
         {
             long bytes = 32L + SqlHashJoinTable.RowBytes(row);
-            _metrics!.ReleaseHashMemory(bytes);
+            _metrics!.ReleasePlainSelectMemory(bytes);
             reserved -= bytes;
         }
     }

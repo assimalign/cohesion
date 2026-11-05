@@ -45,7 +45,7 @@ internal sealed partial class SqlPlanExecutor
                     memory.Retain(values);
                     memory.Reserve(32);
                 }
-                RetainSelectRow(ref retainedBytes, values);
+                RetainSelectRow(ref retainedBytes, values, includeWindow: true);
                 rows.Add(values);
             }
             if (!relation.IsCorrelated)

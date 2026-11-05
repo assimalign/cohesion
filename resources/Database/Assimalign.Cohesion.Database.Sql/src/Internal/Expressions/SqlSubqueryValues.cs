@@ -63,23 +63,53 @@ internal class SqlSubqueryValues
 
     internal void Admit(object?[] values, bool correlated)
     {
-        if (this is not BudgetedValues budgeted || SqlWindowMemory.For(budgeted.Metrics) is not null) { return; }
+        if (this is not BudgetedValues budgeted) { return; }
+        bool windowOwned = SqlWindowMemory.For(budgeted.Metrics) is not null;
+        if (windowOwned && correlated) { return; }
         long bytes = 32L + SqlHashJoinTable.RowBytes(values);
-        budgeted.Metrics.ReserveHashMemory(bytes, budgeted.Budget);
-        if (correlated) { budgeted.CorrelatedBytes += bytes; }
-        else
+        if (!correlated)
         {
             for (var frame = _parent; frame is not null; frame = frame._parent)
             { if (frame is BudgetedValues parentBudget) { budgeted = parentBudget; } }
-            budgeted.StatementBytes += bytes;
         }
+        if (windowOwned) { budgeted.PendingStatementBytes += bytes; return; }
+        budgeted.Metrics.ReservePlainSelectMemory(bytes, budgeted.Budget);
+        if (correlated) { budgeted.CorrelatedBytes += bytes; }
+        else { budgeted.StatementBytes += bytes; }
+    }
+
+    internal long PendingStatementMemoryBytes
+    {
+        get
+        {
+            long bytes = 0;
+            for (var frame = this; frame is not null; frame = frame._parent)
+            { if (frame is BudgetedValues budgeted) { bytes += budgeted.PendingStatementBytes; } }
+            return bytes;
+        }
+    }
+
+    internal void AdmitPendingStatementMemory(long previousPending)
+    {
+        BudgetedValues? owner = null;
+        for (var frame = this; frame is not null; frame = frame._parent)
+        { if (frame is BudgetedValues budgeted) { owner = budgeted; } }
+        if (owner is null) { return; }
+        // New independent vectors belong to the outermost registration frame.
+        // An inner window transfers only its own additions; earlier vectors stay
+        // on the still-live parent window ledger until that stage ends.
+        long bytes = owner.PendingStatementBytes - previousPending;
+        if (bytes == 0) { return; }
+        owner.Metrics.ReservePlainSelectMemory(bytes, owner.Budget);
+        owner.StatementBytes += bytes;
+        owner.PendingStatementBytes = previousPending;
     }
 
     internal void ReleaseMemory()
     {
         if (this is not BudgetedValues budgeted) { return; }
-        budgeted.Metrics.ReleaseHashMemory(budgeted.StatementBytes + budgeted.CorrelatedBytes);
-        budgeted.StatementBytes = 0; budgeted.CorrelatedBytes = 0;
+        budgeted.Metrics.ReleasePlainSelectMemory(budgeted.StatementBytes + budgeted.CorrelatedBytes);
+        budgeted.StatementBytes = 0; budgeted.CorrelatedBytes = 0; budgeted.PendingStatementBytes = 0;
     }
 
     private sealed class BudgetedValues : SqlSubqueryValues
@@ -87,6 +117,7 @@ internal class SqlSubqueryValues
         internal readonly SqlStatementMetrics Metrics;
         internal readonly long Budget;
         internal long StatementBytes;
+        internal long PendingStatementBytes;
         internal long CorrelatedBytes;
 
         internal BudgetedValues(SqlSubqueryValues? parent, int scope, IReadOnlyList<SqlSubqueryBinding> queries,
@@ -105,7 +136,7 @@ internal class SqlSubqueryValues
     internal void ClearCorrelated(SqlWindowMemory? memory)
     {
         if (this is BudgetedValues budgeted)
-        { budgeted.Metrics.ReleaseHashMemory(budgeted.CorrelatedBytes); budgeted.CorrelatedBytes = 0; }
+        { budgeted.Metrics.ReleasePlainSelectMemory(budgeted.CorrelatedBytes); budgeted.CorrelatedBytes = 0; }
         foreach (var query in Queries.Values)
         {
             if (!query.IsCorrelated) { continue; }

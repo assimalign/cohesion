@@ -46,7 +46,7 @@ public sealed partial class SqlSequenceThirdPassTests
         var ordinary = await Rows(session, "SELECT t.k" + clauses);
         ordinary.Length.ShouldBe(count);
         long ordinaryPeak = session.LastStatementMetrics!.PeakHashMemoryBytes;
-        ordinaryPeak.ShouldBe(new long[,] { { 40960, 61440 }, { 12384, 32768 }, { 53248, 91136 } }[shape, ordered ? 1 : 0]);
+        ordinaryPeak.ShouldBe(new long[,] { { 40960, 49152 }, { 12384, 20480 }, { 53248, 78848 } }[shape, ordered ? 1 : 0]);
         int retained = 0;
         SqlPlanExecutor.SequenceCandidatesRetained = value => retained = Math.Max(retained, value);
         try
@@ -65,7 +65,7 @@ public sealed partial class SqlSequenceThirdPassTests
             rows.Length.ShouldBe(count);
             rows.Select(row => row[0]).ShouldBe(Enumerable.Range(1, count).Select(i => (object?)(long)i));
             rows.Select(row => row[1]).ShouldBe(ordinary.Select(row => row[0]));
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(new long[,] { { 43008, 43008 }, { 17504, 36864 }, { 58368, 90112 } }[shape, ordered ? 1 : 0]);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(new long[,] { { 25600, 25600 }, { 17504, 31744 }, { 58368, 84992 } }[shape, ordered ? 1 : 0]);
             session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
             retained.ShouldBe(ordered ? count : 0);
             (await Rows(session, "SELECT currval('s')"))[0][0].ShouldBe((long)count);
@@ -188,7 +188,7 @@ public sealed partial class SqlSequenceThirdPassTests
             {
                 peak.ShouldBeGreaterThan(0);
             }
-            metrics.PeakHashMemoryBytes.ShouldBe(new long[,] { { 576, 352, 272, 576, 592 }, { 1856, 1632, 992, 1856, 544 } }[grouped ? 1 : 0, exit]);
+            metrics.PeakHashMemoryBytes.ShouldBe(new long[,] { { 496, 352, 272, 448, 592 }, { 1776, 1632, 992, 1632, 544 } }[grouped ? 1 : 0, exit]);
             metrics.HashMemoryBytes.ShouldBe(0);
             if (exit == 0) { peak.ShouldBe(2); }
             if (exit == 4)

@@ -223,7 +223,7 @@ internal sealed partial class SqlPlanExecutor
                     memory.Retain(row);
                     memory.Reserve(32); // list storage, including growth
                 }
-                RetainSelectRow(ref bufferBytes, row);
+                RetainSelectRow(ref bufferBytes, row, includeWindow: true);
                 buffer.Add(row);
             }
         }
