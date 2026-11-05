@@ -181,6 +181,10 @@ architecture test is deferred until implementation.
 | `Assimalign.Cohesion.Database.KeyValuePair.Protocol` | Single owner of KeyValuePair wire messages, codecs, model family and transfer DTOs; independently consumed by engine and client |
 | `Assimalign.Cohesion.Database.Blob.Protocol` | Single owner of Blob wire messages, codecs, model family and transfer DTOs; independently consumed by engine and client |
 
+DatabaseRow is the shared NVI row boundary: every ordinal is checked in the base, and six
+sealed model, client and plan-description leaves supply typed cores with their existing
+conversions. See [Execution DESIGN](Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#row-access-contract-1264).
+
 Each implemented remote client references its model Protocol and shared Client/Protocol/Types/Connections; Documents.Client also references Execution. No remote client references an engine or the area root. The six client exceptions derive directly from System.Exception and retain local read-only Diagnostics snapshots. COHDBCLIENT001 protects this boundary in both project and resolved-reference layers. Cache.Client remains empty.
 
 ### Service surface, hosting, orchestration

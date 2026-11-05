@@ -1179,6 +1179,12 @@ its pending-commit and dirty-page scheduling hints without exposing buffer-pool 
 
 ## Result diagnostics (#1264)
 
+SqlMaterializedRow supplies protected typed cores behind DatabaseRow's non-virtual ordinal
+guards. Valid-ordinal invariant conversions, padded CHAR output, binary borrowing and NULL/type
+failures retain their existing results. Out-of-range access now throws ArgumentOutOfRangeException
+from the base instead of the array's IndexOutOfRangeException. Only override names change in
+the leaf; its instance layout and GetRowsAsync are unchanged.
+
 SQL command and row results return a non-null Diagnostics collection, empty when there is
 nothing to report (#1264). SQL wire diagnostic framing is unchanged: empty diagnostics emit no frame.
 

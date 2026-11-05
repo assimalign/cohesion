@@ -10,7 +10,8 @@ The model-neutral request/result vocabulary of the Cohesion Data Platform:
   requests own a typed `Statement` and `Parameters`; key-value requests carry command operands.
 - **Results:** `DatabaseResult` reports status, affected count and non-null diagnostics (empty when none).
   `DatabaseResultSet` streams `DatabaseRow` values described by `DatabaseColumn` metadata.
-  Each model supplies the result implementations it needs.
+  Each model supplies the result implementations it needs. DatabaseRow validates every ordinal
+  before dispatching to typed leaf cores; conversions and NULL/MISSING semantics remain model-owned.
 
 Planning, parsing, execution and transaction brackets belong to model engines. Blob sessions
 operate through their own storage API and have no execute member.
@@ -41,7 +42,7 @@ Sql, Documents and Graph offer typed and text execution. KeyValuePair offers typ
 only; its server uses an internal command-text parser. A variable typed as `DatabaseSession`
 offers lifecycle, state and transactions. Use the concrete model session to execute its requests.
 
-See [DESIGN.md](DESIGN.md) for the decisions and deferred result-contract work.
+See [DESIGN.md](DESIGN.md) for the result contracts and their design decisions.
 
 Plan descriptions keep eight columns. Optional DatabasePlanNode.EstimatedRows/ActualRows carry
 model-defined candidate counts; unavailable measurements remain NULL. SQL SELECT-only EXPLAIN

@@ -146,6 +146,12 @@ its pending-commit and dirty-page scheduling hints without exposing buffer-pool 
 
 ## Result diagnostics (#1264)
 
+KeyValueMaterializedRow supplies protected typed cores behind DatabaseRow's non-virtual
+ordinal guards. Valid-ordinal invariant conversions, binary borrowing and CK02001/CK02002
+type/NULL failures retain their existing results. Out-of-range access now throws
+ArgumentOutOfRangeException from the base instead of the array's IndexOutOfRangeException.
+Its wrapper layout and GetRowsAsync remain unchanged.
+
 Key-value command and materialized row results return a non-null Diagnostics collection,
 empty when there is nothing to report (#1264). Supplied command diagnostics remain intact.
 `KeyValueCatalogException` is a sealed public exception leaf (#1264).

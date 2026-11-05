@@ -1161,6 +1161,12 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 
 ## Planning, execution and bounds
 
+GraphQueryRow supplies protected typed cores behind DatabaseRow's non-virtual ordinal
+guards (#1264). Valid-ordinal invariant conversions, JSON/string UTF-8 and CK02001/CK02002
+type/NULL failures retain their existing results. Out-of-range access now throws
+ArgumentOutOfRangeException from the base instead of the array's IndexOutOfRangeException.
+The wrapper layout and GetRowsAsync remain unchanged.
+
 ### Correlated pattern subplans (#1537, GQ-E1)
 
 GraphCorrelatedSubplan owns the planned inner MATCH stream and its lexical argument contract.
