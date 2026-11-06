@@ -74,11 +74,13 @@ position/total, running state, optional processed/total rows and failure code. I
 schema capability, executor, or interface. Hosting can report Degraded while an engine performs
 deferred provisioning through its own `DatabaseEngineWorkerKind.Provisioning` worker.
 
-Every deferred SQL migration, whether it rewrites a TYPE or not, publishes jointly in one
-catalog commit (#1778). A failure before publication leaves the database online at the old
-schema (`CS03402`) and discards the unpublished work. An unconfirmed publication reports
-`CS03403`; recovery decides old or new. Inline per-step application keeps its compensation
-and `CS03104` until SQ-A6. `StorageOfflineCause.ProvisioningFailure` identifies a post-commit
+Every SQL schema apply, including deferred work, `RunMigrationsInline`, empty-table Build and
+`ApplySchemaAsync`, publishes jointly in one catalog commit (#1778). A failure before publication
+leaves the database online at the old schema (`CS03402`) and discards the unpublished work. An
+unconfirmed publication reports `CS03403`; recovery decides old or new. Per-step application and
+compensation are gone and `CS03104` is retired. A migration that meets a journal admission pause
+(§3.6) waits outside its gates and resumes the same prepared work; session DDL refuses at once
+(`CK04014`). `StorageOfflineCause.ProvisioningFailure` identifies a post-commit
 in-memory publication fault; `RecoveryInterrupted` fences a canceled recovery from shutdown writes.
 Storage-safety failures still take the database offline: a journal write or flush whose
 outcome is unknown, an unconfirmed commit wait, a durable data-flush failure, and the
@@ -121,7 +123,7 @@ The platform runs in two modes, matching Cohesion's identity:
 | # | Requirement | Where it lands |
 |---|---|---|
 | R7 | **Database projects.** A consumer creates an ordinary executable (`<Project Sdk="Assimalign.Cohesion.Sdk.Database">`) whose `Program.cs` composes engines and their servers, and declares the databases each engine owns with their C# schemas on the model's engine builder (`builder.AddSql("orders-sql", sql => sql.AddDatabase("sales", database => database.Schema(...)))`). `Database.Sql.Schema` owns SQL tables, custom types (domains of the SQL engine since E3) and database-scoped principals (refused at engine Build until their DDL exists, and at the SDK build with `COHDBSDK108`). Runtime and static build compilation produce the same canonical `SqlCompiledSchema` document/hash ([current format](../../../resources/Database/Assimalign.Cohesion.Database.Sql.Schema/docs/DESIGN.md#fixed-length-schema-columns-1437)); the SDK writes one artifact pair per declared database, `$(IntermediateOutputPath)cohesion/database/<database>.schema.json` and `.schema.sha256`, from the inline `database.Schema(...)` or a `SqlSchema.Create`/`Compile` declaration (owner decision 59 of 2026-10-09). The area root holds no schema type (owner decision 50 of 2026-10-09); other models own their own vocabulary. The SDK emits no resource manifest; `builder.Services.AddResource(...)` from `Database.Hosting.ApplicationModel` opts the application into management at runtime. | `Database.Sql.Schema` + `Sdk.Database` targets/Tasks (#857–#859, A3) |
-| R8 | **Migrations as a build tool.** The SQL model gets a migration tool implemented in the Database SDK: for one declared database (`CohesionDatabaseName`, optional when the project declares one), diff its compiled schema model against that database's ordinal baseline under `Migrations/<database>/` (or a live catalog), emit ordered engine-dialect migration scripts, and apply with destructive compatibility checks, idempotent catalog hashing, and reverse-order compensation of completed reversible statements. Inline DDL remains self-committing per statement until SQ-A6. Every deferred migration now publishes all its steps jointly in one catalog commit (#1447, #1778); a failure before publication leaves the old schema online (`CS03402`), and an unconfirmed commit reports `CS03403`. Inline per-step application keeps compensation and `CS03104` until SQ-A6. | `Sdk.Database` Tasks (`Assimalign.Cohesion.Sdk.Database.Migration.targets`), runtime apply engine in `Database.Sql` + durable state in `Database.Sql.Catalog` |
+| R8 | **Migrations as a build tool.** The SQL model gets a migration tool implemented in the Database SDK: for one declared database (`CohesionDatabaseName`, optional when the project declares one), diff its compiled schema model against that database's ordinal baseline under `Migrations/<database>/` (or a live catalog), emit ordered engine-dialect migration scripts, and apply with destructive compatibility checks and idempotent catalog hashing. Every migration, deferred or inline, publishes all its steps jointly in one catalog commit (#1447, #1778); a failure before publication leaves the old schema online (`CS03402`), and an unconfirmed commit reports `CS03403`. Per-step application, its compensation and `CS03104` are gone (SQ-A6). A migration waits through a journal admission pause and resumes the same prepared work. | `Sdk.Database` Tasks (`Assimalign.Cohesion.Sdk.Database.Migration.targets`), runtime apply engine in `Database.Sql` + durable state in `Database.Sql.Catalog` |
 | R9 | **Model-specific build tools, loaded by model.** The SDK inspects `$(CohesionDatabaseModel)` on the consumer project and selects from explicit static imports (`Sdk.Database.Sql.targets`, `Sdk.Database.KeyValuePair.targets`). SQL compiles schema artifacts and generates migrations. After A3 removed the shared collection shape, KeyValuePair compilation and migration generation fail explicitly until that model supplies its own schema package and catalog/statement surface. Static allowlisted MSBuild imports — no consumer-controlled path or runtime plugin loading — keep this AOT-clean. | `sdks/Assimalign.Cohesion.Sdk.Database/Targets/` |
 
 ### 2.3 Explicit non-goals (for the MVP)
@@ -394,6 +396,15 @@ the real-process E2E obtains the sample apphost through `ReferenceOutputAssembly
 
 Crash/recovery test suites (kill the process mid-commit, replay, verify) are the acceptance bar for R1 — per-model correctness tests build on a shared crash-harness in the kernel.
 
+Sharp checkpoints serialize with physical write brackets and retain active logical writer
+sequences. With a journal size limit J above zero, observing appended bytes at ceil(J/2) requests a
+checkpoint, independently of the size trigger, and pauses new physical brackets (#1283). A pending
+checkpoint that is not failing may pause indefinitely online (Degraded, `CK06006`). Persistent
+checkpoint and write-back failures keep the default offline window of 100 seconds across at least
+three failed passes, and two failed checkpoints past J can fence sooner. Blob refuses a failing
+database, and going offline wakes parked writers. One admitted bracket, mandatory undo and
+lifecycle records can overshoot J.
+
 **The three transaction layers.** The area deliberately has three transaction contracts, one per layer — they are not redundant names for one thing:
 
 | Contract | Lives in | What it is | Lifetime |
@@ -556,7 +567,7 @@ project's `docs/DESIGN.md`, "Diagnostics", linked), and the batch that added or 
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Database` | `DatabaseEventSource` | [Database (root)](../../../resources/Database/Assimalign.Cohesion.Database/docs/DESIGN.md#diagnostics) | existed; B1 | Engine, database, worker, server, server-session handshake, session, statement and explicit-transaction lifecycle; worker failures and give-ups; `current-sessions` |
 | `Assimalign.Cohesion.Database.Storage` | `StorageEventSource` | [Database.Storage](../../../resources/Database/Assimalign.Cohesion.Database.Storage/docs/DESIGN.md#diagnostics) | B2 | Recovery, checkpoints, write-back, group commit, a storage gone offline, buffer-pool pressure, checksum failures; 8 counters |
-| `Assimalign.Cohesion.Database.Transactions` | `TransactionEventSource` | [Database.Transactions](../../../resources/Database/Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#diagnostics) | B3 | Kernel transactions, deadlocks, lock waits, deferred undo, recovery analysis, deferred checkpoints, version purge; 6 counters |
+| `Assimalign.Cohesion.Database.Transactions` | `TransactionEventSource` | [Database.Transactions](../../../resources/Database/Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#diagnostics) | B3 | Kernel transactions, deadlocks, lock waits, deferred undo, recovery analysis, deferred checkpoints, version purge, journal admission pauses, resumes, waits/refusals and pending-pause failures; 9 counters |
 | `Assimalign.Cohesion.Database.Indexing` | `IndexEventSource` | [Database.Indexing](../../../resources/Database/Assimalign.Cohesion.Database.Indexing/docs/DESIGN.md#diagnostics) | B3 | Index DDL, format and corruption failures, invariant violations, page splits, writer purges |
 | `Assimalign.Cohesion.Database.Protocol` | `ProtocolEventSource` | [Database.Protocol](../../../resources/Database/Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#diagnostics) | B4 | Frames read and written by the stream reader and writer (Verbose, `Frames`) |
 | `Assimalign.Cohesion.Database.Security` | `DatabaseSecurityEventSource` | [Database.Security](../../../resources/Database/Assimalign.Cohesion.Database.Security/docs/DESIGN.md#diagnostics) | B4 | Authenticator verdicts and failures |

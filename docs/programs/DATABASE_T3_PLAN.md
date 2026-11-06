@@ -42,10 +42,12 @@
    - One large `ORDER BY` can exhaust process memory.
    - Track A charges all five (SQ-L1). It then lifts T2's decision D3 ("no spill anywhere") for sort,
      hash and result spooling, so the refused queries run again (EN-X1, SQ-L2–L4).
-5. **Under sustained concurrent writes the journal can fill the volume (#1283, not delivered).** [Certain]
-   A checkpoint still needs zero active transactions, and the area design says a busy checkpoint never
-   takes a database offline "however long its journal grows". EN-C1 traces the growth and EN-C2 adds a
-   bounded admission pause.
+5. **Sharp checkpoints and bounded journal admission (#1283, EN-C1/EN-C2).** Physical brackets serialize
+   with checkpoints, which retain active logical writer sequences. Observing ceil(J/2), where J is the
+   journal size limit, requests a checkpoint and pauses new brackets independently of the ordinary size
+   trigger. A pending, non-failing checkpoint may remain online indefinitely. Persistent worker failures
+   keep owner decisions 25 and 42, including the default 100-second offline window. One admitted bracket,
+   mandatory undo and lifecycle records can overshoot J.
 6. **A refused open still writes (#1744).** T3 bumps about a dozen formats. EN-G1 generalizes SQL's
    copy-on-write probe overlay to Graph, Documents and Key-Value, and merges before the first T3 format
    bump.
@@ -152,6 +154,13 @@ row by its number.
 | EN-A3 | #1790 | Read-only `databases` and `health` actions; no write actions (Hosting D3) | #1785 | none |
 | EN-D1 | #1791 | Fold the event-source, extensibility and concrete-types program documents into the project designs, and delete them | — | docs |
 
+**SQ-A6 note.** A heap-owned index dropped without a same-name replacement keeps its heap; its pages
+remain until the table retires, with separate index reclamation planned for IX-S1 (#1808). This
+overrides SQ-A4's rewrite-for-reclamation rule for this case. Every populated physical replacement runs
+in the worker unless `RunMigrationsInline` is selected. `ApplySchemaAsync` readers and touched-table DDL
+wait through publication and cleanup. A configured engine `LockTimeout` bounds Build and
+`ApplySchemaAsync` reservation.
+
 ## 4. Track B: language surface (39 runs)
 
 **SQL (27):**
@@ -215,8 +224,9 @@ The largest risk in the tier is IX-V3, HNSW repair under MVCC. Every index kind 
 | B1 | EN-G1, SQ-T4, SQ-A4, OQ-K1, EN-C1 | SQL 35 (A4), after EN-G1 |
 | B2 | SQ-K4, OQ-S1, GQ-T1, EN-A1 | SQL 36 (K4), Graph catalog (T1) |
 | B3 | SQ-L1a, SQ-L1b, SQ-L1c (moved from B2), SQ-A5, EN-X1, SQ-H3, OQ-S2, GQ-N1, EN-P1 | SQL (A5) |
-
-The split held "results never change" against the pre-change commit.
+| B4 | SQ-A6, SQ-L2a, SQ-L2b, SQ-L2c, EN-C2, IX-B1, SQ-J3, IX-R1 (#1644) | B-tree format (B1), Graph catalog (R1) |
+| B5 | SQ-A7, SQ-L3, IX-S1 after A7, SQ-CT1, OQ-M1 with OQ-W1 | SQL (A7, then S1 in merge order) |
+| B6 | SQ-A8, SQ-L4, EN-A2, IX-T1, GQ-T2 | Graph catalog (T2) |
 
 SQ-L1 left batch 2 after four review rounds. Each round closed the previous round's findings and
 introduced new ones; the last one left a crash in joined DML over a wide GROUP BY key and two result
@@ -224,9 +234,12 @@ changes (correlated DML re-ran derived tables, and unordered DISTINCT changed vo
 It returns in batch 3, split into smaller runs. Each run is held to "results never change"
 against the pre-change commit, and each covers joined DML. The batch 2 attempt stays on a local
 branch as reference.
-| B4 | SQ-A6, SQ-L2, EN-C2, IX-B1, SQ-J3, IX-R1 (#1644) | B-tree format (B1), Graph catalog (R1) |
-| B5 | SQ-A7, SQ-L3, IX-S1 after A7, SQ-CT1, OQ-M1 with OQ-W1 | SQL (A7, then S1 in merge order) |
-| B6 | SQ-A8, SQ-L4, EN-A2, IX-T1, GQ-T2 | Graph catalog (T2) |
+
+The split held "results never change" against the pre-change commit.
+
+SQ-L2 split in batch 4: SQ-L2a (temp-space codecs), SQ-L2b (root ORDER BY and ordered DISTINCT, with
+lazy delivery) and SQ-L2c (a CTAS source). Window sorts move to SQ-L4: a window retains its whole input
+and output, so spilling only its sort gains nothing until partitions and output spool.
 
 After B6, Track A's EN-A3 and EN-D1 fill open slots. B and C follow their lane queues:
 - **SQL:** J4 → D1 → X1 → V1 → E1 → N3 → U1 → V2 → E2 → N4 → C2 → U2 → Y1 → N5 → Z3 → Y2 → C3 → B1 → N7 →
