@@ -3922,6 +3922,9 @@ reuses freed pages, and compares both FSMs with a full page-header walk. Synchro
 durability model power loss; None models only its documented process-crash guarantee, retaining OS
 writes without promising that unflushed bytes survive power loss. Client tests additionally
 check exact FSM accounting and physical file-length stability when the freed pages are reused.
+Reclamation test completion waits also require the catalog's committed retirement-intent snapshot
+to be empty (#1809). HasWork samples three fields independently and can transiently report idle
+as discovery starts; the intent remains until durable data frees and catalog retirement finish.
 The Release/NativeAOT `Q8D` benchmark records both full Build (including open/recovery) and its
 provisioning DROP phase; decision 77 in the program design records the measurements.
 
