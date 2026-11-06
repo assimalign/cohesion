@@ -108,7 +108,7 @@ internal sealed partial class SqlRowCollector
             SqlSortSpillMetrics.Record(_metrics!, state.Statement, state.Sorter);
             state.Sorter.Dispose(); state.Sorter = null;
             Release(_memory.Bytes);
-            var result = new SqlSpilledResultSet(columns, state.Statement, reader, offset, limit, state.Owner, state.Grant);
+            var result = new SqlSpilledResultSet(columns, state.Statement, reader, offset, limit, state.Owner, state.Grant, state.MaximumDecodedRowBytes);
             _spills.Remove(this);
             return result;
         }
@@ -127,6 +127,7 @@ internal sealed partial class SqlRowCollector
         internal readonly byte[] Families;
         internal readonly int Bound;
         internal readonly long Grant;
+        internal long MaximumDecodedRowBytes;
         internal StorageTempSorter? Sorter;
         internal Spill(SqlDatabaseSession owner, StorageTempSpace space, SqlTempSortKeyCodec.Column[] columns, int bound, long grant)
         {
@@ -145,6 +146,7 @@ internal sealed partial class SqlRowCollector
                 || !SqlTempRowCodec.TryGetLength(output, out int length) || 16L + key.Length + length > Bound
                 || !SqlTempRowCodec.TryEncode(output, out var value))
             { throw SqlExecutionException.StatementMemoryBudget(budget); }
+            MaximumDecodedRowBytes = Math.Max(MaximumDecodedRowBytes, SqlTempRowCodec.DecodedBytes(output));
             return (key, value);
         }
         public void Dispose()

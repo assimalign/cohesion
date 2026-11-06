@@ -21,6 +21,7 @@ internal sealed class SqlStagedSortSource : IDisposable
     private bool _transferred;
     internal StorageTempStatement Statement { get; }
     internal SqlDatabaseSession Owner { get; }
+    internal long MaximumDecodedRowBytes { get; private set; }
     internal long ReadBufferBytes => StorageTempSpace.PageSize + (long)_run.MaximumRecordLength;
 
     internal SqlStagedSortSource(SqlDatabaseSession owner, SqlStatementMetrics metrics, long budget, long grant)
@@ -59,6 +60,7 @@ internal sealed class SqlStagedSortSource : IDisposable
     {
         token.ThrowIfCancellationRequested();
         if (!SqlTempRowCodec.TryGetLength(row, out int length) || length + 16L > _bound || !SqlTempRowCodec.TryEncode(row, out var bytes)) { Refuse(); return; }
+        MaximumDecodedRowBytes = Math.Max(MaximumDecodedRowBytes, SqlTempRowCodec.DecodedBytes(row));
         try { _run.Append(bytes, token); }
         catch (StorageTempException exception) { throw SqlSpilledResultSet.Translate(exception); }
     }

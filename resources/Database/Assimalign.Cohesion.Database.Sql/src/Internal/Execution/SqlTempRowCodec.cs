@@ -34,7 +34,7 @@ internal static class SqlTempRowCodec
                 decimal or Guid => 16,
                 string text => TextLength(text),
                 SqlCharacter character => TextLength(character.Value),
-                byte[] bytes when bytes.Length <= int.MaxValue - 4 => 4 + bytes.Length,
+                byte[] bytes when !SqlBinaryValue.IsApplicationValue(bytes) && bytes.Length <= int.MaxValue - 4 => 4 + bytes.Length,
                 _ => -1,
             };
             if (payload < 0 || (size += 1L + payload) > int.MaxValue) { length = 0; return false; }
@@ -42,6 +42,29 @@ internal static class SqlTempRowCodec
         length = (int)size;
         return true;
     }
+
+    // Decoding creates separate objects even when input cells alias. Charge UTF-16 text,
+    // CHAR's padded and trimmed strings, aligned objects, and the materialized row wrapper.
+    internal static long DecodedBytes(ReadOnlySpan<object?> row)
+    {
+        // Array header (24) plus SqlMaterializedRow (32, including the base capability flag).
+        long bytes = 56L + 8L * row.Length;
+        foreach (object? value in row)
+        {
+            bytes += value switch
+            {
+                null => 0,
+                string text => Align(22L + 2L * text.Length),
+                SqlCharacter text => 32L + Align(22L + 2L * text.Value.Length) + Align(22L + 2L * text.Text.Length),
+                byte[] binary => Align(24L + binary.Length),
+                decimal or Guid or DateTimeOffset => 32,
+                _ => 24,
+            };
+        }
+        return bytes;
+    }
+
+    private static long Align(long bytes) => (bytes + 7) & ~7L;
 
     internal static bool TryEncode(ReadOnlySpan<object?> row, out byte[] bytes)
     {

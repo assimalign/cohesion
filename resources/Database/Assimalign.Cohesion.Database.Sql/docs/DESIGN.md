@@ -49,8 +49,8 @@ No durable data, catalog, journal, record-space or wire format changes.
 ## Root SELECT sort spilling (#1789, SQ-L2b)
 
 A root plain SELECT may spill ORDER BY, its bounded OFFSET + LIMIT heap, and ordered
-DISTINCT when the existing reservation refuses CS05067. A fitting collector keeps its
-existing charges and representation. Permission is an explicit root argument; nested
+DISTINCT when the existing reservation refuses CS05067. A fitting collector keeps its existing representation; application-binary provenance
+accounting is described below. Permission is an explicit root argument; nested
 ExecuteAsync calls never inherit it. Subqueries, derived/CTE bodies, correlated frames,
 recursion, windows, grouping sets and CTAS retain their existing refusals. DML sources
 gain no spill permission and keep their existing policy: INSERT SELECT sort/output
@@ -69,7 +69,18 @@ No TempSpace, a nonfixed ordering collation, an unsupported codec value, a secon
 family, a grant below 65,536 B, or an encoded record above the grant-derived bound keeps
 CS05067. The bound must also be at least 16, so the fixed fan-in rule imposes a higher
 practical minimum than 65,536 B. The sorter receives min(Int32.MaxValue, remaining grant).
-Every buffered row is validated before handoff. Its stable sorted prefix is written while
+Every buffered row is validated before handoff.
+Binary arrays returned by application scalar or aggregate functions carry weak identity provenance,
+including copies made by SqlBinaryValue.CopyShared; both row and key codecs refuse them at runtime
+with CS05067, even through CASE. Fitting keys intentionally retain their existing aliases.
+Projected cells use copySharedBinary and DeliverColumn, so fitting projection copies each call
+before the next one; refusal is conservative for these copies too. Binary columns are detached
+by the row decoder (and retained join columns by DeliverColumn); binary parameters and constants
+are detached by CopyShared on delivery. Built-in extrema retain engine-owned detached inputs;
+no built-in returns a reused decode buffer. SQL expression functions preserve nested provenance.
+Immutable application results remain spillable. Retained-value accounting includes a conservative 128 B allowance for application-binary
+provenance metadata. This refusal avoids freezing an application buffer earlier than
+the fitting collector without changing fitting results. Its stable sorted prefix is written while
 entries and wide-identity references are cleared; only then is the arena allocated and
 charged to the plain ledger. SQL sets a ceiling of 64 simultaneously open sort runs,
 including a merge output, so small-grant sorts merge before approaching a common Unix
@@ -85,7 +96,13 @@ temporary read failure closes the result and is rethrown with its code to every 
 The session caps undisposed spilled results at eight, refusing CS05067 before a further
 spill. Callers must dispose results even after enumeration completes or is cancelled.
 After evaluation the owning merge keeps files only, without its template workspace. Active
-reader bytes are bounded in total by the result grant; opening a reader above it refuses
+reader workspace plus the maximum decoded output row per reader is bounded by the result grant,
+with one additional maximum decoded row reserved for old/new decoding overlap. The maximum
+comes from actual cells, including aligned UTF-16 strings, both CHAR strings, separate boxes
+and duplicate cells, rather than encoded record length. A statement whose first reader plus
+this overlap cannot fit refuses CS05067 before publication; a returned result always admits
+its first reader. Refusal diagnostics include the shared decoding overlap in their live charge.
+Opening a further reader above the remaining grant refuses
 CS05067 with the live and requested byte counts, leaving other readers intact. OFFSET skips decoded
 rows and LIMIT stops reading. CHAR output, typed SqlMaterializedRow conversions, detached
 binary values, headers and AffectedCount are unchanged. Evaluation completes before return;
@@ -93,7 +110,11 @@ no snapshot, transaction or lock is needed during delivery. Disposal invalidates
 with ObjectDisposedException unless a terminal coded read failure is already recorded,
 closes active readers and releases exactly once. Session close,
 engine disposal and all server delivery exits also dispose it; a later session statement
-leaves it intact. Ordered DISTINCT uses the existing GroupKeyComparer across the whole sorted
+leaves it intact. TCP exchange cancellation aborts the broken client transport, allowing blocked
+server delivery to unwind before the client lease is disposed. A stalled, uncancelled delivery
+has no time bound: IdleTimeout applies only at the next-frame read; quotas bound retained
+temp bytes and MaxSessions bounds accepted sessions, until connection end or shutdown.
+Ordered DISTINCT uses the existing GroupKeyComparer across the whole sorted
 stream, retains the first representative, charges its seen set and refuses CS05067 if that
 set itself exceeds the grant. Its output is a rewindable run.
 

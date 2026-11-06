@@ -12,8 +12,8 @@ the engine is disposed. A later statement does not invalidate them. Callers of E
 must dispose results, including after completing or cancelling an enumeration. Cancellation
 releases only that enumeration's cursor. A real temporary read failure releases the result
 and every reader observes the same coded failure. A session permits eight undisposed spilled
-results; a further spill refuses CS05067 until one is disposed. Active reader workspace per
-result cannot exceed its sort grant. A new reader that would exceed it refuses CS05067 at
+results; a further spill refuses CS05067 until one is disposed. Active reader workspace and retained decoded rows per
+result, including one row of decoding overlap, cannot exceed its sort grant. A new reader that would exceed it refuses CS05067 at
 its first MoveNextAsync, reporting live and requested bytes without affecting other readers.
 
 CS05067 remains for nested/subquery, derived/CTE operand bodies, correlated frames,
@@ -24,7 +24,11 @@ Window and SQL/JSON owners keep their specific grant codes when they fill first.
 DML sources gain no spill permission. INSERT SELECT's existing source-budgeting gap
 is tracked by #1828 and is unchanged here. Spill also refuses CS05067 without temp space,
 for a nonfixed ordering collation, an unsupported
-row/key family or a row above the record bound. For grant G the bound is
+row/key family, a binary value returned by an application function (including through CASE
+or a projected cell), or a row above the record bound. Binary columns, binary parameters and
+built-in binary results remain eligible. Fitting statements keep their existing results.
+A statement also refuses before publication if one reader and its maximum decoded row,
+including decoding overlap, would exceed the grant. For grant G the bound is
 (G - 32768) / 16 - 8192 bytes, including key, row and 16 framing bytes; G must be at least
 65,536 and the bound at least 16. Ordered DISTINCT's seen set must itself fit the grant.
 

@@ -83,7 +83,9 @@ internal static class SqlTempSortKeyCodec
                 AppendNumber(writer, value); return true;
             case string text: return TryAppendText(writer, text, collation);
             case SqlCharacter character: return TryAppendText(writer, character.Text, collation);
-            case byte[] binary: AppendEscaped(writer, binary); return true;
+            case byte[] binary:
+                if (SqlBinaryValue.IsApplicationValue(binary)) { return false; }
+                AppendEscaped(writer, binary); return true;
             case bool flag: Append(writer, flag ? (byte)1 : (byte)0); return true;
             case DateOnly date: AppendInt64(writer, date.ToDateTime(TimeOnly.MinValue).Ticks); return true;
             case DateTime timestamp: AppendInt64(writer, timestamp.Ticks); return true;

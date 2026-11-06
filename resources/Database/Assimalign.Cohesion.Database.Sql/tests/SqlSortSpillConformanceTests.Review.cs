@@ -111,12 +111,13 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await Seed(session);
         var result = (SqlSpilledResultSet)await session.ExecuteAsync("SELECT id AS marker,reader_payload(id) AS value FROM t ORDER BY marker");
-        long bytes = Sorted(result)!.BufferBytes;
+        long decoded = SqlTempRowCodec.DecodedBytes([0, new string('a',5500)]);
+        long bytes = Sorted(result)!.BufferBytes + decoded;
         Workspace(Sorted(result)!).Length.ShouldBe(0);
         var readers = new List<IAsyncEnumerator<DatabaseRow>>();
         try
         {
-            for (long live = 0; live + bytes <= grant; live += bytes)
+            for (long live = 0; live + bytes + decoded <= grant; live += bytes)
             {
                 var cursor = result.GetRowsAsync().GetAsyncEnumerator(); readers.Add(cursor);
                 (await cursor.MoveNextAsync()).ShouldBeTrue();
@@ -124,15 +125,15 @@ public sealed partial class SqlSortSpillConformanceTests
             long liveBytes = readers.Count * bytes;
             readers.Count.ShouldBe(2);
             const long defaultGrant = 67108864, defaultMaximumRecord = 4184064;
-            long defaultReader = 8 * (8192 + defaultMaximumRecord);
-            (defaultGrant / defaultReader).ShouldBe(2);
-            _output.WriteLine($"READER_DEFAULT_ARITHMETIC|grant={defaultGrant}|record={defaultMaximumRecord}|per_reader={defaultReader}|live_two={2*defaultReader}");
+            long defaultReader = 8 * (8192 + defaultMaximumRecord) + decoded;
+            ((defaultGrant - decoded) / defaultReader).ShouldBe(1);
+            _output.WriteLine($"READER_DEFAULT_ARITHMETIC|grant={defaultGrant}|record={defaultMaximumRecord}|per_reader={defaultReader}|decode_overlap={decoded}|reader_capacity=1");
             ReaderBytes(result).ShouldBe(liveBytes);
             var refused = result.GetRowsAsync().GetAsyncEnumerator();
 
             // Act / Assert
             var error = await Should.ThrowAsync<DatabaseException>(async () => await refused.MoveNextAsync());
-            error.Diagnostics[0].Code.ShouldBe("CS05067"); error.Message.ShouldContain(liveBytes.ToString());
+            error.Diagnostics[0].Code.ShouldBe("CS05067"); error.Message.ShouldContain((liveBytes + decoded).ToString());
             await refused.DisposeAsync();
             ReaderBytes(result).ShouldBe(liveBytes);
             foreach (var cursor in readers) { (await cursor.MoveNextAsync()).ShouldBeTrue(); }

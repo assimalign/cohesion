@@ -157,6 +157,7 @@ internal sealed partial class SqlPlanExecutor
         var columns = orderBy.Select(order => new SqlTempSortKeyCodec.Column(order.IsDescending, order.NullsFirst,
             order.Collation.Resolve(evaluator.SubqueryValues))).ToArray();
         var families = new byte[columns.Length];
+        long maximumDecodedRowBytes = 0;
         StorageTempSortReader reader;
         StorageTempSorter? sorter = null;
         System.Exception? sortFailure = null;
@@ -179,6 +180,7 @@ internal sealed partial class SqlPlanExecutor
                     || !SqlTempRowCodec.TryGetLength(output, out int size) || 16L + key.Length + size > bound
                     || !SqlTempRowCodec.TryEncode(output, out var value))
                 { throw SqlExecutionException.StatementMemoryBudget(budget); }
+                maximumDecodedRowBytes = System.Math.Max(maximumDecodedRowBytes, SqlTempRowCodec.DecodedBytes(output));
                 sorter.Append(key, value, token);
             }
             reader = sorter.Complete(token);
@@ -205,7 +207,7 @@ internal sealed partial class SqlPlanExecutor
         SqlSpilledResultSet result;
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
-            source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, grant); }
+            source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, grant, maximumDecodedRowBytes); }
         catch (System.Exception exception) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); throw; }
         try
         {
@@ -226,7 +228,7 @@ internal sealed partial class SqlPlanExecutor
         SqlSpilledResultSet result;
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
-            source.Statement, source.TransferOutput(), offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes); }
+            source.Statement, source.TransferOutput(), offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, source.MaximumDecodedRowBytes); }
         catch (System.Exception exception) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); throw; }
         try
         {

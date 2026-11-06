@@ -29,9 +29,12 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             int maximum = 0;
-            for (int i = handoff.Count; i < rows.Count; i++)
+            long maximumDecodedRowBytes = 0;
+            for (int i = 0; i < rows.Count; i++)
             {
                 token.ThrowIfCancellationRequested();
+                maximumDecodedRowBytes = Math.Max(maximumDecodedRowBytes, SqlTempRowCodec.DecodedBytes(rows[i]));
+                if (i < handoff.Count) { continue; }
                 if (!SqlTempRowCodec.TryGetLength(rows[i], out int length)) { throw handoff.Failure; }
                 maximum = Math.Max(maximum, length);
             }
@@ -103,7 +106,7 @@ internal sealed partial class SqlPlanExecutor
             SqlSpilledResultSet result;
             try
             { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
-                source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, owner, grant); }
+                source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, owner, grant, maximumDecodedRowBytes); }
             catch (Exception exception) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); throw; }
             try
             {
