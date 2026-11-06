@@ -65,7 +65,13 @@ public partial class TransactionCoordinatorRecoveryTests
         var resumes = recorder.Events.Where(e => e.EventId == 24).ToArray();
         pauses.Length.ShouldBeGreaterThanOrEqualTo(1000);
         resumes.Length.ShouldBe(pauses.Length);
-        resumes.Select(e => (long)e.Payload![3]!).Order().ShouldBe(pauses.Select(e => (long)e.Payload![6]!).Order());
+        var pauseIds = pauses.Select(e => (long)e.Payload![6]!).ToArray();
+        pauseIds.ShouldAllBe(id => id > 0);
+        pauseIds.Distinct().Count().ShouldBe(pauseIds.Length);
+        var resumeCounts = resumes.GroupBy(e => (long)e.Payload![3]!).ToDictionary(group => group.Key, group => group.Count());
+        foreach (long id in pauseIds)
+        { resumeCounts[id].ShouldBe(1); }
+        resumes.Select(e => (long)e.Payload![3]!).Order().ShouldBe(pauseIds.Order());
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
         _output.WriteLine($"Admission race: cycles={cycles}, pauses={pauses.Length}, resumes={resumes.Length}, backoutSignals={signals}");
     }

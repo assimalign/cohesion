@@ -923,6 +923,7 @@ public sealed class DocumentWorkerResilienceTests
         var database = await CreateAsync(engine, failingDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(failingDatabaseName);
+        long grown;
         using (Assimalign.Cohesion.Database.Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage).Enter("CapCrossing"))
         {
             using var bracket = database.DataStorage.BeginTransaction("CapCrossing");
@@ -930,9 +931,9 @@ public sealed class DocumentWorkerResilienceTests
             { using var page = database.DataStorage.AllocatePageForWrite(bracket, PageType.Data); page.Page.AsBodySpan().Fill(1); }
             faults.FailNextPageWrites(1);
             bracket.Commit();
+            grown = database.DataStorage.JournalLength;
         }
 
-        long grown = database.DataStorage.JournalLength;
 
         // Act: the one-shot page fault also covers a foreground admission checkpoint.
         // Its failure is reported by the worker, whose retry finds the device healthy.
@@ -941,6 +942,7 @@ public sealed class DocumentWorkerResilienceTests
         bool truncated = await Eventually(() => worker.Fault is null && database.DataStorage.JournalLength < grown);
 
         // Assert
+        grown.ShouldBeGreaterThanOrEqualTo(options.JournalSizeLimit);
         grown.ShouldBeLessThanOrEqualTo(options.JournalSizeLimit + 2 * 8192);
         failed.ShouldBeTrue();
         truncated.ShouldBeTrue();

@@ -1009,6 +1009,7 @@ public sealed class KeyValueWorkerResilienceTests
         var database = await engine.CreateDatabaseAsync(failingDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(failingDatabaseName);
+        long grown;
         using (Assimalign.Cohesion.Database.Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage).Enter("CapCrossing"))
         {
             using var bracket = database.DataStorage.BeginTransaction("CapCrossing");
@@ -1016,9 +1017,9 @@ public sealed class KeyValueWorkerResilienceTests
             { using var page = database.DataStorage.AllocatePageForWrite(bracket, PageType.Data); page.Page.AsBodySpan().Fill(1); }
             faults.FailNextPageWrites(1);
             bracket.Commit();
+            grown = database.DataStorage.JournalLength;
         }
 
-        long grown = database.DataStorage.JournalLength;
 
         // Act: the size trigger is armed and the first checkpoint fails; the fault clears before
         // the worker retries the database a backoff later.
@@ -1029,6 +1030,7 @@ public sealed class KeyValueWorkerResilienceTests
         bool truncated = await Eventually(() => worker.Fault is null && database.DataStorage.JournalLength < grown);
 
         // Assert
+        grown.ShouldBeGreaterThanOrEqualTo(options.JournalSizeLimit);
         grown.ShouldBeLessThanOrEqualTo(options.JournalSizeLimit + 2 * 8192);
         failed.ShouldBeTrue();
         truncated.ShouldBeTrue();

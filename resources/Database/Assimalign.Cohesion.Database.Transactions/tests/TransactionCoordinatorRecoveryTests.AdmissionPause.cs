@@ -187,6 +187,11 @@ public partial class TransactionCoordinatorRecoveryTests
         Should.Throw<IOException>(() => coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token));
         var paused = recorder.Events.Single(e => e.EventId == 23);
         var failed = recorder.Events.Single(e => e.EventId == 26);
+        long running = TransactionEventSource.Log.AdmissionPauseTicks;
+        while (TransactionEventSource.Log.AdmissionPauseTicks <= running)
+        { ceiling.Token.ThrowIfCancellationRequested(); await Task.Yield(); }
+        gate.IsAdmissionPaused.ShouldBeTrue();
+        TransactionEventSource.Log.AdmissionPauseTicks.ShouldBeGreaterThan(running);
         _output.WriteLine($"Running pause total: {TransactionEventSource.Log.AdmissionPauseTicks} ticks");
         coordinator.BeforeCheckpoint = null;
         coordinator.Checkpoint(ceiling.Token);
