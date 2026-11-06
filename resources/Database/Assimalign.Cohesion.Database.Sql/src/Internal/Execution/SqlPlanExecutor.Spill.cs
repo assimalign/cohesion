@@ -13,20 +13,38 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    // The one root entry supplies permission explicitly. Every nested ExecuteAsync call defaults
-    // to the original, nonspilling executor, including CTAS, DML, windows and compound operands.
+    // Root SELECT and the CTAS source root supply permission explicitly. Every other nested
+    // ExecuteAsync call retains the original path, including DML, windows and compound operands.
     internal Task<DatabaseResult> ExecuteRootAsync(SqlPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken, SqlDatabaseSession? spillOwner, Location? location = null)
-        => spillOwner?.Database.Engine.TempSpace is not null && plan is SqlSelectPlan or SqlJoinPlan or SqlGroupPlan or SqlSystemViewPlan or SqlConstantPlan or SqlWithPlan or SqlSubqueryPlan
+        => plan is SqlCreateTableAsPlan tableAs && spillOwner?.Database.Engine.TempSpace is not null
+            && !plan.ContainsRecursion && !PlanUsesJson(plan, cancellationToken) && CanSpillTableAs(tableAs, cancellationToken)
+            ? ExecuteSpillRootAsync(plan, statement, cancellationToken, spillOwner, location)
+            : spillOwner?.Database.Engine.TempSpace is not null && plan is SqlSelectPlan or SqlJoinPlan or SqlGroupPlan or SqlSystemViewPlan or SqlConstantPlan or SqlWithPlan or SqlSubqueryPlan
             && StatementInput(plan) is SqlRelationPlan
             && plan is not SqlGroupingSetsPlan && !plan.ContainsRecursion && !PlanUsesJson(plan, cancellationToken)
             && (plan is not SqlSubqueryPlan subquery || !subquery.Queries.Any(query => query.IsCorrelated || query.IsDeferred))
                 ? ExecuteSpillRootAsync(plan, statement, cancellationToken, spillOwner, location)
                 : ExecuteAsync(plan, statement, cancellationToken);
 
+    private bool CanSpillTableAs(SqlCreateTableAsPlan plan, CancellationToken token)
+    {
+        // Inferred domain checks run during assignment, although the source SELECT merely
+        // reads their columns. Conservatively exclude these checks from spill; assignment
+        // uses a private expression scope, not the source's SQL/JSON statement owner.
+        for (int ordinal = 0; ordinal < plan.Columns.Count; ordinal++)
+        {
+            var column = plan.Columns[ordinal];
+            if (column.DomainName is { } name && SqlJsonUsage.FunctionContains(
+                _definitions.Functions.Types.Find(name)?.Check, _catalog.DefaultCollation, token)) { return false; }
+        }
+        return true;
+    }
+
     private async Task<DatabaseResult> ExecuteSpillRootAsync(SqlPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken, SqlDatabaseSession spillOwner, Location? location)
     {
+        bool statementRoot = _metrics is null;
         var metrics = statement.Metrics;
         var frame = metrics.IsAnalyzing ? metrics.BeginAnalysisFrame() : null;
         try
@@ -34,19 +52,28 @@ internal sealed partial class SqlPlanExecutor
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             _metrics = metrics; _containsLike |= plan.ContainsLike;
             var initialized = InitializeWindow(plan, cancellationToken);
-            var result = initialized switch
+            DatabaseResult result;
+            if (initialized is SqlWithPlan with)
             {
-                SqlSelectPlan scan => ExecuteSelect(scan, statement, cancellationToken, null, plan, spillOwner),
-                SqlSystemViewPlan view => ExecuteSystemView(view, statement, cancellationToken, plan, spillOwner),
-                SqlConstantPlan constant => ExecuteRootConstant(constant, plan, cancellationToken, spillOwner),
-                SqlGroupPlan group => await ExecuteGroupAsync(group, statement, cancellationToken, (SqlGroupPlan)plan, spillOwner).ConfigureAwait(false),
-                SqlWithPlan with => await ExecuteRootWithAsync(with, statement, cancellationToken, spillOwner, location).ConfigureAwait(false),
-                SqlSubqueryPlan subquery => await ExecuteRootSubqueriesAsync(subquery.Input, subquery.Queries, statement, cancellationToken, spillOwner, location).ConfigureAwait(false),
-                SqlJoinPlan join => await (CanPipelineJoinOutput((SqlJoinPlan)plan)
-                    ? ExecutePipelinedJoinAsync(join, statement, cancellationToken, spillOwner: spillOwner).AsTask()
-                    : ExecuteJoinAsync(join, statement, cancellationToken, spillOwner)).ConfigureAwait(false),
-                _ => await ExecuteAsync(plan, statement, cancellationToken).ConfigureAwait(false),
-            };
+                foreach (var relation in with.Relations) { await MaterializeRelationAsync(relation, statement, cancellationToken).ConfigureAwait(false); }
+                result = await ExecuteRootAsync(with.Input, statement, cancellationToken, spillOwner, location).ConfigureAwait(false);
+            }
+            else
+            {
+                result = initialized switch
+                {
+                    SqlCreateTableAsPlan tableAs => await ExecuteCreateTableAsAsync(tableAs, statement, cancellationToken, spillOwner).ConfigureAwait(false),
+                    SqlSelectPlan scan => ExecuteSelect(scan, statement, cancellationToken, null, plan, spillOwner),
+                    SqlSystemViewPlan view => ExecuteSystemView(view, statement, cancellationToken, plan, spillOwner),
+                    SqlConstantPlan constant => ExecuteRootConstant(constant, plan, cancellationToken, spillOwner),
+                    SqlGroupPlan group => await ExecuteGroupAsync(group, statement, cancellationToken, (SqlGroupPlan)plan, spillOwner).ConfigureAwait(false),
+                    SqlSubqueryPlan subquery => await ExecuteRootSubqueriesAsync(subquery.Input, subquery.Queries, statement, cancellationToken, spillOwner, location).ConfigureAwait(false),
+                    SqlJoinPlan join => await (CanPipelineJoinOutput((SqlJoinPlan)plan)
+                        ? ExecutePipelinedJoinAsync(join, statement, cancellationToken, spillOwner: spillOwner).AsTask()
+                        : ExecuteJoinAsync(join, statement, cancellationToken, spillOwner)).ConfigureAwait(false),
+                    _ => await ExecuteAsync(plan, statement, cancellationToken).ConfigureAwait(false),
+                };
+            }
             if (frame is not null)
             {
                 if (plan is SqlSelectPlan) { metrics.Analysis(plan)!.Candidates += metrics.RecordsExamined - frame.StartRecords - frame.ChildRecords; }
@@ -58,7 +85,7 @@ internal sealed partial class SqlPlanExecutor
         finally
         {
             if (frame is not null) { metrics.EndAnalysisFrame(frame); }
-            if (_materializedRelations is { } relations) { ReleaseSelectMemory(ref relations.Reserved); }
+            if (statementRoot && _materializedRelations is { } relations) { ReleaseSelectMemory(ref relations.Reserved); }
         }
     }
 
@@ -68,13 +95,6 @@ internal sealed partial class SqlPlanExecutor
         return MaterializeSelect(evaluator.Matches(constant.Where, []) ? [System.Array.Empty<object?>()] : [],
             constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
             evaluator, constant.OrderByProjections, token, incrementalDistinct: CanPipelinePlainDistinct(plan), spillOwner: owner);
-    }
-
-    private async Task<DatabaseResult> ExecuteRootWithAsync(SqlWithPlan plan, SqlStatementContext statement,
-        CancellationToken token, SqlDatabaseSession owner, Location? location)
-    {
-        foreach (var relation in plan.Relations) { await MaterializeRelationAsync(relation, statement, token).ConfigureAwait(false); }
-        return await ExecuteRootAsync(plan.Input, statement, token, owner, location).ConfigureAwait(false);
     }
 
     private async Task<DatabaseResult> ExecuteRootSubqueriesAsync(SqlPlan input, IReadOnlyList<SqlSubqueryBinding> queries,

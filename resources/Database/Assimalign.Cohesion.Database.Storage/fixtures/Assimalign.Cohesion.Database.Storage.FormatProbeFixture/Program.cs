@@ -87,9 +87,41 @@ internal static class Program
         GC.KeepAlive(result); GC.KeepAlive(session); GC.KeepAlive(engine);
     }
 
+    private static async Task SqlTableAsStopAsync(string root, bool copying)
+    {
+        bool armed = false;
+        int calls = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("ctas-stop");
+        builder.Options.RootPath = root; builder.Options.StatementMemoryBudget = 262144;
+        builder.Options.CheckpointJournalSize = 65536;
+        builder.Functions.Add(SqlScalarFunction.Create("probe", (long value) =>
+        {
+            // Domain assignment observes the copy; projection observes sort input.
+            if (armed && ++calls == (copying ? 65 : 3000))
+            {
+                Console.WriteLine("SQL_CTAS_READY"); Console.Out.Flush();
+                Thread.Sleep(Timeout.Infinite);
+            }
+            return value;
+        }, volatility: SqlFunctionVolatility.Immutable));
+        var engine = await builder.BuildAsync();
+        var database = await engine.CreateDatabaseAsync("db");
+        var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE DOMAIN observed AS BIGINT CHECK(probe(VALUE)>=0)");
+        await session.ExecuteAsync("CREATE TABLE t(id observed)");
+        for (int first = 0; first < 4000; first += 200)
+        { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first, 200).Select(i => $"({i})"))); }
+        armed = true;
+        await session.ExecuteAsync(copying ? "CREATE TABLE archive AS SELECT id FROM t ORDER BY id DESC"
+            : "CREATE TABLE archive AS SELECT probe(id) AS id FROM t ORDER BY id DESC");
+        throw new InvalidOperationException("CTAS stop probe was not exercised");
+    }
+
     private static async Task Main(string[] args)
     {
         if (args[0] == "sql-spill-stop") { await SqlSpillStopAsync(args[1]); return; }
+        if (args[0] == "sql-ctas-sort-stop" || args[0] == "sql-ctas-copy-stop")
+        { await SqlTableAsStopAsync(args[1], args[0] == "sql-ctas-copy-stop"); return; }
         if (args[0] == "temp-lease-probe") { await TempLeaseProbeAsync(args[1]); return; }
         // This process deliberately exits with live physical brackets. Never dispose them before Exit.
         string model = args[0];

@@ -213,6 +213,11 @@ internal static class Program
                 }
             }
             Check("spilled ORDER BY releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
+            Check("spilled CTAS completion", (await session.ExecuteAsync("CREATE TABLE archive AS SELECT * FROM t ORDER BY id DESC")).AffectedCount, 4000L);
+            Check("spilled CTAS physical order", await RowsAsync(session, "SELECT id,k FROM archive LIMIT 3", CancellationToken.None), [[3999, 0], [3998, 1], [3997, 2]]);
+            Check("spilled DISTINCT CTAS completion", (await session.ExecuteAsync("CREATE TABLE distinct_archive AS SELECT DISTINCT k%3 AS n FROM t ORDER BY id DESC")).AffectedCount, 3L);
+            Check("spilled DISTINCT CTAS representatives", await RowsAsync(session, "SELECT n FROM distinct_archive", CancellationToken.None), [[0L], [1L], [2L]]);
+            Check("spilled CTAS releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
             await using (var deferred = (DatabaseResultSet)await session.ExecuteAsync("SELECT observe_value(id),id FROM t WHERE id<1000 ORDER BY id"))
             {
                 Check("deferred ORDER BY spills", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length > 0, true);

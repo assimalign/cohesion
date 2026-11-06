@@ -1402,9 +1402,18 @@ neo4j/wal/checkpoint/CheckPointScheduler.java:62-79).
 
 Order is model grants, the data admission semaphore, catalog _sync, the independent catalog
 admission semaphore, log monitor, storage transaction/header locks, then page/pool latches.
-A caller parked on the pause task may retain model grants but owns neither admission semaphore, catalog monitor,
+Except for SQL CTAS copy, a caller parked on the pause task may retain model grants but owns neither admission semaphore, catalog monitor,
 TruncateSnapshotGate, reclamation run lock, provisioner apply gate, DDL metadata lease nor page
-latch. SQL and key/value catalog mutations and SQL DDL/copy paths use non-waiting admission while guards
+latch. A fitting or spilled CTAS copy retains its shared SQL metadata lease and, in a declared
+script, the schema apply lease. Neither is needed by checkpoint work; the writer's own admission
+release services a pending checkpoint after its bracket ends. No checkpoint holder waits for
+these leases, so the parked copy adds no cycle. Definition DDL remains excluded by the metadata
+lease, and a script also excludes ordinary DDL through its apply lease. In a session, a concurrent
+CREATE VIEW reaches SQL metadata admission before journal admission and refuses because of the
+metadata lease (CS03066), even while the journal pause is active. A plain unrelated CREATE TABLE
+uses the independent catalog journal and succeeds during a data-journal pause; DDL that must
+build a data index refuses CK04014 at data admission. SQL and key/value catalog mutations and
+other SQL DDL/copy paths use non-waiting admission while guards
 retain validated metadata; a pause refuses with TransactionAdmissionCanceledException / CK04014
 (57014). Ordinary physical semaphore exclusion remains cancellable; a lazy cancellation notice
 interrupts every guarded acquisition when a pause begins, before it can wait on the pause task.
