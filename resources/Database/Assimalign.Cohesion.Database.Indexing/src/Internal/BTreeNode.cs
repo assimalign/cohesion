@@ -72,6 +72,8 @@ internal readonly ref struct BTreeNode
     /// </summary>
     internal const byte FormatVersion = 3;
 
+    // Deliberately equals Entry << 14: leaves read this bit as payload presence,
+    // while internal nodes read the same bit as the Entry tiebreaker.
     private const int payloadFlag = 0x8000;
 
     internal const byte LeafKind = 1;
@@ -237,8 +239,9 @@ internal readonly ref struct BTreeNode
     internal ulong GetDeleter(int index)
         => BinaryPrimitives.ReadUInt64LittleEndian(_body[(GetValueOffset(index) + 16)..]);
 
-    internal ReadOnlySpan<byte> GetPayload(int index)
+    internal Span<byte> GetPayload(int index)
     {
+        System.Diagnostics.Debug.Assert(IsLeaf);
         int offset = GetEntryOffset(index);
         int field = GetLengthField(offset);
         if ((field & payloadFlag) == 0) { return default; }
@@ -495,8 +498,8 @@ internal readonly ref struct BTreeNode
     /// Removes a leaf entry from the sorted directory. The entry's data bytes stay
     /// orphaned in the body until the node is rebuilt (a split, or the compaction an
     /// insert performs when only the orphaned bytes stand between it and a split) or
-    /// vacuumed — the removal exists for the rare undo paths (aborted-writer purge),
-    /// where the bounded space cost beats a full node rewrite per removed entry.
+    /// vacuumed. Undo, pruning and different-length payload replacement use this
+    /// bounded directory edit instead of rewriting the node per removed entry.
     /// The directory slot the shift vacates is cleared: it joins the free gap between the
     /// directory and the entry data, which a full page image of the node elides only
     /// while it is zero (Storage DESIGN.md, "Page records").

@@ -11,6 +11,7 @@ using Xunit.Abstractions;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Indexing.Tests;
 
@@ -23,7 +24,7 @@ public sealed class BTreePayloadCrashTests
         _output = output;
     }
 
-    [Theory(DisplayName = "Cohesion Test [Indexing] - Payload: every whole/torn write of replacement and recursive splits replays exactly (#1809)")]
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Payload: every whole/torn write of replacement and recursive splits replays exactly (#1809)")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(16)]
@@ -63,6 +64,13 @@ public sealed class BTreePayloadCrashTests
         {
             for (int i = 0; i < 7; i++)
             { await index.InsertVersionAsync(build, BTreePayloadTests.Key(i), (ulong)i, default, default, BTreePayloadTests.Payload(i).AsMemory(0, 17)); }
+            // A committed writer, an aborted writer and both committed/aborted deleters
+            // coexist with physical payloads in every crash image. Open-time purge below
+            // removes the aborted insert and restores the aborted delete's payload.
+            await index.InsertVersionAsync(build, StampedKey(100), 100, new(500), new(600), BTreePayloadTests.Payload(100).AsMemory(0, 17));
+            await index.InsertVersionAsync(build, StampedKey(101), 101, new(600), default, BTreePayloadTests.Payload(101).AsMemory(0, 17));
+            await index.InsertVersionAsync(build, StampedKey(102), 102, new(500), new(700), BTreePayloadTests.Payload(102).AsMemory(0, 17));
+            await index.InsertVersionAsync(build, StampedKey(103), 103, new(500), default, BTreePayloadTests.Payload(103).AsMemory(0, 17));
             build.Commit();
         }
         harness.Storage.Checkpoint();
@@ -105,10 +113,29 @@ public sealed class BTreePayloadCrashTests
     {
         await using var recovered = IndexTestHarness.Reopen(data, journal, registrations);
         recovered.IndexManager.TryGetIndex(1, "payload", out var index).ShouldBeTrue();
-        await BTreePayloadTests.CheckAsync(index, committed ? 40 : 7,
-            i => committed ? BTreePayloadTests.Payload(i) : BTreePayloadTests.Payload(i).AsSpan(0, 17).ToArray());
+        using (var purge = recovered.Storage.BeginTransaction())
+        {
+            index.PurgeWriters(purge, new HashSet<TransactionSequence> { new(600) }).ShouldBe(2);
+            purge.Commit();
+        }
+        foreach (bool reverse in new[] { false, true })
+        {
+            await using var cursor = index.OpenCursor(BTreePayloadTests.Snapshot(), IndexKeyRange.All, reverse);
+            var references = Enumerable.Range(0, committed ? 40 : 7).Concat(new[] { 100, 103 }).ToArray();
+            if (reverse) { Array.Reverse(references); }
+            foreach (int reference in references)
+            {
+                (await cursor.MoveNextAsync()).ShouldBeTrue();
+                cursor.CurrentEntryReference.ShouldBe((ulong)reference);
+                byte[] payload = BTreePayloadTests.Payload(reference);
+                cursor.CurrentPayload.ToArray().ShouldBe(committed && reference < 40 ? payload : payload[..17]);
+            }
+            (await cursor.MoveNextAsync()).ShouldBeFalse();
+        }
         BTreeShape.Read(recovered.Storage, index.RootPageId).Height.ShouldBe(committed ? 3 : 1);
     }
+
+    private static IndexKey StampedKey(int value) => new(new byte[] { 0x7f, (byte)value });
 
     private sealed record Outcome(byte[] Data, byte[] Journal, IReadOnlyList<BTreeIndexRegistration> Registrations,
         int CreationWrites, long Sequence, bool Acknowledged);

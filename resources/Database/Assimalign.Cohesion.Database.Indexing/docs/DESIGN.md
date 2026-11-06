@@ -426,7 +426,13 @@ physical work. Disabling opportunistic removal fails at 127.4697× growth; resto
   including the incoming item, has one value and its upper fence proves the run
   ends here. Equality with `GetKey(0)` proves the whole-page precondition because
   the insertion slot is after every existing entry. Mixed-key leaves keep the
-  midpoint except for the unchanged rightmost-append rule. This adapts PostgreSQL's
+  midpoint except for the unchanged rightmost-append rule. These choices remain when
+  the incoming entry fits its destination half. Otherwise the nearest split to
+  `count / 2` with two nonempty halves that admits it is chosen by entry footprints,
+  excluding orphaned bytes (and discounting the old entry for replacement). At the
+  split slot, the separator comparison decides the destination, including truncated
+  keys and identity tiebreakers. The retry loop remains a safety net. Fixed-size
+  leaves and the measured shapes below are unchanged. This adapts PostgreSQL's
   rightmost and single-value strategies (`src/backend/access/nbtree/nbtsplitloc.c:287-292`,
   `:971`, `:987-1033`): PostgreSQL's single-value strategy likewise requires the
   whole page, including the new item, to contain duplicates. The nearest upper
@@ -592,6 +598,9 @@ InsertAsync and InsertVersionAsync retain their original no-payload signatures a
 same positioning/disposal guards as CurrentKey. Each cursor allocates its payload batch
 array only upon seeing a nonempty visible payload; invisible continuation identities retain
 no payload. Leaf rebuilding allocates payload arrays only for nonempty payloads.
+Every visible payload is copied at batch time, even when CurrentPayload is never read:
+up to 64 KiB of payload bytes per batch, plus array overhead, charged to no statement budget. A covering index will need a
+way to skip that copying for a plain seek (#1739).
 PostgreSQL makes the same key-space distinction in src/include/access/nbtree.h:375–403;
 src/backend/access/nbtree/nbtutils.c:663–718 strips INCLUDE attributes from pivots. No code copied.
 
@@ -599,19 +608,43 @@ ReplacePayloadAsync targets the newest mapping of a key/reference inside a calle
 physical bracket. Missing mappings return false; a nonzero writer **or deleter** is refused
 with IndexException and the resource-backed message “Payload replacement requires a live
 physical entry with zero writer and deleter stamps.” No new diagnostic identity is allocated.
-An identical replacement reads only. Other replacements remove the directory slot and reinsert
-the same identity under one exclusive latch. Orphan accounting includes payload bytes, so a
-full leaf compacts first when that recovers enough space. Otherwise the existing leaf split
-policy, separator truncation, parent insertion and stable-root growth handle the larger entry.
-Failure requires rolling back the caller's bracket, as with InsertVersionAsync.
+A physical (writer-zero) entry is unversioned: replacement is visible at latch release,
+rollback reverts it, and a snapshot does not pin its payload. This is physical state, not
+a versioned row update. Referenced mutable pages must share its latch to restore atomically;
+inline payload bytes already live on the entry's latched page.
+An identical replacement opens the page write handle before comparing and skips MarkDirty
+when equal, so another bracket's page lock still fails with StorageTransactionException.
+Opening the handle costs a page pin, mutable scope, write lock and encoded pre-image on
+first touch. It can journal a full-page image and advance the page LSN after checkpoint,
+or spill the pre-image; skipping MarkDirty does not promise zero WAL. An unchanged body
+needs no commit delta. An equal-length replacement overwrites only the payload in place,
+with no compaction or split. A different length first tests
+`needed <= FreeSpace + OrphanedLeafBytes + old`, including the old directory slot.
+If necessary it splits with the old entry present, finds that identity again and retries.
+Both halves are nonempty, so its leaf loses entries each time; a one-entry leaf always
+fits the bounded replacement. Once it fits, compaction is staged before removal, then
+removal, any compacted-body copy and insertion use one write handle with no allocation,
+entry-access callback or cancellation check after removal. Cancellation is honored before
+changing the entry's page and between splits. Failures require rollback of the caller's
+bracket because splits can already have changed structural pages. The pre-existing failed
+parent-insertion window can still hide an old entry from a bounded seek until rollback;
+a forward leaf-chain scan can see it on the sibling. Keeping the old entry prevents an
+additional removal-before-insert failure window; it does not make split failure atomic.
+
+Three maximum entries followed by 41 empty-payload, 16-byte-key entries occupy 8,038 bytes.
+Inserting a maximum entry first now splits once into leaves of 3 and 42 entries, with
+3 total pages and 1 separator, instead of 6 pages and 4 separators. Replacement's old
+1,052-byte identity plus three maximum entries and 17 small entries occupy 8,034 bytes;
+growing that first identity splits once into 3 and 18 entries, also 3 pages and 1 separator.
 
 All leaf copy/rebuild paths carry payloads; erase, clear-deleter, purge and pruning retain their
 identity/stamp rules. Full page images and committed page deltas already cover the payload
 region, so no logical log schema or new durability boundary is introduced. BTreePayloadCrashTests
-reopens images after uncommitted stolen pages plus durable WAL, committed WAL before page
-flush, committed page flush and checkpoint. It also loses power at every one of 82 writes
-in a replacement/recursive-split workload with 0, 1 and 16 durable torn sectors (246 crash
-images); the exact expected state follows the durable commit marker. The seeded cursor oracle
+reopens images after uncommitted stolen pages plus durable WAL, commit after those stolen
+pages were flushed, committed page flush and checkpoint. It also loses power at every write
+in a replacement/recursive-split workload with 0, 1 and 16 durable torn sectors; stamped
+tombstones and surviving payload entries also exercise the open-time aborted-writer purge (crash
+images follow the durable commit marker). The seeded cursor oracle
 includes empty, 17-byte and 1,024-byte payloads through boundary mutations in both directions.
 
 No model marker changes: SQL, Documents, Graph and KeyValuePair's EN-G1 process-exit helper
@@ -634,7 +667,7 @@ keeping its existing owner allocation unchanged while adding the lazy payload-ar
 ### Concurrency and recovery
 
 - **The latch protocol is unchanged, and the new order does not weaken it.** Every
-  mutation — insert, delete, erase, clear-deleter, the build path and the purge —
+  mutation — insert, delete, payload replacement, erase, clear-deleter, the build path and the purge —
   holds the tree's write latch from its descent until its page change is done, and a
   cursor holds the read latch only while it copies one bounded batch. The unique key lock
   is acquired before the latch, never while holding it, so the order key lock → tree

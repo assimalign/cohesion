@@ -2928,8 +2928,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         try
         {
             // Pages read under a pin first, with no latch held: their readers need no latch, and
-            // need not see them restored together with the latched structures' pages, because the
-            // failed bracket's index entries are invisible to every snapshot.
+            // need not see them restored together with the latched structures' pages. Stamped
+            // index versions use snapshot visibility; unversioned physical entries keep their
+            // inline payload on the latched page itself. Mutable pages referenced by an
+            // unversioned entry must share its latch to restore atomically.
             bool latchedPages = false;
             foreach (var (pageId, preImage) in transaction.PreImages)
             {

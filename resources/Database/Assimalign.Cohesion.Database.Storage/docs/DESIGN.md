@@ -1606,8 +1606,11 @@ as it was before.
   every enlisted latch for the whole restore, record pages and the journal reads of their spilled
   pre-images included, so a large failed statement held off every reader of the indexes it
   changed for its whole restore. The record pages need no latch, and no reader needs them restored
-  together with the index pages: the failed bracket's index entries are invisible to every
-  snapshot, and the committed entries name committed records the restore leaves in place. For a
+  together with the index pages for versioned model records: the failed bracket's stamped
+  entries are invisible to other snapshots, and committed entries name committed records the
+  restore leaves in place. Unversioned physical index entries keep inline payload bytes on
+  their latched page; mutable pages referenced by an unversioned entry must share its
+  latch to restore atomically (#1809). For a
   failed 20,001-row `INSERT ... SELECT` into a table with two indexes (430 pages touched, 332 of
   them index pages) the latches are now held 0.39 to 1.39 ms, against 0.70 to 3.23 ms for the
   whole restore. `StoragePageLatchTests` checks the order: when the rollback waits for a reader's

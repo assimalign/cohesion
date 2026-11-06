@@ -24,7 +24,7 @@ public sealed class BTreePayloadTests
         _output = output;
     }
 
-    [Theory(DisplayName = "Cohesion Test [Indexing] - Payload: empty entries retain format-2 packing and allocate no payload storage (#1809)")]
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Payload: empty entries retain format-2 packing and allocate no payload storage (#1809)")]
     [InlineData(16, 183)]
     [InlineData(1024, 7)]
     public void InsertLeafEntry_EmptyPayload_ShouldKeepPackingAndAllocation(int keyLength, int expected)
@@ -57,7 +57,7 @@ public sealed class BTreePayloadTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Indexing] - Payload: three maximum entries fit and survive leaf and internal root growth (#1809)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Payload: three maximum entries fit and survive leaf and internal root growth (#1809)")]
     public async Task InsertAsync_MaximumKeyAndPayload_ShouldPreserveThroughRootGrowth()
     {
         // Arrange
@@ -85,7 +85,7 @@ public sealed class BTreePayloadTests
         VerifySeparators(harness.Storage, index.RootPageId);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Indexing] - Payload: replacement growth splits, rollback restores, and copied cursor memory stays owned (#1809)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Payload: replacement growth splits, rollback restores, and copied cursor memory stays owned (#1809)")]
     public async Task ReplacePayloadAsync_GrowingPhysicalEntry_ShouldSplitAndRollback()
     {
         // Arrange: seven maximum keys fill the root without payloads.
@@ -134,7 +134,7 @@ public sealed class BTreePayloadTests
         await CheckAsync(index, 7, _ => []);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Indexing] - Payload: identity and uniqueness ignore payloads and stamped replacement is refused (#1809)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Payload: identity and uniqueness ignore payloads and stamped replacement is refused (#1809)")]
     public async Task InsertAsync_PayloadDiffers_ShouldKeepIdentityAndUniqueSemantics()
     {
         // Arrange
@@ -161,7 +161,7 @@ public sealed class BTreePayloadTests
         await CheckAsync(index, 1, _ => Payload(1));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Indexing] - Payload: rollback, logical undo, purge, pruning and compaction preserve surviving bytes (#1809)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Payload: rollback, logical undo, purge, pruning and compaction preserve surviving bytes (#1809)")]
     public async Task Maintenance_PayloadEntries_ShouldPreserveSurvivors()
     {
         // Arrange
@@ -218,7 +218,7 @@ public sealed class BTreePayloadTests
         BTreeShape.Read(harness.Storage, index.RootPageId).LeafCounts.Sum().ShouldBe(30);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Indexing] - Payload: compaction accounts for orphaned payload bytes and retains every survivor (#1809)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Payload: compaction accounts for orphaned payload bytes and retains every survivor (#1809)")]
     public async Task InsertVersionAsync_ErasedPayloadSpace_ShouldCompactWithoutSplitting()
     {
         // Arrange: three worst-case entries leave too little free space for another.
@@ -296,11 +296,14 @@ public sealed class BTreePayloadTests
         var node = new BTreeNode(handle.Page.AsBodySpan());
         if (node.IsLeaf) { return; }
         VerifySeparators(storage, node.LeftmostChild);
+        int bytes = 0;
         for (int i = 0; i < node.EntryCount; i++)
         {
             node.GetKey(i).Length.ShouldBeLessThanOrEqualTo(BTreeIndex.MaxKeyLength);
-            ((int)node.GetSeparatorTiebreaker(i)).ShouldBeInRange(0, 2);
+            node.GetSeparatorTiebreaker(i).ShouldBe(BTreeTiebreaker.None);
+            bytes += BTreeNode.InternalEntrySize(node.GetKey(i).Length, node.GetSeparatorTiebreaker(i));
             VerifySeparators(storage, node.GetChild(i));
         }
+        (node.Body.Length - node.DataStart).ShouldBe(bytes);
     }
 }

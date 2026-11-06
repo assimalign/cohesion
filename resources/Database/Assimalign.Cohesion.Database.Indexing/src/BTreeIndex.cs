@@ -496,16 +496,24 @@ public sealed class BTreeIndex
     }
 
     /// <summary>Replaces the payload of a live physical (writer-zero) mapping.</summary>
-    /// <remarks>Growth compacts the leaf and uses the ordinary leaf/parent/root split path if needed.
-    /// The caller owns the physical bracket and must roll it back on failure.</remarks>
+    /// <remarks>
+    /// A physical (writer-zero) entry is unversioned: replacement is visible at latch release,
+    /// rollback reverts it, and a snapshot does not pin its payload. Equal-length payloads are overwritten in place.
+    /// Identical bytes still take the page write lock without changing the entry body.
+    /// Growth splits with the old entry still present, then replaces it only once the leaf has room.
+    /// Cancellation is honored before changing the entry's page and between splits. A failed split
+    /// can leave structural changes that misroute seeks until rollback; the caller owns the physical
+    /// bracket and must roll it back on failure.
+    /// </remarks>
     /// <param name="transaction">The physical write bracket.</param>
     /// <param name="key">The entry key.</param>
     /// <param name="entryReference">The entry reference.</param>
     /// <param name="payload">The replacement bytes, copied during this call.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>True if a mapping was replaced; false if it does not exist.</returns>
+    /// <returns>True if a live physical mapping accepts the payload, including identical bytes; false if no mapping exists.</returns>
     /// <exception cref="ArgumentNullException">The transaction is null.</exception>
     /// <exception cref="IndexException">The payload is too large, or the newest mapping has a writer or deleter stamp.</exception>
+    /// <exception cref="StorageTransactionException">Another physical bracket holds a page write lock, including for an identical payload.</exception>
     /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
     public ValueTask<bool> ReplacePayloadAsync(StorageTransaction transaction, IndexKey key, ulong entryReference,
         ReadOnlyMemory<byte> payload, CancellationToken cancellationToken = default)
@@ -523,18 +531,77 @@ public sealed class BTreeIndex
                 var leaf = OpenNode(handle.Page.AsBodySpan(), leafId);
                 if (leaf.GetWriter(at) != 0 || leaf.GetDeleter(at) != 0)
                 { throw new IndexException(ErrorMessages.PayloadReplacementRequiresPhysical); }
-                if (leaf.GetPayload(at).SequenceEqual(payload.Span)) { return new ValueTask<bool>(true); }
             }
-            using (var handle = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch))
+            var position = BTreeSearchKey.AtEntry(key.Encoded.Span, entryReference, 0);
+            List<PathEntry>? path = null;
+            int needed = BTreeNode.LeafEntrySize(key.Length, payload.Length);
+            while (true)
             {
-                var leaf = OpenNode(handle.Page.AsBodySpan(), leafId);
-                leaf.RemoveLeafEntry(at);
-                handle.MarkDirty();
+                cancellationToken.ThrowIfCancellationRequested();
+                using (var handle = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch))
+                {
+                    var leaf = OpenNode(handle.Page.AsBodySpan(), leafId);
+                    var oldPayload = leaf.GetPayload(at);
+                    if (oldPayload.SequenceEqual(payload.Span)) { return new ValueTask<bool>(true); }
+                    if (oldPayload.Length == payload.Length)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        payload.Span.CopyTo(oldPayload);
+                        handle.MarkDirty();
+                        return new ValueTask<bool>(true);
+                    }
+
+                    int old = BTreeNode.LeafEntrySize(key.Length, oldPayload.Length) + BTreeNode.DirectorySlotSize;
+                    if (needed <= leaf.FreeSpace + leaf.OrphanedLeafBytes + old)
+                    {
+                        ReplaceLeafPayload(leaf, at, key.Encoded.Span, entryReference, payload.Span, cancellationToken);
+                        handle.MarkDirty();
+                        return new ValueTask<bool>(true);
+                    }
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (path is null)
+                {
+                    path = new List<PathEntry>();
+                    leafId = Descend(position, path);
+                }
+                leafId = SplitLeaf(transaction, path, leafId, at, position, needed, replacing: true);
+                using var read = _storage.PageManager.GetPage((PageId)leafId);
+                at = OpenNode(read.Page.AsBodySpan(), leafId).FindLowerBound(position);
+                // Both halves are nonempty, so the target leaf loses at least one entry.
+                // A leaf holding only the old entry always fits its bounded replacement:
+                // even its maximum key and payload occupy only 2,078 of 8,064 bytes.
             }
-            InsertCore(transaction, key.Encoded.Span, entryReference, 0, 0, payload.Span, cancellationToken: cancellationToken);
-            return new ValueTask<bool>(true);
         }
         finally { _latch.ExitWrite(); }
+    }
+
+    private static void ReplaceLeafPayload(BTreeNode leaf, int at, ReadOnlySpan<byte> key,
+        ulong entryReference, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
+    {
+        int needed = BTreeNode.LeafEntrySize(key.Length, payload.Length);
+        bool compact = needed > leaf.FreeSpace + BTreeNode.DirectorySlotSize;
+        // Stage compaction before removal: allocation, entry-access probes and validation
+        // must all finish while the old entry is still readable. Only bounded span writes
+        // follow the final cancellation check, under the caller's single write handle.
+        Span<byte> packed = compact ? stackalloc byte[leaf.Body.Length] : default;
+        if (compact)
+        {
+            var staging = BTreeNode.Initialize(packed, BTreeNode.LeafKind);
+            staging.PrevLeaf = leaf.PrevLeaf;
+            staging.NextLeaf = leaf.NextLeaf;
+            for (int i = 0; i < leaf.EntryCount; i++)
+            {
+                if (i == at) { continue; }
+                staging.InsertLeafEntry(staging.EntryCount, leaf.GetKey(i), leaf.GetEntryReference(i),
+                    leaf.GetWriter(i), leaf.GetDeleter(i), leaf.GetPayload(i));
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        leaf.RemoveLeafEntry(at);
+        if (compact) { packed.CopyTo(leaf.Body); }
+        leaf.InsertLeafEntry(at, key, entryReference, 0, 0, payload);
     }
 
     private static void ValidatePayload(ReadOnlyMemory<byte> payload)
@@ -1235,7 +1302,7 @@ public sealed class BTreeIndex
                 return;
             }
 
-            leafId = SplitLeaf(transaction, path, leafId, at, position);
+            leafId = SplitLeaf(transaction, path, leafId, at, position, BTreeNode.LeafEntrySize(key.Length, payload.Length));
         }
     }
 
@@ -1286,7 +1353,8 @@ public sealed class BTreeIndex
         }
     }
 
-    private long SplitLeaf(StorageTransaction transaction, List<PathEntry> parentPath, long leafId, int at, in BTreeSearchKey position)
+    private long SplitLeaf(StorageTransaction transaction, List<PathEntry> parentPath, long leafId, int at,
+        in BTreeSearchKey position, int incomingSize, bool replacing = false)
     {
         Separator separator;
         long siblingId;
@@ -1307,7 +1375,7 @@ public sealed class BTreeIndex
 
             bool endOfRun = at == count && leaf.GetKey(0).SequenceEqual(position.Key)
                 && (leaf.NextLeaf < 0 || IsEndOfRun(parentPath, position.Key));
-            int mid = ChooseLeafSplit(leaf, at, endOfRun);
+            int mid = ChooseLeafSplit(leaf, at, endOfRun, position, incomingSize, replacing);
             separator = BTreeEntryOrder.BuildSeparator(leaf, mid - 1, mid);
             EnsureLeafSeparator(leaf, leafId, mid, separator);
 
@@ -1344,12 +1412,7 @@ public sealed class BTreeIndex
         IndexEventSource.Log.PageSplit(_storage, Name, leafId, leaf: true, count);
 
         long leftId = InsertIntoParent(transaction, parentPath, leafId, separator, siblingId);
-        int comparison = position.Key.SequenceCompareTo(separator.Key);
-        if (comparison == 0)
-        {
-            comparison = BTreeEntryOrder.CompareTiebreakers(position, separator.Tiebreaker, separator.EntryReference, separator.Writer);
-        }
-        if (comparison < 0) { return leftId; }
+        if (IsBeforeSeparator(position, separator)) { return leftId; }
         var parent = parentPath[^1];
         parentPath[^1] = new PathEntry(parent.PageId, parent.Slot + 1);
         return siblingId;
@@ -1361,22 +1424,64 @@ public sealed class BTreeIndex
     /// upper fence proves its duplicate run ends here, keep the last existing entry
     /// on the right to supply that side of the separator. Since the insertion slot
     /// is after every entry, equality with the first key proves the whole page,
-    /// including the new item, has one value. Mixed-key leaves retain the midpoint
-    /// unless this is a rightmost append. This adapts PostgreSQL's rightmost and
+    /// including the new item, has one value. These choices are retained when the
+    /// incoming entry fits its half; otherwise the nearest midpoint admitting it
+    /// is chosen by entry footprints, since orphaned bytes do not survive a split.
+    /// This adapts PostgreSQL's rightmost and
     /// single-value strategies (<c>nbtsplitloc.c:287-292,971,987-1033</c>): its
     /// single-value strategy also requires the whole page, including the new item,
     /// to contain duplicates. Both existing halves must be nonempty; the incoming
     /// entry follows on re-descent.
     /// </summary>
-    private static int ChooseLeafSplit(in BTreeNode leaf, int at, bool endOfRun)
+    private static int ChooseLeafSplit(in BTreeNode leaf, int at, bool endOfRun,
+        in BTreeSearchKey position, int incomingSize, bool replacing)
     {
         int count = leaf.EntryCount;
-        if (!endOfRun && !(at == count && leaf.NextLeaf < 0))
+        int preferred = endOfRun || at == count && leaf.NextLeaf < 0 ? count - 1 : count / 2;
+        int total = 0;
+        int preferredLeft = 0;
+        for (int i = 0; i < count; i++)
         {
-            return count / 2;
+            int size = BTreeNode.LeafEntrySize(leaf.GetKey(i).Length, leaf.GetPayload(i).Length) + BTreeNode.DirectorySlotSize;
+            // A replacement discounts the old entry on whichever half it lands in.
+            if (replacing && i == at) { size = 0; }
+            total += size;
+            if (i < preferred) { preferredLeft += size; }
         }
+        int incoming = incomingSize + BTreeNode.DirectorySlotSize;
+        int capacity = leaf.Body.Length - 32;
+        if (FitsLeafHalf(leaf, preferred, at, position, preferredLeft, total, incoming, capacity)) { return preferred; }
 
-        return count - 1;
+        int best = preferred;
+        int distance = int.MaxValue;
+        int left = 0;
+        for (int mid = 1; mid < count; mid++)
+        {
+            int i = mid - 1;
+            if (!replacing || i != at)
+            { left += BTreeNode.LeafEntrySize(leaf.GetKey(i).Length, leaf.GetPayload(i).Length) + BTreeNode.DirectorySlotSize; }
+            int candidateDistance = Math.Abs(mid - count / 2);
+            if (candidateDistance < distance && FitsLeafHalf(leaf, mid, at, position, left, total, incoming, capacity))
+            {
+                best = mid;
+                distance = candidateDistance;
+            }
+        }
+        return best; // InsertCore's retry remains the safety net.
+    }
+
+    private static bool FitsLeafHalf(in BTreeNode leaf, int mid, int at, in BTreeSearchKey position,
+        int left, int total, int incoming, int capacity)
+    {
+        bool landsLeft = at < mid || at == mid && IsBeforeSeparator(position, BTreeEntryOrder.BuildSeparator(leaf, mid - 1, mid));
+        return incoming + (landsLeft ? left : total - left) <= capacity;
+    }
+
+    private static bool IsBeforeSeparator(in BTreeSearchKey position, Separator separator)
+    {
+        int comparison = position.Key.SequenceCompareTo(separator.Key);
+        return comparison < 0 || comparison == 0 && BTreeEntryOrder.CompareTiebreakers(
+            position, separator.Tiebreaker, separator.EntryReference, separator.Writer) < 0;
     }
 
     /// <summary>
@@ -1792,6 +1897,7 @@ public sealed class BTreeIndex
         /// </summary>
         internal static EntryMatch Live => new(EntryMatchKind.Live, 0, 0);
 
+        /// <summary>Any mapping to <paramref name="entryReference"/>, regardless of its stamps.</summary>
         internal static EntryMatch AnyOf(ulong entryReference) => new(EntryMatchKind.AnyOf, entryReference, 0);
 
         /// <summary>

@@ -58,6 +58,7 @@ public sealed class BTreeCursor : IAsyncDisposable
     // after it is consumed, without exposing a batching policy across assemblies.
     internal int BatchSizeOverride { get; set; }
     internal int ReadLimit => _readLimit;
+    internal bool HasPayloadStorage => _payloads is not null;
 
     internal readonly record struct Entry(byte[] Key, ulong EntryReference, ulong Writer);
 
