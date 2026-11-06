@@ -2250,6 +2250,12 @@ are unchanged. Stored, derived, persisted-view and system inputs all participate
 In stored views, a same-name AS alias over a synthesized source can also have come from
 older frozen star expansion. That ambiguous stored shape conservatively requires a fresh alias;
 format 37 has no record of which spelling was authored.
+The same format-37 ambiguity affects an older explicit view column list whose name matches
+an unnamed expression's generated name: CREATE VIEW legacy(column1) AS SELECT CAST(1 AS BIGINT)
+stored only SELECT CAST(1 AS BIGINT) and the catalog name column1. NATURAL conservatively
+refuses that input with CS01015, even though the original list was authored. Wrap the view in
+a derived query with an explicit column-alias list, or recreate it: new views retain the list
+in the stored body.
 Dropped columns are absent from the catalog output. PostgreSQL
 src/backend/parser/parse_clause.c:1242-1274 supplies the common-name algorithm; unlike its
 strcmp, Cohesion uses its case-insensitive identifier rule. Zero common names lower INNER

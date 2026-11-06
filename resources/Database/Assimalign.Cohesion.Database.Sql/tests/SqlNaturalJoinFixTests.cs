@@ -9,12 +9,51 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlNaturalJoinFixTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Format 37: old same-name view column lists conservatively refuse NATURAL after reopen (#1792)")]
+    public async Task Open_OldExplicitViewColumnList_ShouldRequireFreshAlias()
+    {
+        // Arrange: 19dd61626 stored the body alone, plus the output contract in kind 17.
+        // Use that unchanged catalog writer to persist the exact old shape, without passing
+        // through today's CREATE VIEW binder, which preserves the authored list in a wrapper.
+        const string oldBody = "SELECT CAST(1 AS BIGINT)";
+        string root = Path.Combine(AppContext.BaseDirectory, "natural-old-list-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var engine = SqlDatabaseEngine.Create("natural-old-list", new() { RootPath = root }))
+            {
+                var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+                await database.Catalog.CreateViewAsync(new SqlCatalogView("dbo", "legacy", oldBody,
+                    [new SqlCatalogColumn("column1", new(DatabaseType.Int64))], [], [], []), cancellationToken: CancellationToken.None);
+                await using var session = await database.CreateSessionAsync(CancellationToken.None);
+                await ExecAsync(session, "CREATE VIEW fresh(column1) AS SELECT CAST(1 AS BIGINT)");
+                database.Catalog.Views.Single(v => v.Name == "fresh").Definition.ShouldContain("(column1)", Case.Sensitive);
+            }
+            // Act: reopen both actual catalog records before testing provenance.
+            await using var reopened = SqlDatabaseEngine.Create("natural-old-list", new() { RootPath = root });
+            var restored = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
+            await using var reader = await restored.CreateSessionAsync(CancellationToken.None);
+            // Assert
+            restored.Catalog.Views.Single(v => v.Name == "legacy").Definition.ShouldBe(oldBody);
+            Check(await RowsAsync(reader, "SELECT * FROM legacy"), [[1L]]);
+            var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            {
+                await using var unexpected = (await reader.ExecuteAsync("SELECT * FROM legacy NATURAL JOIN (SELECT CAST(1 AS BIGINT) AS column1) x", cancellationToken: CancellationToken.None)) as DatabaseResultSet;
+            });
+            failure.Diagnostics.ShouldContain(d => d.Code == "CS01015");
+            failure.Message.ShouldContain("alias");
+            Check(await RowsAsync(reader, "SELECT * FROM fresh NATURAL JOIN (SELECT CAST(1 AS BIGINT) AS column1) x"), [[1L]]);
+            Check(await RowsAsync(reader, "SELECT * FROM (SELECT * FROM legacy) l(column1) NATURAL JOIN (SELECT CAST(1 AS BIGINT) AS column1) x"), [[1L]]);
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Zero-name outer views: null extension survives added columns and reopen (#1792)")]
     [InlineData("LEFT", "a NATURAL LEFT JOIN b", "LEFT OUTER JOIN b ON TRUE")]
     [InlineData("RIGHT", "b NATURAL RIGHT JOIN a", "RIGHT OUTER JOIN a ON TRUE")]
@@ -94,13 +133,10 @@ public sealed class SqlNaturalJoinFixTests
         await using var engine = SqlDatabaseEngine.Create("star-window", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await ExecAsync(session, "CREATE TABLE a(x INT); CREATE TABLE b(x INT); INSERT INTO a VALUES(2),(1); INSERT INTO b VALUES(1),(2)");
+        await ExecAsync(session, "CREATE TABLE a(x INT); CREATE TABLE b(x INT); INSERT INTO a VALUES(2),(1),(3); INSERT INTO b VALUES(1),(2),(3)");
         // Act / Assert
-        var rows = await RowsAsync(session, "SELECT *, 1 AS p, ROW_NUMBER() OVER () AS r FROM a JOIN b USING(x) ORDER BY " + order);
-        rows.Count.ShouldBe(2);
-        rows.Select(r => r[0]).OrderBy(x => x).ShouldBe([1, 2]);
-        rows.Select(r => r[1]).ShouldBe([1, 1]);
-        rows.Select(r => r[2]).ShouldBe([1L, 2L]);
+        var rows = await RowsAsync(session, "SELECT *, x * 10 AS p, ROW_NUMBER() OVER (ORDER BY x) AS r FROM a JOIN b USING(x) ORDER BY " + order + " DESC");
+        Check(rows, [[3, 30, 3L], [2, 20, 2L], [1, 10, 1L]]);
     }
 
     private static async Task ExecAsync(SqlDatabaseSession session, string sql)

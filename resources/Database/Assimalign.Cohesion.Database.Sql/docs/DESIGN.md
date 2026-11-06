@@ -1697,6 +1697,12 @@ stored-body binding conservatively retains synthesized provenance for that shape
 New fully named same-name re-alias views persist an explicit output list. A mixed view can
 therefore require a fresh alias even when selecting only its authored same-name output;
 the bound text cannot recover that distinction without a format change.
+An older explicit view column list matching a generated name is ambiguous too: the base stored
+legacy(column1) AS SELECT CAST(1 AS BIGINT) as that body alone plus the name column1.
+It conservatively retains synthesized provenance and refuses NATURAL with CS01015; wrapping
+the view in a derived query with an explicit column list or recreating it resolves this. A reopen fixture writes the base's
+exact body and column contract through the unchanged format-37 kind-17 catalog writer,
+alongside a new view whose stored wrapper retains the explicit list. No format changes.
 Each BindItem join checks cancellation; NATURAL skips merged-column scans until a binding
 actually has UsingColumns. A synchronous parameter-read witness tests cancellation after
 binding begins, with an allocation ceiling rather than a duration assertion.
