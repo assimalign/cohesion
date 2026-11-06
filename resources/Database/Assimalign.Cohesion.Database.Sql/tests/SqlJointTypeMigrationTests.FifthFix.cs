@@ -336,9 +336,10 @@ public sealed partial class SqlJointTypeMigrationTests
         finally { await database.Coordinator.RollbackAsync(locks, CancellationToken.None); }
     }
 
-    private static string DifferentialValue(object? value) => value is null ? "NULL" : value.GetType().Name + ":" + Convert.ToString(value, CultureInfo.InvariantCulture);
+    private static string DifferentialValue(object? value) => value is null ? "NULL" : value is byte[] bytes ? "Binary:" + Convert.ToHexString(bytes)
+        : value.GetType().Name + ":" + Convert.ToString(value, CultureInfo.InvariantCulture);
 
-    private static async Task<string[]> CaptureDifferentialSnapshotAsync(SqlDatabase database, CancellationToken token)
+    private static async Task<string[]> CaptureDifferentialSnapshotAsync(SqlDatabase database, CancellationToken token, string order = "Id,Part")
     {
         var state = new List<string>();
         await using var session = await database.CreateSessionAsync(token);
@@ -351,9 +352,9 @@ public sealed partial class SqlJointTypeMigrationTests
             { state.Add("INDEX " + index.Name + " " + string.Join(',', index.ColumnNames) + " " + index.IsUnique + " " + index.IsPrimaryKey + " " + index.Predicate + " " + string.Join(',', index.KeyOrders)); }
             foreach (var constraint in table.Constraints.OrderBy(c => c.Name, StringComparer.Ordinal))
             { state.Add("CONSTRAINT " + constraint.Name + " " + constraint.Kind + " " + string.Join(',', constraint.Columns) + " " + constraint.ReferencedTable + " " + string.Join(',', constraint.ReferencedColumns ?? []) + " " + constraint.CheckExpression + " " + constraint.OnDelete + " " + constraint.OnUpdate); }
-            await using (var result = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.ExecuteAsync($"SELECT * FROM {table.Name} ORDER BY Id,Part", cancellationToken: token))
+            await using (var result = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.ExecuteAsync($"SELECT * FROM {table.Name} ORDER BY {order}", cancellationToken: token))
             { state.Add("HEADERS " + string.Join(',', result.Columns.Select(column => column.Name))); }
-            foreach (var row in await RowsAsync(session, $"SELECT * FROM {table.Name} ORDER BY Id,Part", token))
+            foreach (var row in await RowsAsync(session, $"SELECT * FROM {table.Name} ORDER BY {order}", token))
             { state.Add("ROW " + string.Join('|', row.Select(DifferentialValue))); }
         }
         foreach (var row in await RowsAsync(session, "SELECT TABLE_NAME,CONSTRAINT_NAME,CONSTRAINT_TYPE FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS ORDER BY TABLE_NAME,CONSTRAINT_NAME", token))

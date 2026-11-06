@@ -181,7 +181,7 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 script = new SqlMigrationScript(plan, script.Steps);
                 TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: script.Steps.Count);
-                var joint = await PrepareJointMigrationAsync(schema, script, preparation.Stop.Token, deferDataScalingSteps).ConfigureAwait(false);
+                var joint = await PrepareJointMigrationAsync(schema, script, preparation.Stop.Token, deferDataScalingSteps, jointDeferred).ConfigureAwait(false);
                 Volatile.Write(ref _deferred, joint);
                 try
                 {

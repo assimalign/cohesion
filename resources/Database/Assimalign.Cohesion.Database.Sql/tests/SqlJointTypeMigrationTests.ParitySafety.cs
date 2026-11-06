@@ -328,7 +328,7 @@ public sealed partial class SqlJointTypeMigrationTests
             var image = storage.CaptureDurableImages();
             await using var engine = await Builder(image).BuildAsync(guard.Token);
             var database = await engine.OpenDatabaseAsync("typed", guard.Token);
-            if (shortage >= 0) { image.MigrationAvailableBytes = need - shortage; }
+            if (shortage >= 0) { image.VolumeCapacityBytes = image.AllocatedBytes + need - shortage; }
             // Act / Assert
             if (shortage == Page.Size)
             {

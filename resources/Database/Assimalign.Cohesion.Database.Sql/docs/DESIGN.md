@@ -4434,9 +4434,11 @@ column; PostgreSQL heap.c:3409). Facets resolve the column's actual domain: DROP
 default and explicit NULL keeps the override marker (rewriteHandler.c:1305-1313; heap.c:2466-2475);
 only these facet plans permit a default change. The immutable column carries both its current
 insert default and a frozen missing-value literal. ADD captures the latter, and every subsequent
-replacement preserves it. A type narrowing validates the frozen literal even when no live rows
-remain, then binds it under the replacement type in the same DDL publication; a conversion
-failure is coded and names the column. Retained invisible versions therefore still decode.
+replacement preserves it. Frozen numeric literals bind independently of the current precision,
+and frozen binary literals independently of the current length. Tightening validates visible values, including
+visible missing tails; an obsolete literal used only by retained invisible versions does not
+refuse the change. Those historical versions therefore still decode after publication and reopen.
+Character values retain their established assignment trimming/padding; joint character-width changes rewrite rows.
 SqlBoundTable binds separate default and missing-value arrays;
 all row decode paths use the frozen array. Reads never run an insert-time function default.
 
@@ -8939,14 +8941,22 @@ Permanent portable-policy and binding/dependency/type/collation/key refusals use
 diagnostic and Provisioning before an intent is saved. A reservation timeout throws CS03402 with its lock-manager cause. Imperative interruption clears
 Provisioning; a deferred job's failure remains sticky.
 
-Space admission has two phases. Before saving kind 9, Build checks only
+Space admission uses the boundary after database open/recovery and object reservations, before the kind-9 write.
+The intent phase has its own bound
 F = 1 MiB + (ceil(I / 3072) + 4) * (5*B + 168), where I is the UTF-8 byte length of
 the serialized intent and B = 8192. Catalog kind-9 chunks hold 3 KiB; this reserves a data
 page plus full pre-image/delta frames for both deleting a kept intent and writing its replacement,
 four directory/counter pages, and 1 MiB
 for encoding/checkpoint headers. F depends on declaration size, never stored table size:
-Build takes no owner-directory snapshot, visits no data/index page and decodes zero rows.
+Deferred Build takes no owner-directory snapshot, visits no data/index page and decodes zero rows.
 A floor refusal uses CS03402 online and preserves a kept intent without writing it.
+An inline job measures and admits its full N before saving kind 9. A deferred job saves its
+queued intent after the floor check and measures on the worker. It retains the available
+budget observed before writing the intent, checks N at that same boundary, then checks the
+remaining N-F against live space. A whole N available now also permits newly added space.
+It never credits another writer's consumption or an unwritten sparse extent as spent bytes.
+F separately pays for intent preparation, V for publication,
+and E for discard/reclamation, so later checks do not ask for a budget already spent.
 
 Before the first prepared write, the worker measures each rewritten table's actual heap slots,
 record bytes and encoded component lengths, without materializing values or invoking conversions.
@@ -8959,7 +8969,16 @@ new public API or shipped friend grant. Cost is O(rewritten record bytes + index
 extra source pass before copying; retention is O(index pages + columns), not decoded rows.
 Frozen missing tails use their encoded literal width. Adjacent FK tables, dropped tables and
 untouched owners add no replacement allocation. Cancellation is observed per page. A matching
-resumed intent repeats admission before any prepared write; Build still reads zero data pages.
+resumed intent repeats admission before any prepared write; deferred Build still reads zero data pages.
+For retiring heaps only, a bounded-memory scan of data-storage page headers finds index pages
+whose owner is retiring but whose page is absent from every registered tree walk. Registered
+heap-owned trees are counted once. This adds O(database pages) header visits to retirement,
+without changing kept-layout or copy walks or introducing a public index-directory bridge.
+Stranded trees are immutable once unregistered. Their WAL bound measures the full pre-image
+and the delta or cleared-page committed image produced by FreeOwnerPages: the storage codec's
+32-byte run walk, masked LSN/checksum, 4-byte run headers, B/2 image threshold and 64-byte image
+slack, plus an 8-byte base LSN and two 38-byte frames. It charges encoded bytes, without adding
+a per-page margin. A checkpoint can require the pre-image again but cannot increase its size.
 
 For each final column, unchanged values contribute their measured encoded bytes (1x).
 Built-in conversions to TEXT/VARCHAR use the source's maximum rendered width, with four bytes
@@ -9064,7 +9083,9 @@ worker after gate release, so busy or failed checkpoints retain its existing ret
 Verbose event 27, TableReclamationYielded, makes each stalled drain poll observable.
 Its complete two-image/page and framing bound is
 U=32*2*(B+46)+152=527384 bytes, independent of O, poll cadence and refused attempts. Define
-W=min(P*(B+46)+152*(ceil(P/32)+O), C+U), or the whole first term if C=0.
+W=min(max(A,R*(B+46))+152*(ceil(P/32)+O), C+U), or the whole first term if C=0.
+A is the old registered/heap page count times B+46 plus the measured stranded-page WAL;
+R here is the prepared page bound. Stranded pages also contribute to P and its bracket count.
 The 152-byte framing allowance includes the checkpoint record's 38-byte base and the bracket's
 38-byte Begin and Commit frames; an active-writer list consumes the other-writer margin below.
 Let K=BufferPoolCapacity+1 MiB only for jobs that allocate pages on strategies whose data-file
@@ -9086,7 +9107,8 @@ The publication bound V is F plus (old/new kind-6 chunks + catalog record bound)
 The record bound includes table/index descriptions, registrations, dependent views, old and
 new owned sequences, retirement intents and catalog counters. Declaration and metadata
 supply these counts, with one full page per record. Admission requires
-N=R+J+ceil((R+J)/4)+V+E. A zero-operation job uses N=F alone, including each watchdog check. Before every root/copy bracket the watchdog requires
+N=F+R+J+ceil((R+J)/4)+V+E. A zero-operation job uses N=2F: one F for intent preparation
+and one F retained for publication/discard watchdog checks. Before every root/copy bracket the watchdog requires
 D+E, where D=(A-min(A,FreePageCount))*B+touches*2(B+46)+152, plus copy-owned
 unflushed allocation bytes only for sparse data growth, capped at the data pool capacity because eviction or an engine
 checkpoint may already have flushed earlier allocations. It rechecks under the apply gate before the first mutation.
@@ -9444,8 +9466,11 @@ the old component (src/backend/catalog/heap.c:1692-1732). PostgreSQL NUMERIC nar
 through its typmod coercion; Cohesion's established same-scale path validates without changing
 values. Rollback across a successfully published DROP COLUMN remains SQ-A7 (#1779).
 
-Frozen missing values remain independent of later insert-default changes. Existing dropped
-ordinals persist, newly dropped ordinals are added, and appended columns start beyond all
+Frozen missing values remain independent of later insert-default changes. Historical
+numeric/binary values bind without today's precision/length bound; validation checks only visible rows that
+still read them. Newly appended defaults must fit their declaration. Domains and VARBINARY
+follow the same rule, and later writes continue to enforce the published assignment bounds.
+Existing dropped ordinals persist, newly dropped ordinals are added, and appended columns start beyond all
 old physical components. Same-name re-addition therefore cannot decode a dropped value.
 Nullable checked-domain missing values validate once; only an invalid missing value needs an
 emptiness probe. An empty or fully tombstoned table retains 49a's exception for that missing value. NOT NULL, new CHECKs and tighter precision use validation scans, with one bound

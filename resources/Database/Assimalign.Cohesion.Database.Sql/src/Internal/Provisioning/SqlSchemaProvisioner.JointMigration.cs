@@ -90,7 +90,7 @@ internal sealed partial class SqlSchemaProvisioner
     }
 
     private async ValueTask<SqlDeferredMigration> PrepareJointMigrationAsync(SqlCompiledSchema schema,
-        SqlMigrationScript script, CancellationToken cancellationToken, bool deferredBuild)
+        SqlMigrationScript script, CancellationToken cancellationToken, bool deferredBuild, bool deferredSteps)
     {
         var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
         SqlJointMigrationPlan plan;
@@ -182,9 +182,17 @@ internal sealed partial class SqlSchemaProvisioner
                 { throw new SqlCatalogException("CS04064", ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog); }
             }
             if (locks.State != TransactionState.Active) { throw new TransactionAbortedException(ErrorMessages.SequenceTransactionEnded); }
-            // Build checks only the metadata floor, independent of owner size.
-            // The worker counts pages before any prepared write, including after resume.
-            try { CheckJointSpace(JointSpaceFloor(intent)); }
+            // Cheap inline jobs admit before writing their intent. Populated deferred
+            // work still counts on the worker. Keep its pre-intent budget boundary,
+            // then check the remaining phase budget against live space on the worker.
+            bool deferred = deferredSteps || deferredBuild && plan.Tables.Any(table =>
+                !table.KeepsOwner && table.Previous is { } old && _database.DataStorage.HasOwnerPages(old.ObjectId));
+            long availableBeforeIntent = _database.Engine.GetAvailableMigrationBytes(_database.Name);
+            try
+            {
+                if (deferred) { CheckJointSpace(JointSpaceFloor(intent)); }
+                else { AdmitJointSpace(plan, intent, cancellationToken); }
+            }
             catch { spaceRefused = true; throw; }
             await _catalog.SavePendingMigrationAsync(intent, cancellationToken).ConfigureAwait(false);
             saved = true;
@@ -192,7 +200,8 @@ internal sealed partial class SqlSchemaProvisioner
             JointStage?.Invoke("LocksReserved");
             return new SqlDeferredMigration(this, schema, script.Steps, intent, locks,
                 plan.Touched.Select(table => table.ObjectId).DefaultIfEmpty(0UL).ToHashSet(), cancellationToken)
-                { JointPlan = plan, JointFailureProgress = failed, JointMetadata = metadata };
+                { JointPlan = plan, JointFailureProgress = failed, JointMetadata = metadata,
+                    SpaceAdmitted = !deferred, SpaceAvailableBeforeIntent = availableBeforeIntent };
         }
         catch (Exception failure)
         {
@@ -268,19 +277,20 @@ internal sealed partial class SqlSchemaProvisioner
                 }, checkpointCopy: true);
             JointMetrics = statement.Metrics;
             if (migration.Steps.Count > 0) { BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken); }
-            AdmitJointSpace(migration.JointPlan, migration.Intent, cancellationToken);
+            if (!migration.SpaceAdmitted)
+            { AdmitJointSpace(migration.JointPlan, migration.Intent, cancellationToken, migration.SpaceAvailableBeforeIntent); }
             bool sparseGrowth = _database.Engine.SparseDataGrowth(_database.Name);
             bool markerOnly = migration.JointPlan.Tables.Length == 0 && migration.JointPlan.Dropped.Length == 0;
             statement.ConfigureCopySpace((touches, allocations, unflushed, prepared) =>
             {
-                if (markerOnly) { CheckJointSpace(JointSpaceNeed); return; }
+                if (markerOnly) { CheckJointSpace(JointSpaceDiscardBytes); return; }
                 JointSpaceDiscardBytes = JointEngineReserve(prepared);
                 long reused = Math.Min(allocations, _database.DataStorage.PageManager.FreePageCount);
                 // Eviction and engine checkpoints may have flushed earlier copy
                 // allocations. The unwritten backlog cannot exceed the data pool.
                 long pending = sparseGrowth ? Math.Min(checked(unflushed * Page.Size), _database.Engine.EngineOptions.BufferPoolCapacity) : 0;
                 CheckJointSpace(checked(JointBracketBytes(touches, allocations - reused) + pending + JointSpaceDiscardBytes));
-            }, unflushed => CheckJointSpace(markerOnly ? JointSpaceNeed : checked(JointSpacePublicationBytes + JointSpaceDiscardBytes +
+            }, unflushed => CheckJointSpace(markerOnly ? JointSpaceDiscardBytes : checked(JointSpacePublicationBytes + JointSpaceDiscardBytes +
                 (sparseGrowth ? Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity) : 0))), _database.TableReclamation.CaptureAllocationCount,
                 JointCopyCheckpointThreshold);
             var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);

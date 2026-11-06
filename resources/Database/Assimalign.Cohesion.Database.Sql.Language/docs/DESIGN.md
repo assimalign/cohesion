@@ -25,6 +25,8 @@ The execution corpus also verifies table-scoped COPY scan cost, byte-sized deliv
 deferred migration admission and shared embedded-session admission; DIALECT records these contracts.
 Every compiled-schema apply, including default-only, inline and empty-table paths, publishes
 jointly (#1778, SQ-A6); the engine conformance corpus covers SET/DROP DEFAULT and kept layouts.
+Numeric precision and VARBINARY tightening validate visible rows; obsolete historical literals
+decode without the new bound. DIALECT and the engine conformance corpus cover both outcomes (#1778).
 Deferred admission includes new table names before binding and reserves FK neighbours only when
 their constraints, either owner or matching parent key trees change (#1778).
 

@@ -25,6 +25,7 @@ public sealed partial class SqlJointTypeMigrationTests
     [InlineData("empty", true)]
     [InlineData("reconcile", false)]
     [InlineData("reconcile", true)]
+    [InlineData("index", false)]
     [InlineData("index", true)]
     public async Task BuildAsync_ReviewSparseExactAdmission_ShouldChargeOnlyAllocatedWork(string kind, bool sparse)
     {
@@ -47,15 +48,38 @@ public sealed partial class SqlJointTypeMigrationTests
         for (int admission = 0; admission < 3; admission++)
         {
             var image = storage.CaptureDurableImages(); image.UnixSparseGrowth = sparse;
-            if (admission != 0) { image.MigrationAvailableBytes = need - (admission == 2 ? Page.Size : 0); }
             var builder = Builder(image).AddDatabase("typed", database => { database.Schema(target); database.RunMigrationsInline = kind == "index"; });
+            if (admission != 0)
+            {
+                builder.AddWorker(owner =>
+                {
+                    owner.BeforeProvisioning = db => db.SchemaProvisioner.JointStage = stage =>
+                    { if (stage == "Planning") { image.VolumeCapacityBytes = image.AllocatedBytes + need - (admission == 2 ? Page.Size : 0); } };
+                    return new RecordingWorker(owner);
+                });
+            }
             // Act / Assert
             if (admission == 2)
             {
                 var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync(guard.Token));
                 failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
-                await using var reopened = await Builder(image.CaptureDurableImages()).BuildAsync(guard.Token);
-                (await reopened.OpenDatabaseAsync("typed", guard.Token)).IsOffline.ShouldBeFalse();
+                image.CapacityFailures.ShouldBe(0);
+                long retryCapacity = image.VolumeCapacityBytes + Page.Size;
+                var retryImage = image.CaptureDurableImages(); retryImage.UnixSparseGrowth = sparse;
+                var retry = Builder(retryImage).AddDatabase("typed", database => { database.Schema(target); database.RunMigrationsInline = kind == "index"; });
+                retry.AddWorker(owner =>
+                {
+                    owner.BeforeProvisioning = db => db.SchemaProvisioner.JointStage = stage =>
+                    { if (stage == "Planning") { retryImage.VolumeCapacityBytes = retryCapacity; } };
+                    return new RecordingWorker(owner);
+                });
+                await using var reopened = await retry.BuildAsync(guard.Token);
+                var retried = await reopened.OpenDatabaseAsync("typed", guard.Token);
+                await WaitDoneAsync(retried, guard.Token);
+                retried.IsOffline.ShouldBeFalse(); retried.Provisioning.ShouldBeNull();
+                retried.SchemaProvisioner.JointSpaceNeed.ShouldBe(need);
+                retryImage.CapacityFailures.ShouldBe(0);
+                _output.WriteLine($"refused Build retry {kind}, sparse={sparse}: added exactly {Page.Size} bytes; N stayed {need}; cap={retryCapacity}");
             }
             else
             {
@@ -64,8 +88,9 @@ public sealed partial class SqlJointTypeMigrationTests
                 db.Provisioning.ShouldBeNull();
                 if (admission == 0) { need = db.SchemaProvisioner.JointSpaceNeed; _output.WriteLine($"measured Build {kind}, sparse={sparse}: need={need}"); }
                 db.SchemaProvisioner.JointSpaceNeed.ShouldBe(need);
-                if (kind != "index") { need.ShouldBeLessThan(5L * 1024 * 1024); }
-                if (kind is "empty" or "reconcile") { need.ShouldBe(1_254_216); }
+                // The separate intent phase adds F; the existing bound still
+                // applies to the publication/discard budget after preparation.
+                if (kind != "index") { (need - 1_254_216).ShouldBeLessThan(5L * 1024 * 1024); }
                 db.Catalog.SchemaState!.ContentHash.ShouldBe(target.Compile().Hash);
             }
         }

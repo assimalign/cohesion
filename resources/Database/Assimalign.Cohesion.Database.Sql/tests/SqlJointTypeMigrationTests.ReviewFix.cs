@@ -72,7 +72,6 @@ public sealed partial class SqlJointTypeMigrationTests
         for (int admission = 0; admission < 3; admission++)
         {
             var image = storage.CaptureDurableImages();
-            if (admission != 0) { image.MigrationAvailableBytes = need - (admission == 2 ? Page.Size : 0); }
             var boundaries = new List<(string Stage, CrashCaptureSqlStorageStrategy Image)>();
             var builder = Builder(image);
             int copies = 0; long rewritten = 0; long decoded = 0;
@@ -80,10 +79,14 @@ public sealed partial class SqlJointTypeMigrationTests
             SqlPlanExecutor.RewriteStage = (stage, rows) => { if (stage == "Copied") { copies++; rewritten += rows; } };
             builder.AddWorker(engine =>
             {
-                engine.BeforeProvisioning = db => db.SchemaProvisioner.JointStage = stage =>
+                engine.BeforeProvisioning = db =>
                 {
+                    db.SchemaProvisioner.JointStage = stage =>
+                    {
+                    if (stage == "Planning" && admission != 0) { image.VolumeCapacityBytes = image.AllocatedBytes + need - (admission == 2 ? Page.Size : 0); }
                     if (stage == "IntentDurable") { db.Catalog.PendingMigration!.Steps.ShouldNotContain(step => step.Kind == "Joint/RewriteOwner"); }
                     boundaries.Add((stage, image.CaptureDurableImages()));
+                    };
                 };
                 return new RecordingWorker(engine);
             });
@@ -134,7 +137,7 @@ public sealed partial class SqlJointTypeMigrationTests
                 await using (var reopened = await Builder(image.CaptureDurableImages()).AddDatabase(target).BuildAsync(guard.Token))
                 { await ReviewAssertRowsAsync(await reopened.OpenDatabaseAsync("typed", guard.Token), dropColumn, guard.Token); }
                 // Retiring the heap must free the stranded tree too, once and only once.
-                image.MigrationAvailableBytes = long.MaxValue;
+                image.VolumeCapacityBytes = long.MaxValue;
                 db.SchemaProvisioner.JointStage = null;
                 var compiled = target.Compile();
                 var retirement = retireByType ? Compiled(compiled.Tables.Select(table => new CompiledSchemaTable(table.Name, table.RowType,

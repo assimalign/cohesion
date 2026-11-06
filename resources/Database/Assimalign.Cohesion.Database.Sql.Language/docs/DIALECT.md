@@ -2000,9 +2000,13 @@ DROP DEFAULT affects later omitted-column writes. A NOT NULL
 column without a default requires an explicit value. Neither action changes old rows: ADD
 COLUMN freezes its missing value once, including NULL when it had no default. An old row still
 reads that value after changing/dropping the insert default and after restart. Explicit stored
-NULL stays NULL. A later column narrowing validates and binds the frozen literal under the new
-type before publication, even with no live rows; an unconvertible literal refuses the change
-with a coded error naming the column. This is PostgreSQL's separate missing attribute value
+NULL stays NULL. Precision tightening and VARBINARY narrowing validate visible values, including a visible row
+that still reads its frozen literal. Historical numeric/binary literals bind independently of current
+precision/length bounds; a literal used by no visible row does not block tightening. A compiled
+apply with an out-of-bound visible value refuses with CS03402 and retains the old schema online.
+Newly appended defaults and later assignments must fit their declaration. Character assignment
+retains its trimming/padding rules; joint character-width changes rewrite rows. The frozen value uses
+the separate missing attribute model described by PostgreSQL
 (src/backend/access/common/heaptuple.c:151-180) and column-default operation
 (src/backend/commands/tablecmds.c:8201-8268).
 

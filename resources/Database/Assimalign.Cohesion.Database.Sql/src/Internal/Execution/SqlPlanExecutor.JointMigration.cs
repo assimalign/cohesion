@@ -188,14 +188,9 @@ internal sealed partial class SqlPlanExecutor
                 table = new SqlCatalogTable(old.ObjectId, table.Schema, table.Name, columns, table.PrimaryKeyColumns,
                     table.Owner, table.OwningSchema, table.Constraints, droppedOrdinals);
                 // Missing values are immutable even when the insert default changes.
-                // Bind under the final facets, including retained invisible versions.
+                // Decode historical literals without the final assignment bounds.
+                // The visible-row pass below enforces tightening, including missing tails.
                 _definitions.Get(table, cancellationToken);
-                for (int ordinal = 0; ordinal < columns.Length; ordinal++)
-                {
-                    if (columns[ordinal].MissingValueLiteral is { } missing)
-                    { _ = BindDefaultExpression(new SqlCatalogColumn(columns[ordinal].Name, columns[ordinal].Type, true, missing),
-                        "ADD COLUMN missing value", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true); }
-                }
             }
             if (keepsOwner)
             {

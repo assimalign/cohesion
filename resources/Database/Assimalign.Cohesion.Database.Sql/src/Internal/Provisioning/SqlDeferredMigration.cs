@@ -43,6 +43,8 @@ internal sealed class SqlDeferredMigration
     internal DatabaseProvisioningProgress? JointFailureProgress { get; init; }
     internal IDisposable? JointMetadata { get; init; }
     internal bool ReleaseApplyGate { get; set; }
+    internal bool SpaceAdmitted { get; init; }
+    internal long SpaceAvailableBeforeIntent { get; init; }
 
     internal async Task RunInlineAsync(CancellationToken cancellationToken)
     {
