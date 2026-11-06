@@ -124,7 +124,7 @@ internal sealed class GraphUpdates : IDisposable
         }
     }
 
-    private void Charge(long bytes)
+    internal void Charge(long bytes)
     {
         if (_operation.QueryBudget is not { } budget) { return; }
         (_memory ??= new GraphMemoryOwner(budget.Memory)).Add(bytes);
@@ -175,7 +175,8 @@ internal sealed class GraphUpdates : IDisposable
         GraphPlanExecutor.ExpansionBudget budget, [EnumeratorCancellation] CancellationToken token)
     {
         using var memory = new GraphMemoryOwner(budget.Memory);
-        var index = anchor.Property is { } indexedKey && anchor.Label is { } indexedLabel
+        var text = anchor.Value as GraphTextAnchor;
+        var index = text is null && anchor.Property is { } indexedKey && anchor.Label is { } indexedLabel
             ? OverlayIndex(indexedLabel, indexedKey, budget, token) : null;
         // Select the access path's postings before charging comparisons. Only a NodeScan
         // visits unrelated labels; property residuals still charge every selected candidate.
@@ -195,7 +196,8 @@ internal sealed class GraphUpdates : IDisposable
             (anchor.UnionLabels is { } labels ? node.Labels.Any(label => labels.Contains(label, StringComparer.Ordinal))
                 : anchor.Label is null || node.Labels.Contains(anchor.Label, StringComparer.Ordinal)) &&
             (anchor.Property is null || node.Properties.TryGetValue(anchor.Property, out var value) &&
-                GraphValueComparer.Instance.Equals(value, anchor.Value)))
+                (text is null ? GraphValueComparer.Instance.Equals(value, anchor.Value)
+                    : GraphTextTrigrams.Matches(value, text.Pattern, text.Operation))))
             { memory.Add(16); selected.Add(node); }
         }
         selected.Sort(static (left, right) => left.Id.Value.CompareTo(right.Id.Value));
@@ -203,8 +205,10 @@ internal sealed class GraphUpdates : IDisposable
         var snapshot = ReadSnapshot;
         // A Snapshot plan can retain an index dropped before the latest-view MERGE probe.
         // Fall back under the same writer/pattern locks; the matcher retains all equalities.
-        bool useIndex = anchor.Property is not null && HasReadIndex(anchor.Label!, anchor.Property);
-        IAsyncEnumerable<StoredGraphNode> persisted = useIndex && anchor.Property is { } property
+        bool useIndex = text is null && anchor.Property is not null && HasReadIndex(anchor.Label!, anchor.Property);
+        IAsyncEnumerable<StoredGraphNode> persisted = text is not null
+            ? _database.Store.StreamTextIndexAsync(anchor.Label!, anchor.Property!, text.Pattern, text.Operation, snapshot, token, budget.Consume, memory.Add)
+            : useIndex && anchor.Property is { } property
             ? _database.Store.StreamIndexAsync(anchor.Label!, property, anchor.Value, snapshot, token, budget.Consume, memory.Add)
             : StreamStored();
         int position = 0;
@@ -614,12 +618,15 @@ internal sealed class GraphUpdates : IDisposable
     internal async ValueTask<long> PublishAsync(CancellationToken token)
     {
         long count = 0;
+        var budget = _database.Store.HasTextIndexes ? _operation.EnsureQueryBudget() : null;
+        Action? visit = budget is null ? null : budget.Consume;
+        Action<long>? reserve = visit is null ? null : Charge;
         foreach (var node in _nodes.Values)
         {
             if (IsCreated(true, node.Id.Value))
-            { await _database.Store.CreateNodeAsync(new StoredGraphNode(node.Id.Value, node.Labels, node.Properties), _database.NodeLabelIds(node.Labels, _operation), _operation.Context, token).ConfigureAwait(false); }
+            { await _database.Store.CreateNodeAsync(new StoredGraphNode(node.Id.Value, node.Labels, node.Properties), _database.NodeLabelIds(node.Labels, _operation), _operation.Context, token, visit, reserve).ConfigureAwait(false); }
             else
-            { await _database.Store.UpdateNodeAsync(node.Id.Value, node.Labels, node.Properties, _database.NodeLabelIds(node.Labels, _operation), _operation.Context, token).ConfigureAwait(false); }
+            { await _database.Store.UpdateNodeAsync(node.Id.Value, node.Labels, node.Properties, _database.NodeLabelIds(node.Labels, _operation), _operation.Context, token, visit, reserve).ConfigureAwait(false); }
             if (_changed.Contains((true, node.Id.Value)) && !_created.Contains((true, node.Id.Value))) { count++; }
         }
         foreach (var edge in _relationships.Values)

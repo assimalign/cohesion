@@ -519,7 +519,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
 | COHDBG018 | CG06018 | Storage/durability |
-| New (#1738, GQ-D1; #1806, GQ-T1) | CG06019 | Format — graph catalog record version differs from v3; recreate database, no legacy reader |
+| New (#1738, GQ-D1; #1806, GQ-T1) | CG06019 | Format — graph catalog record version differs from v4; recreate database, no legacy reader |
 | COHDBG005 | CG07005 | Protocol/transport |
 | COHDBG016 | CG07016 | Protocol/transport |
 | COHDBG021 | CG08021 | Configuration |

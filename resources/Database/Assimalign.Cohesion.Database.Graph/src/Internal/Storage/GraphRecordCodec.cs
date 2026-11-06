@@ -18,6 +18,7 @@ internal static class GraphRecordCodec
 {
     // One graph format fence, shared by open and recovery; #1633 requires type postings.
     internal const byte FormatVersion = 5;
+    private static readonly UTF8Encoding _utf8 = new(false, true);
     internal static void EnsureFormat(ReadOnlySpan<byte> bytes, PageId? page = null, int slot = 0)
     {
         if (bytes.Length < 18)
@@ -36,7 +37,7 @@ internal static class GraphRecordCodec
     internal static byte[] Encode(GraphRecord record, TransactionSequence writer)
     {
         using var stream = new MemoryStream();
-        using var output = new BinaryWriter(stream, new UTF8Encoding(false, true), true);
+        using var output = new BinaryWriter(stream, _utf8, true);
         output.Write(writer.Value);
         output.Write(0UL);
         output.Write(record.Kind);
@@ -48,7 +49,7 @@ internal static class GraphRecordCodec
             output.Write(node.Labels.Count);
             for (int i = 0; i < node.Labels.Count; i++)
             { output.Write(node.Labels[i]); output.Write(record.LabelIds![i].ToByteArray()); }
-            Properties(output, node.Properties);
+            Properties(output, node.Properties, record.Kind);
         }
         else if (record.Relationship is { } relationship)
         {
@@ -56,7 +57,7 @@ internal static class GraphRecordCodec
             output.Write(relationship.TargetId);
             output.Write(record.TypeId.ToByteArray());
             output.Write(relationship.Type);
-            Properties(output, relationship.Properties);
+            Properties(output, relationship.Properties, record.Kind);
         }
         else
         {
@@ -67,17 +68,18 @@ internal static class GraphRecordCodec
         {
             // One record holds the whole element, so its size is the user's input, not a store
             // fault: a typed failure lets the engine fail the statement and keep the session.
-            string element = record.Kind switch
-            {
-                1 => "A node's labels and properties",
-                2 => "A relationship's type and properties",
-                _ => "A property index definition's label and property key",
-            };
             throw new GraphElementTooLargeException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphRecordCodecEncodeFailure, element, stream.Length, SlottedPage.MaxRecordSize));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphRecordCodecEncodeFailure, Element(record.Kind), stream.Length, SlottedPage.MaxRecordSize));
         }
         return stream.ToArray();
     }
+
+    private static string Element(byte kind) => kind switch
+    {
+        1 => "A node's labels and properties",
+        2 => "A relationship's type and properties",
+        _ => "A property index definition's label and property key",
+    };
 
     internal static GraphRecord Decode(ReadOnlyMemory<byte> bytes, PageId? page = null, int slot = 0)
     {
@@ -85,7 +87,7 @@ internal static class GraphRecordCodec
         try
         {
             using var stream = new MemoryStream(bytes.ToArray(), false);
-            using var input = new BinaryReader(stream, new UTF8Encoding(false, true));
+            using var input = new BinaryReader(stream, _utf8);
             input.ReadUInt64(); input.ReadUInt64();
             byte kind = input.ReadByte();
             if (input.ReadByte() != FormatVersion) { throw UnsupportedFormat(page, slot); }
@@ -113,7 +115,10 @@ internal static class GraphRecordCodec
                     record = new GraphRecord(kind, id, Relationship: new StoredGraphRelationship(id,
                         source, target, input.ReadString(), Properties(input, page, slot)), TypeId: typeId);
                     break;
-                case 3: record = new GraphRecord(kind, id, Label: input.ReadString(), PropertyKey: input.ReadString()); break;
+                case 3:
+                    if (revision > 1) { throw Corrupt(page, slot, ErrorMessages.TextIndexKindInvalid); }
+                    record = new GraphRecord(kind, id, Label: input.ReadString(), PropertyKey: input.ReadString());
+                    break;
                 default: throw Corrupt(page, slot, ErrorMessages.RecordKindInvalid);
             }
             if (id == 0 || stream.Position != stream.Length) { throw Corrupt(page, slot, ErrorMessages.RecordPayloadInvalid); }
@@ -136,7 +141,7 @@ internal static class GraphRecordCodec
         return count;
     }
 
-    private static void Properties(BinaryWriter output, IReadOnlyDictionary<string, object?> properties)
+    private static void Properties(BinaryWriter output, IReadOnlyDictionary<string, object?> properties, byte kind)
     {
         output.Write(properties.Count);
         foreach (var property in properties.OrderBy(pair => pair.Key, StringComparer.Ordinal))
@@ -147,7 +152,12 @@ internal static class GraphRecordCodec
             {
                 case null: output.Write((byte)0); break;
                 case bool value: output.Write((byte)1); output.Write(value); break;
-                case string value: output.Write((byte)2); output.Write(value); break;
+                case string value:
+                    // Every valid UTF-8 string occupies at least its UTF-16 code-unit count.
+                    // Refuse certainly oversized properties before allocating their encoded bytes.
+                    if (value.Length > SlottedPage.MaxRecordSize)
+                    { throw new GraphElementTooLargeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.StringPropertyTooLarge, Element(kind), output.BaseStream.Position + (long)value.Length, SlottedPage.MaxRecordSize)); }
+                    output.Write((byte)2); output.Write(value); break;
                 case sbyte value: output.Write((byte)3); output.Write(value); break;
                 case byte value: output.Write((byte)4); output.Write(value); break;
                 case short value: output.Write((byte)5); output.Write(value); break;

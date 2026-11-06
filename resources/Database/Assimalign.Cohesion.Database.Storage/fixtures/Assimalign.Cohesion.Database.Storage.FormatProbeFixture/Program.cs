@@ -191,8 +191,8 @@ internal static class Program
         else
         {
             dataSet = model == "Documents" ? "document" : model.ToLowerInvariant();
-            byte current = model == "Graph" ? (byte)3 : (byte)1;
-            byte[] record = Metadata(legacy ? (model == "Graph" ? (byte)2 : (byte)0) : current);
+            byte current = model == "Graph" ? (byte)4 : (byte)1;
+            byte[] record = Metadata(legacy ? (model == "Graph" ? (byte)3 : (byte)0) : current);
             if (model == "Graph")
             {
                 var typed = GraphStorage.Open(Open(dataSet, ".dat"), Open(dataSet, ".log"), Open(dataSet, ".bak"), checkpointOnOpen: false);

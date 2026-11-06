@@ -49,6 +49,10 @@ Property maps, WHERE operands and RETURN expressions accept `$name` and the Cohe
 Both produce `GqlParameterExpression` with a bare name and source span; property-map values
 are scalar value expressions, evaluated against the incoming row. See [DIALECT.md](DIALECT.md#named-scalar-parameters) for binding rules.
 
+Standalone CREATE TEXT INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property) adds
+node-property trigram indexes. The engine can seek equality and string predicates, always
+rechecks stored strings, and scans for patterns shorter than three Unicode code points.
+
 Read [DESIGN.md](DESIGN.md) for the standard decision, exact clause matrix, AST model, bounds,
 diagnostic codes, and the conformance corpus's relationship to ISO GQL.
 

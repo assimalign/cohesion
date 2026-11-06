@@ -46,7 +46,7 @@ entity writes enforce the effective rules. SHOW PROPERTY KEYS reports their comb
 required state; SHOW OBJECT OWNERSHIP includes named CONSTRAINT rows with parent ownership.
 The existing column contracts remain fixed. D2 adds the schema commands and transaction policy below. Duplicate names use CG03008, conflicting rules CG03009,
 invalid existing data CG03010 and an absent named drop CG01021. Graph catalog v2 refuses with
-CG06019; only v3 is read.
+CG06019; only v4 is read.
 
 A named constraint may repeat an identical unnamed property rule. The declarations are
 independent: dropping that constraint preserves the unnamed rule. Typed GetPropertyKeysAsync
@@ -64,12 +64,13 @@ members through owner postings and refuse with CG03010 without replacing the pri
 Budgets remain CG05004/CG05020, and explicit-transaction DDL remains CG04025. GraphTypeTests
 is the typed-schema/write-path conformance corpus. Edge declarations persist but do not yet
 enforce properties or endpoints. Text ALTER CURRENT GRAPH TYPE and SHOW CURRENT GRAPH TYPE
-remain outside this run; their parser refusals are unchanged. Catalog v3 refuses v2 before
+remain outside this run; their parser refusals are unchanged. Catalog v4 refuses v3 before
 any write (CG06019), while graph entity format remains 5. Closed mode remains a later opt-in.
 
 Standalone commands run on the session's database:
 
 - `CREATE INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property)`;
+- `CREATE TEXT INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property)`;
 - `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS NOT NULL`;
 - `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS :: type`;
 - constraint relationship patterns use `FOR ()-[r:TYPE]-()` and `REQUIRE r.property`, with
@@ -122,7 +123,7 @@ remain ordinal and case-sensitive across the shared database-wide namespace.
 SHOW CONSTRAINTS returns DATABASE_NAME, DEFINITION_TYPE, DEFINITION_ID, DEFINITION_NAME,
 CONSTRAINT_NAME, PROPERTY_KEY, DATA_TYPE and IS_REQUIRED, ordered by label name then constraint
 name, followed by relationship type name then constraint name. Other SHOW column contracts
-stay fixed. Graph catalog is v3 (#1806); graph entity format remains 5.
+stay fixed. Graph catalog is v4 (#1806); graph entity format remains 5.
 
 Read-only statements warn with structured CG01023 for each distinct, ordinal, statically named
 entity property unknown database-wide (#1249, GQ-D3). This includes MATCH node/relationship
@@ -842,6 +843,40 @@ Shape analysis includes both the seed and possible repeated body results, so an 
 cannot bypass entity-result admission. Entity-valued wire results retain the existing gate
 until #1662. Scalar lists/maps use the existing protocol 2.1 capability; no wire or disk change
 is introduced. See [design and local reference evidence](DESIGN.md#reduce-and-list-predicates-1736-gq-c2).
+
+## Text indexes (#1644)
+
+CREATE TEXT INDEX builds a nonunique node-label/property index over Unicode code-point
+trigrams, with no case folding or Unicode normalization. Exact and text indexes may coexist
+on the same pair; each kind permits one physical index. IF NOT EXISTS suppresses an existing
+index name; otherwise equivalence compares the kind as well as label/property. Names retain the shared
+ordinal schema-rule namespace. Omitted names are deterministic and distinguish text indexes.
+DROP INDEX name drops either kind; SHOW INDEXES retains its existing column shape, and typed
+GraphIndexMetadata.IsText identifies the kind.
+
+A direct n.property string equality, CONTAINS, ENDS WITH or STARTS WITH on a required label in a MATCH AND
+chain can seek the text index. The engine ANDs its distinct pattern trigrams and always
+rechecks the stored value using the ordinal, case-sensitive predicate. A supplementary pair
+counts as one code point; combining sequences remain separate code points. A pattern shorter
+than three code points uses a label scan, including empty strings. Patterns retain the existing strict Unicode input validation. NULL and
+non-string values retain their ordinary predicate semantics and cannot supply a text seek.
+
+Parameters bind for each execution before anchor selection; execution checks the actual
+pattern again when opening the cursor. EXPLAIN reports TextIndexSeek or LabelScan for that
+binding, the predicate, parameter flag, AND combination, mandatory stored-value recheck and
+short-pattern fallback. No SEARCH, scoring or full-text tokenizer is introduced.
+
+Stored values shorter than three code points contribute one token; longer values contribute
+at most N-2 distinct postings. Build and text write extraction consume work per code point,
+and postings reserve memory before retaining keys/undo state. The defaults remain 1,000,000
+work units and 256 MiB. Exhaustion fails atomically with CG05004 or CG05020. A property and
+its node must fit the existing single-record limit (CG02009); oversized strings are refused,
+never silently omitted from an otherwise indexed row. In particular a 1 MiB value writes no
+text postings. Old snapshots keep removed tokens and dropped trees until their snapshot pins
+release; maintenance then persists a retirement receipt and frees at most 64 owner pages
+per pass, deleting the receipt after its final batch. Reopen resumes pending reclamation.
+Catalog v4 admits this index kind and refuses v3 with CG06019 without changing files; graph
+entity layout remains format 5.
 
 ## Named scalar parameters
 

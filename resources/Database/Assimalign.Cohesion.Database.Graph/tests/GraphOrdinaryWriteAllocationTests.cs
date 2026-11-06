@@ -40,12 +40,12 @@ public sealed class GraphOrdinaryWriteAllocationTests
 
     private static void CheckTypedCeilings(long[] minima)
     {
-        minima[0].ShouldBeLessThanOrEqualTo(40_072 + 128);
-        minima[1].ShouldBeLessThanOrEqualTo(67_896 + 128);
-        minima[2].ShouldBeLessThanOrEqualTo(50_032 + 128);
+        minima[0].ShouldBeLessThanOrEqualTo(39_896 + 128);
+        minima[1].ShouldBeLessThanOrEqualTo(67_272 + 128);
+        minima[2].ShouldBeLessThanOrEqualTo(49_568 + 128);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - ordinary CREATE SET DELETE retain catalog v3 allocation minima (#1735, #1806)")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - ordinary CREATE SET DELETE retain strict-codec allocation minima (#1735, #1806)")]
     public async Task Execute_OrdinaryWrites_ShouldRetainBaseAllocations()
     {
         // Arrange / Act: a fresh process warms its own engine/session and measures on one thread.
@@ -54,7 +54,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
         // Do not treat the old offset as allocation headroom or attribute it to workers.
         var minima = await MeasureAsync(-1);
 
-        // Assert: catalog v3 fresh-process minima plus exactly 128 B of headroom.
+        // Assert: shared strict-codec fresh-process minima plus exactly 128 B of headroom.
         _output.WriteLine($"ordinary writes bytes/statement: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
         CheckCeilings(minima);
     }
@@ -89,9 +89,9 @@ public sealed class GraphOrdinaryWriteAllocationTests
     {
         // Native ARM64 and --arch x64 agree; each fixture takes the minimum over five
         // warmed 100-statement rounds. Keep exactly 128 B above those baselines.
-        minima[0].ShouldBeLessThanOrEqualTo(38_728 + 128);
-        minima[1].ShouldBeLessThanOrEqualTo(66_568 + 128);
-        minima[2].ShouldBeLessThanOrEqualTo(50_032 + 128);
+        minima[0].ShouldBeLessThanOrEqualTo(38_552 + 128);
+        minima[1].ShouldBeLessThanOrEqualTo(65_944 + 128);
+        minima[2].ShouldBeLessThanOrEqualTo(49_568 + 128);
     }
 
     private static async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024, bool typed = false)
@@ -102,6 +102,10 @@ public sealed class GraphOrdinaryWriteAllocationTests
             OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"));
         var start = new ProcessStartInfo(host)
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        // Pin optimized JIT code in this measurement child: background tiering changed CREATE
+        // by 144 B depending on whether a control allocation was injected. The measured ceilings
+        // preserve 128 B headroom and injected 129 B/1 KiB controls; ordinary execution keeps its defaults.
+        start.Environment["DOTNET_TieredCompilation"] = "0";
         start.ArgumentList.Add(fixture);
         start.ArgumentList.Add(typed ? "typed-allocations" : "allocations");
         start.ArgumentList.Add(injectedKind.ToString(CultureInfo.InvariantCulture));

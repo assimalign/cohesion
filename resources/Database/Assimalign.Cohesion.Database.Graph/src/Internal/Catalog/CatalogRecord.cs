@@ -17,7 +17,8 @@ internal sealed record CatalogRecord
     // growing every ordinary property/index record to carry the new variants. Boxed label/type
     // structs still cost less than retaining both nullable structs in every catalog record.
     private readonly GraphPropertyKeyMetadata? _property;
-    private readonly GraphIndexMetadata? _index;
+    private static readonly object _textIndex = new();
+    private readonly IndexFields? _index;
     private readonly object? _definition;
 
     public CatalogRecord(GraphLabelMetadata? label = null, GraphRelationshipTypeMetadata? relationshipType = null,
@@ -27,14 +28,17 @@ internal sealed record CatalogRecord
         _property = constraint is { } rule
             ? new GraphPropertyKeyMetadata(rule.DefinitionId, rule.PropertyKey, rule.Type) : property;
         _index = constraint is { } named
-            ? new GraphIndexMetadata(named.DefinitionId, named.Name, named.PropertyKey) : index;
-        _definition = (object?)graphType ?? (object?)nodeType ?? (object?)edgeType ?? (object?)label ?? relationshipType;
+            ? new IndexFields(named.DefinitionId, named.Name, named.PropertyKey)
+            : index is { } fields ? new IndexFields(fields.LabelId, fields.Name, fields.PropertyKey) : null;
+        _definition = (object?)graphType ?? (object?)nodeType ?? (object?)edgeType ?? (object?)label ?? (object?)relationshipType
+            ?? (index is { IsText: true } ? _textIndex : null);
     }
 
     public GraphLabelMetadata? Label => _definition is GraphLabelMetadata label ? label : null;
     public GraphRelationshipTypeMetadata? RelationshipType => _definition is GraphRelationshipTypeMetadata type ? type : null;
     public GraphPropertyKeyMetadata? Property => _index is null ? _property : null;
-    public GraphIndexMetadata? Index => _property is null ? _index : null;
+    public GraphIndexMetadata? Index => _property is null && _index is { } fields
+        ? new GraphIndexMetadata(fields.LabelId, fields.Name, fields.PropertyKey, ReferenceEquals(_definition, _textIndex)) : null;
     public GraphConstraintMetadata? Constraint => _property is { } property && _index is { } index
         ? new GraphConstraintMetadata(index.LabelId, index.Name, index.PropertyKey, property.Type) : null;
     public GraphTypeDeclaration? GraphType => _definition as GraphTypeDeclaration;
@@ -50,6 +54,8 @@ internal sealed record CatalogRecord
         ?? Label?.Name ?? RelationshipType?.Name ?? _index?.Name ?? _property!.Value.Name;
     internal DatabaseObjectOwner Owner => Label?.Owner ?? RelationshipType?.Owner ?? DatabaseObjectOwner.Adhoc;
     internal string? OwningSchema => Label?.OwningSchema ?? RelationshipType?.OwningSchema;
+
+    private readonly record struct IndexFields(Guid LabelId, string Name, string PropertyKey);
 
     private sealed class DebugView
     {

@@ -48,6 +48,12 @@ GQL selectors ANY/ALL, ANY/ALL SHORTEST and counted shortest paths/groups now pa
 EXPLAIN with endpoint-pair partitions and separate search prefilters
 under the statement work/memory budgets; see [selector execution](DESIGN.md#gql-path-selectors-execution-1734-gq-sp2sp3).
 
+CREATE TEXT INDEX builds ordinal, case-sensitive Unicode trigram postings for string equality,
+CONTAINS, STARTS WITH and ENDS WITH. Every seek rechecks the stored value; patterns shorter
+than three code points use a label scan. EXPLAIN reports the choice for bound parameters.
+Catalog v4 refuses earlier catalogs without writing; entity format remains 5. See
+[the text-index design](DESIGN.md#trigram-text-indexes-1644-ix-r1).
+
 `GraphSchema.Open` supplies session-bound label/type discovery, property metadata, ownership
 enforcement, database-wide node-property index names and independently named type/existence
 constraints. Named constraints validate existing data and share enforcement with property metadata;

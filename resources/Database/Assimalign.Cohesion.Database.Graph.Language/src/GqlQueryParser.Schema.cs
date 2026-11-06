@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 public sealed partial class GqlQueryParser
 {
     private bool IsSchemaStart() => (Is("CREATE") || Is("DROP")) &&
-        (IsWordAt(_position + 1, "INDEX") || IsWordAt(_position + 1, "CONSTRAINT") ||
+        (IsWordAt(_position + 1, "INDEX") || IsWordAt(_position + 1, "TEXT") || IsWordAt(_position + 1, "CONSTRAINT") ||
          IsWordAt(_position + 1, "LABEL") || IsWordAt(_position + 1, "RELATIONSHIP") ||
          IsWordAt(_position + 1, "UNIQUE") || IsWordAt(_position + 1, "CLOSED") ||
          IsWordAt(_position + 1, "GRAPH") && IsWordAt(_position + 2, "TYPE"));
@@ -16,8 +16,10 @@ public sealed partial class GqlQueryParser
         var start = Current;
         bool drop = Take("DROP");
         if (!drop) { Expect("CREATE"); }
+        bool text = !drop && Take("TEXT");
         GqlSchemaObjectKind kind;
-        if (Take("INDEX")) { kind = GqlSchemaObjectKind.Index; }
+        if (text) { Expect("INDEX"); kind = GqlSchemaObjectKind.Index; }
+        else if (Take("INDEX")) { kind = GqlSchemaObjectKind.Index; }
         else if (Take("CONSTRAINT")) { kind = GqlSchemaObjectKind.Constraint; }
         else if (Take("LABEL")) { kind = GqlSchemaObjectKind.Label; }
         else if (Take("RELATIONSHIP")) { Expect("TYPE"); kind = GqlSchemaObjectKind.RelationshipType; }
@@ -27,7 +29,7 @@ public sealed partial class GqlQueryParser
         { name = Identifier(allowKeyword: true); }
         bool conditional = Take("IF");
         if (conditional) { if (!drop) { Expect("NOT"); } Expect("EXISTS"); }
-        var command = new GqlSchemaCommand { Drop = drop, Kind = kind, Name = name, IfExists = conditional };
+        var command = new GqlSchemaCommand { Drop = drop, Kind = kind, IsText = text, Name = name, IfExists = conditional };
         if (!drop && kind is GqlSchemaObjectKind.Index or GqlSchemaObjectKind.Constraint)
         {
             Expect("FOR");

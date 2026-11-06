@@ -1,5 +1,96 @@
 # Graph engine design
 
+## Trigram text indexes (#1644, IX-R1)
+
+CREATE TEXT INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property) shares schema
+autocommit, ordinal names and token discovery with exact indexes. GraphIndexMetadata.IsText
+and its v4 kind-4 payload byte (0 exact, 1 text) identify the kind; malformed bytes use existing
+CG06006. Catalog v3 is refused with CG06019 through the recovered read-only gate, including
+WAL-only records, preserving every file. No legacy reader is present. The mutually exclusive catalog definition slot holds a shared
+text-kind tag in memory, preserving ordinary CatalogRecord size. Physical kind-3 index
+definitions reuse their existing revision word as the immutable discriminator (0 exact,
+1 text). Their layout and entity format 5 do not change. The catalog fence admits the new
+semantics before writable open. Exact and text indexes on one pair have separate tree ids.
+
+Tokens are rolling triples of Unicode scalar values without case folding or normalization;
+three 21-bit scalars occupy 63 bits, preceded by their code-point count. Short values have
+one length-tagged token, including the empty string. Distinct tokens are written once per
+node version. Keys are (token,node id); entry references locate the stored version and B-tree
+creator/deleter stamps use the existing no-payload insertion, cursor, undo and recovery API.
+An update tombstones every prior token and inserts the new version's tokens; deletes and
+label removal do the same. Backfill uses each node version's original creator stamp under
+the database writer lock, so it serves later readers without exposing pre-build snapshots.
+Concurrent writers wait through logical publication and then maintain the new tree.
+A Snapshot writer maintains both current trees and trees still visible to its older snapshot,
+including a dropped/replaced tree. It therefore sees its own new versions through the old
+plan while future readers use the replacement. Both commit and rollback are exercised.
+
+Planning considers string equality and positive conjunctive CONTAINS, ENDS WITH and STARTS
+WITH on required labels. A per-clause ordinal variable/property table collects text predicates
+once, keeping selection linear in predicates plus index definitions. Exact seeks retain their normal preference. Text seeks enumerate
+one token range, probe the remaining distinct tokens for the same node version (AND), and
+mandatorily recheck the stored string, label and identity. Recheck preserves position,
+multiplicity, order and ordinal case-sensitive semantics. Snapshot and statement-overlay
+versions use the same predicate. Parameter values bind anew for every execution; the anchor
+keeps the bound pattern and execution rechecks its eligibility before cursor open. Fewer
+than three code points uses a label scan. Patterns retain strict Unicode input validation. Supplementary pairs count once;
+combining marks remain separate. EXPLAIN exposes TextIndexSeek/LabelScan, parameter and
+execution-decision flags, AND, recheck and fallback. There is no scoring or SEARCH surface.
+
+Extraction consumes one work unit per code point. Before retaining a distinct token it
+reserves 256 bytes covering set capacity, key/change arrays and transaction undo; its set
+header reserves 128 bytes. Backfill separately charges entry capacity and owned keys, and
+insertion charges work. Seek token directories and bounded cursor batches share the same
+statement grant. Existing defaults are 1,000,000 work units and 256 MiB; CG05004/CG05020
+failures roll back all metadata, tokens and data. Typed node creates/deletes lazily start
+the same default statement grant when text indexes exist; raw GraphStore callers retain
+their existing caller-owned accounting contract. Multi-node DELETE keeps all posting/undo
+charges on the statement owner until completion, rather than releasing them per node. The unchanged single-record node cap
+(CG02009) bounds each value. The codec refuses a string whose UTF-16 length alone exceeds
+that cap before allocating its UTF-8 encoding: a 1 MiB property fails before posting insertion, with no
+unfindable row. GraphTextIndexTests records the 1 KiB unique-trigram page/entry cost. The codec shares its private,
+strict UTF-8 encoding instance, as the catalog codec does, to avoid per-record encoding objects
+while preserving invalid-input refusal and the original ordinary-write allocation ceilings.
+
+Maintenance retires an index only when all definition versions are absent or have creator
+and deleter stamps below the safe prune bound. Old snapshot pins therefore protect dropped
+trees. An orphan id must also be below that bound: ids are reserved after their creator,
+so a directory restoration followed by failed physical undo cannot retire an active creator's tree.
+Under the existing maintenance apply gate, the registration's root first becomes
+negative in a committed WAL bracket: its magnitude retains the old root identity and its
+sign is a durable retirement receipt. The manager then excludes that tree. Maintenance
+checks at most 64 queued candidates and frees at most 64 owner pages per pass using
+FreeOwnerPages(tree id, remaining grant). Each page batch commits separately; a final
+zero-page pass deletes the receipt. Open ignores retired roots, rejects receipts on fixed
+owners or on an undeleted definition, and requeues receipts/orphan registrations for cleanup.
+A partly reclaimed tree therefore never has to open its freed root. One FIFO and a membership
+set keep work bounded and retry failed/waiting candidates fairly. Manager reconstruction runs
+once after a retirement pass, including failure cleanup. Tree ids reserve past data owners
+0/1/2. This also collects abandoned builds after logical scrub. Exact trees use the same
+retirement path; fixed label/type/adjacency trees are excluded. Tests assert each batch bound
+and the exact total reclaimed owner-page count. Page reclamation is counted separately from
+the existing version-purge event's version count. No Indexing API or B-tree format assumption is added.
+
+Crash boundaries are label discovery, kind-4 catalog publication, property discovery, atomic
+backfill/tree-definition/registration publication, node/posting replacement or deletion,
+logical commit record before flush confirmation and confirmed commit; drop has catalog and
+physical-definition tombstones plus logical commit. Reclamation boundaries are the committed
+negative-root receipt, owner-page retyping before commit, confirmed page-batch commit,
+receipt deletion before commit and confirmed deletion. A large partial-batch image proves
+reopen works after the root is freed while owner pages remain. Fault-injecting storage
+captures each image and two reopens assert exact metadata,
+values and predicate results. Partial physical brackets restore their pages or receipt changes;
+abandoned logical creators and deleters scrub through the existing coordinator/index recovery.
+
+Reference behavior consulted without copying code, under C:/Source/repos/neo4j/neo4j:
+community/lucene-index/src/main/java/org/neo4j/kernel/api/impl/index/lucene/v10/
+Lucene10TrigramTokenStream.java:28-74 uses code points and short-value tokens;
+community/lucene-index/src/main/java/org/neo4j/kernel/api/impl/schema/trigram/
+TrigramIndexReader.java:65-67 requires the store filter. Cohesion deliberately scans short
+patterns as specified by the owner. The new internal helpers keep Storage's dependency
+boundary and the concrete-first Database rule; no public interface or assembly reference is
+added. Existing CG02009, CG05004, CG05020, CG06006 and CG06019 keep their conditions.
+
 ## Journal admission backstop (#1283, EN-C2)
 
 At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
@@ -125,9 +216,12 @@ their names, implied labels and properties before retention. Each element must f
 record (CG02009). The codec measures strict UTF-8 lengths before allocating an exact-sized payload
 buffer, so an oversized declaration does not first allocate its encoded bytes. Ordinary catalog
 definitions and graph-type variants share one object slot, keeping property/index records from
-growing for the new variants. Ordinary-write allocation guards are tightened to the v3 layout's
-lower fresh-process baselines, retaining 128 bytes of headroom and the injected-regression controls.
-Ordinary and typed-label write minima agree on win-arm64 and win-x64; typed writes have their
+growing for the new variants. Allocation measurement children pin DOTNET_TieredCompilation=0: background tiering otherwise
+shifted CREATE by 144 bytes depending on an injected control allocation. The shared strict
+UTF-8 codec lowers ordinary CREATE/SET/DELETE minima to 38,552/65,944/49,568 bytes and
+typed-label minima to 39,896/67,272/49,568 bytes. Every ceiling is tightened to its new minimum
+plus exactly 128 bytes; the 129-byte/1-KiB regression controls remain unchanged.
+These fresh-process minima agree on win-arm64 and win-x64; typed writes have their
 own allocation guard and injected control. Child measurement processes use the testhost's
 runtime root and assert the matching architecture, including under --arch x64.
 Publication reserves 512 bytes for the singleton type route and
@@ -140,7 +234,7 @@ discovers label/type/property tokens in the same logical transaction; dropping a
 those discoveries. Failed operations roll all new tokens back. The defaults remain 1,000,000
 work units and 256 MiB retained memory. Every grant unwinds on success, cancellation or failure.
 
-Catalog v3 adds kind 6 (current-type marker), 7 (node declaration) and 8 (edge declaration).
+Catalog v3 introduced kind 6 (current-type marker), 7 (node declaration) and 8 (edge declaration); v4 retains them.
 The private fixed GUID 672bf6e9-3491-4306-a153-2a0f4c0370ed routes only these kinds; it is never
 a graph token identity. Membership remains label-derived and graph entity format stays 5.
 Only changed or removed kind-7/8 records are tombstoned; only new or changed declarations are
@@ -157,12 +251,12 @@ replacement publishes the complete type. No independently committed metadata or 
 cache exists. Crash-image tests interrupt after tombstones, marker and each element publication,
 and check exact state on two successive reopens; the fault-injecting storage also supplies
 images at the logical commit record before flush confirmation and after confirmed replacement
-and drop. Version 2, including journal-only images, refuses with CG06019 through the
+and drop. Version 3, including journal-only images, refuses with CG06019 through the
 existing recovered read-only gate before any write. No upgrade or legacy reader is added.
 
 GraphTypeTests is the typed-schema and node-write conformance corpus; GraphTypeWireTests verifies
 node refusals and continued session use over InMemory and TCP. Catalog-format tests pin
-v3 for every existing record kind and byte-preserving v2 refusal. The NativeAOT sample exercises
+v4 for every existing record kind and byte-preserving v2 refusal. The NativeAOT sample exercises
 all five schema verbs and node enforcement. No new interface, assembly reference, wire message
 or EventSource is introduced. This follows the concrete-first Database rule (database-area.md).
 Local Neo4j shapes consulted without copying code: GraphType.scala:277-343 under
@@ -179,12 +273,12 @@ fragment replacement/default rules above are Cohesion's explicit API contract fo
 | CG03012 | A node write omits a required implied label |
 | CG04025 | A schema mutation is attempted inside an explicit transaction |
 | CG05004 / CG05020 | Schema work / retained-memory budget is exhausted |
-| CG06019 | A catalog record version differs from v3 |
+| CG06019 | A catalog record version differs from v4 |
 
 ## Refused opens preserve every file (#1744)
 
 GraphStore.EnsureIndexFormat and GraphCatalog.EnsureFormat read graph headers, index registrations
-and roots, and catalog v3 records. The engine validates these through Storage's recovered read-only
+and roots, and catalog v4 records. The engine validates these through Storage's recovered read-only
 view before acquiring writable file handles.
 A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
 committed and uncommitted crash records. Acceptance discards the probe, opens the original files
@@ -210,7 +304,7 @@ analysis, including correlated EXISTS and pattern comprehensions. Results, expli
 EXPLAIN performs the same admission and reports the same warnings without execution.
 
 The catalog maintains a property-name directory alongside its existing version directory, loaded
-from existing v3 records and updated on publication and undo. Resolution checks snapshot-visible
+from existing v4 records and updated on publication and undo. Resolution checks snapshot-visible
 writer stamps in memory, without decoding catalog records or scanning labels, types or entities.
 Entity records currently embed string keys; there is no separate property-token identity to consult.
 Unlabeled writes and undeclared keys on schema-owned definitions therefore save untyped kind-3
@@ -346,7 +440,7 @@ a named rule into an unnamed declaration. CreateConstraintAsync validates names,
 owner identities and supported types before statement admission, leaving an explicit transaction
 usable after a bad argument. D2 applies this order to the remaining schema mutations. Oversized encoded constraint metadata reports DatabaseException with CG02009.
 
-The catalog record codec is v3 for every kind (1 label, 2 relationship type, 3 property, 4 index,
+The catalog record codec is v4 for every kind (1 label, 2 relationship type, 3 property, 4 index,
 5 constraint, 6 current-type marker, 7 node type, 8 edge type). Its prefix remains writer/deleter u64 stamps, kind byte, version byte, GUID and
 length-prefixed UTF-8 name. Constraint payload is a length-prefixed UTF-8 property key followed
 by one type byte (255 for existence). Other payload layouts are unchanged. Earlier or future
@@ -371,7 +465,7 @@ records to refuse. No wire bytes, public interface or assembly boundary changes 
 | CG03009 | Duplicate constraint kind or incompatible property type rules |
 | CG03010 | Existing data violates a new named constraint |
 | CG04025 | Schema DDL inside an explicit transaction (Cohesion policy) |
-| CG06019 | Unsupported catalog record format; only v3 is admitted |
+| CG06019 | Unsupported catalog record format; only v4 is admitted |
 
 ## Schema text coordination (#1738, GQ-D2; #1249)
 
@@ -623,7 +717,7 @@ Each logical database owns `graph.dat`, `graph.log` and `graph.bak`, in the dire
 All records start with the
 shared 16-byte little-endian writer/deleter transaction stamp. The graph payload's byte 16 is the
 kind, byte 17 is format version 5, bytes 18–25 are a nonzero unsigned 64-bit identity and bytes
-26–33 hold the entity's increasing revision. Formats 1, 2, 3 and 4 are refused before logical recovery scrub,
+26–33 hold the entity's increasing revision (or the immutable 0 exact / 1 text discriminator for kind 3). Formats 1, 2, 3 and 4 are refused before logical recovery scrub,
 with CG06017 and the remedy to recreate the database; no upgrade path exists. Graph
 identities are reserved from the shared storage sequence allocator, so rollback does not recycle
 an identity. Database-local IDs must always be paired with the correct session.
@@ -634,7 +728,7 @@ an identity. Database-local IDs must always be paired with the correct session.
 | Owner 2, kind 1 | Common graph header, label count and (string, catalog GUID) pairs, then scalar property map |
 | Owner 2, kind 2 | Common graph header, source ID, target ID, catalog type GUID, type string, scalar property map |
 | Owner 2, kind 3 | Common graph header, indexed label and property key |
-| Owner 1, kind 4 | Zero stamps, kind/version, tree object ID, signed 64-bit root page; 34 bytes total |
+| Owner 1, kind 4 | Zero stamps, kind/version, tree object ID, signed root page (negative while retiring); 34 bytes total |
 
 Counts and fixed integers are little-endian. Strings use BinaryWriter's UTF-8 encoding with a
 7-bit encoded byte-length prefix. Property maps are ordered by ordinal key and preserve scalar
@@ -3532,7 +3626,7 @@ Property metadata supports an optional shared `DatabaseType` and a required flag
 uses these declarations for schema checks; the catalog does not inspect node content.
 Indexes carry a name and property key, and are nonunique. The physical tree identity and
 registration stay entirely in Graph.Storage. A catalog index save cannot silently retarget an
-existing name to another property.
+existing name to another property or index kind.
 
 #### Catalog: On-disk format
 
@@ -3547,12 +3641,12 @@ The payload begins at byte 16:
 | Offset / order | Encoding | Meaning |
 | --- | --- | --- |
 | 16 | byte | Kind: 1 label, 2 relationship type, 3 property key, 4 named index, 5 named constraint, 6 current graph type, 7 node type, 8 edge type |
-| 17 | byte | Format version 3 for every kind; earlier versions refuse with CG06019 before any write |
+| 17 | byte | Format version 4 for every kind; earlier versions refuse with CG06019 before any write |
 | 18 | 16 bytes | CLR `Guid.ToByteArray()` representation: definition ID for kinds 1/2, parent ID for kinds 3/4/5, private current-type GUID for kinds 6/7/8 |
 | 34 | string | Definition name, property key, or index name |
 | Following name, kinds 1/2 | byte, string | `DatabaseObjectOwner` value and owning schema |
 | Following name, kind 3 | byte, byte | Shared `DatabaseType` value (255 means unconstrained), required flag (0 or 1) |
-| Following name, kind 4 | string | Indexed scalar property key |
+| Following name, kind 4 | string + byte | Indexed property key, then kind (0 exact, 1 text) |
 | Following name, kind 5 | string, byte | Constrained property key and type (255 means existence) |
 | Following name, kind 6 | none | Marker name is CURRENT; distinguishes an empty type from no type |
 | Following name, kind 7 | int32, strings, properties | Implied-label count and labels, then property declarations |
@@ -3866,7 +3960,7 @@ cursor across replacement, commit/rollback and purge, asserts overlap counters, 
 one-node decode bound with unrelated nodes present after both tasks stop; interruption inside
 a mutation bracket is tested separately.
 
-Each label/property definition owns a B+Tree whose object ID is its durable definition
+Each exact label/property definition owns a B+Tree whose object ID is its durable definition
 identity. Keys consist of the shared `DatabaseKeyWriter` scalar encoding followed by
 the node identity as eight unsigned big-endian bytes. The scalar encoding is null,
 Boolean, ordinal UTF-16 big-endian string bytes, or Float64 for every numeric CLR type.
@@ -3890,11 +3984,13 @@ candidate range by node identities zero and `UInt64.MaxValue`; the identity suff
 also makes a heavily repeated property value safe across B+Tree leaf splits.
 
 Index creation backfills visible nodes under the database writer lock and preserves
-source record stamps. Every subsequent node create/update/delete maintains all current
-definitions in its transaction. Dropping an index tombstones its logical definition;
-older snapshots retain the tree and their view. This MVP retains dropped physical trees
-for later reclamation rather than recycling them while snapshots may still reference
-them. An exact seek costs `O(log N + k)` index work for `k` candidates, including numeric projection
+source record stamps. Every subsequent node create/update/delete maintains current trees
+and trees visible to a Snapshot writer's older view. Dropping an index tombstones its logical
+definition; old snapshot pins retain the tree. After the safe prune bound passes the drop,
+maintenance marks its registration for retirement, frees at most 64 owner pages per pass,
+and removes the receipt once empty; reopen resumes incomplete retirement. Text indexes use
+the same ownership, maintenance and recovery paths with trigram keys and mandatory stored
+rechecks, described above. An exact seek costs `O(log N + k)` index work for `k` candidates, including numeric projection
 collisions and retained versions; ordering its `m` visible matches adds `O(m log m)` CPU work.
 
 #### Storage: Atomicity, conflicts and recovery
