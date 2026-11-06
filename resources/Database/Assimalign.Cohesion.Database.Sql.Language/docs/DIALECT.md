@@ -2270,6 +2270,15 @@ columns: SELECT b.* FROM a NATURAL LEFT JOIN b ORDER BY x DESC NULLS LAST sorts 
 the merged x here, whereas PostgreSQL sorts by the output b.x.
 A SELECT or RETURNING target list is limited to 1,664 entries after expansion; CS05097
 (54011) names the limit and attempted count before retaining an oversized target list.
+The parser also limits each syntactic target list to 1,664 entries, across all query bodies
+and INSERT/UPDATE/DELETE/MERGE RETURNING. At entry 1,665 it reports one located CS05097,
+abandons the remaining text without tokenizing it, places the lexer at EOF, and discards the partial
+tree. Whole-text lexical/capability diagnostics are deferred until parsing completes and are
+not built for that abandoned text; the lexer retains no tokens or input span after refusal.
+Supported text sources cannot expand a star to zero columns: stored tables and views require
+at least one live column, DROP COLUMN refuses the last, derived queries require a target,
+and a FROM-less star fails CS05013. The syntactic bound counts every star independently of
+its eventual width; binder checks still enforce expanded width for accepted syntax and ASTs.
 The same limit covers derived/CTE bodies, compound operands and view expansion.
 Grouped wildcard projections retain the existing CS05017 wildcard boundary. Row-valued uses,
 including COUNT(t.*), remain CK00001. UPDATE FROM, DELETE USING and MERGE USING do not

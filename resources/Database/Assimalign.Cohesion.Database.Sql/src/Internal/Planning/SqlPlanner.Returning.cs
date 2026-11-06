@@ -6,21 +6,18 @@ using Assimalign.Cohesion.Database.Language;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    // PostgreSQL parse_node.c:79-83 uses MaxTupleAttributeNumber (1,664).
-    private const int targetListLimit = 1664;
-    internal const string TargetListLimitCode = "CS05097";
-
     private static void CheckTargetList(int count, int additional, Location? location)
     {
-        if (additional > targetListLimit - count)
+        if (additional > SqlTargetListLimits.MaximumTargets - count)
         {
-            throw new SqlPlanningException(TargetListLimitCode, string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.TargetListLimit, targetListLimit, (long)count + additional), location);
+            throw new SqlPlanningException(SqlTargetListLimits.Code, string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.TargetListLimit, SqlTargetListLimits.MaximumTargets, (long)count + additional), location);
         }
     }
 
@@ -30,7 +27,7 @@ internal sealed partial class SqlPlanner
         int required = targets.Count + additional;
         if (targets.Capacity < required)
         {
-            targets.Capacity = Math.Min(targetListLimit, Math.Max(required, Math.Max(4, targets.Capacity * 2)));
+            targets.Capacity = Math.Min(SqlTargetListLimits.MaximumTargets, Math.Max(required, Math.Max(4, targets.Capacity * 2)));
         }
     }
 
@@ -75,7 +72,7 @@ internal sealed partial class SqlPlanner
     private List<SqlProjection> BindProjections(IReadOnlyList<SqlSelectColumn> selectColumns,
         IReadOnlyList<SqlCatalogColumn> columns, SqlExpressionEvaluator evaluator, IReadOnlyList<int>? outputOrdinals = null)
     {
-        var projections = new List<SqlProjection>(Math.Min(selectColumns.Count, targetListLimit));
+        var projections = new List<SqlProjection>(Math.Min(selectColumns.Count, SqlTargetListLimits.MaximumTargets));
         foreach (var column in selectColumns)
         {
             if (column.Expression is SqlStarExpression)

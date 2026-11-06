@@ -187,4 +187,7 @@
   <data name="NaturalCrossJoin" xml:space="preserve">
     <value>NATURAL CROSS JOIN is not valid join syntax.</value>
   </data>
+  <data name="TargetListLimit" xml:space="preserve">
+    <value>A target list can have at most {0} entries; this expansion reaches {1} entries.</value>
+  </data>
 </root>

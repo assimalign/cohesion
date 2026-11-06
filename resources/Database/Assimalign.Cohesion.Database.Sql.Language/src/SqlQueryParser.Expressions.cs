@@ -1053,11 +1053,12 @@ public sealed partial class SqlQueryParser
         // The vocabulary stores uppercase display names; quoted built-ins use lowercase lookup names.
         if ((!quoted || string.Equals(name, name.ToLowerInvariant(), StringComparison.Ordinal)) && SqlUnsupportedVocabulary.IsFunction(name))
         {
-            if (!SqlUnsupportedVocabulary.IsWindowFunction(name) || _preflightClauseStart < 0)
-            {
-                AddUnsupportedSurfaceDiagnostic(pos, pos + name.Length + (quoted ? 2 : 0),
-                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserParseFunctionCallArgsVoid, name.ToUpperInvariant()));
-            }
+            // A deferred capability diagnostic takes precedence over an unsupported window
+            // function's generic refusal, as the earlier preflight scan did.
+            if (SqlUnsupportedVocabulary.IsWindowFunction(name))
+            { (_windowFunctionDiagnostics ??= []).Add(_parseDiagnostics.Count); }
+            AddUnsupportedSurfaceDiagnostic(pos, pos + name.Length + (quoted ? 2 : 0),
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserParseFunctionCallArgsVoid, name.ToUpperInvariant()));
             SkipParenthesized(ref lexer);
             SkipCallExtensions(ref lexer);
             return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, pos + name.Length));

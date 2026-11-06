@@ -38,6 +38,9 @@ public sealed partial class SqlQueryParser
         // OLD/NEW are contextual pseudo-relations only when a visible relation does not mask them
         // (PostgreSQL src/backend/parser/analyze.c:2773-2786). Keep quoted identifiers ordinary.
         var scan = lexer;
+        if (IsAtEnd(ref lexer)) { AddExpectedDiagnostic(ref lexer, "a RETURNING expression"); return []; }
+        var columns = ParseSelectColumns(ref lexer, qualifiedStar: false);
+        if (_targetListDiagnostic >= 0) { return columns; }
         bool afterDot = false;
         while (!IsAtEnd(ref scan) && scan.Current.Type != TokenType.Semicolon)
         {
@@ -63,8 +66,6 @@ public sealed partial class SqlQueryParser
             if (!scan.MoveNext()) { break; }
         }
 
-        if (IsAtEnd(ref lexer)) { AddExpectedDiagnostic(ref lexer, "a RETURNING expression"); return []; }
-        var columns = ParseSelectColumns(ref lexer, qualifiedStar: false);
         if (IsWord(ref lexer, "INTO"))
         {
             RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length, "RETURNING ... INTO");

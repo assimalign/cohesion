@@ -642,6 +642,14 @@ Star aliases are discarded as in PostgreSQL parse_target.c:148-152. A star follo
 a row-expression operator keeps the QualifiedStarContext CK00001 refusal. NATURAL never
 consumes ON, allowing INSERT SELECT ON CONFLICT and retaining syntax errors elsewhere.
 
+The parser and binder share the internal SqlTargetListLimits constants through the existing
+Types source module. ParseSelectColumns covers every SELECT body and RETURNING list; it
+caps both count and backing capacity at 1,664, reports located CS05097 before parsing entry
+1,665, then resets the lexer to EOF without scanning the tail and discards the partial tree. Lexical/capability scans
+run after a bounded parse, with their original diagnostic precedence and parameter refinements;
+an abandoned list does not allocate scan diagnostics or retain tokens for its tail. Supported
+sources cannot have zero visible columns (DIALECT records the catalog and FROM-less boundaries).
+
 ## System relation joins (#1106)
 
 The FROM join-tree grammar accepts stored tables and registered

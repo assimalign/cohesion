@@ -16,12 +16,11 @@ public sealed partial class SqlQueryParser
         var relation = ParseRelationReference(ref lexer);
         var source = new SqlFromItem(relation, ParseJoinClauses(ref lexer, mergeSource: true));
         RejectNaturalDmlSources([source]);
-        // An unconsumed source suffix already covered by preflight owns the refusal;
-        // avoid cascading missing ON/WHEN diagnostics from the abandoned source.
-        if (lexer.Current.Position == _preflightClauseStart)
+        // The deferred capability scan may own an unconsumed source suffix. Remember where
+        // its recovery begins so ParseCore can discard cascading ON/WHEN errors in that case.
+        if (!IsWord(ref lexer, "ON"))
         {
-            return new(table, source, new SqlLiteralExpression("NULL", SqlLiteralType.Null, null), [], null,
-                Location.Create(1, 1, start, _lastTokenEnd));
+            _mergeSourceRecovery = (lexer.Current.Position, _parseDiagnostics.Count);
         }
         ExpectKeyword(ref lexer, "ON", "ON after the MERGE source");
         var condition = ParseExpression(ref lexer);

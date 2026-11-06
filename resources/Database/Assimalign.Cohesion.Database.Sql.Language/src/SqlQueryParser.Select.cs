@@ -4,6 +4,7 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 public sealed partial class SqlQueryParser
@@ -219,6 +220,30 @@ public sealed partial class SqlQueryParser
         while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
         {
             Advance(ref lexer);
+            if (columns.Count == SqlTargetListLimits.MaximumTargets)
+            {
+                _targetListDiagnostic = _parseDiagnostics.Count;
+                _parseDiagnostics.Add(new Diagnostic
+                {
+                    Code = SqlTargetListLimits.Code,
+                    Message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.TargetListLimit, SqlTargetListLimits.MaximumTargets, columns.Count + 1),
+                    Start = lexer.Current.Position,
+                    End = CurrentTokenEnd(ref lexer),
+                    Severity = DiagnosticSeverity.Error,
+                    Location = DiagnosticLocation.Absolute,
+                });
+                // The statement is refused. Drop the borrowed lexer input and put it at EOF
+                // without tokenizing, building expressions or diagnosing the abandoned tail.
+                lexer = default;
+                lexer.MoveNext();
+                _lastTokenEnd = _sourceText.Length;
+                break;
+            }
+            if (columns.Capacity == columns.Count)
+            {
+                columns.Capacity = System.Math.Min(SqlTargetListLimits.MaximumTargets, columns.Capacity * 2);
+            }
             columns.Add(ParseSingleSelectColumn(ref lexer, qualifiedStar));
         }
 

@@ -1712,6 +1712,10 @@ explicit lists before grouped, constant or window projection arrays can be built
 recursive outputs inherit their already bounded operand width. Physical join inputs are
 not target lists. These bind-time guards protect allocations independently of the
 execution memory ledger.
+The parser applies the same internal constants from the existing shared Types module to every
+SELECT and RETURNING list before constructing target 1,665, then resets the lexer to EOF and discards
+the partial tree. Deferred whole-text diagnostic scans do not allocate for the abandoned tail;
+whole text-to-refusal allocation tests cover 16 MiB qualified, explicit, view and RETURNING lists.
 Backing capacities are also capped at 1,664; bounded scalar lists and set operands allocate
 their known count, and star/name lists grow only after admission with clamped capacity.
 
