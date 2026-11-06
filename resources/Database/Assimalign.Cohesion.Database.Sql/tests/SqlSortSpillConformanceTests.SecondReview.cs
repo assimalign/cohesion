@@ -142,7 +142,39 @@ public sealed partial class SqlSortSpillConformanceTests
         _output.WriteLine($"DECODED_READER_PROBE|workspace={3 * Sorted(result)!.BufferBytes}|live={live}|allowance={allowance}|third_refused={failure is not null}");
         failure.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics[0].Code.ShouldBe("CS05067"); ReaderBytes(result).ShouldBe(admitted);
         live.ShouldBeLessThanOrEqualTo(allowance);
-        (await first.MoveNextAsync()).ShouldBeTrue(); (await second.MoveNextAsync()).ShouldBeTrue();
+        // Concurrent readers publish Current before leaving the decoding gate, so their
+        // previous rows cannot accumulate multiple uncharged old/new overlaps.
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        using var attempted = new ManualResetEventSlim(); int publications = 0;
+        Task<bool>? firstAdvance = null, secondAdvance = null;
+        SqlRowCollector.ObserveSpill = phase =>
+        {
+            if (phase == "reader-publish" && Interlocked.Increment(ref publications) == 1)
+            { entered.Set(); release.Wait(ceiling.Token); }
+        };
+        try
+        {
+            firstAdvance = Task.Run(async () => await first.MoveNextAsync()); entered.Wait(ceiling.Token);
+            secondAdvance = Task.Run(async () => { attempted.Set(); return await second.MoveNextAsync(); }); attempted.Wait(ceiling.Token);
+            bool acquired = Monitor.TryEnter(SpillReaderGate(result));
+            if (acquired) { Monitor.Exit(SpillReaderGate(result)); }
+            acquired.ShouldBeFalse();
+            long overlapLive = GC.GetTotalMemory(true) - baseline;
+            _output.WriteLine($"DECODED_PUBLICATION|live={overlapLive}|allowance={allowance}|gate_held=true|paused_decodes=1");
+            overlapLive.ShouldBeLessThanOrEqualTo(allowance);
+        }
+        finally
+        {
+            release.Set();
+            try
+            {
+                if (firstAdvance is not null) { (await firstAdvance.WaitAsync(ceiling.Token)).ShouldBeTrue(); }
+                if (secondAdvance is not null) { (await secondAdvance.WaitAsync(ceiling.Token)).ShouldBeTrue(); }
+            }
+            finally { SqlRowCollector.ObserveSpill = null; }
+        }
+        publications.ShouldBe(2);
         first.Current.GetString(1)!.Length.ShouldBe(3900000); second.Current.GetString(1)!.Length.ShouldBe(3900000);
         _output.WriteLine($"DECODED_READERS|workspace={2 * Sorted(result)!.BufferBytes}|charged={admitted}|live={live}|allowance={allowance}|readers=2");
     }
@@ -247,6 +279,9 @@ public sealed partial class SqlSortSpillConformanceTests
         factory.Connects.ShouldBe(2);
         (await replacement.QueryAsync("SELECT 1", cancellationToken: ceiling.Token)).Count.ShouldBe(1);
     }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_gate")]
+    private static extern ref object SpillReaderGate(SqlSpilledResultSet result);
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_socket")]
     private static extern ref Socket TcpSocket([UnsafeAccessorType("Assimalign.Cohesion.Connections.Tcp.Internal.TcpConnection, Assimalign.Cohesion.Connections.Tcp")] object connection);

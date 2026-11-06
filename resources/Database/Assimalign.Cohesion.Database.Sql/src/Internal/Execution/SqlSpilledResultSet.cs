@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>Fully evaluated root outputs; only byte merging and decoding remain during delivery.</summary>
 [System.Diagnostics.DebuggerDisplay("SQL spilled result")]
 [System.Diagnostics.DebuggerTypeProxy(typeof(SqlSpilledResultSet.DebugView))]
-internal sealed class SqlSpilledResultSet : DatabaseResultSet
+internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
 {
     private readonly object _gate = new();
     private readonly IReadOnlyList<DatabaseColumn> _columns;
@@ -155,22 +154,8 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
         finally { metrics.ReleasePlainSelectMemory(scratch); }
     }
 
-    public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var cursor = Open(cancellationToken);
-        try
-        {
-            long skip = _offset, left = _limit;
-            while (left != 0 && Read(cursor, cancellationToken, out var row))
-            {
-                if (skip > 0) { skip--; continue; }
-                if (left > 0) { left--; }
-                yield return new SqlMaterializedRow(row!);
-            }
-        }
-        finally { lock (_gate) { if (_readers.Remove(cursor)) { _readerBytes -= cursor.ReservedBytes; } cursor.Dispose(); } }
-        await Task.CompletedTask.ConfigureAwait(false);
-    }
+    public override IAsyncEnumerable<DatabaseRow> GetRowsAsync(CancellationToken cancellationToken = default)
+        => new Rows(this, cancellationToken);
 
     private void ValidateFirstReader()
     {
@@ -268,6 +253,7 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
         private readonly StorageTempSortReader? _sorted;
         private readonly StorageTempRunReader? _reader;
         private byte[] _row = [];
+        internal DatabaseRow? Current { get; set; }
         internal long ReservedBytes { get; }
         internal Cursor(StorageTempSortReader sorted, long bytes = 0) { _sorted = sorted; ReservedBytes = bytes; }
         internal Cursor(StorageTempRun run, long bytes = 0) { _reader = run.OpenReader(StorageTempSpace.PageSize); _row = new byte[run.MaximumRecordLength]; ReservedBytes = bytes; }
@@ -276,7 +262,7 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
             if (_sorted is not null) { bool next = _sorted.MoveNext(token); value = _sorted.Value; return next; }
             bool found = _reader!.TryRead(_row, out int length, token); value = _row.AsMemory(0, length); return found;
         }
-        public void Dispose() { _sorted?.Dispose(); _reader?.Dispose(); _row = []; }
+        public void Dispose() { Current = null; _sorted?.Dispose(); _reader?.Dispose(); _row = []; }
         private sealed class DebugView { public DebugView(Cursor target) { } }
     }
     private sealed class DebugView { public DebugView(SqlSpilledResultSet target) { } }

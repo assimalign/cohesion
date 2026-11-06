@@ -97,7 +97,9 @@ The session caps undisposed spilled results at eight, refusing CS05067 before a 
 spill. Callers must dispose results even after enumeration completes or is cancelled.
 After evaluation the owning merge keeps files only, without its template workspace. Active
 reader workspace plus the maximum decoded output row per reader is bounded by the result grant,
-with one additional maximum decoded row reserved for old/new decoding overlap. The maximum
+with one additional maximum decoded row reserved for old/new decoding overlap. Decoding and
+publishing each reader's Current share the result gate, so concurrent readers cannot retain
+multiple unpublished overlaps. The maximum
 comes from actual cells, including aligned UTF-16 strings, both CHAR strings, separate boxes
 and duplicate cells, rather than encoded record length. A statement whose first reader plus
 this overlap cannot fit refuses CS05067 before publication; a returned result always admits
