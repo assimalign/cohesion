@@ -20,10 +20,11 @@ internal sealed partial class SqlPlanExecutor
     /// use the same captured statement snapshot, including every index cursor.
     /// Table intent locks protect definitions; MVCC readers need no FK row locks.
     /// </summary>
-    private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         SqlSelectMemory matchBytes = default;
         long derivedBytes = 0;
+        List<object?[]>? matches = null;
         try
         {
             Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
@@ -50,7 +51,9 @@ internal sealed partial class SqlPlanExecutor
 
             var sharedColumns = new bool[plan.Columns.Count];
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
-            var matches = new List<object?[]>();
+            var sourceOwner = spillOwner is not null && HasSequenceProjection(plan.Projections) && !OrderingUsesSequence(plan.Projections, plan.OrderByProjections?.Values)
+                ? null : spillOwner;
+            matches = new List<object?[]>();
             await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -62,32 +65,39 @@ internal sealed partial class SqlPlanExecutor
                         memory.Retain(row);
                         memory.Reserve(32);
                     }
-                    RetainSelectRow(ref matchBytes, row, includeWindow: true);
-                    matches.Add(row);
+                    if (RetainStagedSortSource(matches, row, ref matchBytes, plan.OrderBy,
+                        sourceOwner, cancellationToken)) { matches.Add(row); }
                 }
             }
 
             _definitions.ObserveSelectRetention?.Invoke("join-matches", false, matches.Count);
+            if (SqlStagedSortSource.For(matches) is { } spooled)
+            {
+                return MaterializeStagedSort(spooled, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset, plan.IsDistinct,
+                    evaluator, plan.OrderByProjections, cancellationToken,
+                    plan.OrderByProjections is not { Count: > 0 } && plan.Projections.Any(p => ContainsVolatileCall(p.Value)));
+            }
             if (_subqueryValues is { HasCorrelatedQueries: true })
             {
                 return await MaterializeCorrelatedSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
                     plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
             }
             return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-                plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+                plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken, spillOwner: spillOwner);
         }
-        finally { ReleaseSelectMemory(ref matchBytes); ReleaseSelectMemory(ref derivedBytes); }
+        catch (Exception exception) { if (matches is not null) { SqlStagedSortSource.ReleaseAfterFailure(matches, exception); } throw; }
+        finally { if (matches is not null) { SqlStagedSortSource.Release(matches); } ReleaseSelectMemory(ref matchBytes); ReleaseSelectMemory(ref derivedBytes); }
     }
 
     private async ValueTask<DatabaseResult> ExecutePipelinedJoinAsync(SqlJoinPlan plan,
-        SqlStatementContext statement, CancellationToken cancellationToken, int? retainRows = null)
+        SqlStatementContext statement, CancellationToken cancellationToken, int? retainRows = null, SqlDatabaseSession? spillOwner = null)
     {
         var (derivedRows, derivedBytes) = await PrepareJoinInputsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
         try
         {
             var sharedColumns = new bool[plan.Columns.Count];
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
-            return await ProjectJoinRowsAsync(plan, statement, sharedColumns, derivedRows, evaluator, cancellationToken, retainRows).ConfigureAwait(false);
+            return await ProjectJoinRowsAsync(plan, statement, sharedColumns, derivedRows, evaluator, cancellationToken, retainRows, spillOwner).ConfigureAwait(false);
         }
         finally { ReleaseSelectMemory(ref derivedBytes); }
     }
@@ -254,6 +264,7 @@ internal sealed partial class SqlPlanExecutor
                                     buffer.Add(item);
                                 }
                                 buffered[level].Rows = buffer;
+                                SqlRowCollector.ObserveBuffer?.Invoke("join-inner", buffer);
                             }
                             candidates = buffered[level].Rows!;
                         }

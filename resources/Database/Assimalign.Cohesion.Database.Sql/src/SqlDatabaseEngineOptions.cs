@@ -60,7 +60,10 @@ public sealed class SqlDatabaseEngineOptions
     /// Plain ON DELETE CASCADE closures charge about 840 bytes per two-column row: the default
     /// 64 MiB grant caps such a closure at about 79,900 rows, less when other work retains memory.
     /// A 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget.
-    /// Budget exhaustion refuses the statement. CTAS publishes only after all copying succeeds; query buffers do not spill yet.</remarks>
+    /// Budget exhaustion refuses the statement unless an eligible root plain SELECT ORDER BY or ordered DISTINCT hands off to configured temporary space.
+    /// Nested plans, window/recursive/CTAS/DML sources, grouping sets and ordered sequence deferral retain their current memory policy.
+    /// Spill requires fixed ordering collations, supported codecs and a remaining grant whose bound (grant - 32768) / 16 - 8192 holds each encoded record.
+    /// CTAS publishes only after all copying succeeds.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>Gets or sets a dedicated spill directory. File engines default to RootPath/.cohesion-temp;
@@ -84,7 +87,7 @@ public sealed class SqlDatabaseEngineOptions
 
     /// <summary>Gets or sets the statement's physical temporary-byte quota. Null uses four times
     /// StatementMemoryBudget, saturating at Int64.MaxValue. Zero refuses growth. Must be nonnegative.
-    /// SQL operators retain their existing CS05067 memory-budget refusal.</summary>
+    /// Eligible root SELECT sorts spill; other SQL buffers retain their CS05067 memory-budget refusal.</summary>
     public long? StatementTempSpaceQuota { get; set; }
 
     /// <summary>

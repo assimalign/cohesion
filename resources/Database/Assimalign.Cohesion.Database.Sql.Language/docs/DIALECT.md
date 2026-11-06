@@ -1,5 +1,49 @@
 # The Declared SQL Dialect
 
+## Root ORDER BY and ordered DISTINCT spilling (#1789, SQ-L2b)
+
+At the root of a plain SELECT, ORDER BY and ordered DISTINCT may use temporary runs when
+the statement grant would refuse. Stable ties, DISTINCT's first sorted representative,
+volatile/sequence evaluation, access paths and pagination are unchanged. In-memory engines
+need an explicit TempDirectory; file engines use their configured temp space. Fitting sorts
+retain their existing path. OFFSET + LIMIT heaps can spill too; delivered results decode
+lazily and can be read repeatedly or concurrently until disposed, the session closes, or
+the engine is disposed. A later statement does not invalidate them. Callers of ExecuteAsync
+must dispose results, including after completing or cancelling an enumeration. Cancellation
+releases only that enumeration's cursor. A real temporary read failure releases the result
+and every reader observes the same coded failure. A session permits eight undisposed spilled
+results; a further spill refuses CS05067 until one is disposed. Active reader workspace and retained decoded rows per
+result, including one row of decoding overlap, cannot exceed its sort grant. A new reader that would exceed it refuses CS05067 at
+its first MoveNextAsync, reporting live and requested bytes without affecting other readers.
+
+CS05067 remains for nested/subquery, derived/CTE operand bodies, correlated frames,
+recursion, windows, CTAS, grouping sets, SQL/JSON statements, deferred subqueries,
+plain ordered index scans without DISTINCT, ordered aggregates, ordered sequence deferral, and
+buffers belonging to operators preceding the root sort that have no handoff.
+Window and SQL/JSON owners keep their specific grant codes when they fill first.
+DML sources gain no spill permission. INSERT SELECT's existing source-budgeting gap
+is tracked by #1828 and is unchanged here. Spill also refuses CS05067 without temp space,
+for a nonfixed ordering collation, an unsupported
+row/key family, a binary value returned by an application function (including through CASE
+or a projected cell), or a row above the record bound. Binary columns, binary parameters and
+built-in binary results remain eligible. Fitting statements keep their existing results.
+A statement also refuses before publication if one reader and its maximum decoded row,
+including decoding overlap, would exceed the grant. For grant G the bound is
+(G - 32768) / 16 - 8192 bytes, including key, row and 16 framing bytes; G must be at least
+65,536 and the bound at least 16. Ordered DISTINCT's seen set must itself fit the grant.
+
+The default physical statement quota remains four grants. Ten grants of 20- and
+50-character ASCII rows complete; 20 three-byte characters fit six grants but seven
+refuse CK05002 (6.66 grants of payload before rounding). Width, framing, run tails and
+intermediate merges determine capacity. CK05001 (engine quota), CK05002 (statement quota),
+CK05003 (free-space reserve), CK05004 (temp integrity), CK05005 (unavailable temp I/O) and
+CK05006 (sort record bound) are located statement/delivery errors and release temporary
+files without taking the database offline or aborting an explicit transaction. Temporary
+close failures retain CK05005 during evaluation; cleanup after completed wire delivery
+is counted by storage and does not replace completion. EXPLAIN changes no fields; EXPLAIN ANALYZE
+adds spilled_bytes, spill_peak_bytes, spill_runs and spill_merge_passes only after a spill.
+SqlSortSpillConformanceTests is the executable differential, lifetime, memory and wire corpus.
+
 ## COPY TO STDOUT (#1724, SQ-C1)
 
 `COPY table [(column, ...)] TO STDOUT [WITH] [(option, ...)]` exports a physical table
@@ -2727,8 +2771,8 @@ sorts every input and projects every row before LIMIT 0 discards them, and a
 grouped query whose ORDER BY is correlated evaluates every group's HAVING and
 projection (but no ORDER BY key).
 DISTINCT still completes
-before pagination. Results remain fully evaluated before delivery; ordered index
-access and spillable sorting are separate work.
+before pagination. Results remain fully evaluated before delivery; ordered index access removes eligible sorts
+and eligible root sorts spill as described above.
 
 For ordinary SELECT ordering without output-alias or ordinal dependencies,
 nonvolatile projections and keys evaluate together in input order, projection
@@ -5427,7 +5471,8 @@ keep that owner. An independent cache first materialized in a window remains cha
 the statement. When plain bytes fill the grant first, refusal reports CS05067, including statements whose
 earlier ledger would later refuse with CS05079 or CS05094. With no plain bytes live, window
 and SQL/JSON grant refusals retain their specific code. Statement memory refusal aborts input
-immediately, including input with a later error. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
+immediately, including input with a later error, except when an eligible root sort hands
+its retained rows to temporary storage and continues under the same grant. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
 buffer owner by reference identity, plus a fixed 64 B per distinct wide-cell map entry
 (#1776, SQ-L1c). Further references pay their array slots; smaller cells still pay per
 reference. Equal but separate objects, including binary clones, each pay. Output and ordering

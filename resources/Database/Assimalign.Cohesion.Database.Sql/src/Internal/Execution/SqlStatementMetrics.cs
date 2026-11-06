@@ -312,8 +312,7 @@ internal sealed class SqlStatementMetrics
     {
         if (bytes > budget - _memoryBytes)
         {
-            throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, budget));
+            throw SqlExecutionException.StatementMemoryBudget(budget);
         }
         _memoryBytes += bytes;
         _peakMemoryBytes = Math.Max(_peakMemoryBytes, _memoryBytes);

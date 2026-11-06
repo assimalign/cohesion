@@ -16,6 +16,10 @@ flowchart LR
     Models --> Storage["Database.Storage"]
 ```
 
+The sql-spill-stop mode executes and starts delivering a real spilled root SELECT, then
+reports readiness while its result remains live. The parent kills it without cleanup and
+asserts that the next SQL engine open sweeps temporary files and recovers all committed rows.
+
 The fixture adds no shipped API or on-disk format. Each model test imports the common
 FormatProbeTests.targets to build/copy the executable; its csproj explicitly links the test-only process helper.
 

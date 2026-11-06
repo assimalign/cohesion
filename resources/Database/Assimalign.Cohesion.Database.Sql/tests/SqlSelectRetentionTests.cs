@@ -101,6 +101,10 @@ public sealed partial class SqlSelectRetentionTests
                     Check(() => capturedPeak.ShouldBe(1752));
                     _output.WriteLine($"PEAK_FINDING|seed={seed}|{row.Sql}|base={basePeak}|pipeline={capturedPeak}");
                 }
+                else if (row.Sql == "SELECT DISTINCT k FROM t ORDER BY id DESC LIMIT 1")
+                {
+                    Check(() => basePeak.ShouldBe(1120)); Check(() => capturedPeak.ShouldBe(608));
+                }
                 else { Check(() => capturedPeak.ShouldBeLessThanOrEqualTo(basePeak, row.Sql)); }
                 if (row.Pipelines.Length == 0) { Check(() => capturedPeak.ShouldBe(basePeak, row.Sql)); }
                 Check(() => pipelined.ShouldBe(baseline, $"seed={seed}; transport={transport}; {row.Sql}"));
@@ -270,7 +274,8 @@ public sealed partial class SqlSelectRetentionTests
         yield return Pipeline("SELECT DISTINCT nextval('s') FROM t LIMIT 1", "distinct");
         yield return Pipeline("SELECT DISTINCT nextval('s') FROM t LIMIT 0", "distinct");
         yield return Pipeline("SELECT DISTINCT 10/(id-2) FROM t LIMIT 1", "distinct") with { Fails = true };
-        yield return Fallback("SELECT DISTINCT k FROM t ORDER BY id DESC LIMIT 1", "distinct");
+        // An ordered index already supplies representative order; #1789 keeps only the seen set.
+        yield return Pipeline("SELECT DISTINCT k FROM t ORDER BY id DESC LIMIT 1", "distinct");
         yield return Pipeline("SELECT EXISTS(SELECT record_call(id) FROM t)", "subquery-body");
         yield return Pipeline("SELECT EXISTS(SELECT a.id FROM t a JOIN u b ON a.k=b.k WHERE record_call(a.id)>0)", "subquery-body", "join-matches");
         yield return Pipeline("SELECT (SELECT a.id FROM t a JOIN u b ON a.k=b.k WHERE record_call(a.id)>0)", "subquery-body", "join-matches") with { Fails = true };

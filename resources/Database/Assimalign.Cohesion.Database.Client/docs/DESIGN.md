@@ -102,6 +102,13 @@ protected `MarkResponseComplete` before it throws. An exchange that supplies no
 evidence is discarded after failure. Successful return already guarantees a complete
 response, so a successful exchange never marks anything. Framing violations,
 transport failure, and an unfinished response invalidate the connection.
+An exchange cancellation also aborts its already unusable transport immediately, before lease
+disposal, so a server blocked delivering a response can unwind and release its resources.
+The transport uses its standard abort reason, keeping the caller cancellation local rather than
+propagating its token through an in-memory peer pipe. The original cancellation remains the
+outcome if a custom transport abort throws; that cleanup
+failure is retained in exception data. Every model using DatabaseConnector shares this rule.
+The broken lease rejects reuse, and pool return discards its connector and releases the slot.
 
 SQL, Key-Value and Graph mark the evidence only after decoding a terminal response.
 Before the base owned the reset, each of the three cleared it by hand at the start of

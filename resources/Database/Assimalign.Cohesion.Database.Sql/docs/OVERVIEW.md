@@ -446,11 +446,18 @@ nested loops. LEFT semantics, duplicate matches, SQL equality and full residual 
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live
 hash builds, retained SELECT buffers and grouping-set aggregate states per statement.
 CTAS sources charge like any SELECT; CTAS itself admits only kept output after pagination.
-CS05067 (SQLSTATE 53200) refuses newly charged memory without spill and stops input promptly.
+CS05067 (SQLSTATE 53200) refuses newly charged memory and stops input promptly unless an
+eligible root plain SELECT ORDER BY or ordered DISTINCT hands off to configured temporary
+space. Its fully evaluated result decodes lazily and supports repeated or concurrent reads.
+Nested plans, windows, recursion, CTAS sources, grouping sets and ordered sequence
+deferral retain their existing refusals; DISTINCT's retained representatives must still fit.
+DML sources gain no spill permission; their existing budgeting policy, including the
+INSERT SELECT gap tracked by #1828, is unchanged.
 Window and SQL/JSON grants retain their existing refusal codes when they fail without the
 plain SELECT charges.
 Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
-executes to report candidate work in the same eight-column description; unavailable counts remain
+executes to report candidate work in the same eight-column description; actual root sort spills
+add byte, run and merge-pass details. Unavailable counts remain
 NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;
 statement-wide totals include all invocations. No standalone ANALYZE, persisted statistics,
 format change or new wire message is added.

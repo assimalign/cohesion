@@ -82,11 +82,16 @@ internal sealed class DocumentCommitRelay : IAsyncDisposable
                     Task completed = await Task.WhenAny(requests, replies);
                     await completed;
                 }
+                catch (ConnectionAbortedException) when (_drop == "ready-timeout" && Volatile.Read(ref _drops) != 0)
+                {
+                    // Canceling the lost reply now aborts the transport; the next lease reconnects.
+                }
                 finally
                 {
                     await pair.CancelAsync();
                     try { await Task.WhenAll(requests, replies); }
                     catch (OperationCanceledException) when (pair.IsCancellationRequested) { }
+                    catch (ConnectionAbortedException) when (_drop == "ready-timeout" && Volatile.Read(ref _drops) != 0) { }
                 }
 
                 async Task ForwardAsync(ProtocolChannel source, ProtocolChannel destination, bool response)

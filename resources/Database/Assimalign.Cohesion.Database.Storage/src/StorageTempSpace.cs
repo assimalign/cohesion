@@ -117,29 +117,38 @@ public sealed class StorageTempSpace : IDisposable
     {
         try
         {
+            // Fault/cancellation injection runs after setup but outside the directory monitor.
+            // A callback must not carry that monitor into asynchronous exception cleanup.
+            if (BeforeFileCreate is { } beforeCreate)
+            {
+                lock (_directoryGate) { Check(); PrepareDirectory(); }
+                beforeCreate();
+            }
             lock (_directoryGate)
             {
                 Check();
-                if (_lease is null)
-                {
-                    try { OpenDirectory(); if (!_quotaKnown) { InitializeProbe(); } }
-                    catch
-                    {
-                        try { ReleaseLease(); }
-                        catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
-                        { _ = StorageTempException.Unavailable(cleanup); } // Preserve the setup cause.
-                        throw;
-                    }
-                }
+                PrepareDirectory();
                 var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.ReadWrite,
                     Share = FileShare.Delete, BufferSize = 0, Options = FileOptions.DeleteOnClose | FileOptions.SequentialScan };
                 if (!OperatingSystem.IsWindows()) { options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite; }
-                BeforeFileCreate?.Invoke();
                 return new FileStream(Path.Combine(DirectoryPath, "cohesion-" + Guid.NewGuid().ToString("N") + ".ctmp"), options);
             }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         { WarnUnavailable(error); throw StorageTempException.Unavailable(error); }
+    }
+
+    private void PrepareDirectory()
+    {
+        if (_lease is not null) { return; }
+        try { OpenDirectory(); if (!_quotaKnown) { InitializeProbe(); } }
+        catch
+        {
+            try { ReleaseLease(); }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            { _ = StorageTempException.Unavailable(cleanup); } // Preserve the setup cause.
+            throw;
+        }
     }
 
     private void WarnUnavailable(Exception cause)

@@ -299,7 +299,7 @@ public sealed class SavepointFailureWireTests
     }
 
 
-    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Cancellation before dispatch admits no control and a discarded lease resets every scope (#1726)")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Cancellation before dispatch admits no control and aborts every scope before lease disposal (#1726, #1789)")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ExecuteAsync_CanceledBeforeDispatch_ShouldDiscardAndReset(bool tcp)
@@ -323,14 +323,17 @@ public sealed class SavepointFailureWireTests
         canceled.Cancel();
 
         // Act / Assert: the shared client deliberately breaks a canceled exchange (#1313).
-        // The control never entered the kernel; returning that lease must scrub its scope.
+        // The control never enters the kernel; transport abort must scrub its scope before lease return.
         try
         {
             await Should.ThrowAsync<OperationCanceledException>(async () =>
                 await writer.ExecuteAsync("ROLLBACK TO retained", cancellationToken: canceled.Token));
+            writer.IsOpen.ShouldBeFalse();
+            while (Context(transaction).State != TransactionState.RolledBack || session.CurrentTransaction is not null)
+            { await Task.Delay(1, token); }
+            transaction.State.ShouldBe(TransactionState.RolledBack);
+            session.CurrentTransaction.ShouldBeNull();
             admitted.ShouldBe(0);
-            session.CurrentTransaction.ShouldBeSameAs(transaction);
-            transaction.State.ShouldBe(TransactionState.Active);
         }
         finally { Observe(coordinator.VersionStore, null); }
         await writer.DisposeAsync();
