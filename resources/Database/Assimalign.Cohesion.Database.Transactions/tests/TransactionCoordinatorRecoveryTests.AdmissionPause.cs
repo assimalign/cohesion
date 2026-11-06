@@ -175,6 +175,7 @@ public partial class TransactionCoordinatorRecoveryTests
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var recorder = new EventSourceRecorder(TransactionEventSource.Log, EventLevel.Verbose);
         var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        storage.CheckpointJournalSize = 1;
         gate.JournalSizeLimit = 2;
         using (var outside = storage.BeginTransaction())
         {

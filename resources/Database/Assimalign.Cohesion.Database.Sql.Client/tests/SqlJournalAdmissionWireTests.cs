@@ -38,6 +38,7 @@ public sealed class SqlJournalAdmissionWireTests
         var storage = DataStorage(coordinator);
         var gate = TransactionCheckpointInterlock.ForStorage(storage);
         using var outside = storage.BeginTransaction("OutsideTest");
+        storage.CheckpointJournalSize = 1;
         gate.JournalSizeLimit = 2;
         gate.ObserveAdmissionPause().ShouldBeTrue();
         var source = EventSource.GetSources().Single(s => s.Name == "Assimalign.Cohesion.Database.Transactions");

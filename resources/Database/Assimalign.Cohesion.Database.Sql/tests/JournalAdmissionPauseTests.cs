@@ -93,7 +93,7 @@ public sealed class JournalAdmissionPauseTests
             crash = strategy.CaptureDurableImages();
         }
         await using var engine = SqlDatabaseEngine.Create("reopen-pending", new()
-        { StorageStrategy = crash, CheckpointJournalSize = 0, JournalSizeLimit = 1024, CheckpointInterval = TimeSpan.FromHours(1) });
+        { StorageStrategy = crash, CheckpointJournalSize = 512, JournalSizeLimit = 1024, CheckpointInterval = TimeSpan.FromHours(1) });
         // Act: there is no published instance for a worker to resume during this open.
         var reopened = await engine.OpenDatabaseAsync("pending", ceiling.Token);
         // Assert
@@ -123,6 +123,7 @@ public sealed class JournalAdmissionPauseTests
         worker.BeforeCheckpoint = _ => throw new System.IO.IOException("checkpoint deliberately pending");
         var gate = TransactionCheckpointInterlock.ForStorage(database.CatalogStorage);
         using (var bracket = database.CatalogStorage.BeginTransaction()) { bracket.Commit(); }
+        database.CatalogStorage.CheckpointJournalSize = 1;
         gate.JournalSizeLimit = 2;
         gate.ObserveAdmissionPause().ShouldBeTrue();
         var source = EventSource.GetSources().Single(s => s.Name == "Assimalign.Cohesion.Database.Transactions");
