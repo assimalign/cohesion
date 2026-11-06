@@ -51,7 +51,7 @@ public sealed class GraphTextIndexCorruptionTests
                 {
                     var record = records.Current;
                     byte[] bytes = record.Data.ToArray();
-                    if (mutation == "kind") { if (bytes[16] != 3) { continue; } bytes[^1] = 2; }
+                    if (mutation == "kind") { if (bytes[16] != 4) { continue; } bytes[^1].ShouldBe((byte)1); bytes[^1] = 2; }
                     else if (mutation == "revision")
                     { if (bytes[16] != 3) { continue; } BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(26), 2); }
                     else
