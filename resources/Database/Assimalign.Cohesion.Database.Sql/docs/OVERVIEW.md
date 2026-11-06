@@ -51,6 +51,8 @@ TRUNCATE table lists execute through atomic storage replacement, with recursive 
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
 CREATE TABLE AS infers output types and builds an unpublished owner before atomic publication;
 WITH NO DATA creates only the inferred definition. Failed builds leave no table and use deferred reclamation.
+Eligible source-root ORDER BY and ordered DISTINCT spill to temporary space and stream
+into bounded copy batches (#1789).
 
 MERGE executes ordered actions, BY SOURCE and RETURNING/merge_action() within one statement
 rollback bracket. Repeated target modifications fail with CS05036. USING retains the existing
@@ -447,9 +449,10 @@ The positive StatementMemoryBudget engine option defaults to 64 MiB and limits c
 hash builds, retained SELECT buffers and grouping-set aggregate states per statement.
 CTAS sources charge like any SELECT; CTAS itself admits only kept output after pagination.
 CS05067 (SQLSTATE 53200) refuses newly charged memory and stops input promptly unless an
-eligible root plain SELECT ORDER BY or ordered DISTINCT hands off to configured temporary
-space. Its fully evaluated result decodes lazily and supports repeated or concurrent reads.
-Nested plans, windows, recursion, CTAS sources, grouping sets and ordered sequence
+eligible root plain SELECT ORDER BY or ordered DISTINCT, including a CTAS source root,
+hands off to configured temporary space. Its fully evaluated result decodes lazily and
+supports repeated or concurrent reads.
+Nested plans, windows, recursion, grouping sets and ordered sequence
 deferral retain their existing refusals; DISTINCT's retained representatives must still fit.
 DML sources gain no spill permission; their existing budgeting policy, including the
 INSERT SELECT gap tracked by #1828, is unchanged.

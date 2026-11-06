@@ -17,7 +17,7 @@ result, including one row of decoding overlap, cannot exceed its sort grant. A n
 its first MoveNextAsync, reporting live and requested bytes without affecting other readers.
 
 CS05067 remains for nested/subquery, derived/CTE operand bodies, correlated frames,
-recursion, windows, CTAS, grouping sets, SQL/JSON statements, deferred subqueries,
+recursion, windows, grouping sets, SQL/JSON statements, deferred subqueries,
 plain ordered index scans without DISTINCT, ordered aggregates, ordered sequence deferral, and
 buffers belonging to operators preceding the root sort that have no handoff.
 Window and SQL/JSON owners keep their specific grant codes when they fill first.
@@ -33,7 +33,8 @@ including decoding overlap, would exceed the grant. For grant G the bound is
 65,536 and the bound at least 16. Ordered DISTINCT's seen set must itself fit the grant.
 
 The default physical statement quota remains four grants. Ten grants of 20- and
-50-character ASCII rows complete; 20 three-byte characters fit six grants but seven
+50-character ASCII rows complete; session and declared-script CTAS also complete ten grants
+of 20-character ASCII input. Twenty three-byte characters fit six grants but seven
 refuse CK05002 (6.66 grants of payload before rounding). Width, framing, run tails and
 intermediate merges determine capacity. CK05001 (engine quota), CK05002 (statement quota),
 CK05003 (free-space reserve), CK05004 (temp integrity), CK05005 (unavailable temp I/O) and
@@ -1203,8 +1204,14 @@ report zero. It follows existing self-committing DDL:
 inside BEGIN it fails with CS04003 (25001), leaving earlier work and the transaction active.
 This differs from PostgreSQL's statement-transaction publication. A completed catalog publication
 is irrevocable; cancellation after it returns the committed result. A disconnect may lose that
-response. The source uses one statement MVCC snapshot. Retained query output and encoded batch
-buffers share StatementMemoryBudget; exhaustion reports CS05067 and leaves no table.
+response. The source uses one statement MVCC snapshot. Its root ORDER BY and ordered DISTINCT may
+spill under the root SELECT rules above, in sessions and declared scripts. A fitting source
+retains its existing memory admission; a spilled source streams into 64-row copy brackets
+and is disposed before the statement ends, releasing its temporary files and result slot.
+Retained query output and encoded batch buffers share StatementMemoryBudget; exhaustion
+reports CS05067 and leaves no table. Temp quota and I/O failures retain CK05 codes and leave
+the database online; a declared script keeps its completed prefix and resumes at the failed
+CTAS on a later Build. WITH NO DATA executes no sort and creates no temp files.
 The destination remains absent until its entire data build and dedicated writer transaction
 are durable. Ordinary snapshot isolation follows the builder's single commit: a snapshot taken
 before that commit sees no destination rows; one taken after it sees every row once the live

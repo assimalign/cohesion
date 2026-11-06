@@ -50,7 +50,7 @@ TempDirectory overrides must be dedicated descendants of RootPath; option checks
 first segment a database could take (a leading dot is safe) and link components below the root.
 A default RootPath is refused with its own message; an empty RootPath remains in-memory. An in-memory engine has no
 space unless TempDirectory is explicitly set. The options snapshot includes TempDirectory,
-TempSpaceQuota and StatementTempSpaceQuota. Root plain SELECT sorts consume this substrate as described below; other operators retain their current memory policy.
+TempSpaceQuota and StatementTempSpaceQuota. Root plain SELECT sorts, including CTAS source roots, consume this substrate as described below; other operators retain their current memory policy.
 
 TempSpaceQuota is nullable: an explicit nonnegative physical-byte cap, or min(10 GiB, 25% of
 available bytes) measured after startup sweeping. An unavailable probe uses zero until CreateRun
@@ -94,7 +94,7 @@ A root plain SELECT may spill ORDER BY, its bounded OFFSET + LIMIT heap, and ord
 DISTINCT when the existing reservation refuses CS05067. A fitting collector keeps its existing representation; application-binary provenance
 accounting is described below. Permission is an explicit root argument; nested
 ExecuteAsync calls never inherit it. Subqueries, derived/CTE bodies, correlated frames,
-recursion, windows, grouping sets and CTAS retain their existing refusals. DML sources
+recursion, windows and grouping sets retain their existing refusals. CTAS grants permission only to its source root as described below. DML sources
 gain no spill permission and keep their existing policy: INSERT SELECT sort/output
 buffers bypass SELECT charging under _isDml; that budgeting gap belongs to #1828.
 An ordered index scan does not introduce a sort or a new result-spooling permission.
@@ -180,6 +180,49 @@ access work, covers owner/cancellation/I/O exits, and reuses VerifyEveryUnwind. 
 complete ten grants of 20- and 50-character ASCII output. Twenty three-byte characters fit
 six grants but seven refuse CK05002; payload capacity before rounding is 6.66 grants. The
 64 MiB collector acceptance also exercises ten grants without fixture table-write overhead.
+
+### CTAS source sort spilling (#1789, SQ-L2c)
+
+A session or declared-script CREATE TABLE AS gives its source root the same explicit
+ORDER BY and ordered DISTINCT permission as a root SELECT. The source borrows the executing
+session as its spill owner and is disposed by the CTAS statement before builder commit and
+publication. It holds no result slot after the statement ends; no new session or lifetime
+registry is allocated for fitting sources. The existing eight-result session admission also
+applies while a CTAS source is live. WITH NO DATA still binds without executing the source.
+Nested sources and every root exclusion above retain their existing memory refusal. Inferred
+SQL/JSON domain checks also exclude source spill because they execute during destination assignment.
+
+A fitting source retains ReserveMemory, TableAsSourceAdmitted and the existing batch/buffer
+charges exactly. Fitting projection/collector and Release dispatch allocation probes agree
+exactly. Debug uses smaller dispatcher frames; WITH executes inline to avoid an extra Task.
+A spilled source admits zero retained-result bytes and reads one row at a
+time into the existing 64-row encoded batch. Its reader owns bounded merge/decode workspace;
+CTAS reserves only its batch and fixed 536 B list buffer. Relation-cache reservations retain
+the enclosing statement lifetime, including a fitting source beneath WITH. Temp reads and
+reader disposal happen outside every coordinator apply bracket and data page latch. The
+existing object-lock -> apply-gate -> page-latch order is unchanged; temp calls require no
+page latch or apply bracket. EN-C2 admission parks a later bracket and resumes that batch
+once, without repeating source evaluation or already committed brackets.
+
+No durable boundary is added. Existing reservation/abandonment intent, each bounded copy
+bracket and checkpoint, builder transaction commit, and catalog/receipt publication are the
+crash boundaries. Fault-storage images at every write, flush and length change converge to
+an absent/reclaimed owner or the complete table in physical insertion order. A sort-stage
+image has only the abandonment intent. Killed-process fixtures cover both sort input and
+copy after the first bracket; startup sweeps runs before retrying the absent table. Temp
+read failures retain CK05 codes, abandon the owner and leave durable storage online. Script
+prefix receipts stay applied; a later Build resumes the refused CTAS statement.
+If temp close also fails during cancellation or a copy error, the initiating cancellation
+or copy error remains primary; storage still counts the close failure.
+
+The conformance corpus compares physical rows, stable DISTINCT representatives, volatile
+call logs and sequence values against a fitting CTAS. Session and declared-script CTAS
+complete ten grants of 20-character ASCII input at the default four-grant temp quota;
+the seven-grant three-byte-text boundary still refuses CK05002 online. A forced-GC copy
+sample uses a 1 MiB grant plus a fixed 2 MiB allowance for storage-pool growth, transaction
+metadata, the encoded batch and current rows; drained rows and projected values are weakly observed.
+PostgreSQL src/backend/commands/createas.c:580-606 likewise receives and inserts one tuple
+at a time. No source or persistent format change is taken from that reference.
 
 ### Temp encoding (#1789, SQ-L2a)
 
@@ -1941,7 +1984,7 @@ at LIMIT 0 or after the output window fills; bounded subquery bodies run every p
 the original body ran, and scalar cardinality is checked afterwards. Existing stored-scan early
 stops remain unchanged. Every retained plain SELECT buffer now reserves statement memory before adding an entry
 (#1776, SQ-L1b). Newly charged buffers refuse with CS05067 unless the root sort handoff above applies. CTAS sources use the same
-pipelines and charge like any SELECT; CTAS itself admits only rows kept after pagination,
+pipelines and charge like any SELECT; eligible CTAS source root sorts can spill. CTAS itself admits only materialized rows kept after pagination,
 independent of list capacity (#1762). Per-database internal test seams
 force the original collectors, observe operator entry and count retained DISTINCT/subquery rows.
 The separate forced-GC regression proves streamed group/join inputs retain no growing list.

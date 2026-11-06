@@ -13,9 +13,10 @@ internal sealed partial class SqlPlanExecutor
 {
     internal static Action<string, ulong>? TableAsStage { get; set; }
     internal static Action<long>? TableAsSourceAdmitted { get; set; }
+    internal static Action<SqlSpilledResultSet, DatabaseRow>? TableAsSourceReading { get; set; }
 
     private async Task<DatabaseResult> ExecuteCreateTableAsAsync(SqlCreateTableAsPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         SqlNamespaces.Require(_catalog, plan.Schema);
         if (plan.IfNotExists && _catalog.TryGetTable(plan.Schema, plan.Name, out _))
@@ -50,61 +51,72 @@ internal sealed partial class SqlPlanExecutor
             if (plan.WithData)
             {
                 builder = await statement.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
-                // Query operators currently materialize their output, as INSERT SELECT does.
-                // Storage brackets are bounded to 64 rows and release the apply gate between
-                // batches. Nothing is reachable through the catalog until all batches commit.
+                // The source borrows the root's owner only until this statement disposes it.
+                // A fitting source retains its exact admission; a spilled source streams into
+                // 64-row brackets. Temp reads finish outside every apply bracket/page latch.
                 long sourceBytes = 0, batchBytes = 0, bufferBytes = 0;
                 try
                 {
-                    await using var source = (SqlMaterializedResultSet)await ExecuteAsync(
-                        Cost(plan.Source, statement, cancellationToken), statement, cancellationToken).ConfigureAwait(false);
-                    sourceBytes = source.ReserveMemory(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken);
-                    TableAsSourceAdmitted?.Invoke(sourceBytes);
-                    statement.Metrics.ReserveHashMemory(24L + 64L * 8, _definitions.StatementMemoryBudget);
-                    bufferBytes = 24L + 64L * 8;
-                    var batch = new List<byte[]>(64);
-                    var domains = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken,
-                        transactionTimestamp: statement.TransactionStart);
-                    await foreach (var row in source.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+                    await using var source = (DatabaseResultSet)await ExecuteRootAsync(
+                        Cost(plan.Source, statement, cancellationToken), statement, cancellationToken, spillOwner).ConfigureAwait(false);
+                    try
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        // Bound each physical bracket and release the apply gate between batches.
-                        if (batch.Count == 64) { await FlushAsync().ConfigureAwait(false); }
-                        var values = new object?[table.Columns.Count];
-                        for (int ordinal = 0; ordinal < values.Length; ordinal++)
+                        if (source is SqlMaterializedResultSet materialized)
+                        { sourceBytes = materialized.ReserveMemory(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken); }
+                        TableAsSourceAdmitted?.Invoke(sourceBytes);
+                        statement.Metrics.ReserveHashMemory(24L + 64L * 8, _definitions.StatementMemoryBudget);
+                        bufferBytes = 24L + 64L * 8;
+                        var batch = new List<byte[]>(64);
+                        var domains = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken,
+                            transactionTimestamp: statement.TransactionStart);
+                        await foreach (var row in source.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                         {
-                            values[ordinal] = CoerceForColumn(SqlCharacter.Input(row.GetValue(ordinal), source.Columns[ordinal].Type),
-                                table.Columns[ordinal]);
-                        }
-                        if (domains is not null) { CheckDomains(bound, values, domains); }
-                        byte[] record = SqlRowCodec.Encode(table, values, builder.Sequence);
-                        long bytes = 32L + record.Length;
-                        statement.Metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget);
-                        batchBytes += bytes;
-                        batch.Add(record);
-                        written++;
-                    }
-                    if (batch.Count != 0) { await FlushAsync().ConfigureAwait(false); }
-
-                    async Task FlushAsync()
-                    {
-                        // The ordered journal makes every bracket durable with the builder's
-                        // later commit, whose fsync runs outside the apply gate.
-                        await statement.Coordinator.ApplyStatementAsync(builder, bracket =>
-                        {
-                            foreach (var record in batch)
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (source is SqlSpilledResultSet spilled) { TableAsSourceReading?.Invoke(spilled, row); }
+                            // Bound each physical bracket and release the apply gate between batches.
+                            if (batch.Count == 64) { await FlushAsync().ConfigureAwait(false); }
+                            var values = new object?[table.Columns.Count];
+                            for (int ordinal = 0; ordinal < values.Length; ordinal++)
                             {
-                                cancellationToken.ThrowIfCancellationRequested();
-                                // The abandonment intent undoes the entire unreachable owner;
-                                // no per-row undo ledger needs to survive each bounded bracket.
-                                _storage.InsertRow(bracket, table.ObjectId, record);
+                                values[ordinal] = CoerceForColumn(SqlCharacter.Input(row.GetValue(ordinal), source.Columns[ordinal].Type),
+                                    table.Columns[ordinal]);
                             }
-                            return ValueTask.FromResult(true);
-                        }, false, cancellationToken).ConfigureAwait(false);
-                        batch.Clear();
-                        statement.Metrics.ReleaseHashMemory(batchBytes);
-                        batchBytes = 0;
-                        TableAsStage?.Invoke("Copied", table.ObjectId);
+                            if (domains is not null) { CheckDomains(bound, values, domains); }
+                            byte[] record = SqlRowCodec.Encode(table, values, builder.Sequence);
+                            long bytes = 32L + record.Length;
+                            statement.Metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget);
+                            batchBytes += bytes;
+                            batch.Add(record);
+                            written++;
+                        }
+                        if (batch.Count != 0) { await FlushAsync().ConfigureAwait(false); }
+
+                        async Task FlushAsync()
+                        {
+                            // The ordered journal makes every bracket durable with the builder's
+                            // later commit, whose fsync runs outside the apply gate.
+                            await statement.Coordinator.ApplyStatementAsync(builder, bracket =>
+                            {
+                                foreach (var record in batch)
+                                {
+                                    cancellationToken.ThrowIfCancellationRequested();
+                                    // The abandonment intent undoes the entire unreachable owner;
+                                    // no per-row undo ledger needs to survive each bounded bracket.
+                                    _storage.InsertRow(bracket, table.ObjectId, record);
+                                }
+                                return ValueTask.FromResult(true);
+                            }, false, cancellationToken).ConfigureAwait(false);
+                            batch.Clear();
+                            statement.Metrics.ReleaseHashMemory(batchBytes);
+                            batchBytes = 0;
+                            TableAsStage?.Invoke("Copied", table.ObjectId);
+                        }
+                    }
+                    catch (Exception failure)
+                    {
+                        // Preserve the source/copy failure if temporary cleanup also fails.
+                        if (source is SqlSpilledResultSet spilled) { spilled.DisposeAfterFailure(failure); }
+                        throw;
                     }
                 }
                 finally { statement.Metrics.ReleaseHashMemory(sourceBytes + batchBytes + bufferBytes); }

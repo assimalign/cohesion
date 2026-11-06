@@ -141,7 +141,6 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
-    [InlineData(5)]
     [InlineData(6)]
     [InlineData(7)]
     [InlineData(8)]
@@ -161,7 +160,6 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
             2 => "SELECT COUNT(*) FROM (SELECT id,k FROM t ORDER BY k) d",
             3 => "WITH d AS (SELECT id,k FROM t ORDER BY k) SELECT COUNT(*) FROM d",
             4 => "(SELECT id FROM t ORDER BY k) UNION ALL SELECT id FROM t",
-            5 => "CREATE TABLE c AS SELECT id,k FROM t ORDER BY k",
             6 => "SELECT id,COUNT(*) OVER() FROM (SELECT id,k FROM t ORDER BY k) d",
             7 => "SELECT t.id,(SELECT u.id FROM u WHERE u.id=t.id) AS value FROM t ORDER BY t.k",
             8 => "WITH RECURSIVE r(id) AS (SELECT 0 UNION ALL SELECT id+1 FROM r WHERE id<4000) SELECT id FROM r ORDER BY id",

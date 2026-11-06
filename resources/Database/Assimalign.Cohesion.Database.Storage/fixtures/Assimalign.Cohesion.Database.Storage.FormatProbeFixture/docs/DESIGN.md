@@ -44,3 +44,9 @@ The temp-lease-probe mode creates and reopens a real SQL database with disabled 
 locking. It requires startup warnings and a later CK05005 spill refusal while the database
 remains online. Windows verifies ordinary lease success. A test-only UnsafeAccessor reaches
 the internal engine space; no shipped visibility or reference is added.
+
+The sql-ctas-sort-stop and sql-ctas-copy-stop modes stop during spilled CTAS input and
+destination assignment respectively. A registered projection stops after 3,000 input calls;
+a domain constraint stops at destination row 65, after the first bounded copy bracket.
+The parent kills the process, then verifies temp sweeping, unpublished-owner reclamation,
+the unchanged source and successful retry. Neither stop introduces durable state (#1789).
