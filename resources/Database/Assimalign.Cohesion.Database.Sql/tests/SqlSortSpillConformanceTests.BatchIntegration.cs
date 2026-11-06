@@ -106,7 +106,7 @@ public sealed partial class SqlSortSpillConformanceTests
         if (starOnOuter)
         {
             right.Columns.ShouldAllBe(c => c.IsNullable);
-            (await Rows(right, guard.Token)).ShouldContain(row => row.Cells[0] is null);
+            (await Rows(right, guard.Token)).ShouldContain(row => row.Cells[0] == null);
         }
         else if (outer) { right.Columns[^1].IsNullable.ShouldBeTrue(); }
         // A discarded alias never becomes an ORDER BY key, at either grant.
