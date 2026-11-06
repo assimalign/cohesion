@@ -470,7 +470,7 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         // Assert: the coded refusal names the database and both formats, and the open
         // wrote nothing — it failed before recovery's scrub and checkpoint.
         failure.Message.ShouldStartWith("Database 'kv' cannot be opened. " + IndexFormatException.ErrorCode + ": ", Case.Sensitive);
-        failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+        failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 3", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<IndexFormatException>().FoundVersion.ShouldBe(1);
 
         foreach (var (path, bytes) in before)

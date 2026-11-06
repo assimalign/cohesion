@@ -208,7 +208,7 @@ internal static class Program
                 using var read = storage.PageManager.GetPage((PageId)id);
                 if (read.Page.Type != PageType.Index) { continue; }
                 using var write = storage.OpenPageForWrite(bracket, (PageId)id);
-                if (mode == "index") { write.Page.AsBodySpan()[2] = 1; }
+                if (mode is "index" or "index2") { write.Page.AsBodySpan()[2] = mode == "index2" ? (byte)2 : (byte)1; }
                 write.MarkDirty();
             }
             bracket.Commit();

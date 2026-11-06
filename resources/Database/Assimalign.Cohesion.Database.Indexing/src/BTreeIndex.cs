@@ -83,6 +83,9 @@ public sealed class BTreeIndex
     /// </remarks>
     public const int MaxKeyLength = 1024;
 
+    /// <summary>The maximum leaf payload length, in bytes (1,024).</summary>
+    public const int MaxPayloadLength = 1024;
+
     private readonly Storage.Storage _storage;
     private readonly Func<TransactionContext, StorageTransaction> _transactionSource;
     private readonly LockManager? _lockManager;
@@ -210,9 +213,25 @@ public sealed class BTreeIndex
     /// The key exceeds the maximum key length, or an entry with the same key, entry
     /// reference and writer already exists (a defect: entry identities are unique).
     /// </exception>
-    public async ValueTask InsertAsync(TransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
+    public ValueTask InsertAsync(TransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
+        => InsertAsync(transaction, key, entryReference, ReadOnlyMemory<byte>.Empty, cancellationToken);
+
+    /// <summary>Inserts a mapping with an opaque leaf payload, excluded from entry identity and uniqueness.</summary>
+    /// <param name="transaction">The transaction the mutation belongs to.</param>
+    /// <param name="key">The key to insert.</param>
+    /// <param name="entryReference">The opaque entry reference.</param>
+    /// <param name="payload">Payload bytes copied during this call; at most <see cref="MaxPayloadLength"/>.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing the insert.</returns>
+    /// <exception cref="ArgumentNullException">The transaction is null.</exception>
+    /// <exception cref="IndexException">The key or payload is too large, or the identity already exists.</exception>
+    /// <exception cref="IndexUniqueViolationException">The unique key already has a live entry.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    public async ValueTask InsertAsync(TransactionContext transaction, IndexKey key, ulong entryReference, ReadOnlyMemory<byte> payload,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
+        ValidatePayload(payload);
 
         if (key.Length > MaxKeyLength)
         {
@@ -246,7 +265,7 @@ public sealed class BTreeIndex
             // key lock held, any live entry (deleter stamp zero) is either
             // committed or our own: uncommitted others are excluded by the lock,
             // and aborted writers' entries were physically reverted by rollback.
-            InsertCore(storageTransaction, key.Encoded.Span, entryReference, transaction.Sequence.Value, 0,
+            InsertCore(storageTransaction, key.Encoded.Span, entryReference, transaction.Sequence.Value, 0, payload.Span,
                 IsUnique, pruneBound, cancellationToken);
         }
         finally
@@ -436,8 +455,26 @@ public sealed class BTreeIndex
     /// reference and writer already exists (a defect: entry identities are unique).
     /// </exception>
     public ValueTask InsertVersionAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, TransactionSequence deleter, CancellationToken cancellationToken = default)
+        => InsertVersionAsync(transaction, key, entryReference, writer, deleter, ReadOnlyMemory<byte>.Empty, cancellationToken);
+
+    /// <summary>Inserts a payload-bearing version with explicit stamps inside a physical bracket.</summary>
+    /// <remarks>The builder owns uniqueness checks. Payload bytes never participate in the entry identity.</remarks>
+    /// <param name="transaction">The physical write bracket.</param>
+    /// <param name="key">The key to insert.</param>
+    /// <param name="entryReference">The opaque entry reference.</param>
+    /// <param name="writer">The source writer stamp.</param>
+    /// <param name="deleter">The source deleter stamp.</param>
+    /// <param name="payload">Payload bytes copied during this call; at most <see cref="MaxPayloadLength"/>.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing the insert.</returns>
+    /// <exception cref="ArgumentNullException">The transaction is null.</exception>
+    /// <exception cref="IndexException">The key or payload is too large, or the identity already exists.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    public ValueTask InsertVersionAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer,
+        TransactionSequence deleter, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
+        ValidatePayload(payload);
         cancellationToken.ThrowIfCancellationRequested();
 
         if (key.Length > MaxKeyLength)
@@ -448,7 +485,7 @@ public sealed class BTreeIndex
         _latch.EnterWrite();
         try
         {
-            InsertCore(transaction, key.Encoded.Span, entryReference, writer.Value, deleter.Value);
+            InsertCore(transaction, key.Encoded.Span, entryReference, writer.Value, deleter.Value, payload.Span);
         }
         finally
         {
@@ -456,6 +493,55 @@ public sealed class BTreeIndex
         }
 
         return default;
+    }
+
+    /// <summary>Replaces the payload of a live physical (writer-zero) mapping.</summary>
+    /// <remarks>Growth compacts the leaf and uses the ordinary leaf/parent/root split path if needed.
+    /// The caller owns the physical bracket and must roll it back on failure.</remarks>
+    /// <param name="transaction">The physical write bracket.</param>
+    /// <param name="key">The entry key.</param>
+    /// <param name="entryReference">The entry reference.</param>
+    /// <param name="payload">The replacement bytes, copied during this call.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>True if a mapping was replaced; false if it does not exist.</returns>
+    /// <exception cref="ArgumentNullException">The transaction is null.</exception>
+    /// <exception cref="IndexException">The payload is too large, or the newest mapping has a writer or deleter stamp.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    public ValueTask<bool> ReplacePayloadAsync(StorageTransaction transaction, IndexKey key, ulong entryReference,
+        ReadOnlyMemory<byte> payload, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        ValidatePayload(payload);
+        cancellationToken.ThrowIfCancellationRequested();
+        _latch.EnterWrite();
+        try
+        {
+            if (!TryFindNewestEntry(key.Encoded.Span, entryReference, EntryMatch.AnyOf(entryReference), out long leafId, out int at))
+            { return new ValueTask<bool>(false); }
+            using (var handle = _storage.PageManager.GetPage((PageId)leafId))
+            {
+                var leaf = OpenNode(handle.Page.AsBodySpan(), leafId);
+                if (leaf.GetWriter(at) != 0 || leaf.GetDeleter(at) != 0)
+                { throw new IndexException(ErrorMessages.PayloadReplacementRequiresPhysical); }
+                if (leaf.GetPayload(at).SequenceEqual(payload.Span)) { return new ValueTask<bool>(true); }
+            }
+            using (var handle = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch))
+            {
+                var leaf = OpenNode(handle.Page.AsBodySpan(), leafId);
+                leaf.RemoveLeafEntry(at);
+                handle.MarkDirty();
+            }
+            InsertCore(transaction, key.Encoded.Span, entryReference, 0, 0, payload.Span, cancellationToken: cancellationToken);
+            return new ValueTask<bool>(true);
+        }
+        finally { _latch.ExitWrite(); }
+    }
+
+    private static void ValidatePayload(ReadOnlyMemory<byte> payload)
+    {
+        if (payload.Length > MaxPayloadLength)
+        { throw new IndexException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            ErrorMessages.PayloadTooLarge, payload.Length, MaxPayloadLength)); }
     }
 
     /// <summary>
@@ -819,7 +905,11 @@ public sealed class BTreeIndex
                         var entry = new BTreeCursor.Entry(key.ToArray(), node.GetEntryReference(index), node.GetWriter(index));
                         cursor.Continuation = entry;
                         cursor.Boundary = null;
-                        if (visible) { cursor.Entries[cursor.Count++] = entry; }
+                        if (visible)
+                        {
+                            cursor.CopyPayload(cursor.Count, node.GetPayload(index));
+                            cursor.Entries[cursor.Count++] = entry;
+                        }
                     }
                     if (cursor.Count == (cursor.BatchSizeOverride > 0 ? cursor.BatchSizeOverride : cursor.ReadLimit) ||
                         examined == BTreeCursor.ExaminationLimit) { return; }
@@ -1087,6 +1177,7 @@ public sealed class BTreeIndex
     }
 
     private void InsertCore(StorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter,
+        ReadOnlySpan<byte> payload,
         bool unique = false, TransactionSequence pruneBound = default, CancellationToken cancellationToken = default)
     {
         var position = BTreeSearchKey.AtEntry(key, entryReference, writer);
@@ -1118,7 +1209,7 @@ public sealed class BTreeIndex
                         string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexInsertCoreIndex, Name, entryReference, writer));
                 }
 
-                int needed = BTreeNode.LeafEntrySize(key.Length);
+                int needed = BTreeNode.LeafEntrySize(key.Length, payload.Length);
                 fits = needed <= node.FreeSpace;
 
                 // Undo removals (erase, purge) orphan entry bytes. A leaf they fill is
@@ -1139,7 +1230,7 @@ public sealed class BTreeIndex
                     RebuildLeaf(ref writableNode, writableNode.EntryCount, writableNode.PrevLeaf, writableNode.NextLeaf);
                 }
 
-                writableNode.InsertLeafEntry(at, key, entryReference, writer, deleter);
+                writableNode.InsertLeafEntry(at, key, entryReference, writer, deleter, payload);
                 writable.MarkDirty();
                 return;
             }
@@ -1227,7 +1318,7 @@ public sealed class BTreeIndex
             for (int i = mid; i < count; i++)
             {
                 sibling.InsertLeafEntry(
-                    i - mid, leaf.GetKey(i), leaf.GetEntryReference(i), leaf.GetWriter(i), leaf.GetDeleter(i));
+                    i - mid, leaf.GetKey(i), leaf.GetEntryReference(i), leaf.GetWriter(i), leaf.GetDeleter(i), leaf.GetPayload(i));
             }
 
             // Fix the sibling chain.
@@ -1319,6 +1410,7 @@ public sealed class BTreeIndex
         var references = new ulong[count];
         var writers = new ulong[count];
         var deleters = new ulong[count];
+        byte[][]? payloads = null;
 
         for (int i = 0; i < count; i++)
         {
@@ -1326,6 +1418,12 @@ public sealed class BTreeIndex
             references[i] = leaf.GetEntryReference(i);
             writers[i] = leaf.GetWriter(i);
             deleters[i] = leaf.GetDeleter(i);
+            var payload = leaf.GetPayload(i);
+            if (!payload.IsEmpty)
+            {
+                payloads ??= new byte[count][];
+                payloads[i] = payload.ToArray();
+            }
         }
 
         leaf = BTreeNode.Initialize(leaf.Body, BTreeNode.LeafKind);
@@ -1334,7 +1432,7 @@ public sealed class BTreeIndex
 
         for (int i = 0; i < count; i++)
         {
-            leaf.InsertLeafEntry(i, keys[i], references[i], writers[i], deleters[i]);
+            leaf.InsertLeafEntry(i, keys[i], references[i], writers[i], deleters[i], payloads?[i]);
         }
     }
 
@@ -1663,6 +1761,7 @@ public sealed class BTreeIndex
 
     private enum EntryMatchKind : byte
     {
+        AnyOf,
         Live,
         LiveOf,
         WrittenBy,
@@ -1693,6 +1792,8 @@ public sealed class BTreeIndex
         /// </summary>
         internal static EntryMatch Live => new(EntryMatchKind.Live, 0, 0);
 
+        internal static EntryMatch AnyOf(ulong entryReference) => new(EntryMatchKind.AnyOf, entryReference, 0);
+
         /// <summary>
         /// The live mapping to <paramref name="entryReference"/> (deleter stamp zero), whoever
         /// wrote it — the entry a delete tombstones.
@@ -1716,6 +1817,7 @@ public sealed class BTreeIndex
 
         internal bool Accepts(in BTreeNode node, int index) => _kind switch
         {
+            EntryMatchKind.AnyOf => node.GetEntryReference(index) == _entryReference,
             EntryMatchKind.Live => node.GetDeleter(index) == 0,
             EntryMatchKind.LiveOf => node.GetEntryReference(index) == _entryReference
                 && node.GetDeleter(index) == 0,

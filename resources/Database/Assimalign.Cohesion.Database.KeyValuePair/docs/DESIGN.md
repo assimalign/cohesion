@@ -297,7 +297,7 @@ and explicit-transaction cases are regression guards, not proof of that session 
   tree that rides it. The engine opens and validates the catalog before opening
   the data set, so a catalog refusal cannot apply data recovery (#1270).
   Format 2 keeps format 1's entry records, but its primary
-  index is a tree of `Database.Indexing`'s B-tree page format 2 (entries ordered
+  index now uses `Database.Indexing`'s B-tree page format 3 (#1809; entries ordered
   by key, entry location and writer) instead of format 1 (ordered by key alone).
   The engine stamps the marker at creation before it registers the primary
   index, and at open, before it attaches the index or recovery writes anything,
@@ -313,7 +313,7 @@ and explicit-transaction cases are regression guards, not proof of that session 
   the root page's B-tree page format when the instance attaches the
   registration, and a tree the marker does not describe is refused with
   `DatabaseException` "Database 'x' cannot be opened. CK06101: Index … uses
-  B-tree page format 1, but this engine supports only format 2 …", the index
+  B-tree page format 2, but this engine supports only format 3 …", the index
   manager's `IndexFormatException` as its inner exception. Clean and crashed
   databases are left byte-identical by either refusal: catalog and tree checks precede all writes,
   using Storage's recovered read-only views when replay is needed (#1744). There is no upgrade path (owner decision of 2026-10-02; #1152).

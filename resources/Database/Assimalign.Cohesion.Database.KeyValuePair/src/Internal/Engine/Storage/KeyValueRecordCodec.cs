@@ -22,7 +22,7 @@ internal static class KeyValueRecordCodec
     /// The format version of the database's data storage — entry records and the
     /// primary index tree that shares their file set — this engine reads and
     /// writes, persisted in the catalog: 2 = MVCC-stamped key/value records in the
-    /// key space's per-object page chain, indexed by a tree of B-tree page format 2,
+    /// key space's per-object page chain, indexed by a tree of B-tree page format 3,
     /// which orders entries by key, entry location and writer (#1194). Version 1 —
     /// the same records over a tree of B-tree page format 1, ordered by key alone —
     /// is history: a database is created on this version, and an existing database

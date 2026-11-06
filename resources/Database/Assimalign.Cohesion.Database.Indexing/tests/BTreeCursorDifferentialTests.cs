@@ -40,7 +40,7 @@ public sealed class BTreeCursorDifferentialTests
             {
                 var entry = (Key(i / 10), (ulong)i);
                 visible.Add(entry);
-                await index.InsertAsync(seed, entry.Item1, entry.Item2);
+                await index.InsertAsync(seed, entry.Item1, entry.Item2, Payload(i));
             }
             await harness.CommitAsync(seed);
             var reader = await harness.Manager.BeginAsync();
@@ -69,6 +69,7 @@ public sealed class BTreeCursorDifferentialTests
                 actual.Count.ShouldBeLessThan(expected.Count);
                 actual.Add((cursor.CurrentKey, cursor.CurrentEntryReference));
                 actual[^1].ShouldBe(expected[actual.Count - 1]);
+                cursor.CurrentPayload.ToArray().ShouldBe(Payload((int)cursor.CurrentEntryReference));
             }
             actual.ShouldBe(expected);
             await harness.Manager.CommitAsync(reader);
@@ -85,22 +86,22 @@ public sealed class BTreeCursorDifferentialTests
                     case 0: // Duplicate keys on both sides of the logical continuation.
                     {
                         var writer = await harness.BeginAsync();
-                        await index.InsertAsync(writer, near, 0);
-                        await index.InsertAsync(writer, near, nextReference++);
+                        await index.InsertAsync(writer, near, 0, Payload(998));
+                        await index.InsertAsync(writer, near, nextReference++, Payload(998));
                         await harness.CommitAsync(writer);
                         break;
                     }
                     case 1: // Same key/reference, distinct invisible writer tiebreaker.
                     {
                         var writer = await harness.BeginAsync();
-                        await index.InsertAsync(writer, near, last?.EntryReference ?? 7);
+                        await index.InsertAsync(writer, near, last?.EntryReference ?? 7, Payload(998));
                         await harness.CommitAsync(writer);
                         break;
                     }
                     case 2: // Abort after a durable bracket, then purge its entries.
                     {
                         var writer = await harness.BeginAsync();
-                        await index.InsertAsync(writer, near, nextReference++);
+                        await index.InsertAsync(writer, near, nextReference++, Payload(998));
                         await harness.LogicalRollbackAsync(writer, bracket =>
                         {
                             index.PurgeWriters(bracket, new HashSet<TransactionSequence> { writer.Sequence }).ShouldBe(1);
@@ -126,7 +127,7 @@ public sealed class BTreeCursorDifferentialTests
                         do
                         {
                             for (int i = 0; i < 240; i++)
-                            { await index.InsertAsync(writer, SplitKey(100 + inserted++), nextReference++); }
+                            { await index.InsertAsync(writer, SplitKey(100 + inserted++), nextReference++, Payload(998)); }
                             inserted.ShouldBeLessThan(5_000);
                         }
                         while (mutation == 4 && !rootGrown && Height(harness, index) == height);
@@ -147,7 +148,7 @@ public sealed class BTreeCursorDifferentialTests
                         var writer = await harness.BeginAsync();
                         // Reuse the finite slot range, as storage does after purge. Growing
                         // a new empty chain at every empty-page boundary could starve any scan.
-                        for (int i = 0; i < 48; i++) { await index.InsertAsync(writer, Key(low), 2_000UL + (ulong)i); }
+                        for (int i = 0; i < 48; i++) { await index.InsertAsync(writer, Key(low), 2_000UL + (ulong)i, Payload(998)); }
                         await harness.LogicalRollbackAsync(writer, bracket =>
                         {
                             index.PurgeWriters(bracket, new HashSet<TransactionSequence> { writer.Sequence }).ShouldBe(48);
@@ -208,6 +209,13 @@ public sealed class BTreeCursorDifferentialTests
         // Assert
         actual.ShouldBe(expected);
         emptyFences.ShouldBeGreaterThan(10);
+    }
+
+    private static byte[] Payload(int value)
+    {
+        var payload = new byte[value % 3 == 0 ? 0 : value % 3 == 1 ? 17 : 1024];
+        new Random(value).NextBytes(payload);
+        return payload;
     }
 
     private static IndexKey Key(int value)

@@ -641,7 +641,7 @@ public class BTreeIndexTests
         keys.ShouldBe(keys.Order().ToList());
     }
 
-    // Offsets from BTreeNode's documented body layout, page format 2 (kind at 3, entry
+    // Offsets from BTreeNode's documented body layout, page format 3 (kind at 3, entry
     // count at 4, directory at 32; an internal entry is [u16 keyLen | tiebreaker << 14]
     // [key][tiebreaker attributes][i64 child]). The corruption test below writes a
     // node directly, which needs exactly these.

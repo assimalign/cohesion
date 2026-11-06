@@ -177,7 +177,7 @@ public class BTreeMaintenanceTests
         body.AsSpan(nodeDirectoryOffset + 4, 2).ToArray().ShouldBe(new byte[2]);
     }
 
-    // Offsets from BTreeNode's documented body layout, page format 2: the entry count at 4,
+    // Offsets from BTreeNode's documented body layout, page format 3: the entry count at 4,
     // the directory of two-byte entry offsets at 32.
     private const int nodeCountOffset = 4;
     private const int nodeDirectoryOffset = 32;

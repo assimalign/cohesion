@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Internal;
 /// 32 : ushort[entryCount]        — directory of entry offsets, in entry order
 /// </code>
 /// <para>
-/// Leaf entry: <c>[u16 keyLen][key][u64 entryRef][u64 writer][u64 deleter]</c> — the
+/// Leaf entry: <c>[u16 keyLen | hasPayload &lt;&lt; 15][key][u64 entryRef][u64 writer][u64 deleter][u16 payloadLen]?[payload]?</c> — the
 /// writer/deleter stamps carry MVCC visibility; deleter 0 means live. Entries are
 /// ordered by their identity <c>(key, entryRef, writer)</c>
 /// (<see cref="BTreeEntryOrder"/>); the deleter is not part of the order, so a
@@ -68,9 +68,11 @@ internal readonly ref struct BTreeNode
     /// The page format this layout implements. Format 1 (before #1194) ordered
     /// entries by key alone and had no magic or version bytes; format 2 orders them
     /// by <c>(key, entry reference, writer)</c> and stores the tiebreaker in
-    /// separators.
+    /// separators. Format 3 adds optional leaf payloads, excluded from identity and separators.
     /// </summary>
-    internal const byte FormatVersion = 2;
+    internal const byte FormatVersion = 3;
+
+    private const int payloadFlag = 0x8000;
 
     internal const byte LeafKind = 1;
     internal const byte InternalKind = 2;
@@ -192,7 +194,7 @@ internal readonly ref struct BTreeNode
             int referenced = 0;
             for (int index = 0; index < EntryCount; index++)
             {
-                referenced += LeafEntrySize(GetKey(index).Length);
+                referenced += LeafEntrySize(GetKey(index).Length, GetPayload(index).Length);
             }
 
             return _body.Length - DataStart - referenced;
@@ -234,6 +236,16 @@ internal readonly ref struct BTreeNode
 
     internal ulong GetDeleter(int index)
         => BinaryPrimitives.ReadUInt64LittleEndian(_body[(GetValueOffset(index) + 16)..]);
+
+    internal ReadOnlySpan<byte> GetPayload(int index)
+    {
+        int offset = GetEntryOffset(index);
+        int field = GetLengthField(offset);
+        if ((field & payloadFlag) == 0) { return default; }
+        int lengthOffset = offset + 2 + (field & keyLengthMask) + 24;
+        int length = BinaryPrimitives.ReadUInt16LittleEndian(_body[lengthOffset..]);
+        return _body.Slice(lengthOffset + 2, length);
+    }
 
     internal void SetDeleter(int index, ulong deleter)
         => BinaryPrimitives.WriteUInt64LittleEndian(_body[(GetValueOffset(index) + 16)..], deleter);
@@ -387,7 +399,8 @@ internal readonly ref struct BTreeNode
     /// </summary>
     internal long GetChildAt(int slot) => slot < 0 ? LeftmostChild : GetChild(slot);
 
-    internal static int LeafEntrySize(int keyLength) => 2 + keyLength + 8 + 8 + 8;
+    internal static int LeafEntrySize(int keyLength, int payloadLength = 0)
+        => 2 + keyLength + 8 + 8 + 8 + (payloadLength == 0 ? 0 : 2 + payloadLength);
 
     /// <summary>
     /// Gets the bytes an internal entry takes: the length field, the separator key,
@@ -414,16 +427,23 @@ internal readonly ref struct BTreeNode
     /// Inserts a leaf entry at the given directory position. The caller has verified
     /// free space and the position's order.
     /// </summary>
-    internal void InsertLeafEntry(int index, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter)
+    internal void InsertLeafEntry(int index, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter,
+        ReadOnlySpan<byte> payload = default)
     {
-        int size = LeafEntrySize(key.Length);
+        int size = LeafEntrySize(key.Length, payload.Length);
         int offset = DataStart - size;
 
-        BinaryPrimitives.WriteUInt16LittleEndian(_body[offset..], (ushort)key.Length);
+        BinaryPrimitives.WriteUInt16LittleEndian(_body[offset..], (ushort)(key.Length | (payload.IsEmpty ? 0 : payloadFlag)));
         key.CopyTo(_body[(offset + 2)..]);
         BinaryPrimitives.WriteUInt64LittleEndian(_body[(offset + 2 + key.Length)..], entryReference);
         BinaryPrimitives.WriteUInt64LittleEndian(_body[(offset + 2 + key.Length + 8)..], writer);
         BinaryPrimitives.WriteUInt64LittleEndian(_body[(offset + 2 + key.Length + 16)..], deleter);
+        if (!payload.IsEmpty)
+        {
+            int lengthOffset = offset + 2 + key.Length + 24;
+            BinaryPrimitives.WriteUInt16LittleEndian(_body[lengthOffset..], (ushort)payload.Length);
+            payload.CopyTo(_body[(lengthOffset + 2)..]);
+        }
 
         InsertDirectorySlot(index, (ushort)offset);
         DataStart = (ushort)offset;
