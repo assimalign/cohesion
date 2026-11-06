@@ -1412,7 +1412,7 @@ public sealed class BTreeIndex
         IndexEventSource.Log.PageSplit(_storage, Name, leafId, leaf: true, count);
 
         long leftId = InsertIntoParent(transaction, parentPath, leafId, separator, siblingId);
-        if (IsBeforeSeparator(position, separator)) { return leftId; }
+        if (IsBeforeSeparator(position, separator.AsSearchKey())) { return leftId; }
         var parent = parentPath[^1];
         parentPath[^1] = new PathEntry(parent.PageId, parent.Slot + 1);
         return siblingId;
@@ -1473,11 +1473,11 @@ public sealed class BTreeIndex
     private static bool FitsLeafHalf(in BTreeNode leaf, int mid, int at, in BTreeSearchKey position,
         int left, int total, int incoming, int capacity)
     {
-        bool landsLeft = at < mid || at == mid && IsBeforeSeparator(position, BTreeEntryOrder.BuildSeparator(leaf, mid - 1, mid));
+        bool landsLeft = at < mid || at == mid && IsBeforeSeparator(position, BTreeEntryOrder.GetLeafSeparator(leaf, mid - 1, mid));
         return incoming + (landsLeft ? left : total - left) <= capacity;
     }
 
-    private static bool IsBeforeSeparator(in BTreeSearchKey position, Separator separator)
+    private static bool IsBeforeSeparator(in BTreeSearchKey position, in BTreeSearchKey separator)
     {
         int comparison = position.Key.SequenceCompareTo(separator.Key);
         return comparison < 0 || comparison == 0 && BTreeEntryOrder.CompareTiebreakers(

@@ -598,6 +598,9 @@ InsertAsync and InsertVersionAsync retain their original no-payload signatures a
 same positioning/disposal guards as CurrentKey. Each cursor allocates its payload batch
 array only upon seeing a nonempty visible payload; invisible continuation identities retain
 no payload. Leaf rebuilding allocates payload arrays only for nonempty payloads.
+Split-size checks borrow the same truncated key and tiebreakers used to build the owned
+separator, which is copied only once after the split point is chosen. Empty payloads add
+no allocations on the split or compaction paths; the existing key, stamp and storage allocations remain.
 Every visible payload is copied at batch time, even when CurrentPayload is never read:
 up to 64 KiB of payload bytes per batch, plus array overhead, charged to no statement budget. A covering index will need a
 way to skip that copying for a plain seek (#1739).
