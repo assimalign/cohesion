@@ -1,0 +1,76 @@
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
+using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Transactions;
+
+namespace Assimalign.Cohesion.Database.Graph.Tests;
+
+[Collection(nameof(GraphConcurrencyCollection))]
+public sealed class GraphExactIndexRetirementTests
+{
+    [Theory(DisplayName = "Cohesion Test [Graph] - A pinned dropped exact tree validates and finds a Snapshot writer's own values (#1644)")]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Execute_PinnedDroppedExactIndex_ShouldMaintainOwnWritesAsync(bool oversized)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("exact-pinned", GraphTextIndexTests.Quiet());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var current = await database.CreateSessionAsync(CancellationToken.None);
+        await using var writer = await database.CreateSessionAsync(CancellationToken.None);
+        await current.ExecuteAsync("CREATE INDEX exact_p FOR (n:N) ON (n.p)", cancellationToken: CancellationToken.None);
+        await using var transaction = await writer.BeginTransactionAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await current.ExecuteAsync("DROP INDEX exact_p", cancellationToken: CancellationToken.None);
+
+        // Act / Assert
+        if (oversized)
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync(
+                "INSERT (:N {p:$pattern})", GraphTextIndexTests.Bind(new string('x', 2048)), CancellationToken.None));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02009");
+            (await GraphTextIndexTests.RowsAsync(current, "MATCH (n:N) RETURN n.p")).ShouldBeEmpty();
+        }
+        else
+        {
+            await writer.ExecuteAsync("INSERT (:N {p:'x'})", cancellationToken: CancellationToken.None);
+            (await GraphTextIndexTests.RowsAsync(writer, "EXPLAIN MATCH (n:N {p:'x'}) RETURN n.p")).ShouldContain(row => Equals(row[2], "IndexSeek"));
+            (await GraphTextIndexTests.RowsAsync(writer, "MATCH (n:N {p:'x'}) RETURN n.p")).ShouldHaveSingleItem()[0].ShouldBe("x");
+            await transaction.CommitAsync(CancellationToken.None);
+            (await GraphTextIndexTests.RowsAsync(current, "MATCH (n:N {p:'x'}) RETURN n.p")).ShouldHaveSingleItem();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Exact tree owner pages survive an old pin and retire after it releases (#1644)")]
+    public async Task DropIndexAsync_ExactTree_ShouldRespectSnapshotAndFreeOwnerPagesAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("exact-retire", GraphTextIndexTests.Quiet());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var writer = await database.CreateSessionAsync(CancellationToken.None);
+        await using var old = await database.CreateSessionAsync(CancellationToken.None);
+        await writer.ExecuteAsync("INSERT (:N {p:'abc'})", cancellationToken: CancellationToken.None);
+        await writer.ExecuteAsync("CREATE INDEX exact_p FOR (n:N) ON (n.p)", cancellationToken: CancellationToken.None);
+        await using var snapshot = await old.BeginTransactionAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        ulong id = database.Store.GetIndexIdentities(snapshot.Context.Snapshot).Single().Id;
+        int pages = database.DataStorage.GetOwnerIndexPages(id).Count;
+        pages.ShouldBeGreaterThan(0);
+        long reclaimed = database.Store.IndexOwnerPagesReclaimed;
+
+        // Act / Assert
+        await writer.ExecuteAsync("DROP INDEX exact_p", cancellationToken: CancellationToken.None);
+        database.Coordinator.RunVersionPurgePass(CancellationToken.None);
+        database.DataStorage.GetOwnerIndexPages(id).Count.ShouldBe(pages);
+        (await GraphTextIndexTests.RowsAsync(old, "MATCH (n:N {p:'abc'}) RETURN n.p")).ShouldHaveSingleItem();
+        await snapshot.RollbackAsync(CancellationToken.None);
+        for (int pass = 0; pass < 4; pass++) { database.Coordinator.RunVersionPurgePass(CancellationToken.None); }
+        database.DataStorage.GetOwnerIndexPages(id).ShouldBeEmpty();
+        (database.Store.IndexOwnerPagesReclaimed - reclaimed).ShouldBe(pages);
+        GraphTextIndexTests.Registrations(database).ShouldNotContain(entry => entry.Id == id);
+        (await GraphTextIndexTests.RowsAsync(writer, "MATCH (n:N {p:'abc'}) RETURN n.p")).ShouldHaveSingleItem();
+    }
+}

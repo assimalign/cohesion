@@ -23,7 +23,9 @@ public sealed class GraphTextIndexRecoveryTests
     [InlineData("update")] [InlineData("committed-update")] [InlineData("delete")]
     [InlineData("retire-registration")] [InlineData("reclaim-pages")] [InlineData("reclaim-registration")] [InlineData("reclaimed")]
     [InlineData("reclaim-batch")] [InlineData("reclaim-batch-large")]
-    public async Task Execute_CrashImage_ShouldConvergeToExactCommittedStateAsync(string boundary)
+    [InlineData("retire-registration", false)] [InlineData("reclaim-pages", false)]
+    [InlineData("reclaim-batch", false)] [InlineData("reclaim-registration", false)] [InlineData("reclaimed", false)]
+    public async Task Execute_CrashImage_ShouldConvergeToExactCommittedStateAsync(string boundary, bool text = true)
     {
         // Arrange: a durable fault-injecting storage captures actual WAL/page images, not copies of model objects.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -35,6 +37,10 @@ public sealed class GraphTextIndexRecoveryTests
         var database = await engine.CreateDatabaseAsync("source", token);
         await using var session = await database.CreateSessionAsync(token);
         await session.ExecuteAsync("INSERT (:N {k:1,p:'oldabc'}),(:N {k:2,p:'abcXbcd'})", cancellationToken: token);
+        var initialOwners = GraphIndexReclamationReviewTests.IndexOwners(database).Keys.ToArray();
+        var initialRegistrations = GraphTextIndexTests.Registrations(database).Select(entry => entry.Id).ToArray();
+        ulong imageTree = 0;
+        string build = text ? "CREATE TEXT INDEX text_p FOR (n:N) ON (n.p)" : "CREATE INDEX text_p FOR (n:N) ON (n.p)";
         bool reclamation = boundary.StartsWith("reclaim", StringComparison.Ordinal) || boundary == "retire-registration";
         bool drop = boundary.Contains("drop", StringComparison.Ordinal) || reclamation;
         bool update = boundary is "update" or "committed-update" or "delete";
@@ -44,7 +50,7 @@ public sealed class GraphTextIndexRecoveryTests
             value = "!" + string.Concat(value.Select(character => character is >= 'a' and <= 'p' ? (char)(character + 10) : character)) + "!";
             await session.ExecuteAsync("FOR k IN [3,4] INSERT (:N {k:k,p:$pattern})", GraphTextIndexTests.Bind(value), token);
         }
-        if (drop || update) { await session.ExecuteAsync("CREATE TEXT INDEX text_p FOR (n:N) ON (n.p)", cancellationToken: token); }
+        if (drop || update) { await session.ExecuteAsync(build, cancellationToken: token); }
         ulong largeTree = 0;
         long largeRoot = 0;
         if (boundary == "reclaim-batch-large")
@@ -55,6 +61,7 @@ public sealed class GraphTextIndexRecoveryTests
             largeRoot = GraphTextIndexTests.ReadIndexRoot(database, largeTree);
             database.DataStorage.GetOwnerIndexPages(largeTree).Count.ShouldBeGreaterThan(Graph.Storage.GraphStore.IndexReclaimPageLimit);
         }
+        if (drop || update) { CaptureIdentity(); }
         if (reclamation)
         { await session.ExecuteAsync("DROP INDEX text_p", cancellationToken: token); }
         int captured = 0;
@@ -84,12 +91,12 @@ public sealed class GraphTextIndexRecoveryTests
         {
             if (boundary == "commit-record")
             {
-                FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () => { strategy.CopyDatabase("source", "image"); captured++; };
-                await session.ExecuteAsync("CREATE TEXT INDEX text_p FOR (n:N) ON (n.p)", cancellationToken: token);
+                FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () => { CaptureIdentity(); strategy.CopyDatabase("source", "image"); captured++; };
+                await session.ExecuteAsync(build, cancellationToken: token);
             }
             else if (boundary is "committed" or "committed-drop" or "committed-update")
             {
-                await session.ExecuteAsync(boundary == "committed" ? "CREATE TEXT INDEX text_p FOR (n:N) ON (n.p)"
+                await session.ExecuteAsync(boundary == "committed" ? build
                     : boundary == "committed-drop" ? "DROP INDEX text_p" : "MATCH (n:N {k:1}) SET n.p='newxyz'", cancellationToken: token);
                 Capture();
             }
@@ -110,7 +117,7 @@ public sealed class GraphTextIndexRecoveryTests
                 await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(drop ? "DROP INDEX text_p"
                     : boundary == "update" ? "MATCH (n:N {k:1}) SET n.p='newxyz'"
                     : boundary == "delete" ? "MATCH (n:N {k:1}) DELETE n"
-                    : "CREATE TEXT INDEX text_p FOR (n:N) ON (n.p)", cancellationToken: token));
+                    : build, cancellationToken: token));
             }
         }
         finally
@@ -129,19 +136,43 @@ public sealed class GraphTextIndexRecoveryTests
             bool indexed = boundary is "commit-record" or "committed" or "drop-catalog" or "drop-tree" or "update" or "committed-update" or "delete";
             var indexes = await GraphSchema.Open(recovered, reader).GetIndexesAsync(token);
             indexes.Count.ShouldBe(indexed ? 1 : 0);
-            if (indexed) { indexes[0].IsText.ShouldBeTrue(); }
+            if (indexed) { indexes[0].IsText.ShouldBe(text); }
             (await GraphTextIndexTests.RowsAsync(reader, GraphTextIndexTests.Query("CONTAINS"), "abc")).Select(row => row[0])
                 .ShouldBe(boundary == "committed-update" ? [2L] : new object?[] { 1L, 2L });
             (await GraphTextIndexTests.RowsAsync(reader, GraphTextIndexTests.Query("ENDS WITH"), "xyz")).Select(row => row[0])
                 .ShouldBe(boundary == "committed-update" ? [1L] : Array.Empty<object?>());
             (await GraphTextIndexTests.RowsAsync(reader, GraphTextIndexTests.Query("CONTAINS"), "abcd")).ShouldBeEmpty();
-            recovered.Coordinator.RunVersionPurgePass(token);
+            for (int pass = 0; pass < 16; pass++) { recovered.Coordinator.RunVersionPurgePass(token); }
+            var registrations = GraphTextIndexTests.Registrations(recovered);
+            registrations.Select(entry => entry.Id).Order().ShouldBe(initialRegistrations.Concat(indexed ? [imageTree] : Array.Empty<ulong>()).Order());
+            registrations.ShouldAllBe(entry => entry.Root > 0);
+            if (indexed)
+            {
+                string[] values = boundary == "committed-update" ? ["newxyz", "abcXbcd"] : ["oldabc", "abcXbcd"];
+                var expected = values.SelectMany(value => Internal.GraphTextTrigrams.Keys(value, token))
+                    .GroupBy(key => Convert.ToHexString(key.Encoded.Span)).ToDictionary(group => group.Key, group => group.Count());
+                var postings = await GraphTextIndexTests.CountEntriesByTokenAsync(recovered, imageTree);
+                postings.OrderBy(pair => pair.Key).ShouldBe(expected.OrderBy(pair => pair.Key));
+                (await GraphTextIndexTests.CountEntriesAsync(recovered, imageTree)).ShouldBe(expected.Values.Sum());
+            }
+            else
+            {
+                if (imageTree != 0) { recovered.DataStorage.GetOwnerIndexPages(imageTree).ShouldBeEmpty(); }
+                GraphIndexReclamationReviewTests.IndexOwners(recovered).Keys.Order().ShouldBe(initialOwners.Order());
+            }
             await reader.DisposeAsync();
             await recovered.DisposeAsync();
         }
 
+        void CaptureIdentity()
+        {
+            ulong id = GraphIndexReclamationReviewTests.IndexOwners(database).Keys.Except(initialOwners).SingleOrDefault();
+            if (id != 0) { imageTree = id; }
+        }
+
         void Capture()
         {
+            CaptureIdentity();
             database.DataStorage.WriteBackDirtyPages(int.MaxValue);
             database.DataStorage.WriteAheadJournal.Flush(forceDurable: true);
             strategy.CopyDatabase("source", "image");
