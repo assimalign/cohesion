@@ -41,7 +41,7 @@ public sealed class CheckpointBracketLoadTests
                 var session = sessions[writer];
                 var result = await session.ExecuteAsync("CREATE (:Item {value: 'payload'})", cancellationToken: token);
                 result.Diagnostics.ShouldBeEmpty();
-            }, _output.WriteLine, admissionPause);
+            }, _output.WriteLine, admissionPause, releaseModelGrantsWhilePaused: true);
         }
         finally
         {

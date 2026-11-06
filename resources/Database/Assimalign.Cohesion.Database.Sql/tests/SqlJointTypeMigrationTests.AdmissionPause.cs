@@ -9,6 +9,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Tests;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
@@ -34,7 +36,7 @@ public sealed partial class SqlJointTypeMigrationTests
             var gate = TransactionCheckpointInterlock.ForStorage(database.DataStorage);
             gate.JournalSizeLimit = 2; database.DataStorage.CheckpointJournalSize = 1;
             using var outside = database.DataStorage.BeginTransaction("OutsideTest");
-            gate.IsAdmissionPaused.ShouldBeTrue();
+            gate.ObserveAdmissionPause().ShouldBeTrue();
             // The pump is held: discard its shared wake so this yield proves the storage due predicate.
             engine.CheckpointNeededSignal.Reset();
             int visits = 0;
@@ -101,7 +103,13 @@ public sealed partial class SqlJointTypeMigrationTests
             [new("Value", DatabaseType.Int32, false)], null, [], [])), guard.Token);
         SeedRaw(database, [1], 128); database.Coordinator.Checkpoint(guard.Token);
         var gate = TransactionCheckpointInterlock.ForStorage(database.DataStorage);
-        gate.JournalSizeLimit = 2;
+        gate.JournalSizeLimit = 0;
+        database.DataStorage.CheckpointJournalSize = 1;
+        void DeferReleaseCheckpoint() => CheckpointLoad.SetBeforeCheckpoint(database.Coordinator,
+            _ => throw new StorageTransactionException("release deliberately pending"));
+        DeferReleaseCheckpoint();
+        var worker = engine.Workers.OfType<SqlCheckpointWorker>().Single();
+        worker.BeforeCheckpoint = _ => throw new StorageTransactionException("worker deliberately pending");
         var transaction = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, guard.Token);
         var statement = new SqlStatementContext(transaction, database.Coordinator, provisioningSchema: "typed",
             provisioningProgress: (_, _) => { }, checkpointCopy: true);
@@ -112,10 +120,13 @@ public sealed partial class SqlJointTypeMigrationTests
         {
             if (stage == "CopyCommitted")
             {
-                database.DataStorage.CheckpointJournalSize = 1;
-                if (gate.IsAdmissionPaused) { paused++; }
+                // The release checkpoint was deferred. Arm admission only after
+                // this bracket entered, then let its explicit checkpoint resume it.
+                gate.JournalSizeLimit = 2;
+                gate.ObserveAdmissionPause().ShouldBeTrue(); paused++;
+                CheckpointLoad.SetBeforeCheckpoint(database.Coordinator, null);
             }
-            if (stage == "CopyCheckpointed") { forced++; database.DataStorage.CheckpointJournalSize = 0; }
+            if (stage == "CopyCheckpointed") { forced++; gate.JournalSizeLimit = 0; DeferReleaseCheckpoint(); }
         };
         try
         {
@@ -129,6 +140,9 @@ public sealed partial class SqlJointTypeMigrationTests
         finally
         {
             SqlPlanExecutor.RewriteStage = null;
+            worker.BeforeCheckpoint = null;
+            CheckpointLoad.SetBeforeCheckpoint(database.Coordinator, null);
+            gate.JournalSizeLimit = 0;
             database.DataStorage.CheckpointJournalSize = 0;
             database.Coordinator.Checkpoint(guard.Token);
             await database.Coordinator.RollbackAsync(transaction, CancellationToken.None);

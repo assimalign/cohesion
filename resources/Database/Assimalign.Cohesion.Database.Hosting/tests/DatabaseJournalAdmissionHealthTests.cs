@@ -37,6 +37,7 @@ public sealed class DatabaseJournalAdmissionHealthTests
         using var recorder = new EventSourceRecorder(source, EventLevel.Verbose);
         using (var outside = storage.BeginTransaction("OutsideTest"))
         {
+            Assimalign.Cohesion.Database.Transactions.TransactionCheckpointInterlock.ForStorage(storage).ObserveAdmissionPause().ShouldBeTrue();
             // Act / Assert: no worker failure is needed to report the admission pause.
             var health = await application.Context.CheckAsync(guard.Token);
             health.Status.ShouldBe(HealthStatus.Degraded);
@@ -66,7 +67,7 @@ public sealed class DatabaseJournalAdmissionHealthTests
         using (var bracket = storage.BeginTransaction()) { bracket.Commit(); }
         storage.CheckpointJournalSize = 1;
         var gate = Assimalign.Cohesion.Database.Transactions.TransactionCheckpointInterlock.ForStorage(storage);
-        gate.IsAdmissionPaused.ShouldBeTrue();
+        gate.ObserveAdmissionPause().ShouldBeTrue();
         var source = EventSource.GetSources().Single(s => s.Name == "Assimalign.Cohesion.Database.Transactions");
         using var recorder = new EventSourceRecorder(source, EventLevel.Verbose);
         var waiting = Task.Factory.StartNew(() =>
@@ -93,7 +94,7 @@ public sealed class DatabaseJournalAdmissionHealthTests
         using (var bracket = storage.BeginTransaction()) { bracket.Commit(); }
         storage.CheckpointJournalSize = 1;
         var gate = Assimalign.Cohesion.Database.Transactions.TransactionCheckpointInterlock.ForStorage(storage);
-        gate.IsAdmissionPaused.ShouldBeTrue();
+        gate.ObserveAdmissionPause().ShouldBeTrue();
         var source = EventSource.GetSources().Single(s => s.Name == "Assimalign.Cohesion.Database.Transactions");
         using var recorder = new EventSourceRecorder(source, EventLevel.Verbose);
         var waiting = Task.Factory.StartNew(() =>

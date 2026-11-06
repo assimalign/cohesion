@@ -43,7 +43,7 @@ public sealed class CheckpointBracketLoadTests
                 var files = await session.GetContainerAsync("files", token);
                 await using var upload = await files.OpenWriteAsync($"{writer}-{next}", cancellationToken: token);
                 await upload.WriteAsync(new byte[1024], token);
-            }, _output.WriteLine, admissionPause);
+            }, _output.WriteLine, admissionPause, releaseModelGrantsWhilePaused: true);
         }
         finally
         {

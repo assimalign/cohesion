@@ -488,123 +488,120 @@ internal static class CheckpointLoad
     internal const long JournalSize = 64 * 1024;
 
     internal static async Task RunAsync(Assimalign.Cohesion.Database.Storage.Storage storage,
-        Action<CancellationToken> checkpoint, Func<int, long, CancellationToken, Task> write, Action<string> report, bool admissionPause = true)
+        Action<CancellationToken> checkpoint, Func<int, long, CancellationToken, Task> write, Action<string> report,
+        bool admissionPause = true, bool releaseModelGrantsWhilePaused = false)
     {
-        // Arrange: Windows process affinity includes every writer and checkpoint lane.
-        // Linux affinity is per thread; no workload-affinity claim is made there.
+        // Arrange: measure ordinary load separately from blocked checkpoints.
         using var affinity = new LoadAffinity();
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        using var stop = new CancellationTokenSource();
-        using var observation = new Observation(storage.Name);
-        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var counts = new long[4];
-        var watch = Stopwatch.StartNew();
-        var writers = new List<Task>(4);
         var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        var coordinator = (TransactionCoordinator)checkpoint.Target!;
         SetAdmissionPause(gate, admissionPause);
-        using var probeEntered = new ManualResetEventSlim();
-        using var probeRelease = new ManualResetEventSlim();
-        int writerStarts = 0;
-        // Exercise the long-holder backstop once, then keep the original four
-        // continuous writers. Each synthetic bracket is short; the outer raw
-        // scope holds admission across them as a nested catalog operation can.
+        var next = new long[4];
         checkpoint(ceiling.Token);
-        var probe = DedicatedTestTask.Run(() =>
+        using (var free = new Observation(storage.Name))
         {
-            using var lease = gate.Enter("LoadPauseProbe", cancellationToken: ceiling.Token);
-            while (storage.JournalBytesSinceCheckpoint < gate.JournalSizeLimit / 2)
+            using var stop = new CancellationTokenSource();
+            var counts = new long[4];
+            var watch = Stopwatch.StartNew();
+            var writers = Enumerable.Range(0, 4).Select(index => DedicatedTestTask.Run(async () =>
             {
-                using var bracket = storage.BeginTransaction("LoadPauseProbe");
-                bracket.Commit(awaitDurability: false);
-                ceiling.Token.ThrowIfCancellationRequested();
-            }
-            gate.IsAdmissionPaused.ShouldBe(admissionPause);
-            probeEntered.Set(); probeRelease.Wait(ceiling.Token);
-        }, CancellationToken.None);
-        try
-        {
-            for (int writer = 0; writer < 4; writer++)
-            {
-                int index = writer;
-                writers.Add(DedicatedTestTask.Run(async () =>
+                while (!stop.IsCancellationRequested)
                 {
-                    await ready.Task;
-                    Interlocked.Increment(ref writerStarts);
-                    long next = 0;
-                    while (!stop.IsCancellationRequested)
-                    {
-                        await write(index, next++, ceiling.Token);
-                        Interlocked.Increment(ref counts[index]);
-                        observation.Observe(storage.JournalLength);
-                    }
-                }, CancellationToken.None));
-            }
-            // Act: a minimum exposure followed by counter-driven progress, with a hang guard.
-            probeEntered.Wait(ceiling.Token);
-            ready.SetResult();
-            while (Volatile.Read(ref writerStarts) < 4 || (admissionPause && Interlocked.Read(ref observation.AdmissionWaits) == 0))
-            { await Task.Delay(1, ceiling.Token); }
-            probeRelease.Set();
-            await probe.WaitAsync(ceiling.Token);
-            watch.Restart();
-            do
+                    await write(index, next[index]++, ceiling.Token);
+                    Interlocked.Increment(ref counts[index]);
+                    free.Observe(storage.JournalLength);
+                }
+            }, CancellationToken.None)).ToArray();
+            try
             {
-                await Task.Delay(10, ceiling.Token);
-                foreach (var writer in writers.Where(writer => writer.IsCompleted)) { await writer; }
+                do { await Task.Delay(10, ceiling.Token); foreach (var task in writers.Where(t => t.IsCompleted)) { await task; } }
+                while (watch.Elapsed < TimeSpan.FromSeconds(2) || counts.Any(count => count < 32) || Interlocked.Read(ref free.Checkpoints) < 4);
             }
-            while (watch.Elapsed < TimeSpan.FromSeconds(2) || Interlocked.Read(ref observation.Checkpoints) < 4 ||
-                Enumerable.Range(0, counts.Length).Any(index => Volatile.Read(ref counts[index]) < 32));
+            finally { stop.Cancel(); await Task.WhenAll(writers); }
+            // Assert: EN-C1 keeps free-running load below the pause threshold.
+            free.AdmissionPauses.ShouldBe(0);
+            free.Peak.ShouldBeLessThanOrEqualTo(gate.JournalSizeLimit);
+            report($"{storage.Name}: freeRun pauseEnabled={admissionPause}, writes={counts.Sum()}, checkpoints={free.Checkpoints}, peak={free.Peak}, pauses={free.AdmissionPauses}");
         }
-        finally
+        // Act: repeat blocked checkpoints while four writers keep trying to append.
+        for (int episode = 0; episode < 3; episode++)
         {
-            stop.Cancel();
-            probeRelease.Set();
-            ready.TrySetResult(); // Also joins writers after a partial setup failure.
-            try { await probe.WaitAsync(ceiling.Token); }
-            finally { await Task.WhenAll(writers); }
+            checkpoint(ceiling.Token);
+            using var blocked = new Observation(storage.Name);
+            using var stop = new CancellationTokenSource();
+            var resumed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var cancellations = new CancellationTokenSource?[4];
+            var retreated = new int[4];
+            if (releaseModelGrantsWhilePaused) { blocked.WriterParked = index => cancellations[index]!.Cancel(); }
+            long attempts = 0;
+            SetBeforeCheckpoint(coordinator, _ =>
+            {
+                Interlocked.Increment(ref attempts);
+                throw new StorageTransactionException("Checkpoint deliberately pending in load probe");
+            });
+            var counts = new long[4];
+            var writers = Enumerable.Range(0, 4).Select(index => DedicatedTestTask.Run(async () =>
+            {
+                blocked.Writer.Value = index + 1;
+                using var cancellation = releaseModelGrantsWhilePaused ? CancellationTokenSource.CreateLinkedTokenSource(ceiling.Token) : null;
+                cancellations[index] = cancellation;
+                while (!stop.IsCancellationRequested)
+                {
+                    try { await write(index, next[index]++, cancellation?.Token ?? ceiling.Token); }
+                    catch (OperationCanceledException) when (cancellation?.IsCancellationRequested == true && !ceiling.IsCancellationRequested)
+                    {
+                        // Graph, Documents and Blob retain a database-wide writer grant.
+                        // Cancel only after its recorded wait, finish statement cleanup,
+                        // then wait outside the engine so the next writer can reach admission.
+                        Interlocked.Exchange(ref retreated[index], 1);
+                        await resumed.Task.WaitAsync(ceiling.Token);
+                        break;
+                    }
+                    Interlocked.Increment(ref counts[index]);
+                    blocked.Observe(storage.JournalLength);
+                    if (Interlocked.Read(ref counts[index]) > 100_000) { throw new InvalidOperationException("Blocked load made no bounded progress"); }
+                }
+            }, CancellationToken.None)).ToArray();
+            try
+            {
+                while (admissionPause ? Enumerable.Range(0, 4).Any(index => Interlocked.Read(ref blocked.WriterWaits[index]) == 0 ||
+                    releaseModelGrantsWhilePaused && Volatile.Read(ref retreated[index]) == 0) : blocked.Peak <= gate.JournalSizeLimit)
+                {
+                    await Task.Delay(1, ceiling.Token);
+                    foreach (var task in writers.Where(t => t.IsCompleted)) { await task; }
+                }
+                if (admissionPause)
+                {
+                    long held = storage.JournalLength;
+                    long writes = counts.Sum();
+                    for (int retry = 0; retry < 8; retry++)
+                    { Should.Throw<StorageTransactionException>(() => checkpoint(ceiling.Token)); }
+                    counts.Sum().ShouldBe(writes);
+                    storage.JournalLength.ShouldBe(held);
+                    blocked.Peak.ShouldBeLessThanOrEqualTo(gate.JournalSizeLimit);
+                    blocked.WriterWaits.ShouldAllBe(count => count > 0);
+                }
+                else { blocked.Peak.ShouldBeGreaterThan(gate.JournalSizeLimit); }
+            }
+            finally
+            {
+                stop.Cancel();
+                SetBeforeCheckpoint(coordinator, null);
+                try { checkpoint(ceiling.Token); }
+                finally { resumed.TrySetResult(); await Task.WhenAll(writers).WaitAsync(ceiling.Token); }
+            }
+            // Durations are diagnostic only.
+            report($"{storage.Name}: blocked episode={episode}, pauseEnabled={admissionPause}, releaseModelGrants={releaseModelGrantsWhilePaused}, peak={blocked.Peak}, limit={gate.JournalSizeLimit}, writersWaits=[{string.Join(",", blocked.WriterWaits)}], checkpointsBlocked={attempts}, pauseMs={blocked.PauseMilliseconds:F3}");
+            blocked.AdmissionResumes.ShouldBe(blocked.AdmissionPauses);
+            blocked.Errors.ShouldBe(0);
+            storage.IsOffline.ShouldBeFalse();
         }
-        // Read the append-locked high-water mark after all four writers have ended.
-        // Autonomous checkpoint progress was already required above.
-        checkpoint(ceiling.Token);
-        long checkpoints = Interlocked.Read(ref observation.Checkpoints);
-        long deferred;
-        long attributed;
-        System.Collections.Generic.KeyValuePair<string, long>[] classes;
-        while (true)
-        {
-            deferred = Interlocked.Read(ref observation.Deferred);
-            classes = observation.Classes.ToArray();
-            attributed = Interlocked.Read(ref observation.Attributed);
-            if (deferred == Interlocked.Read(ref observation.Deferred) && deferred == attributed
-                && classes.Sum(pair => pair.Value) == attributed) { break; }
-            await Task.Delay(1, ceiling.Token); // A deferral and its attribution are separate events.
-        }
-        long busy = Interlocked.Read(ref observation.Busy);
-        // Assert: journal bytes and attribution, never a wall-clock rate, decide the outcome.
-        long writes = counts.Sum();
-        string measured = $"{storage.Name}: pauseEnabled={admissionPause}, writes={writes}, checkpoints={checkpoints}, " +
-            $"checkpoints/write={(double)checkpoints / writes:F6}, " +
-            $"checkpoints/s={checkpoints / watch.Elapsed.TotalSeconds:F2}, " +
-            $"peak={observation.Peak} ({(double)observation.Peak / JournalSize:F2}x), " +
-            $"deferred={deferred}, attributed={attributed}, busy={busy}, " +
-            $"pauses={observation.AdmissionPauses}, bracketWaits={observation.AdmissionWaits}, pauseMs={observation.PauseMilliseconds:F3}, " +
-            $"classes={string.Join(",", classes.OrderBy(pair => pair.Key).Select(pair => pair.Key + "=" + pair.Value))}, seconds={watch.Elapsed.TotalSeconds:F2}";
-        report(measured);
-        counts.ShouldAllBe(count => count >= 32, measured);
-        checkpoints.ShouldBeGreaterThanOrEqualTo(4, measured);
-        observation.Errors.ShouldBe(0, measured);
-        attributed.ShouldBe(deferred, measured);
-        observation.Peak.ShouldBeLessThanOrEqualTo(4 * JournalSize, measured);
-        storage.IsOffline.ShouldBeFalse(measured);
-        if (admissionPause)
-        {
-            observation.AdmissionPauses.ShouldBeGreaterThan(0, measured);
-            observation.AdmissionWaits.ShouldBeGreaterThan(0, measured);
-            observation.AdmissionResumes.ShouldBe(observation.AdmissionPauses, measured);
-        }
-        else { observation.AdmissionPauses.ShouldBe(0, measured); }
         SetAdmissionPause(gate, true);
     }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "set_BeforeCheckpoint")]
+    internal static extern void SetBeforeCheckpoint(TransactionCoordinator coordinator, Action<long[]>? before);
 
     // Test-only access to the internal comparison switch; no public toggle or
     // shipped friend grant. Both measurements retain EN-C1 release arming.
@@ -665,7 +662,11 @@ internal static class CheckpointLoad
         internal long AdmissionPauses;
         internal long AdmissionResumes;
         internal long AdmissionWaits;
-        internal double PauseMilliseconds;
+        private long _pauseMicroseconds;
+        internal double PauseMilliseconds => Interlocked.Read(ref _pauseMicroseconds) / 1000.0;
+        internal readonly AsyncLocal<int> Writer = new();
+        internal readonly long[] WriterWaits = new long[4];
+        internal Action<int>? WriterParked;
         internal readonly ConcurrentDictionary<string, long> Classes = new();
         internal long Errors;
         internal void Observe(long value)
@@ -692,8 +693,13 @@ internal static class CheckpointLoad
             else
             {
                 if (data.EventId == 23) { Interlocked.Increment(ref AdmissionPauses); }
-                if (data.EventId == 24) { Interlocked.Increment(ref AdmissionResumes); PauseMilliseconds += (double)payload[2]!; }
-                if (data.EventId == 25) { Interlocked.Increment(ref AdmissionWaits); }
+                if (data.EventId == 24) { Interlocked.Increment(ref AdmissionResumes); Interlocked.Add(ref _pauseMicroseconds, (long)((double)payload[2]! * 1000)); }
+                if (data.EventId == 25)
+                {
+                    Interlocked.Increment(ref AdmissionWaits);
+                    if (Writer.Value > 0 && Interlocked.Increment(ref WriterWaits[Writer.Value - 1]) == 1)
+                    { WriterParked?.Invoke(Writer.Value - 1); }
+                }
                 if (data.EventId == 15) { Interlocked.Increment(ref Deferred); }
                 if (data.EventId == 21)
                 {

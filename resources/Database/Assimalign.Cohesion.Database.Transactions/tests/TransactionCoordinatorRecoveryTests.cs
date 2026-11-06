@@ -265,6 +265,8 @@ public partial class TransactionCoordinatorRecoveryTests
         long baseline = long.MaxValue;
         long asyncAdmission = long.MaxValue;
         long asyncBaseline = long.MaxValue;
+        long guardedAdmission = long.MaxValue;
+        long guardedAsyncAdmission = long.MaxValue;
         // Act
         for (int round = 0; round < 4; round++)
         {
@@ -280,17 +282,28 @@ public partial class TransactionCoordinatorRecoveryTests
             before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 1024; i++) { await interlock.WaitAsync(token); interlock.Release(); }
             long newAsyncBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1024; i++) { interlock.Wait(token, waitForAdmission: false); interlock.Release(); }
+            long guardedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1024; i++) { await interlock.WaitAsync(token, waitForAdmission: false); interlock.Release(); }
+            long guardedAsyncBytes = GC.GetAllocatedBytesForCurrentThread() - before;
             if (round == 0) { continue; }
             baseline = Math.Min(baseline, oldBytes);
             admission = Math.Min(admission, newBytes);
             asyncBaseline = Math.Min(asyncBaseline, oldAsyncBytes);
             asyncAdmission = Math.Min(asyncAdmission, newAsyncBytes);
+            guardedAdmission = Math.Min(guardedAdmission, guardedBytes);
+            guardedAsyncAdmission = Math.Min(guardedAsyncAdmission, guardedAsyncBytes);
         }
         // Assert
         baseline.ShouldBe(0);
         admission.ShouldBe(0);
         asyncBaseline.ShouldBe(0);
         asyncAdmission.ShouldBe(0);
+        guardedAdmission.ShouldBe(0);
+        guardedAsyncAdmission.ShouldBe(0);
+        _output.WriteLine($"Admission B/call: sync={admission / 1024.0:F2}, async={asyncAdmission / 1024.0:F2}, guardedSync={guardedAdmission / 1024.0:F2}, guardedAsync={guardedAsyncAdmission / 1024.0:F2}, semaphoreSync={baseline / 1024.0:F2}, semaphoreAsync={asyncBaseline / 1024.0:F2}");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Version purge: apply callback refuses reentrancy before any work (w11 review)")]

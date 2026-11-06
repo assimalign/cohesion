@@ -34,7 +34,7 @@ public sealed class JournalAdmissionStreamTests
         await stream.WriteAsync("{}"u8.ToArray(), guard.Token);
         using var outside = database.DataStorage.BeginTransaction("OutsideTest");
         gate.JournalSizeLimit = 2; database.DataStorage.CheckpointJournalSize = 1;
-        gate.IsAdmissionPaused.ShouldBeTrue();
+        gate.ObserveAdmissionPause().ShouldBeTrue();
         var source = EventSource.GetSources().Single(s => s.Name == "Assimalign.Cohesion.Database.Transactions");
         using var recorder = new EventSourceRecorder(source, EventLevel.Verbose);
         var finishing = completion == 0 ? stream.DisposeAsync().AsTask()
@@ -49,7 +49,7 @@ public sealed class JournalAdmissionStreamTests
             catch (OperationCanceledException exception) { canceled = exception; }
             // Assert: only the lifetime cancellation, never the hang guard, ended admission.
             canceled.ShouldNotBeNull(); guard.IsCancellationRequested.ShouldBeFalse();
-            gate.IsAdmissionPaused.ShouldBeTrue(); database.IsOffline.ShouldBeFalse();
+            gate.ObserveAdmissionPause().ShouldBeTrue(); database.IsOffline.ShouldBeFalse();
             recorder.Events.ShouldNotContain(e => e.EventId == 0);
         }
         finally

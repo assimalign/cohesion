@@ -17,21 +17,200 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 public partial class TransactionCoordinatorRecoveryTests
 {
-    [Fact(DisplayName = "Cohesion Test [Transactions] - Admission requires a pending checkpoint and excludes its own record (#1283)")]
-    public async Task Wait_SizeThresholdWithoutPending_ShouldAdmitUntilCheckpointIsPending()
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Ordinary physical acquisition preserves the caller cancellation token (#1283)")]
+    public async Task WaitAsync_CallerCancelsWhileQueued_ShouldPreserveTheCallerToken()
+    {
+        // Arrange: force the linked offline notice to participate in physical acquisition.
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(ceiling.Token);
+        var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        gate.Wait(ceiling.Token, drain: true);
+        var waiting = gate.WaitAsync(caller.Token, "QueuedWriter").AsTask();
+        try
+        {
+            waiting.IsCompleted.ShouldBeFalse();
+            // Act
+            caller.Cancel();
+            OperationCanceledException? canceled = null;
+            try { await waiting.WaitAsync(ceiling.Token); }
+            catch (OperationCanceledException error) { canceled = error; }
+            // Assert: an internal cancellation source never escapes as the caller's identity.
+            canceled.ShouldNotBeNull().CancellationToken.ShouldBe(caller.Token);
+            ceiling.IsCancellationRequested.ShouldBeFalse();
+        }
+        finally { gate.Release(allowCheckpoint: false); }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Offline interrupts semaphore waiters queued before a pause (#1283)")]
+    public async Task WaitAsync_OfflineWhileQueuedBeforePause_ShouldWakeWithoutThePermit()
+    {
+        // Arrange: the writer queued while there was no pause and cannot get the permit.
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        gate.Wait(ceiling.Token, drain: true);
+        var waiting = gate.WaitAsync(ceiling.Token, "QueuedWriter").AsTask();
+        try
+        {
+            waiting.IsCompleted.ShouldBeFalse();
+            using (var bracket = storage.BeginTransaction()) { bracket.Commit(); }
+            storage.CheckpointJournalSize = 1; gate.JournalSizeLimit = 2;
+            gate.ObserveAdmissionPause().ShouldBeTrue();
+            // Act: no physical holder release or successful checkpoint follows this fence.
+            storage.TakeOffline(StorageOfflineCause.PageWriteBackFailures, "write-back failure", new IOException("test failure"));
+            // Assert
+            (await Should.ThrowAsync<StorageOfflineException>(() => waiting.WaitAsync(ceiling.Token))).ShouldBeSameAs(storage.OfflineError);
+            ceiling.IsCancellationRequested.ShouldBeFalse();
+        }
+        finally
+        {
+            gate.Release(allowCheckpoint: false); gate.JournalSizeLimit = 0;
+            try { await waiting.WaitAsync(TimeSpan.FromSeconds(45)); gate.Release(allowCheckpoint: false); }
+            catch (Exception error) when (error is StorageOfflineException or OperationCanceledException) { }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - A pause interrupts guarded asynchronous physical acquisition (#1283)")]
+    public async Task ApplyStatementAsync_GuardedPhysicalWaitBecomesPaused_ShouldRefuseBeforeTheHolderEnds()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        var context = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, ceiling.Token);
+        var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        gate.Wait(ceiling.Token, drain: true);
+        bool applied = false;
+        var applying = coordinator.ApplyStatementAsync(context, _ =>
+        { applied = true; return ValueTask.FromResult(0); }, cancellationToken: ceiling.Token, waitForAdmission: false).AsTask();
+        try
+        {
+            applying.IsCompleted.ShouldBeFalse();
+            using (var bracket = storage.BeginTransaction()) { bracket.Commit(); }
+            storage.CheckpointJournalSize = 1; gate.JournalSizeLimit = 2;
+            // Act
+            gate.ObserveAdmissionPause().ShouldBeTrue();
+            TransactionAdmissionCanceledException? refusal = null;
+            try { await applying.WaitAsync(ceiling.Token); }
+            catch (TransactionAdmissionCanceledException error) { refusal = error; }
+            // Assert: the pause, rather than the guard or physical release, ends acquisition.
+            refusal.ShouldNotBeNull();
+            ceiling.IsCancellationRequested.ShouldBeFalse(); applied.ShouldBeFalse();
+        }
+        finally { gate.Release(allowCheckpoint: false); gate.JournalSizeLimit = 0; }
+        coordinator.Checkpoint(ceiling.Token);
+        await coordinator.RollbackAsync(context, ceiling.Token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Reading pause state cannot create a pause (#1283)")]
+    public async Task IsAdmissionPaused_ThresholdReached_ShouldRemainAPureRead()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using (var bracket = storage.BeginTransaction()) { bracket.Commit(); }
+        storage.CheckpointJournalSize = 1;
+        var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        gate.JournalSizeLimit = 2;
+        // Act / Assert: only the named observation creates an episode.
+        gate.IsAdmissionPaused.ShouldBeFalse();
+        gate.ObserveAdmissionPause().ShouldBeTrue();
+        gate.IsAdmissionPaused.ShouldBeTrue();
+        coordinator.Checkpoint(ceiling.Token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Version pruning yields a paused maintenance lane (#1283)")]
+    public async Task RunVersionPurgePass_PrunableVersionsDuringPause_ShouldYieldWithoutParking()
+    {
+        // Arrange: keep a real committed tombstone eligible for pruning.
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        var writer = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, ceiling.Token);
+        var location = await coordinator.ApplyStatementAsync(writer, bracket =>
+        {
+            var row = storage.Insert(bracket, Stamped(writer.Sequence, TransactionSequence.None));
+            coordinator.VersionStore.RecordCreated(writer.Sequence, row.PageId, row.SlotIndex);
+            return row;
+        }, ceiling.Token);
+        await coordinator.CommitAsync(writer, ceiling.Token);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, ceiling.Token);
+        await coordinator.ApplyStatementAsync(deleter, bracket =>
+        {
+            storage.Update(bracket, location.PageId, location.SlotIndex, Stamped(writer.Sequence, deleter.Sequence));
+            coordinator.VersionStore.RecordTombstoned(deleter.Sequence, location.PageId, location.SlotIndex);
+            return 0;
+        }, ceiling.Token);
+        await coordinator.CommitAsync(deleter, ceiling.Token);
+        var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        storage.CheckpointJournalSize = 1;
+        gate.JournalSizeLimit = 2;
+        gate.ObserveAdmissionPause().ShouldBeTrue();
+        var pruning = Task.Run(() => coordinator.RunVersionPurgePass(ceiling.Token), ceiling.Token);
+        try
+        {
+            // Act / Assert: the lane returns while admission remains paused.
+            (await pruning.WaitAsync(ceiling.Token)).ShouldBe(0);
+            gate.IsAdmissionPaused.ShouldBeTrue();
+        }
+        finally
+        {
+            gate.JournalSizeLimit = 0;
+            await pruning.WaitAsync(TimeSpan.FromSeconds(45));
+        }
+        coordinator.Checkpoint(ceiling.Token);
+        coordinator.RunVersionPurgePass(ceiling.Token).ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - A pending pause reports worker checkpoint failure and pairs its episode (#1283)")]
+    public async Task TryCheckpoint_PendingPauseLaterFails_ShouldReportTheSameEpisode()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var recorder = new EventSourceRecorder(TransactionEventSource.Log, EventLevel.Verbose);
+        var gate = TransactionCheckpointInterlock.ForStorage(storage);
+        gate.JournalSizeLimit = 2;
+        using (var outside = storage.BeginTransaction())
+        {
+            gate.ObserveAdmissionPause().ShouldBeTrue();
+            outside.Rollback();
+        }
+        coordinator.BeforeCheckpoint = _ => throw new IOException("worker checkpoint failed");
+        // Act: a worker-style attempt fails after the pending pause has been published.
+        Should.Throw<IOException>(() => coordinator.TryCheckpoint(TimeSpan.Zero, ceiling.Token));
+        var paused = recorder.Events.Single(e => e.EventId == 23);
+        var failed = recorder.Events.Single(e => e.EventId == 26);
+        _output.WriteLine($"Running pause total: {TransactionEventSource.Log.AdmissionPauseTicks} ticks");
+        coordinator.BeforeCheckpoint = null;
+        coordinator.Checkpoint(ceiling.Token);
+        // Assert: payload names and process-unique episode identity survive event reordering.
+        failed.PayloadNames.ShouldBe(new[] { "database", "reason", "episodeId" });
+        failed.Payload![1].ShouldBe("CheckpointFailure");
+        failed.Payload[2].ShouldBe(paused.Payload![6]);
+        recorder.Events.Single(e => e.EventId == 24).Payload![3].ShouldBe(paused.Payload[6]);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Half the limit requests a checkpoint with the size trigger disabled (#1283)")]
+    public async Task Wait_SizeTriggerDisabled_ShouldRequestCheckpointAtHalfLimit()
     {
         // Arrange
         using var storage = CoordinatorStorage.Create();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var gate = TransactionCheckpointInterlock.ForStorage(storage);
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        gate.JournalSizeLimit = 2;
         using (gate.Enter("Catalog")) { using var bracket = storage.BeginTransaction(); bracket.Commit(); }
         gate.IsAdmissionPaused.ShouldBeFalse();
 
-        // Act: the written journal becomes size-due, even before the worker requests it.
-        storage.CheckpointJournalSize = 1;
-        gate.IsAdmissionPaused.ShouldBeTrue();
+        // Act: reaching half the limit requests a checkpoint with the size trigger off.
+        gate.JournalSizeLimit = 2;
+        gate.ObserveAdmissionPause().ShouldBeTrue();
         var waiting = gate.WaitAsync(guard.Token, "Statement", 42).AsTask();
         waiting.IsCompleted.ShouldBeFalse();
         coordinator.Checkpoint(guard.Token);
@@ -79,7 +258,7 @@ public partial class TransactionCoordinatorRecoveryTests
         try
         {
             entered.Wait(guard.Token);
-            gate.IsAdmissionPaused.ShouldBeTrue();
+            gate.ObserveAdmissionPause().ShouldBeTrue();
             // Act: no new bracket can enter, but the holder can unwind without waiting on itself.
             var waiting = gate.WaitAsync(guard.Token, "Statement", 42).AsTask();
             waiting.IsCompleted.ShouldBeFalse();
@@ -92,11 +271,13 @@ public partial class TransactionCoordinatorRecoveryTests
             // Assert
             gate.IsAdmissionPaused.ShouldBeFalse();
             var paused = recorder.Events.Single(e => e.EventId == 23);
-            paused.PayloadNames.ShouldBe(new[] { "database", "reason", "bracketClass", "owner", "journalBytes", "journalSizeLimit" });
+            paused.PayloadNames.ShouldBe(new[] { "database", "reason", "bracketClass", "owner", "journalBytes", "journalSizeLimit", "episodeId" });
             paused.Payload![2].ShouldBe("Catalog"); paused.Payload[3].ShouldBe(7L);
             paused.Payload[4].ShouldBeOfType<long>().ShouldBeGreaterThanOrEqualTo(1); paused.Payload[5].ShouldBe(2L);
             recorder.Events.Count(e => e.EventId == 24).ShouldBe(1);
             recorder.Events.Count(e => e.EventId == 25).ShouldBe(1);
+            recorder.Events.Single(e => e.EventId == 24).PayloadNames.ShouldBe(new[] { "database", "reason", "durationMilliseconds", "episodeId" });
+            recorder.Events.Single(e => e.EventId == 25).PayloadNames.ShouldBe(new[] { "database", "bracketClass", "owner" });
             recorder.Events.ShouldNotContain(e => e.EventId == 0);
         }
         finally { release.Set(); try { await holder.WaitAsync(guard.Token); } catch (Exception e) when (e == expected || e is OperationCanceledException) { } }
@@ -132,8 +313,8 @@ public partial class TransactionCoordinatorRecoveryTests
         }
         else if (exit == 1)
         {
-            gate.CloseAdmission();
-            await Should.ThrowAsync<ObjectDisposedException>(() => waiting.WaitAsync(guard.Token));
+            storage.TakeOffline(StorageOfflineCause.CheckpointFailures, "checkpoint test", new IOException("test failure"));
+            await Should.ThrowAsync<StorageOfflineException>(() => waiting.WaitAsync(guard.Token));
         }
         else
         {
@@ -142,7 +323,7 @@ public partial class TransactionCoordinatorRecoveryTests
         }
         // Assert: draining operations never wait behind the pause.
         coordinator.BeforeCheckpoint = null;
-        if (exit != 2) { coordinator.Checkpoint(guard.Token); }
+        if (exit != 2 && !storage.IsOffline) { coordinator.Checkpoint(guard.Token); }
         await gate.WaitAsync(guard.Token, "Undo", drain: true); gate.Release();
     }
 
@@ -158,7 +339,7 @@ public partial class TransactionCoordinatorRecoveryTests
         coordinator.BeforeCheckpoint = _ => throw failure;
         gate.JournalSizeLimit = 2; storage.CheckpointJournalSize = 1;
         using (gate.Enter("Seed")) { using var bracket = storage.BeginTransaction(); bracket.Commit(); }
-        gate.IsAdmissionPaused.ShouldBeTrue();
+        gate.ObserveAdmissionPause().ShouldBeTrue();
         var waiting = gate.WaitAsync(guard.Token, "Statement").AsTask();
         // Act: explicit success clears the pause, but the worker must still collect its earlier failure.
         coordinator.BeforeCheckpoint = null;
@@ -171,7 +352,7 @@ public partial class TransactionCoordinatorRecoveryTests
         int laterAttempts = 0;
         coordinator.BeforeCheckpoint = _ => { laterAttempts++; throw new IOException("later deferred failure"); };
         using (gate.Enter("LaterFailure")) { using var bracket = storage.BeginTransaction(); bracket.Commit(); }
-        laterAttempts.ShouldBe(1); gate.IsAdmissionPaused.ShouldBeTrue();
+        laterAttempts.ShouldBe(1); gate.ObserveAdmissionPause().ShouldBeTrue();
         // A later failure is observable by event but cannot overwrite the older handoff.
         Should.Throw<IOException>(() => coordinator.TryCheckpoint(TimeSpan.Zero, guard.Token)).ShouldBeSameAs(failure);
         coordinator.BeforeCheckpoint = null; coordinator.Checkpoint(guard.Token);
@@ -189,7 +370,7 @@ public partial class TransactionCoordinatorRecoveryTests
         first.BeforeCheckpoint = _ => throw new IOException("old coordinator failure");
         gate.JournalSizeLimit = 2; storage.CheckpointJournalSize = 1;
         using (gate.Enter("Seed")) { using var bracket = storage.BeginTransaction(); bracket.Commit(); }
-        gate.IsAdmissionPaused.ShouldBeTrue();
+        gate.ObserveAdmissionPause().ShouldBeTrue();
         // Act
         await first.DisposeAsync();
         gate.JournalSizeLimit.ShouldBe(0); gate.IsAdmissionPaused.ShouldBeFalse();
@@ -247,7 +428,7 @@ public partial class TransactionCoordinatorRecoveryTests
         await lockWaiter.WaitAsync(guard.Token);
         // Assert
         storage.TryReadRecord(location.PageId, location.SlotIndex, out _).ShouldBeFalse();
-        gate.IsAdmissionPaused.ShouldBeTrue(); admission.IsCompleted.ShouldBeFalse();
+        gate.ObserveAdmissionPause().ShouldBeTrue(); admission.IsCompleted.ShouldBeFalse();
         coordinator.BeforeCheckpoint = null; coordinator.Checkpoint(guard.Token);
         await admission.WaitAsync(guard.Token); gate.Release();
         await coordinator.RollbackAsync(other, guard.Token);

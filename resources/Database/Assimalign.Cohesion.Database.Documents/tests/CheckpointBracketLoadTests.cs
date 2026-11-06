@@ -42,7 +42,7 @@ public sealed class CheckpointBracketLoadTests
                 var session = sessions[writer];
                 var items = await session.GetCollectionAsync("items", token);
                 await items.PutAsync(session, $"{writer}-{next}", System.Text.Encoding.UTF8.GetBytes("{\"value\":\"payload\"}"), cancellationToken: token);
-            }, _output.WriteLine, admissionPause);
+            }, _output.WriteLine, admissionPause, releaseModelGrantsWhilePaused: true);
         }
         finally
         {
