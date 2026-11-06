@@ -64,7 +64,8 @@ internal sealed partial class SqlPlanner
         return BindDerivedOutput(child, derived.Alias!, derived.Columns, derived.Query, dependencies.Count > 0);
     }
 
-    private SqlRelationSource BindDerivedOutput(SqlPlan child, string relationName, IReadOnlyList<string> names, SqlQueryBodyExpression query, bool isCorrelated = false)
+    private SqlRelationSource BindDerivedOutput(SqlPlan child, string relationName, IReadOnlyList<string> names, SqlQueryBodyExpression query,
+        bool isCorrelated = false, bool storedNames = false)
     {
         var output = QueryOutput(child);
         var projections = output.Projections;
@@ -124,7 +125,11 @@ internal sealed partial class SqlPlanner
             columns[i] = new SqlCatalogColumn(name,
                 type, projection.IsNullable,
                 collation: candidate.Priority >= 2 ? candidate.Collation : null,
-                domainName: projection.Metadata?.DomainName ?? inherited?.DomainName ?? (declaredType is { IsDomain: true } ? declaredType.Name : null));
+                domainName: projection.Metadata?.DomainName ?? inherited?.DomainName ?? (declaredType is { IsDomain: true } ? declaredType.Name : null))
+            {
+                HasSynthesizedName = (names.Count == 0 || storedNames && name == projection.Name) &&
+                    (!projection.HasOutputName || projection.HasSynthesizedName),
+            };
         }
         return new SqlRelationSource(new SqlDerivedRelation(relationName, child, columns, isCorrelated));
     }

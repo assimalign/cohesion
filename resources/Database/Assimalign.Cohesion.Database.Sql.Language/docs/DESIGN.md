@@ -626,6 +626,30 @@ before any mutation. The engine supplies relation bindings; parser shapes are un
 CK00001 refusal is retained for UPDATE SET. PostgreSQL `parse_relation.c:3759`
 is the reference for the hidden-name rule.
 
+## NATURAL joins and qualified SELECT wildcards (#1792, SQ-J3)
+
+SqlJoinClause retains IsNatural and source spans for its keywords and complete join.
+SqlQualifiedStarExpression is a sealed leaf retaining the relation name, optional schema
+and source span. The parser accepts NATURAL before INNER/LEFT/RIGHT/FULL, refuses NATURAL CROSS and ON/USING
+combinations and keeps direct mutation sources excluded. Qualified stars parse only as
+standalone SELECT targets; generic expression parsing and RETURNING retain CK00001.
+The renderer round-trips both forms for binding, while CREATE VIEW stores only their
+expanded forms. The natural/lateral identifier corpus confirms unchanged canonical quoting.
+The profile gains exactly one measured clause (92/93); vocabulary, keyword disposition,
+completeness, positive/negative and live conformance cases advance together. LATERAL is
+unchanged. Zero-name LEFT/RIGHT retain ON TRUE; FULL retains its executable-subset refusal.
+Star aliases are discarded as in PostgreSQL parse_target.c:148-152. A star followed by
+a row-expression operator keeps the QualifiedStarContext CK00001 refusal. NATURAL never
+consumes ON, allowing INSERT SELECT ON CONFLICT and retaining syntax errors elsewhere.
+
+The parser and binder share the internal SqlTargetListLimits constants through the existing
+Types source module. ParseSelectColumns covers every SELECT body and RETURNING list; it
+caps both count and backing capacity at 1,664, reports located CS05097 before parsing entry
+1,665, then resets the lexer to EOF without scanning the tail and discards the partial tree. Lexical/capability scans
+run after a bounded parse, with their original diagnostic precedence and parameter refinements;
+an abandoned list does not allocate scan diagnostics or retain tokens for its tail. Supported
+sources cannot have zero visible columns (DIALECT records the catalog and FROM-less boundaries).
+
 ## System relation joins (#1106)
 
 The FROM join-tree grammar accepts stored tables and registered
@@ -792,11 +816,10 @@ src/backend/parser/parse_cte.c:214-229 supplies declaration-order visibility.
 FROM exposes one SqlFromItem join tree per comma item (#1109), preserving JOIN precedence
 and ON scopes without recovering grouping from flattened text. SqlJoinClause retains ordered
 UsingColumns separately from ON. The capability pre-scan skips advertised clauses and reports
-the first unadvertised construct, so USING cannot mask NATURAL, WINDOW or OVER.
+the first unadvertised construct, so USING cannot mask LATERAL or deferred window forms.
 The renderer and nesting measure traverse every item and condition; catalog-aware correlation binding belongs to the engine.
 The engine implements written-order steps; DIALECT.md defines LEFT null extension and the
-common-typed merged expressions and modifier clearing for USING. Qualified wildcards keep
-CK00001. ORDER BY aliases and ordinals count visible wildcard output after USING merges.
+common-typed merged expressions and modifier clearing for USING. Qualified SELECT wildcards expand each input's own visible columns; row-valued and qualified RETURNING uses keep CK00001. ORDER BY aliases and ordinals count visible wildcard output after USING merges.
 
 
 - **Recursive descent, hand-written** — over a parser generator. The dialect is
@@ -891,7 +914,7 @@ CK00001. ORDER BY aliases and ordinals count visible wildcard output after USING
   advertised for binding; window clauses are lexed and parsed for their executable
   stage, with named unsupported diagnostics for deferred FROM FIRST/LAST modifiers. Gateable
   names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
-  including OVER/WINDOW/PARTITION, while NATURAL remains absent. Nested WITH and recursive
+  including OVER/WINDOW/PARTITION and NATURAL (#1792). Nested WITH and recursive
   execution retain positional capability checks. `ParseCore` scans a copy of its configured
   lexer before recursive descent and attaches the first rejected clause to the
   statement, so analyzers observe `CK00001` with the token location and the `SQL`

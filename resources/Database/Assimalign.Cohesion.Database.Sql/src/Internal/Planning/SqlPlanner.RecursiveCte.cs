@@ -113,7 +113,8 @@ internal sealed partial class SqlPlanner
         var columns = BindDerivedOutput(anchor, definition.Name, definition.Columns, union.Left).Columns
             .Select(column => new SqlCatalogColumn(column.Name,
                 column.Type.Type == DatabaseType.Null ? new DatabaseTypeInfo(DatabaseType.String) : column.Type,
-                true, collation: column.Collation, domainName: column.DomainName)).ToArray();
+                true, collation: column.Collation, domainName: column.DomainName)
+            { HasSynthesizedName = column.HasSynthesizedName }).ToArray();
         // parse_cte.c:580-632 resolves unknown anchor output to text before publishing
         // the self-reference. Its identity binds the executor's working-table scan.
         var relation = new SqlDerivedRelation(definition.Name, anchor, columns) { IsCommonTable = true, IsRecursiveReference = true };
@@ -180,6 +181,7 @@ internal sealed partial class SqlPlanner
         {
             Value = new SqlBoundSlot(index), Collation = new SqlBoundCollation(column.Collation ?? _catalog.DefaultCollation),
             IsNullable = true, HasOutputName = true, MaxLength = column.Type.MaxLength,
+            HasSynthesizedName = column.HasSynthesizedName,
             Metadata = new SqlProjectionMetadata(output.Projections[index].Metadata?.Collation ?? default, null, column.Type, column.DomainName),
         }).ToArray();
         return relation with { IsRecursiveReference = false, Query = new SqlRecursiveUnionPlan(

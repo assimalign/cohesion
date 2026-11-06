@@ -40,7 +40,8 @@ public sealed class SqlDiagnosticOverflowTests
         });
         await using var connection = await client.ConnectAsync(TestTimeout.Token());
         var session = (SqlDatabaseServerSession)server.Sessions.Single();
-        string sql = "SELECT " + string.Join(",", Enumerable.Repeat("CURRENT_DATE()", 4097)) + ";";
+        // One target keeps the 4,097 independent syntax errors below the target-list guard.
+        string sql = "SELECT 1 WHERE 1 IN (" + string.Join(",", Enumerable.Repeat("CURRENT_DATE()", 4097)) + ");";
         var expected = new SqlQueryParser().Parse(sql).Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ToArray();
         // Act
         var parse = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(sql, cancellationToken: TestTimeout.Token()));

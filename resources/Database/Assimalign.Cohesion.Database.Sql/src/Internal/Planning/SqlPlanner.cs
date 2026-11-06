@@ -194,6 +194,7 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
     private SqlPlan PlanSelectCore(SqlSelectExpression select)
     {
+        CheckTargetList(0, select.Columns.Count, select.Location);
         ValidateNamedWindows(select);
         if (select.Where is not null && ContainsAggregate(select.Where))
         {
@@ -237,7 +238,7 @@ internal sealed partial class SqlPlanner
             where = evaluator.BindPredicate(select.Where);
         }
 
-        var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count);
+        var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count, evaluator);
         CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
         foreach (var orderBy in select.OrderBy)
         {
@@ -334,15 +335,21 @@ internal sealed partial class SqlPlanner
 
     /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>
     private SqlProjection PassThrough(string name, int ordinal, IReadOnlyList<SqlCatalogColumn> columns,
-        SqlExpressionEvaluator scope, bool merged = false)
+        SqlExpressionEvaluator scope, bool merged = false, bool explicitName = false)
     {
         var output = merged ? scope.MergedColumn(ordinal) : null;
         var column = output?.Column ?? columns[ordinal];
+        if (explicitName && column.HasSynthesizedName && name == column.Name && ViewDefinitionBinding is { } binding)
+        { binding.NeedsOutputNames = true; }
+        // Older frozen stars emitted AS source_name. Their same-name decoration cannot
+        // be distinguished from an authored re-alias, so retain provenance conservatively.
+        bool ambiguousStoredAlias = ViewDefinitionBinding?.Owner is not null && name == column.Name;
         return new(name, output is null ? ordinal : null, null, column.Type.Type)
         {
             Value = output?.Value, Collation = new SqlBoundCollation(output is null ? scope.ResolveColumnCollation(ordinal) : column.Collation ?? _catalog.DefaultCollation),
             Metadata = CaptureProjectionMetadata(new SqlCollationCandidate(column.Collation, column.Collation is null ? 0 : 2), column),
             MaxLength = column.Type.MaxLength, IsNullable = column.IsNullable,
+            HasSynthesizedName = (!explicitName || ambiguousStoredAlias) && column.HasSynthesizedName,
         };
     }
 
@@ -949,7 +956,7 @@ internal sealed partial class SqlPlanner
     internal static bool ContainsStar(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        return expression is SqlStarExpression || Children(expression).Any(ContainsStar);
+        return expression is SqlStarExpression or SqlQualifiedStarExpression || Children(expression).Any(ContainsStar);
     }
 
     /// <summary>Rejects the first column reference in an expression, outside a subquery.</summary>
@@ -1212,7 +1219,7 @@ internal sealed partial class SqlPlanner
     private void ValidateDefaultSyntax(SqlExpression expression, string column)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlColumnReferenceExpression or SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression ||
+        if (expression is SqlColumnReferenceExpression or SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression or SqlQualifiedStarExpression ||
             expression is SqlFunctionCallExpression call && _functions.Catalog.IsAggregate(call.FunctionName))
         {
             throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,

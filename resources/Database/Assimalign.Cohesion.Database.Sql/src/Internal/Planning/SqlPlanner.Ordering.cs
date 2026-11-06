@@ -23,13 +23,13 @@ internal sealed partial class SqlPlanner
     /// numeric expressions remain expressions: ORDER BY 1 + 1 is not ordinal 2.
     /// </summary>
     private Dictionary<SqlExpression, int> BindOrderByProjections(
-        SqlSelectExpression select, IReadOnlyList<SqlProjection> projections, int wildcardColumnCount)
+        SqlSelectExpression select, IReadOnlyList<SqlProjection> projections, int wildcardColumnCount, SqlExpressionEvaluator? scope = null)
     {
         var aliases = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int projectionIndex = 0;
         foreach (var column in select.Columns)
         {
-            if (column.Alias is { } alias)
+            if (column.Expression is not (SqlStarExpression or SqlQualifiedStarExpression) && column.Alias is { } alias)
             {
                 // An unused duplicate is harmless; referencing it is ambiguous.
                 if (!aliases.TryAdd(alias, projectionIndex))
@@ -37,7 +37,8 @@ internal sealed partial class SqlPlanner
                     aliases[alias] = -1;
                 }
             }
-            projectionIndex += column.Expression is SqlStarExpression ? wildcardColumnCount : 1;
+            projectionIndex += column.Expression is SqlStarExpression ? wildcardColumnCount
+                : column.Expression is SqlQualifiedStarExpression star ? scope!.QualifiedStarOrdinals(star).Count : 1;
         }
 
         var slots = new Dictionary<SqlExpression, int>();

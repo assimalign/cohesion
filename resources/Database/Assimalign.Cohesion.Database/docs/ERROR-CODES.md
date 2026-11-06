@@ -336,6 +336,7 @@ structured-carrier messages remain unprefixed.
 | New (#1722, SQ-N2) | CS05094 | SQL/JSON path parse size, statement work or transient result memory budget exceeded (54000) |
 | New (#1724, SQ-C1) | CS05095 | A streaming COPY consumer was given another statement kind |
 | New (#1724, SQ-C1) | CS05096 | COPY TO requires its SQL outbound-stream capability and consumer API |
+| New (#1792, SQ-J3 fix) | CS05097 | Syntactic or expanded target list exceeds 1,664 entries (54011); reports limit and attempted count |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

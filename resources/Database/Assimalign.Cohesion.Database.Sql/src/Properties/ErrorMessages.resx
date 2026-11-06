@@ -1083,4 +1083,10 @@
   <data name="TempRootInvalid" xml:space="preserve"><value>must be a valid path or an empty path for an in-memory engine; a default path is invalid.</value></data>
   <data name="SpillResultsUndisposed" xml:space="preserve"><value>The session has {0} undisposed spilled results. Dispose a result before spilling another statement.</value></data>
   <data name="SpillReaderBudgetExceeded" xml:space="preserve"><value>The spilled result reader grant of {0} bytes would be exceeded: {1} live bytes and {2} requested bytes. Dispose an active enumeration before opening another.</value></data>
+  <data name="TargetListLimit" xml:space="preserve">
+    <value>A target list can have at most {0} entries; this expansion reaches {1} entries.</value>
+  </data>
+  <data name="NaturalSynthesizedName" xml:space="preserve">
+    <value>NATURAL JOIN input column '{0}' has a synthesized name; give the column an explicit alias.</value>
+  </data>
 </root>

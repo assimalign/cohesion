@@ -41,9 +41,7 @@ public sealed class SqlNWayJoinTests
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("SELECT *, a.id AS sort" + from + "ORDER BY 3;", cancellationToken: CancellationToken.None));
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02018");
-        var qualified = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync("SELECT a.*, a.id AS sort" + from + "ORDER BY sort;", cancellationToken: CancellationToken.None));
-        qualified.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
+        Check(await RowsAsync(session, "SELECT a.*, a.id AS sort" + from + "ORDER BY sort;"), [[1, 1], [2, 2]]);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LEFT: UNKNOWN, ON filters and WHERE filters retain SQL semantics")]

@@ -358,10 +358,15 @@ No wire or client API changes.
 
 ## Expanded joins (#1109)
 
+NATURAL and qualified SELECT wildcards (#1792, SQ-J3) use the existing result codec on
+InMemory and TCP. Wire tests compare complete typed rows after NATURAL and USING joins,
+including qualified physical columns. LATERAL and row-valued COUNT(t.*) retain CK00001
+ParseFailure and leave the connection reusable. There is no client API or protocol change.
+
 LEFT null values, N-way, CROSS, comma and USING results use the existing SQL frames and
 production materializer. No nullability field or frame-writing change is introduced.
 Wire tests run every join case over InMemory and loopback TCP, pin exact values and
-multiplicities, and retain FULL/NATURAL and qualified-wildcard exclusions. RIGHT [OUTER] and RIGHT USING (#1525) carry null-extended written-left values, merged right spelling, coerced decimal values, original column ordinals and cleared lengths on both transports; direct joined-DML refusals carry CS05069 and keep the connection usable. Engine nullability remains engine metadata; no nullability field is added to the wire. USING
+multiplicities, and retain the LATERAL and row-valued wildcard exclusions. RIGHT [OUTER] and RIGHT USING (#1525) carry null-extended written-left values, merged right spelling, coerced decimal values, original column ordinals and cleared lengths on both transports; direct joined-DML refusals carry CS05069 and keep the connection usable. Engine nullability remains engine metadata; no nullability field is added to the wire. USING
 wildcard alias/ordinal ordering, decimal common-type values in both input orders, qualified
 types and cleared character lengths use the same production frames and materializer.
 

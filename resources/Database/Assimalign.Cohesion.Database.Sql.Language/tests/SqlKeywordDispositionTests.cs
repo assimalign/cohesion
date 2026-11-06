@@ -87,7 +87,7 @@ public sealed class SqlKeywordDispositionTests
         ["FULL"] = Parses("SELECT * FROM t FULL JOIN u ON t.id = u.id"),
         ["OUTER"] = Parses("SELECT * FROM t LEFT OUTER JOIN u ON t.id = u.id"),
         ["CROSS"] = Parses("SELECT * FROM t CROSS JOIN u"),
-        ["NATURAL"] = Rejects("SELECT * FROM t NATURAL JOIN u", SqlClauses.Natural),
+        ["NATURAL"] = Parses("SELECT * FROM t NATURAL JOIN u"),
         ["USING"] = Parses("SELECT * FROM t JOIN u USING (id)"),
         ["LATERAL"] = Rejects("SELECT * FROM t JOIN LATERAL (SELECT b FROM u) x ON TRUE", "LATERAL subquery"),
         // Clauses and modifiers
