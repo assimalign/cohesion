@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -18,6 +19,7 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Protocol;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -83,7 +85,11 @@ public sealed partial class SqlSortSpillConformanceTests
         if (exit == 0)
         {
             var result = await connection.QueryAsync("SELECT id,k FROM t ORDER BY k", cancellationToken: ceiling.Token);
-            result.Count.ShouldBe(4000);
+            await using var reference = await Create("wire-reference",67108864);
+            await using var expectedSession = await (await reference.CreateDatabaseAsync("db")).CreateSessionAsync();
+            await Seed(expectedSession);
+            await using var expected = (DatabaseResultSet)await expectedSession.ExecuteAsync("SELECT id,k FROM t ORDER BY k");
+            result.Select(row => new RowValues(Enumerable.Range(0,row.FieldCount).Select(row.GetValue).ToArray())).ToArray().ShouldBe(await Rows(expected));
         }
         else if (exit == 1)
         {
@@ -101,6 +107,63 @@ public sealed partial class SqlSortSpillConformanceTests
         Files(engine).ShouldBe(0); TempBytes(engine.TempSpace!).ShouldBe(0);
         SqlSortSpillMetrics.For(serverSession.DatabaseSession!.LastStatementMetrics!).ShouldNotBeNull();
         if (exit == 1) { (await connection.QueryAsync("SELECT 1", cancellationToken: ceiling.Token)).Count.ShouldBe(1); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - TCP distinguishes damage after received rows from close failures after complete delivery (#1789)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_LateTempFailure_ShouldPreserveWireOutcome(bool closeFailure)
+    {
+        // Arrange
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = await Create("late-wire",262144);
+        var database = await engine.CreateDatabaseAsync("db");
+        await using (var session = await database.CreateSessionAsync()) { await Seed(session); }
+        await using var listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback,0));
+        await using var server = SqlDatabaseServer.Create(engine,new() { Listener=listener }); await server.StartAsync(ceiling.Token);
+        using var socket = await TcpResetPeer.ConnectReadyAsync(listener.EndPoint,"db",ceiling.Token);
+        using var stream = new NetworkStream(socket,ownsSocket:false);
+        await using var reader = ProtocolFrameReader.Create(stream,leaveOpen:true);
+        await using var writer = ProtocolFrameWriter.Create(stream,leaveOpen:true);
+        using var received = new ManualResetEventSlim(); int reads=0; bool injected=false;
+        BeforeRead(engine.TempSpace!,() =>
+        {
+            int runs = StatementRuns(engine.TempSpace!).Count();
+            if (closeFailure && !injected)
+            {
+                var run = StatementRuns(engine.TempSpace!).First(); RunFile(run)=new FailedCloseStream(RunFile(run).SafeFileHandle); injected=true;
+            }
+            else if (!closeFailure && !injected && ++reads > runs)
+            {
+                received.Wait(ceiling.Token); injected=true;
+                foreach (var input in StatementRuns(engine.TempSpace!).Where(run => RandomAccess.GetLength(Handle(run)) > StorageTempSpace.PageSize))
+                { RandomAccess.Write(Handle(input),new byte[] { 255 },StorageTempSpace.PageSize); }
+            }
+        });
+        try
+        {
+            // Act
+            await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)SqlProtocolMessageType.Execute,
+                ProtocolExecuteMessage.Create("SELECT id,k FROM t ORDER BY k").Encode()),ceiling.Token); await writer.FlushAsync(ceiling.Token);
+            int rows=0; bool complete=false,failed=false;
+            while (true)
+            {
+                var frame = (await reader.ReadFrameAsync(ceiling.Token)).ShouldNotBeNull();
+                if (frame.Type == (ProtocolMessageType)SqlProtocolMessageType.ResultRow) { rows++; received.Set(); }
+                else if (frame.Type == (ProtocolMessageType)SqlProtocolMessageType.ResultComplete) { complete=true; break; }
+                else if (frame.Type == ProtocolMessageType.Error)
+                {
+                    ProtocolErrorMessage.Decode(frame.Payload.Span).Message.ShouldContain("CK05004"); failed=true; break;
+                }
+                else if (frame.Type == ProtocolMessageType.Ready) { break; }
+            }
+            // Assert
+            injected.ShouldBeTrue(); rows.ShouldBeGreaterThan(0); complete.ShouldBe(closeFailure); failed.ShouldBe(!closeFailure);
+            if (closeFailure) { rows.ShouldBe(4000); }
+            while (TempBytes(engine.TempSpace!)!=0) { await Task.Delay(10,ceiling.Token); }
+            Files(engine).ShouldBe(0);
+        }
+        finally { received.Set(); BeforeRead(engine.TempSpace!,null); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Spill TCP: a reset during delivery releases temp bytes and files (#1789)")]

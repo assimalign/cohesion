@@ -77,7 +77,8 @@ public sealed partial class SqlSortSpillConformanceTests
             // Act / Assert
             await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync("SELECT id,k FROM t ORDER BY k"));
             await closing;
-            exercised.ShouldBeTrue(); TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            exercised.ShouldBeTrue();
+            TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
         }
         finally { SqlRowCollector.ObserveSpill = null; }
@@ -140,16 +141,20 @@ public sealed partial class SqlSortSpillConformanceTests
         if (point == "create") { BeforeCreate(engine.TempSpace!, Cancel); }
         if (point == "write") { BeforeWrite(engine.TempSpace!, Cancel); }
         if (point == "read") { BeforeRead(engine.TempSpace!, Cancel); }
+        DatabaseResultSet? delivered = null;
         try
         {
             // Act / Assert
             await Should.ThrowAsync<OperationCanceledException>(async () =>
             {
-                await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,k FROM t ORDER BY k", cancellationToken: cancellation.Token);
+                var result = delivered = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,k FROM t ORDER BY k", cancellationToken: cancellation.Token);
                 if (point == "delivery") { BeforeRead(engine.TempSpace!, Cancel); }
                 await Rows(result, cancellation.Token);
             });
-            exercised.ShouldBeTrue(); TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            exercised.ShouldBeTrue();
+            if (delivered is not null)
+            { TempBytes(engine.TempSpace!).ShouldBeGreaterThan(0); await delivered.DisposeAsync(); }
+            TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
         }
         finally { SqlRowCollector.ObserveSpill = null; BeforeCreate(engine.TempSpace!, null); BeforeWrite(engine.TempSpace!, null); BeforeRead(engine.TempSpace!, null); }

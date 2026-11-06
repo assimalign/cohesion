@@ -63,6 +63,10 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
             "SELECT DISTINCT stamp(k) FROM t ORDER BY id DESC LIMIT 2 OFFSET 1",
             "SELECT id FROM t ORDER BY stamp(k) DESC",
             "SELECT nextval('s') AS serial,id FROM t ORDER BY serial DESC LIMIT 2500",
+            "SELECT t.id FROM t CROSS JOIN u ORDER BY stamp(t.id) LIMIT 0",
+            "SELECT stamp(t.id) AS v FROM t CROSS JOIN u ORDER BY v LIMIT 0",
+            "SELECT nextval('s') AS n,t.id FROM t CROSS JOIN u ORDER BY n LIMIT 0",
+            "SELECT t.id FROM t CROSS JOIN u ORDER BY fails_on(t.id) LIMIT 0",
             "SELECT t.id,t.k FROM t CROSS JOIN u ORDER BY t.k DESC,t.id",
             "SELECT DISTINCT t.note FROM t CROSS JOIN u ORDER BY t.id DESC LIMIT 1",
             "SELECT stamp(t.id),t.k FROM t CROSS JOIN u ORDER BY t.k DESC,t.id",
@@ -80,6 +84,9 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
             (await Rows(right)).ShouldBe(expected, customMessage: sql);
             right.Columns.Select(c => (c.Name, c.Type, c.IsNullable, c.MaxLength)).ShouldBe(left.Columns.Select(c => (c.Name, c.Type, c.IsNullable, c.MaxLength)));
             logs[1].ShouldBe(logs[0], customMessage: sql);
+            if (sql.Contains("CROSS JOIN",StringComparison.Ordinal) && sql.Contains("LIMIT 0",StringComparison.Ordinal)) { logs[0].ShouldBeEmpty(); logs[1].ShouldBeEmpty(); }
+            left.ShouldBeOfType<SqlMaterializedResultSet>();
+            SqlSortSpillMetrics.For(a.LastStatementMetrics!).ShouldBeNull();
             var am = a.LastStatementMetrics!; var bm = b.LastStatementMetrics!;
             bm.RecordsExamined.ShouldBe(am.RecordsExamined); bm.JoinCandidatePairs.ShouldBe(am.JoinCandidatePairs);
             bm.AccessPath.ShouldBe(am.AccessPath); bm.HashMemoryBytes.ShouldBe(0); bm.PlainSelectMemoryBytes.ShouldBe(0);
@@ -197,6 +204,9 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         builder.Options.StatementTempSpaceQuota = 64 * 1024 * 1024;
         builder.Options.CheckpointJournalSize = 65536;
         builder.Functions.Add(SqlScalarFunction.Create("stamp", (long value) => { log?.Add(value); return value; }));
+        builder.Functions.Add(SqlScalarFunction.Create("reader_payload", (long value) => new string((char)('a'+value%23),5500)));
+        builder.Functions.Add(SqlScalarFunction.Create("fails_on", (long value) =>
+        { log?.Add(value); if (value == 317) { throw new InvalidOperationException("injected row failure"); } return value; }));
         builder.Functions.Add(SqlScalarFunction.Create("wide", (long value) => { log?.Add(-1000000 - value); return new string((char)('a' + value % 23), 1100); }));
         return await builder.BuildAsync();
     }
@@ -213,12 +223,29 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         await session.ExecuteAsync("CREATE TABLE u(id INT)"); await session.ExecuteAsync("INSERT INTO u VALUES(1)");
         await session.ExecuteAsync("CREATE SEQUENCE s");
     }
-    private static async Task<string[]> Rows(DatabaseResultSet result, CancellationToken token = default)
+    private static async Task<RowValues[]> Rows(DatabaseResultSet result, CancellationToken token = default)
     {
-        var values = new List<string>();
+        var values = new List<RowValues>();
         await foreach (var row in result.GetRowsAsync(token))
-        { values.Add(string.Join('|', Enumerable.Range(0, row.FieldCount).Select(i => row.GetValue(i) is byte[] bytes ? Convert.ToHexString(bytes) : row.GetValue(i)?.ToString() ?? "<NULL>"))); }
+        { values.Add(new RowValues(Enumerable.Range(0, row.FieldCount).Select(row.GetValue).ToArray())); }
         return values.ToArray();
+    }
+    private sealed class RowValues : IEquatable<RowValues>
+    {
+        internal readonly object?[] Cells;
+        internal RowValues(object?[] cells) { Cells = cells; }
+        public bool Equals(RowValues? other) => other is not null && Cells.Length == other.Cells.Length
+            && Cells.Zip(other.Cells).All(pair => EqualCell(pair.First, pair.Second));
+        public override bool Equals(object? obj) => obj is RowValues row && Equals(row);
+        public override int GetHashCode() => Cells.Length;
+        public override string ToString() => string.Join('|', Cells.Select(value => value?.ToString() ?? "<NULL>"));
+        private static bool EqualCell(object? left, object? right) => left?.GetType() == right?.GetType() && (left switch
+        {
+            byte[] bytes => bytes.SequenceEqual((byte[])right!),
+            double number => BitConverter.DoubleToInt64Bits(number) == BitConverter.DoubleToInt64Bits((double)right!),
+            float number => BitConverter.SingleToInt32Bits(number) == BitConverter.SingleToInt32Bits((float)right!),
+            _ => Equals(left, right),
+        });
     }
     private static int Files(SqlDatabaseEngine engine) => Directory.Exists(engine.TempSpace!.DirectoryPath) ? Directory.GetFiles(engine.TempSpace.DirectoryPath, "*.ctmp").Length : 0;
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_bytes")]

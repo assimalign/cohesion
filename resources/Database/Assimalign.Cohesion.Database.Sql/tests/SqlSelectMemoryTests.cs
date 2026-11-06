@@ -481,7 +481,7 @@ public sealed partial class SqlSelectMemoryTests
     }
 
     internal static async Task VerifyEveryUnwind(string sql, bool forceBase,
-        Action<SqlDatabaseEngineBuilder>? configure = null, Func<SqlDatabaseSession, Task>? setup = null)
+        Action<SqlDatabaseEngineBuilder>? configure = null, Func<SqlDatabaseSession, Task>? setup = null, Action<SqlDatabaseEngine>? verifyUnwind = null)
     {
         var builder = SqlDatabaseEngine.CreateBuilder("every-buffer-unwind");
         builder.Options.StatementMemoryBudget = 1_048_576;
@@ -522,6 +522,7 @@ public sealed partial class SqlSelectMemoryTests
                     else
                     { (await Should.ThrowAsync<InvalidOperationException>(() => Read(session, sql))).ShouldBeSameAs(fault); }
                     visited.ShouldBeGreaterThanOrEqualTo(point);
+                    verifyUnwind?.Invoke(engine);
                     session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
                     session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
                 }

@@ -29,7 +29,7 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             await session.ExecuteAsync("CREATE TABLE t(k INT)");
             await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Repeat("(1)", deferred ? 1000 : 2000)));
-        });
+        }, engine => { TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0); });
         if (Directory.Exists(Path.Combine(_root, ".unwind")))
         { Directory.GetFiles(Path.Combine(_root, ".unwind"), "*.ctmp").ShouldBeEmpty(); }
     }
