@@ -30,7 +30,8 @@ internal sealed partial class SqlPlanExecutor
     private bool CanSpillTableAs(SqlCreateTableAsPlan plan, CancellationToken token)
     {
         // Inferred domain checks run during assignment, although the source SELECT merely
-        // reads their columns. Keep SQL/JSON's statement owner exclusive during the copy.
+        // reads their columns. Conservatively exclude these checks from spill; assignment
+        // uses a private expression scope, not the source's SQL/JSON statement owner.
         for (int ordinal = 0; ordinal < plan.Columns.Count; ordinal++)
         {
             var column = plan.Columns[ordinal];

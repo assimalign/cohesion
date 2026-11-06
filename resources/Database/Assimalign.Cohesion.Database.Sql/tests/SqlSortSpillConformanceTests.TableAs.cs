@@ -79,7 +79,7 @@ public sealed partial class SqlSortSpillConformanceTests
             }
             statement.Metrics.HashMemoryBytes.ShouldBe(0); statement.Metrics.PlainSelectMemoryBytes.ShouldBe(0);
             TempBytes(engine.TempSpace!).ShouldBe(0);
-            _output.WriteLine($"CTAS_FITTING|before={before.Bytes}|after={after.Bytes}|source={after.Source}|peak={after.Peak}");
+            _output.WriteLine($"CTAS_FITTING|dispatch={(after.Bytes == before.Bytes ? "equal" : "only lower")}|before={before.Bytes}|after={after.Bytes}|source={after.Source}|peak={after.Peak}");
 
             (long Bytes, long Source, long Peak) Measure(bool permission, bool leaf = false)
             {
@@ -94,6 +94,7 @@ public sealed partial class SqlSortSpillConformanceTests
             }
             long Execute(bool permission, bool leaf = false)
             {
+                statement = new SqlStatementContext(transaction, database.Coordinator, catalogSnapshot: database.Catalog.CaptureSnapshot());
                 var executor = new SqlPlanExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
                 ExecutorMetrics(executor) = statement.Metrics;
                 SqlMaterializedResultSet result;
@@ -121,6 +122,8 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData("SELECT id,COUNT(*) AS n FROM t GROUP BY GROUPING SETS ((id)) ORDER BY id", "CS05067")]
     [InlineData("SELECT id,(SELECT u.id FROM u WHERE u.id=t.id) AS n FROM t ORDER BY id", "CS05067")]
     [InlineData("SELECT nextval('s') AS n,id FROM t ORDER BY k", "CS05067")]
+    [InlineData("WITH RECURSIVE r(id) AS (SELECT 0 UNION ALL SELECT id+1 FROM r WHERE id<4000) SELECT id FROM r ORDER BY id", "CS05067")]
+    [InlineData("SELECT nextval('s') AS n,(SELECT u.id FROM u) AS v,id FROM t ORDER BY id", "CS05067")]
     [InlineData("SELECT id,JSON_VALUE('[1]', '$[0]' RETURNING BIGINT) AS n FROM t ORDER BY id", "CS05067")]
     public async Task ExecuteAsync_TableAsIneligibleSource_ShouldKeepRootRefusal(string query, string code)
     {
@@ -138,7 +141,7 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - CTAS inferred SQL/JSON domain checks also exclude source spill (#1789)")]
-    public async Task ExecuteAsync_TableAsJsonDomain_ShouldKeepStatementOwnerExclusive()
+    public async Task ExecuteAsync_TableAsJsonDomain_ShouldConservativelyRefuseSpill()
     {
         // Arrange: the source only reads the domain; the destination executes its check.
         await using var engine = await Create("ctas-json-domain", 262144);
@@ -169,6 +172,10 @@ public sealed partial class SqlSortSpillConformanceTests
         string[] queries =
         [
             "SELECT * FROM t ORDER BY id DESC",
+            "SELECT id,CAST(id AS DECIMAL(10,2)) AS amount FROM t ORDER BY id",
+            "SELECT id,DATE '2024-01-02' AS d,TIME '12:34:56' AS tm,TIMESTAMP '2024-01-02 12:34:56' AS ts,TIMESTAMP WITH TIME ZONE '2024-01-02 12:34:56+03:00' AS tz FROM t ORDER BY id",
+            "SELECT id,CAST('{\"x\":1}' AS JSON) AS j,CAST('{\"x\":1}' AS JSONB) AS jb,X'00FF' AS bytes FROM t ORDER BY id",
+            "SELECT id,CAST(note AS CHAR(10)) AS padded FROM t ORDER BY id",
             "SELECT id,k FROM t ORDER BY k DESC NULLS FIRST,id",
             "SELECT id,k FROM t ORDER BY k LIMIT 2500 OFFSET 13",
             "SELECT DISTINCT note FROM t ORDER BY id DESC",
@@ -186,6 +193,9 @@ public sealed partial class SqlSortSpillConformanceTests
 
             // Assert before a later SELECT replaces the CTAS metrics.
             right.AffectedCount.ShouldBe(left.AffectedCount);
+            a.Database.Catalog.TryGetTable("dbo", $"c{i}", out var leftTable).ShouldBeTrue();
+            b.Database.Catalog.TryGetTable("dbo", $"c{i}", out var rightTable).ShouldBeTrue();
+            rightTable!.Columns.Select(c => (c.Name, c.Type.Type, c.Type.MaxLength, c.Type.Precision, c.Type.Scale, c.IsNullable, c.Collation)).ShouldBe(leftTable!.Columns.Select(c => (c.Name, c.Type.Type, c.Type.MaxLength, c.Type.Precision, c.Type.Scale, c.IsNullable, c.Collation)));
             logs[1].ShouldBe(logs[0], customMessage: queries[i]);
             var metrics = b.LastStatementMetrics!;
             SqlSortSpillMetrics.For(metrics).ShouldNotBeNull().Runs.ShouldBeGreaterThan(0);
@@ -233,8 +243,8 @@ public sealed partial class SqlSortSpillConformanceTests
         var builder = SqlDatabaseEngine.CreateBuilder("ctas-capacity");
         builder.Options.RootPath = root; builder.Options.StatementMemoryBudget = grant; builder.Options.CheckpointJournalSize = 65536;
         if (script) { builder.AddDatabase("db", declaration => declaration.Script("archive", sql)); }
-        int runs = 0;
-        SqlRowCollector.ObserveSpill = phase => { if (phase == "complete") { runs++; } };
+        int handoffs = 0;
+        SqlRowCollector.ObserveSpill = phase => { if (phase == "complete") { handoffs++; } };
         try
         {
             // Act / Assert
@@ -263,7 +273,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 metrics.Runs.ShouldBeGreaterThan(1); metrics.MergePasses.ShouldBeGreaterThan(0);
                 _output.WriteLine($"CTAS_CAPACITY|script={script}|distinct={distinct}|rows={count}|runs={metrics.Runs}|passes={metrics.MergePasses}");
             }
-            runs.ShouldBeGreaterThan(0); TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            handoffs.ShouldBeGreaterThan(0); TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
             int visited = 0;
             foreach (var row in await TableAsPhysicalRowsAsync(session, "archive"))
             {
@@ -273,6 +283,22 @@ public sealed partial class SqlSortSpillConformanceTests
             }
             visited.ShouldBe(distinct ? 1 : count);
             if (script) { database.Catalog.Scripts.ShouldHaveSingleItem().CompletedStatements.ShouldBe(1); }
+            if (script)
+            {
+                // A real non-spilling CTAS is the script oracle, including catalog metadata.
+                await using var reference = SqlDatabaseEngine.Create("ctas-script-reference", new() { StatementMemoryBudget = 67108864 });
+                var referenceDatabase = await reference.CreateDatabaseAsync("db");
+                await using var referenceSession = await referenceDatabase.CreateSessionAsync();
+                await referenceSession.ExecuteAsync("CREATE TABLE t(id INT,note TEXT COLLATE binary)");
+                for (int first = 0; first < count; first += 200)
+                { await referenceSession.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first, Math.Min(200, count - first)).Select(i => $"({i},'{note}')"))); }
+                (await referenceSession.ExecuteAsync(sql)).AffectedCount.ShouldBe(distinct ? 1 : count);
+                SqlSortSpillMetrics.For(referenceSession.LastStatementMetrics!).ShouldBeNull();
+                (await TableAsPhysicalRowsAsync(session, "archive")).ShouldBe(await TableAsPhysicalRowsAsync(referenceSession, "archive"));
+                database.Catalog.TryGetTable("dbo", "archive", out var actual).ShouldBeTrue();
+                referenceDatabase.Catalog.TryGetTable("dbo", "archive", out var expected).ShouldBeTrue();
+                actual!.Columns.Select(c => (c.Name, c.Type.Type, c.Type.MaxLength, c.Type.Precision, c.Type.Scale, c.IsNullable, c.Collation)).ShouldBe(expected!.Columns.Select(c => (c.Name, c.Type.Type, c.Type.MaxLength, c.Type.Precision, c.Type.Scale, c.IsNullable, c.Collation)));
+            }
             (await session.ExecuteAsync("CREATE TABLE empty AS SELECT * FROM t ORDER BY id WITH NO DATA")).AffectedCount.ShouldBe(0);
             TempBytes(engine.TempSpace!).ShouldBe(0);
         }

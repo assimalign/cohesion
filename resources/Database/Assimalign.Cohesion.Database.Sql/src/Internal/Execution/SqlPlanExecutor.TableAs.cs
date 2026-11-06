@@ -14,6 +14,7 @@ internal sealed partial class SqlPlanExecutor
     internal static Action<string, ulong>? TableAsStage { get; set; }
     internal static Action<long>? TableAsSourceAdmitted { get; set; }
     internal static Action<SqlSpilledResultSet, DatabaseRow>? TableAsSourceReading { get; set; }
+    internal static Action<byte[]>? TableAsRecordEncoded { get; set; }
 
     private async Task<DatabaseResult> ExecuteCreateTableAsAsync(SqlCreateTableAsPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
@@ -33,7 +34,7 @@ internal sealed partial class SqlPlanExecutor
         // Lock/latch order: session DDL admission -> metadata lease -> reserved owner X
         // -> coordinator apply gate -> data page latches. Catalog monitor/brackets are
         // innermost and never overlap the apply gate or a data latch. Source SELECT uses
-        // the statement's pinned MVCC snapshot without source table locks. The epoch
+        // the statement's pinned MVCC snapshot; joins retain source IS locks. The epoch
         // spans reservation, source disposal and every failure/rollback path, so a worker
         // discovering the abandonment intent cannot reclaim pages while we build them.
         var table = await _catalog.ReserveTableAsAsync(plan.Schema, plan.Name, plan.Columns,
@@ -83,6 +84,7 @@ internal sealed partial class SqlPlanExecutor
                             }
                             if (domains is not null) { CheckDomains(bound, values, domains); }
                             byte[] record = SqlRowCodec.Encode(table, values, builder.Sequence);
+                            TableAsRecordEncoded?.Invoke(record);
                             long bytes = 32L + record.Length;
                             statement.Metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget);
                             batchBytes += bytes;
@@ -90,6 +92,7 @@ internal sealed partial class SqlPlanExecutor
                             written++;
                         }
                         if (batch.Count != 0) { await FlushAsync().ConfigureAwait(false); }
+                        DisposeCompletedTableAsSource(source);
 
                         async Task FlushAsync()
                         {
@@ -165,5 +168,15 @@ internal sealed partial class SqlPlanExecutor
 
         ValueTask<DatabaseResult> CompleteAsync(long count)
             => statement.PrepareResultAsync(new SqlQueryResult(DatabaseResultStatus.Success, count), cancellationToken);
+    }
+
+    private static void DisposeCompletedTableAsSource(DatabaseResultSet source)
+    {
+        if (source is not SqlSpilledResultSet completed) { return; }
+        // As with completed wire delivery, temporary cleanup cannot replace a completed
+        // copy. Storage counts the translated close failure. Keep this synchronous so
+        // fitting CTAS retains its existing async frame and allocation shape.
+        try { completed.Dispose(); }
+        catch (SqlExecutionException) { }
     }
 }

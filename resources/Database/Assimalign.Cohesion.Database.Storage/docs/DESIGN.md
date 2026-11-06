@@ -6,7 +6,7 @@ StorageTempSpace, StorageTempStatement, StorageTempRun, StorageTempRunReader,
 StorageTempSorter, StorageTempSortReader and StorageTempPartitions are sealed public leaves.
 The model owns one space and supplies a required free-space reserve delegate; Storage references
 no model. StorageTempException carries an unprefixed message, a CK05 identity and the I/O cause.
-SQL keeps its space internal and consumes it for eligible root SELECT sorts; OQL and GQL retain their existing memory refusals.
+SQL keeps its space internal and consumes it for eligible root SELECT and CTAS source-root sorts; OQL and GQL retain their existing memory refusals.
 
 A space fixes its engine quota after sweeping: an explicit nonnegative quota, or min(10 GiB,
 floor(available volume bytes / 4)). Leftovers do not shrink the quota for the engine's lifetime.

@@ -200,18 +200,27 @@ public sealed partial class SqlSelectMemoryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - CTAS memory: sequence OFFSET source admission follows kept rows (#1762)")]
-    [InlineData(false, false, false)]
-    [InlineData(false, true, false)]
-    [InlineData(true, false, false)]
-    [InlineData(true, true, false)]
-    [InlineData(false, false, true)]
-    [InlineData(false, true, true)]
-    [InlineData(true, false, true)]
-    [InlineData(true, true, true)]
-    public async Task ExecuteAsync_SequenceOffset_ShouldAdmitOnlyKeptRows(bool grouped, bool forceBase, bool sequence)
+    [InlineData(false, false, false, false)]
+    [InlineData(false, false, false, true)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, true, false, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, false, false, true)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, true, false, true)]
+    [InlineData(false, false, true, false)]
+    [InlineData(false, false, true, true)]
+    [InlineData(false, true, true, false)]
+    [InlineData(false, true, true, true)]
+    [InlineData(true, false, true, false)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, true, true, false)]
+    [InlineData(true, true, true, true)]
+    public async Task ExecuteAsync_SequenceOffset_ShouldAdmitOnlyKeptRows(bool grouped, bool forceBase, bool sequence, bool temp)
     {
         // Arrange: source buffers charge normally; CTAS admission counts only kept output.
         var builder = SqlDatabaseEngine.CreateBuilder("ctas-offset");
+        if (temp) { builder.Options.TempDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ctas-pins-" + Guid.NewGuid().ToString("N")); }
         builder.Options.StatementMemoryBudget = 1_048_576;
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
@@ -248,14 +257,19 @@ public sealed partial class SqlSelectMemoryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - CTAS memory: grouped OFFSET sources refuse at 8 KiB (#1762)")]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task ExecuteAsync_GroupedOffsetSmallGrant_ShouldRefuseSource(bool forceBase, bool sequence)
+    [InlineData(false, false, false)]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    public async Task ExecuteAsync_GroupedOffsetSmallGrant_ShouldRefuseSource(bool forceBase, bool sequence, bool temp)
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("ctas-small-group");
+        if (temp) { builder.Options.TempDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ctas-pins-" + Guid.NewGuid().ToString("N")); }
         builder.Options.StatementMemoryBudget = 8192;
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);

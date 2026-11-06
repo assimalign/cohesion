@@ -61,61 +61,76 @@ public sealed partial class SqlSortSpillConformanceTests
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - CTAS spill memory: copying stays within the grant plus 2 MiB and releases drained rows (#1789)")]
-    public async Task ExecuteAsync_TableAsLiveCopy_ShouldReleaseDrainedRowsWithinBound()
+    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS copy has fixed pool growth and a row-count independent live bound; retained-row mutant fails (#1789)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_TableAsLiveCopy_ShouldReleaseDrainedRowsWithinBound(bool mutant)
     {
-        // Arrange: include the growing database pool/transaction pages in the fixed allowance.
-        const long grant = 1048576, constant = 2097152;
-        bool observe = false; long baseline = 0, peak = 0; int copies = 0;
-        var weak = new List<WeakReference>(); var rows = new List<WeakReference>(); var vectors = new List<WeakReference>();
-        var builder = SqlDatabaseEngine.CreateBuilder("ctas-live");
-        builder.Options.RootPath = Path.Combine(_root, "ctas-live");
-        builder.Options.StatementMemoryBudget = grant; builder.Options.StatementTempSpaceQuota = 67108864;
-        builder.Functions.Add(SqlScalarFunction.Create("fresh", (long value) =>
+        // Arrange: a warmed minimum pool excludes destination page growth from the sample.
+        const long grant = 1048576, constant = 553240;
+        var peaks = new List<long>();
+        foreach (int count in new[] { 4000, 16000 })
         {
-            string result = new((char)('a' + value % 23), 512);
-            if (observe && value < 100) { weak.Add(new WeakReference(result)); }
-            return result;
-        }));
-        await using var engine = await builder.BuildAsync();
-        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session);
-        // Warm the same copy footprint so pool growth does not dominate the forced-GC sample.
-        await session.ExecuteAsync("CREATE TABLE warm AS SELECT fresh(id) AS value FROM t ORDER BY id");
-        baseline = GC.GetTotalMemory(true); observe = true;
-        SqlPlanExecutor.TableAsSourceReading = (_, row) =>
-        {
-            if (rows.Count >= 100) { return; }
-            rows.Add(new WeakReference(row)); vectors.Add(new WeakReference(TableAsValues((SqlMaterializedRow)row)));
-        };
-        SqlPlanExecutor.TableAsStage = (phase, _) =>
-        {
-            if (phase != "Copied") { return; }
-            copies++;
-            if (copies % 7 != 0) { return; }
-            peak = Math.Max(peak, Math.Max(0, GC.GetTotalMemory(true) - baseline));
-            weak.Count.ShouldBe(100); weak.Count(row => row.IsAlive).ShouldBe(0);
-            rows.Count.ShouldBe(100); rows.Count(row => row.IsAlive).ShouldBe(0);
-            vectors.Count.ShouldBe(100); vectors.Count(row => row.IsAlive).ShouldBe(0);
-        };
-        try
-        {
-            // Act
-            (await session.ExecuteAsync("CREATE TABLE archive AS SELECT fresh(id) AS value FROM t ORDER BY id")).AffectedCount.ShouldBe(4000);
-            // Assert
-            copies.ShouldBe(63); SqlSortSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull();
-            peak.ShouldBeLessThanOrEqualTo(grant + constant);
-            _output.WriteLine($"CTAS_LIVE|copies={copies}|peak={peak}|grant={grant}|constant={constant}|weak={weak.Count}|alive={weak.Count(row => row.IsAlive)}|weakRows={rows.Count}|aliveRows={rows.Count(row => row.IsAlive)}|weakVectors={vectors.Count}|aliveVectors={vectors.Count(row => row.IsAlive)}");
-            TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            var builder = SqlDatabaseEngine.CreateBuilder("ctas-live");
+            builder.Options.RootPath = Path.Combine(_root, "live-" + count);
+            builder.Options.BufferPoolCapacity = 1048576;
+            builder.Options.StatementMemoryBudget = grant; builder.Options.StatementTempSpaceQuota = 67108864;
+            builder.Functions.Add(SqlScalarFunction.Create("fresh", (long value) => new string((char)('a' + value % 23), 512), volatility: SqlFunctionVolatility.Immutable));
+            await using var engine = await builder.BuildAsync();
+            var database = await engine.CreateDatabaseAsync("db");
+            await using var session = await database.CreateSessionAsync(); await Seed(session, count);
+            const string query = "SELECT id,fresh(id) AS value FROM t ORDER BY id";
+            await session.ExecuteAsync("CREATE TABLE warm AS " + query);
+            database.DataStorage.BufferPoolCapacity.ShouldBe(128);
+            TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
+            long baseline = 0, peak = 0; int read = 0, encoded = 0, copies = 0; long workspace = 0;
+            var weak = new List<WeakReference>(); var retained = new List<object>();
+            SqlPlanExecutor.TableAsSourceAdmitted = _ => baseline = GC.GetTotalMemory(true);
+            SqlPlanExecutor.TableAsSourceReading = (source, row) =>
+            {
+                read++; workspace = Math.Max(workspace, Sorted(source)!.BufferBytes);
+                var values = TableAsValues((SqlMaterializedRow)row);
+                if (mutant) { retained.Add(values[1]!); }
+                if (read % 97 == 0) { weak.Add(new(row)); weak.Add(new(values)); weak.Add(new(values[1]!)); }
+            };
+            SqlPlanExecutor.TableAsRecordEncoded = record =>
+            {
+                if (++encoded % 97 == 0) { weak.Add(new(record)); }
+                if (encoded % 256 == 0) { peak = Math.Max(peak, GC.GetTotalMemory(true) - baseline); }
+            };
+            SqlPlanExecutor.TableAsStage = (phase, _) =>
+            {
+                if (phase == "Copied" && ++copies % 7 == 0) { peak = Math.Max(peak, GC.GetTotalMemory(true) - baseline); }
+            };
+            try
+            {
+                // Act
+                (await session.ExecuteAsync("CREATE TABLE archive AS " + query)).AffectedCount.ShouldBe(count);
+                GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+                // Assert: the exact same guard rejects retaining one decoded string per row.
+                void AssertBound() => peak.ShouldBeLessThanOrEqualTo(grant + constant);
+                if (mutant) { Should.Throw<ShouldAssertException>(AssertBound); retained.Count.ShouldBe(count); }
+                else { AssertBound(); weak.Count(w => w.IsAlive).ShouldBe(0); }
+                read.ShouldBe(count); encoded.ShouldBe(count); copies.ShouldBe((count + 63) / 64);
+                workspace.ShouldBeGreaterThan(0); // the merge fork was actually opened
+                TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
+                peaks.Add(peak);
+                _output.WriteLine($"CTAS_LIVE|mutant={mutant}|rows={count}|peak={peak}|workspace={workspace}|weak={weak.Count}|alive={weak.Count(w => w.IsAlive)}|poolPages=128");
+                TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            }
+            finally { SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; SqlPlanExecutor.TableAsStage = null; GC.KeepAlive(retained); }
         }
-        finally { SqlPlanExecutor.TableAsStage = null; SqlPlanExecutor.TableAsSourceReading = null; }
+        if (!mutant) { Math.Abs(peaks[1] - peaks[0]).ShouldBeLessThanOrEqualTo(524288); }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - CTAS spill brackets wait through checkpoint admission and copy each row once (#1283, #1789)")]
-    public async Task ExecuteAsync_TableAsCheckpointPause_ShouldResumeWithoutRepeatingRows()
+    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS brackets keep metadata during admission pause and copy each row once (#1283, #1789)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_TableAsCheckpointPause_ShouldResumeWithoutRepeatingRows(bool spill)
     {
         // Arrange: open a counted admission pause only after the first copied bracket.
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        await using var engine = await Create("ctas-pause", 262144);
+        await using var engine = await Create("ctas-pause", spill ? 262144 : 67108864);
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(); await Seed(session);
         var gate = TransactionCheckpointInterlock.ForStorage(database.DataStorage);
@@ -139,6 +154,19 @@ public sealed partial class SqlSortSpillConformanceTests
             while (!recorder.Events.Any(e => e.EventId == 25)) { await Task.Delay(1, guard.Token); }
             gate.IsAdmissionPaused.ShouldBeTrue(); copied.ShouldBe(1);
             database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse();
+            await using (var other = await database.CreateSessionAsync(guard.Token))
+            {
+                var failure = await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
+                    await other.ExecuteAsync("CREATE VIEW parked_view AS SELECT 1 AS id", cancellationToken: guard.Token));
+                failure.Operation.ShouldBe("SQL definition DDL");
+                _output.WriteLine($"CTAS_PARKED|spill={spill}|viewRefusal={failure.Operation}|diagnostics={string.Join(',', failure.Diagnostics.Select(d => d.Code))}");
+                (await other.ExecuteAsync("CREATE TABLE unrelated(id INT)", cancellationToken: guard.Token)).Status.ShouldBe(DatabaseResultStatus.Success);
+                database.Catalog.TryGetTable("dbo", "unrelated", out _).ShouldBeTrue();
+                var tableFailure = await Should.ThrowAsync<DatabaseException>(async () =>
+                    await other.ExecuteAsync("CREATE TABLE needs_data(id INT PRIMARY KEY)", cancellationToken: guard.Token));
+                tableFailure.Diagnostics[0].Code.ShouldBe("CK04014");
+                _output.WriteLine($"CTAS_PARKED|spill={spill}|unrelatedTable=Success|indexBuildRefusal={tableFailure.Diagnostics[0].Code}");
+            }
             gate.JournalSizeLimit = long.MaxValue; // retain this pause; prevent a second episode
             outside.ShouldNotBeNull().Rollback(); outside = null;
             database.Coordinator.Checkpoint(guard.Token);
@@ -198,6 +226,7 @@ public sealed partial class SqlSortSpillConformanceTests
             if (database.Catalog.TryGetTable("dbo", "archive", out _))
             {
                 complete++;
+                database.Catalog.GetPendingTableReclamations().ShouldNotContain(item => item == owner);
                 await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,note FROM archive", cancellationToken: guard.Token);
                 var rows = await Rows(result, guard.Token);
                 rows.Select(row => row.Cells[0]).ShouldBe(Enumerable.Range(0, 180).Reverse().Cast<object?>());
@@ -206,12 +235,23 @@ public sealed partial class SqlSortSpillConformanceTests
             else
             {
                 absent++; await ReclaimTableAsAsync(database, guard.Token); database.DataStorage.HasOwnerPages(owner).ShouldBeFalse();
+                await using (var source = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) FROM t", cancellationToken: guard.Token))
+                { (await Rows(source, guard.Token)).ShouldHaveSingleItem().Cells[0].ShouldBe(180L); }
+                (await session.ExecuteAsync("CREATE TABLE archive AS SELECT * FROM t ORDER BY id DESC", cancellationToken: guard.Token)).AffectedCount.ShouldBe(180);
             }
             database.IsOffline.ShouldBeFalse();
+            Directory.GetFiles(temp, "*.ctmp").ShouldBeEmpty();
         }
         absent.ShouldBeGreaterThan(0); complete.ShouldBeGreaterThan(0);
         _output.WriteLine($"CTAS_CRASH|images={recorder.Count + 1}|absent={absent}|complete={complete}|brackets={copied}");
     }
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_values")]
     private static extern ref object?[] TableAsValues(SqlMaterializedRow row);
+
+    private const string tableAsPoolType = "Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool, Assimalign.Cohesion.Database.Storage";
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_BufferPool")]
+    [return: UnsafeAccessorType(tableAsPoolType)]
+    private static extern object TableAsPool(global::Assimalign.Cohesion.Database.Storage.Storage storage);
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Count")]
+    private static extern int TableAsPoolCount([UnsafeAccessorType(tableAsPoolType)] object pool);
 }
