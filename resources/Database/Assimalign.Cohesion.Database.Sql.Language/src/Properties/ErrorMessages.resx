@@ -184,4 +184,7 @@
   <data name="ValuesRowOpeningExpected" xml:space="preserve"><value>'(' before the VALUES row</value></data>
   <data name="ValuesRowClosingExpected" xml:space="preserve"><value>')' after the VALUES row</value></data>
   <data name="QueryOperandClosingExpected" xml:space="preserve"><value>')' after the query operand</value></data>
+  <data name="NaturalCrossJoin" xml:space="preserve">
+    <value>NATURAL CROSS JOIN is not valid join syntax.</value>
+  </data>
 </root>

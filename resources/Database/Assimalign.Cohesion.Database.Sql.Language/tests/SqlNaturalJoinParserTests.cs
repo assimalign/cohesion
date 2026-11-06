@@ -9,6 +9,45 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlNaturalJoinParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Qualified stars: whitespace and quoted qualifiers retain the target shape (#1792)")]
+    [InlineData("SELECT t. * FROM t")]
+    [InlineData("SELECT \"t\".* FROM t")]
+    public void Parse_QualifiedStarTokens_ShouldRetainTarget(string sql)
+    {
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+        // Assert
+        statement.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
+        statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression
+            .ShouldBeOfType<SqlQualifiedStarExpression>().TableName.ShouldBe("t");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Adjacent multiplication after a qualified column remains arithmetic (#1792)")]
+    public void Parse_QualifiedMultiplication_ShouldKeepBinaryExpression()
+    {
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse("SELECT a.b*2 FROM a");
+        // Assert
+        statement.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
+        var multiply = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression.ShouldBeOfType<SqlBinaryExpression>();
+        multiply.Operator.ShouldBe(SqlBinaryOperator.Multiply);
+        multiply.Left.ShouldBeOfType<SqlColumnReferenceExpression>().ColumnName.ShouldBe("b");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Star aliases: canonical output discards either form's decoration (#1792)")]
+    [InlineData("SELECT * AS y FROM t", "SELECT * FROM t")]
+    [InlineData("SELECT t.* AS y FROM t", "SELECT t.* FROM t")]
+    public void Render_StarAlias_ShouldDiscardAlias(string sql, string expected)
+    {
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+        // Assert
+        statement.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
+        var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+        select.Columns.Single().Alias.ShouldBeNull();
+        SqlExpressionRenderer.Render(select).ShouldBe(expected);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - NATURAL: every join spelling and qualified wildcard round trips (#1792)")]
     [InlineData("JOIN")]
     [InlineData("INNER JOIN")]
@@ -18,7 +57,6 @@ public sealed class SqlNaturalJoinParserTests
     [InlineData("RIGHT OUTER JOIN")]
     [InlineData("FULL JOIN")]
     [InlineData("FULL OUTER JOIN")]
-    [InlineData("CROSS JOIN")]
     public void Parse_NaturalJoin_ShouldRetainShapeAndRender(string kind)
     {
         // Arrange
@@ -43,6 +81,10 @@ public sealed class SqlNaturalJoinParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - NATURAL and stars: excluded positions retain CK00001 (#1792)")]
+    [InlineData("SELECT t.* + 1 FROM t")]
+    [InlineData("SELECT t.* IS NULL FROM t")]
+    [InlineData("SELECT t.* AND TRUE FROM t")]
+    [InlineData("SELECT t.* OR FALSE FROM t")]
     [InlineData("SELECT COUNT(t.*) FROM t")]
     [InlineData("SELECT COUNT(s.t.*) FROM s.t")]
     [InlineData("SELECT 1 FROM t WHERE t.* IS NULL")]
@@ -71,6 +113,8 @@ public sealed class SqlNaturalJoinParserTests
     [InlineData("SELECT * FROM a NATURAL JOIN b ON a.id=b.id")]
     [InlineData("SELECT * FROM a NATURAL LEFT JOIN b USING(id)")]
     [InlineData("SELECT * FROM a NATURAL b")]
+    [InlineData("SELECT * FROM a NATURAL CROSS JOIN b")]
+    [InlineData("SELECT * FROM a natural")]
     public void Parse_NaturalCondition_ShouldRefuseSyntax(string sql)
     {
         // Arrange / Act

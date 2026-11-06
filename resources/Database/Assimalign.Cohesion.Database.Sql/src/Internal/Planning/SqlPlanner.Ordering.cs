@@ -29,7 +29,7 @@ internal sealed partial class SqlPlanner
         int projectionIndex = 0;
         foreach (var column in select.Columns)
         {
-            if (column.Alias is { } alias)
+            if (column.Expression is not (SqlStarExpression or SqlQualifiedStarExpression) && column.Alias is { } alias)
             {
                 // An unused duplicate is harmless; referencing it is ambiguous.
                 if (!aliases.TryAdd(alias, projectionIndex))

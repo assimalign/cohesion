@@ -630,14 +630,17 @@ is the reference for the hidden-name rule.
 
 SqlJoinClause retains IsNatural and source spans for its keywords and complete join.
 SqlQualifiedStarExpression is a sealed leaf retaining the relation name, optional schema
-and source span. The parser accepts NATURAL before every join type, refuses ON/USING
+and source span. The parser accepts NATURAL before INNER/LEFT/RIGHT/FULL, refuses NATURAL CROSS and ON/USING
 combinations and keeps direct mutation sources excluded. Qualified stars parse only as
 standalone SELECT targets; generic expression parsing and RETURNING retain CK00001.
 The renderer round-trips both forms for binding, while CREATE VIEW stores only their
 expanded forms. The natural/lateral identifier corpus confirms unchanged canonical quoting.
 The profile gains exactly one measured clause (92/93); vocabulary, keyword disposition,
 completeness, positive/negative and live conformance cases advance together. LATERAL is
-unchanged. DIALECT records no-common-name and NATURAL CROSS departures from PostgreSQL.
+unchanged. Zero-name LEFT/RIGHT retain ON TRUE; FULL retains its executable-subset refusal.
+Star aliases are discarded as in PostgreSQL parse_target.c:148-152. A star followed by
+a row-expression operator keeps the QualifiedStarContext CK00001 refusal. NATURAL never
+consumes ON, allowing INSERT SELECT ON CONFLICT and retaining syntax errors elsewhere.
 
 ## System relation joins (#1106)
 

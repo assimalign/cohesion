@@ -993,6 +993,16 @@ public sealed partial class SqlQueryParser
         }
         else { EnterLeaf(); }
         Advance(ref lexer);
+        if (projection && !IsAtEnd(ref lexer) && !IsStatementBoundaryKeyword(ref lexer) &&
+            lexer.Current.Type is not (TokenType.Comma or TokenType.RightParen or TokenType.Semicolon) &&
+            (!IsIdentifierOrKeyword(ref lexer) || IsKeyword(ref lexer, "IS") || IsKeyword(ref lexer, "IN") ||
+                IsKeyword(ref lexer, "NOT") || IsKeyword(ref lexer, "BETWEEN") || IsKeyword(ref lexer, "LIKE") ||
+                IsKeyword(ref lexer, "ILIKE") || IsKeyword(ref lexer, "COLLATE") || IsKeyword(ref lexer, "AND") ||
+                IsKeyword(ref lexer, "OR") || IsKeyword(ref lexer, "ISNULL") || IsKeyword(ref lexer, "NOTNULL") ||
+                IsKeyword(ref lexer, "SIMILAR")))
+        {
+            AddUnsupportedSurfaceDiagnostic(start, end, ErrorMessages.QualifiedStarContext);
+        }
         return new SqlQualifiedStarExpression(table, schema, Location.Create(1, 1, start, end));
     }
 

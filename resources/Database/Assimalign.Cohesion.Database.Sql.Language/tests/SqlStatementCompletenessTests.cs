@@ -34,7 +34,7 @@ public sealed class SqlStatementCompletenessTests
         ],
         [SqlClauses.From] = ["SELECT * FROM t", "SELECT * FROM dbo.t AS u", "SELECT * FROM t u"],
         [SqlClauses.Using] = ["SELECT * FROM t JOIN u USING (id)"],
-        [SqlClauses.Natural] = ["SELECT t.*, u.* FROM t NATURAL LEFT JOIN u"],
+        [SqlClauses.Natural] = ["SELECT t.*, u.* FROM t NATURAL LEFT JOIN u", "SELECT * FROM t NATURAL RIGHT JOIN u", "SELECT * FROM t NATURAL FULL JOIN u", "INSERT INTO t SELECT * FROM u NATURAL JOIN v ON CONFLICT DO NOTHING"],
         [SqlClauses.Join] = ["SELECT * FROM t JOIN u ON t.id = u.id", "SELECT * FROM t INNER JOIN u v ON t.id = v.id", "SELECT * FROM t RIGHT JOIN u USING (id)", "SELECT * FROM t FULL JOIN u USING (id)", "SELECT * FROM t FULL OUTER JOIN u ON t.id = u.id", "SELECT * FROM (t LEFT JOIN u USING (id)) RIGHT OUTER JOIN v USING (id)"],
         [SqlClauses.Where] =
         [

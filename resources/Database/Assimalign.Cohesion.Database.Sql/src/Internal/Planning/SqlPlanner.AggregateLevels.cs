@@ -182,6 +182,7 @@ internal sealed partial class SqlPlanner
     private IEnumerable<string> AggregateColumnNames(SqlRelationReference reference, SqlSelectExpression owner)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        _cancellationToken.ThrowIfCancellationRequested();
         if (reference is SqlJoinedTableReference group)
         {
             var groupNames = AggregateColumnNames(group.Item.Table, owner).ToList();
@@ -204,10 +205,15 @@ internal sealed partial class SqlPlanner
         {
             return ResolveRelation(reference, owner).Columns.Select(column => column.Name);
         }
-        if (derived.Columns.Count > 0) { return derived.Columns; }
+        if (derived.Columns.Count > 0)
+        {
+            CheckTargetList(0, derived.Columns.Count, derived.Query.Location);
+            return derived.Columns;
+        }
         var body = derived.Query;
         while (body is SqlSetOperationExpression set) { body = set.Left; }
         var query = (SqlSelectExpression)body;
+        CheckTargetList(0, query.Columns.Count, query.Location);
         var names = new List<string>();
         bool grouped = query.GroupBy.Count > 0 || query.Having is not null || ProjectsOrOrdersByAggregate(query);
         foreach (var projection in query.Columns)
@@ -218,10 +224,10 @@ internal sealed partial class SqlPlanner
                 {
                     if (!item.Joins.Any(join => join.IsNatural))
                     {
-                        names.AddRange(AggregateColumnNames(item.Table, query));
+                        Append(AggregateColumnNames(item.Table, query));
                         foreach (var join in item.Joins)
                         {
-                            names.AddRange(AggregateColumnNames(join.Table, query)
+                            Append(AggregateColumnNames(join.Table, query)
                                 .Where(name => !join.UsingColumns.Contains(name, StringComparer.OrdinalIgnoreCase)));
                         }
                         continue;
@@ -234,17 +240,18 @@ internal sealed partial class SqlPlanner
                         visible = usingNames.Concat(visible.Where(name => !usingNames.Contains(name, StringComparer.OrdinalIgnoreCase)))
                             .Concat(rightNames.Where(name => !usingNames.Contains(name, StringComparer.OrdinalIgnoreCase))).ToList();
                     }
-                    names.AddRange(visible);
+                    Append(visible);
                 }
             }
             else if (projection.Expression is SqlQualifiedStarExpression star)
             {
                 foreach (var relation in QueryRelations(query).Where(relation =>
                     SqlExpressionEvaluator.MatchesQualifier(relation, star.TableName, star.SchemaName)))
-                { names.AddRange(AggregateColumnNames(relation, query)); }
+                { Append(AggregateColumnNames(relation, query)); }
             }
             else
             {
+                EnsureTargetCapacity(names, 1, projection.Expression.Location);
                 names.Add(projection.Alias ?? (projection.Expression switch
                 {
                     SqlColumnReferenceExpression column => column.ColumnName,
@@ -254,6 +261,16 @@ internal sealed partial class SqlPlanner
             }
         }
         return names;
+
+        void Append(IEnumerable<string> additional)
+        {
+            foreach (string name in additional)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                EnsureTargetCapacity(names, 1, query.Location);
+                names.Add(name);
+            }
+        }
     }
 
     private static IReadOnlyList<string> NaturalUsingNames(SqlJoinClause join, IEnumerable<string> left, IEnumerable<string> right)

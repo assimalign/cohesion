@@ -95,6 +95,10 @@ public sealed class SqlCatalogColumn
     [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
     internal bool RecastDefault { get; init; }
 
+    // Bind-time provenance only; stored table identifiers are always authored names.
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
+    internal bool HasSynthesizedName { get; init; }
+
     /// <summary>Gets the frozen ADD COLUMN value for physically absent fields, independent of the current insert default.</summary>
     public string? MissingValueLiteral { get; }
 

@@ -40,6 +40,25 @@ internal sealed partial class SqlPlanner
         if (output.Select(column => column.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != output.Count) { throw ViewError(ErrorMessages.ViewDuplicateColumns); }
         var expanded = new StringBuilder(text);
         foreach (var edit in binding.Edits.OrderByDescending(pair => pair.Key)) { expanded.Remove(edit.Key, edit.Value.Length).Insert(edit.Key, edit.Value.Text); }
+        // Persist names in the body only when an authored name equals a synthesized one.
+        // A different catalog name already proves that an explicit column list supplied it.
+        bool needsOutputNames = binding.NeedsOutputNames && output.All(column => !column.HasSynthesizedName);
+        if (create.Columns.Count > 0)
+        {
+            var projections = QueryOutput(child).Projections;
+            for (int i = 0; i < projections.Count; i++)
+            {
+                if ((!projections[i].HasOutputName || projections[i].HasSynthesizedName) && create.Columns[i] == projections[i].Name)
+                { needsOutputNames = true; }
+            }
+        }
+        if (needsOutputNames)
+        {
+            var outputNames = output.Select(column => column.Name).ToArray();
+            string names = string.Join(", ", outputNames.Select(SqlObjectIdentity.Quote));
+            expanded = new StringBuilder("SELECT " + string.Join(", ", outputNames.Select(name =>
+                "\"__view\"." + SqlObjectIdentity.Quote(name))) + " FROM (" + expanded + ") AS \"__view\" (" + names + ")");
+        }
         var frozen = SqlPersistedExpression.LoadQuery(expanded.ToString(), "view " + create.View.TableName, declaring: true);
         string canonical = SqlExpressionRenderer.Render(frozen);
         if (!SqlPersistedExpression.SameQuery(frozen, SqlPersistedExpression.LoadQuery(canonical, "view " + create.View.TableName, declaring: true))) { throw ViewError(ErrorMessages.ViewRoundTrip); }
@@ -119,7 +138,7 @@ internal sealed partial class SqlPlanner
                     planner.ViewImageState = image;
                     planner.ViewDefinitionBinding = new ViewBinding { Owner = view };
                     var child = planner.PlanOnce(query);
-                    var columns = planner.BindDerivedOutput(child, view.Name, view.Columns.Select(column => column.Name).ToArray(), query).Columns;
+                    var columns = planner.BindDerivedOutput(child, view.Name, view.Columns.Select(column => column.Name).ToArray(), query, storedNames: true).Columns;
                     if (columns.Count != view.Columns.Count || columns.Where((column, index) => !SameViewOutput(column, view.Columns[index])).Any())
                     { throw new SqlPlanningException("CS01009", ErrorMessages.ViewContractChanged); }
                     return new ViewPlan(child, columns, planner.ViewDefinitionBinding.SystemRelations, planner._commonTableState?.HasRecursion == true);
@@ -152,6 +171,7 @@ internal sealed partial class SqlPlanner
         foreach (var root in SqlViewQuery.Expressions(select).Where(root => !ordering.Contains(root) &&
             !SourceJoins(select.From).Any(join => ReferenceEquals(join.Condition, root))))
         { CaptureViewExpression(root, columns, bindings, select.From.FirstOrDefault()?.Table, scope); }
+        int targetCount = 0;
         foreach (var column in select.Columns)
         {
             if (column.Expression is SqlColumnReferenceExpression projected && column.Alias is null &&
@@ -159,16 +179,25 @@ internal sealed partial class SqlPlanner
                 (rendered.Text.StartsWith("CAST(", StringComparison.Ordinal) || rendered.Text.StartsWith("CASE ", StringComparison.Ordinal) ||
                     rendered.Text.StartsWith("COALESCE(", StringComparison.Ordinal)))
             { binding.Edits[projected.Location.Start] = (rendered.Length, rendered.Text + " AS " + SqlObjectIdentity.Quote(projected.ColumnName)); }
-            if (column.Expression is not (SqlStarExpression or SqlQualifiedStarExpression) || column.Expression.Location is null) { continue; }
+            if (column.Expression is not (SqlStarExpression or SqlQualifiedStarExpression) || column.Expression.Location is null)
+            {
+                CheckTargetList(targetCount, 1, column.Expression.Location);
+                targetCount++;
+                continue;
+            }
             var star = column.Expression;
             bool qualified = star is SqlQualifiedStarExpression;
+            if (!qualified) { CheckTargetList(targetCount, outputOrdinals?.Count ?? columns.Count, star.Location); }
             var ordinals = star is SqlQualifiedStarExpression selected ? scope.QualifiedStarOrdinals(selected)
                 : outputOrdinals ?? Enumerable.Range(0, columns.Count).ToArray();
-            var names = new List<string>();
+            CheckTargetList(targetCount, ordinals.Count, star.Location);
+            targetCount += ordinals.Count;
+            var names = new List<string>(ordinals.Count);
             foreach (int ordinal in ordinals)
             {
                 string name = RenderViewColumn(ordinal, columns, bindings, select.From[0].Table, scope, merged: !qualified);
-                names.Add(name + " AS " + SqlObjectIdentity.Quote(columns[ordinal].Name));
+                // A generated AS would turn a display-only name into an authored alias on reopen.
+                names.Add(columns[ordinal].HasSynthesizedName ? name : name + " AS " + SqlObjectIdentity.Quote(columns[ordinal].Name));
             }
             binding.Edits[star.Location!.Start] = (star.Location.End - star.Location.Start, string.Join(", ", names));
         }
@@ -316,6 +345,7 @@ internal sealed partial class SqlPlanner
     internal sealed class ViewBinding
     {
         internal SqlCatalogView? Owner { get; init; }
+        internal bool NeedsOutputNames { get; set; }
         internal HashSet<ulong> Tables { get; } = new();
         internal HashSet<string> Dependencies { get; } = new(StringComparer.OrdinalIgnoreCase);
         internal SqlViewCallCapture Calls { get; } = new();

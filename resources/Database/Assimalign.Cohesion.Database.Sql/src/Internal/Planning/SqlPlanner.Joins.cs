@@ -65,6 +65,7 @@ internal sealed partial class SqlPlanner
             var root = left.Tree;
             foreach (var join in item.Joins)
             {
+                _cancellationToken.ThrowIfCancellationRequested();
                 var kind = join.JoinType;
                 int rightIndex = bindings.Count;
                 var rightPart = AddReference(join.Table, kind == SqlJoinType.LeftOuter && !join.IsNatural);
@@ -92,9 +93,20 @@ internal sealed partial class SqlPlanner
                 IReadOnlyList<string> usingColumns = join.UsingColumns;
                 if (join.IsNatural)
                 {
-                    var rightNames = rightPart.Visible.Select(ordinal => (scope.MergedColumn(ordinal)?.Column ?? allColumns[ordinal]).Name)
+                    bool hasMerged = bindings.Any(binding => binding.UsingColumns is not null);
+                    SqlCatalogColumn NaturalColumn(int ordinal)
+                    {
+                        var column = (hasMerged ? scope.MergedColumn(ordinal)?.Column : null) ?? allColumns[ordinal];
+                        if (column.HasSynthesizedName)
+                        {
+                            throw new SqlPlanningException("CS01015", string.Format(CultureInfo.CurrentCulture,
+                                ErrorMessages.NaturalSynthesizedName, column.Name), join.Location);
+                        }
+                        return column;
+                    }
+                    var rightNames = rightPart.Visible.Select(ordinal => NaturalColumn(ordinal).Name)
                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    usingColumns = visible.Select(ordinal => (scope.MergedColumn(ordinal)?.Column ?? allColumns[ordinal]).Name)
+                    usingColumns = visible.Select(ordinal => NaturalColumn(ordinal).Name)
                         .Where(rightNames.Contains).ToArray();
                     if (usingColumns.Count == 0)
                     {
@@ -102,7 +114,7 @@ internal sealed partial class SqlPlanner
                         {
                             throw new SqlPlanningException("CS05070", ErrorMessages.FullJoinCondition, join.Location);
                         }
-                        if (kind != SqlJoinType.FullOuter) { kind = SqlJoinType.Cross; }
+                        if (kind == SqlJoinType.Inner) { kind = SqlJoinType.Cross; }
                     }
                     else if (kind == SqlJoinType.Cross) { kind = SqlJoinType.Inner; }
                     if (kind == SqlJoinType.LeftOuter) { Nullify(rightIndex, bindings.Count, []); }
@@ -122,10 +134,16 @@ internal sealed partial class SqlPlanner
                         {
                             binding.Edits[join.Location!.End] = (0, " USING (" + string.Join(", ", usingColumns.Select(SqlObjectIdentity.Quote)) + ")");
                         }
+                        else if (kind is SqlJoinType.LeftOuter or SqlJoinType.RightOuter)
+                        {
+                            binding.Edits[join.Location!.End] = (0, " ON TRUE");
+                        }
                     }
                 }
                 var equalities = new List<(int Left, int Right, Collation Collation)>();
-                SqlBoundExpression? condition = null;
+                // PostgreSQL parse_clause.c:1408-1411 preserves zero-name outer joins.
+                SqlBoundExpression? condition = join.IsNatural && usingColumns.Count == 0 &&
+                    kind is SqlJoinType.LeftOuter or SqlJoinType.RightOuter ? new SqlBoundConstant(true) : null;
                 if (join.Condition is { } on)
                 {
                     if (ContainsAggregate(on))
@@ -207,7 +225,8 @@ internal sealed partial class SqlPlanner
                                     ? leftColumn.Collation is not null || rightColumn.Collation is not null ? collation.Resolve(null) : null
                                     : kind == SqlJoinType.RightOuter ? rightColumn.Collation : leftColumn.Collation,
                                 // PostgreSQL parse_coerce.c:1360-1387 preserves identical domains.
-                                domainName: sameDomain ? leftColumn.DomainName : null), value);
+                                domainName: sameDomain ? leftColumn.DomainName : null)
+                            { HasSynthesizedName = leftColumn.HasSynthesizedName || rightColumn.HasSynthesizedName }, value);
                         merged.Add(leftOrdinal);
                         var hiddenOwner = bindings.Last(binding => binding.Offset <= rightOrdinal);
                         hiddenOwner.HiddenColumns.Add(rightOrdinal - hiddenOwner.Offset);
@@ -305,7 +324,7 @@ internal sealed partial class SqlPlanner
 
         static SqlCatalogColumn Nullable(SqlCatalogColumn column) => column.IsNullable ? column
             : new SqlCatalogColumn(column.Name, column.Type, true, column.DefaultLiteral,
-                column.Collation, column.DomainName, column.DefaultFunctionCalls);
+                column.Collation, column.DomainName, column.DefaultFunctionCalls) { HasSynthesizedName = column.HasSynthesizedName };
 
         void Add(SqlRelationReference reference, bool nullable)
         {
@@ -321,6 +340,7 @@ internal sealed partial class SqlPlanner
             bindings.Add(new SqlRelationBinding(source, reference, allColumns.Count));
             allColumns.AddRange(source.Columns.Select(column => nullable && !column.IsNullable
                 ? new SqlCatalogColumn(column.Name, column.Type, true, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls)
+                    { HasSynthesizedName = column.HasSynthesizedName }
                 : column));
         }
     }

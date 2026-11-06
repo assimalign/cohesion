@@ -250,7 +250,8 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
-        return new SqlSelectColumn(expr, alias);
+        // PostgreSQL parse_target.c:148-152 discards decoration on either star form.
+        return new SqlSelectColumn(expr, expr is SqlStarExpression or SqlQualifiedStarExpression ? null : alias);
     }
 
     private List<SqlJoinClause> ParseJoinClauses(ref TokenLexer lexer, bool mergeSource = false)
@@ -290,6 +291,10 @@ public sealed partial class SqlQueryParser
                 if (natural) { AddExpectedDiagnostic(ref lexer, "a join type after NATURAL"); }
                 break;
             }
+            if (natural && joinType == SqlJoinType.Cross)
+            {
+                AddSyntaxDiagnostic(joinStart, joinEnd, ErrorMessages.NaturalCrossJoin);
+            }
 
             // Expect table reference after JOIN keyword
             var table = ParseRelationReference(ref lexer);
@@ -297,7 +302,7 @@ public sealed partial class SqlQueryParser
             // ON condition
             SqlExpression? condition = null;
             // A top-level source CROSS JOIN has no condition; the next ON belongs to MERGE.
-            bool hasOn = !(mergeSource && (joinType == SqlJoinType.Cross || natural)) &&
+            bool hasOn = !natural && !(mergeSource && joinType == SqlJoinType.Cross) &&
                 !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON");
             if (hasOn)
             {
@@ -354,7 +359,7 @@ public sealed partial class SqlQueryParser
             {
                 AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd, ErrorMessages.SqlQueryParserParseJoinClausesVoid7);
             }
-            if (natural && (hasOn || hasUsing))
+            if (natural && hasUsing)
             {
                 AddSyntaxDiagnostic(joinStart, joinEnd, ErrorMessages.NaturalJoinCondition);
             }

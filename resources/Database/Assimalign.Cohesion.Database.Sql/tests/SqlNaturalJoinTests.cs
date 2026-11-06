@@ -53,7 +53,7 @@ public sealed class SqlNaturalJoinTests
 
     // Independent hand oracle: PostgreSQL parse_clause.c:1242-1274 derives USING in
     // left output order, and :1735-1756 preserves RIGHT/FULL representatives.
-    // Zero-name outer joins and NATURAL CROSS follow the explicit SQ-J3 departures.
+    // Zero-name LEFT/RIGHT joins preserve their outer side (parse_clause.c:1408-1411).
     [Theory(DisplayName = "Cohesion Test [Sql] - NATURAL oracle: join types, source kinds, common names and case (#1792)")]
     [MemberData(nameof(OracleCases))]
     public async Task Execute_NaturalOracle_ShouldMatchHandDerivedRows(string kind, string source, int common, bool differentCase)
@@ -126,16 +126,14 @@ public sealed class SqlNaturalJoinTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - NATURAL: no common names use CROSS even with an empty input (#1792)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - NATURAL: no common names preserve the outer side with an empty input (#1792)")]
     [InlineData("INNER", false)]
     [InlineData("LEFT", false)]
     [InlineData("RIGHT", false)]
-    [InlineData("CROSS", false)]
     [InlineData("INNER", true)]
     [InlineData("LEFT", true)]
     [InlineData("RIGHT", true)]
-    [InlineData("CROSS", true)]
-    public async Task Execute_NaturalEmptyProduct_ShouldReturnNoRows(string kind, bool leftEmpty)
+    public async Task Execute_NaturalEmptyInput_ShouldPreserveOuterSide(string kind, bool leftEmpty)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("natural-empty", new());
@@ -143,7 +141,10 @@ public sealed class SqlNaturalJoinTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecAsync(session, "CREATE TABLE a(x INT NOT NULL); CREATE TABLE b(y INT NOT NULL); INSERT INTO " + (leftEmpty ? "b" : "a") + " VALUES(1)");
         // Act / Assert
-        (await RowsAsync(session, "SELECT * FROM a NATURAL " + kind + " JOIN b")).ShouldBeEmpty();
+        var rows = await RowsAsync(session, "SELECT * FROM a NATURAL " + kind + " JOIN b");
+        if (kind == "LEFT" && !leftEmpty) { Check(rows, [[1, null]]); }
+        else if (kind == "RIGHT" && leftEmpty) { Check(rows, [[null, 1]]); }
+        else { rows.ShouldBeEmpty(); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - NATURAL: repeated common names fail as USING (#1792)")]
@@ -174,7 +175,7 @@ public sealed class SqlNaturalJoinTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecAsync(session, "CREATE TABLE a(id INT NOT NULL, v INT NOT NULL); CREATE TABLE b(id BIGINT NOT NULL, w INT NOT NULL); INSERT INTO a VALUES(1,10),(3,30); INSERT INTO b VALUES(1,100),(2,200)");
         // Act
-        await using var result = (await session.ExecuteAsync("SELECT a.*,b.*,99 AS tail FROM a " + kind + " JOIN b USING(id) ORDER BY tail,id", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        await using var result = (await session.ExecuteAsync("SELECT a.*,b.*,99 AS tail FROM a " + kind + " JOIN b USING(id) ORDER BY tail,a.id", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = await ReadAsync(result);
         // Assert
         result.Columns.Select(column => column.Name).ShouldBe(["id", "v", "id", "w", "tail"]);
@@ -183,8 +184,8 @@ public sealed class SqlNaturalJoinTests
         object?[][] expected = kind switch
         {
             "LEFT" => [[1, 10, 1L, 100, 99], [3, 30, null, null, 99]],
-            "RIGHT" => [[1, 10, 1L, 100, 99], [null, null, 2L, 200, 99]],
-            _ => [[1, 10, 1L, 100, 99], [null, null, 2L, 200, 99], [3, 30, null, null, 99]],
+            "RIGHT" => [[null, null, 2L, 200, 99], [1, 10, 1L, 100, 99]],
+            _ => [[null, null, 2L, 200, 99], [1, 10, 1L, 100, 99], [3, 30, null, null, 99]],
         };
         Check(rows, expected);
     }
@@ -211,7 +212,7 @@ public sealed class SqlNaturalJoinTests
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
             error.Diagnostics.ShouldContain(item => item.Code == "CS01015" || item.Code == "CS01014");
         }
-        Check(await RowsAsync(session, "SELECT * FROM (s.t a NATURAL JOIN s.t b) NATURAL CROSS JOIN s.t c ORDER BY id"), [[1, 20], [2, 10]]);
+        Check(await RowsAsync(session, "SELECT * FROM (s.t a NATURAL JOIN s.t b) NATURAL JOIN s.t c ORDER BY id"), [[1, 20], [2, 10]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Views: NATURAL and qualified stars stay frozen after ADD COLUMN and reopen (#1792)")]

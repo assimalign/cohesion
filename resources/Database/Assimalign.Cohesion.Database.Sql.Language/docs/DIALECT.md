@@ -1300,7 +1300,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain CK00001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `CK00001` |
 | DML `RETURNING` | Supported subset, measured | Written-row SELECT list and affected count; see the RETURNING contract below |
-| `NATURAL JOIN` | Supported, measured | Derives USING names in left-output order; frozen in views. No common names lowers INNER/LEFT/RIGHT/CROSS to CROSS; FULL refuses with CS05070. |
+| `NATURAL JOIN` | Supported, measured | Derives USING names in left-output order; frozen in views. No common names lowers INNER to CROSS and preserves LEFT/RIGHT with ON TRUE; FULL refuses with CS05070. |
 | `UNION` / `INTERSECT` / `EXCEPT` | Supported, measured | Each accepts ALL or DISTINCT (default); available in every query position, with parenthesized operands and combined ordering/paging. See [Set operations](#set-operations-1114). |
 | `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE, DELETE or MERGE; optional output column lists; also INSERT INTO t WITH ... SELECT |
 | `WITH RECURSIVE` | Supported subset, measured | Anchor-typed UNION ALL and DISTINCT fixpoints, demand-driven shared scans, budget/cancellation and EXPLAIN. WITH RECURSIVE before MERGE remains excluded. |
@@ -2236,18 +2236,27 @@ retains CK00001; malformed joins and CROSS with a condition fail
 with an error and never execute as a product. LATERAL keeps CK00001.
 Derived comma inputs, FROM t, (SELECT ...) d, execute.
 
-NATURAL precedes bare JOIN or any explicit join type, including INNER, LEFT/RIGHT/FULL
-[OUTER] and CROSS. It forbids an explicit ON or USING (CS00003). Binding derives common
+NATURAL precedes bare JOIN, INNER, or LEFT/RIGHT/FULL [OUTER] JOIN.
+NATURAL CROSS JOIN is a syntax error (CS00003), as is an explicit ON or USING. Binding derives common
 visible output names in left-input order, comparing identifiers without case, then uses
 the ordinary USING type, collation, ordering and nullability rules. Repeated common names
-on either side fail CS01015. Stored, derived, persisted-view and system inputs all participate.
+on either side fail CS01015. An input column with a synthesized display name (such as
+column1 for an unnamed CAST) also fails CS01015, naming the column and requesting an alias.
+That provenance follows derived tables (including FROM-less correlated inputs), CTEs,
+compound output names, views and both star forms;
+an explicit alias or column-alias list clears it. A stored table column literally named
+column1 is an authored identifier and remains valid. Existing wire-visible columnN names
+are unchanged. Stored, derived, persisted-view and system inputs all participate.
+In stored views, a same-name AS alias over a synthesized source can also have come from
+older frozen star expansion. That ambiguous stored shape conservatively requires a fresh alias;
+format 37 has no record of which spelling was authored.
 Dropped columns are absent from the catalog output. PostgreSQL
 src/backend/parser/parse_clause.c:1242-1274 supplies the common-name algorithm; unlike its
-strcmp, Cohesion uses its case-insensitive identifier rule. As explicitly required by SQ-J3,
-zero common names lower INNER, LEFT, RIGHT and CROSS to CROSS even with an empty input;
-FULL fails CS05070. PostgreSQL preserves the outer side for zero-name LEFT/RIGHT with an
-empty opposite input. NATURAL CROSS is a dialect extension: common names lower to INNER
-USING, and no common names lower to CROSS (PostgreSQL gram.y:14062-14081 has no NATURAL CROSS).
+strcmp, Cohesion uses its case-insensitive identifier rule. Zero common names lower INNER
+to CROSS; LEFT and RIGHT retain their join kind with ON TRUE, including null extension
+and nullable metadata when the opposite input is empty (parse_clause.c:1408-1411).
+FULL with no common names fails CS05070 under the executable FULL subset; PostgreSQL
+returns the product there. PostgreSQL gram.y:14062-14086,14169-14172 excludes NATURAL CROSS.
 
 Standalone SELECT list items t.* and schema.table.* expand that local input's own columns,
 in declared order, including its physical columns hidden from unqualified * by USING.
@@ -2255,6 +2264,13 @@ Outer-extended inputs retain nullable metadata and NULL values, with their origi
 Aliases hide base names and schema qualifiers as for qualified scalar references; unknown
 or ambiguous qualifiers fail CS01015 before reads. Expansion composes with other projections,
 DISTINCT, ordering aliases/ordinals, windows, derived/view/system inputs and compound operands.
+An alias on either star form is discarded, including in views and ORDER BY (PostgreSQL
+parse_target.c:148-152). Bare ORDER BY names still resolve explicit aliases, then source
+columns: SELECT b.* FROM a NATURAL LEFT JOIN b ORDER BY x DESC NULLS LAST sorts by
+the merged x here, whereas PostgreSQL sorts by the output b.x.
+A SELECT or RETURNING target list is limited to 1,664 entries after expansion; CS05097
+(54011) names the limit and attempted count before retaining an oversized target list.
+The same limit covers derived/CTE bodies, compound operands and view expansion.
 Grouped wildcard projections retain the existing CS05017 wildcard boundary. Row-valued uses,
 including COUNT(t.*), remain CK00001. UPDATE FROM, DELETE USING and MERGE USING do not
 accept a wildcard as a relation or scalar expression; SELECT bodies in those sources may
@@ -2262,9 +2278,16 @@ project qualified wildcards. Qualified RETURNING wildcards retain CK00001, as do
 NATURAL mutation-source joins; ordinary RETURNING * and explicit qualified columns retain
 their existing behavior. LATERAL's refusal is unchanged.
 
-CREATE VIEW freezes NATURAL into explicit USING names (or CROSS for zero common names)
+An aliased source group, UPDATE t SET v=1 FROM (a NATURAL JOIN b) AS j WHERE t.id=j.id,
+executes through its derived SELECT, matching PostgreSQL. INSERT SELECT can end a NATURAL
+join with ON CONFLICT; elsewhere a leftover ON is a syntax error. CROSS JOIN retains its
+existing ON consumption and therefore still refuses that ON CONFLICT form.
+
+CREATE VIEW freezes NATURAL into explicit USING names (or CROSS / LEFT or RIGHT ON TRUE)
 and expands both wildcard forms through the existing text edits. Later ADD COLUMN cannot
-add a join predicate or output column, including after reopen. NATURAL is risky in an ad-hoc
+add a join predicate or output column, including after reopen. PostgreSQL also deparses
+NATURAL as USING (ruleutils.c:12782-12804) or an outer ON TRUE (:12814-12818); freezing
+is not a departure. NATURAL is risky in an ad-hoc
 query under schema change (PostgreSQL doc/src/sgml/queries.sgml:391-405); views avoid that risk.
 The canonical audit of columns named natural and lateral retains the same quoting, so
 SQL format 37 and wire contracts are unchanged. SqlNaturalJoinTests records independent,

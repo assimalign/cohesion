@@ -1,4 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
+
+using Assimalign.Cohesion.Database.Language;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -7,6 +11,29 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
+    // PostgreSQL parse_node.c:79-83 uses MaxTupleAttributeNumber (1,664).
+    private const int targetListLimit = 1664;
+    internal const string TargetListLimitCode = "CS05097";
+
+    private static void CheckTargetList(int count, int additional, Location? location)
+    {
+        if (additional > targetListLimit - count)
+        {
+            throw new SqlPlanningException(TargetListLimitCode, string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.TargetListLimit, targetListLimit, (long)count + additional), location);
+        }
+    }
+
+    private static void EnsureTargetCapacity<T>(List<T> targets, int additional, Location? location)
+    {
+        CheckTargetList(targets.Count, additional, location);
+        int required = targets.Count + additional;
+        if (targets.Capacity < required)
+        {
+            targets.Capacity = Math.Min(targetListLimit, Math.Max(required, Math.Max(4, targets.Capacity * 2)));
+        }
+    }
+
     private IReadOnlyList<SqlProjection>? BindReturning(IReadOnlyList<SqlSelectColumn>? returning,
         SqlCatalogTable table, SqlTableReference target)
     {
@@ -48,11 +75,12 @@ internal sealed partial class SqlPlanner
     private List<SqlProjection> BindProjections(IReadOnlyList<SqlSelectColumn> selectColumns,
         IReadOnlyList<SqlCatalogColumn> columns, SqlExpressionEvaluator evaluator, IReadOnlyList<int>? outputOrdinals = null)
     {
-        var projections = new List<SqlProjection>(selectColumns.Count);
+        var projections = new List<SqlProjection>(Math.Min(selectColumns.Count, targetListLimit));
         foreach (var column in selectColumns)
         {
             if (column.Expression is SqlStarExpression)
             {
+                EnsureTargetCapacity(projections, outputOrdinals?.Count ?? columns.Count, column.Expression.Location);
                 for (int i = 0; i < (outputOrdinals?.Count ?? columns.Count); i++)
                 {
                     int ordinal = outputOrdinals is null ? i : outputOrdinals[i];
@@ -61,19 +89,23 @@ internal sealed partial class SqlPlanner
             }
             else if (column.Expression is SqlQualifiedStarExpression star)
             {
-                foreach (int ordinal in evaluator.QualifiedStarOrdinals(star))
+                var ordinals = evaluator.QualifiedStarOrdinals(star);
+                EnsureTargetCapacity(projections, ordinals.Count, star.Location);
+                foreach (int ordinal in ordinals)
                 {
                     projections.Add(PassThrough(columns[ordinal].Name, ordinal, columns, evaluator, merged: false));
                 }
             }
             else if (column.Expression is SqlColumnReferenceExpression reference && !evaluator.IsOuterColumn(reference))
             {
+                EnsureTargetCapacity(projections, 1, column.Expression.Location);
                 int ordinal = evaluator.ResolveColumn(reference);
                 projections.Add(PassThrough(column.Alias ?? columns[ordinal].Name, ordinal, columns, evaluator,
-                    merged: reference.TableAlias is null && reference.SchemaName is null));
+                    merged: reference.TableAlias is null && reference.SchemaName is null, explicitName: column.Alias is not null));
             }
             else
             {
+                EnsureTargetCapacity(projections, 1, column.Expression.Location);
                 ValidateExpression(column.Expression, evaluator, _subqueryTypes);
                 var value = evaluator.Bind(column.Expression, out SqlBoundCollation collation, out var candidate);
                 projections.Add(new SqlProjection(
@@ -81,6 +113,8 @@ internal sealed partial class SqlPlanner
                         ? outerColumn.ColumnName : $"column{projections.Count + 1}"), null, column.Expression,
                     GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation,
                         HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression,
+                        HasSynthesizedName = column.Alias is null && column.Expression is SqlColumnReferenceExpression inheritedName &&
+                            evaluator.ColumnMetadata(inheritedName).HasSynthesizedName,
                         Metadata = CaptureProjectionMetadata(candidate,
                             UnwrapCollation(column.Expression) is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null,
                             column.Expression, evaluator),

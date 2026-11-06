@@ -1667,21 +1667,64 @@ reference, persisted format, protocol frame or metadata field changes.
 
 Binding derives NATURAL's common visible names in left-output order, ignoring case,
 then runs the existing USING binder. Repeated common names retain CS01015. No common
-names lower INNER/LEFT/RIGHT/CROSS to CROSS; FULL retains CS05070. NATURAL CROSS with
-common names lowers to INNER USING. These explicit scope decisions differ from PostgreSQL
-for NATURAL CROSS and empty-input zero-name outer joins; see DIALECT and its independent
-oracle corpus (PostgreSQL parse_clause.c:1242-1274 and gram.y:14062-14081).
+names lower INNER to CROSS; LEFT/RIGHT preserve their kind and ON TRUE, including
+null extension. FULL retains CS05070 although PostgreSQL returns the product.
+NATURAL CROSS is a syntax error (PostgreSQL parse_clause.c:1242-1274,1408-1411;
+gram.y:14062-14086,14169-14172).
 
 Qualified stars expand local relation physical ordinals through ordinary pass-through
 projections, preserving qualified USING types and outer nullability. ORDER BY counts each
-expansion independently. No operator, retained buffer, budget or execution contract changes.
+expansion independently. The executor and its retained-row budgets are unchanged.
 View binding replaces NATURAL keywords with the effective join type and inserts explicit
-USING names, then expands stars through the existing edits mechanism. Reopen tests add
+USING names (or outer ON TRUE), then expands stars through the existing edits mechanism.
+PostgreSQL ruleutils.c:12782-12804,12814-12818 deparses the same forms. Star aliases
+are discarded during parsing, including before view canonicalization and ORDER BY binding. Reopen tests add
 new common columns and prove unchanged view rows and columns. The canonical audit for
 natural/lateral identifiers changes no quoting, format or wire contract. Direct mutation
 NATURAL joins, qualified RETURNING wildcards and row-valued stars keep CK00001.
 
+NATURAL refuses synthesized input names with CS01015 and requests an explicit alias.
+Bind-time column/projection provenance follows derived/CTE/recursive and compound outputs,
+both stars and null extension. Authored aliases and column lists clear it; table identifiers
+and wire-visible display names do not change. Views recover provenance from their bound
+canonical body. FROM-less correlated projections also retain provenance when their columnN
+display name differs from the referenced column, or that column was already synthesized.
+An authored view name identical to a synthesized name is also expressed
+as a derived column list in that body; different catalog names already prove an explicit
+list supplied them. Star expansion avoids inventing aliases for synthesized names. SQL format stays 37.
+An older frozen star's same-name AS alias is indistinguishable from an authored re-alias;
+stored-body binding conservatively retains synthesized provenance for that shape (CS01015).
+New fully named same-name re-alias views persist an explicit output list. A mixed view can
+therefore require a fresh alias even when selecting only its authored same-name output;
+the bound text cannot recover that distinction without a format change.
+Each BindItem join checks cancellation; NATURAL skips merged-column scans until a binding
+actually has UsingColumns. A synchronous parameter-read witness tests cancellation after
+binding begins, with an allocation ceiling rather than a duration assertion.
+
 ## N-way joins (#1109)
+
+Target lists have at most 1,664 entries, following PostgreSQL parse_node.c:79-83.
+CS05097 (54011) names the limit and attempted count. BindProjections checks before
+each star expansion or scalar addition, including RETURNING; AggregateColumnNames
+checks projected additions before recursive derived-name walks can double width.
+CaptureViewSelect checks before allocating expansion strings. PlanSelectCore also bounds
+explicit lists before grouped, constant or window projection arrays can be built. Set and
+recursive outputs inherit their already bounded operand width. Physical join inputs are
+not target lists. These bind-time guards protect allocations independently of the
+execution memory ledger.
+Backing capacities are also capped at 1,664; bounded scalar lists and set operands allocate
+their known count, and star/name lists grow only after admission with clamped capacity.
+
+The table catalog independently admits only one 8,092-byte record (SqlCatalog.cs,
+EncodeTableRecord/EnsureStorable). Its widest minimal-name table has 193 columns:
+193 shortest printable names encode to 8,090 bytes; 194 encode to 8,132 and fail CS05042.
+Even all 95 distinct non-whitespace, nonzero one-byte names cannot fit a 194th column
+(8,105 bytes with two-byte names thereafter). Defaults, constraints, longer identifiers
+and dropped ordinals only reduce this width, so a stored table alone cannot reach 1,664.
+
+| Code | Condition | SQLSTATE |
+| --- | --- | --- |
+| CS05097 | More than 1,664 target entries | 54011 |
 
 ORDER BY aliases following a wildcard count its visible output columns after USING merges;
 ordering execution slots still begin after the full physical source row.
