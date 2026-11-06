@@ -112,7 +112,9 @@ evaluation stays inside the already-bound logical database.
 ## Text index grammar (#1644)
 
 CREATE TEXT INDEX uses a contextual TEXT modifier and the existing standalone schema AST,
-with GqlSchemaCommand.IsText retained by semantic rendering. It shares the CREATE INDEX
+with GqlSchemaCommand.IsText retained by semantic rendering. TEXT is recognized only after
+CREATE; DROP TEXT INDEX keeps its own unsupported DROP diagnostic. Programmatic IsText
+commands are admitted only for a CREATE INDEX, never constraints or drops. It shares the CREATE INDEX
 node-only, single-property grammar, name and conditional rules; unsupported composite and
 relationship forms keep CK00001. CreateTextIndex is advertised beside CreateIndex and has
 parser, profile execution, Unicode differential and InMemory/TCP conformance cases. No

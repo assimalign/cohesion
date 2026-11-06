@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,7 +23,14 @@ public sealed partial class GraphStore
     private const string treeName = "graph";
     private static readonly Guid _maximumTypeId = new("ffffffff-ffff-ffff-ffff-ffffffffffff");
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
+    // Lock order: coordinator apply gate -> registry -> directory _sync. Failure rebuilds
+    // take only the registry lock and never wait for apply admission while holding it.
+    private readonly object _indexRegistrySync = new();
     private BTreeIndexManager _indexes = null!;
+    internal Action? AfterIndexRegistrationsCleared { get; set; }
+    internal Action? BeforeIndexReclamation { get; set; }
+    internal Action? AfterIndexPrune { get; set; }
+    internal Action? AfterRelationshipTypeCountRefresh { get; set; }
 
     /// <summary>Tests whether an exact property index is visible.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="snapshot">Visibility snapshot.</param><returns>True when an index is visible.</returns>
@@ -89,6 +97,7 @@ public sealed partial class GraphStore
                     entries.Capacity = capacity;
                 }
                 reserve?.Invoke(32L + key.Length);
+                visit?.Invoke(); // Refuse before entering the allocating physical bracket.
                 entries.Add((reference, key));
             }
         }
@@ -98,9 +107,9 @@ public sealed partial class GraphStore
             var index = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
             foreach (var entry in entries)
             {
-                visit?.Invoke();
                 await index.InsertVersionAsync(bracket, entry.Key, entry.Reference.Location,
                     entry.Reference.Writer, TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                AfterTextIndexMutation?.Invoke("build-entry");
             }
             var location = Insert(bracket, bytes, context);
             SaveRegistrations(bracket);
@@ -277,9 +286,29 @@ public sealed partial class GraphStore
 
     internal async ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
     {
-        ReclaimRetiredIndexes(bound, cancellationToken);
-        long pruned = await _indexes.PruneAsync(bound, cancellationToken).ConfigureAwait(false);
-        RefreshRelationshipTypeCounts(cancellationToken);
+        ExceptionDispatchInfo? failure = null;
+        long pruned = 0;
+        try { ReclaimRetiredIndexes(bound, cancellationToken); }
+        catch (Exception error) when (error is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        { failure = ExceptionDispatchInfo.Capture(error); }
+        try
+        {
+            pruned = await _indexes.PruneAsync(bound, cancellationToken).ConfigureAwait(false);
+            AfterIndexPrune?.Invoke();
+        }
+        catch (Exception error) when (error is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        { failure ??= ExceptionDispatchInfo.Capture(error); }
+        try
+        {
+            RefreshRelationshipTypeCounts(cancellationToken);
+            AfterRelationshipTypeCountRefresh?.Invoke();
+        }
+        catch (Exception error) when (error is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        { failure ??= ExceptionDispatchInfo.Capture(error); }
+        failure?.Throw();
         return pruned;
     }
 
@@ -287,25 +316,29 @@ public sealed partial class GraphStore
 
     private void OpenIndexes(bool scheduleReclamation)
     {
-        _registrations.Clear();
-        var registrations = new List<BTreeIndexRegistration>();
-        foreach (var (registration, page, slot) in ReadRegistrations(_storage))
+        lock (_indexRegistrySync)
         {
-            if (registration.RootPageId > 0) { registrations.Add(registration); }
-            _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
-            if (scheduleReclamation) { ScheduleIndexReclamation(registration.ObjectId); }
+            _registrations.Clear();
+            AfterIndexRegistrationsCleared?.Invoke();
+            var registrations = new List<BTreeIndexRegistration>();
+            foreach (var (registration, page, slot) in ReadRegistrations(_storage))
+            {
+                if (registration.RootPageId > 0) { registrations.Add(registration); }
+                _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
+                if (scheduleReclamation) { ScheduleIndexReclamation(registration.ObjectId); }
+            }
+            _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+            {
+                Storage = _storage,
+                TransactionSource = ResolveStatementBracket,
+                PruneBound = () => _coordinator.PruneBound,
+                ExistingIndexes = registrations
+            });
+            // Labeled nodes and relationships require their persisted token trees; never reopen a graph
+            // whose tree registration was lost, or treat a pre-index development file as empty.
+            if (_labelTokens.Count != 0) { _ = ResolveIndex(labelsId); }
+            if (_relationshipTypeTokens.Count != 0) { _ = ResolveIndex(relationshipTypesId); }
         }
-        _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
-        {
-            Storage = _storage,
-            TransactionSource = ResolveStatementBracket,
-            PruneBound = () => _coordinator.PruneBound,
-            ExistingIndexes = registrations
-        });
-        // Labeled nodes and relationships require their persisted token trees; never reopen a graph
-        // whose tree registration was lost, or treat a pre-index development file as empty.
-        if (_labelTokens.Count != 0) { _ = ResolveIndex(labelsId); }
-        if (_relationshipTypeTokens.Count != 0) { _ = ResolveIndex(relationshipTypesId); }
     }
 
     private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot)> ReadRegistrations(GraphStorage storage)

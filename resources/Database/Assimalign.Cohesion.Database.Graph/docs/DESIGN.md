@@ -13,8 +13,7 @@ definitions reuse their existing revision word as the immutable discriminator (0
 semantics before writable open. Exact and text indexes on one pair have separate tree ids.
 
 Tokens are rolling triples of Unicode scalar values without case folding or normalization;
-three 21-bit scalars occupy 63 bits, preceded by their code-point count. Short values have
-one length-tagged token, including the empty string. Distinct tokens are written once per
+three 21-bit scalars occupy 63 bits, preceded by their code-point count. Values shorter than three code points write no tokens: no seek can read them. Distinct tokens are written once per
 node version. Keys are (token,node id); entry references locate the stored version and B-tree
 creator/deleter stamps use the existing no-payload insertion, cursor, undo and recovery API.
 An update tombstones every prior token and inserts the new version's tokens; deletes and
@@ -22,25 +21,40 @@ label removal do the same. Backfill uses each node version's original creator st
 the database writer lock, so it serves later readers without exposing pre-build snapshots.
 Concurrent writers wait through logical publication and then maintain the new tree.
 A Snapshot writer maintains both current trees and trees still visible to its older snapshot,
-including a dropped/replaced tree. It therefore sees its own new versions through the old
+including a dropped/replaced exact or text tree. A pinned exact tree still enforces its
+1,016-byte encoded-key prefix limit (CG02009). It therefore sees its own new versions through the old
 plan while future readers use the replacement. Both commit and rollback are exercised.
 
 Planning considers string equality and positive conjunctive CONTAINS, ENDS WITH and STARTS
 WITH on required labels. A per-clause ordinal variable/property table collects text predicates
 once, keeping selection linear in predicates plus index definitions. Exact seeks retain their normal preference. Text seeks enumerate
-one token range, probe the remaining distinct tokens for the same node version (AND), and
-mandatorily recheck the stored string, label and identity. Recheck preserves position,
+only the pattern's first trigram range and mandatorily recheck the stored string, label and
+identity. There is no posting intersection; selectivity is only that of the first trigram.
+Estimates use label cardinality alone, without counting any trigram. Each visible anchor
+posting costs one work unit, as a visible label posting does. Extracting the single anchor
+charges no work and retains no pattern-token directory. Recheck preserves position,
 multiplicity, order and ordinal case-sensitive semantics. Snapshot and statement-overlay
 versions use the same predicate. Parameter values bind anew for every execution; the anchor
 keeps the bound pattern and execution rechecks its eligibility before cursor open. Fewer
-than three code points uses a label scan. Patterns retain strict Unicode input validation. Supplementary pairs count once;
+than three code points uses a plain label scan with no stored or overlay prefilter. Parameters
+retain strict planning validation; in-process lone-surrogate literals retain evaluation-time
+CG02013 when a row evaluates them. As with exact seeks, a real seek can avoid evaluating a
+residual error on excluded rows; DIALECT gives the example. Supplementary pairs count once;
 combining marks remain separate. EXPLAIN exposes TextIndexSeek/LabelScan, parameter and
-execution-decision flags, AND, recheck and fallback. There is no scoring or SEARCH surface.
+execution-decision flags, the first-trigram anchor and recheck. There is no scoring or SEARCH surface.
 
 Extraction consumes one work unit per code point. Before retaining a distinct token it
 reserves 256 bytes covering set capacity, key/change arrays and transaction undo; its set
 header reserves 128 bytes. Backfill separately charges entry capacity and owned keys, and
-insertion charges work. Seek token directories and bounded cursor batches share the same
+insertion work is charged during extraction, before the allocating bracket. A build costs
+1+L+K per present string, where L is its code-point length and K its distinct trigram count.
+An update pays one label visit plus L_old+L_new per text index, even for an unrelated-property
+change, because the stored version moves. With one p property and default grants, measured
+text/exact first refusals are 82,545/141,133 rows for five-code-point SET (memory),
+12,346 work / 130,817 memory for an unrelated SET over 40-code-point values, and
+25,642/500,001 rows for a 20-code-point build (work). DIALECT records the adjacent boundaries
+and row shapes. Text maintenance is therefore an exception to the 100,000-row envelope.
+Bounded cursor batches share the same
 statement grant. Existing defaults are 1,000,000 work units and 256 MiB; CG05004/CG05020
 failures roll back all metadata, tokens and data. Typed node creates/deletes lazily start
 the same default statement grant when text indexes exist; raw GraphStore callers retain
@@ -61,14 +75,23 @@ negative in a committed WAL bracket: its magnitude retains the old root identity
 sign is a durable retirement receipt. The manager then excludes that tree. Maintenance
 checks at most 64 queued candidates and frees at most 64 owner pages per pass using
 FreeOwnerPages(tree id, remaining grant). Each page batch commits separately; a final
-zero-page pass deletes the receipt. Open ignores retired roots, rejects receipts on fixed
+owner-directory emptiness check deletes the receipt in a separate bracket. Open ignores retired roots, rejects receipts on fixed
 owners or on an undeleted definition, and requeues receipts/orphan registrations for cleanup.
 A partly reclaimed tree therefore never has to open its freed root. One FIFO and a membership
 set keep work bounded and retry failed/waiting candidates fairly. Manager reconstruction runs
-once after a retirement pass, including failure cleanup. Tree ids reserve past data owners
-0/1/2. This also collects abandoned builds after logical scrub. Exact trees use the same
+once after a retirement pass, including failure cleanup. A private registry lock makes root
+reads, registration replacement and manager assignment one critical section. Lock order is
+apply gate, registry lock, then directory _sync; failure rebuilds never wait for apply admission
+while holding the registry lock. A reclamation failure is deferred until independent index
+pruning and relationship-type counts have run. Tree ids reserve past data owners
+0/1/2. At open, allocated Index-page headers also discover owners with neither a definition nor a
+registration. These receive retirement receipts and follow the same id-below-bound check and
+bounded cleanup; fixed owners and owners with any retained definition are excluded. An
+abandoned build receipt names an owned page without assuming its root survived; no retired
+page is opened. This
+collects allocations surviving a canceled or failed physical build after logical scrub. Exact trees use the same
 retirement path; fixed label/type/adjacency trees are excluded. Tests assert each batch bound
-and the exact total reclaimed owner-page count. Page reclamation is counted separately from
+and the exact total reclaimed owner-page count. IndexOwnerPagesReclaimed counts both exact and text owner pages, separately from
 the existing version-purge event's version count. No Indexing API or B-tree format assumption is added.
 
 Crash boundaries are label discovery, kind-4 catalog publication, property discovery, atomic
@@ -1974,7 +1997,7 @@ and the stricter identity-minimal witness contract, without copying reference co
 
 `GraphDatabaseEngineOptions.QueryMemoryBudget` defaults to 268,435,456 bytes and
 `QueryWorkBudget` to 1,000,000 units. The engine snapshots both positive ceilings at construction.
-The default preserves the former 100,000-row envelope for one-property SET targets, FOR/INSERT,
+Except for text-index maintenance described above, the default preserves the former 100,000-row envelope for one-property SET targets, FOR/INSERT,
 entity RETURN and QueryPaths, and the 30,000-node collect/SET fixture. Wider properties and retained
 intermediate stages reduce capacity; this is a memory limit, not a guaranteed row count for arbitrary
 queries. Ten times that envelope is refused by memory accounting. To admit larger workloads, raise

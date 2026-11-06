@@ -153,7 +153,7 @@ internal sealed partial class GraphPlanner
                             estimate: anchor.EstimatedRows)
                         : Add(DescribeOperator(anchor), pathId, anchor.UnionLabels is { } union ? string.Join("|", union) : anchor.Label, index,
                             $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}" +
-                            (anchor.Value is GraphTextAnchor text ? $"; predicate={text.Operation}; parameter={text.Parameter}; decision=execution; trigrams=Unicode_code_points; combine=AND; recheck=stored_value; access={(text.CanSeek ? "TextIndexSeek" : "LabelScan")}; fallback=shorter_than_3_code_points" : "") +
+                            (anchor.Value is GraphTextAnchor text ? $"; predicate={text.Operation}; parameter={text.Parameter}; decision=execution; trigrams=Unicode_code_points; anchor=first_trigram; recheck=stored_value; access={(text.CanSeek ? "TextIndexSeek" : "LabelScan")}; fallback={(text.CanSeek ? "none" : GraphTextTrigrams.IsValidPattern(text.Pattern) ? "shorter_than_3_code_points" : "invalid_unicode")}" : "") +
                             (anchor.UnionLabels is null ? "" : "; combine=union"), anchor.EstimatedRows);
                     // The posting supplies its edge directly; only the remaining edges expand.
                     int rightStart = anchor.NodeIndex + (anchor.RelationshipTypes is null ? 0 : 1);

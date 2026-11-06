@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 public sealed partial class GqlQueryParser
 {
     private bool IsSchemaStart() => (Is("CREATE") || Is("DROP")) &&
-        (IsWordAt(_position + 1, "INDEX") || IsWordAt(_position + 1, "TEXT") || IsWordAt(_position + 1, "CONSTRAINT") ||
+        (IsWordAt(_position + 1, "INDEX") || Is("CREATE") && IsWordAt(_position + 1, "TEXT") || IsWordAt(_position + 1, "CONSTRAINT") ||
          IsWordAt(_position + 1, "LABEL") || IsWordAt(_position + 1, "RELATIONSHIP") ||
          IsWordAt(_position + 1, "UNIQUE") || IsWordAt(_position + 1, "CLOSED") ||
          IsWordAt(_position + 1, "GRAPH") && IsWordAt(_position + 2, "TYPE"));

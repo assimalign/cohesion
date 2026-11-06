@@ -12,6 +12,18 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// <summary>Ordinal code-point tokens; three 21-bit scalars fit in one unsigned integer.</summary>
 internal static class GraphTextTrigrams
 {
+    internal static bool IsValidPattern(object? value)
+    {
+        if (value is not string text) { return false; }
+        var remaining = text.AsSpan();
+        while (!remaining.IsEmpty)
+        {
+            if (Rune.DecodeFromUtf16(remaining, out _, out int consumed) != OperationStatus.Done) { return false; }
+            remaining = remaining[consumed..];
+        }
+        return true;
+    }
+
     internal static bool CanSeek(object? value)
     {
         if (value is not string text) { return false; }
@@ -44,11 +56,6 @@ internal static class GraphTextTrigrams
             reserve?.Invoke(256); // Set capacity, owned key, change buffer and transaction undo entry.
             seen.Add(rolling);
             yield return Key(3, rolling);
-        }
-        if (count < 3)
-        {
-            reserve?.Invoke(256);
-            yield return Key((byte)count, rolling);
         }
     }
 

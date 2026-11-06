@@ -1946,8 +1946,8 @@ internal sealed partial class GraphPlanner
                         GraphTextAnchor? predicate = inline.TryGetValue(textIndex.Key, out var literal) && literal.Value is string text
                             ? new GraphTextAnchor(text, "=", node.Properties[textIndex.Key] is GqlParameterExpression)
                             : sources.GetTextPredicate(node.Variable, textIndex.Key, token);
-                        if (predicate is null) { continue; }
-                        // A single posting prefix plus AND probes; the residual always rechecks.
+                        if (predicate is null || !predicate.CanSeek) { continue; }
+                        // The first trigram supplies candidates; estimates use label cardinality only.
                         long cost = _database.Store.EstimateLabelCount(label);
                         if (scan is null || cost <= scanCost && scan.Property is null)
                         { scan = new GraphAnchor(i, label, textIndex.Key, predicate); scanCost = cost; }
@@ -2149,8 +2149,9 @@ internal sealed partial class GraphPlanner
                         GraphExpressionEvaluator.ParameterOrLiteral(pattern, _parameters) is not string value) { continue; }
                     if (!collected.TryGetValue(receiver.Variable, out var values))
                     { collected.Add(receiver.Variable, values = new Dictionary<string, GraphTextAnchor>(StringComparer.Ordinal)); }
-                    if (!values.ContainsKey(receiver.Property))
-                    { values.Add(receiver.Property, new GraphTextAnchor(value, operation, pattern is GqlParameterExpression)); }
+                    var candidate = new GraphTextAnchor(value, operation, pattern is GqlParameterExpression);
+                    if (!values.TryGetValue(receiver.Property, out var prior) || !prior.CanSeek && candidate.CanSeek)
+                    { values[receiver.Property] = candidate; }
                 }
                 _textPredicates = collected;
             }

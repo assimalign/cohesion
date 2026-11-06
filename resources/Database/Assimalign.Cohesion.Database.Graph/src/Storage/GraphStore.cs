@@ -63,6 +63,7 @@ public sealed partial class GraphStore
             _records[key] = versions;
         }
         OpenIndexes();
+        CollectAbandonedIndexOwners();
         storage.UndoScopesChanged = UndoScopesChanged;
         storage.UndoTransactionEnded = context => UndoScopesChanged(context.Sequence, false, _coordinator.VersionStore);
     }

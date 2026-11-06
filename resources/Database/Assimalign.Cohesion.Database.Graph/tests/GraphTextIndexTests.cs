@@ -34,27 +34,42 @@ public sealed class GraphTextIndexTests
         await using var engine = GraphDatabaseEngine.Create("text-differential", new());
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var referenceDatabase = await engine.CreateDatabaseAsync("reference", CancellationToken.None);
+        await using var reference = await referenceDatabase.CreateSessionAsync(CancellationToken.None);
         var random = new Random(1644);
         string[] alphabet = ["a", "b", "c", "A", "é", "e", "\u0301", "😀", "𐐀", "\0"];
         var values = new List<object?> { null, false, 42L, 1.25m, "", "a", "ab", "abc", "ABC", "😀😀", "😀😀😀", "e\u0301", "é", "abcXbcd", "abcd", "aaaa", "aaa", "x😀ab" };
         for (int i = 0; i < 64; i++)
         { values.Add(string.Concat(Enumerable.Range(0, random.Next(16)).Select(_ => alphabet[random.Next(alphabet.Length)]))); }
         for (int i = 0; i < values.Count; i++)
-        { await session.ExecuteAsync("INSERT (:N {k:$k,p:$p})", new Dictionary<string, object?> { ["k"] = (long)i, ["p"] = values[i] }, CancellationToken.None); }
+        {
+            var parameters = new Dictionary<string, object?> { ["k"] = (long)i, ["p"] = values[i] };
+            await session.ExecuteAsync("INSERT (:N {k:$k,p:$p})", parameters, CancellationToken.None);
+            await reference.ExecuteAsync("INSERT (:N {k:$k,p:$p})", parameters, CancellationToken.None);
+        }
         await session.ExecuteAsync("INSERT (:N {k:999})", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT (:Noise {k:1000,p:'abcd'})", cancellationToken: CancellationToken.None);
+        await reference.ExecuteAsync("INSERT (:N {k:999}),(:Noise {k:1000,p:'abcd'})", cancellationToken: CancellationToken.None);
         var patterns = new List<object?> { null, false, 42L, "", "a", "ab", "abc", "abcd", "aaa", "aaaa", "ABC", "😀", "😀😀", "😀😀😀", "e\u0301", "é", "\0", "😀ab", "missing" };
         foreach (string value in values.OfType<string>())
         {
             string[] scalars = value.EnumerateRunes().Select(rune => rune.ToString()).ToArray();
             patterns.Add(string.Concat(scalars.Take(random.Next(0, scalars.Length + 1))));
+            int start = random.Next(scalars.Length + 1);
+            patterns.Add(string.Concat(scalars.Skip(start)));
+            patterns.Add(string.Concat(scalars.Skip(start).Take(random.Next(scalars.Length - start + 1))));
         }
         string[] operators = ["=", "CONTAINS", "ENDS WITH", "STARTS WITH"];
         var expected = new Dictionary<(int Pattern, string Operator), object?[]>();
+        var costs = new Dictionary<(int Pattern, string Operator), (long Work, long Memory)>();
+        string Statement(string operation, int pattern) => pattern % 2 == 0 ? Query(operation) : Query(operation).Replace(" ORDER BY n.k", "", StringComparison.Ordinal);
         foreach (string operation in operators)
         {
             for (int i = 0; i < patterns.Count; i++)
-            { expected[(i, operation)] = (await RowsAsync(session, Query(operation), patterns[i])).Select(row => row[0]).ToArray(); }
+            {
+                expected[(i, operation)] = (await RowsAsync(session, Statement(operation, i), patterns[i])).Select(row => row[0]).ToArray();
+                costs[(i, operation)] = (session.LastStatementMetrics!.Physical, session.LastStatementMetrics.Memory.PeakRetainedBytes);
+            }
         }
 
         // Act: every statement and parameter executes unchanged against the populated text index.
@@ -63,25 +78,36 @@ public sealed class GraphTextIndexTests
         {
             for (int i = 0; i < patterns.Count; i++)
             {
-                var actual = (await RowsAsync(session, Query(operation), patterns[i])).Select(row => row[0]);
+                var actual = (await RowsAsync(session, Statement(operation, i), patterns[i])).Select(row => row[0]);
                 actual.ShouldBe(expected[(i, operation)], $"operator={operation}; pattern={patterns[i]}");
+                // One fixed anchor may add at most one work unit and 128 retained bytes.
+                session.LastStatementMetrics!.Physical.ShouldBeLessThanOrEqualTo(costs[(i, operation)].Work + 1);
+                session.LastStatementMetrics.Memory.PeakRetainedBytes.ShouldBeLessThanOrEqualTo(costs[(i, operation)].Memory + 128);
             }
         }
 
         // Assert: two supplementary characters are two code points, while three permit a seek.
         foreach (var (pattern, access) in new[] { ("", "LabelScan"), ("ab", "LabelScan"), ("😀😀", "LabelScan"), ("😀😀😀", "TextIndexSeek"), ("abc", "TextIndexSeek") })
         {
-            var plan = await RowsAsync(session, "EXPLAIN " + Query("CONTAINS"), pattern);
-            var anchor = plan.Single(row => Equals(row[2], access));
-            anchor[4].ShouldBe("text_p");
-            anchor[5]!.ToString()!.ShouldContain("decision=execution");
-            anchor[5]!.ToString()!.ShouldContain("parameter=True");
-            anchor[5]!.ToString()!.ShouldContain("recheck=stored_value");
+            foreach (string operation in operators)
+            {
+                var plan = await RowsAsync(session, "EXPLAIN " + Query(operation), pattern);
+                var anchor = plan.Single(row => Equals(row[2], access));
+                if (access == "TextIndexSeek")
+                {
+                    anchor[4].ShouldBe("text_p");
+                    anchor[5]!.ToString()!.ShouldContain("decision=execution");
+                    anchor[5]!.ToString()!.ShouldContain("parameter=True");
+                    anchor[5]!.ToString()!.ShouldContain("recheck=stored_value");
+                }
+                else { anchor[4].ShouldBeNull(); }
+            }
         }
         // Both abc and bcd occur in abcXbcd; the stored recheck must reject it for abcd.
         (await RowsAsync(session, Query("CONTAINS"), "abcd")).Select(row => row[0]).ShouldBe([14L]);
         (await RowsAsync(session, "MATCH (n:N {p:'abcd'}) RETURN n.k ORDER BY n.k")).Select(row => row[0]).ShouldBe([14L]);
         (await RowsAsync(session, "MATCH (n:N) WHERE n.p CONTAINS 'abcd' OR n.k=0 RETURN n.k ORDER BY n.k")).Select(row => row[0]).ShouldBe([0L, 14L]);
+        await GraphTextIndexReviewTests.ReplayWritesAndCompareAsync(reference, session, database);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Conjunctive text predicates stay distinct by variable and property (#1644)")]
@@ -195,7 +221,7 @@ public sealed class GraphTextIndexTests
         ulong textId = database.Store.GetIndexIdentities(snapshot.Context.Snapshot).Single(index => index.Text).Id;
         int pages = database.DataStorage.GetOwnerIndexPages(textId).Count;
         pages.ShouldBeGreaterThan(0);
-        long reclaimed = database.Store.TextIndexPagesReclaimed;
+        long reclaimed = database.Store.IndexOwnerPagesReclaimed;
 
         // Act / Assert: an exact equality seek wins a tied text estimate; old snapshots pin DROP.
         var equalityPlan = await RowsAsync(writer, "EXPLAIN MATCH (n:N {p:'abcdef'}) RETURN n.k");
@@ -208,7 +234,7 @@ public sealed class GraphTextIndexTests
         await snapshot.RollbackAsync(CancellationToken.None);
         database.Coordinator.RunVersionPurgePass(CancellationToken.None);
         database.DataStorage.GetOwnerIndexPages(textId).ShouldBeEmpty();
-        (database.Store.TextIndexPagesReclaimed - reclaimed).ShouldBe(pages);
+        (database.Store.IndexOwnerPagesReclaimed - reclaimed).ShouldBe(pages);
         (await RowsAsync(writer, "MATCH (n:N {p:'abcdef'}) RETURN n.k")).ShouldHaveSingleItem();
     }
 
@@ -243,11 +269,11 @@ public sealed class GraphTextIndexTests
         else { (await RowsAsync(session, "MATCH (n:N) RETURN n.k")).ShouldBeEmpty(); }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Partial text posting brackets roll back on work exhaustion (#1644)")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Build preflight and partial text updates roll back on work exhaustion (#1644)")]
     [InlineData(false)] [InlineData(true)]
-    public async Task Execute_PartialPhysicalMutation_ShouldRestoreTreeAndRowsAsync(bool update)
+    public async Task Execute_WorkExhaustion_ShouldRestoreTreeAndRowsAsync(bool update)
     {
-        // Arrange: 1500 units admit extraction, then refuse during backfill insertion or old-token removal.
+        // Arrange: 1500 units refuse backfill before allocation, or an update during old-token removal.
         await using var engine = GraphDatabaseEngine.Create("text-partial", Quiet());
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -337,7 +363,7 @@ public sealed class GraphTextIndexTests
         int pages = database.DataStorage.GetOwnerIndexPages(id).Count;
         pages.ShouldBeGreaterThan(GraphStore.IndexReclaimPageLimit);
         await session.ExecuteAsync("DROP INDEX text_p", cancellationToken: CancellationToken.None);
-        long reclaimed = database.Store.TextIndexPagesReclaimed;
+        long reclaimed = database.Store.IndexOwnerPagesReclaimed;
 
         // Act / Assert: use owner counts and exact progress, never elapsed time.
         int remaining = pages;
@@ -352,8 +378,8 @@ public sealed class GraphTextIndexTests
             passes.ShouldBeLessThanOrEqualTo(pages);
         }
         passes.ShouldBeGreaterThan(1);
-        (database.Store.TextIndexPagesReclaimed - reclaimed).ShouldBe(pages);
-        database.Coordinator.RunVersionPurgePass(CancellationToken.None); // Remove the empty retirement receipt.
+        (database.Store.IndexOwnerPagesReclaimed - reclaimed).ShouldBe(pages);
+        database.Coordinator.RunVersionPurgePass(CancellationToken.None); // Verify stable completion.
         (await RowsAsync(session, "MATCH (n:N) RETURN n.k ORDER BY n.k")).Select(row => row[0]).ShouldBe([1L, 2L]);
     }
 
@@ -410,7 +436,22 @@ public sealed class GraphTextIndexTests
         return root;
     }
 
-    private static async Task<int> CountEntriesAsync(GraphDatabase database, ulong id)
+    internal static async Task<int> CountEntriesAsync(GraphDatabase database, ulong id)
+        => (await CountEntriesByTokenAsync(database, id)).Values.Sum();
+
+    internal static List<(ulong Id, long Root)> Registrations(GraphDatabase database)
+    {
+        var result = new List<(ulong, long)>();
+        using var records = database.DataStorage.GetUnitIterator(1);
+        while (records.MoveNext())
+        {
+            var bytes = records.Current.Data.Span;
+            result.Add((BinaryPrimitives.ReadUInt64LittleEndian(bytes[18..]), BinaryPrimitives.ReadInt64LittleEndian(bytes[26..])));
+        }
+        return result;
+    }
+
+    internal static async Task<Dictionary<string, int>> CountEntriesByTokenAsync(GraphDatabase database, ulong id)
     {
         long root = ReadIndexRoot(database, id);
         var manager = BTreeIndexManager.Create(new()
@@ -423,9 +464,13 @@ public sealed class GraphTextIndexTests
         var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
         try
         {
-            int entries = 0;
+            var entries = new Dictionary<string, int>(StringComparer.Ordinal);
             await using var cursor = index.OpenCursor(context.Snapshot, IndexKeyRange.All);
-            while (await cursor.MoveNextAsync(CancellationToken.None)) { entries++; }
+            while (await cursor.MoveNextAsync(CancellationToken.None))
+            {
+                string key = Convert.ToHexString(cursor.CurrentKey.Encoded.Span[..^8]);
+                entries[key] = entries.GetValueOrDefault(key) + 1;
+            }
             return entries;
         }
         finally { await database.Coordinator.RollbackAsync(context, CancellationToken.None); }

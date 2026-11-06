@@ -652,7 +652,7 @@ Paging never reduces mutation inputs. For reads, LIMIT without ORDER BY can stop
 while ordered finite pages retain a top set bounded by OFFSET + LIMIT. Grouping consumes its
 input incrementally. Final rows and paths remain materialized within the statement memory budget;
 the default 256 MiB grant preserves the former 100,000-row envelope for one-property SET,
-FOR/INSERT, entity RETURN and QueryPaths. Capacity depends on row width and retained intermediate
+FOR/INSERT, entity RETURN and QueryPaths, except for text-index posting maintenance described below. Capacity depends on row width and retained intermediate
 state: larger workloads can still fail with CG05020. Raise GraphDatabaseEngineOptions.QueryMemoryBudget
 (and QueryWorkBudget when needed) on the server to increase capacity; in-process GraphQueryLimits
 can only lower those ceilings. TraverseAsync also uses these grants and now has a default
@@ -855,28 +855,61 @@ DROP INDEX name drops either kind; SHOW INDEXES retains its existing column shap
 GraphIndexMetadata.IsText identifies the kind.
 
 A direct n.property string equality, CONTAINS, ENDS WITH or STARTS WITH on a required label in a MATCH AND
-chain can seek the text index. The engine ANDs its distinct pattern trigrams and always
-rechecks the stored value using the ordinal, case-sensitive predicate. A supplementary pair
+chain can seek the text index; inline {p:'x'} equalities and MERGE use the same selection.
+The engine reads only the pattern's first trigram and always rechecks the stored value using
+the ordinal, case-sensitive predicate. There is no posting intersection: the index is only as
+selective as the pattern's first trigram. Each visible anchor posting costs one work unit,
+as a visible label posting does; extracting that anchor charges no work and reserves no
+memory for the rest of the pattern. A supplementary pair
 counts as one code point; combining sequences remain separate code points. A pattern shorter
-than three code points uses a label scan, including empty strings. Patterns retain the existing strict Unicode input validation. NULL and
+than three code points uses a plain label scan, including empty strings, with no prefilter
+on stored or statement-overlay rows. Parameters retain strict Unicode validation during
+planning (CG03003). An in-process lone-surrogate literal is validated when evaluated
+(CG02013); an empty scan evaluates no literal. NULL and
 non-string values retain their ordinary predicate semantics and cannot supply a text seek.
 
 Parameters bind for each execution before anchor selection; execution checks the actual
 pattern again when opening the cursor. EXPLAIN reports TextIndexSeek or LabelScan for that
-binding, the predicate, parameter flag, AND combination, mandatory stored-value recheck and
-short-pattern fallback. No SEARCH, scoring or full-text tokenizer is introduced.
+binding. A seek reports the predicate, parameter flag, first-trigram anchor and mandatory
+stored-value recheck. Unseekable patterns retain the ordinary LabelScan candidate. No SEARCH, scoring or full-text tokenizer is introduced.
 
-Stored values shorter than three code points contribute one token; longer values contribute
-at most N-2 distinct postings. Build and text write extraction consume work per code point,
-and postings reserve memory before retaining keys/undo state. The defaults remain 1,000,000
+Stored values shorter than three code points contribute no tokens; longer values contribute
+at most N-2 distinct postings. This saves one key, posting and undo entry per short node
+version without changing any statement's rows. Build and text write extraction consume work per code point,
+and postings reserve memory before retaining keys/undo state. For a present string with L code
+points and K distinct trigrams, a build costs 1+L+K work units per node (the label visit,
+extraction and insertion). A SET costs one label visit plus L_old+L_new for each maintained
+text index. An unrelated SET n.seen=true pays the same extraction and token maintenance,
+because the indexed value moves to a new stored version. Extraction reserves 128 bytes plus
+256 bytes per distinct token; staged rows, keys and backfill buffers add their own charges. The defaults remain 1,000,000
 work units and 256 MiB. Exhaustion fails atomically with CG05004 or CG05020. A property and
 its node must fit the existing single-record limit (CG02009); oversized strings are refused,
 never silently omitted from an otherwise indexed row. In particular a 1 MiB value writes no
 text postings. Old snapshots keep removed tokens and dropped trees until their snapshot pins
-release; maintenance then persists a retirement receipt and frees at most 64 owner pages
+release. A Snapshot writer maintains dropped exact trees too: it reads its own writes and
+still refuses a value exceeding the exact tree's 1,016-byte encoded-key prefix with CG02009.
+Maintenance then persists a retirement receipt and frees at most 64 owner pages
 per pass, deleting the receipt after its final batch. Reopen resumes pending reclamation.
+With one initial p property per node and the default grants, measured adjacent pass/refusal
+boundaries are:
+
+| Statement and values | Text: first refused row count | Exact: first refused row count |
+| --- | --- | --- |
+| MATCH (n:N) SET n.p='abcde', from p='vwxyz' | 82,545 (CG05020) | 141,133 (CG05020) |
+| MATCH (n:N) SET n.seen=true, 40 code points / 38 distinct trigrams | 12,346 (CG05004) | 130,817 (CG05020) |
+| CREATE TEXT INDEX / CREATE INDEX, 20 code points / 18 distinct trigrams | 25,642 (CG05004) | 500,001 (CG05004) |
+
+These posting costs are an exception to the general 100,000-row envelope; row width, repeated
+trigrams and other retained state change the boundary. Build insertion work is charged before
+any index page allocation, so a work refusal leaves no abandoned build pages.
 Catalog v4 admits this index kind and refuses v3 with CG06019 without changing files; graph
 entity layout remains format 5.
+
+A real text seek shares exact seeks' candidate-dependent error evaluation. For example,
+MATCH (n:N) WHERE n.p CONTAINS 'abc' AND n.q + 1 > 0 RETURN n.k can avoid CG02013 on
+an excluded non-string p row with q='x'; a label scan evaluates that row's second operand.
+With the unseekable pattern 'ab', both access paths evaluate the complete label-scan
+predicate and raise CG02013. Qualifying rows always equal the label scan's rows.
 
 ## Named scalar parameters
 
@@ -918,8 +951,9 @@ labels when its label expression is a pure conjunction: `MATCH (n) WHERE n:Keep 
 property index seeks with inline or conjunctive WHERE equalities. Bound entities take precedence,
 then the smallest candidate estimate across property seeks, required labels,
 pure pattern unions and fixed relationship-type anchors chooses the access path. Ties prefer
-an equality seek, then node candidates in source order, then relationship candidates in source
-order. Estimates include
+an exact equality seek, then a seekable text candidate, then node candidates in source
+order, then relationship candidates in source order. An unseekable text candidate does not
+displace an equal-cost scan. Text estimates use label cardinality alone. Estimates include
 history and affect plan cost only.
 Any node position can anchor, including `(a)->(b) WHERE b:Keep`; EXPLAIN shows the chosen label
 and node ordinal. The complete predicate still filters candidates. MVCC label postings limit

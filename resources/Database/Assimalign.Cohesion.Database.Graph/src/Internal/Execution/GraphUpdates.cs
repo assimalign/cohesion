@@ -176,6 +176,11 @@ internal sealed class GraphUpdates : IDisposable
     {
         using var memory = new GraphMemoryOwner(budget.Memory);
         var text = anchor.Value as GraphTextAnchor;
+        if (text is { CanSeek: false })
+        {
+            anchor = anchor with { Property = null, Value = null };
+            text = null;
+        }
         var index = text is null && anchor.Property is { } indexedKey && anchor.Label is { } indexedLabel
             ? OverlayIndex(indexedLabel, indexedKey, budget, token) : null;
         // Select the access path's postings before charging comparisons. Only a NodeScan
@@ -206,7 +211,7 @@ internal sealed class GraphUpdates : IDisposable
         // A Snapshot plan can retain an index dropped before the latest-view MERGE probe.
         // Fall back under the same writer/pattern locks; the matcher retains all equalities.
         bool useIndex = text is null && anchor.Property is not null && HasReadIndex(anchor.Label!, anchor.Property);
-        IAsyncEnumerable<StoredGraphNode> persisted = text is not null
+        IAsyncEnumerable<StoredGraphNode> persisted = text is { CanSeek: true }
             ? _database.Store.StreamTextIndexAsync(anchor.Label!, anchor.Property!, text.Pattern, text.Operation, snapshot, token, budget.Consume, memory.Add)
             : useIndex && anchor.Property is { } property
             ? _database.Store.StreamIndexAsync(anchor.Label!, property, anchor.Value, snapshot, token, budget.Consume, memory.Add)

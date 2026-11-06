@@ -60,7 +60,7 @@ constraints. Named constraints validate existing data and share enforcement with
 index/constraint drops preserve snapshot visibility. Its immutable GraphType model supports
 typed set/add/alter/drop/get and open node rules for implied labels, scalar types and NOT NULL.
 New types validate existing members before publication; edge enforcement and text graph-type
-DDL follow in GQ-T2. Catalog v3 refuses earlier catalogs. `AddGraph(name, graph => ...)` captures
+DDL follow in GQ-T2. Catalog v4 refuses earlier catalogs. `AddGraph(name, graph => ...)` captures
 construction through `IDatabaseApplicationBuilder` and returns that builder. At Build the callback
 configures the sealed `GraphDatabaseEngineBuilder`: its `Options` (copied at build), the databases
 it declares (`AddDatabase(name)`: opened or created by the build, never dropped while declared), a

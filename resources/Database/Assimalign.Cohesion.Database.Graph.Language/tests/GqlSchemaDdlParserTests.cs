@@ -79,6 +79,7 @@ public sealed class GqlSchemaDdlParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Schema DDL: unsupported forms report one named CK00001")]
+    [InlineData("DROP TEXT INDEX t", "DROP")]
     [InlineData("CREATE TEXT INDEX ix FOR ()-[r:T]-() ON (r.p)", "RELATIONSHIP PROPERTY INDEX")]
     [InlineData("CREATE TEXT INDEX ix FOR (n:N) ON (n.p,n.q)", "COMPOSITE INDEX")]
     [InlineData("CREATE UNIQUE INDEX ix FOR (n:N) ON (n.p)", "UNIQUE INDEX")]
@@ -103,6 +104,7 @@ public sealed class GqlSchemaDdlParserTests
         var diagnostic = parsed.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message!.ShouldContain(form, Case.Sensitive);
+        if (text.StartsWith("DROP TEXT", StringComparison.Ordinal)) { diagnostic.Message.ShouldNotContain("CLOSED GRAPH TYPE", Case.Sensitive); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Schema DDL: malformed commands refuse without ON function noise")]

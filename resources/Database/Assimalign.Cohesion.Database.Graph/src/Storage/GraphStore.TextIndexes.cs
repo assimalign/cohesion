@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -7,6 +8,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Storage;
@@ -32,11 +34,36 @@ public sealed partial class GraphStore
 
     internal Action<string>? AfterTextIndexMutation { get; set; }
 
-    internal long TextIndexPagesReclaimed { get; private set; }
+    internal long IndexOwnerPagesReclaimed { get; private set; }
 
     internal const int IndexReclaimPageLimit = 64;
     private readonly Queue<ulong> _retirementQueue = new();
     private readonly HashSet<ulong> _retirementCandidates = new();
+
+    private void CollectAbandonedIndexOwners()
+    {
+        // Open only, before admitting operations. Allocation survives bracket rollback, while
+        // the registration may not. Recover only owners with no definition at all; fixed owners
+        // and trees with a retained definition must follow their ordinary recovery contracts.
+        for (long page = 1; page < _storage.PageManager.PageCount; page++)
+        {
+            if (!_storage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
+            using var handle = _storage.PageManager.GetPage((PageId)page);
+            ulong id = handle.Page.OwnerId;
+            if (handle.Page.Type != PageType.Index ||
+                id <= 2 || id == adjacencyId || id == labelsId || id == relationshipTypesId ||
+                _registrations.ContainsKey(id) || _records.ContainsKey((3, id))) { continue; }
+            var bytes = new byte[34];
+            bytes[16] = 4; bytes[17] = GraphRecordCodec.FormatVersion;
+            BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(18), id);
+            BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -page);
+            using var bracket = _storage.BeginTransaction();
+            var location = _storage.InsertOwned(bracket, 1, bytes);
+            bracket.Commit();
+            _registrations.Add(id, (location.PageId, location.SlotIndex, -page));
+            ScheduleIndexReclamation(id); // Reclamation still requires id below the safe bound.
+        }
+    }
 
     private void ScheduleIndexReclamation(ulong id)
     {
@@ -46,72 +73,79 @@ public sealed partial class GraphStore
 
     private void ReclaimRetiredIndexes(TransactionSequence bound, CancellationToken token)
     {
-        int checks;
-        lock (_sync) { checks = Math.Min(IndexReclaimPageLimit, _retirementQueue.Count); }
-        int remaining = IndexReclaimPageLimit;
-        bool rebuild = false;
-        try
+        BeforeIndexReclamation?.Invoke();
+        lock (_indexRegistrySync)
         {
-            for (int step = 0; step < checks && remaining > 0; step++)
+            int checks;
+            lock (_sync) { checks = Math.Min(IndexReclaimPageLimit, _retirementQueue.Count); }
+            int remaining = IndexReclaimPageLimit;
+            bool rebuild = false;
+            try
             {
-                token.ThrowIfCancellationRequested();
-                ulong id;
-                lock (_sync) { id = _retirementQueue.Dequeue(); }
-                bool finished = false;
-                try
+                for (int step = 0; step < checks && remaining > 0; step++)
                 {
-                    if (!_registrations.TryGetValue(id, out var registration)) { finished = true; continue; }
-                    if (registration.Root > 0)
+                    token.ThrowIfCancellationRequested();
+                    ulong id;
+                    lock (_sync) { id = _retirementQueue.Dequeue(); }
+                    bool finished = false;
+                    try
                     {
-                        int status = RetirementStatus(id, bound);
-                        if (status == 0) { finished = true; continue; } // A live definition (or rolled-back DROP).
-                        if (status == 1) { continue; } // A pinned creator/deleter.
-                        // A negative root is a durable retirement receipt. Detach before freeing
-                        // the root so an open never attaches a partly reclaimed tree.
-                        byte[] bytes = _storage.ReadEntry(registration.Page, registration.Slot).ToArray();
-                        System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -registration.Root);
+                        if (!_registrations.TryGetValue(id, out var registration)) { finished = true; continue; }
+                        if (registration.Root > 0)
+                        {
+                            int status = RetirementStatus(id, bound);
+                            if (status == 0) { finished = true; continue; } // A live definition (or rolled-back DROP).
+                            if (status == 1) { continue; } // A pinned creator/deleter.
+                            // A negative root is a durable retirement receipt. Detach before freeing
+                            // the root so an open never attaches a partly reclaimed tree.
+                            byte[] bytes = _storage.ReadEntry(registration.Page, registration.Slot).ToArray();
+                            BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -registration.Root);
+                            using (var bracket = _storage.BeginTransaction())
+                            {
+                                _storage.UpdateEntry(bracket, registration.Page, registration.Slot, bytes);
+                                bracket.Commit();
+                            }
+                            _registrations[id] = (registration.Page, registration.Slot, -registration.Root);
+                            rebuild = true;
+                            AfterTextIndexMutation?.Invoke("retire-registration");
+                        }
+                        if (id >= bound.Value) { continue; }
+                        int freed;
                         using (var bracket = _storage.BeginTransaction())
                         {
-                            _storage.UpdateEntry(bracket, registration.Page, registration.Slot, bytes);
+                            freed = _storage.FreeOwnerPages(bracket, id, remaining);
+                            AfterTextIndexMutation?.Invoke("reclaim-pages");
                             bracket.Commit();
                         }
-                        _registrations[id] = (registration.Page, registration.Slot, -registration.Root);
-                        rebuild = true;
-                        AfterTextIndexMutation?.Invoke("retire-registration");
-                    }
-                    int freed;
-                    using (var bracket = _storage.BeginTransaction())
-                    {
-                        freed = _storage.FreeOwnerPages(bracket, id, remaining);
-                        AfterTextIndexMutation?.Invoke("reclaim-pages");
-                        if (freed == 0)
+                        IndexOwnerPagesReclaimed += freed;
+                        remaining -= freed;
+                        if (freed != 0) { AfterTextIndexMutation?.Invoke("reclaim-batch"); }
+                        // Directory removal is published at commit. A short batch is not proof of completion.
+                        if (_storage.GetOwnerIndexPages(id).Count == 0)
                         {
-                            _storage.DeleteEntry(bracket, registration.Page, registration.Slot);
-                            AfterTextIndexMutation?.Invoke("reclaim-registration");
+                            using (var bracket = _storage.BeginTransaction())
+                            {
+                                _storage.DeleteEntry(bracket, registration.Page, registration.Slot);
+                                AfterTextIndexMutation?.Invoke("reclaim-registration");
+                                bracket.Commit();
+                            }
+                            _registrations.Remove(id);
+                            finished = true;
+                            AfterTextIndexMutation?.Invoke("reclaimed");
                         }
-                        bracket.Commit();
                     }
-                    TextIndexPagesReclaimed += freed;
-                    remaining -= freed;
-                    if (freed == 0)
+                    finally
                     {
-                        _registrations.Remove(id);
-                        finished = true;
-                        AfterTextIndexMutation?.Invoke("reclaimed");
-                    }
-                    else { AfterTextIndexMutation?.Invoke("reclaim-batch"); }
-                }
-                finally
-                {
-                    lock (_sync)
-                    {
-                        if (finished) { _retirementCandidates.Remove(id); }
-                        else { _retirementQueue.Enqueue(id); }
+                        lock (_sync)
+                        {
+                            if (finished) { _retirementCandidates.Remove(id); }
+                            else { _retirementQueue.Enqueue(id); }
+                        }
                     }
                 }
             }
+            finally { if (rebuild) { OpenIndexes(scheduleReclamation: false); } }
         }
-        finally { if (rebuild) { OpenIndexes(scheduleReclamation: false); } }
     }
 
     // 0 live, 1 waiting for the safe prune bound, 2 reclaimable. Definition records
@@ -166,33 +200,19 @@ public sealed partial class GraphStore
             }
             yield break;
         }
-        var keys = GraphTextTrigrams.Keys((string)value!, token, reserve, visit).ToArray();
-        reserve(8192 + 128L * keys.Length); // Owned token directory and two bounded cursor batches.
+        var anchor = GraphTextTrigrams.Keys((string)value!, token).First();
+        reserve(8192); // One bounded cursor batch, matching a visible label posting.
         var index = ResolveIndex(definition.Id);
         await using var cursor = index.OpenCursor(snapshot,
-            new IndexKeyRange(Composite(keys[0], 0), Composite(keys[0], ulong.MaxValue), true, true), cancellationToken: token);
+            new IndexKeyRange(Composite(anchor, 0), Composite(anchor, ulong.MaxValue), true, true), cancellationToken: token);
         while (await cursor.MoveNextAsync(token).ConfigureAwait(false))
         {
             visit();
             if (ReadAt(cursor.CurrentEntryReference, snapshot)?.Record.Node is not { } node) { continue; }
-            bool all = true;
-            for (int i = 1; i < keys.Length; i++)
-            {
-                visit();
-                var key = Composite(keys[i], node.Id);
-                await using var probe = index.OpenCursor(snapshot, new IndexKeyRange(key, key, true, true), cancellationToken: token);
-                bool found = false;
-                while (await probe.MoveNextAsync(token).ConfigureAwait(false))
-                {
-                    visit();
-                    if (probe.CurrentEntryReference == cursor.CurrentEntryReference) { found = true; break; }
-                }
-                if (!found) { all = false; break; }
-            }
-            // A conjunction of trigrams never proves equality, position, multiplicity or order.
+            // The first trigram never proves equality, position, multiplicity or order.
             // Always recheck the snapshot-visible stored value, including the label and identity.
-            if (all && node.Labels.Contains(label, StringComparer.Ordinal) &&
-                cursor.CurrentKey.Equals(Composite(keys[0], node.Id)) && node.Properties.TryGetValue(property, out var actual) &&
+            if (node.Labels.Contains(label, StringComparer.Ordinal) &&
+                cursor.CurrentKey.Equals(Composite(anchor, node.Id)) && node.Properties.TryGetValue(property, out var actual) &&
                 GraphTextTrigrams.Matches(actual, value, operation)) { yield return node; }
         }
     }
