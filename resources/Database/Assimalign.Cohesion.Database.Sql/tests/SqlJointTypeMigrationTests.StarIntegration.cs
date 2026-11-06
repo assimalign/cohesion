@@ -72,34 +72,42 @@ public sealed partial class SqlJointTypeMigrationTests
         await database.ApplySchemaAsync(StarIntegrationSchema(false), guard.Token);
         await using var session = await database.CreateSessionAsync(guard.Token);
         await session.ExecuteAsync("INSERT INTO items VALUES(1,9)", cancellationToken: guard.Token);
+        // A drop-only plan keeps the heap and executes inline even with deferral
+        // requested. Widening its populated id forces a real worker handoff.
+        var target = StarIntegrationSchema(true, rewrite: deferred);
         database.SchemaProvisioner.JointStage = stage =>
         { if (stage == "OwnersDurable") { entered.TrySetResult(); release.Wait(guard.Token); } };
         using var listener = new LockWaitListener(database.Name);
         listener.Observed = value => { if (value.EventName == "LockWaitStart") { waiting.TrySetResult(); } };
         var applying = Task.Run(async () =>
         {
-            if (deferred) { await database.SchemaProvisioner.ApplyAsync(StarIntegrationSchema(true), guard.Token, deferDataScalingSteps: true); }
-            else { await database.ApplySchemaAsync(StarIntegrationSchema(true), guard.Token); }
+            if (deferred) { await database.SchemaProvisioner.ApplyAsync(target, guard.Token, deferDataScalingSteps: true); }
+            else { await database.ApplySchemaAsync(target, guard.Token); }
         }, guard.Token);
         Task<Execution.DatabaseResult>? reading = null;
         try
         {
+            await Task.WhenAny(entered.Task, applying).WaitAsync(guard.Token);
+            if (applying.IsCompleted) { await applying.WaitAsync(guard.Token); }
             await entered.Task.WaitAsync(guard.Token);
+            database.SchemaProvisioner.Deferred.ShouldNotBeNull().ReleaseApplyGate.ShouldBe(deferred);
+            _output.WriteLine($"QUEUED_STAR|workerHandoff={deferred}");
             // Act
             reading = session.ExecuteAsync("SELECT t.* FROM items t", cancellationToken: guard.Token).AsTask();
             (await Task.WhenAny(waiting.Task, reading).WaitAsync(guard.Token)).ShouldBeSameAs(waiting.Task);
             reading.IsCompleted.ShouldBeFalse();
         }
-        finally { release.Set(); }
-        await applying.WaitAsync(guard.Token); await WaitDoneAsync(database, guard.Token);
+        finally { release.Set(); await applying.WaitAsync(guard.Token); }
+        await WaitDoneAsync(database, guard.Token);
         await using var result = (await reading!.WaitAsync(guard.Token)).ShouldBeAssignableTo<Execution.DatabaseResultSet>();
         // Assert
         result.Columns.Select(c => c.Name).ShouldBe(["id"]);
         int count = 0;
-        await foreach (var row in result.GetRowsAsync(guard.Token)) { row.GetValue(0).ShouldBe(1); count++; }
+        await foreach (var row in result.GetRowsAsync(guard.Token)) { Convert.ToInt64(row.GetValue(0)).ShouldBe(1L); count++; }
         count.ShouldBe(1); Table(database).FindColumn("legacy").ShouldBeNull();
+        Table(database).FindColumn("id")!.Type.Type.ShouldBe(deferred ? DatabaseType.Int64 : DatabaseType.Int32);
     }
 
-    private static SqlCompiledSchema StarIntegrationSchema(bool drop) => Compiled(new CompiledSchemaTable("items", "row",
-        drop ? [new("id", DatabaseType.Int32, false)] : [new("id", DatabaseType.Int32, false), new("legacy", DatabaseType.Int32, true)], null, [], []));
+    private static SqlCompiledSchema StarIntegrationSchema(bool drop, bool rewrite = false) => Compiled(new CompiledSchemaTable("items", "row",
+        drop ? [new("id", rewrite ? DatabaseType.Int64 : DatabaseType.Int32, false)] : [new("id", DatabaseType.Int32, false), new("legacy", DatabaseType.Int32, true)], null, [], []));
 }
