@@ -13,6 +13,11 @@ optional injected payload is allocated inside that measured bracket, testing bot
 regressions and the 128-byte SET/DELETE headroom. Recovery's `seed directory` and `verify directory`
 modes retain their existing process-crash behavior.
 
+The indexed-allocations mode creates exact indexes on both measured properties before
+warmup, independently pinning CREATE, update and delete allocation minima and injected controls.
+The exact-index minima are 42,256/71,760/53,264 bytes for CREATE/SET/DELETE, with
+128-byte headroom and 129-byte injected update/delete controls. All allocation children run with DOTNET_TieredCompilation=0 for comparisons with a9139018f.
+
 The typed-allocations mode takes the same arguments and publishes required Int64 properties
 for both measured labels before warmup. It uses the same measurement and injected controls.
 The fixture reports its process architecture alongside the minima; the test launches the

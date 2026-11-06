@@ -11,14 +11,14 @@ using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Graph.Protocol;
 using Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
-if (args.Length != 2 && !(args.Length == 3 && args[0] is "allocations" or "typed-allocations"))
-{ throw new ArgumentException("Usage: seed|verify directory; allocations injectedKind [injectedBytes]; typed-allocations injectedKind [injectedBytes]"); }
-if (args[0] is "allocations" or "typed-allocations")
+if (args.Length != 2 && !(args.Length == 3 && args[0] is "allocations" or "typed-allocations" or "indexed-allocations"))
+{ throw new ArgumentException("Usage: seed|verify directory; allocations injectedKind [injectedBytes]; typed-allocations|indexed-allocations injectedKind [injectedBytes]"); }
+if (args[0] is "allocations" or "typed-allocations" or "indexed-allocations")
 {
     int injectedKind = int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
     int injectedBytes = args.Length == 3 ? int.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 1024;
     Console.WriteLine("architecture=" + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
-    Console.WriteLine("allocations=" + string.Join(",", GraphWriteAllocations.Measure(injectedKind, injectedBytes, args[0] == "typed-allocations")));
+    Console.WriteLine("allocations=" + string.Join(",", GraphWriteAllocations.Measure(injectedKind, injectedBytes, args[0] == "typed-allocations", args[0] == "indexed-allocations")));
     return;
 }
 await using var engine = GraphDatabaseEngine.Create("graph-engine", new()
