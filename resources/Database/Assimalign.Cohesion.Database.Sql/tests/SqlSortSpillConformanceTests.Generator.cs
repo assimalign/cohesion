@@ -16,6 +16,71 @@ public sealed partial class SqlSortSpillConformanceTests
 {
     private const int generatedStatementCount = 2048;
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - Seeded staged-source projections execute once and generated application binary values refuse spill (#1789)")]
+    public async Task ExecuteAsync_SeededStagedProjections_ShouldPreserveCallsAndBinaryRefusals()
+    {
+        // Arrange: independent volatile projections have no ORDER BY output slot. Wide source
+        // retention forces MaterializeStagedSort's deferProjection branch before Transform.
+        var logs = new[] { new List<long>(), new List<long>() };
+        await using var reference = await CreateSecondGeneratedAsync("staged-reference", 67108864, logs[0]);
+        await using var engine = await CreateSecondGeneratedAsync("staged-spill", 262144, logs[1]);
+        await using var a = await (await reference.CreateDatabaseAsync("db")).CreateSessionAsync();
+        await using var b = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        foreach (var session in new[] { a, b }) { await Seed(session); }
+        var random = new Random(seed);
+        int staged = 0;
+        SqlRowCollector.ObserveSpill = phase => { if (phase == "staged-sort") { staged++; } };
+        try
+        {
+            for (int statement = 0; statement < 12; statement++)
+            {
+                string from = (statement % 3) switch
+                {
+                    1 => "t LEFT JOIN u ON u.id=t.id%4",
+                    2 => "t CROSS JOIN u",
+                    _ => "t",
+                };
+                string direction = random.Next(2) == 0 ? "ASC" : "DESC";
+                string window = statement % 4 == 0 ? " LIMIT 3000 OFFSET 11" : "";
+                string sql = $"SELECT stamp(t.id),wide(t.id) FROM {from} WHERE stamp(t.id)>=0 ORDER BY t.k {direction},t.id{window}";
+                logs[0].Clear(); logs[1].Clear();
+                // Act
+                await using var left = (DatabaseResultSet)await a.ExecuteAsync(sql);
+                await using var right = (DatabaseResultSet)await b.ExecuteAsync(sql);
+                // Assert: both the predicate phase and the projection phase are exact.
+                right.ShouldBeOfType<SqlSpilledResultSet>();
+                logs[1].ShouldBe(logs[0], customMessage: $"seed={seed}; statement={statement}; {sql}");
+                (await Rows(right)).ShouldBe(await Rows(left));
+            }
+            staged.ShouldBe(12);
+            for (int statement = 0; statement < 6; statement++)
+            {
+                string expression = statement % 2 == 0 ? "changing_key(id)" : "CASE WHEN id>=0 THEN changing_key(id) ELSE X'00' END";
+                string sql = statement < 4 ? $"SELECT id FROM t ORDER BY {expression}" : $"SELECT {expression} FROM t ORDER BY id";
+                await using var left = (DatabaseResultSet)await a.ExecuteAsync(sql);
+                var error = await Should.ThrowAsync<DatabaseException>(async () => await b.ExecuteAsync(sql));
+                error.Diagnostics[0].Code.ShouldBe("CS05067");
+                TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            }
+            _output.WriteLine($"GENERATOR_REVIEW|seed={seed}|statements=18|staged_spills=12|staged_starts={staged}|binary_refusals=6");
+        }
+        finally { SqlRowCollector.ObserveSpill = null; }
+    }
+
+    private async Task<SqlDatabaseEngine> CreateSecondGeneratedAsync(string name, long budget, List<long> log)
+    {
+        var builder = SqlDatabaseEngine.CreateBuilder(name);
+        builder.Options.TempDirectory = Path.Combine(_root, name);
+        builder.Options.StatementMemoryBudget = budget;
+        builder.Options.StatementTempSpaceQuota = 67108864;
+        byte[] shared = [0]; var gate = new object();
+        builder.Functions.Add(SqlScalarFunction.Create("stamp", (long id) => { log.Add(id); return id; }));
+        builder.Functions.Add(SqlScalarFunction.Create("wide", (long id) => { log.Add(-1000000-id); return new string('a', 1100); }));
+        builder.Functions.Add(SqlScalarFunction.Create("changing_key", (long id) =>
+        { lock (gate) { shared[0] = (byte)(id % 251); return shared; } }));
+        return await builder.BuildAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Seeded statement generator crosses sources, typed keys, volatile calls, sequences and empty/error windows (#1789)")]
     public async Task ExecuteAsync_SeededStatements_ShouldMatchTypesValuesCallsAndFailures()
     {

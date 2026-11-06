@@ -20,7 +20,9 @@ located CK05 failures and retained-grant refusals. Grammar and wire formats are 
 DIALECT records the root-only scope and the default quota capacity. The seed 178903
 generator adds 2,048 statements crossing root sources, typed keys, volatile and sequence
 positions, empty windows and row failures; comparisons retain CLR types and exact binary
-and floating-point representations. Cancellation belongs to an enumeration, while real
+and floating-point representations. Eighteen additional seeded shapes cover independent volatile
+projections in the staged-source sorter and runtime refusal of application-produced binary keys
+and cells; the dialect records decoded-row admission and preservation of fitting aliases. Cancellation belongs to an enumeration, while real
 temporary failures remain coded and terminal for the result.
 
 ## COPY table export grammar (#1724)
