@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,15 +21,35 @@ internal static class DedicatedTestTask
     internal static Task Run(Func<Task> action, CancellationToken cancellationToken = default)
         => Run(async () => { await action(); return true; }, cancellationToken);
 
-    internal static async Task<T> Run<T>(Func<Task<T>> action, CancellationToken cancellationToken = default)
-        => await Task.Factory.StartNew(() =>
+    internal static Task<T> Run<T>(Func<Task<T>> action, CancellationToken cancellationToken = default)
+    {
+        if (cancellationToken.IsCancellationRequested) { return Task.FromCanceled<T>(cancellationToken); }
+        var completion = AsyncTaskMethodBuilder<T>.Create();
+        var task = completion.Task;
+        _ = Task.Factory.StartNew(() =>
         {
-            using var scheduler = new ActorScheduler();
-            var result = Task.Factory.StartNew(async () => await action(), cancellationToken,
-                TaskCreationOptions.DenyChildAttach, scheduler).Unwrap();
-            scheduler.Complete(result);
-            return result.GetAwaiter().GetResult();
-        }, cancellationToken, options, TaskScheduler.Default).ConfigureAwait(false);
+            try
+            {
+                T value;
+                using (var scheduler = new ActorScheduler())
+                {
+                    var result = Task.Factory.StartNew(async () => await action(), cancellationToken,
+                        TaskCreationOptions.DenyChildAttach, scheduler).Unwrap();
+                    scheduler.Complete(result);
+                    value = result.GetAwaiter().GetResult();
+                }
+                // Publish completion on the actor, without awaiting its terminal task:
+                // that await may queue behind the very pool this helper must outlive.
+                completion.SetResult(value);
+            }
+            catch (Exception failure)
+            {
+                // The builder preserves original exception and cancellation identities.
+                completion.SetException(failure);
+            }
+        }, CancellationToken.None, options | TaskCreationOptions.RunContinuationsAsynchronously, TaskScheduler.Default);
+        return task;
+    }
 
     // A LongRunning async delegate alone returns its thread at the first incomplete await.
     // Keep driver continuations on the actor's thread without installing a synchronization context.

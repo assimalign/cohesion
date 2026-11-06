@@ -3263,6 +3263,11 @@ they share stays in every build for tests to call.
 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
+Async actor completion is published by the dedicated thread after scheduler cleanup, using
+the task builder to retain exception/cancellation identity. It does not await the terminal
+LongRunning task: asynchronously dispatched completion could otherwise park behind a held pool.
+The guard forces an incomplete actor and asynchronous terminal completion (#1285).
+
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
 
 ## Invalid signed page identities (found during #1365)
