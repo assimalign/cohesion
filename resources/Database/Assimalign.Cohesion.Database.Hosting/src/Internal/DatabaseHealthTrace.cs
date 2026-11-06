@@ -103,8 +103,8 @@ internal sealed class DatabaseHealthTrace
     {
         internal Dictionary<DatabaseEngine, Dictionary<string, Condition>> Conditions { get; } = new(ReferenceEqualityComparer.Instance);
 
-        internal void ObserveDatabase(DatabaseEngine engine, DatabaseInstance database, DatabaseProvisioningProgress? progress)
-            => ForEngine(engine)[database.Name.ToString()] = new Condition(database, progress is null ? null : "Provisioning", null, progress);
+        internal void ObserveDatabase(DatabaseEngine engine, DatabaseInstance database, DatabaseProvisioningProgress? progress, bool paused = false)
+            => ForEngine(engine)[database.Name.ToString()] = new Condition(database, paused ? "JournalAdmissionPaused:CK06006" : progress is null ? null : "Provisioning", null, progress);
 
         internal void ObserveOffline(DatabaseEngine engine, string name, StorageOfflineCause? cause)
         {

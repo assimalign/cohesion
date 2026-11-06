@@ -605,6 +605,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="schema"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="SqlTimeoutException">A migration's checkpoint-admission wait was canceled or reached the engine lock timeout (<c>CK04014</c>).</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CS04004</c>, #1243).</exception>
     /// <exception cref="DatabaseObjectLockedException">
     /// The engine's builder declared the database with another schema: the declaration owns the
@@ -637,6 +638,8 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// binding the published schema. The engine's configured LockTimeout bounds reservation;
     /// zero waits without a timeout. Imperative cancellation or reservation timeout clears the
     /// provisioning observation because this caller receives the exception.
+    /// A transient checkpoint-admission refusal waits outside the physical and publication gates,
+    /// then resumes the same prepared job with completed copy and index work retained.
     /// </remarks>
     public ValueTask<SqlSchemaMigrationResult> ApplySchemaAsync(SqlCompiledSchema schema, CancellationToken cancellationToken = default)
     {

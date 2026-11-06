@@ -153,6 +153,13 @@ internal sealed class DocumentWriteStream : Stream
             return;
         }
 
+        // Admission can now wait for checkpoint recovery. Retain upload lifetime
+        // cancellation during Flush/Dispose too, including a distinct per-call token.
+        using var linked = _lifetimeCancellation.CanBeCanceled && cancellationToken.CanBeCanceled
+            && cancellationToken != _lifetimeCancellation
+            ? CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation, cancellationToken) : null;
+        cancellationToken = linked?.Token ?? (cancellationToken.CanBeCanceled ? cancellationToken : _lifetimeCancellation);
+
         var record = DocumentChunkCodec.Encode(_buffer.AsSpan(0, _buffered), _context.Sequence);
         ulong next = await _coordinator.ApplyStatementAsync(_context, bracket =>
         {

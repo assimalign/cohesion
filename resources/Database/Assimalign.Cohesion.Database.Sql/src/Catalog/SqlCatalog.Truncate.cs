@@ -139,7 +139,7 @@ public sealed partial class SqlCatalog
             var replacements = expected.Select(table => describe is not null ? describe(table, checked(next++)) : new SqlCatalogTable(checked(next++), table.Schema, table.Name,
                 table.Columns, table.PrimaryKeyColumns, table.Owner, table.OwningSchema, table.Constraints,
                 table.DroppedColumnOrdinals)).ToArray();
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             // Reuse kind 14 for unreachable prepared owners too. A failed build or crash
             // leaves durable reclamation work. The active statement pins these owners until
@@ -277,7 +277,7 @@ public sealed partial class SqlCatalog
             var indexRecords = indexes.Select(EncodeIndex).ToArray();
             beforeTransaction?.Invoke();
             // Admission first: a canceled wait must not leave the kept-read markers behind.
-            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             var addedReadVersions = PrepareKeptReadVersions(kept);
             bool committed = false;
             try

@@ -1,5 +1,35 @@
 # Graph engine design
 
+## Journal admission backstop (#1283, EN-C2)
+
+At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
+ordinary size trigger is disabled. New physical brackets wait while that checkpoint is
+pending. A long holder or a checkpoint that has not run never takes the database offline,
+regardless of the pause's duration. Undo and nested brackets drain; health reports
+Degraded/CK06006 while admission is paused.
+
+Checkpoint and page write-back failures retain owner decisions 25, 41 and 42: every operational
+failure counts while paused too. A persistent failure takes its database offline after the
+failure window (100 seconds by default, across at least three failed passes); two failed
+checkpoints with a journal past the cap can take it offline sooner. Every parked writer wakes
+with the existing offline error. A successful checkpoint inside the window resumes admission;
+a reopen recovers an offline database. Blob refuses its failing database while its worker
+failure is held. Storage safety fences and single-admitted-bracket/mandatory-undo overshoot
+remain. Reads retain ordinary MVCC and model-lock rules while the database remains online.
+
+The free-run four-writer phase asserts zero pauses. Three repeated blocked-checkpoint episodes
+compare the internal switch on/off with the same four writers: each writer records admission
+waits with the switch on and the peak stays at or below J; without the switch the peak passes J.
+Writers' wait counts and total pause duration per episode are diagnostics; no duration decides
+a test. Transactions DESIGN records the lock order, events and exact counters. No format change.
+
+Graph holds a database-wide writer grant through admission, so only one writer can reach the
+kernel pause at a time. After recording each wait, the blocked probe cancels that statement,
+finishes its cleanup and holds that writer outside the engine until checkpoint recovery. All
+four real writers therefore reach admission in each episode; this probe does not claim four
+simultaneous kernel waiters. The disabled comparison uses the same load and never cancels
+because it records no admission waits. Production cancellation and writer locking are unchanged.
+
 ## Open graph types (#1806, GQ-T1)
 
 Graph-type marker, node and edge publication and tombstones reuse the catalog SaveAsync/DeleteAsync

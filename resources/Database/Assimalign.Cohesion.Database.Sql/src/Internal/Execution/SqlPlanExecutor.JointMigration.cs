@@ -327,21 +327,30 @@ internal sealed partial class SqlPlanExecutor
                 }
                 statement.ProvisioningProgress?.Invoke(processed, processed);
             }
-            _catalog.ReserveStorageReplacement(previous, null, (table, id) =>
+            // Track candidates before commit as before, including a failure at gate
+            // release after a durable reservation. Only admission refusal proves that
+            // these prospective descriptions reserved nothing and may be removed.
+            int beforeReservation = prepared.Count;
+            await WithCatalogMigrationAdmissionAsync(() => _catalog.ReserveStorageReplacement(previous, null, (table, id) =>
             {
                 var shape = changed.First(item => item.Previous!.ObjectId == table.ObjectId).Shape;
                 var replacement = WithOwner(shape, id);
                 prepared.Add(replacement);
                 return replacement;
-            }, cancellationToken);
+            }, cancellationToken), statement, cancellationToken,
+                () => prepared.RemoveRange(beforeReservation, prepared.Count - beforeReservation)).ConfigureAwait(false);
             foreach (var item in plan.Tables.Where(table => table.Previous is null))
             {
-                _catalog.ReserveStorageReplacement([WithOwner(item.Shape, 0)], null, (_, id) =>
-                {
-                    var replacement = WithOwner(item.Shape, id);
-                    prepared.Add(replacement);
-                    return replacement;
-                }, cancellationToken, newTable: true);
+                int beforeNewReservation = prepared.Count;
+                await WithCatalogMigrationAdmissionAsync(() =>
+                    _catalog.ReserveStorageReplacement([WithOwner(item.Shape, 0)], null,
+                        (_, id) =>
+                        {
+                            var replacement = WithOwner(item.Shape, id);
+                            prepared.Add(replacement);
+                            return replacement;
+                        }, cancellationToken, newTable: true), statement, cancellationToken,
+                    () => prepared.RemoveRange(beforeNewReservation, prepared.Count - beforeNewReservation)).ConfigureAwait(false);
             }
             stage("OwnersDurable");
             var descriptions = prepared.Concat(keeping.Select(item => item.Shape)).SelectMany(table => plan.Tables.Single(item => item.Shape.Name.Equals(table.Name, StringComparison.OrdinalIgnoreCase)).Indexes
@@ -358,7 +367,7 @@ internal sealed partial class SqlPlanExecutor
             statement.ObserveCopyJournalStart(_storage.JournalLength);
             statement.CheckCopySpace(roots.Length);
             long journalStart = 0;
-            await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
+            await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
             {
                 statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
                 statement.CheckCopySpace(roots.Length);
@@ -372,14 +381,15 @@ internal sealed partial class SqlPlanExecutor
                 }
                 statement.AddCopyAllocations(allocationStart);
                 return true;
-            }, durable: true, cancellationToken).ConfigureAwait(false);
+            }, durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             stage("TreesDurable");
             foreach (var item in keeping)
             {
                 foreach (var index in item.Indexes.Where(index => !SameJointIndex(index, _catalog.GetIndexes(item.Previous!.ObjectId))))
                 {
-                    ulong owner = _catalog.ReserveJointTreeOwner(item.Shape, cancellationToken);
+                    ulong owner = await WithCatalogMigrationAdmissionAsync(() =>
+                        _catalog.ReserveJointTreeOwner(item.Shape, cancellationToken), statement, cancellationToken).ConfigureAwait(false);
                     reservedTrees.Add(owner);
                     stage("BeforeTreeBuild");
                     await BuildDeferredIndexAsync(item.Shape, new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique),
@@ -408,6 +418,8 @@ internal sealed partial class SqlPlanExecutor
             var preparedAll = prepared.Concat(keeping.Select(item => item.Shape)).ToArray();
             var replacedNames = retiring.Concat(keeping.Select(item => item.Previous!)).Select(table => (table.Schema, table.Name)).ToHashSet();
             var final = _catalog.Tables.Where(table => !replacedNames.Contains((table.Schema, table.Name))).Concat(preparedAll).ToArray();
+            stage("Validating");
+            await CheckMigrationAdmissionAsync(statement, cancellationToken).ConfigureAwait(false);
             var snapshot = ConstraintCurrentSnapshot(statement);
             foreach (var child in final)
             {
@@ -427,44 +439,50 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             stage("Validated");
-            await _catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            TransactionContext? marker = null;
-            try
-            {
-                marker = await statement.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
-                stage("Publishing");
-                _indexManager.PreparePublication();
-                try
-                {
-                    await _catalog.PublishStorageReplacementAsync(previous, null, prepared, descriptions, PublishedRegistrations(descriptions, includePrepared: true),
-                        retiredIndexes, false, marker.Sequence, string.Empty, null, cancellationToken, definitionChange: true,
-                        appliedSchema: new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, 0), dropped: plan.Dropped,
-                        beforeTransaction: statement.CheckPublicationSpace, kept: keeping.Select(item => item.Shape).ToArray(),
-                        treeOwners: reservedTrees,
-                        publishTrees: _indexManager.PublishPrepared,
-                        expectedKept: keeping.Select(item => item.Previous!).ToArray()).ConfigureAwait(false);
-                }
-                catch (Exception failure) when (SqlSchemaProvisioner.IsCommitUnconfirmed(failure))
-                {
-                    throw new SqlCatalogException(SqlProvisioningCodes.JointUnconfirmed, ErrorMessages.JointPublicationUnconfirmed, failure);
-                }
-                published = true;
-                statement.Metrics.RecordSelfCommit();
-                stage("CatalogPublished");
-            }
-            finally
-            {
-                try
-                {
-                    if (marker is not null)
-                    {
-                        await statement.Coordinator.RollbackAsync(marker, CancellationToken.None).ConfigureAwait(false);
-                        if (published) { _catalog.ReleaseTruncatePublication(retiring, marker.Sequence); }
-                    }
-                }
-                finally { _catalog.TruncateSnapshotGate.Release(); }
-            }
+            await WithMigrationAdmissionAsync(PublishAsync, true, statement, cancellationToken).ConfigureAwait(false);
             stage("Published");
+
+            async ValueTask<bool> PublishAsync()
+            {
+                await _catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                TransactionContext? marker = null;
+                try
+                {
+                    marker = await statement.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
+                    stage("Publishing");
+                    _indexManager.PreparePublication();
+                    try
+                    {
+                        await _catalog.PublishStorageReplacementAsync(previous, null, prepared, descriptions, PublishedRegistrations(descriptions, includePrepared: true),
+                            retiredIndexes, false, marker.Sequence, string.Empty, null, cancellationToken, definitionChange: true,
+                            appliedSchema: new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, 0), dropped: plan.Dropped,
+                            beforeTransaction: statement.CheckPublicationSpace, kept: keeping.Select(item => item.Shape).ToArray(),
+                            treeOwners: reservedTrees,
+                            publishTrees: _indexManager.PublishPrepared,
+                            expectedKept: keeping.Select(item => item.Previous!).ToArray()).ConfigureAwait(false);
+                    }
+                    catch (Exception failure) when (SqlSchemaProvisioner.IsCommitUnconfirmed(failure))
+                    {
+                        throw new SqlCatalogException(SqlProvisioningCodes.JointUnconfirmed, ErrorMessages.JointPublicationUnconfirmed, failure);
+                    }
+                    published = true;
+                    statement.Metrics.RecordSelfCommit();
+                    stage("CatalogPublished");
+                }
+                finally
+                {
+                    try
+                    {
+                        if (marker is not null)
+                        {
+                            await statement.Coordinator.RollbackAsync(marker, CancellationToken.None).ConfigureAwait(false);
+                            if (published) { _catalog.ReleaseTruncatePublication(retiring, marker.Sequence); }
+                        }
+                    }
+                    finally { _catalog.TruncateSnapshotGate.Release(); }
+                }
+                return true;
+            }
         }
         catch (Exception failure)
         {
@@ -478,12 +496,17 @@ internal sealed partial class SqlPlanExecutor
             // The engine reserve survives both abandonment and publication, including
             // reclamation WAL and dirty pages written after this statement ends.
             int before = failures.Count;
+            if (published)
+            {
+                try { stage("Cleanup"); await CheckMigrationAdmissionAsync(statement, cancellationToken).ConfigureAwait(false); }
+                catch (Exception cleanup) { failures.Add(cleanup); }
+            }
             try { if (!unconfirmed) { await RemoveDroppedIndexesAsync(statement, published ? oldIndexes : created, cancellationToken: CancellationToken.None).ConfigureAwait(false); } }
             catch (Exception cleanup) { failures.Add(cleanup); }
             if (!published && !unconfirmed)
             {
                 _indexManager.DiscardPrepared();
-                try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared, reservedTrees).ConfigureAwait(false); }
+                try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared, reservedTrees, drain: true).ConfigureAwait(false); }
                 catch (Exception cleanup) { failures.Add(cleanup); }
                 finally { _catalog.AbandonStorageReplacement(prepared); _catalog.AbandonJointTreeOwners(reservedTrees); }
             }

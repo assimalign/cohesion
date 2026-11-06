@@ -4966,6 +4966,7 @@ pin in the same change.
 | `CS06041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
 | `CS05042` | Error | Encoded row, index key or catalog definition exceeds its size limit, or catalog DDL generation is exhausted (SQLSTATE 54000, program_limit_exceeded); the statement writes nothing and an explicit transaction remains active (#1266, #1653) |
 | `CS05043` | Error | Server-side statement timeout (SQLSTATE 57014, query_canceled); failed statement changes and new lock resources are rolled back/released, and the session and explicit transaction remain usable (#1231) |
+| `CK04014` | Error | Statement deadline at journal checkpoint admission, or immediate admission refusal while metadata/gates must be retained (SQLSTATE 57014, query_canceled); the statement remains atomic. Persistent worker failures retain the offline window (#1283) |
 | `CS04044` | Error | Individual lock-wait timeout, including unique-key waits (SQLSTATE 55P03, lock_not_available); same statement-atomic failure contract as CS05043 (#1231) |
 | `CS05045` | Error | Result encoding/preparation failed. Writing statements prepare header/rows before commit and any result frame; DML failures roll back only the statement. Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery and may fail after partial frames, which the client discards. Includes encoding failures or a header/row above ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB); there is no aggregate result cap. Size refusals map to SQLSTATE 54000 and report encoded size and frame limit. The connection and explicit transaction remain usable on result failures; transport failures are terminal (#1651). |
 | `CS02034` | Error | Invalid LIKE/ILIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
@@ -5008,6 +5009,16 @@ both timeouts to zero; their caller/lifecycle cancellation still applies, includ
 index builds. CREATE/DROP FUNCTION and DOMAIN finish binding after self-commit without observing
 cancellation again. SqlTimeoutConformanceTests and SqlTimeoutRegressionTests are the executable conformance corpus for
 these engine-visible limits; no grammar/profile clause count changes.
+JournalAdmissionPauseTests and SqlJournalAdmissionWireTests cover CK04014 / SQLSTATE 57014
+(#1283): a pending checkpoint near the journal limit delays new write brackets; expiry at
+that admission point releases failed-statement work and new grants, while caller cancellation
+keeps its cancellation meaning. Metadata operations that cannot release their gates refuse
+admission immediately with CK04014. An explicit transaction and TCP session remain usable.
+Reads retain ordinary snapshot and locking behavior.
+Session DDL keeps its immediate CK04014 refusal; a client can retry the statement.
+Code-first migrations instead wait outside the physical and publication gates and resume the
+same prepared job, preserving completed copy/index work. ApplySchemaAsync, inline Build and
+deferred Build retain cancellation and lock timeouts, with coded admission failures.
 
 A refusal carries CS05042 / SQLSTATE 54000, naming the table, actual byte size and limit.
 The failure leaves the session usable and an explicit transaction active, with earlier statements

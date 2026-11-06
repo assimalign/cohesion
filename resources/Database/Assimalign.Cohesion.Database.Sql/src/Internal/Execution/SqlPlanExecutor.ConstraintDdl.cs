@@ -176,7 +176,7 @@ internal sealed partial class SqlPlanExecutor
                             await ValidateBuiltUniqueIndexAsync(table, index, statement, cancellationToken).ConfigureAwait(false);
                         }
                         return true;
-                    }, durable: true, cancellationToken).ConfigureAwait(false);
+                    }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
                 }
             }
             await SelfCommitAsync(statement, (publication is null ? _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),

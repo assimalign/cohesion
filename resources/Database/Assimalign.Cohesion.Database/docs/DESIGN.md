@@ -772,24 +772,29 @@ ordinary storage transaction contention is retried as busy.
     worker, and every failure is written to the event source for the whole window; Blob's
     server refuses only the failing database meanwhile ("A failing worker refuses its database
     alone", below).
-  - *The journal cap.* A checkpoint that fails for the second pass or more in a row while one
-    of the database's journals holds the engine's `JournalSizeLimit` (an engine option; zero,
-    the default, resolves to four times `CheckpointJournalSize`, 1 GiB at its default and
-    PostgreSQL's `max_wal_size` default, or to 1 GiB with the size trigger off;
-    `shared/Engine/DatabaseWorkerLimits.cs`) takes the database offline with
-    `StorageOfflineCause.JournalSizeLimit`, through the worker base's
-    `protected TakeDatabaseOffline`: under load the journal would fill the device long before
-    the failure window passes. One failure is not enough (owner decision 41), because a journal
-    reaches the cap with no
-    failure at all: a checkpoint deferred to a running statement or refused by a busy storage
-    (#1283), or a write burst, never takes a database offline by itself, however long its
-    journal grows, and a single transient failure of such a journal is retried like any
-    other. The second failure in a row, a backoff later, is what says the checkpoints keep
-    failing (`ReportFailure` returns the database's count of failed passes in a row; the
-    shared checkpointer's `JournalSizeLimitFailures` is two). The cap is not held back by the
-    window or its minimum of three passes: it is a count of two, whatever the clock says.
-    PostgreSQL's `max_wal_size` is a soft limit the WAL may pass under heavy load
-    (`doc/src/sgml/config.sgml:4010-4014`).
+  - *Journal admission (T3-27, #1283).* The limit still defaults to 4x CheckpointJournalSize
+    (1 GiB at the default trigger, or with the trigger off). Each model attaches every data
+    and catalog interlock through ConfigureJournalAdmission after open-time provisioning and before publishing DatabaseInstance.
+    IsJournalAdmissionPaused folds pure live-state reads for health. Reaching half the limit
+    requests a checkpoint even with the size trigger off; while it is pending, new physical brackets wait for a successful checkpoint. Undo
+    and nested scopes drain; readers retain ordinary snapshot and locking rules. The root disables
+    the backstop before server disposal or worker joins, then before individual database cleanup.
+    Engine entry points reject new work while model operations and unpublished
+    intent discard drain before storage disposal.
+    Its weak-key admission registry cannot retain failed unpublished instances and removes
+    closed databases rather than retaining their storages;
+    late registration during engine close has pausing disabled immediately. It also composes each
+    storage offline hook to wake paused
+    callers before forwarding its safety fence; undo can drain. Checkpoint
+    failures and page write-back failures count toward the existing offline window while paused too.
+    Persistent failures take the database offline at the window; the two-failure journal-cap path
+    remains for a single admitted bracket that crosses J. The offline transition wakes all parked
+    writers with the existing cause. A successful checkpoint inside the window resumes admission.
+    HasFailingWorker reads only the lock-free worker snapshot and retains Blob refusal for the
+    failing database, including while admission is paused. A non-failing pending pause never
+    takes the database offline, however long it lasts. Transactions DESIGN records exact counters,
+    lock order, CK04014 deadline and CK06006 health reason. One huge admitted bracket and mandatory
+    undo retain #1270's overshoot residual. No format change.
   - *The give-up never runs on a worker's thread.* Taking a storage offline latches its
     journal under the journal's lock, which a durable flush holds through its fsync. A worker
     that gave up on its own thread would wait out a hung fsync of that database, and so would

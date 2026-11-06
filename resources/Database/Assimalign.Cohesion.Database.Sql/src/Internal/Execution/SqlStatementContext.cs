@@ -85,6 +85,11 @@ internal readonly struct SqlStatementContext
 
     internal long CopyCheckpointBytes => ((JointProvisioningNames)_names).CheckpointBytes;
 
+    internal Func<bool, CancellationToken, Task>? MigrationAdmission => (_names as JointProvisioningNames)?.Admission;
+
+    internal void ConfigureMigrationAdmission(Func<bool, CancellationToken, Task> admission)
+        => ((JointProvisioningNames)_names).Admission = admission;
+
     internal void ConfigureCopySpace(Action<long, long, long, long> check, Action<long> publication, Func<long> allocations,
         long checkpointBytes = SqlSchemaProvisioner.JointCopyCheckpointBytes)
     {
@@ -213,6 +218,7 @@ internal readonly struct SqlStatementContext
 
     private sealed class JointProvisioningNames : ProvisioningNames
     {
+        internal Func<bool, CancellationToken, Task>? Admission { get; set; }
         internal Action<long, long, long, long>? CheckSpace { get; set; }
         internal Action<long>? CheckPublication { get; set; }
         internal Func<long>? CountAllocations { get; set; }

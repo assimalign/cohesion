@@ -2184,6 +2184,15 @@ A missing image is checked before the physical redo cache can evict and write an
 
 ### Checkpoints
 
+The Transactions interlock adds T3-27 bounded admission at half the engine journal limit
+and requests a checkpoint even with the ordinary size trigger disabled (#1283, EN-C2). Persistent
+worker failures retain the existing offline window while paused. JournalBytesSinceCheckpoint is the public
+advisory appended-byte count, excluding the completed checkpoint record. Storage retains
+its sharp truncation, active-bracket refusal, blocker events and append-locked peak counter.
+Engine pauses affect admission rather than storage reads or the durable safety fence; one
+huge admitted bracket can still overshoot (#1270). Transactions DESIGN records lock order,
+undo/nesting/close exceptions, coded timeout, events and counter semantics. No format changes.
+
 `Checkpoint()` durably flushes all page state and **truncates** the journal, writing a
 fresh checkpoint record whose LSN continues the sequence (LSNs never restart — page
 LSN comparisons depend on monotonicity across truncation). Checkpointing requires no

@@ -49,7 +49,7 @@ internal sealed partial class SqlPlanExecutor
                 await ApplyConstraintUpdatesAsync(pending, statement, bracket, cancellationToken).ConfigureAwait(false);
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, direct.Count)
                     : MaterializeProjected(returning!, returned, direct.Count), cancellationToken).ConfigureAwait(false);
-            }, durable: false, cancellationToken).ConfigureAwait(false);
+            }, durable: false, cancellationToken, waitForAdmission: statement.ProvisioningSchema is null).ConfigureAwait(false);
         }
         catch (SqlCascadeLockRetry) { throw; } // arbitration owns release/restart
         catch when (!applying && !_storage.IsOffline)
