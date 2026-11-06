@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphCatalogCodec
 {
-    internal const byte FormatVersion = 3;
+    internal const byte FormatVersion = 4;
 
     private static readonly UTF8Encoding _utf8 = new(false, true);
 
@@ -42,6 +42,7 @@ internal static class GraphCatalogCodec
         else if (record.Index is { } index)
         {
             WriteString(binary, index.PropertyKey);
+            binary.Write(index.IsText ? (byte)1 : (byte)0);
         }
         else if (record.Constraint is { } constraint)
         {
@@ -129,7 +130,7 @@ internal static class GraphCatalogCodec
             else if (kind == 4)
             {
                 result = new CatalogRecord(index: new GraphIndexMetadata(id, name,
-                    ReadString(reader) ?? throw new GraphCatalogException("CG06006", ErrorMessages.GraphCatalogCodecDecodeGraphCatalog4)));
+                    ReadString(reader) ?? throw new GraphCatalogException("CG06006", ErrorMessages.GraphCatalogCodecDecodeGraphCatalog4), ReadIndexKind(reader)));
             }
             else if (kind == 5)
             {
@@ -206,6 +207,13 @@ internal static class GraphCatalogCodec
         }
     }
 
+    private static bool ReadIndexKind(BinaryReader reader)
+    {
+        byte kind = reader.ReadByte();
+        if (kind > 1) { throw new GraphCatalogException("CG06006", ErrorMessages.TextIndexKindInvalid); }
+        return kind == 1;
+    }
+
     private static void WriteString(BinaryWriter writer, string? value)
     {
         if (value is null)
@@ -234,7 +242,7 @@ internal static class GraphCatalogCodec
         long size = 34L + StringSize(record.Name);
         if (record.Kind <= 2) { return size + 1 + StringSize(record.OwningSchema); }
         if (record.Property is not null) { return size + 2; }
-        if (record.Index is { } index) { return size + StringSize(index.PropertyKey); }
+        if (record.Index is { } index) { return size + StringSize(index.PropertyKey) + 1; }
         if (record.Constraint is { } constraint) { return size + StringSize(constraint.PropertyKey) + 1; }
         if (record.NodeType is { } node)
         {

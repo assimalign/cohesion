@@ -14,8 +14,9 @@
   <data name="GraphTypeChangeInvalid" xml:space="preserve"><value>The graph type {0} operation cannot apply to element type '{1}'.</value></data>
   <data name="GraphTypeReferenceMissing" xml:space="preserve"><value>Edge type '{0}' references an absent node type.</value></data>
   <data name="GraphTypeViolation" xml:space="preserve"><value>Node type '{0}' requires label or property '{1}' with its declared type and nullability.</value></data>
-  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Graph catalog format {0} is unsupported; this engine supports only format 3. Recreate the database.</value></data>
-  <data name="CatalogIndexPropertyMismatch" xml:space="preserve"><value>Index '{0}' already identifies property '{1}'.</value></data>
+  <data name="TextIndexKindInvalid" xml:space="preserve"><value>Invalid graph index kind.</value></data>
+  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Graph catalog format {0} is unsupported; this engine supports only format 4. Recreate the database.</value></data>
+  <data name="CatalogIndexPropertyMismatch" xml:space="preserve"><value>Index '{0}' already identifies property '{1}' with a fixed index kind.</value></data>
   <data name="CatalogIdentityMismatch" xml:space="preserve"><value>Definition '{0}' already has a different identity.</value></data>
   <data name="CatalogIdentityReused" xml:space="preserve"><value>A definition identity cannot be reused or renamed. After a drop, wait for version purge before reusing the identity.</value></data>
   <data name="CatalogOwnerMissing" xml:space="preserve"><value>The owning graph definition does not exist.</value></data>
@@ -289,6 +290,7 @@
   <data name="ValidateRelationshipGraphPlanning3" xml:space="preserve"><value>Inserted relationships require a type and a directed pattern.</value></data>
   <data name="ValidateRelationshipGraphPlanning4" xml:space="preserve"><value>An inserted relationship type cannot be empty or only whitespace.</value></data>
   <data name="StatementTooComplexCreateDatabase" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce the nesting of its parentheses and negations, or run it on a thread with a larger stack.</value></data>
+  <data name="StringPropertyTooLarge" xml:space="preserve"><value>{0} encode to at least {1} bytes, more than the {2} bytes one graph record can hold.</value></data>
   <data name="GraphRecordCodecEncodeFailure" xml:space="preserve"><value>{0} encode to {1} bytes, more than the {2} bytes one graph record can hold.</value></data>
   <data name="GraphRecordCodecPropertiesArgument" xml:space="preserve"><value>Graph properties support null, Boolean, String, Decimal, integral types, and finite floating point values.</value></data>
   <data name="GraphRecordCodecKeyFailure" xml:space="preserve"><value>An indexed property value encodes to {0} bytes, more than the {1}-byte index key it must fit.</value></data>

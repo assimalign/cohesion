@@ -6,7 +6,7 @@ Environment.Exit skips unwinding the live brackets. Engine tests invoke this pro
 all refused files byte for byte, or tear journal-covered pages and verify exact recovery.
 Graph cases include format-4 entities and physical registrations (CG06017), catalog versions
 (CG06019) and B-tree root stamps (CK06101).
-Graph catalog seeds use v3 as current and v2 as legacy (#1806); graph entity format remains 5.
+Graph catalog seeds use v4 as current and v3 as legacy (#1644); graph entity format remains 5.
 
 The fixture depends on the model assemblies, which use Storage:
 

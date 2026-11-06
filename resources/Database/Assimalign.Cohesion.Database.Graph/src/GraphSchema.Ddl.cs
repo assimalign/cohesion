@@ -54,7 +54,7 @@ public sealed partial class GraphSchema
                         if (_database.Store.StreamLabels([name], latest, token, op.QueryBudget.Consume, memory.Add).Any())
                         { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.GraphSchemaDropLabelAsyncDatabase); }
                         foreach (var index in _database.Catalog.GetIndexes(label.Value.Id, op.Context.Snapshot))
-                        { await _database.Store.DropIndexAsync(name, index.PropertyKey, op.Context, token).ConfigureAwait(false); }
+                        { await _database.Store.DropIndexAsync(name, index.PropertyKey, op.Context, token, index.IsText).ConfigureAwait(false); }
                         await _database.Catalog.DeleteLabelAsync(label.Value.Id, op.Context, token).ConfigureAwait(false);
                     }
                 }
@@ -90,10 +90,10 @@ public sealed partial class GraphSchema
                     : _database.Catalog.FindLabel(command.Definition!, snapshot)?.Id;
                 DatabaseType? scalar = command.Type is { } target ? StorageType(target) : null;
                 if (command.IfExists && owner is { } id && (indexCommand
-                    ? _database.Catalog.GetIndexes(id, snapshot).Any(item => item.PropertyKey == command.Property)
+                    ? _database.Catalog.GetIndexes(id, snapshot).Any(item => item.PropertyKey == command.Property && item.IsText == command.IsText)
                     : _database.Catalog.GetConstraints(id, snapshot).Any(item => item.PropertyKey == command.Property && item.Type == scalar))) { return; }
                 if (indexCommand)
-                { await CreateIndexCoreAsync(op, command.Definition!, name, command.Property!, token).ConfigureAwait(false); }
+                { await CreateIndexCoreAsync(op, command.Definition!, name, command.Property!, token, command.IsText).ConfigureAwait(false); }
                 else
                 {
                     var definition = await EnsureDefinitionAsync(op, command.Definition!, command.Relationship, token).ConfigureAwait(false);
@@ -147,13 +147,14 @@ public sealed partial class GraphSchema
         // Length-prefixed UTF-8 fields avoid delimiter ambiguities; aliases and variables do not affect identity.
         string Field(string value) => Encoding.UTF8.GetByteCount(value).ToString(CultureInfo.InvariantCulture) + ":" + value;
         string identity = Field(command.Kind.ToString()) + Field(command.Relationship ? "relationship" : "node") +
-            Field(command.Definition ?? "") + Field(command.Property ?? "") + Field(command.Type?.ToString() ?? "exists");
+            Field(command.Definition ?? "") + Field(command.Property ?? "") + Field(command.IsText ? "text" : command.Type?.ToString() ?? "exists");
         return command.Kind.ToString().ToLowerInvariant() + "_" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 
-    private async ValueTask CreateIndexCoreAsync(GraphOperation op, string label, string name, string propertyKey, CancellationToken cancellationToken)
+    private async ValueTask CreateIndexCoreAsync(GraphOperation op, string label, string name, string propertyKey, CancellationToken cancellationToken, bool text = false)
     {
         var metadata = await EnsureDefinitionAsync(op, label, false, cancellationToken).ConfigureAwait(false);
+        if (text) { _database.Store.AfterTextIndexMutation?.Invoke("label"); }
         if (_database.Catalog.FindIndex(name, op.Context.Snapshot) is not null ||
             _database.Catalog.FindConstraint(name, op.Context.Snapshot) is not null)
         {
@@ -161,11 +162,14 @@ public sealed partial class GraphSchema
             throw new DatabaseException(message, [new Types.Diagnostic
             { Code = "CG03008", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
         }
-        await _database.Catalog.SaveIndexAsync(new GraphIndexMetadata(metadata, name, propertyKey), op.Context, cancellationToken).ConfigureAwait(false);
+        await _database.Catalog.SaveIndexAsync(new GraphIndexMetadata(metadata, name, propertyKey, text), op.Context, cancellationToken).ConfigureAwait(false);
+        if (text) { _database.Store.AfterTextIndexMutation?.Invoke("catalog"); }
         if (!_database.Catalog.GetDeclaredPropertyKeys(metadata, op.Context.Snapshot).Any(key => key.Name == propertyKey))
         { await _database.Catalog.SavePropertyKeyAsync(new(metadata, propertyKey), op.Context, cancellationToken).ConfigureAwait(false); }
+        if (text) { _database.Store.AfterTextIndexMutation?.Invoke("property"); }
         using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
-        await _database.Store.CreateIndexAsync(label, propertyKey, op.Context, op.QueryBudget.Consume, memory.Add, cancellationToken).ConfigureAwait(false);
+        await _database.Store.CreateIndexAsync(label, propertyKey, op.Context, op.QueryBudget.Consume, memory.Add, cancellationToken, text).ConfigureAwait(false);
+        if (text) { _database.Store.AfterTextIndexMutation?.Invoke("tree"); }
     }
 
     private async ValueTask CreateConstraintCoreAsync(GraphOperation op, GraphConstraintMetadata constraint, CancellationToken cancellationToken)
@@ -213,8 +217,10 @@ public sealed partial class GraphSchema
         var index = _database.Catalog.FindIndex(name, op.Context.Snapshot) ?? throw Missing("Index", name);
         // Catalog performs ownership and stale-snapshot checks before the physical drop.
         await _database.Catalog.DeleteIndexAsync(index.LabelId, name, op.Context, cancellationToken).ConfigureAwait(false);
+        if (index.IsText) { _database.Store.AfterTextIndexMutation?.Invoke("drop-catalog"); }
         var label = _database.Catalog.FindLabel(index.LabelId, op.Context.Snapshot)!.Value;
-        await _database.Store.DropIndexAsync(label.Name, index.PropertyKey, op.Context, cancellationToken).ConfigureAwait(false);
+        await _database.Store.DropIndexAsync(label.Name, index.PropertyKey, op.Context, cancellationToken, index.IsText).ConfigureAwait(false);
+        if (index.IsText) { _database.Store.AfterTextIndexMutation?.Invoke("drop-tree"); }
     }
 
 }

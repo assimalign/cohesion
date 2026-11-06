@@ -18,6 +18,9 @@ public static class GqlClauses
     /// <summary>Standalone create index schema DDL.</summary>
     public const string CreateIndex = "CREATE INDEX";
 
+    /// <summary>Standalone create Unicode trigram text index DDL.</summary>
+    public const string CreateTextIndex = "CREATE TEXT INDEX";
+
     /// <summary>Standalone drop index schema DDL.</summary>
     public const string DropIndex = "DROP INDEX";
 

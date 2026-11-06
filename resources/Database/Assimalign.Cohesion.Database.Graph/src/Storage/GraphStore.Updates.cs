@@ -27,9 +27,14 @@ public sealed partial class GraphStore
     /// <exception cref="TransactionAbortedException">The node changed since the snapshot.</exception>
     /// <exception cref="GraphElementTooLargeException">The record or an index key is too large.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public async ValueTask<StoredGraphNode?> UpdateNodeAsync(ulong id, IReadOnlyList<string> labels,
+    public ValueTask<StoredGraphNode?> UpdateNodeAsync(ulong id, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?> properties, IReadOnlyDictionary<string, Guid> labelIds,
         TransactionContext context, CancellationToken cancellationToken = default)
+        => UpdateNodeAsync(id, labels, properties, labelIds, context, cancellationToken, null, null);
+
+    internal async ValueTask<StoredGraphNode?> UpdateNodeAsync(ulong id, IReadOnlyList<string> labels,
+        IReadOnlyDictionary<string, object?> properties, IReadOnlyDictionary<string, Guid> labelIds,
+        TransactionContext context, CancellationToken cancellationToken, Action? visit, Action<long>? reserve)
     {
         ArgumentNullException.ThrowIfNull(labelIds);
         ArgumentNullException.ThrowIfNull(labels);
@@ -46,11 +51,12 @@ public sealed partial class GraphStore
         record = GraphRecordCodec.Decode(bytes);
         var node = record.Node!.Value;
         var old = prior.Record.Node!.Value;
-        var definitions = Definitions(Latest(context));
+        var definitions = MutationDefinitions(context);
         // Validate every new key before tombstoning either the record or an index entry.
-        var changes = definitions.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
-            && node.Properties.ContainsKey(index.PropertyKey!))
-            .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), id))).ToArray();
+        var changes = HasTextIndexes ? TextChanges(definitions, node, cancellationToken, reserve, visit)
+            : definitions.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
+                && node.Properties.ContainsKey(index.PropertyKey!))
+                .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), id))).ToArray();
         bool published = false;
         ulong inserted = await ApplyAsync(context, async bracket =>
         {
@@ -61,7 +67,10 @@ public sealed partial class GraphStore
             foreach (var definition in definitions)
             {
                 if (old.Labels.Contains(definition.Label!, StringComparer.Ordinal) && old.Properties.TryGetValue(definition.PropertyKey!, out var value))
-                { await DeleteIndexEntryAsync(definition.Id, Composite(GraphRecordCodec.Key(value), id), prior.Reference.Location, context, cancellationToken).ConfigureAwait(false); }
+                {
+                    foreach (var key in PropertyKeys(definition, value, id, cancellationToken, reserve, visit))
+                    { await DeleteIndexEntryAsync(definition.Id, key, prior.Reference.Location, context, cancellationToken).ConfigureAwait(false); }
+                }
             }
             foreach (var change in changes)
             { await InsertIndexAsync(change.Id, change.Key, location, context, cancellationToken).ConfigureAwait(false); }

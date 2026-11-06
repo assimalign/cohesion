@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,7 +23,14 @@ public sealed partial class GraphStore
     private const string treeName = "graph";
     private static readonly Guid _maximumTypeId = new("ffffffff-ffff-ffff-ffff-ffffffffffff");
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
+    // Lock order: coordinator apply gate -> registry -> directory _sync. Failure rebuilds
+    // take only the registry lock and never wait for apply admission while holding it.
+    private readonly object _indexRegistrySync = new();
     private BTreeIndexManager _indexes = null!;
+    internal Action? AfterIndexRegistrationsCleared { get; set; }
+    internal Action? BeforeIndexReclamation { get; set; }
+    internal Action? AfterIndexPrune { get; set; }
+    internal Action? AfterRelationshipTypeCountRefresh { get; set; }
 
     /// <summary>Tests whether an exact property index is visible.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="snapshot">Visibility snapshot.</param><returns>True when an index is visible.</returns>
@@ -35,17 +43,17 @@ public sealed partial class GraphStore
     }
 
     /// <summary>
-    /// Lists every exact property index visible to a snapshot in one pass over the index
+    /// Lists every exact or text property index visible to a snapshot in one pass over the index
     /// definitions, so a planner can match many labels and property keys without a lookup per pair.
     /// </summary>
-    /// <param name="snapshot">Visibility snapshot.</param><returns>The visible indexes, each label/property pair once.</returns>
+    /// <param name="snapshot">Visibility snapshot.</param><returns>The visible indexes, each label/property/kind once.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     public IReadOnlyList<StoredGraphIndex> GetIndexes(TransactionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var definitions = Definitions(snapshot);
         var indexes = new StoredGraphIndex[definitions.Length];
-        for (int i = 0; i < definitions.Length; i++) { indexes[i] = new StoredGraphIndex(definitions[i].Label!, definitions[i].PropertyKey!); }
+        for (int i = 0; i < definitions.Length; i++) { indexes[i] = new StoredGraphIndex(definitions[i].Label!, definitions[i].PropertyKey!, definitions[i].Revision == 1); }
         return indexes;
     }
 
@@ -58,35 +66,40 @@ public sealed partial class GraphStore
     /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
     /// <exception cref="GraphElementTooLargeException">The names exceed one graph record, or an existing node's value exceeds the index key.</exception>
     public ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
-        => CreateIndexAsync(label, propertyKey, context, null, null, cancellationToken);
+        => CreateIndexAsync(label, propertyKey, context, null, null, cancellationToken, false);
 
     internal async ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context,
-        Action? visit, Action<long>? reserve, CancellationToken cancellationToken)
+        Action? visit, Action<long>? reserve, CancellationToken cancellationToken, bool text = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         ArgumentException.ThrowIfNullOrWhiteSpace(propertyKey);
         using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
         context = mutation.RefreshSnapshot(context);
         var latest = Latest(context);
-        if (Definition(label, propertyKey, latest) is not null) { throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreCreateIndexAsyncFailure, label, propertyKey)); }
-        ulong id = (ulong)_storage.ReserveTransactionSequence();
-        var record = new GraphRecord(3, id, Label: label, PropertyKey: propertyKey);
+        if (Definition(label, propertyKey, latest, text) is not null) { throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreCreateIndexAsyncFailure, label, propertyKey)); }
+        ulong id;
+        do { id = (ulong)_storage.ReserveTransactionSequence(); } while (id <= 2); // Owners 0/1/2 hold catalog, registrations and entities.
+        var record = new GraphRecord(3, id, Label: label, PropertyKey: propertyKey, Revision: text ? 1UL : 0UL);
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         reserve?.Invoke(32);
         var entries = new List<(Reference Reference, IndexKey Key)>();
         foreach (var node in StreamLabels([label], latest, cancellationToken, visit, reserve))
         {
             if (!node.Properties.TryGetValue(propertyKey, out var value)) { continue; }
-            var key = GraphRecordCodec.Key(value);
-            if (entries.Count == entries.Capacity)
+            var reference = Find(1, node.Id, latest)!.Value.Reference;
+            foreach (var key in PropertyKeys(record, value, node.Id, cancellationToken, reserve, visit))
             {
-                int capacity = entries.Capacity == 0 ? 4 : checked(entries.Capacity * 2);
-                // Include owned entry slots and array headers before growing the backfill buffer.
-                reserve?.Invoke(24 + 48L * (capacity - entries.Capacity));
-                entries.Capacity = capacity;
+                if (entries.Count == entries.Capacity)
+                {
+                    int capacity = entries.Capacity == 0 ? 4 : checked(entries.Capacity * 2);
+                    // Include owned entry slots and array headers before growing the backfill buffer.
+                    reserve?.Invoke(24 + 48L * (capacity - entries.Capacity));
+                    entries.Capacity = capacity;
+                }
+                reserve?.Invoke(32L + key.Length);
+                visit?.Invoke(); // Refuse before entering the allocating physical bracket.
+                entries.Add((reference, key));
             }
-            reserve?.Invoke(32L + key.Length + 8);
-            entries.Add((Find(1, node.Id, latest)!.Value.Reference, Composite(key, node.Id)));
         }
         bool published = false;
         ulong inserted = await ApplyAsync(context, async bracket =>
@@ -94,9 +107,9 @@ public sealed partial class GraphStore
             var index = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
             foreach (var entry in entries)
             {
-                visit?.Invoke();
                 await index.InsertVersionAsync(bracket, entry.Key, entry.Reference.Location,
                     entry.Reference.Writer, TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                AfterTextIndexMutation?.Invoke("build-entry");
             }
             var location = Insert(bracket, bytes, context);
             SaveRegistrations(bracket);
@@ -104,6 +117,7 @@ public sealed partial class GraphStore
             return location;
         }, cancellationToken).ConfigureAwait(false);
         if (!published) { Add(record, inserted, context.Sequence); }
+        ScheduleIndexReclamation(id); // Also finds a build abandoned after its physical bracket committed.
     }
 
     /// <summary>Drops a node-property index definition; older snapshots retain its tree.</summary>
@@ -113,12 +127,15 @@ public sealed partial class GraphStore
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="TransactionAbortedException">The index changed after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
     public async ValueTask DropIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
+        => await DropIndexAsync(label, propertyKey, context, cancellationToken, false).ConfigureAwait(false);
+
+    internal async ValueTask DropIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken, bool text)
     {
         using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
         context = mutation.RefreshSnapshot(context);
-        var definition = Definition(label, propertyKey, context.Snapshot)
+        var definition = Definition(label, propertyKey, context.Snapshot, text)
             ?? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreDropIndexAsyncFailure, label, propertyKey));
-        if (Definition(label, propertyKey, Latest(context))?.Id != definition.Id)
+        if (Definition(label, propertyKey, Latest(context), text)?.Id != definition.Id)
         {
             throw new TransactionAbortedException(_errorGraphStoreDropIndexAsyncFailure2);
         }
@@ -128,6 +145,7 @@ public sealed partial class GraphStore
             Tombstone(bracket, found.Reference, context);
             return new ValueTask<bool>(true);
         }, cancellationToken).ConfigureAwait(false);
+        ScheduleIndexReclamation(definition.Id);
     }
 
     /// <summary>Seeks an exact scalar property value through its B+Tree.</summary>
@@ -181,6 +199,23 @@ public sealed partial class GraphStore
         bracket.Commit();
     }
 
+    private GraphRecord[] MutationDefinitions(TransactionContext context)
+    {
+        var latest = Definitions(Latest(context));
+        if (context.IsolationLevel != IsolationLevel.Snapshot || _definitionIds.Count == latest.Length) { return latest; }
+        // A Snapshot writer can still plan against a tree dropped after its snapshot.
+        // Maintain that pinned tree as well as current trees so it sees its own new versions.
+        List<GraphRecord>? union = null;
+        foreach (var prior in Definitions(context.Snapshot))
+        {
+            bool present = false;
+            foreach (var current in latest) { if (current.Id == prior.Id) { present = true; break; } }
+            if (present) { continue; }
+            (union ??= new List<GraphRecord>(latest)).Add(prior);
+        }
+        return union?.ToArray() ?? latest;
+    }
+
     private GraphRecord[] Definitions(TransactionSnapshot snapshot)
     {
         var definitions = new List<GraphRecord>();
@@ -192,11 +227,11 @@ public sealed partial class GraphStore
         return definitions.ToArray();
     }
 
-    private GraphRecord? Definition(string label, string propertyKey, TransactionSnapshot snapshot)
+    private GraphRecord? Definition(string label, string propertyKey, TransactionSnapshot snapshot, bool text = false)
     {
         foreach (var definition in Definitions(snapshot))
         {
-            if (definition.Label == label && definition.PropertyKey == propertyKey) { return definition; }
+            if (definition.Label == label && definition.PropertyKey == propertyKey && (definition.Revision == 1) == text) { return definition; }
         }
         return null;
     }
@@ -251,31 +286,59 @@ public sealed partial class GraphStore
 
     internal async ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
     {
-        long pruned = await _indexes.PruneAsync(bound, cancellationToken).ConfigureAwait(false);
-        RefreshRelationshipTypeCounts(cancellationToken);
+        ExceptionDispatchInfo? failure = null;
+        long pruned = 0;
+        try { ReclaimRetiredIndexes(bound, cancellationToken); }
+        catch (Exception error) when (error is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        { failure = ExceptionDispatchInfo.Capture(error); }
+        try
+        {
+            pruned = await _indexes.PruneAsync(bound, cancellationToken).ConfigureAwait(false);
+            AfterIndexPrune?.Invoke();
+        }
+        catch (Exception error) when (error is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        { failure ??= ExceptionDispatchInfo.Capture(error); }
+        try
+        {
+            RefreshRelationshipTypeCounts(cancellationToken);
+            AfterRelationshipTypeCountRefresh?.Invoke();
+        }
+        catch (Exception error) when (error is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        { failure ??= ExceptionDispatchInfo.Capture(error); }
+        failure?.Throw();
         return pruned;
     }
 
-    private void OpenIndexes()
+    private void OpenIndexes() => OpenIndexes(scheduleReclamation: true);
+
+    private void OpenIndexes(bool scheduleReclamation)
     {
-        _registrations.Clear();
-        var registrations = new List<BTreeIndexRegistration>();
-        foreach (var (registration, page, slot) in ReadRegistrations(_storage))
+        lock (_indexRegistrySync)
         {
-            registrations.Add(registration);
-            _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
+            _registrations.Clear();
+            AfterIndexRegistrationsCleared?.Invoke();
+            var registrations = new List<BTreeIndexRegistration>();
+            foreach (var (registration, page, slot) in ReadRegistrations(_storage))
+            {
+                if (registration.RootPageId > 0) { registrations.Add(registration); }
+                _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
+                if (scheduleReclamation) { ScheduleIndexReclamation(registration.ObjectId); }
+            }
+            _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+            {
+                Storage = _storage,
+                TransactionSource = ResolveStatementBracket,
+                PruneBound = () => _coordinator.PruneBound,
+                ExistingIndexes = registrations
+            });
+            // Labeled nodes and relationships require their persisted token trees; never reopen a graph
+            // whose tree registration was lost, or treat a pre-index development file as empty.
+            if (_labelTokens.Count != 0) { _ = ResolveIndex(labelsId); }
+            if (_relationshipTypeTokens.Count != 0) { _ = ResolveIndex(relationshipTypesId); }
         }
-        _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
-        {
-            Storage = _storage,
-            TransactionSource = ResolveStatementBracket,
-            PruneBound = () => _coordinator.PruneBound,
-            ExistingIndexes = registrations
-        });
-        // Labeled nodes and relationships require their persisted token trees; never reopen a graph
-        // whose tree registration was lost, or treat a pre-index development file as empty.
-        if (_labelTokens.Count != 0) { _ = ResolveIndex(labelsId); }
-        if (_relationshipTypeTokens.Count != 0) { _ = ResolveIndex(relationshipTypesId); }
     }
 
     private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot)> ReadRegistrations(GraphStorage storage)
@@ -296,7 +359,8 @@ public sealed partial class GraphStore
             if (reader.ReadByte() != GraphRecordCodec.FormatVersion) { throw GraphRecordCodec.UnsupportedFormat(unit.PageId, unit.SlotIndex); }
             ulong id = reader.ReadUInt64();
             long root = reader.ReadInt64();
-            if (id == 0 || root <= 0 || !ids.Add(id)) { throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationIdentityInvalid); }
+            if (id == 0 || root == 0 || root == long.MinValue || !ids.Add(id) ||
+                root < 0 && (id <= 2 || id == adjacencyId || id == labelsId || id == relationshipTypesId)) { throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationIdentityInvalid); }
             registrations.Add((new BTreeIndexRegistration(id, new IndexDefinition(treeName), root), unit.PageId, unit.SlotIndex));
         }
         return registrations;

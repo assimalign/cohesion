@@ -46,7 +46,7 @@ entity writes enforce the effective rules. SHOW PROPERTY KEYS reports their comb
 required state; SHOW OBJECT OWNERSHIP includes named CONSTRAINT rows with parent ownership.
 The existing column contracts remain fixed. D2 adds the schema commands and transaction policy below. Duplicate names use CG03008, conflicting rules CG03009,
 invalid existing data CG03010 and an absent named drop CG01021. Graph catalog v2 refuses with
-CG06019; only v3 is read.
+CG06019; only v4 is read.
 
 A named constraint may repeat an identical unnamed property rule. The declarations are
 independent: dropping that constraint preserves the unnamed rule. Typed GetPropertyKeysAsync
@@ -64,12 +64,13 @@ members through owner postings and refuse with CG03010 without replacing the pri
 Budgets remain CG05004/CG05020, and explicit-transaction DDL remains CG04025. GraphTypeTests
 is the typed-schema/write-path conformance corpus. Edge declarations persist but do not yet
 enforce properties or endpoints. Text ALTER CURRENT GRAPH TYPE and SHOW CURRENT GRAPH TYPE
-remain outside this run; their parser refusals are unchanged. Catalog v3 refuses v2 before
+remain outside this run; their parser refusals are unchanged. Catalog v4 refuses v3 before
 any write (CG06019), while graph entity format remains 5. Closed mode remains a later opt-in.
 
 Standalone commands run on the session's database:
 
 - `CREATE INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property)`;
+- `CREATE TEXT INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property)`;
 - `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS NOT NULL`;
 - `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS :: type`;
 - constraint relationship patterns use `FOR ()-[r:TYPE]-()` and `REQUIRE r.property`, with
@@ -122,7 +123,7 @@ remain ordinal and case-sensitive across the shared database-wide namespace.
 SHOW CONSTRAINTS returns DATABASE_NAME, DEFINITION_TYPE, DEFINITION_ID, DEFINITION_NAME,
 CONSTRAINT_NAME, PROPERTY_KEY, DATA_TYPE and IS_REQUIRED, ordered by label name then constraint
 name, followed by relationship type name then constraint name. Other SHOW column contracts
-stay fixed. Graph catalog is v3 (#1806); graph entity format remains 5.
+stay fixed. Graph catalog is v4 (#1806); graph entity format remains 5.
 
 Read-only statements warn with structured CG01023 for each distinct, ordinal, statically named
 entity property unknown database-wide (#1249, GQ-D3). This includes MATCH node/relationship
@@ -651,7 +652,7 @@ Paging never reduces mutation inputs. For reads, LIMIT without ORDER BY can stop
 while ordered finite pages retain a top set bounded by OFFSET + LIMIT. Grouping consumes its
 input incrementally. Final rows and paths remain materialized within the statement memory budget;
 the default 256 MiB grant preserves the former 100,000-row envelope for one-property SET,
-FOR/INSERT, entity RETURN and QueryPaths. Capacity depends on row width and retained intermediate
+FOR/INSERT, entity RETURN and QueryPaths, except for text-index posting maintenance described below. Capacity depends on row width and retained intermediate
 state: larger workloads can still fail with CG05020. Raise GraphDatabaseEngineOptions.QueryMemoryBudget
 (and QueryWorkBudget when needed) on the server to increase capacity; in-process GraphQueryLimits
 can only lower those ceilings. TraverseAsync also uses these grants and now has a default
@@ -843,6 +844,73 @@ cannot bypass entity-result admission. Entity-valued wire results retain the exi
 until #1662. Scalar lists/maps use the existing protocol 2.1 capability; no wire or disk change
 is introduced. See [design and local reference evidence](DESIGN.md#reduce-and-list-predicates-1736-gq-c2).
 
+## Text indexes (#1644)
+
+CREATE TEXT INDEX builds a nonunique node-label/property index over Unicode code-point
+trigrams, with no case folding or Unicode normalization. Exact and text indexes may coexist
+on the same pair; each kind permits one physical index. IF NOT EXISTS suppresses an existing
+index name; otherwise equivalence compares the kind as well as label/property. Names retain the shared
+ordinal schema-rule namespace. Omitted names are deterministic and distinguish text indexes.
+DROP INDEX name drops either kind; SHOW INDEXES retains its existing column shape, and typed
+GraphIndexMetadata.IsText identifies the kind.
+
+A direct n.property string equality, CONTAINS, ENDS WITH or STARTS WITH on a required label in a MATCH AND
+chain can seek the text index; inline {p:'x'} equalities and MERGE use the same selection.
+The engine reads only the pattern's first trigram and always rechecks the stored value using
+the ordinal, case-sensitive predicate. There is no posting intersection: the index is only as
+selective as the pattern's first trigram. Each visible anchor posting costs one work unit,
+as a visible label posting does; extracting that anchor charges no work and reserves no
+memory for the rest of the pattern. A supplementary pair
+counts as one code point; combining sequences remain separate code points. A pattern shorter
+than three code points uses a plain label scan, including empty strings, with no prefilter
+on stored or statement-overlay rows. Parameters retain strict Unicode validation during
+planning (CG03003). An in-process lone-surrogate literal is validated when evaluated
+(CG02013); an empty scan evaluates no literal. NULL and
+non-string values retain their ordinary predicate semantics and cannot supply a text seek.
+
+Parameters bind for each execution before anchor selection; execution checks the actual
+pattern again when opening the cursor. EXPLAIN reports TextIndexSeek or LabelScan for that
+binding. A seek reports the predicate, parameter flag, first-trigram anchor and mandatory
+stored-value recheck. Unseekable patterns retain the ordinary LabelScan candidate. No SEARCH, scoring or full-text tokenizer is introduced.
+
+Stored values shorter than three code points contribute no tokens; longer values contribute
+at most N-2 distinct postings. This saves one key, posting and undo entry per short node
+version without changing any statement's rows. Build and text write extraction consume work per code point,
+and postings reserve memory before retaining keys/undo state. For a present string with L code
+points and K distinct trigrams, a build costs 1+L+K work units per node (the label visit,
+extraction and insertion). A SET costs one label visit plus L_old+L_new for each maintained
+text index. An unrelated SET n.seen=true pays the same extraction and token maintenance,
+because the indexed value moves to a new stored version. Extraction reserves 128 bytes plus
+256 bytes per distinct token; staged rows, keys and backfill buffers add their own charges. The defaults remain 1,000,000
+work units and 256 MiB. Exhaustion fails atomically with CG05004 or CG05020. A property and
+its node must fit the existing single-record limit (CG02009); oversized strings are refused,
+never silently omitted from an otherwise indexed row. In particular a 1 MiB value writes no
+text postings. Old snapshots keep removed tokens and dropped trees until their snapshot pins
+release. A Snapshot writer maintains dropped exact trees too: it reads its own writes and
+still refuses a value exceeding the exact tree's 1,016-byte encoded-key prefix with CG02009.
+Maintenance then persists a retirement receipt and frees at most 64 owner pages
+per pass, deleting the receipt after its final batch. Reopen resumes pending reclamation.
+With one initial p property per node and the default grants, measured adjacent pass/refusal
+boundaries are:
+
+| Statement and values | Text: first refused row count | Exact: first refused row count |
+| --- | --- | --- |
+| MATCH (n:N) SET n.p='abcde', from p='vwxyz' | 82,545 (CG05020) | 141,133 (CG05020) |
+| MATCH (n:N) SET n.seen=true, 40 code points / 38 distinct trigrams | 12,346 (CG05004) | 130,817 (CG05020) |
+| CREATE TEXT INDEX / CREATE INDEX, 20 code points / 18 distinct trigrams | 25,642 (CG05004) | 500,001 (CG05004) |
+
+These posting costs are an exception to the general 100,000-row envelope; row width, repeated
+trigrams and other retained state change the boundary. Build insertion work is charged before
+any index page allocation, so a work refusal leaves no abandoned build pages.
+Catalog v4 admits this index kind and refuses v3 with CG06019 without changing files; graph
+entity layout remains format 5.
+
+A real text seek shares exact seeks' candidate-dependent error evaluation. For example,
+MATCH (n:N) WHERE n.p CONTAINS 'abc' AND n.q + 1 > 0 RETURN n.k can avoid CG02013 on
+an excluded non-string p row with q='x'; a label scan evaluates that row's second operand.
+With the unseekable pattern 'ab', both access paths evaluate the complete label-scan
+predicate and raise CG02013. Qualifying rows always equal the label scan's rows.
+
 ## Named scalar parameters
 
 Node/relationship property maps in MATCH, INSERT and CREATE, WHERE operands and RETURN expressions accept
@@ -883,8 +951,9 @@ labels when its label expression is a pure conjunction: `MATCH (n) WHERE n:Keep 
 property index seeks with inline or conjunctive WHERE equalities. Bound entities take precedence,
 then the smallest candidate estimate across property seeks, required labels,
 pure pattern unions and fixed relationship-type anchors chooses the access path. Ties prefer
-an equality seek, then node candidates in source order, then relationship candidates in source
-order. Estimates include
+an exact equality seek, then a seekable text candidate, then node candidates in source
+order, then relationship candidates in source order. An unseekable text candidate does not
+displace an equal-cost scan. Text estimates use label cardinality alone. Estimates include
 history and affect plan cost only.
 Any node position can anchor, including `(a)->(b) WHERE b:Keep`; EXPLAIN shows the chosen label
 and node ordinal. The complete predicate still filters candidates. MVCC label postings limit

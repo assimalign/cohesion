@@ -21,6 +21,7 @@ internal sealed class GraphOperation
     internal IReadOnlyDictionary<GqlNamedFunctionCallExpression, GraphFunction> FunctionBindings { get; set; } = FrozenDictionary<GqlNamedFunctionCallExpression, GraphFunction>.Empty;
     internal CancellationToken FunctionCancellation { get; set; }
     internal GraphPlanExecutor.ExpansionBudget? QueryBudget { get; set; }
+    internal GraphPlanExecutor.ExpansionBudget EnsureQueryBudget() => QueryBudget ?? _session.StartQueryBudget(this, null);
     // Reuse the session reference so flow-owned MERGE cleanup adds no ordinary operation size.
     private GraphDatabase Database => _session.Database;
     private readonly GraphDatabaseSession _session;
