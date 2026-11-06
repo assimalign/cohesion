@@ -170,32 +170,25 @@ internal sealed partial class SqlSchemaProvisioner
                         retiredHeaps.Contains(pageOwner) ? registeredHeapPages : null).Pages;
                 }
             }
-            // The record directory excludes index pages, and a dropped tree has no
-            // root registration to walk. Scan headers only when heaps retire. Count
-            // only unregistered pages here; registered trees retain their tree walk.
+            // The index directory includes dropped trees with no root registration.
+            // Visit only retiring owners, and count registered trees once via their walk.
             long strandedPages = 0, strandedWal = 0;
             if (retiredHeaps.Count != 0)
             {
                 var cleared = new byte[Page.Size];
                 var zero = new byte[Page.Size];
-                long pageCount = _database.DataStorage.PageManager.PageCount;
-                for (long page = 1; page < pageCount; page++)
+                foreach (ulong owner in retiredHeaps)
                 {
-                    token.ThrowIfCancellationRequested();
-                    if (!_database.DataStorage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
-                    StoragePageHandle handle;
-                    try { handle = _database.DataStorage.PageManager.GetPage((PageId)page); }
-                    catch (StorageIOException) when (!_database.DataStorage.FreeSpaceMap.IsAllocated((PageId)page))
+                    foreach (var page in _database.DataStorage.GetOwnerIndexPages(owner))
                     {
-                        // Other owners may retire concurrently. Catalog ownership and
-                        // table X reservations keep the retiring heaps stable.
-                        continue;
-                    }
-                    using var pinned = handle;
-                    if (handle.Page.Type == PageType.Index && retiredHeaps.Contains(handle.Page.OwnerId) && !registeredHeapPages.Contains(page))
-                    {
-                        strandedPages++;
-                        strandedWal += JointStrandedPageWal(handle.Page, cleared, zero);
+                        token.ThrowIfCancellationRequested();
+                        if (registeredHeapPages.Contains((long)page)) { continue; }
+                        using var handle = _database.DataStorage.PageManager.GetPage(page);
+                        if (handle.Page.Type == PageType.Index && handle.Page.OwnerId == owner)
+                        {
+                            strandedPages++;
+                            strandedWal += JointStrandedPageWal(handle.Page, cleared, zero);
+                        }
                     }
                 }
             }

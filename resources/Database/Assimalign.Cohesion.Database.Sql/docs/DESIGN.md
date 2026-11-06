@@ -8964,16 +8964,16 @@ Stable owner-checked record copies tolerate concurrent pruning; one temporary ra
 retained at a time. It walks B-tree format-2 child links and measures leaf payload high-water
 bytes plus directory bytes, conservatively including payload orphaned by pruning until the
 next insertion compacts it. This avoids racing a shifted leaf directory. CHAR key lengths exclude
-padding. Storage's public owner directory omits index pages; the local read-only walk avoids a
-new public API or shipped friend grant. Cost is O(rewritten record bytes + index pages), with one
+padding. Storage's data-owner directory omits index pages; the local read-only tree walk
+measures registered trees. Cost is O(rewritten record bytes + index pages), with one
 extra source pass before copying; retention is O(index pages + columns), not decoded rows.
 Frozen missing tails use their encoded literal width. Adjacent FK tables, dropped tables and
 untouched owners add no replacement allocation. Cancellation is observed per page. A matching
 resumed intent repeats admission before any prepared write; deferred Build still reads zero data pages.
-For retiring heaps only, a bounded-memory scan of data-storage page headers finds index pages
-whose owner is retiring but whose page is absent from every registered tree walk. Registered
-heap-owned trees are counted once. This adds O(database pages) header visits to retirement,
-without changing kept-layout or copy walks or introducing a public index-directory bridge.
+For retiring heaps only, Storage.GetOwnerIndexPages snapshots the index-owner directory,
+including stranded pages rebuilt from recovered headers on open. Admission visits only those
+owners' index pages, excluding pages already counted by registered tree walks. This costs
+O(the retiring owners' index pages), with registered heap-owned trees counted once.
 Stranded trees are immutable once unregistered. Their WAL bound measures the full pre-image
 and the delta or cleared-page committed image produced by FreeOwnerPages: the storage codec's
 32-byte run walk, masked LSN/checksum, 4-byte run headers, B/2 image threshold and 64-byte image
