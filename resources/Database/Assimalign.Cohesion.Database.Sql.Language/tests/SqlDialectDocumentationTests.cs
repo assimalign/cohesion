@@ -9,6 +9,19 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Batch diagnostics distinguish target/deadline refusals, paused health and retired schema codes (#1792, #1283, #1778)")]
+    public void Documentation_BatchDiagnostics_ShouldDistinguishActiveAndRetiredCodes()
+    {
+        // Arrange
+        string dialect = ReadDialect();
+        // Act / Assert
+        dialect.ShouldContain("| `CS05097` | Error |", Case.Sensitive);
+        dialect.ShouldContain("| `CK04014` | Error |", Case.Sensitive);
+        dialect.ShouldContain("Degraded health with CK06006", Case.Sensitive);
+        dialect.ShouldContain("CS03104 is retired", Case.Sensitive);
+        dialect.ShouldNotContain("| `CS03104` | Error |", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Joint deferred docs: every job publishes once, failures retain the old schema and default-only and inline paths have joint parity")]
     public void Documentation_DeferredPublication_ShouldDescribeJointBoundary()
     {
@@ -110,6 +123,9 @@ public sealed class SqlDialectDocumentationTests
     [InlineData("Sql.Language", "DIALECT.md", "Format 37 requires joint publication for every deferred")]
     [InlineData("Sql", "DESIGN.md", "current format 37 and mandatory index")]
     [InlineData("Sql", "DESIGN.md", "Current format 37 also requires extension 8's OnUpdate byte")]
+    [InlineData("Indexing", "DESIGN.md", "B-tree page format 2, but this engine supports only format 3")]
+    [InlineData("Graph", "DESIGN.md", "catalog v3 and B-tree page format 2 therefore reports only CK06101")]
+    [InlineData("Graph", "DESIGN.md", "and roots, and catalog v4 records.")]
     [InlineData("Sql.Language", "DIALECT.md", "additive indexes and CHECK, NOT NULL, UNIQUE and foreign-key constraint")]
     [InlineData("Sql", "DESIGN.md", "SQL remains format 29: ordinary dense table records")]
     public void Documentation_FormatHistory_ShouldDistinguishHistoricalAndCurrentVersions(string project, string file, string expected)
