@@ -14,16 +14,24 @@ internal sealed class SqlSpillLifetime
     private static ConditionalWeakTable<SqlDatabaseEngine, SqlSpillLifetime>? _engines;
     private readonly HashSet<SqlSpilledResultSet> _results = [];
     private bool _closed;
+    internal const int MaximumResultsPerSession = 8;
+    internal static void CheckCapacity(SqlDatabaseSession owner)
+    {
+        if (_sessions?.TryGetValue(owner, out var session) == true)
+        { lock (session._results) { session.CheckCapacity(); } }
+    }
+    private void CheckCapacity()
+    { if (_results.Count >= MaximumResultsPerSession) { throw SqlExecutionException.UndisposedResults(MaximumResultsPerSession); } }
 
     internal static void Attach(SqlDatabaseSession owner, SqlSpilledResultSet result)
     {
-        LazyInitializer.EnsureInitialized(ref _sessions).GetValue(owner, _ => new()).Add(result);
+        LazyInitializer.EnsureInitialized(ref _sessions).GetValue(owner, _ => new()).Add(result, session: true);
         try { LazyInitializer.EnsureInitialized(ref _engines).GetValue(owner.Database.Engine, _ => new()).Add(result); result.CheckOwner(); }
         catch { Detach(owner, result); throw; }
     }
-    private void Add(SqlSpilledResultSet result)
+    private void Add(SqlSpilledResultSet result, bool session = false)
     {
-        lock (_results) { ObjectDisposedException.ThrowIf(_closed, this); _results.Add(result); }
+        lock (_results) { ObjectDisposedException.ThrowIf(_closed, this); if (session) { CheckCapacity(); } _results.Add(result); }
     }
     internal static void Detach(SqlDatabaseSession owner, SqlSpilledResultSet result)
     {

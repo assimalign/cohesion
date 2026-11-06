@@ -51,6 +51,8 @@ internal sealed partial class SqlPlanExecutor
 
             var sharedColumns = new bool[plan.Columns.Count];
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
+            var sourceOwner = spillOwner is not null && HasSequenceProjection(plan.Projections) && !OrderingUsesSequence(plan.Projections, plan.OrderByProjections?.Values)
+                ? null : spillOwner;
             matches = new List<object?[]>();
             await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows).ConfigureAwait(false))
             {
@@ -64,8 +66,7 @@ internal sealed partial class SqlPlanExecutor
                         memory.Reserve(32);
                     }
                     if (RetainStagedSortSource(matches, row, ref matchBytes, plan.OrderBy,
-                        spillOwner is not null && HasSequenceProjection(plan.Projections) && !OrderingUsesSequence(plan.Projections, plan.OrderByProjections?.Values)
-                            ? null : spillOwner, cancellationToken)) { matches.Add(row); }
+                        sourceOwner, cancellationToken)) { matches.Add(row); }
                 }
             }
 
@@ -263,6 +264,7 @@ internal sealed partial class SqlPlanExecutor
                                     buffer.Add(item);
                                 }
                                 buffered[level].Rows = buffer;
+                                SqlRowCollector.ObserveBuffer?.Invoke("join-inner", buffer);
                             }
                             candidates = buffered[level].Rows!;
                         }

@@ -557,7 +557,7 @@ internal sealed partial class SqlDatabaseServerSession : DatabaseServerSession
         byte[] completion;
         try
         {
-            await using (result.ConfigureAwait(false))
+            try
             {
                 await WriteAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader, encoder.EncodeHeader(result, cancellationToken)).ConfigureAwait(false);
                 await foreach (DatabaseRow row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
@@ -565,6 +565,17 @@ internal sealed partial class SqlDatabaseServerSession : DatabaseServerSession
                     await WriteAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow, encoder.EncodeRow(row, cancellationToken)).ConfigureAwait(false);
                 }
                 completion = new ProtocolResultCompleteMessage(result.AffectedCount).Encode();
+            }
+            finally
+            {
+                if (result is SqlSpilledResultSet spilled)
+                {
+                    // Temp storage counts close failures. Cleanup cannot replace completed
+                    // delivery or the initiating evaluation/transport failure.
+                    try { await spilled.DisposeAsync().ConfigureAwait(false); }
+                    catch (SqlExecutionException) { }
+                }
+                else { await result.DisposeAsync().ConfigureAwait(false); }
             }
         }
         catch (Exception exception) when (!transportFailed && exception is DatabaseException or DatabaseTypeException)

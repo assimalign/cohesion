@@ -734,6 +734,8 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
                     ? LockTimeout ?? _database.Engine.EngineOptions.LockTimeout : TimeSpan.Zero);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
+            if (result is SqlSpilledResultSet spilled)
+            { return await CompleteSpilledStatementAsync(spilled, request, context, scriptReceipt, cancellationToken).ConfigureAwait(false); }
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)
             {
                 await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
@@ -767,6 +769,22 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
             await RollbackAutoCommitAsync(context).ConfigureAwait(false);
             throw;
         }
+    }
+
+    // Only spilled results need an owner if publication or commit fails after evaluation.
+    // Keep this cleanup out of the fitting statement state machine.
+    private async Task<DatabaseResult> CompleteSpilledStatementAsync(SqlSpilledResultSet result, SqlQueryRequest request,
+        TransactionContext context, SqlCatalogScriptPublication? scriptReceipt, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (scriptReceipt is { } receipt && !IsSelfCommitting(request))
+            { await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false); }
+            _statementTimer?.CancelAfter(Timeout.InfiniteTimeSpan);
+            await _coordinator.CommitAsync(context).ConfigureAwait(false);
+            return result;
+        }
+        catch (Exception exception) { result.DisposeAfterFailure(exception); throw; }
     }
 
     private Task<DatabaseResult> ExecuteDataOrExplainAsync(SqlQueryRequest request, SqlStatementContext scope, CancellationToken cancellationToken)

@@ -25,6 +25,7 @@ internal sealed class SqlStagedSortSource : IDisposable
 
     internal SqlStagedSortSource(SqlDatabaseSession owner, SqlStatementMetrics metrics, long budget, long grant)
     {
+        SqlSpillLifetime.CheckCapacity(owner);
         Owner = owner; _metrics = metrics; _budget = budget;
         long bound = (Math.Min(grant, int.MaxValue) - 32768) / 16 - 8192;
         if (grant < 65536 || bound < 16) { Refuse(); }
@@ -49,6 +50,7 @@ internal sealed class SqlStagedSortSource : IDisposable
                 metrics.ReleasePlainSelectMemory(bytes); memory.Bytes -= bytes;
             }
             rows.Clear(); rows.Capacity = 0; memory.Clear();
+            SqlRowCollector.ObserveSpill?.Invoke("staged-drained");
             source.Append(row, token); _sources.Add(rows, source);
         }
         catch (Exception exception) { source.DisposeAfterFailure(exception); throw; }
@@ -110,7 +112,6 @@ internal sealed class SqlStagedSortSource : IDisposable
         try { if (!_transferred) { Statement.Dispose(); } }
         catch (AggregateException exception) { throw SqlSpilledResultSet.TranslateCleanup(exception); }
     }
-    private void Refuse() => throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
-        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, _budget));
+    private void Refuse() => throw SqlExecutionException.StatementMemoryBudget(_budget);
     private sealed class DebugView { public DebugView(SqlStagedSortSource target) { } }
 }

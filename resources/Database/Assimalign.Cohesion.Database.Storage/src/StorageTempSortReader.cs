@@ -6,7 +6,7 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
-/// <summary>Streams a stable final merge, owning its input runs and borrowed key/value buffers.</summary>
+/// <summary>Streams a stable final merge with private borrowed key/value buffers; only the original reader owns runs.</summary>
 /// <remarks>Instances require serialized use. Key and Value remain borrowed until the next
 /// MoveNext or disposal. Disposing the statement also closes every input run.</remarks>
 [DebuggerDisplay("StorageTempSortReader")]
@@ -66,11 +66,12 @@ public sealed class StorageTempSortReader : IDisposable
     /// <returns>True for a record; false at end.</returns>
     /// <exception cref="StorageTempException">A page or record is damaged, or temporary I/O failed (CK05005).</exception>
     /// <exception cref="ObjectDisposedException">The reader, statement or an input run is disposed.</exception>
-    /// <exception cref="OperationCanceledException">Cancellation was requested; owned runs are released.</exception>
+    /// <exception cref="InvalidOperationException">Independent cursors were opened; read a cursor instead of this owning template.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested; private buffers and owned runs are released.</exception>
     public bool MoveNext(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_forked) { throw new InvalidOperationException(ErrorMessages.TempSortCompleted); }
+        if (_forked) { throw new InvalidOperationException(ErrorMessages.TempSortTemplateRead); }
         Key = Value = default;
         try
         {

@@ -18,9 +18,12 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken) => ExecuteGroupAsync(plan, statement, cancellationToken, plan);
 
     private Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken, SqlGroupPlan retentionPlan, SqlDatabaseSession? spillOwner = null) => plan is SqlGroupingSetsPlan grouped
-            ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
+        CancellationToken cancellationToken, SqlGroupPlan retentionPlan, SqlDatabaseSession? spillOwner = null)
+    {
+        if (spillOwner is not null && plan.Aggregates.Any(aggregate => aggregate.OrderBy.Count > 0)) { spillOwner = null; }
+        return plan is SqlGroupingSetsPlan grouped ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
             : ExecutePlainGroupAsync(plan, statement, cancellationToken, retentionPlan, spillOwner);
+    }
 
     /// <summary>
     /// Consumes a filtered relation, accumulates one state per group, then applies

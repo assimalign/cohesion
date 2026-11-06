@@ -203,7 +203,7 @@ internal sealed partial class SqlRowCollector : IDisposable
 
     public void Dispose()
     {
-        try { if (_spills.TryGetValue(this, out var spill)) { _spills.Remove(this); spill.Dispose(); } }
+        try { if (_spills.TryGetValue(this, out var spill)) { _spills.Remove(this); try { spill.Dispose(); } catch (SqlExecutionException) { /* Storage counted cleanup; preserve the statement outcome during unwinding. */ } } }
         finally { _metrics?.ReleasePlainSelectMemory(_memory.Bytes); _memory.Clear(); }
     }
 

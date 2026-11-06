@@ -149,7 +149,8 @@ The arena is allocated for the full grant at creation after any sorted prefix is
 Final readers use actual record sizes, and wide records cap the final fan-in at eight;
 growing the arena on demand and multi-page input buffers remain unimplemented. A record
 over the declared maximum is a coded CK05006 refusal. The engine quota and statement default
-(4 times the memory budget) bound capacity; ten grants requires an explicit larger statement quota.
+(4 times the memory budget) bound capacity; capacity depends on encoding width, page rounding and merge shape; SQL completes ten
+grants of compact ASCII rows at its default quota (see DIALECT), while wider encodings can refuse earlier.
 
 | Code | Temporary storage condition |
 |---|---|

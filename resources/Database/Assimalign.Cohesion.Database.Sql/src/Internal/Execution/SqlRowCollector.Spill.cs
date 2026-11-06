@@ -13,6 +13,7 @@ internal sealed partial class SqlRowCollector
     // Only a refused reservation creates spill state. Fitting collectors retain their exact layout.
     private static readonly ConditionalWeakTable<SqlRowCollector, Spill> _spills = new();
     internal static Action<string>? ObserveSpill { get; set; }
+    internal static Action<string, object>? ObserveBuffer { get; set; }
     internal bool HasSpilled => _spills.TryGetValue(this, out _);
 
     private bool AdmitEntry(Entry entry, SqlDatabaseSession? owner)
@@ -32,12 +33,13 @@ internal sealed partial class SqlRowCollector
         var columns = new SqlTempSortKeyCodec.Column[_orderBy.Count];
         for (int i = 0; i < columns.Length; i++)
         { columns[i] = new(_orderBy[i].IsDescending, _orderBy[i].NullsFirst, _collations[i]); }
-        var state = new Spill(owner, space, columns, (int)bound);
+        SqlSpillLifetime.CheckCapacity(owner);
+        var state = new Spill(owner, space, columns, (int)bound, grant);
         try
         {
             // Validate buffered rows as well as the refused row, before comparison or handoff.
-            foreach (var entry in _ordered) { state.Encode(entry.Output, entry.Keys, _budget); }
-            state.Encode(pending.Output, pending.Keys, _budget);
+            foreach (var entry in _ordered) { state.Validate(entry.Output, entry.Keys, _budget); }
+            state.Validate(pending.Output, pending.Keys, _budget);
             try { _ordered.Sort(Compare); }
             catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException or OperationCanceledException)
             { ExceptionDispatchInfo.Throw(exception.InnerException); throw; }
@@ -53,6 +55,7 @@ internal sealed partial class SqlRowCollector
             return true;
         }
         catch (StorageTempException exception) { var failure = SqlSpilledResultSet.Translate(exception); RevokeSpill(state, failure); throw failure; }
+        catch (AggregateException exception) { var failure = SqlSpilledResultSet.TranslateCleanup(exception); RevokeSpill(state, failure); throw failure; }
         catch (Exception exception) { RevokeSpill(state, exception); throw; }
 
         IEnumerable<(ReadOnlyMemory<byte> Key, ReadOnlyMemory<byte> Value)> Drain()
@@ -83,6 +86,7 @@ internal sealed partial class SqlRowCollector
             state.Sorter!.Append(encoded.Key.Span, encoded.Value.Span, _cancellationToken);
         }
         catch (StorageTempException exception) { var failure = SqlSpilledResultSet.Translate(exception); RevokeSpill(state, failure); throw failure; }
+        catch (AggregateException exception) { var failure = SqlSpilledResultSet.TranslateCleanup(exception); RevokeSpill(state, failure); throw failure; }
         catch (Exception exception) { RevokeSpill(state, exception); throw; }
     }
 
@@ -104,11 +108,12 @@ internal sealed partial class SqlRowCollector
             SqlSortSpillMetrics.Record(_metrics!, state.Statement, state.Sorter);
             state.Sorter.Dispose(); state.Sorter = null;
             Release(_memory.Bytes);
-            var result = new SqlSpilledResultSet(columns, state.Statement, reader, offset, limit, state.Owner);
+            var result = new SqlSpilledResultSet(columns, state.Statement, reader, offset, limit, state.Owner, state.Grant);
             _spills.Remove(this);
             return result;
         }
         catch (StorageTempException exception) { var failure = SqlSpilledResultSet.Translate(exception); RevokeSpill(state, failure); throw failure; }
+        catch (AggregateException exception) { var failure = SqlSpilledResultSet.TranslateCleanup(exception); RevokeSpill(state, failure); throw failure; }
         catch (Exception exception) { RevokeSpill(state, exception); throw; }
     }
 
@@ -121,19 +126,25 @@ internal sealed partial class SqlRowCollector
         internal readonly SqlTempSortKeyCodec.Column[] Columns;
         internal readonly byte[] Families;
         internal readonly int Bound;
+        internal readonly long Grant;
         internal StorageTempSorter? Sorter;
-        internal Spill(SqlDatabaseSession owner, StorageTempSpace space, SqlTempSortKeyCodec.Column[] columns, int bound)
+        internal Spill(SqlDatabaseSession owner, StorageTempSpace space, SqlTempSortKeyCodec.Column[] columns, int bound, long grant)
         {
-            Owner = owner; Columns = columns; Families = new byte[columns.Length]; Bound = bound;
+            Owner = owner; Grant = grant; Columns = columns; Families = new byte[columns.Length]; Bound = bound;
             Statement = space.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
+        }
+        internal void Validate(object?[] output, object?[] keys, long budget)
+        {
+            if (!SqlTempSortKeyCodec.TryEncode(keys, Columns, Families, out var key)
+                || !SqlTempRowCodec.TryGetLength(output, out int length) || 16L + key.Length + length > Bound)
+            { throw SqlExecutionException.StatementMemoryBudget(budget); }
         }
         internal (ReadOnlyMemory<byte> Key, ReadOnlyMemory<byte> Value) Encode(object?[] output, object?[] keys, long budget)
         {
             if (!SqlTempSortKeyCodec.TryEncode(keys, Columns, Families, out var key)
                 || !SqlTempRowCodec.TryGetLength(output, out int length) || 16L + key.Length + length > Bound
                 || !SqlTempRowCodec.TryEncode(output, out var value))
-            { throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, budget)); }
+            { throw SqlExecutionException.StatementMemoryBudget(budget); }
             return (key, value);
         }
         public void Dispose()

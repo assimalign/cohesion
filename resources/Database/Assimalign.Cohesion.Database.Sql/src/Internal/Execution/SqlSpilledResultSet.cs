@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,7 +21,10 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
     private readonly object _gate = new();
     private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly StorageTempStatement _statement;
-    private readonly SqlDatabaseSession _owner;
+    private SqlDatabaseSession? _owner;
+    private readonly long _readerGrant;
+    private long _readerBytes;
+    private ExceptionDispatchInfo? _failure;
     private readonly HashSet<Cursor> _readers = [];
     private StorageTempSortReader? _sorted;
     private StorageTempRun? _distinct;
@@ -28,23 +32,29 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
     private readonly long _limit;
     private bool _disposed;
     internal Location? Location { get; set; }
-    internal void CaptureMetrics(SqlStatementMetrics metrics) => SqlSortSpillMetrics.Refresh(metrics, _statement);
+    internal void CaptureMetrics(SqlStatementMetrics metrics)
+    {
+        // Transform consumes the owning merge first. Once evaluation ends, discard its
+        // unused template workspace through the existing fork lifecycle.
+        if (_sorted is not null) { using var unused = _sorted.OpenReader(); }
+        SqlSortSpillMetrics.Refresh(metrics, _statement);
+    }
     internal void CheckOwner()
     {
-        lock (_gate) { ObjectDisposedException.ThrowIf(_disposed || _owner.State == SessionState.Closed || _owner.Database.Engine.State == EngineState.Disposed, this); }
+        lock (_gate) { ObjectDisposedException.ThrowIf(_disposed || _owner!.State == SessionState.Closed || _owner.Database.Engine.State == EngineState.Disposed, this); }
     }
 
     internal SqlSpilledResultSet(IReadOnlyList<DatabaseColumn> columns, StorageTempStatement statement,
-        StorageTempSortReader sorted, long offset, long limit, SqlDatabaseSession owner)
+        StorageTempSortReader sorted, long offset, long limit, SqlDatabaseSession owner, long readerGrant)
     {
-        _columns = columns; _statement = statement; _sorted = sorted; _offset = offset; _limit = limit; _owner = owner;
+        _columns = columns; _statement = statement; _sorted = sorted; _offset = offset; _limit = limit; _owner = owner; _readerGrant = readerGrant;
         try { SqlSpillLifetime.Attach(owner, this); }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
     }
     internal SqlSpilledResultSet(IReadOnlyList<DatabaseColumn> columns, StorageTempStatement statement,
-        StorageTempRun run, long offset, long limit, SqlDatabaseSession owner)
+        StorageTempRun run, long offset, long limit, SqlDatabaseSession owner, long readerGrant)
     {
-        _columns = columns; _statement = statement; _distinct = run; _offset = offset; _limit = limit; _owner = owner;
+        _columns = columns; _statement = statement; _distinct = run; _offset = offset; _limit = limit; _owner = owner; _readerGrant = readerGrant;
         try { SqlSpillLifetime.Attach(owner, this); }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
     }
@@ -81,6 +91,7 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
         long scratch = 0;
         try
         {
+            SqlRowCollector.ObserveSpill?.Invoke("deduplicate");
             var seen = new HashSet<object?[]>(comparer);
             var original = _distinct;
             long readerBytes = _sorted?.BufferBytes ?? StorageTempSpace.PageSize + (long)original!.MaximumRecordLength;
@@ -88,8 +99,10 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
             metrics.ReservePlainSelectMemory(readerBytes + StorageTempSpace.PageSize, budget);
             scratch = readerBytes + StorageTempSpace.PageSize;
             _distinct = _statement.CreateRun(token);
+            int visited = 0;
             while (reader.MoveNext(token, out var encoded))
             {
+                if ((visited++ & 255) == 0) { SqlRowCollector.ObserveSpill?.Invoke("deduplicate"); }
                 var row = Decode(encoded.Span);
                 if (seen.Contains(row)) { continue; }
                 long bytes = seenMemory.RowBytes(row, out bool wide, overhead: 64);
@@ -103,6 +116,7 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
             _sorted?.Dispose(); _sorted = null; original?.Dispose();
         }
         catch (StorageTempException exception) { var failure = Translate(exception, Location); DisposeAfterFailure(failure); throw failure; }
+        catch (AggregateException exception) { var failure = TranslateCleanup(exception, Location); DisposeAfterFailure(failure); throw failure; }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
         finally { metrics.ReleasePlainSelectMemory(seenMemory.Bytes + scratch); }
     }
@@ -114,26 +128,29 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
         try
         {
             _distinct = _statement.CreateRun(token);
+            SqlRowCollector.ObserveSpill?.Invoke("transform");
             // This stage has not escaped to a consumer: consuming the owner releases each exhausted
             // input run as projection advances. Every volatile projection still precedes pagination.
+            int visited = 0;
             while (_sorted.MoveNext(token))
             {
                 var output = projection(Decode(_sorted.Value.Span));
+                if ((visited++ & 255) == 0) { SqlRowCollector.ObserveSpill?.Invoke("transform"); }
                 if (!SqlTempRowCodec.TryGetLength(output, out int length) || length + 16L > bound || !SqlTempRowCodec.TryEncode(output, out var encoded))
-                { throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
-                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, budget)); }
+                { throw SqlExecutionException.StatementMemoryBudget(budget); }
                 _distinct.Append(encoded, token);
             }
             _distinct.Seal(token); _sorted.Dispose(); _sorted = null;
         }
         catch (StorageTempException exception) { var failure = Translate(exception, Location); DisposeAfterFailure(failure); throw failure; }
+        catch (AggregateException exception) { var failure = TranslateCleanup(exception, Location); DisposeAfterFailure(failure); throw failure; }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
         finally { metrics.ReleasePlainSelectMemory(scratch); }
     }
 
     public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var cursor = Open(cancellationToken);
+        var cursor = Open(cancellationToken);
         try
         {
             long skip = _offset, left = _limit;
@@ -144,7 +161,7 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
                 yield return new SqlMaterializedRow(row!);
             }
         }
-        finally { lock (_gate) { _readers.Remove(cursor); } }
+        finally { lock (_gate) { if (_readers.Remove(cursor)) { _readerBytes -= cursor.BufferBytes; } cursor.Dispose(); } }
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
@@ -152,28 +169,40 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
     {
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            Check();
             try
             {
                 token.ThrowIfCancellationRequested();
+                long bytes = _sorted?.BufferBytes ?? StorageTempSpace.PageSize + (long)_distinct!.MaximumRecordLength;
+                if (bytes > _readerGrant - _readerBytes) { throw SqlExecutionException.ReaderMemoryBudget(_readerGrant, _readerBytes, bytes).At(Location); }
                 var cursor = _sorted is not null ? new Cursor(_sorted.OpenReader()) : new Cursor(_distinct!);
-                _readers.Add(cursor); return cursor;
+                _readers.Add(cursor); _readerBytes += bytes; return cursor;
             }
-            catch (Exception exception) { DisposeAfterFailure(exception); throw; }
+            catch (OperationCanceledException) { throw; }
+            catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode) { throw; }
+            catch (StorageTempException exception) { var failure = Translate(exception, Location); Fail(failure); throw failure; }
+            catch (Exception exception) { Fail(exception); throw; }
         }
     }
+    private void Check()
+    {
+        if (_failure is not null) { _failure.Throw(); }
+        ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+    private void Fail(Exception failure) { _failure ??= ExceptionDispatchInfo.Capture(failure); DisposeAfterFailure(failure); }
     private bool Read(Cursor cursor, CancellationToken token, out object?[]? row)
     {
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            Check();
             try
             {
                 if (!cursor.MoveNext(token, out var bytes)) { row = null; return false; }
                 row = Decode(bytes.Span); return true;
             }
-            catch (StorageTempException exception) { var failure = Translate(exception, Location); DisposeAfterFailure(failure); throw failure; }
-            catch (Exception exception) { DisposeAfterFailure(exception); throw; }
+            catch (OperationCanceledException) { throw; }
+            catch (StorageTempException exception) { var failure = Translate(exception, Location); Fail(failure); throw failure; }
+            catch (Exception exception) { Fail(exception); throw; }
         }
     }
     private object?[] Decode(ReadOnlySpan<byte> value)
@@ -187,7 +216,11 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
         try { Dispose(); }
         catch (SqlExecutionException cleanup) { failure.Data[nameof(SqlSpilledResultSet)] = cleanup; }
     }
-    public override ValueTask DisposeAsync() { Dispose(); return default; }
+    public override ValueTask DisposeAsync()
+    {
+        try { Dispose(); return default; }
+        catch (Exception exception) { return ValueTask.FromException(exception); }
+    }
     internal void Dispose()
     {
         try { DisposeCore(); }
@@ -203,12 +236,12 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
             try
             {
                 foreach (var reader in _readers) { reader.Dispose(); }
-                _readers.Clear(); _sorted?.Dispose(); _sorted = null;
+                _readers.Clear(); _readerBytes = 0; _sorted?.Dispose(); _sorted = null;
             }
             finally
             {
                 try { _statement.Dispose(); }
-                finally { SqlSpillLifetime.Detach(_owner, this); }
+                finally { if (_owner is { } owner) { _owner = null; SqlSpillLifetime.Detach(owner, this); } _distinct = null; }
             }
         }
     }
@@ -220,6 +253,7 @@ internal sealed class SqlSpilledResultSet : DatabaseResultSet
         private readonly StorageTempSortReader? _sorted;
         private readonly StorageTempRunReader? _reader;
         private byte[] _row = [];
+        internal long BufferBytes => _sorted?.BufferBytes ?? StorageTempSpace.PageSize + (long)_row.Length;
         internal Cursor(StorageTempSortReader sorted) { _sorted = sorted; }
         internal Cursor(StorageTempRun run) { _reader = run.OpenReader(StorageTempSpace.PageSize); _row = new byte[run.MaximumRecordLength]; }
         internal bool MoveNext(CancellationToken token, out ReadOnlyMemory<byte> value)

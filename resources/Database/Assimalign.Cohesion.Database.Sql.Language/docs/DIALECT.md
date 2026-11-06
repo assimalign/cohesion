@@ -8,10 +8,17 @@ volatile/sequence evaluation, access paths and pagination are unchanged. In-memo
 need an explicit TempDirectory; file engines use their configured temp space. Fitting sorts
 retain their existing path. OFFSET + LIMIT heaps can spill too; delivered results decode
 lazily and can be read repeatedly or concurrently until disposed, the session closes, or
-the engine is disposed. A later statement does not invalidate them.
+the engine is disposed. A later statement does not invalidate them. Callers of ExecuteAsync
+must dispose results, including after completing or cancelling an enumeration. Cancellation
+releases only that enumeration's cursor. A real temporary read failure releases the result
+and every reader observes the same coded failure. A session permits eight undisposed spilled
+results; a further spill refuses CS05067 until one is disposed. Active reader workspace per
+result cannot exceed its sort grant. A new reader that would exceed it refuses CS05067 at
+its first MoveNextAsync, reporting live and requested bytes without affecting other readers.
 
 CS05067 remains for nested/subquery, derived/CTE operand bodies, correlated frames,
-recursion, windows, CTAS, grouping sets, ordered sequence deferral, and
+recursion, windows, CTAS, grouping sets, SQL/JSON statements, deferred subqueries,
+plain ordered index scans without DISTINCT, ordered aggregates, ordered sequence deferral, and
 buffers belonging to operators preceding the root sort that have no handoff.
 Window and SQL/JSON owners keep their specific grant codes when they fill first.
 DML sources gain no spill permission. INSERT SELECT's existing source-budgeting gap
@@ -27,7 +34,9 @@ refuse CK05002 (6.66 grants of payload before rounding). Width, framing, run tai
 intermediate merges determine capacity. CK05001 (engine quota), CK05002 (statement quota),
 CK05003 (free-space reserve), CK05004 (temp integrity), CK05005 (unavailable temp I/O) and
 CK05006 (sort record bound) are located statement/delivery errors and release temporary
-files without taking the database offline. EXPLAIN changes no fields; EXPLAIN ANALYZE
+files without taking the database offline or aborting an explicit transaction. Temporary
+close failures retain CK05005 during evaluation; cleanup after completed wire delivery
+is counted by storage and does not replace completion. EXPLAIN changes no fields; EXPLAIN ANALYZE
 adds spilled_bytes, spill_peak_bytes, spill_runs and spill_merge_passes only after a spill.
 SqlSortSpillConformanceTests is the executable differential, lifetime, memory and wire corpus.
 
@@ -2743,8 +2752,8 @@ sorts every input and projects every row before LIMIT 0 discards them, and a
 grouped query whose ORDER BY is correlated evaluates every group's HAVING and
 projection (but no ORDER BY key).
 DISTINCT still completes
-before pagination. Results remain fully evaluated before delivery; ordered index
-access and spillable sorting are separate work.
+before pagination. Results remain fully evaluated before delivery; ordered index access removes eligible sorts
+and eligible root sorts spill as described above.
 
 For ordinary SELECT ordering without output-alias or ordinal dependencies,
 nonvolatile projections and keys evaluate together in input order, projection
@@ -5428,7 +5437,8 @@ keep that owner. An independent cache first materialized in a window remains cha
 the statement. When plain bytes fill the grant first, refusal reports CS05067, including statements whose
 earlier ledger would later refuse with CS05079 or CS05094. With no plain bytes live, window
 and SQL/JSON grant refusals retain their specific code. Statement memory refusal aborts input
-immediately, including input with a later error. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
+immediately, including input with a later error, except when an eligible root sort hands
+its retained rows to temporary storage and continues under the same grant. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
 buffer owner by reference identity, plus a fixed 64 B per distinct wide-cell map entry
 (#1776, SQ-L1c). Further references pay their array slots; smaller cells still pay per
 reference. Equal but separate objects, including binary clones, each pay. Output and ordering

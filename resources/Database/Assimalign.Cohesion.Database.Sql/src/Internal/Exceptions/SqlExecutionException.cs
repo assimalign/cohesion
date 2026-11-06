@@ -52,6 +52,15 @@ internal sealed class SqlExecutionException : DatabaseException
         _location = location;
     }
 
+    internal static SqlExecutionException StatementMemoryBudget(long budget)
+        => new(StatementMemoryBudgetCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, budget));
+
+    internal static SqlExecutionException UndisposedResults(int maximum)
+        => new(StatementMemoryBudgetCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SpillResultsUndisposed, maximum));
+
+    internal static SqlExecutionException ReaderMemoryBudget(long grant, long live, long requested)
+        => new(StatementMemoryBudgetCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SpillReaderBudgetExceeded, grant, live, requested));
+
     internal static SqlExecutionException ReferentialAssignmentConflict(string constraint, string schema, string table, string column)
         => new(ReferentialAssignmentConflictCode, string.Format(System.Globalization.CultureInfo.CurrentCulture,
             ErrorMessages.UpdateActionConflict, constraint, schema, table, column));

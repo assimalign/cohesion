@@ -148,12 +148,12 @@ internal sealed partial class SqlPlanExecutor
         SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots,
         CancellationToken token, bool deferProjection)
     {
+        if (!deferProjection && !distinct && limit?.Count == 0) { return MaterializeProjected(projections, []); }
         source.Seal(token);
         long budget = _definitions.StatementMemoryBudget;
         long grant = System.Math.Min(int.MaxValue, budget - _metrics!.HashMemoryBytes - source.ReadBufferBytes);
         int bound = (int)((grant - 32768) / 16 - 8192);
-        if (grant < 65536 || bound < 16) { throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
-            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, budget)); }
+        if (grant < 65536 || bound < 16) { throw SqlExecutionException.StatementMemoryBudget(budget); }
         var columns = orderBy.Select(order => new SqlTempSortKeyCodec.Column(order.IsDescending, order.NullsFirst,
             order.Collation.Resolve(evaluator.SubqueryValues))).ToArray();
         var families = new byte[columns.Length];
@@ -164,6 +164,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             sorter = StorageTempSorter.Create(source.Statement, grant, bound, 64);
+            SqlRowCollector.ObserveSpill?.Invoke("staged-sort");
             foreach (var row in source.Read(token))
             {
                 var output = deferProjection ? row : ProjectRow(row, projections, evaluator, token);
@@ -177,14 +178,14 @@ internal sealed partial class SqlPlanExecutor
                 if (!SqlTempSortKeyCodec.TryEncode(keys, columns, families, out var key)
                     || !SqlTempRowCodec.TryGetLength(output, out int size) || 16L + key.Length + size > bound
                     || !SqlTempRowCodec.TryEncode(output, out var value))
-                { throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
-                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, budget)); }
+                { throw SqlExecutionException.StatementMemoryBudget(budget); }
                 sorter.Append(key, value, token);
             }
             reader = sorter.Complete(token);
             SqlSortSpillMetrics.Record(_metrics, source.Statement, sorter);
         }
         catch (StorageTempException exception) { sortFailure = SqlSpilledResultSet.Translate(exception); throw sortFailure; }
+        catch (System.AggregateException exception) { sortFailure = SqlSpilledResultSet.TranslateCleanup(exception); throw sortFailure; }
         catch (System.Exception exception) { sortFailure = exception; throw; }
         finally
         {
@@ -204,7 +205,7 @@ internal sealed partial class SqlPlanExecutor
         SqlSpilledResultSet result;
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
-            source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, source.Owner); }
+            source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, grant); }
         catch (System.Exception exception) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); throw; }
         try
         {
@@ -221,10 +222,11 @@ internal sealed partial class SqlPlanExecutor
     {
         source.Seal(token);
         SqlSortSpillMetrics.RecordOutput(_metrics!, source.Statement);
+        SqlRowCollector.ObserveSpill?.Invoke("output-spool");
         SqlSpilledResultSet result;
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
-            source.Statement, source.TransferOutput(), offset?.Count ?? 0, limit?.Count ?? -1, source.Owner); }
+            source.Statement, source.TransferOutput(), offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes); }
         catch (System.Exception exception) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); throw; }
         try
         {

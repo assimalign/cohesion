@@ -58,6 +58,12 @@ hook. SQL supplies its early-statement policy; other model behavior remains unch
 is root state, manager registration, context end latch; coordinator tracking follows manager
 release. End cores run outside root state. Identity remains fixed throughout configuration. This intentionally deviates from database-area.md rule 6 (state fixed at construction): SQL SET TRANSACTION may change isolation before the first data statement (#1012), signed off by the owner on 2026-11-02 as rule 6's one exception (#1769). The protected seam stays non-virtual and field-backed; other construction state remains fixed.
 
+## Returned language results (#1789)
+
+ExecuteAsync XML states the caller's obligation to dispose result sets even after enumeration
+completes or is cancelled. SQL spilled results retain temporary files until disposal or
+session close; the SQL design records its bounded result and reader ownership.
+
 ## Shared row and language bases (#1264)
 
 Database.Execution owns the non-virtual ordinal row guards and protected typed cores used by

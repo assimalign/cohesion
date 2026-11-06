@@ -56,6 +56,8 @@ recursion, windows, grouping sets and CTAS retain their existing refusals. DML s
 gain no spill permission and keep their existing policy: INSERT SELECT sort/output
 buffers bypass SELECT charging under _isDml; that budgeting gap belongs to #1828.
 An ordered index scan does not introduce a sort or a new result-spooling permission.
+Its DISTINCT uses the incremental seen set over the ordered stream. Ordered aggregate
+inputs keep CS05067 and never enable a root spill that would starve a later group sort.
 Ordered sequence deferral stays in memory. A staged volatile input or join writes its
 already evaluated source rows in input order on refusal, finishing all predicates before
 keys and projections at their original evaluation boundary. Its temporary input and output
@@ -78,11 +80,18 @@ temp I/O. The established order is SQL object intent locks, no page latch, temp 
 probe gate, space gate. Registry locks are released before result/storage disposal.
 
 SqlSpilledResultSet owns the StorageTempStatement. Its immutable final runs can be read
-repeatedly and concurrently, with one bounded reader per enumeration. OFFSET skips decoded
+repeatedly and concurrently, with one bounded reader per enumeration. Cancellation releases only that cursor; a terminal
+temporary read failure closes the result and is rethrown with its code to every reader.
+The session caps undisposed spilled results at eight, refusing CS05067 before a further
+spill. Callers must dispose results even after enumeration completes or is cancelled.
+After evaluation the owning merge keeps files only, without its template workspace. Active
+reader bytes are bounded in total by the result grant; opening a reader above it refuses
+CS05067 with the live and requested byte counts, leaving other readers intact. OFFSET skips decoded
 rows and LIMIT stops reading. CHAR output, typed SqlMaterializedRow conversions, detached
 binary values, headers and AffectedCount are unchanged. Evaluation completes before return;
 no snapshot, transaction or lock is needed during delivery. Disposal invalidates enumeration
-with ObjectDisposedException, closes active readers and releases exactly once. Session close,
+with ObjectDisposedException unless a terminal coded read failure is already recorded,
+closes active readers and releases exactly once. Session close,
 engine disposal and all server delivery exits also dispose it; a later session statement
 leaves it intact. Ordered DISTINCT uses the existing GroupKeyComparer across the whole sorted
 stream, retains the first representative, charges its seen set and refuses CS05067 if that
@@ -90,9 +99,11 @@ set itself exceeds the grant. Its output is a rewindable run.
 
 CK05001 through CK05006 remain kernel identities carried by located SqlExecutionException.
 Temporary causes are retained in Exception.Data under StorageTempException, outside the
-durable InnerException failure walker; temp I/O cannot fence durable storage. No new error
+durable InnerException failure walker; temp I/O and aggregated temp close failures cannot fence durable storage or abort an
+explicit transaction. A failed post-evaluation receipt or commit disposes an undelivered
+spilled result. Cleanup cannot replace a statement error or completed wire delivery. No new error
 identity or event is allocated. EXPLAIN is unchanged. Only actual spills append spilled_bytes,
-spill_peak_bytes, spill_runs and spill_merge_passes to EXPLAIN ANALYZE's root detail.
+spill_peak_bytes, spill_runs and spill_merge_passes to EXPLAIN ANALYZE's outer sorting query detail, beneath With/Subqueries wrappers.
 PhysicalBytes and PeakBytes are sampled after evaluation; both memory ledgers are zero then.
 The Debug/Release conformance corpus samples forced-GC live bytes with a 512 KiB fixed
 allowance above 1.1 times a 1 MiB grant and checks drained values with WeakReference.
@@ -2180,7 +2191,7 @@ parse_agg.c:1327-1334 (aggregates); nodeRecursiveunion.c:68-167 (working-table f
 | CS02065 | Recursive anchor, recursive output or declared column-list width mismatch | 42601 |
 | CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
 | CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
-| CS05067 | Recursive tables, DISTINCT state or shared buffer exceed StatementMemoryBudget | 53200 |
+| CS05067 | Retained buffers or active spilled-result readers exceed their grant, or eight spilled results remain undisposed | 53200 |
 | CS05090 | Internal invariant: a CTE opens more readers than its plan counted | XX000 |
 
 ## Subquery and insert-source operators (#1021)

@@ -137,9 +137,16 @@ public sealed class StorageTempSorter : IDisposable
             void WritePrefix()
             {
                 Span<byte> header = stackalloc byte[16];
+#if DEBUG
+                byte[]? previousKey = null;
+#endif
                 foreach (var (key, value) in sortedPrefix)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+#if DEBUG
+                    System.Diagnostics.Debug.Assert(previousKey is null || previousKey.AsSpan().SequenceCompareTo(key.Span) <= 0);
+                    previousKey = key.ToArray();
+#endif
                     long length = 16L + key.Length + value.Length;
                     if (length > maximumRecordLength)
                     { StorageEventSource.Log.TempRefused(StorageTempException.RecordTooLargeCode); throw new StorageTempException(StorageTempException.RecordTooLargeCode, ErrorMessages.TempSortRecordLarge); }

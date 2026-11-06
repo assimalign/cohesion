@@ -110,6 +110,9 @@ internal sealed partial class SqlPlanner
     internal static DatabasePlanDescription Describe(SqlPlan plan, IEnumerable<Diagnostic>? diagnostics = null, SqlStatementMetrics? metrics = null)
     {
         var nodes = new List<DatabasePlanNode>();
+        var spillPlan = plan;
+        while (spillPlan is SqlWithPlan or SqlSubqueryPlan)
+        { spillPlan = spillPlan is SqlWithPlan with ? with.Input : ((SqlSubqueryPlan)spillPlan).Input; }
         bool recursiveDemand = plan.ContainsRecursion || plan is SqlSequenceScopePlan { Input.ContainsRecursion: true };
         Visit(plan, null);
         return DatabasePlanDescription.Create(nodes, diagnostics);
@@ -182,9 +185,9 @@ internal sealed partial class SqlPlanner
                 _ => null,
             };
             if (current.ContainsSequences) { detail = (detail is null ? "" : detail + "; ") + "sequences=volatile; object_locks=transaction"; }
-            if (nodes.Count == 0 && metrics is not null && SqlSortSpillMetrics.For(metrics) is { } spill)
+            if (ReferenceEquals(current, spillPlan) && metrics is not null && SqlSortSpillMetrics.For(metrics) is { } spill)
             {
-                detail += $"; spilled_bytes={spill.PhysicalBytes}; spill_peak_bytes={spill.PeakBytes}; spill_runs={spill.Runs}; spill_merge_passes={spill.MergePasses}";
+                detail = (string.IsNullOrEmpty(detail) ? "" : detail + "; ") + $"spilled_bytes={spill.PhysicalBytes}; spill_peak_bytes={spill.PeakBytes}; spill_runs={spill.Runs}; spill_merge_passes={spill.MergePasses}";
             }
             string? indexName = current switch
             {
