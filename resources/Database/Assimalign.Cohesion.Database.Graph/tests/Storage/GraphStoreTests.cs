@@ -435,7 +435,7 @@ public sealed partial class GraphStoreTests
         // Assert
         var refusal = Should.Throw<IndexFormatException>(() => GraphStore.EnsureIndexFormat(fixture.Storage));
         refusal.FoundVersion.ShouldBe(1);
-        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 3", Case.Sensitive);
         Should.Throw<IndexFormatException>(() => GraphStore.Open(fixture.Storage, fixture.Coordinator)).FoundVersion.ShouldBe(1);
     }
 

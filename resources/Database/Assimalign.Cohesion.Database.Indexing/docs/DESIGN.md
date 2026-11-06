@@ -148,8 +148,8 @@ A cursor takes no transaction lock and never awaits under its latch. StoragePage
 overload checks cancellation while waiting for a writer; moves also check at each descent page,
 leaf and examined entry. Cancellation and any read failure release the batch and dispose the
 cursor; disposal is idempotent and drops owned keys, bounds and snapshot references. Current
-values are invalid before the first move, after exhaustion and after disposal. A retained
-CurrentKey owns its bytes and survives later moves/disposal. Cursors have one reader; concurrent
+values are invalid before the first move, after exhaustion and after disposal. Retained
+CurrentKey and CurrentPayload own their bytes and survive later moves/disposal. Cursors have one reader; concurrent
 moves or disposal are unsupported.
 
 The caller retains its statement/transaction snapshot pin for the entire enumeration; the cursor
@@ -426,7 +426,13 @@ physical work. Disabling opportunistic removal fails at 127.4697× growth; resto
   including the incoming item, has one value and its upper fence proves the run
   ends here. Equality with `GetKey(0)` proves the whole-page precondition because
   the insertion slot is after every existing entry. Mixed-key leaves keep the
-  midpoint except for the unchanged rightmost-append rule. This adapts PostgreSQL's
+  midpoint except for the unchanged rightmost-append rule. These choices remain when
+  the incoming entry fits its destination half. Otherwise the nearest split to
+  `count / 2` with two nonempty halves that admits it is chosen by entry footprints,
+  excluding orphaned bytes (and discounting the old entry for replacement). At the
+  split slot, the separator comparison decides the destination, including truncated
+  keys and identity tiebreakers. The retry loop remains a safety net. Fixed-size
+  leaves and the measured shapes below are unchanged. This adapts PostgreSQL's
   rightmost and single-value strategies (`src/backend/access/nbtree/nbtsplitloc.c:287-292`,
   `:971`, `:987-1033`): PostgreSQL's single-value strategy likewise requires the
   whole page, including the new item, to contain duplicates. The nearest upper
@@ -491,7 +497,7 @@ the 64-byte ascending-update case worse, from 175 to 192 leaves (midpoint: 117;
 unrestricted run ends: 349), so it was not adopted and the committed split policy
 is retained.
 
-### Page format 2 and the format gate
+### Page format 3 and the format gate
 
 The node layout of every index page (offsets relative to the page body, after the
 storage layer's 96-byte page header):
@@ -499,7 +505,7 @@ storage layer's 96-byte page header):
 | Offset | Field |
 |---|---|
 | 0 | `u16` magic `"BT"` (`0x5442`) |
-| 2 | `u8` page format version, `2` |
+| 2 | `u8` page format version, `3` |
 | 3 | `u8` kind: 1 leaf, 2 internal |
 | 4 | `u16` entry count |
 | 6 | `u16` data start: entry data grows down from the body end |
@@ -507,7 +513,7 @@ storage layer's 96-byte page header):
 | 24 | `i64` leftmost child (internal nodes) |
 | 32 | `u16` directory of entry offsets, in entry order |
 
-A leaf entry is `[u16 key length][key][u64 reference][u64 writer][u64 deleter]`. An
+A leaf entry is `[u16 key length | hasPayload << 15][key][u64 reference][u64 writer][u64 deleter][u16 payload length]?[payload]?`. The length and payload are present only when bit 15 is set; an empty payload adds **zero bytes**. Keys and payloads each have a 1,024-byte maximum. Format 2 used the same empty-entry layout without the payload flag. An
 internal entry is `[u16 key length | tiebreaker << 14][key][u64 reference]?[u64
 writer]?[i64 child]`: the top two bits of the length field count the tiebreaker
 attributes the separator keeps (the key length never exceeds 1,024, so they are
@@ -550,7 +556,7 @@ never moves and from which one engine wrote the whole tree. `BTreeIndexManager.C
 reads every registered root before it attaches any tree, and a root in any other
 format refuses the attach with `IndexFormatException`, whose message starts with
 `CK06101` and names the index, the format found and the one supported ("uses
-B-tree page format 1, but this engine supports only format 2", with the export,
+B-tree page format 2, but this engine supports only format 3", with the export,
 drop and recreate remedy and #1152), or says the root is no B-tree page at all.
 `BTreeIndexManager.EnsureFormat(storage, registrations)` makes the same check alone,
 writing nothing, for a model whose open recovers its record space before it attaches
@@ -584,10 +590,87 @@ a database this engine wrote and must not open one: they would misread its trees
 Nothing has shipped (owner decision of 2026-10-02), so this is recorded for owner
 review rather than fenced with a new Documents or Graph marker.
 
+### Leaf payloads (#1809)
+
+Payloads are opaque bytes outside order, uniqueness, entry identity and separators. Both
+InsertAsync and InsertVersionAsync retain their original no-payload signatures and add a
+`ReadOnlyMemory<byte>` overload. Inputs are copied before returning. CurrentPayload uses the
+same positioning/disposal guards as CurrentKey. Each cursor allocates its payload batch
+array only upon seeing a nonempty visible payload; invisible continuation identities retain
+no payload. Leaf rebuilding allocates payload arrays only for nonempty payloads.
+Split-size checks borrow the same truncated key and tiebreakers used to build the owned
+separator, which is copied only once after the split point is chosen. Empty payloads add
+no allocations on the split or compaction paths; the existing key, stamp and storage allocations remain.
+Every visible payload is copied at batch time, even when CurrentPayload is never read:
+up to 64 KiB of payload bytes per batch, plus array overhead, charged to no statement budget. A covering index will need a
+way to skip that copying for a plain seek (#1739).
+PostgreSQL makes the same key-space distinction in src/include/access/nbtree.h:375–403;
+src/backend/access/nbtree/nbtutils.c:663–718 strips INCLUDE attributes from pivots. No code copied.
+
+ReplacePayloadAsync targets the newest mapping of a key/reference inside a caller-owned
+physical bracket. Missing mappings return false; a nonzero writer **or deleter** is refused
+with IndexException and the resource-backed message “Payload replacement requires a live
+physical entry with zero writer and deleter stamps.” No new diagnostic identity is allocated.
+A physical (writer-zero) entry is unversioned: replacement is visible at latch release,
+rollback reverts it, and a snapshot does not pin its payload. This is physical state, not
+a versioned row update. Referenced mutable pages must share its latch to restore atomically;
+inline payload bytes already live on the entry's latched page.
+An identical replacement opens the page write handle before comparing and skips MarkDirty
+when equal, so another bracket's page lock still fails with StorageTransactionException.
+Opening the handle costs a page pin, mutable scope, write lock and encoded pre-image on
+first touch. It can journal a full-page image and advance the page LSN after checkpoint,
+or spill the pre-image; skipping MarkDirty does not promise zero WAL. An unchanged body
+needs no commit delta. An equal-length replacement overwrites only the payload in place,
+with no compaction or split. A different length first tests
+`needed <= FreeSpace + OrphanedLeafBytes + old`, including the old directory slot.
+If necessary it splits with the old entry present, finds that identity again and retries.
+Both halves are nonempty, so its leaf loses entries each time; a one-entry leaf always
+fits the bounded replacement. Once it fits, compaction is staged before removal, then
+removal, any compacted-body copy and insertion use one write handle with no allocation,
+entry-access callback or cancellation check after removal. Cancellation is honored before
+changing the entry's page and between splits. Failures require rollback of the caller's
+bracket because splits can already have changed structural pages. The pre-existing failed
+parent-insertion window can still hide an old entry from a bounded seek until rollback;
+a forward leaf-chain scan can see it on the sibling. Keeping the old entry prevents an
+additional removal-before-insert failure window; it does not make split failure atomic.
+
+Three maximum entries followed by 41 empty-payload, 16-byte-key entries occupy 8,038 bytes.
+Inserting a maximum entry first now splits once into leaves of 3 and 42 entries, with
+3 total pages and 1 separator, instead of 6 pages and 4 separators. Replacement's old
+1,052-byte identity plus three maximum entries and 17 small entries occupy 8,034 bytes;
+growing that first identity splits once into 3 and 18 entries, also 3 pages and 1 separator.
+
+All leaf copy/rebuild paths carry payloads; erase, clear-deleter, purge and pruning retain their
+identity/stamp rules. Full page images and committed page deltas already cover the payload
+region, so no logical log schema or new durability boundary is introduced. BTreePayloadCrashTests
+reopens images after uncommitted stolen pages plus durable WAL, commit after those stolen
+pages were flushed, committed page flush and checkpoint. It also loses power at every write
+in a replacement/recursive-split workload with 0, 1 and 16 durable torn sectors; stamped
+tombstones and surviving payload entries also exercise the open-time aborted-writer purge (crash
+images follow the durable commit marker). The seeded cursor oracle
+includes empty, 17-byte and 1,024-byte payloads through boundary mutations in both directions.
+
+No model marker changes: SQL, Documents, Graph and KeyValuePair's EN-G1 process-exit helper
+seeds clean and abruptly stopped format-2 trees. Each refuses with CK06101 and preserves the
+entire file set byte for byte through disposal. SQL also covers its no-metadata-probe strategy.
+Blob uses no B-tree and therefore has no B-tree format-2 image to refuse.
+
+On an 8,192-byte page (96-byte storage header, 32-byte node header), format 2 and format 3
+with empty payloads both hold 183 entries with 16-byte keys and 7 with 1,024-byte keys.
+A 1,024-byte key plus 1,024-byte payload takes 2,076 bytes plus a 2-byte directory slot:
+three fit (6,234 bytes of 8,064). The exact-size test checks the fourth entry's leaf/root
+split and later internal root growth. The minimum of three direct leaf-packing allocation
+rounds is zero bytes for both key sizes. On Windows ARM64, .NET 10.0.13 / SDK 10.0.401,
+the isolated Release cursor guard (minimum of three rounds, ten results) allocates 8,728 bytes
+for a 10,000-key range and 8,696 bytes for a million-key range, both before (e54e9465a) and
+after this change. Accessing CurrentPayload is included in the new guard. Both directions
+retain 8 page visits and 65 examined entries. The cursor's 1/64 read limit is stored as a byte,
+keeping its existing owner allocation unchanged while adding the lazy payload-array reference.
+
 ### Concurrency and recovery
 
 - **The latch protocol is unchanged, and the new order does not weaken it.** Every
-  mutation — insert, delete, erase, clear-deleter, the build path and the purge —
+  mutation — insert, delete, payload replacement, erase, clear-deleter, the build path and the purge —
   holds the tree's write latch from its descent until its page change is done, and a
   cursor holds the read latch only while it copies one bounded batch. The unique key lock
   is acquired before the latch, never while holding it, so the order key lock → tree

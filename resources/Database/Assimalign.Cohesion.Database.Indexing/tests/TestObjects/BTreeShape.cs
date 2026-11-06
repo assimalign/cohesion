@@ -46,7 +46,7 @@ internal sealed class BTreeShape
                 shape.AvailableLeafBytes += node.Body.Length - 32;
                 for (int i = 0; i < node.EntryCount; i++)
                 {
-                    shape.UsedLeafBytes += BTreeNode.LeafEntrySize(node.GetKey(i).Length) + BTreeNode.DirectorySlotSize;
+                    shape.UsedLeafBytes += BTreeNode.LeafEntrySize(node.GetKey(i).Length, node.GetPayload(i).Length) + BTreeNode.DirectorySlotSize;
                 }
                 return;
             }

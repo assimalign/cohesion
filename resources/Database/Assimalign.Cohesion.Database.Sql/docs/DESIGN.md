@@ -4152,6 +4152,9 @@ reuses freed pages, and compares both FSMs with a full page-header walk. Synchro
 durability model power loss; None models only its documented process-crash guarantee, retaining OS
 writes without promising that unflushed bytes survive power loss. Client tests additionally
 check exact FSM accounting and physical file-length stability when the freed pages are reused.
+Reclamation test completion waits also require the catalog's committed retirement-intent snapshot
+to be empty (#1809). HasWork samples three fields independently and can transiently report idle
+as discovery starts; the intent remains until durable data frees and catalog retirement finish.
 The Release/NativeAOT `Q8D` benchmark records both full Build (including open/recovery) and its
 provisioning DROP phase; decision 77 in the program design records the measurements.
 
@@ -9302,7 +9305,7 @@ and E for discard/reclamation, so later checks do not ask for a budget already s
 Before the first prepared write, the worker measures each rewritten table's actual heap slots,
 record bytes and encoded component lengths, without materializing values or invoking conversions.
 Stable owner-checked record copies tolerate concurrent pruning; one temporary raw record is
-retained at a time. It walks B-tree format-2 child links and measures leaf payload high-water
+retained at a time. It walks B-tree format-3 child links and measures leaf payload high-water
 bytes plus directory bytes, conservatively including payload orphaned by pruning until the
 next insertion compacts it. This avoids racing a shifted leaf directory. CHAR key lengths exclude
 padding. Storage's data-owner directory omits index pages; the local read-only tree walk

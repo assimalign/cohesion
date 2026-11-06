@@ -2557,7 +2557,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05031` | An internal statement lookup unexpectedly lacks its key; the statement boundary retains the KeyNotFoundException cause and reports a code-free internal-error message. Application function failures retain their existing CG05021 wrapper |
 | `CG05032` | EXCEPT/INTERSECT retained frames, rows and hash state exceed the statement memory budget |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
-| `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before any write, through a recovered preflight when replay is needed, preserving every file of clean and crashed databases (#1744) |
+| `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (formats 1 and 2, written before #1809) fails with "Database 'x' cannot be opened. CK06101: …", checked before any write, through a recovered preflight when replay is needed, preserving every file of clean and crashed databases (#1744) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 | `CK06003` | Storage corruption; `DatabaseCorruptionException` names the database and page, retains the storage cause, and advises restoration from a verified backup. Operations fail as `ExecutionFailure` on the wire. |
 
@@ -3761,12 +3761,12 @@ physical statement rollback. They are physical
 infrastructure, so logical rollback leaves an unused tree available for recovery;
 logical property-index definitions remain stamped and determine visibility.
 
-The trees' pages carry `Database.Indexing`'s own B-tree page format (2 since #1194: entries
+The trees' pages carry `Database.Indexing`'s own B-tree page format (3 since #1809: entries
 ordered by key, record location and writer), which the index manager checks on each tree's root
 page when the store attaches it. The store opens after the coordinator's recovery scrub, so
 `GraphStore.EnsureIndexFormat(storage)` makes the same check first from the registration records
 (zero-stamped, so the scrub never changes them) and the root pages, writing nothing. The Graph
-engine calls it before recovery and refuses a database whose indexes an engine before #1194 wrote
+engine calls it before recovery and refuses a database whose indexes use an earlier page format
 with "Database 'x' cannot be opened. CK06101: …" (the `IndexFormatException` as its inner
 exception). Clean and crashed databases are left byte-identical: the gate precedes all writes,
 using Storage's recovered read-only view when replay is needed (#1744). There is no upgrade path (owner decision of 2026-10-02; #1152). The fence runs one way

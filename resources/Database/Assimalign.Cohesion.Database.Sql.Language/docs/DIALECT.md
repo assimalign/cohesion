@@ -2695,7 +2695,9 @@ the database, the format it found and the format it supports. The check reads
 only the database's catalog and runs before the engine opens the data files, so
 a refused open never touches them. Catalog and data format checks read Storage's
 recovered read-only view before either original file set opens for writing (#1744).
-Clean and crashed databases are left byte-identical, including their journals. To move an older database to the current engine, export
+Clean and crashed databases are left byte-identical, including their journals. Separately,
+B-tree page format 3 (#1809) is required; format-2 trees are refused with CK06101
+through that same preflight, without changing the model marker. To move an older database to the current engine, export
 its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1

@@ -475,7 +475,7 @@ internal sealed partial class SqlSchemaProvisioner
     }
 
     // Storage's public owner snapshots contain only heap pages. Walk registered trees
-    // locally on the worker rather than adding a public Storage bridge. B-tree format 2:
+    // locally on the worker rather than adding a public Storage bridge. B-tree format 3:
     // BTreeNode.cs documents the 32-byte header, directory, tiebreakers and child slots.
     // Work/retention is O(index pages), independent of all other owners. No row decode.
     private (long Pages, int Height, long Bytes) CountJointIndexPages(long root, ulong owner, CancellationToken token, HashSet<long>? registered = null)

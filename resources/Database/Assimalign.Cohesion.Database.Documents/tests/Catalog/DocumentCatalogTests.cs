@@ -416,7 +416,7 @@ public sealed partial class DocumentCatalogTests
         // Assert
         var refusal = Should.Throw<IndexFormatException>(() => DocumentCatalog.EnsureIndexFormat(fixture.Storage));
         refusal.FoundVersion.ShouldBe(1);
-        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 3", Case.Sensitive);
         Should.Throw<IndexFormatException>(() => DocumentCatalog.Open(fixture.Storage, fixture.Coordinator)).FoundVersion.ShouldBe(1);
     }
 
