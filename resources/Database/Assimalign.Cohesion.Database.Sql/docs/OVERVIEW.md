@@ -106,7 +106,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   pending intent to the generation-stamped applied document. An unchanged applied hash/generation
   with no pending intent still skips in constant time. Every deferred preparation failure reports
   `CS03402`, discards its intent and keeps the old schema
-  online unless an unsafe-storage latch fired. Non-TYPE inline failures retain compensation until SQ-A6.
+  online unless an unsafe-storage latch fired. Inline and deferred applications both prepare unpublished work and publish once.
   Build checks a metadata-only space floor before intent save;
   the worker measures rewritten heap/index pages and bounded copy-WAL growth before prepared writes.
   Untouched tables never change the need. Refusals report needed/available bytes online; precise
@@ -114,8 +114,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   Unconfirmed publication uses `CS03403`; recovery decides old/new and retains the new trees.
   Definition DDL is excluded database-wide from Build through queue time and worker completion; DML on untouched tables proceeds.
   Pending names refuse relation creation/table rename (`CS03404`); planning and publication
-  check the table/view/sequence namespace. A successful apply or skip clears an earlier failure. A default change without a TYPE rewrite
-  retains the base `CS03105` refusal before any intent or inline change.
+  check the table/view/sequence namespace. A successful apply or skip clears an earlier failure. Default-only changes publish jointly with destructive opt-in; without it they refuse `CS03105`.
   Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
   database or apply a different schema than its declaration.
 - **Bounded DDL workspace** — validation streams rows; uniqueness compares adjacent live keys

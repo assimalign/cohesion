@@ -24,6 +24,67 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: tightening validates visible frozen values and keeps the old schema on refusal (#1778)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApplySchemaAsync_SecondReviewFrozenMissingCorpus_ShouldValidateVisibleRows(bool missing)
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var engine = SqlDatabaseEngine.Create("frozen-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", guard.Token);
+        SqlCompiledSchema Declare(bool appended, int precision = 8, string literal = "12345") => new(SqlCompiledSchema.CurrentFormat, "db", true, [],
+            [new CompiledSchemaTable("items", "row", appended ? [new("id", DatabaseType.Int32, false), new("v", DatabaseType.Decimal, true, Precision: precision, Scale: 0, DefaultLiteral: literal)] : [new("id", DatabaseType.Int32, false)],
+                new("pk", ["id"]), [], [])], []);
+        await database.ApplySchemaAsync(Declare(false), guard.Token);
+        await using var writer = await database.CreateSessionAsync(guard.Token);
+        await writer.ExecuteAsync("INSERT INTO items VALUES(1)", cancellationToken: guard.Token);
+        await database.ApplySchemaAsync(Declare(true), guard.Token);
+        if (!missing) { await writer.ExecuteAsync("UPDATE items SET v=1", cancellationToken: guard.Token); }
+        var source = Declare(true, literal: "1");
+        await database.ApplySchemaAsync(source, guard.Token);
+        ulong owner = database.Catalog.Tables.Single().ObjectId;
+        // Act / Assert
+        if (missing)
+        {
+            var refusal = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(Declare(true, 3, "1"), guard.Token));
+            refusal.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+            database.Catalog.SchemaState!.ContentHash.ShouldBe(source.Hash);
+        }
+        else { await database.ApplySchemaAsync(Declare(true, 3, "1"), guard.Token); }
+        database.Catalog.Tables.Single().ObjectId.ShouldBe(owner);
+        database.IsOffline.ShouldBeFalse(); database.Catalog.PendingMigration.ShouldBeNull();
+        await ExpectRowsAsync(writer, "SELECT v FROM items", [[missing ? 12345m : 1m]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: compiled SET and DROP DEFAULT publish without a TYPE rewrite (#1778)")]
+    [InlineData("2", 2)]
+    [InlineData(null, null)]
+    public async Task ApplySchemaAsync_DefaultOnlyCorpus_ShouldPublishOnceAndKeepExistingRows(string? literal, int? expected)
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var engine = SqlDatabaseEngine.Create("default-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", guard.Token);
+        SqlCompiledSchema Declare(string? value) => new(SqlCompiledSchema.CurrentFormat, "db", true, [],
+            [new CompiledSchemaTable("items", "row", [new("id", DatabaseType.Int32, false), new("value", DatabaseType.Int32, true, DefaultLiteral: value)],
+                new("pk_items", ["id"]), [], [])], []);
+        var source = Declare("1");
+        var target = Declare(literal);
+        await database.ApplySchemaAsync(source, guard.Token);
+        await using var session = await database.CreateSessionAsync(guard.Token);
+        await session.ExecuteAsync("INSERT INTO items(id) VALUES(1)", cancellationToken: guard.Token);
+        ulong owner = database.Catalog.Tables.Single().ObjectId;
+        // Act
+        await database.ApplySchemaAsync(target, guard.Token);
+        await session.ExecuteAsync("INSERT INTO items(id) VALUES(2)", cancellationToken: guard.Token);
+        // Assert
+        database.Catalog.Tables.Single().ObjectId.ShouldBe(owner);
+        database.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
+        database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
+        await ExpectRowsAsync(session, "SELECT value FROM items ORDER BY id", [[1], [expected]]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: retained SELECT output obeys statement memory admission (#1776)")]
     [InlineData(95L, true)]
     [InlineData(96L, false)]

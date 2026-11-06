@@ -253,7 +253,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
-| COHSQLP004 | CS03104 | Inline per-step schema application/compensation failure; deferred jobs use CS03402 |
+| COHSQLP004 | CS03104 | Retired (#1778): every schema apply uses joint publication and CS03402/CS03403 |
 | COHSQLP005 | CS03105 | Schema/constraints |
 | New (#1447, SQ-A3) | CS03402 | Joint preparation/space admission failed or unpublished target/route discarded; old schema retained, unsafe-storage latches still apply |
 | New (#1447, SQ-A3 fix) | CS03403 | Joint publication commit unconfirmed; recovery determines old/new schema |

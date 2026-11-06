@@ -65,8 +65,8 @@ internal readonly struct SqlStatementContext
 
     internal DateTimeOffset TransactionStart => new(_transactionStartTicks, TimeSpan.Zero);
 
-    // Schema steps keep their table locks until the entire apply and compensation end,
-    // while each statement's data/catalog brackets retain their existing commit lifetime.
+    // Joint jobs retain reservations through publication/discard. Ordinary session DDL
+    // uses its transaction owner; tests may supply a retained owner across statements.
     internal TransactionSequence DdlLockOwner { get; }
 
     internal Action<long, long?>? ProvisioningProgress { get; }

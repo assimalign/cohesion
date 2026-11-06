@@ -1456,8 +1456,10 @@ complete target in one catalog commit, including cheap additions and drops (#177
 Before publication a failure reports CS03402 and keeps the old schema online. Only a matching
 target Build resumes interrupted preparation; a different-target Build discards it and replans
 from the stored schema. A no-target open discards without a provisioning report or trace; a
-successful Verify clears a declared discard observation. Non-TYPE inline and empty-table paths retain their existing behavior
-until SQ-A6; default-only changes still refuse CS03105.
+successful Verify clears a declared discard observation. RunMigrationsInline, empty-table Build
+and ApplySchemaAsync use the same joint executor inline. Default-only changes publish jointly
+(SET or DROP DEFAULT) with destructive opt-in (CS03105 without it), with CS03402 before
+publication and CS03403 for an unconfirmed commit.
 
 Referential SET NULL and SET DEFAULT update only matching foreign-key columns, using the
 ordinary domain, nullability, CHECK, outgoing/incoming FK, MVCC and index machinery.
@@ -1895,8 +1897,8 @@ Full-definition identity-type changes retain their refusal; use explicit TYPE fo
 Typed-schema plans containing a TYPE rewrite and every deferred migration prepare their complete target unpublished, using
 the same assignment conversion/copy path, then publish every table, index, constraint and applied
 marker in one commit (#1447, SQ-A3). Build defers populated work to the provisioning worker.
-For TYPE-rewrite plans, empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same
-joint executor inline; their non-TYPE paths retain their existing behavior until SQ-A6.
+Empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same
+joint executor inline for every plan, including default-only changes (#1778, SQ-A6).
 Before publication users on touched tables wait through the lock manager; DML on other tables
 proceeds. Definition DDL is refused database-wide from Build through queue time and worker completion.
 CREATE TABLE, CTAS, CREATE VIEW, CREATE SEQUENCE and ALTER TABLE RENAME TO cannot claim an
@@ -1913,10 +1915,13 @@ Narrowing length, precision or scale, rounding and every conversion not proven l
 destructive opt-in (CS03105 before any step); exact widening can run without it. Dependent-view
 refusals, old snapshots and retryable CS04006 writers retain the single-statement contract.
 VARCHAR narrowing always takes the joint TYPE path because assignment may trim excess spaces;
-CHAR width changes also rewrite. Default changes in a plan without any TYPE rewrite retain
-the base generator's CS03105 refusal before saving anything. The joint plan publishes all defaults.
-Metadata planning refusals report CS03105; joint reservation failures agree on CS03402 in the
-exception and provisioning report. Before intent save, Build checks only the metadata space floor, without owner snapshots or row
+CHAR width changes also rewrite. Default changes without a TYPE rewrite publish jointly,
+including SET and DROP DEFAULT with destructive opt-in (CS03105 without it); a frozen missing
+value retains its original value. Typed reconciliation preserves inherited SQL-domain defaults
+and explicit DEFAULT NULL overrides.
+Metadata planning refusals report CS03105; joint reservation failures throw CS03402. Imperative
+interruption clears Provisioning; deferred failures remain sticky. Before intent save, Build
+checks only the metadata space floor, without owner snapshots or row
 decodes. The worker measures actual rewritten record/key bytes and conversion growth before prepared writes.
 A volume watchdog checks each copy/index bracket and the catalog publication bracket after
 validation. An engine reserve covers discard, old/prepared-owner reclamation WAL up to the
@@ -1939,10 +1944,16 @@ offline. An unconfirmed publication uses CS03403 and leaves recovery to decide o
 Deferred Build does not copy data; RunMigrationsInline or any declared script forces the typed
 copy inline during Build. The executable SqlJointTypeMigrationTests corpus covers these edges.
 In every joint plan, additive indexes and CHECK, NOT NULL, UNIQUE and foreign-key constraint
-changes can keep the physical heap owner (#1777, SQ-A4). Stored column types and facets must
-remain identical, including native-domain bounds. Dropping or replacing a heap-owned index
-forces a rewrite; alternate-tree drops and replacements can keep the heap and reclaim kind-14
-owners. General heap-owned dropped-index reclamation is tracked by #1808.
+changes can keep the physical heap owner (#1777, SQ-A4). Nullable appends with immutable missing
+values, non-identity logical backfills, DROP COLUMN, VARCHAR widening, same-scale DECIMAL precision
+changes, aliases and defaults also keep it (#1778, SQ-A6). Surviving physical ordinals and value
+representations remain identical. Precision tightening scans and refuses invalid rows; dropped
+column bytes remain intact until publication. Reserved-table writers wait, then enforce the new
+declaration or receive a stale-plan retry. A statement naming a dropped column is refused.
+Dropping a heap-owned index without a same-name replacement keeps the heap; its pages remain
+until the table retires (DROP TABLE or a later TYPE rewrite). IX-S1 (#1808) will give indexes
+separate pages and reclaim them on drop. A same-name heap-owned replacement still rewrites;
+alternate-tree drops and replacements retain their heaps and retire separate owners.
 New trees build unpublished against that heap; added constraints validate existing rows under
 the joint X locks before tree builds. Index-only changes need no additional validation scan;
 unchanged foreign-key pairs are skipped. Drops, new trees and rewritten tables publish in the same single commit.
@@ -1989,9 +2000,13 @@ DROP DEFAULT affects later omitted-column writes. A NOT NULL
 column without a default requires an explicit value. Neither action changes old rows: ADD
 COLUMN freezes its missing value once, including NULL when it had no default. An old row still
 reads that value after changing/dropping the insert default and after restart. Explicit stored
-NULL stays NULL. A later column narrowing validates and binds the frozen literal under the new
-type before publication, even with no live rows; an unconvertible literal refuses the change
-with a coded error naming the column. This is PostgreSQL's separate missing attribute value
+NULL stays NULL. Precision tightening and VARBINARY narrowing validate visible values, including a visible row
+that still reads its frozen literal. Historical numeric/binary literals bind independently of current
+precision/length bounds; a literal used by no visible row does not block tightening. A compiled
+apply with an out-of-bound visible value refuses with CS03402 and retains the old schema online.
+Newly appended defaults and later assignments must fit their declaration. Character assignment
+retains its trimming/padding rules; joint character-width changes rewrite rows. The frozen value uses
+the separate missing attribute model described by PostgreSQL
 (src/backend/access/common/heaptuple.c:151-180) and column-default operation
 (src/backend/commands/tablecmds.c:8201-8268).
 
@@ -5090,9 +5105,13 @@ The ISO `DEFAULT X'007FFF'` spelling also works. Quoted backslash-x defaults kee
 resolving after reopen; COLUMN_DEFAULT reports the resolved value as X hex.
 General text-to-BYTEA conversion is separately defined by the [CAST contract](#explicit-conversion-cast-1022-e3).
 
-While a compiled-schema apply runs, ordinary session DDL is refused with
-`DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the
-apply, including any compensation, finishes; unrelated table reads and writes continue.
+While a compiled-schema apply runs, plain readers, writers and session DDL naming a touched
+table wait through the whole job and cleanup, then bind the published schema. This includes
+inline ApplySchemaAsync scans/builds. Unrelated table reads and writes continue; unrelated
+session DDL is refused with DatabaseObjectLockedException while apply admission is held.
+A configured engine LockTimeout bounds Build and ApplySchemaAsync reservation; zero has no
+timeout. Imperative cancellation/timeout clears its Provisioning report; deferred failures stay
+sticky. Build-time inline jobs have no user sessions. Sql DESIGN lists each step's lock window.
 
 ## SQL definitions and declared scripts (E4)
 

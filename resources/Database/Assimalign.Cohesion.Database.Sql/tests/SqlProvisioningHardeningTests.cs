@@ -16,8 +16,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlProvisioningHardeningTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: Build after every committed provisioning step applies only the remaining steps")]
-    public async Task BuildAsync_CrashAfterEveryStep_ShouldConvergeWithOnlyRemainingSteps()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: Build at each prepared operation replans the whole unpublished job")]
+    public async Task BuildAsync_CrashBeforePublication_ShouldReplanWholeJob()
     {
         // Arrange: every builder-provisionable kind, including DEFAULTs, bounded named
         // types, a declared domain, a nullable CLR primary key, CHECK and foreign key.
@@ -51,21 +51,22 @@ public sealed class SqlProvisioningHardeningTests
                 await adhoc.ExecuteAsync("CREATE TABLE scratch (id INT)", cancellationToken: CancellationToken.None);
             }
             crashes.Add(storage.CaptureDurableImages());
-            database.SchemaProvisioner.StepApplied = step =>
+            database.SchemaProvisioner.BeforeJointPublication = step =>
             {
                 completed.Add(Describe(step.Operation));
-                // Capture before the next statement or final schema-state save. Closing
+                // Every operation is still unpublished. Closing
                 // the original afterwards cannot change these independent durable images.
                 crashes.Add(storage.CaptureDurableImages());
             };
 
-            // Act: one real apply, crashed at each committed step in its durable images.
+            // Act: one real apply, capture each prepared operation and the joint commit.
             await database.ApplySchemaAsync(after, CancellationToken.None);
             completed.ShouldBe(script.Steps.Select(step => Describe(step.Operation)).ToArray());
+            crashes.Add(storage.CaptureDurableImages());
         }
 
-        // Assert: engine Build recovers each image and plans exactly the uncommitted tail.
-        crashes.Count.ShouldBe(script.Steps.Count + 1);
+        // Assert: preparation images replan the complete job; the published image skips.
+        crashes.Count.ShouldBe(script.Steps.Count + 2);
         script.Steps.Select(step => step.Operation.Kind).Distinct().Order().ShouldBe(new[]
         {
             SqlSchemaMigrationOperationKind.AddTable, SqlSchemaMigrationOperationKind.DropTable,
@@ -79,8 +80,9 @@ public sealed class SqlProvisioningHardeningTests
             builder.AddDatabase(desired);
             await using var engine = await builder.BuildAsync(CancellationToken.None);
             var database = await engine.OpenDatabaseAsync("b2", CancellationToken.None);
-            database.SchemaProvisioner.LastPlan.ShouldNotBeNull().Operations
-                .Select(Describe).ToArray().ShouldBe(completed.Skip(k).ToArray(), $"crash after step {k}");
+            if (k == crashes.Count - 1) { database.SchemaProvisioner.LastPlan.ShouldBeNull(); }
+            else { database.SchemaProvisioner.LastPlan.ShouldNotBeNull().Operations
+                .Select(Describe).ToArray().ShouldBe(completed.ToArray(), $"crash before joint publication at operation {k}"); }
             var state = database.Catalog.SchemaState.ShouldNotBeNull();
             state.ContentHash.ShouldBe(after.Hash);
             state.Generation.ShouldBe(database.Catalog.DdlGeneration);
@@ -178,7 +180,7 @@ public sealed class SqlProvisioningHardeningTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: compiled unique indexes and composite keys survive every crash boundary")]
-    public async Task ApplySchemaAsync_CompiledUniqueAndCompositeKeyCrash_ShouldApplyOnlyRemainingSteps()
+    public async Task ApplySchemaAsync_CompiledUniqueAndCompositeKeyCrash_ShouldReplanWholeUnpublishedJob()
     {
         // Arrange: these are compiled-schema kinds; the retained C# builder has a
         // single-column key and a non-unique Index verb. Exercise the same provisioner.
@@ -196,7 +198,7 @@ public sealed class SqlProvisioningHardeningTests
         {
             var database = await engine.CreateDatabaseAsync("b2", CancellationToken.None);
             crashes.Add(storage.CaptureDurableImages());
-            database.SchemaProvisioner.StepApplied = _ => crashes.Add(storage.CaptureDurableImages());
+            database.SchemaProvisioner.BeforeJointPublication = _ => crashes.Add(storage.CaptureDurableImages());
             await database.ApplySchemaAsync(schema, CancellationToken.None);
         }
 
@@ -208,7 +210,7 @@ public sealed class SqlProvisioningHardeningTests
             await using var engine = await builder.BuildAsync(CancellationToken.None);
             var database = await engine.OpenDatabaseAsync("b2", CancellationToken.None);
             await database.ApplySchemaAsync(schema, CancellationToken.None);
-            database.SchemaProvisioner.LastPlan!.Operations.Select(Describe).ToArray().ShouldBe(expected.Skip(k).ToArray());
+            database.SchemaProvisioner.LastPlan!.Operations.Select(Describe).ToArray().ShouldBe(expected);
             var table = GetTable(database, "pairs");
             table.PrimaryKeyColumns.ShouldBe(["id", "part"]);
             database.Catalog.GetIndexes(table.ObjectId).Single(index => index.Name == "uq_code").IsUnique.ShouldBeTrue();

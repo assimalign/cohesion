@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Joint deferred docs: every job publishes once, failures retain the old schema and default-only parity waits for SQ-A6")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Joint deferred docs: every job publishes once, failures retain the old schema and default-only and inline paths have joint parity")]
     public void Documentation_DeferredPublication_ShouldDescribeJointBoundary()
     {
         // Arrange
@@ -24,7 +24,8 @@ public sealed class SqlDialectDocumentationTests
         dialect.ShouldContain("A no-target open discards without a provisioning report or trace", Case.Sensitive);
         dialect.ShouldContain("successful Verify clears a declared discard observation", Case.Sensitive);
         dialect.ShouldContain("Statements naming a new table in the plan also wait before binding", Case.Sensitive);
-        dialect.ShouldContain("default-only changes still refuse CS03105", Case.Sensitive);
+        dialect.ShouldContain("Default-only changes publish jointly", Case.Sensitive);
+        dialect.ShouldContain("ApplySchemaAsync use the same joint executor inline", Case.Sensitive);
         design.ShouldContain("SQL record-space format 37 requires this joint kind-9 meaning", Case.Sensitive);
         design.ShouldContain("prepared target plus untouched objects", Case.Sensitive);
     }
