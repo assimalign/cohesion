@@ -140,7 +140,7 @@ public sealed partial class SqlSortSpillConformanceTests
         long live = GC.GetTotalMemory(true) - baseline;
         // Assert
         _output.WriteLine($"DECODED_READER_PROBE|workspace={3 * Sorted(result)!.BufferBytes}|live={live}|allowance={allowance}|third_refused={failure is not null}");
-        failure.ShouldBeAssignableTo<DatabaseException>()!.Diagnostics[0].Code.ShouldBe("CS05067"); ReaderBytes(result).ShouldBe(admitted);
+        failure.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics[0].Code.ShouldBe("CS05067"); ReaderBytes(result).ShouldBe(admitted);
         live.ShouldBeLessThanOrEqualTo(allowance);
         (await first.MoveNextAsync()).ShouldBeTrue(); (await second.MoveNextAsync()).ShouldBeTrue();
         first.Current.GetString(1)!.Length.ShouldBe(3900000); second.Current.GetString(1)!.Length.ShouldBe(3900000);
