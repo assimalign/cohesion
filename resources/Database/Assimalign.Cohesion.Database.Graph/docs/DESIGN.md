@@ -12,6 +12,13 @@ definitions reuse their existing revision word as the immutable discriminator (0
 1 text). Their layout and entity format 5 do not change. The catalog fence admits the new
 semantics before writable open. Exact and text indexes on one pair have separate tree ids.
 
+CREATE TEXT INDEX and DROP INDEX wait for journal admission outside catalog/directory monitors;
+metadata and data reads remain available (#1283). A backfill already admitted when J/2 is crossed
+drains its one physical bracket and mandatory logical commit. That bracket can exceed J by its
+entire bounded build; J is not a per-bracket byte cap. No further physical bracket is admitted
+during the pause. Ordinary posting maintenance waits and resumes once; a held-checkpoint
+reclamation pass yields through the coordinator's non-waiting IndexPrune admission.
+
 Tokens are rolling triples of Unicode scalar values without case folding or normalization;
 three 21-bit scalars occupy 63 bits, preceded by their code-point count. Values shorter than three code points write no tokens: no seek can read them. Distinct tokens are written once per
 node version. Keys are (token,node id); entry references locate the stored version and B-tree
@@ -303,6 +310,10 @@ fragment replacement/default rules above are Cohesion's explicit API contract fo
 GraphStore.EnsureIndexFormat and GraphCatalog.EnsureFormat read graph headers, index registrations
 and roots, and catalog v4 records. The engine validates these through Storage's recovered read-only
 view before acquiring writable file handles.
+The graph entity/registration and B-tree gates precede the catalog gate. An image with both
+catalog v3 and B-tree page format 2 therefore reports only CK06101, in its existing message-only
+carrier, before CG06019 could be reached. Clean and abruptly stopped images retain every byte;
+repeated opens preserve that order (FormatOrderIntegrationTests, #1809, #1644).
 A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
 committed and uncommitted crash records. Acceptance discards the probe, opens the original files
 and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
