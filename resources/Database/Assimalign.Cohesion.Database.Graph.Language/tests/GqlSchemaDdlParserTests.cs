@@ -103,8 +103,9 @@ public sealed class GqlSchemaDdlParserTests
         // Assert
         var diagnostic = parsed.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe("CK00001");
-        diagnostic.Message!.ShouldContain(form, Case.Sensitive);
-        if (text.StartsWith("DROP TEXT", StringComparison.Ordinal)) { diagnostic.Message.ShouldNotContain("CLOSED GRAPH TYPE", Case.Sensitive); }
+        string message = diagnostic.Message.ShouldNotBeNull();
+        message.ShouldContain(form, Case.Sensitive);
+        if (text.StartsWith("DROP TEXT", StringComparison.Ordinal)) { message.ShouldNotContain("CLOSED GRAPH TYPE", Case.Sensitive); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Schema DDL: malformed commands refuse without ON function noise")]

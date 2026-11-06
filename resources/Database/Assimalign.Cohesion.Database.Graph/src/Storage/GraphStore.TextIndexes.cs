@@ -91,11 +91,16 @@ public sealed partial class GraphStore
                     try
                     {
                         if (!_registrations.TryGetValue(id, out var registration)) { finished = true; continue; }
+                        int status = RetirementStatus(id, bound, receipt: registration.Root < 0);
+                        if (status == 0)
+                        {
+                            if (registration.Root < 0)
+                            { throw new StorageCorruptionException(registration.Page, registration.Slot, ErrorMessages.RegistrationIdentityInvalid); }
+                            finished = true; continue; // A live definition (or rolled-back DROP).
+                        }
+                        if (status == 1) { continue; } // A pinned creator/deleter, with either root sign.
                         if (registration.Root > 0)
                         {
-                            int status = RetirementStatus(id, bound);
-                            if (status == 0) { finished = true; continue; } // A live definition (or rolled-back DROP).
-                            if (status == 1) { continue; } // A pinned creator/deleter.
                             // A negative root is a durable retirement receipt. Detach before freeing
                             // the root so an open never attaches a partly reclaimed tree.
                             byte[] bytes = _storage.ReadEntry(registration.Page, registration.Slot).ToArray();
@@ -150,7 +155,7 @@ public sealed partial class GraphStore
 
     // 0 live, 1 waiting for the safe prune bound, 2 reclaimable. Definition records
     // are immutable, but account for every retained reference rather than assuming one.
-    private int RetirementStatus(ulong id, TransactionSequence bound)
+    private int RetirementStatus(ulong id, TransactionSequence bound, bool receipt = false)
     {
         lock (_sync)
         {
@@ -167,6 +172,7 @@ public sealed partial class GraphStore
         {
             if (!TryRead(reference, 3, id, out var bytes)) { return 2; }
             var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
+            if (receipt && deleter == TransactionSequence.None) { return 0; }
             if (writer >= bound || deleter >= bound) { return 1; }
             return deleter == TransactionSequence.None ? 0 : 2;
         }

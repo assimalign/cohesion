@@ -149,7 +149,8 @@ public sealed partial class GraphStore
     }
 
     /// <summary>
-    /// Checks graph record format 5 and that every index tree the storage registers is in the B-tree page format
+    /// Checks graph record format 5, physical index-definition discriminators and recovered
+    /// retirement-receipt liveness, and that every registered tree is in the B-tree page format
     /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading record
     /// headers, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
@@ -172,6 +173,10 @@ public sealed partial class GraphStore
             if (entry.Registration.RootPageId < 0)
             { (retiring ??= new HashSet<ulong>()).Add(entry.Registration.ObjectId); }
         }
+        // Classify lifecycle records without scrubbing: an abandoned DROP's deleter will
+        // be cleared by recovery, so its definition must already protect the receipt here.
+        var aborted = retiring is null ? null
+            : TransactionRecovery.Analyze(storage.WriteAheadJournal, storage.CheckpointActiveTransactions).Aborted;
         using var records = storage.GetUnitIterator(2);
         while (records.MoveNext())
         {
@@ -179,8 +184,12 @@ public sealed partial class GraphStore
             GraphRecordCodec.EnsureFormat(record.Data.Span, record.PageId, record.SlotIndex);
             if (retiring is not null && record.Data.Length >= 34 && record.Data.Span[16] == 3 &&
                 retiring.Contains(BinaryPrimitives.ReadUInt64LittleEndian(record.Data.Span.Slice(18))) &&
-                RecordVersionStamp.ReadStamps(record.Data.Span).Deleter == TransactionSequence.None)
-            { throw new StorageCorruptionException(record.PageId, record.SlotIndex, ErrorMessages.RegistrationIdentityInvalid); }
+                !aborted!.Contains(RecordVersionStamp.ReadStamps(record.Data.Span).Writer))
+            {
+                var (_, deleter) = RecordVersionStamp.ReadStamps(record.Data.Span);
+                if (deleter == TransactionSequence.None || aborted.Contains(deleter))
+                { throw new StorageCorruptionException(record.PageId, record.SlotIndex, ErrorMessages.RegistrationIdentityInvalid); }
+            }
         }
         BTreeIndexManager.EnsureFormat(storage, registrations.Where(entry => entry.Registration.RootPageId > 0).Select(entry => entry.Registration));
     }

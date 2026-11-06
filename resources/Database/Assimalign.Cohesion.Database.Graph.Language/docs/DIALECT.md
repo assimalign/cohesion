@@ -951,9 +951,10 @@ labels when its label expression is a pure conjunction: `MATCH (n) WHERE n:Keep 
 property index seeks with inline or conjunctive WHERE equalities. Bound entities take precedence,
 then the smallest candidate estimate across property seeks, required labels,
 pure pattern unions and fixed relationship-type anchors chooses the access path. Ties prefer
-an exact equality seek, then a seekable text candidate, then node candidates in source
-order, then relationship candidates in source order. An unseekable text candidate does not
-displace an equal-cost scan. Text estimates use label cardinality alone. Estimates include
+an exact equality seek, then node candidates in source order, then relationship candidates
+in source order. A text index never changes the anchor position: it only replaces the label
+scan at the node and label selected without text indexes. It cannot take another node's tie.
+Text estimates use label cardinality alone. Estimates include
 history and affect plan cost only.
 Any node position can anchor, including `(a)->(b) WHERE b:Keep`; EXPLAIN shows the chosen label
 and node ordinal. The complete predicate still filters candidates. MVCC label postings limit

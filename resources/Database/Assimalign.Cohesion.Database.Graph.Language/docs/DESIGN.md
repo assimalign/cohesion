@@ -119,7 +119,9 @@ node-only, single-property grammar, name and conditional rules; unsupported comp
 relationship forms keep CK00001. CreateTextIndex is advertised beside CreateIndex and has
 parser, profile execution, Unicode differential and InMemory/TCP conformance cases. No
 ordinary query-expression layout, lexer keyword or wire encoding changes. Graph DESIGN owns
-posting maintenance, runtime parameter selection and the v4 catalog fence.
+posting maintenance, runtime parameter selection and the v4 catalog fence. Text access preserves
+the anchor node and label selected without text indexes, substituting only an eligible
+label scan after exact and relationship candidates compete. DIALECT records the tie rule.
 
 ## Schema DDL (#1738, GQ-D2)
 

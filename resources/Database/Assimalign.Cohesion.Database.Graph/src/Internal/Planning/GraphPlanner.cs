@@ -1940,18 +1940,6 @@ internal sealed partial class GraphPlanner
                 foreach (string label in labels)
                 {
                     if (!tried.Add(label) || !indexes.TryGetValue(label, out var keys)) { continue; }
-                    foreach (var textIndex in keys)
-                    {
-                        if (!textIndex.Text) { continue; }
-                        GraphTextAnchor? predicate = inline.TryGetValue(textIndex.Key, out var literal) && literal.Value is string text
-                            ? new GraphTextAnchor(text, "=", node.Properties[textIndex.Key] is GqlParameterExpression)
-                            : sources.GetTextPredicate(node.Variable, textIndex.Key, token);
-                        if (predicate is null || !predicate.CanSeek) { continue; }
-                        // The first trigram supplies candidates; estimates use label cardinality only.
-                        long cost = _database.Store.EstimateLabelCount(label);
-                        if (scan is null || cost <= scanCost && scan.Property is null)
-                        { scan = new GraphAnchor(i, label, textIndex.Key, predicate); scanCost = cost; }
-                    }
                     string? bestKey = null;
                     ulong bestIndex = 0;
                     FirstValue best = new(int.MaxValue, null!);
@@ -1982,7 +1970,7 @@ internal sealed partial class GraphPlanner
                         long cost = _database.Store.EstimateIndexCount(bestIndex, label, best.Value, _snapshot, token);
                         // Prefer an equality seek on a tie, preserving the established preference
                         // for a seek over its own label scan. Other ties retain source order.
-                        if (scan is null || cost < scanCost || cost == scanCost && (scan.Property is null || scan.Value is GraphTextAnchor))
+                        if (scan is null || cost < scanCost || cost == scanCost && scan.Property is null)
                         { scan = new GraphAnchor(i, label, bestKey, best.Value); scanCost = cost; }
                     }
                 }
@@ -2011,6 +1999,27 @@ internal sealed partial class GraphPlanner
             { cost = cost > long.MaxValue / 2 ? long.MaxValue : cost * 2; }
             if (scan is null || cost < scanCost)
             { scan = new GraphAnchor(i, null, null, null) { RelationshipTypes = types }; scanCost = cost; }
+        }
+        // Text estimates are label counts: substitute only at the anchor selected without
+        // text indexes, after exact seeks and relationship candidates have competed.
+        if (scan is { Property: null, Label: { } anchorLabel, UnionLabels: null, RelationshipTypes: null } && sources.HasTextIndexes)
+        {
+            foreach (var node in shape.Nodes[scan.NodeIndex])
+            {
+                if (!sources.GetRequiredLabels(node).Contains(anchorLabel)) { continue; }
+                var inline = FirstValues(node.Properties, merging);
+                if (inline.Count == 0 && sources.GetEqualities(node.Variable).Count == 0 && !sources.MayUseTextIndex) { continue; }
+                if (!sources.GetIndexedKeys().TryGetValue(anchorLabel, out var anchorKeys)) { continue; }
+                foreach (var index in anchorKeys)
+                {
+                    if (!index.Text) { continue; }
+                    GraphTextAnchor? predicate = inline.TryGetValue(index.Key, out var literal) && literal.Value is string text
+                        ? new GraphTextAnchor(text, "=", node.Properties[index.Key] is GqlParameterExpression)
+                        : sources.GetTextPredicate(node.Variable, index.Key, token);
+                    if (predicate is not { CanSeek: true }) { continue; }
+                    return scan with { Property = index.Key, Value = predicate, EstimatedRows = scanCost };
+                }
+            }
         }
         return scan is null ? new GraphAnchor(0, null, null, null) : scan with { EstimatedRows = scanCost };
     }
@@ -2107,6 +2116,17 @@ internal sealed partial class GraphPlanner
             if (variable is null) { return _none; }
             _equalities ??= Collect(_predicate);
             return _equalities.TryGetValue(variable, out var values) ? values : _none;
+        }
+
+        internal bool HasTextIndexes
+        {
+            get
+            {
+                if (_indexedKeys is null) { return false; }
+                foreach (var label in _indexedKeys)
+                { foreach (var index in label.Value) { if (index.Text) { return true; } } }
+                return false;
+            }
         }
 
         internal bool MayUseTextIndex => _predicate is GqlStringPredicateExpression or

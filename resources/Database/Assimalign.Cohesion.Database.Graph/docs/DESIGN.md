@@ -10,7 +10,9 @@ WAL-only records, preserving every file. No legacy reader is present. The mutual
 text-kind tag in memory, preserving ordinary CatalogRecord size. Physical kind-3 index
 definitions reuse their existing revision word as the immutable discriminator (0 exact,
 1 text). Their layout and entity format 5 do not change. The catalog fence admits the new
-semantics before writable open. Exact and text indexes on one pair have separate tree ids.
+semantics before writable open. The read-only gate validates the physical definition revision
+(0 exact, 1 text), the catalog kind byte and signed registration-root discriminators before
+AnalyzeAndScrub can append to the journal. Exact and text indexes on one pair have separate tree ids.
 
 Tokens are rolling triples of Unicode scalar values without case folding or normalization;
 three 21-bit scalars occupy 63 bits, preceded by their code-point count. Values shorter than three code points write no tokens: no seek can read them. Distinct tokens are written once per
@@ -30,7 +32,9 @@ WITH on required labels. A per-clause ordinal variable/property table collects t
 once, keeping selection linear in predicates plus index definitions. Exact seeks retain their normal preference. Text seeks enumerate
 only the pattern's first trigram range and mandatorily recheck the stored string, label and
 identity. There is no posting intersection; selectivity is only that of the first trigram.
-Estimates use label cardinality alone, without counting any trigram. Each visible anchor
+Estimates use label cardinality alone, without counting any trigram. Text access only replaces
+the label scan at the node and label chosen without text indexes, after exact seeks and
+relationship anchors compete; it never takes another node's anchor or tie. Each visible anchor
 posting costs one work unit, as a visible label posting does. Extracting the single anchor
 charges no work and retains no pattern-token directory. Recheck preserves position,
 multiplicity, order and ordinal case-sensitive semantics. Snapshot and statement-overlay
@@ -46,7 +50,9 @@ execution-decision flags, the first-trigram anchor and recheck. There is no scor
 Extraction consumes one work unit per code point. Before retaining a distinct token it
 reserves 256 bytes covering set capacity, key/change arrays and transaction undo; its set
 header reserves 128 bytes. Backfill separately charges entry capacity and owned keys, and
-insertion work is charged during extraction, before the allocating bracket. A build costs
+text insertion work is charged during extraction, before the allocating bracket. Exact builds
+validate keys in the original label-scan order, then precharge every buffered insertion before
+allocating pages; an oversized last key therefore retains CG02009 ahead of insertion-work refusal. A build costs
 1+L+K per present string, where L is its code-point length and K its distinct trigram count.
 An update pays one label visit plus L_old+L_new per text index, even for an unrelated-property
 change, because the stored version moves. With one p property and default grants, measured
@@ -75,8 +81,14 @@ negative in a committed WAL bracket: its magnitude retains the old root identity
 sign is a durable retirement receipt. The manager then excludes that tree. Maintenance
 checks at most 64 queued candidates and frees at most 64 owner pages per pass using
 FreeOwnerPages(tree id, remaining grant). Each page batch commits separately; a final
-owner-directory emptiness check deletes the receipt in a separate bracket. Open ignores retired roots, rejects receipts on fixed
-owners or on an undeleted definition, and requeues receipts/orphan registrations for cleanup.
+owner-directory emptiness check deletes the receipt in a separate bracket. Before freeing any
+page, maintenance checks definition liveness with either root sign and refuses a negative root
+on a live definition with CK06003. Open ignores retired roots and rejects receipts on fixed
+owners or recovered live definitions. Read-only lifecycle analysis anticipates the scrub clearing
+an abandoned DROP's deleter, preserving every file on refusal. GraphStore attachment rechecks
+after AnalyzeAndScrub, before OpenIndexes creates a manager or CollectAbandonedIndexOwners
+writes receipts. The engine fences failed recovery from shutdown writes; other owners' data
+is retained. Valid receipts/orphan registrations are requeued for cleanup.
 A partly reclaimed tree therefore never has to open its freed root. One FIFO and a membership
 set keep work bounded and retry failed/waiting candidates fairly. Manager reconstruction runs
 once after a retirement pass, including failure cleanup. A private registry lock makes root
@@ -104,6 +116,10 @@ reopen works after the root is freed while owner pages remain. Fault-injecting s
 captures each image and two reopens assert exact metadata,
 values and predicate results. Partial physical brackets restore their pages or receipt changes;
 abandoned logical creators and deleters scrub through the existing coordinator/index recovery.
+
+Separate child-process exits retain corrupt receipt or revision images alongside an uncommitted
+DROP or node update. The regressions verify unchanged files on refusal, protection at store
+attachment and purge, and readable live trees and unrelated nodes after receipt repair.
 
 Reference behavior consulted without copying code, under C:/Source/repos/neo4j/neo4j:
 community/lucene-index/src/main/java/org/neo4j/kernel/api/impl/index/lucene/v10/
@@ -300,8 +316,9 @@ fragment replacement/default rules above are Cohesion's explicit API contract fo
 
 ## Refused opens preserve every file (#1744)
 
-GraphStore.EnsureIndexFormat and GraphCatalog.EnsureFormat read graph headers, index registrations
-and roots, and catalog v4 records. The engine validates these through Storage's recovered read-only
+GraphStore.EnsureIndexFormat and GraphCatalog.EnsureFormat read graph headers, physical index
+definition revisions, signed index registrations and roots, and catalog v4 records including
+index-kind bytes. Receipt checks use read-only lifecycle classification to determine recovered liveness. The engine validates these through Storage's recovered read-only
 view before acquiring writable file handles.
 A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
 committed and uncommitted crash records. Acceptance discards the probe, opens the original files

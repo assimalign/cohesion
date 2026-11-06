@@ -21,6 +21,11 @@ if (args[0] is "allocations" or "typed-allocations" or "indexed-allocations")
     Console.WriteLine("allocations=" + string.Join(",", GraphWriteAllocations.Measure(injectedKind, injectedBytes, args[0] == "typed-allocations", args[0] == "indexed-allocations")));
     return;
 }
+if (args[0] is "index-receipt-text" or "index-receipt-exact" or "index-revision-text" or "index-revision-exact")
+{
+    await GraphIndexCrashImage.SeedAsync(args[1], args[0].EndsWith("text", StringComparison.Ordinal), args[0].Contains("revision", StringComparison.Ordinal));
+    return;
+}
 await using var engine = GraphDatabaseEngine.Create("graph-engine", new()
 {
     RootPath = args[1], CheckpointInterval = TimeSpan.FromHours(1), PageWriteBackInterval = TimeSpan.FromHours(1),

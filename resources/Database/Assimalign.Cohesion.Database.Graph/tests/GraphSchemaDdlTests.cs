@@ -72,9 +72,9 @@ public sealed class GraphSchemaDdlTests
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(backfillMemory ? "CG05020" : "CG05004");
         long visited = (relationship ? database.Store.RelationshipTypeEntriesVisited : database.Store.LabelEntriesVisited) - postings;
         visited.ShouldBeGreaterThan(0);
-        // Five scan/key pairs consume ten units. The sixth key refuses at twelve;
-        // the label cursor has read one posting ahead, so seven postings were visited.
-        if (backfillWork) { visited.ShouldBe(7); session.LastStatementMetrics!.Physical.ShouldBe(12); }
+        // Validate all ten exact keys before precharging buffered insertions; the second
+        // insertion refuses at twelve without allocating any index page.
+        if (backfillWork) { visited.ShouldBe(10); session.LastStatementMetrics!.Physical.ShouldBe(12); }
         else { visited.ShouldBeLessThan(10); }
         if (backfillMemory)
         {
