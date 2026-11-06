@@ -90,7 +90,7 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var spilling = await Create("joined-spilling", 262144);
         await using var a = await (await fitting.CreateDatabaseAsync("db", guard.Token)).CreateSessionAsync(guard.Token);
         await using var b = await (await spilling.CreateDatabaseAsync("db", guard.Token)).CreateSessionAsync(guard.Token);
-        await SeedJoinedSpillAsync(a, guard.Token); await SeedJoinedSpillAsync(b, guard.Token);
+        await SeedJoinedSpillAsync(a, guard.Token, starOnOuter); await SeedJoinedSpillAsync(b, guard.Token, starOnOuter);
         string sql = "SELECT " + (distinct ? "DISTINCT " : "") + "t.* AS ignored" +
             (starOnOuter ? " FROM u LEFT JOIN t USING(id) ORDER BY t.id NULLS FIRST" : outer
                 ? ",u.rank AS nullable_key FROM t LEFT JOIN u USING(id) ORDER BY nullable_key NULLS FIRST,t.id"
@@ -155,10 +155,22 @@ public sealed partial class SqlSortSpillConformanceTests
         source.Columns.ShouldHaveSingleItem().Name.ShouldBe("column1");
     }
 
-    private static async Task SeedJoinedSpillAsync(SqlDatabaseSession session, CancellationToken token)
+    private static async Task SeedJoinedSpillAsync(SqlDatabaseSession session, CancellationToken token, bool starOnOuter = false)
     {
         await session.ExecuteAsync("CREATE TABLE t(id INT NOT NULL,note TEXT COLLATE binary)", cancellationToken: token);
         await session.ExecuteAsync("CREATE TABLE u(id INT NOT NULL,rank INT NOT NULL)", cancellationToken: token);
+        if (starOnOuter)
+        {
+            // Root sorts spill; hash-build inputs still must fit. Repeat preserved u
+            // rows so the nullable t.* output is wide without retaining a wide build.
+            await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 20).Select(i => $"({i},'{new string('x', 512)}')")), cancellationToken: token);
+            await session.ExecuteAsync("INSERT INTO u VALUES(100,100)", cancellationToken: token);
+            for (int first = 0; first < 4000; first += 100)
+            {
+                await session.ExecuteAsync("INSERT INTO u VALUES" + string.Join(',', Enumerable.Range(first, 100).Select(i => $"({i % 40},{i})")), cancellationToken: token);
+            }
+            return;
+        }
         await session.ExecuteAsync("INSERT INTO u VALUES" + string.Join(',', Enumerable.Range(0, 20).Select(i => $"({i},{19 - i})")) + ",(100,100)", cancellationToken: token);
         for (int first = 0; first < 4000; first += 100)
         {

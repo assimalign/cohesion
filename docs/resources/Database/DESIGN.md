@@ -394,8 +394,8 @@ documented gap (#1828). T3-2 lifts T2 decision D3's no-spill
 rule: eligible root ORDER BY, bounded LIMIT/OFFSET sorts and ordered DISTINCT can spill,
 including a CTAS source root (#1789). Temporary files use engine and statement quotas;
 in-memory engines need an explicit temp directory. Delivery owns bounded readers and no
-database locks. Nested sorts, windows, grouping sets, unsupported codecs/collations and an
-over-budget DISTINCT seen set still refuse; hash aggregation and general result spooling
+database locks. Nested sorts, windows, grouping sets, unsupported codecs/collations,
+over-budget hash builds and DISTINCT seen sets still refuse; hash aggregation and general result spooling
 remain later work. The SQL project design records the precise eligibility and lifetime rules.
 SQL target lists admit at most 1,664 entries after expansion (CS05097, #1792); a CTAS
 table's separate catalog-record size limit can refuse a narrower shape.

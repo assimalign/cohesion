@@ -47,6 +47,7 @@ public sealed partial class SqlJointTypeMigrationTests
         });
         // Assert: the migration policy wrapper keeps the original dependency diagnostic.
         statement.Diagnostics.ShouldContain(d => d.Code == "CS03302");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03105");
         Exception? cause = failure;
         while (cause is not null && (cause is not DatabaseException coded || !coded.Diagnostics.Any(d => d.Code == "CS03302"))) { cause = cause.InnerException; }
         cause.ShouldNotBeNull();
