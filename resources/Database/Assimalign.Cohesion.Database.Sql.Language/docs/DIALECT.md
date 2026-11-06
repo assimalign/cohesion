@@ -5015,6 +5015,10 @@ that admission point releases failed-statement work and new grants, while caller
 keeps its cancellation meaning. Metadata operations that cannot release their gates refuse
 admission immediately with CK04014. An explicit transaction and TCP session remain usable.
 Reads retain ordinary snapshot and locking behavior.
+Session DDL keeps its immediate CK04014 refusal; a client can retry the statement.
+Code-first migrations instead wait outside the physical and publication gates and resume the
+same prepared job, preserving completed copy/index work. ApplySchemaAsync, inline Build and
+deferred Build retain cancellation and lock timeouts, with coded admission failures.
 
 A refusal carries CS05042 / SQLSTATE 54000, naming the table, actual byte size and limit.
 The failure leaves the session usable and an explicit transaction active, with earlier statements

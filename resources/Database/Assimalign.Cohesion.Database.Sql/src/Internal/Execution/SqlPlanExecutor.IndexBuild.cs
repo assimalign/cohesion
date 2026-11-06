@@ -32,7 +32,7 @@ internal sealed partial class SqlPlanExecutor
         statement.ObserveCopyJournalStart(_storage.JournalLength);
         statement.CheckCopySpace(1);
         long journalStart = 0;
-        var index = await statement.Coordinator.ApplyStatementAsync(statement.Transaction,
+        var index = await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction,
             async bracket =>
             {
                 statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
@@ -47,7 +47,7 @@ internal sealed partial class SqlPlanExecutor
                 statement.AddCopyAllocations(allocationStart);
                 return createdIndex;
             },
-            durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
+            durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
         await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
         // A root never moves on splits. Capture once, outside the row-bracket loop;
         // per-bracket costing must not walk/allocate the whole database directory.
@@ -74,7 +74,7 @@ internal sealed partial class SqlPlanExecutor
                 statement.ObserveCopyJournalStart(_storage.JournalLength);
                 statement.CheckCopySpace(touches, allocations);
             }
-            await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
+            await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
                 statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
                 statement.CheckCopySpace(touches, allocations);
@@ -89,7 +89,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 statement.AddCopyAllocations(allocationStart);
                 return true;
-            }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
+            }, durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             processed += batch.Length;
             statement.ProvisioningProgress?.Invoke(processed, Math.Max(processed, total));

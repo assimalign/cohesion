@@ -194,7 +194,7 @@ internal sealed partial class SqlSchemaProvisioner
                 else { AdmitJointSpace(plan, intent, cancellationToken); }
             }
             catch { spaceRefused = true; throw; }
-            await _catalog.SavePendingMigrationAsync(intent, cancellationToken).ConfigureAwait(false);
+            await WithCatalogMigrationAdmissionAsync(() => _catalog.SavePendingMigrationAsync(intent, cancellationToken), cancellationToken).ConfigureAwait(false);
             saved = true;
             JointStage?.Invoke("IntentDurable");
             JointStage?.Invoke("LocksReserved");
@@ -221,6 +221,8 @@ internal sealed partial class SqlSchemaProvisioner
             EnsureFailureTrace(schema);
             TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: script.Steps.Count);
             TraceFailure(coded);
+            if (ReferenceEquals(cause, failure) && failure is TransactionAdmissionCanceledException admission) { throw SqlTimeoutException.Statement(admission, null); }
+            if (ReferenceEquals(cause, failure) && failure is SqlTimeoutException) { throw; }
             if (ReferenceEquals(cause, failure) && (failure is OperationCanceledException or OutOfMemoryException)) { throw; }
             throw coded;
         }
@@ -228,7 +230,7 @@ internal sealed partial class SqlSchemaProvisioner
 
     private async ValueTask DiscardMismatchedIntentAsync(SqlCompiledSchema schema, int stepCount, CancellationToken cancellationToken)
     {
-        await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false);
+        await WithCatalogMigrationAdmissionAsync(() => _catalog.DiscardJointIntentAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
         TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: stepCount);
         TraceFailure(CodedMigrationFailure(SqlProvisioningCodes.JointFailed, ErrorMessages.JointIntentDiscarded));
         TraceOutcome("Restarted", stepCount);
@@ -242,19 +244,21 @@ internal sealed partial class SqlSchemaProvisioner
     internal async ValueTask DiscardUnpublishedIntentAsync(SqlCompiledSchema? target, CancellationToken cancellationToken)
     {
         if (_catalog.PendingMigration is null) { return; }
+        if (!TryEnterApply(cancellationToken))
+        { throw new DatabaseObjectLockedException(_database.Name, _database.Name, "APPLY SCHEMA"); }
         // A discarded target is untrusted and need not be parsed to keep the stored
         // schema available. A declared target already passed Build's schema validation.
         if (target is not null) { BeginTrace(target, "Resume"); }
         try
         {
-            if (target is null) { await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false); }
+            if (target is null) { await WithCatalogMigrationAdmissionAsync(() => _catalog.DiscardJointIntentAsync(cancellationToken), cancellationToken).ConfigureAwait(false); }
             else { await DiscardMismatchedIntentAsync(target, 0, cancellationToken).ConfigureAwait(false); }
             TraceOutcome("Discarded", 0);
             if (target is not null)
             { _database.ReportProvisioning(new DatabaseProvisioningProgress("JointMigration", _database.Name.ToString(), 1, 1,
                 false, failureCode: SqlProvisioningCodes.JointFailed)); }
         }
-        finally { EndTrace(); }
+        finally { EndTrace(); _applyGate.Release(); }
     }
 
     private async Task RunJointMigrationAsync(SqlDeferredMigration migration, CancellationToken cancellationToken)
@@ -275,6 +279,8 @@ internal sealed partial class SqlSchemaProvisioner
                     TraceDeferredProgress(migration, migration.Intent.Steps[0], processed, total);
                     DeferredProgress?.Invoke(processed, total);
                 }, checkpointCopy: true);
+            statement.ConfigureMigrationAdmission((catalogStorage, token) =>
+                WaitMigrationAdmissionAsync(catalogStorage, token, applyLockTimeout: !migration.ReleaseApplyGate));
             JointMetrics = statement.Metrics;
             if (migration.Steps.Count > 0) { BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken); }
             if (!migration.SpaceAdmitted)
@@ -339,6 +345,8 @@ internal sealed partial class SqlSchemaProvisioner
             { EnsureFailureTrace(migration.Schema); TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: migration.ProvisioningStepCount); }
             FailDeferredTrace(migration, 0, coded);
             EndDeferredTrace(migration, 0, "Error");
+            if (ReferenceEquals(cause, failure) && failure is TransactionAdmissionCanceledException admission) { throw SqlTimeoutException.Statement(admission, null); }
+            if (ReferenceEquals(cause, failure) && failure is SqlTimeoutException) { throw; }
             if (ReferenceEquals(cause, failure) && (failure is OperationCanceledException or OutOfMemoryException)) { throw; }
             throw coded;
         }
@@ -350,7 +358,7 @@ internal sealed partial class SqlSchemaProvisioner
     }
 
     private static bool IsImperativeInterruption(Exception failure)
-        => failure is OperationCanceledException or TransactionLockTimeoutException;
+        => failure is OperationCanceledException or TransactionLockTimeoutException or SqlTimeoutException;
 
     private SqlSchemaMigrationException JointFailure(Exception failure, SqlCompiledSchema schema,
         System.Collections.Generic.IReadOnlyList<SqlMigrationScriptStep> steps)

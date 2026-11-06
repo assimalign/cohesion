@@ -118,7 +118,7 @@ internal sealed partial class SqlSchemaProvisioner
         }
         // The worker retains this gate after handoff. Never queue outside the lock
         // manager: a caller may own a transaction the current migration needs.
-        if (!await _applyGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        if (!TryEnterApply(cancellationToken))
         {
             throw new DatabaseObjectLockedException(schema.Name, schema.Name, "APPLY SCHEMA");
         }
@@ -274,7 +274,7 @@ internal sealed partial class SqlSchemaProvisioner
     {
         ArgumentNullException.ThrowIfNull(schema);
         _database.Definitions.EnsureDefinitions(cancellationToken);
-        if (!await _applyGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        if (!TryEnterApply(cancellationToken))
         {
             throw new DatabaseObjectLockedException(schema.Name, schema.Name, "VERIFY SCHEMA");
         }

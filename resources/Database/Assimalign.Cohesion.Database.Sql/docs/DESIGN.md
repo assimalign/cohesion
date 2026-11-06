@@ -25,9 +25,14 @@ a test. Transactions DESIGN records the lock order, events and exact counters. N
 
 SQL catalog writes use non-waiting admission under _sync. Ordinary sequence/identity reservations
 release that monitor, wait with the statement token, then retry and revalidate the incarnation.
-Other catalog mutations retain validated metadata and refuse immediately with CK04014. DDL,
-copy, index and provisioning applies also refuse admission while retaining metadata or apply
-gates. Ordinary physical semaphore acquisition remains cancellable and a new pause interrupts
+Session catalog mutations retain validated metadata and refuse immediately with CK04014. Migration
+copy, index, validation, publication and cleanup boundaries retry transient admission refusals:
+the same job retains its table/name/definition reservations and prepared work, releases the schema
+apply semaphore, catalog monitor and publication snapshot gate before waiting with its token,
+then reacquires and revalidates transaction state, catalog identities and publication inputs.
+Checkpoints require none of those logical reservations; no committed chunk is copied again.
+Imperative waits retain the caller's lock timeout; a handed-off worker waits with its job token.
+Ordinary physical semaphore acquisition remains cancellable and a new pause interrupts
 it immediately, so no guarded caller waits on the pause task. Publication never parks under TruncateSnapshotGate, and reclamation yields rather
 than parking under its run monitor. Mandatory joint-intent cleanup drains through a pause.
 Open arms journal admission after ResumeProvisioningAsync, so a recovered catalog beyond J/2

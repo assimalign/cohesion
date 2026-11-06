@@ -42,6 +42,9 @@ public sealed class SqlTimeoutException : DatabaseException
             ? new("CK04014", "57014", admission.Message, admission, location)
             : new("CS05043", "57014", _statementMessage, cause, location);
 
+    internal static SqlTimeoutException Admission(Exception cause)
+        => new("CK04014", "57014", cause.Message, cause, null);
+
     internal static SqlTimeoutException Lock(Exception cause, Location? location)
         => new("CS04044", "55P03", _lockMessage, cause, location);
 }

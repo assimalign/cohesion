@@ -89,7 +89,7 @@ internal sealed partial class SqlPlanExecutor
             }
             if (indexes.Length != 0)
             {
-                await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
+                await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
                 {
                     foreach (var index in indexes)
                     {
@@ -98,7 +98,7 @@ internal sealed partial class SqlPlanExecutor
                         created.Add(index);
                     }
                     return true;
-                }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
+                }, durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
             }
             if (copyRows)
             {
@@ -253,7 +253,7 @@ internal sealed partial class SqlPlanExecutor
                 statement.ObserveCopyJournalStart(_storage.JournalLength);
                 statement.CheckCopySpace(touches, allocations);
             }
-            await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
+            await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
                 statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
                 statement.CheckCopySpace(touches, allocations);
@@ -287,7 +287,7 @@ internal sealed partial class SqlPlanExecutor
                     RewriteStage?.Invoke("CopyAllocationsAdded", statement.CaptureCopyAllocations() - allocationStart);
                 }
                 return true;
-            }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
+            }, durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             ForgetIndexRows(converted);
             processed += batch.Count;

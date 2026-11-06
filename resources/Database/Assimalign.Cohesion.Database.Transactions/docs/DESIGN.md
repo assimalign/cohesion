@@ -1451,7 +1451,8 @@ One admitted huge bracket, mandatory undo and already-enrolled lifecycle records
 there is no mid-bracket refusal. An untimed pending checkpoint wait has no new deadline option.
 The provisioning queue remains serial across databases. Its true bound is the current job and
 mandatory cleanup, including object-lock, forced-checkpoint and device waits, so it has no finite
-deadline. Admission under the retained apply/metadata gates now refuses rather than parking.
+deadline. Admission under retained apply/metadata gates refuses rather than parking; SQL
+migrations unwind those gates, wait with the job token and retry the same prepared boundary.
 
 The merged raw-site audit covers every BeginTransaction call under Database src and shared:
 SQL catalog (including ReserveJointTreeOwner), key/value catalog, reclamation, statement apply,
