@@ -1040,7 +1040,9 @@ object ids, so a table scan stops decoding the whole database.
   index-page owner directory. It never copies the whole owner's page set for a bounded call.
   `AllocatePageForWrite` can stamp an index owner before first touch; B-tree roots and every
   split allocation pass their object id. Index pages do not enter row iteration or empty-table
-  probes. Open rebuilds this second directory from existing header owner fields. Allocation
+  probes. `GetOwnerIndexPages(ownerId)` exposes a sorted snapshot of this directory so SQL
+  retirement admission can measure stranded-tree WAL in O(the retiring owners' index pages).
+  Open rebuilds this second directory from existing header owner fields. Allocation
   rollback retains that tag on its empty safe-leak page, so retiring the owner also reclaims
   abandoned trees. Each batch's free headers, directory removals and FSM updates use the existing
   commit protocol; interrupted frees undo, durable frees are skipped on reopen. Neither the

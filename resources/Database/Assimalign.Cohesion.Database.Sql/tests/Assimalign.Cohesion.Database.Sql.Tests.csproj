@@ -57,6 +57,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Tcp" />
 		<!-- Health during SQL recovery uses the real host and the SQL-only recovery barrier. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
+		<!-- Reclamation-cap regressions inspect Hosting's real health result. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Health" />
 		<!-- The SqlDatabaseServer suite and the AddSqlServer verb test run over the
 		     in-memory Connections driver. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />

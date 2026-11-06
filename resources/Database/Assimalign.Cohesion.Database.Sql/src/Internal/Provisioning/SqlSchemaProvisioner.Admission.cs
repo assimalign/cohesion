@@ -59,8 +59,8 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 // New names have no published identity yet. Rendezvous on an old
                 // reservation, then bind the published catalog (or its ordinary miss).
-                // A live user transaction retains that IS grant until commit; only DDL
-                // on the rendezvous table is additionally blocked by this admission.
+                // Object zero is only a rendezvous, not a data identity. Its IS grant
+                // is released after admission even for a live user transaction.
                 tables.Add(migration.Tables.Min());
             }
             if (_catalog.TryGetView(reference.SchemaName ?? referenceSchema, reference.TableName, out var view))
@@ -93,6 +93,10 @@ internal sealed partial class SqlSchemaProvisioner
         // Wait before binding a plan or capturing the auto-commit snapshot. Readers
         // ordinarily need no table lock, but must not bind the old schema here.
         var waiter = transaction ?? await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
+        // No statement work can run concurrently on this session. A mark releases only
+        // this admission's synthetic grant; positive data identities retain their locks.
+        var rendezvous = transaction is not null && tables.SetEquals([0UL])
+            ? _database.Coordinator.LockManager.MarkStatement(waiter.Sequence) : (LockStatementMark?)null;
         try
         {
             foreach (ulong table in tables)
@@ -104,6 +108,7 @@ internal sealed partial class SqlSchemaProvisioner
         catch (TransactionDeadlockException failure) { throw SqlExecutionException.Deadlock(failure); }
         finally
         {
+            if (rendezvous is { } mark) { _database.Coordinator.LockManager.ReleaseSince(mark); }
             if (transaction is null && !_database.IsOffline)
             {
                 await _database.Coordinator.RollbackAsync(waiter, CancellationToken.None).ConfigureAwait(false);

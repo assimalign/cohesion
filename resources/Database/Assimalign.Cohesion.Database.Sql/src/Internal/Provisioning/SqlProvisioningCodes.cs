@@ -27,10 +27,7 @@ internal static class SqlProvisioningCodes
     /// </summary>
     internal const string Drift = "CS03103";
 
-    /// <summary>
-    /// A step of a schema apply failed; the completed reversible steps were compensated.
-    /// </summary>
-    internal const string StepFailed = "CS03104";
+    // CS03104 retired: per-step publication and compensation were removed (#1778).
 
     /// <summary>Unpublished joint preparation failed; the old applied schema remains usable.</summary>
     internal const string JointFailed = "CS03402";

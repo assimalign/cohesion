@@ -156,7 +156,8 @@ public sealed partial class SqlJointTypeMigrationTests
 
         // Assert
         database.OfflineError.ShouldBeNull();
-        database.Provisioning!.FailureCode.ShouldBe("CS03402");
+        if (oom) { database.Provisioning!.FailureCode.ShouldBe("CS03402"); }
+        else { database.Provisioning.ShouldBeNull(); }
         await using var session = await database.CreateSessionAsync(timeout.Token);
         await session.ExecuteAsync("INSERT INTO items VALUES(1000,9)", cancellationToken: timeout.Token);
         database.SchemaProvisioner.JointStage = null;

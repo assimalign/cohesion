@@ -1515,8 +1515,8 @@ internal sealed partial class SqlPlanExecutor
         SqlNamespaces.Require(_catalog, plan.Schema);
         if (plan.IfNotExists && _catalog.TryGetTable(plan.Schema, plan.Name, out _))
         {
-            // A provisioner compensates every successful step. An object created
-            // after it planned is not its work and must never enter that list.
+            // A schema statement must not adopt an object created after planning.
+            // Ordinary ad-hoc IF NOT EXISTS still returns a no-op.
             if (statement.ProvisioningSchema is not null)
             {
                 throw new SqlExecutionException(SqlExecutionException.DuplicateTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableProvisioningCollision, plan.Schema, plan.Name));

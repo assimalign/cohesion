@@ -41,7 +41,7 @@ public sealed class SqlProvisioningAdmissionTests
             new CompiledSchemaTable("z_existing", "Existing", [new("id", DatabaseType.Int32, false),
                 new("note", DatabaseType.String, true)], null, [], []));
         int steps = 0;
-        database.SchemaProvisioner.StepApplied = _ => Interlocked.Increment(ref steps);
+        database.SchemaProvisioner.BeforeJointPublication = _ => Interlocked.Increment(ref steps);
         using var waits = new EventSourceRecorder(EventSource.GetSources().Single(source =>
             source.Name == "Assimalign.Cohesion.Database.Transactions"), EventLevel.Verbose);
         Task<SqlSchemaMigrationResult> applying = database.ApplySchemaAsync(desired, applyingToken.Token).AsTask();
@@ -50,7 +50,7 @@ public sealed class SqlProvisioningAdmissionTests
         {
             await waits.WaitForAsync(written => written.EventName == "LockWaitStart" &&
                 written.Payload is { Count: > 3 } payload && Equals(payload[0], "orders") && Equals(payload[3], "Exclusive"), timeout.Token);
-            Volatile.Read(ref steps).ShouldBe(1);
+            Volatile.Read(ref steps).ShouldBe(0);
 
             // Act: T's owner awaits B before committing. B must complete synchronously;
             // a semaphore wait would form A -> T -> B -> A outside the lock graph.

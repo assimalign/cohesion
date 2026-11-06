@@ -336,9 +336,10 @@ public sealed partial class SqlJointTypeMigrationTests
         finally { await database.Coordinator.RollbackAsync(locks, CancellationToken.None); }
     }
 
-    private static string DifferentialValue(object? value) => value is null ? "NULL" : value.GetType().Name + ":" + Convert.ToString(value, CultureInfo.InvariantCulture);
+    private static string DifferentialValue(object? value) => value is null ? "NULL" : value is byte[] bytes ? "Binary:" + Convert.ToHexString(bytes)
+        : value.GetType().Name + ":" + Convert.ToString(value, CultureInfo.InvariantCulture);
 
-    private static async Task<string[]> CaptureDifferentialSnapshotAsync(SqlDatabase database, CancellationToken token)
+    private static async Task<string[]> CaptureDifferentialSnapshotAsync(SqlDatabase database, CancellationToken token, string order = "Id,Part")
     {
         var state = new List<string>();
         await using var session = await database.CreateSessionAsync(token);
@@ -351,7 +352,9 @@ public sealed partial class SqlJointTypeMigrationTests
             { state.Add("INDEX " + index.Name + " " + string.Join(',', index.ColumnNames) + " " + index.IsUnique + " " + index.IsPrimaryKey + " " + index.Predicate + " " + string.Join(',', index.KeyOrders)); }
             foreach (var constraint in table.Constraints.OrderBy(c => c.Name, StringComparer.Ordinal))
             { state.Add("CONSTRAINT " + constraint.Name + " " + constraint.Kind + " " + string.Join(',', constraint.Columns) + " " + constraint.ReferencedTable + " " + string.Join(',', constraint.ReferencedColumns ?? []) + " " + constraint.CheckExpression + " " + constraint.OnDelete + " " + constraint.OnUpdate); }
-            foreach (var row in await RowsAsync(session, $"SELECT * FROM {table.Name} ORDER BY Id,Part", token))
+            await using (var result = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.ExecuteAsync($"SELECT * FROM {table.Name} ORDER BY {order}", cancellationToken: token))
+            { state.Add("HEADERS " + string.Join(',', result.Columns.Select(column => column.Name))); }
+            foreach (var row in await RowsAsync(session, $"SELECT * FROM {table.Name} ORDER BY {order}", token))
             { state.Add("ROW " + string.Join('|', row.Select(DifferentialValue))); }
         }
         foreach (var row in await RowsAsync(session, "SELECT TABLE_NAME,CONSTRAINT_NAME,CONSTRAINT_TYPE FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS ORDER BY TABLE_NAME,CONSTRAINT_NAME", token))
@@ -359,18 +362,20 @@ public sealed partial class SqlJointTypeMigrationTests
         return state.ToArray();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Seeded joint migration matches per-step behavior (#1778)")]
-    public async Task ApplyAsync_SeededDifferential_ShouldMatchPerStep()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Seeded kept migration matches forced replacement for drops, widening and tightening (#1778)")]
+    public async Task ApplyAsync_SeededDifferential_ShouldMatchForcedRewrite()
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(12));
         const int seed = 177804;
         var random = new Random(seed);
-        int keep = 0, rewrite = 0, keyedKeep = 0, both = 0;
+        int keep = 0, rewrite = 0, keyedKeep = 0, both = 0, matchingErrors = 0;
         var differences = new List<string>();
         for (int pair = 0; pair < 96; pair++)
         {
             int keyShape = pair % 4;
+            string kind = new[] { "drop", "widen", "tighten", "append" }[pair / 4 % 4];
+            bool invalidPrecision = kind == "tighten" && pair % 3 == 0;
             bool retype = random.Next(2) == 0;
             bool priorIndex = random.Next(3) == 0;
             bool dropIndex = priorIndex && random.Next(2) == 0;
@@ -385,7 +390,10 @@ public sealed partial class SqlJointTypeMigrationTests
             SqlCompiledSchema Declaration(bool target)
             {
                 var columns = new List<CompiledSchemaColumn> { new("Id", DatabaseType.Int32, false), new("Part", DatabaseType.Int32, false), new("Value", target && retype ? DatabaseType.Int64 : DatabaseType.Int32, false) };
-                if (target && append) { columns.Add(new("Added", DatabaseType.Int32, false, DefaultLiteral: "9")); }
+                columns.Insert(2, new("Legacy", DatabaseType.Int32, true));
+                if (target && kind == "drop") { columns.RemoveAt(2); }
+                columns.Add(new("Facet", DatabaseType.Decimal, true, Precision: target && kind == "widen" ? 12 : target && kind == "tighten" ? invalidPrecision ? 1 : 5 : 8, Scale: 0));
+                if (target && (append || kind == "append")) { columns.Add(new("Added", DatabaseType.Int32, false, DefaultLiteral: "9")); }
                 var indexes = new List<CompiledSchemaIndex>();
                 if (keyShape == 3) { indexes.Add(new("ux_id", ["Id"], true)); }
                 if (priorIndex && (!target || !dropIndex)) { indexes.Add(new("ix_old", ["Part"], false)); }
@@ -409,7 +417,7 @@ public sealed partial class SqlJointTypeMigrationTests
                 await using var session = await db.CreateSessionAsync(guard.Token);
                 await session.ExecuteAsync("INSERT INTO parent VALUES(0,0),(1,1),(2,2),(3,3)", cancellationToken: guard.Token);
                 var order = Enumerable.Range(1, 16).ToArray(); random.Shuffle(order);
-                await session.ExecuteAsync("INSERT INTO items VALUES " + string.Join(',', order.Select(i => $"({i},{i % 4},{i * 10})")), cancellationToken: guard.Token);
+                await session.ExecuteAsync("INSERT INTO items VALUES " + string.Join(',', order.Select(i => $"({i},{i % 4},99,{i * 10},{i})")), cancellationToken: guard.Token);
                 if (fk && !outgoing) { await session.ExecuteAsync("INSERT INTO child VALUES(1,1),(2,2)", cancellationToken: guard.Token); }
                 if (adhoc) { await session.ExecuteAsync("CREATE UNIQUE INDEX adhoc_key ON items(Id)", cancellationToken: guard.Token); }
                 db.Coordinator.Checkpoint(guard.Token);
@@ -430,10 +438,12 @@ public sealed partial class SqlJointTypeMigrationTests
                 };
                 var error = await Record.ExceptionAsync(async () =>
                 {
-                    if (mode == 0) { await ApplyPerStepAsync(db, source, target, guard.Token); }
+                    db.SchemaProvisioner.ForceJointRewrite = mode == 0;
+                    if (mode == 0) { await db.ApplySchemaAsync(target, guard.Token); }
                     else { await db.SchemaProvisioner.ApplyAsync(target, guard.Token, deferDataScalingSteps: true); await WaitDoneAsync(db, guard.Token); }
                 });
-                errors[mode] = error?.ToString() ?? db.Provisioning?.FailureCode;
+                errors[mode] = error is DatabaseException coded ? string.Join(',', coded.Diagnostics.Select(diagnostic => diagnostic.Code)) : error?.GetType().Name ?? db.Provisioning?.FailureCode;
+                if (errors[mode] is not null) { snapshots[mode] = await CaptureDifferentialSnapshotAsync(db, guard.Token); }
                 if (errors[mode] is null)
                 {
                     var state = (await CaptureDifferentialSnapshotAsync(db, guard.Token)).ToList();
@@ -453,7 +463,8 @@ public sealed partial class SqlJointTypeMigrationTests
                     snapshots[mode] = state.ToArray();
                 }
             }
-            if (errors.Any(e => e is not null))
+            if (errors.Any(e => e is not null) && errors[0] == errors[1] && snapshots[0].SequenceEqual(snapshots[1])) { matchingErrors++; }
+            else if (errors.Any(e => e is not null))
             { differences.Add($"PAIR={pair} key={keyShape} retype={retype} prior={priorIndex} drop={dropIndex} partial={partial} unique={unique} create={create} fk={fk} outgoing={outgoing} adhoc={adhoc} append={append}\nPERSTEP={errors[0]}\nJOINT={errors[1]}"); }
             else
             {
@@ -463,10 +474,11 @@ public sealed partial class SqlJointTypeMigrationTests
             }
         }
         // Assert
-        _output.WriteLine($"seed={seed}; pairs=96; both-success={both}; KeepOwner={keep}; keyedKeep={keyedKeep}; RewriteOwner={rewrite}; differences={differences.Count}");
+        _output.WriteLine($"seed={seed}; pairs=96; both-success={both}; matching-errors={matchingErrors}; KeepOwner={keep}; keyedKeep={keyedKeep}; RewriteOwner={rewrite}; differences={differences.Count}");
         foreach (string difference in differences) { _output.WriteLine(difference); }
-        both.ShouldBe(96);
-        keep.ShouldBe(33); keyedKeep.ShouldBe(27); rewrite.ShouldBe(63);
+        (both + matchingErrors).ShouldBe(96);
+        matchingErrors.ShouldBe(8);
+        keep.ShouldBeGreaterThan(0); keyedKeep.ShouldBeGreaterThan(0); rewrite.ShouldBeGreaterThan(0);
         differences.ShouldBeEmpty();
     }
 

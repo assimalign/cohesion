@@ -232,6 +232,13 @@ internal sealed class SqlRowCollector : IDisposable
         _collationsInitialized = true;
     }
 
+    /// <summary>Test seam over the production comparison, excluding only the stable input ordinal.</summary>
+    internal int CompareKeys(object?[] left, object?[] right)
+    {
+        ResolveCollations();
+        return Compare(new Entry([], left, 0), new Entry([], right, 0));
+    }
+
     private int Compare(Entry left, Entry right)
     {
         for (int i = 0; i < _orderBy.Count; i++)

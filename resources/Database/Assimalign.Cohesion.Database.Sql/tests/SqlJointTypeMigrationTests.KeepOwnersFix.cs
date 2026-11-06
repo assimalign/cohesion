@@ -98,7 +98,7 @@ public sealed partial class SqlJointTypeMigrationTests
             // differs while the operation describes only the NOT NULL transition.
             var portableSource = Compiled(new CompiledSchemaTable("items", "items",
                 [new("v", newType.Storage.Type, true, CustomType: "native_value")], null, [], []));
-            var script = SqlMigrationScriptGenerator.GenerateJoint(SqlSchemaMigrationPlanner.Plan(portableSource, target), portableSource);
+            var script = SqlMigrationScriptGenerator.Generate(SqlSchemaMigrationPlanner.Plan(portableSource, target), portableSource);
             var executor = new SqlPlanExecutor(current.DataStorage, current.Catalog, current.IndexManager, current.Definitions);
             var plan = executor.PlanJointMigration(target, script, guard.Token);
             classification = plan.Tables.Single().KeepsOwner ? "Joint/KeepOwner" : "Joint/RewriteOwner";
@@ -125,10 +125,10 @@ public sealed partial class SqlJointTypeMigrationTests
         Table(current).Columns[0].IsNullable.ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Joint heap-owned index removal rewrites the candidate and reclaims its old pages")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint heap-owned drops keep pages until retirement; same-name replacements rewrite")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ApplyAsync_HeapOwnedIndexRemoval_ShouldRewriteAndReclaimPages(bool replace)
+    public async Task ApplyAsync_HeapOwnedIndexRemoval_ShouldKeepDropAndRewriteReplacement(bool replace)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -136,7 +136,9 @@ public sealed partial class SqlJointTypeMigrationTests
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
         await database.ApplySchemaAsync(OwnerDeclaration(false), guard.Token);
         SeedRaw(database, [7, 8], 1024);
-        await database.ApplySchemaAsync(OwnerDeclaration(false, [new("ix_v", ["w"], false)]), guard.Token);
+        // Seed a heap-owned tree explicitly. First-Build declarations also use
+        // heap ownership; additive indexes on an existing heap use alternate owners.
+        await ApplyOrdinaryParityAsync(database, OwnerDeclaration(false), OwnerDeclaration(false, [new("ix_v", ["w"], false)]), guard.Token);
         ulong heap = Table(database).ObjectId;
         IndexOwnerPages(database, heap).ShouldBeGreaterThan(1);
         string? classification = null;
@@ -151,10 +153,20 @@ public sealed partial class SqlJointTypeMigrationTests
         await DrainReclamationAsync(database, guard.Token);
 
         // Assert
-        IndexOwnerPages(database, heap).ShouldBe(0);
-        database.DataStorage.HasOwnerPages(heap).ShouldBeFalse();
-        classification.ShouldBe("Joint/RewriteOwner");
-        Table(database).ObjectId.ShouldNotBe(heap);
+        if (replace)
+        {
+            IndexOwnerPages(database, heap).ShouldBe(0);
+            database.DataStorage.HasOwnerPages(heap).ShouldBeFalse();
+            classification.ShouldBe("Joint/RewriteOwner");
+            Table(database).ObjectId.ShouldNotBe(heap);
+        }
+        else
+        {
+            IndexOwnerPages(database, heap).ShouldBeGreaterThan(1);
+            database.DataStorage.HasOwnerPages(heap).ShouldBeTrue();
+            classification.ShouldBe("Joint/KeepOwner");
+            Table(database).ObjectId.ShouldBe(heap);
+        }
         await using var reader = await database.CreateSessionAsync(guard.Token);
         (await RowsAsync(reader, "SELECT COUNT(*) FROM items WHERE v=7", guard.Token)).Single()[0].ShouldBe(1024L);
     }

@@ -25,8 +25,6 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSchemaProvisioner.DebugView))]
 internal sealed partial class SqlSchemaProvisioner
 {
-    private static readonly string _errorSqlSchemaProvisionerApplyAsyncFailure4 = ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure4;
-
     private static CompiledSchemaReferentialAction CompiledDeleteAction(SqlCatalogReferentialAction action) => action switch
     {
         SqlCatalogReferentialAction.Restrict => CompiledSchemaReferentialAction.Restrict,
@@ -56,7 +54,7 @@ internal sealed partial class SqlSchemaProvisioner
     // enter any catalog traversal; crash tests capture durable storage after each step.
     internal int CatalogWalkCount { get; private set; }
     internal SqlSchemaMigrationPlan? LastPlan { get; private set; }
-    internal Action<SqlMigrationScriptStep>? StepApplied { get; set; }
+    internal Action<SqlMigrationScriptStep>? BeforeJointPublication { get; set; }
 
     internal SqlSchemaProvisioner(SqlDatabase database, SqlCatalog catalog)
     {
@@ -125,7 +123,6 @@ internal sealed partial class SqlSchemaProvisioner
             throw new DatabaseObjectLockedException(schema.Name, schema.Name, "APPLY SCHEMA");
         }
         BeginTrace(schema, "Apply");
-        TransactionContext? locks = null;
         IDisposable? ddl = null;
         bool transferred = false;
         bool planning = true;
@@ -137,10 +134,6 @@ internal sealed partial class SqlSchemaProvisioner
             TraceStage("Planning", SqlProvisioningCodes.PolicyRefused);
             if (_catalog.PendingMigration is { } intent && !string.Equals(intent.ContentHash, schema.Hash, StringComparison.Ordinal))
             {
-                if (!deferDataScalingSteps)
-                {
-                    throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure, SqlProvisioningCodes.PolicyRefused, Describe()));
-                }
                 await DiscardMismatchedIntentAsync(schema, 0, cancellationToken).ConfigureAwait(false);
             }
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
@@ -176,140 +169,64 @@ internal sealed partial class SqlSchemaProvisioner
             SqlMigrationScript script;
             try
             {
-                script = jointRewrite ? SqlMigrationScriptGenerator.GenerateJoint(renderedPlan, current)
-                    : SqlMigrationScriptGenerator.Generate(renderedPlan, current);
+                script = SqlMigrationScriptGenerator.Generate(renderedPlan, current);
             }
             catch (DatabaseException refusal) { throw PlanningRefusal(schema, renderedPlan.Operations.Count, refusal); }
-            // Choose the complete job before publishing any inline step. The ordinary
-            // generator above deliberately keeps default-only changes refused until SQ-A6.
+            // All entry points prepare the complete target before one catalog commit.
+            // Only data-scaling work on populated tables may be handed to the worker.
             bool jointDeferred = deferDataScalingSteps && FindDeferredSteps(script).Count > 0;
             planning = false;
-            if (jointRewrite || jointDeferred)
-            {
-                var preparation = BeginJointPreparation(cancellationToken);
-                try
-                {
-                    script = new SqlMigrationScript(plan, script.Steps);
-                    TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: script.Steps.Count);
-                    var joint = await PrepareJointMigrationAsync(schema, script, preparation.Stop.Token).ConfigureAwait(false);
-                    Volatile.Write(ref _deferred, joint);
-                    transferred = true;
-                    try
-                    {
-                        JointStage?.Invoke("Handoff");
-                        if (deferDataScalingSteps && joint.JointPlan.Touched.Any(table => _database.DataStorage.HasOwnerPages(table.ObjectId)))
-                        {
-                            PublishProgress(joint.Intent.Steps[0], joint.ProvisioningStepCount, running: false);
-                            TraceOutcome("Deferred");
-                            return new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, 0, WasAlreadyApplied: false);
-                        }
-                    }
-                    catch (Exception failure)
-                    {
-                        // Reservation succeeded, but no execution/handoff was accepted.
-                        // Do not let the outer finally enqueue work after this failure.
-                        try { await joint.StopAsync().ConfigureAwait(false); }
-                        catch (Exception cleanup) { throw JointFailure(new AggregateException(failure, cleanup)); }
-                        if (failure is OperationCanceledException or OutOfMemoryException) { throw; }
-                        throw JointFailure(failure);
-                    }
-                    await joint.RunInlineAsync(preparation.Stop.Token).ConfigureAwait(false);
-                    TraceOutcome("Applied");
-                    return new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, plan.Operations.Count, WasAlreadyApplied: false);
-                }
-                finally { EndJointPreparation(preparation); }
-            }
-            if (_catalog.PendingMigration is { } jointIntent && jointIntent.Steps.Any(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))
-            {
-                // A route flip must not carry the joint job's total into the ordinary script.
-                await DiscardMismatchedIntentAsync(schema, script.Steps.Count, cancellationToken).ConfigureAwait(false);
-            }
-            TraceStage("Prepare", SqlProvisioningCodes.StepFailed, stepCount: script.Steps.Count);
-            var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
-            // This read-only context owns table locks across self-committing statements.
-            // Its rollback only releases locks: no schema/data changes enlist in it.
-            locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
-            await using SqlDatabaseSession session = _database.CreateSchemaSession(schema.Name, cancellationToken, locks.Sequence);
+            var preparation = BeginJointPreparation(cancellationToken);
             try
             {
-                foreach (SqlMigrationScriptStep step in script.Steps)
+                script = new SqlMigrationScript(plan, script.Steps);
+                TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: script.Steps.Count);
+                var joint = await PrepareJointMigrationAsync(schema, script, preparation.Stop.Token, deferDataScalingSteps, jointDeferred).ConfigureAwait(false);
+                Volatile.Write(ref _deferred, joint);
+                try
                 {
-                    TraceStep(script, step);
-                    await session.ExecuteAsync(step.Request, cancellationToken).ConfigureAwait(false);
-                    applied.Add(step);
-                    StepApplied?.Invoke(step);
-                }
-
-                // IF NOT EXISTS and concurrent ad-hoc DDL must not turn an unowned or
-                // mismatched object into a trusted marker. Capture before validation;
-                // SaveSchemaState checks the generation again under the catalog lock.
-                TraceStage("Finalize", SqlProvisioningCodes.StepFailed);
-                ulong generation = _catalog.DdlGeneration;
-                if (FirstCatalogDifference(schema) is { } difference)
-                {
-                    throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure3, Describe(), difference));
-                }
-
-                await _catalog.SaveSchemaStateAsync(
-                    new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, generation),
-                    cancellationToken).ConfigureAwait(false);
-                _formatCheckedStateDocument = schema.CanonicalDocument;
-            }
-            catch (Exception failure)
-            {
-                TraceStepFailure(schema, script, failure);
-                CompensationResult compensation = await CompensateAsync(session, applied).ConfigureAwait(false);
-
-                // A canceled token can also surface as the failure of the step it interrupted (a
-                // commit whose record could not be written is an aborted transaction), so the
-                // token decides, not only the failure's type: a compensated, canceled apply is a
-                // cancellation, as BuildAsync and this method document.
-                if (compensation.IsComplete &&
-                    (failure is OperationCanceledException || cancellationToken.IsCancellationRequested))
-                {
-                    if (failure is OperationCanceledException)
+                    JointStage?.Invoke("Handoff");
+                    if (jointDeferred || deferDataScalingSteps && joint.JointPlan.Tables.Any(table =>
+                        !table.KeepsOwner && table.Previous is { } old && _database.DataStorage.HasOwnerPages(old.ObjectId)))
                     {
-                        throw;
+                        PublishProgress(joint.Intent.Steps[0], joint.ProvisioningStepCount, running: false);
+                        TraceOutcome("Deferred");
+                        var result = new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, 0, WasAlreadyApplied: false);
+                        joint.ReleaseApplyGate = true;
+                        transferred = true;
+                        return result;
                     }
-
-                    throw new OperationCanceledException(
-                        string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorSqlSchemaProvisionerApplyAsyncFailure4, Describe(), schema.Name),
-                        failure,
-                        cancellationToken);
                 }
-
-                string state = compensation.IsComplete
-                    ? ErrorMessages.CompensationComplete
-                    : ErrorMessages.CompensationIncomplete;
-                Exception inner = compensation.Failures.Count == 0
-                    ? failure
-                    : new AggregateException(new[] { failure }.Concat(compensation.Failures));
-                string where = applied.Count < script.Steps.Count
-                    ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationStepFailureContext, applied.Count + 1, script.Steps.Count, Describe(script.Steps[applied.Count].Operation))
-                    : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaRecordFailureContext, script.Steps.Count);
-                // Keep the named dependent view visible at the schema-apply boundary,
-                // rather than requiring callers to inspect the compensation's inner error.
-                string dependency = failure is DatabaseException databaseFailure &&
-                    databaseFailure.Diagnostics.Any(diagnostic => diagnostic.Code == "CS03302")
-                    ? " " + failure.Message : string.Empty;
-                throw new SqlSchemaMigrationException(
-                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure5, SqlProvisioningCodes.StepFailed, Describe(), schema.Name, where, state, dependency),
-                    inner);
+                catch (Exception failure)
+                {
+                    joint.ReleaseApplyGate = false;
+                    transferred = false;
+                    // Reservation succeeded, but no execution/handoff was accepted.
+                    // Do not let the outer finally enqueue work after this failure.
+                    try { await joint.StopAsync().ConfigureAwait(false); }
+                    catch (Exception cleanup)
+                    {
+                        _database.ReportProvisioning(joint.JointFailureProgress);
+                        throw JointFailure(new AggregateException(failure, cleanup), schema, script.Steps);
+                    }
+                    // Stop uses a cancelled execution token to discard the reservation.
+                    // Report the producer's actual outcome, not that cleanup cancellation.
+                    _database.ReportProvisioning(deferDataScalingSteps || !IsImperativeInterruption(failure)
+                        ? joint.JointFailureProgress : null);
+                    if (failure is OperationCanceledException or OutOfMemoryException) { throw; }
+                    throw JointFailure(failure, schema, script.Steps);
+                }
+                await joint.RunInlineAsync(preparation.Stop.Token).ConfigureAwait(false);
+                TraceOutcome("Applied");
+                return new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, plan.Operations.Count, WasAlreadyApplied: false);
             }
-
-            _database.ReportProvisioning(null);
-            TraceOutcome("Applied");
-            return new SqlSchemaMigrationResult(
-                plan.SourceHash,
-                schema.Hash,
-                plan.Operations.Count,
-                WasAlreadyApplied: false);
+            finally { EndJointPreparation(preparation); }
         }
         catch (SqlSchemaMigrationException refusal) when (planning && refusal.Diagnostics.Count == 0)
         {
             // Preserve the base's policy message while making its identity available
-            // through the structured diagnostic and Provisioning too. Execution and
-            // 49a compensation failures have already left this planning boundary.
+            // through the structured diagnostic and Provisioning too.
+            // Joint execution failures have already left this planning boundary.
             var coded = PlanningRefusal(schema, 0, refusal, refusal.Message);
             EnsureFailureTrace(schema);
             TraceFailure(coded);
@@ -322,32 +239,22 @@ internal sealed partial class SqlSchemaProvisioner
         }
         finally
         {
-            try
+            ddl?.Dispose();
+            EndTrace();
+            if (transferred && Deferred is { } pending)
             {
-                if (locks?.State == TransactionState.Active && !_database.IsOffline)
+                try { _database.Engine.ScheduleProvisioning(pending); }
+                catch
                 {
-                    await _database.Coordinator.RollbackAsync(locks, CancellationToken.None).ConfigureAwait(false);
+                    // A rejected enqueue still owns the reservation and apply gate.
+                    // Run its cancelled cleanup before propagating the producer failure.
+                    await pending.StopAsync().ConfigureAwait(false);
+                    throw;
                 }
             }
-            finally
+            else if (!transferred)
             {
-                ddl?.Dispose();
-                EndTrace();
-                if (transferred && Deferred is { } pending)
-                {
-                    try { _database.Engine.ScheduleProvisioning(pending); }
-                    catch
-                    {
-                        // A rejected enqueue still owns the reservation and apply gate.
-                        // Run its cancelled cleanup before propagating the producer failure.
-                        await pending.StopAsync().ConfigureAwait(false);
-                        throw;
-                    }
-                }
-                else if (!transferred)
-                {
-                    _applyGate.Release();
-                }
+                _applyGate.Release();
             }
         }
     }
@@ -720,7 +627,7 @@ internal sealed partial class SqlSchemaProvisioner
         CompiledSchemaColumn? declared = desiredTable?.Columns.FirstOrDefault(candidate =>
             string.Equals(candidate.Name, column.Name, StringComparison.OrdinalIgnoreCase));
         string? defaultLiteral = declared is not null &&
-            string.Equals(CanonicalDefault(declared.DefaultLiteral), column.DefaultLiteral, StringComparison.Ordinal)
+            string.Equals(EffectiveDeclaredDefault(declared, column), column.DefaultLiteral, StringComparison.Ordinal)
                 ? declared.DefaultLiteral : column.DefaultLiteral;
         bool nullable = declared is not null &&
             column.IsNullable == (declared.IsNullable && !IsPrimaryKeyColumn(desiredTable!.PrimaryKey, column.Name))
@@ -847,6 +754,19 @@ internal sealed partial class SqlSchemaProvisioner
         return null;
     }
 
+    // An omitted column DEFAULT inherits a SQL domain default, including on reconciliation.
+    private string? EffectiveDeclaredDefault(CompiledSchemaColumn declared, SqlCatalogColumn actual)
+    {
+        string? inherited = actual.DomainName is null ? null : _catalog.Domains
+            .FirstOrDefault(domain => domain.Name.Equals(actual.DomainName, StringComparison.OrdinalIgnoreCase))?.DefaultLiteral;
+        if (declared.DefaultLiteral is not null)
+        {
+            // Planner keeps an explicit NULL to override a SQL domain's inherited default.
+            return CanonicalDefault(declared.DefaultLiteral) ?? (inherited is null ? null : "NULL");
+        }
+        return inherited is not null && DescribeTypeDifference(declared, actual) is null ? inherited : null;
+    }
+
     // The first column of a table that differs from its declaration, described for a message.
     private string? DescribeColumnDifference(CompiledSchemaTable expected, SqlCatalogTable actual)
     {
@@ -893,7 +813,7 @@ internal sealed partial class SqlSchemaProvisioner
                 return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnIdentityUndeclared, expected.Name, expectedColumn.Name);
             }
 
-            if (!string.Equals(actualColumn.DefaultLiteral, CanonicalDefault(expectedColumn.DefaultLiteral), StringComparison.Ordinal))
+            if (!string.Equals(actualColumn.DefaultLiteral, EffectiveDeclaredDefault(expectedColumn, actualColumn), StringComparison.Ordinal))
             {
                 return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnDefaultMismatch, expected.Name, expectedColumn.Name);
             }
@@ -1123,38 +1043,6 @@ internal sealed partial class SqlSchemaProvisioner
 
         return true;
     }
-
-    private static async ValueTask<CompensationResult> CompensateAsync(
-        SqlDatabaseSession session,
-        IReadOnlyList<SqlMigrationScriptStep> applied)
-    {
-        bool complete = true;
-        var failures = new List<Exception>();
-
-        for (int index = applied.Count - 1; index >= 0; index--)
-        {
-            SqlMigrationScriptStep step = applied[index];
-            if (step.RollbackRequest is null)
-            {
-                complete = false;
-                continue;
-            }
-
-            try
-            {
-                await session.ExecuteAsync(step.RollbackRequest, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                complete = false;
-                failures.Add(exception);
-            }
-        }
-
-        return new CompensationResult(complete, failures);
-    }
-
-    private sealed record CompensationResult(bool IsComplete, IReadOnlyList<Exception> Failures);
 
     private sealed class DebugView
     {

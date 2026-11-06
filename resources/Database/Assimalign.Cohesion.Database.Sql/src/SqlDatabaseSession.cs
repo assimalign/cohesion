@@ -102,7 +102,7 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
     /// a typed request nested deeper is refused (#1151).
     /// </param>
     /// <param name="provisioningSchema">The schema the provisioner's session owns, if any.</param>
-    /// <param name="ddlLockOwner">The apply's retained DDL lock owner, if any.</param>
+    /// <param name="ddlLockOwner">The test-only retained DDL lock owner for statement baselines and adjacent-FK lock probes.</param>
     internal SqlDatabaseSession(
         SqlDatabase database,
         TransactionCoordinator coordinator,
