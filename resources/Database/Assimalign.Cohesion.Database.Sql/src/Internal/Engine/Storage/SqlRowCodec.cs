@@ -85,7 +85,7 @@ internal static class SqlRowCodec
     /// a dropped column keeps its physical ordinal, rows are decoded through that
     /// layout, and DROP COLUMN rewrites no row, #1241), 5 (DROP COLUMN spliced the column out of every stored version, so
     /// the catalog recorded no dropped columns; index keys encode the temporal
-    /// identity, <see cref="ToKeyIdentity"/>, in index trees of B-tree page format 3,
+    /// identity, <see cref="ToKeyIdentity"/>, in index trees of B-tree page format 2,
     /// which order entries by key, entry reference and writer, #1194), 4 (the same
     /// rows, with index trees of B-tree page format 1, ordered by key alone), 3 (the
     /// kind and offset inside temporal keys), 2 (records in the shared page stream)

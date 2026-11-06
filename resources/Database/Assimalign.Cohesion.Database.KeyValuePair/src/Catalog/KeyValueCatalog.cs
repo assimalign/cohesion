@@ -67,8 +67,8 @@ public sealed class KeyValueCatalog
 
     /// <summary>
     /// Gets the entry-space format version of the database's data storage: its entry records and
-    /// the primary index tree that shares their file set. 2 = MVCC-stamped key/value entry records
-    /// in the key space's page chain, indexed by a tree of B-tree page format 3 (#1809); 1 = the
+    /// the primary index tree that shares their file set. Marker 2 = MVCC-stamped key/value entry records
+    /// in the key space's page chain; its tree must be in the current page format (#1809). 1 = the
     /// same records over a tree of B-tree page format 1, and also the value reported when no marker
     /// is persisted. The engine reads this at open and refuses a database with a primary index on
     /// any version but its own.
