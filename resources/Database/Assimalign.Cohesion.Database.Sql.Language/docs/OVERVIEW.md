@@ -24,6 +24,11 @@ discards its target and descendants. SET TRANSACTION refuses inside an active sc
 
 ## Scope
 
+NATURAL before every join type and qualified SELECT wildcards (`t.*`, `schema.table.*`)
+execute through the existing USING and projection machinery (#1792, SQ-J3). Views freeze
+both forms before persistence. LATERAL and row-valued wildcards retain CK00001; see DIALECT
+for the no-common-name, NATURAL CROSS and mutation-source boundaries.
+
 Aggregate calls retain FILTER conditions, DISTINCT/ALL and ordered inputs. The executable
 profile includes BOOL_AND/BOOL_OR/EVERY and sample/population variance and standard deviation
 (#1720, SQ-H1). GROUPING SETS, ROLLUP, CUBE, empty sets, GROUP BY DISTINCT and

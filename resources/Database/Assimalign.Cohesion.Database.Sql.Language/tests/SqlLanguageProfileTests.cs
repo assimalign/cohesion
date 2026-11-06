@@ -115,6 +115,7 @@ public class SqlLanguageProfileTests
 
     [Theory]
     [InlineData(SqlClauses.Using, "SELECT * FROM t JOIN u USING (id);")]
+    [InlineData(SqlClauses.Natural, "SELECT * FROM t NATURAL JOIN u;")]
     [InlineData(SqlClauses.Cte, "WITH cte AS (SELECT * FROM t) SELECT * FROM cte;")]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id IN (SELECT id FROM u);")]
     public void Parse_ExecutableSubquery_IsDeclaredAndReportsNoError(string clause, string sql)
@@ -141,7 +142,6 @@ public class SqlLanguageProfileTests
 
     [Theory]
     [InlineData(SqlClauses.All)]
-    [InlineData(SqlClauses.Natural)]
     public void Profile_UnsupportedClause_IsNotDeclared(string clause)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
@@ -149,7 +149,6 @@ public class SqlLanguageProfileTests
 
     [Theory]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]
-    [InlineData(SqlClauses.Natural, "SELECT * FROM t NATURAL JOIN u;")]
     public void Parse_UnsupportedClause_EmitsModelSpecificDiagnostic(string clause, string sql)
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);

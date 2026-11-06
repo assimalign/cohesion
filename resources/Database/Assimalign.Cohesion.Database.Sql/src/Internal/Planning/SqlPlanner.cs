@@ -237,7 +237,7 @@ internal sealed partial class SqlPlanner
             where = evaluator.BindPredicate(select.Where);
         }
 
-        var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count);
+        var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count, evaluator);
         CaptureViewOrdering(select, columns, bindings, evaluator, orderByProjections);
         foreach (var orderBy in select.OrderBy)
         {
@@ -949,7 +949,7 @@ internal sealed partial class SqlPlanner
     internal static bool ContainsStar(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        return expression is SqlStarExpression || Children(expression).Any(ContainsStar);
+        return expression is SqlStarExpression or SqlQualifiedStarExpression || Children(expression).Any(ContainsStar);
     }
 
     /// <summary>Rejects the first column reference in an expression, outside a subquery.</summary>
@@ -1212,7 +1212,7 @@ internal sealed partial class SqlPlanner
     private void ValidateDefaultSyntax(SqlExpression expression, string column)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlColumnReferenceExpression or SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression ||
+        if (expression is SqlColumnReferenceExpression or SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression or SqlQualifiedStarExpression ||
             expression is SqlFunctionCallExpression call && _functions.Catalog.IsAggregate(call.FunctionName))
         {
             throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,

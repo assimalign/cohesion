@@ -920,7 +920,7 @@ public sealed partial class SqlQueryParser
             Location.Create(1, 1, position, position));
     }
 
-    private SqlExpression ParseColumnRefOrFunction(ref TokenLexer lexer)
+    private SqlExpression ParseColumnRefOrFunction(ref TokenLexer lexer, bool qualifiedStar = false)
     {
         var pos = lexer.Current.Position;
         bool quoted = lexer.Current.Type == TokenType.QuotedIdentifier;
@@ -946,7 +946,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer); // consume dot
             if (lexer.Current.Type == TokenType.Asterisk)
             {
-                return ParseUnsupportedQualifiedStar(ref lexer, pos);
+                return ParseQualifiedStar(ref lexer, pos, first, null, qualifiedStar);
             }
             if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
             {
@@ -960,7 +960,7 @@ public sealed partial class SqlQueryParser
                     Advance(ref lexer);
                     if (lexer.Current.Type == TokenType.Asterisk)
                     {
-                        return ParseUnsupportedQualifiedStar(ref lexer, pos);
+                        return ParseQualifiedStar(ref lexer, pos, second, first, qualifiedStar);
                     }
                     if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
                     {
@@ -983,13 +983,30 @@ public sealed partial class SqlQueryParser
             Location.Create(1, 1, pos, firstEnd));
     }
 
-    private SqlStarExpression ParseUnsupportedQualifiedStar(ref TokenLexer lexer, int start)
+    private SqlQualifiedStarExpression ParseQualifiedStar(ref TokenLexer lexer, int start,
+        string table, string? schema, bool projection)
     {
         int end = lexer.Current.Position + 1;
-        AddUnsupportedSurfaceDiagnostic(start, end,
-            ErrorMessages.ParseUnsupportedQualifiedStarVoid);
+        if (!projection)
+        {
+            AddUnsupportedSurfaceDiagnostic(start, end, ErrorMessages.QualifiedStarContext);
+        }
+        else { EnterLeaf(); }
         Advance(ref lexer);
-        return new SqlStarExpression(Location.Create(1, 1, start, end));
+        return new SqlQualifiedStarExpression(table, schema, Location.Create(1, 1, start, end));
+    }
+
+    private static bool StartsQualifiedStar(TokenLexer lexer)
+    {
+        if (!IsIdentifierOrKeyword(ref lexer)) { return false; }
+        for (int part = 0; part < 2; part++)
+        {
+            if (!AdvancePastComments(ref lexer) || lexer.Current.Type != TokenType.Dot ||
+                !AdvancePastComments(ref lexer)) { return false; }
+            if (lexer.Current.Type == TokenType.Asterisk) { return true; }
+            if (!IsIdentifierOrKeyword(ref lexer)) { return false; }
+        }
+        return false;
     }
 
     private SqlExpression ParseFunctionCall(ref TokenLexer lexer)

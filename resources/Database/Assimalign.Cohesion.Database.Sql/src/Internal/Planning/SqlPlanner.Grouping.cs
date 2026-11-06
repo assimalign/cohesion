@@ -273,7 +273,7 @@ internal sealed partial class SqlPlanner
                 if (evaluator.IsOuterColumn(reference)) { return; }
                 throw new SqlPlanningException("CS05017", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerPlanGroupSqlPlanning3, reference.ColumnName), reference.Location);
             }
-            if (expression is SqlStarExpression)
+            if (expression is SqlStarExpression or SqlQualifiedStarExpression)
             {
                 throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanGroupSqlPlanning4, expression.Location);
             }

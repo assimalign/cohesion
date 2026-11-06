@@ -1243,7 +1243,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), table COPY TO STDOUT (#1724, +1 clause), SQL/JSON path functions JSON_VALUE, JSON_QUERY and JSON_EXISTS (#1722, +3 clauses), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and named savepoints (+3 clauses, #1726), and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), the profile has **91 of 93 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), table COPY TO STDOUT (#1724, +1 clause), SQL/JSON path functions JSON_VALUE, JSON_QUERY and JSON_EXISTS (#1722, +3 clauses), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and named savepoints (+3 clauses, #1726), and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), NATURAL joins (#1792, SQ-J3, +1 clause), the profile has **92 of 93 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -1264,8 +1264,7 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **2 excluded clauses** are `NATURAL`,
-and `ALL`. Counts describe named clauses, not
+The **1 excluded clause** is `ALL`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
@@ -1295,13 +1294,13 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` | Supported accessor subset, measured (+3 clauses) | Lax/strict paths, RETURNING, wrappers, quotes, empty/error behavior and statement budgets; see SQL/JSON path functions below. |
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
-| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], RIGHT [OUTER], FULL [OUTER], CROSS and comma joins over stored/system/derived sources, with parenthesized join groups. INNER/LEFT/RIGHT/FULL require ON or USING; CROSS accepts neither. FULL requires hash-compatible conditions (CS05070 otherwise). NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
+| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], RIGHT [OUTER], FULL [OUTER], CROSS and comma joins over stored/system/derived sources, with parenthesized join groups. INNER/LEFT/RIGHT/FULL require ON or USING; CROSS accepts neither. FULL requires hash-compatible conditions (CS05070 otherwise). NATURAL and qualified SELECT wildcards execute as described below; LATERAL remains excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. GROUPING SETS, ROLLUP, CUBE, empty sets and GROUPING masks execute; aggregate windows execute; other ordered-set aggregates report `CK00001`. |
 | Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, and scalar `op ANY`, `op SOME` or `op ALL` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `CS00006`). Subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `CK00001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain CK00001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `CK00001` |
 | DML `RETURNING` | Supported subset, measured | Written-row SELECT list and affected count; see the RETURNING contract below |
-| `NATURAL JOIN` | Recognized, not supported | rejected with `CK00001` |
+| `NATURAL JOIN` | Supported, measured | Derives USING names in left-output order; frozen in views. No common names lowers INNER/LEFT/RIGHT/CROSS to CROSS; FULL refuses with CS05070. |
 | `UNION` / `INTERSECT` / `EXCEPT` | Supported, measured | Each accepts ALL or DISTINCT (default); available in every query position, with parenthesized operands and combined ordering/paging. See [Set operations](#set-operations-1114). |
 | `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE, DELETE or MERGE; optional output column lists; also INSERT INTO t WITH ... SELECT |
 | `WITH RECURSIVE` | Supported subset, measured | Anchor-typed UNION ALL and DISTINCT fixpoints, demand-driven shared scans, budget/cancellation and EXPLAIN. WITH RECURSIVE before MERGE remains excluded. |
@@ -1597,10 +1596,10 @@ comment, and a string literal or block comment may span lines. `//` is not a
 comment: `/` is the division operator, so `//` is a syntax error.
 
 A recognized clause outside the profile keeps its `CK00001`, for example
-`NATURAL JOIN`. The parser stops at such a clause by design, so the text
+`JOIN LATERAL (SELECT ...) alias`. The parser stops at such a clause by design, so the text
 from that clause on adds no second diagnostic. Text the parser stopped at before
 it reached the clause still reports `CS00003`: `DELETE FROM t WHRE id = 1
-NATURAL JOIN u` reports both, so fixing the unsupported join does not reveal a new error. A
+JOIN LATERAL (SELECT id FROM u) x ON TRUE` reports both, so fixing the unsupported source does not reveal a new error. A
 derived table, `(SELECT ...) alias`, is parsed as a query relation; its alias is required.
 Named `:name` parameters are not part of the dialect; bind `@name` or `$1`.
 
@@ -2234,8 +2233,42 @@ registered INFORMATION_SCHEMA/COHESION_SCHEMA relation or aliased derived query,
 (including bare JOIN), LEFT [OUTER], RIGHT [OUTER], FULL [OUTER], or CROSS joins. INNER, LEFT, RIGHT and FULL require exactly one
 ON predicate or USING (column [, column ...]); CROSS accepts neither. Missing ON/USING
 retains CK00001; malformed joins and CROSS with a condition fail
-with an error and never execute as a product. NATURAL, LATERAL and qualified wildcards
-such as t.* keep CK00001. Derived comma inputs, FROM t, (SELECT ...) d, execute.
+with an error and never execute as a product. LATERAL keeps CK00001.
+Derived comma inputs, FROM t, (SELECT ...) d, execute.
+
+NATURAL precedes bare JOIN or any explicit join type, including INNER, LEFT/RIGHT/FULL
+[OUTER] and CROSS. It forbids an explicit ON or USING (CS00003). Binding derives common
+visible output names in left-input order, comparing identifiers without case, then uses
+the ordinary USING type, collation, ordering and nullability rules. Repeated common names
+on either side fail CS01015. Stored, derived, persisted-view and system inputs all participate.
+Dropped columns are absent from the catalog output. PostgreSQL
+src/backend/parser/parse_clause.c:1242-1274 supplies the common-name algorithm; unlike its
+strcmp, Cohesion uses its case-insensitive identifier rule. As explicitly required by SQ-J3,
+zero common names lower INNER, LEFT, RIGHT and CROSS to CROSS even with an empty input;
+FULL fails CS05070. PostgreSQL preserves the outer side for zero-name LEFT/RIGHT with an
+empty opposite input. NATURAL CROSS is a dialect extension: common names lower to INNER
+USING, and no common names lower to CROSS (PostgreSQL gram.y:14062-14081 has no NATURAL CROSS).
+
+Standalone SELECT list items t.* and schema.table.* expand that local input's own columns,
+in declared order, including its physical columns hidden from unqualified * by USING.
+Outer-extended inputs retain nullable metadata and NULL values, with their original types.
+Aliases hide base names and schema qualifiers as for qualified scalar references; unknown
+or ambiguous qualifiers fail CS01015 before reads. Expansion composes with other projections,
+DISTINCT, ordering aliases/ordinals, windows, derived/view/system inputs and compound operands.
+Grouped wildcard projections retain the existing CS05017 wildcard boundary. Row-valued uses,
+including COUNT(t.*), remain CK00001. UPDATE FROM, DELETE USING and MERGE USING do not
+accept a wildcard as a relation or scalar expression; SELECT bodies in those sources may
+project qualified wildcards. Qualified RETURNING wildcards retain CK00001, as do direct
+NATURAL mutation-source joins; ordinary RETURNING * and explicit qualified columns retain
+their existing behavior. LATERAL's refusal is unchanged.
+
+CREATE VIEW freezes NATURAL into explicit USING names (or CROSS for zero common names)
+and expands both wildcard forms through the existing text edits. Later ADD COLUMN cannot
+add a join predicate or output column, including after reopen. NATURAL is risky in an ad-hoc
+query under schema change (PostgreSQL doc/src/sgml/queries.sgml:391-405); views avoid that risk.
+The canonical audit of columns named natural and lateral retains the same quoting, so
+SQL format 37 and wire contracts are unchanged. SqlNaturalJoinTests records independent,
+hand-derived PostgreSQL-oracle rows, with the documented dialect departures.
 
 JOIN binds more tightly than comma: in FROM a, b JOIN c ON ..., ON can see b and c,
 but cannot see a. It also cannot reference a later input. Unknown/hidden qualifiers
@@ -2373,7 +2406,7 @@ index inner is freshly decoded. Earlier indexed inputs retained by later steps a
 copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
 Capability preflight skips advertised clauses and reports the first unadvertised
-one. Thus USING cannot mask a later NATURAL JOIN or a later FOR UPDATE/SHARE clause. MERGE INTO ... USING
+one. Thus USING cannot mask a later LATERAL source or a later FOR UPDATE/SHARE clause. MERGE INTO ... USING
 binds and explains; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
 
 ## MERGE syntax, binding and execution (#1715, SQ-M1/SQ-M2/SQ-M3)
@@ -2421,7 +2454,7 @@ RETURNING supports merge_action(), a contextual zero-argument text expression av
 in this projection (CS01053 elsewhere; CS01006 for arguments/modifiers), including nested
 scalar expressions. It is separate from the standalone executable-function profile. Bare *
 expands target columns then visible source columns, preserving source USING merges;
-qualified wildcards retain CK00001. Source metadata includes absent-side nullability,
+qualified RETURNING wildcards retain CK00001. Source metadata includes absent-side nullability,
 including merged USING outputs.
 RETURNING emits one row per applied action and none for DO NOTHING. merge_action() yields
 INSERT, UPDATE or DELETE. Target columns contain the new row for INSERT/UPDATE and the old
@@ -3386,7 +3419,7 @@ WITH inside subqueries, derived tables or CTE bodies, modifying CTE bodies,
 `AS [NOT] MATERIALIZED` and SEARCH/CYCLE report `CK00001`.
 A WITH list followed by another command kind reports `CS00003`.
 Capability scanning continues through advertised WITH lists, OVER and WINDOW;
-NATURAL JOIN and deferred window forms retain their capability diagnostics.
+Direct NATURAL mutation-source joins and deferred window forms retain their capability diagnostics.
 
 ## WITH RECURSIVE binding and fixpoints (#1719, SQ-R1/SQ-R2)
 
@@ -3467,7 +3500,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 91/93 declared-clause count.
+These contextual exclusions do not change the 92/93 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -5080,7 +5113,7 @@ carried per node.
 the internal recognized-unsupported table (`SqlUnsupportedVocabulary`), either
 parses inside a supported clause or reports exactly one `CK00001` naming its
 construct. The table holds the clause keywords the preflight scan rejects,
-such as `NATURAL` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
+such as `SELECT ALL` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
 rejects with `CK00001`: `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`, SELECT-tail `FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` /

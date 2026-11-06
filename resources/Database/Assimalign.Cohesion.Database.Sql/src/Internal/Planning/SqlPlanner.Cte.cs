@@ -15,6 +15,10 @@ internal sealed partial class SqlPlanner
         var evaluator = new SqlExpressionEvaluator([], _parameters, defaultCollation: _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
             outerScope: OuterScope, outerDependencies: OuterDependencies);
+        foreach (var column in select.Columns)
+        {
+            if (column.Expression is SqlQualifiedStarExpression star) { evaluator.QualifiedStarOrdinals(star); }
+        }
         if (select.Columns.Any(column => column.Expression is SqlStarExpression))
         {
             throw new SqlPlanningException("CS05013", ErrorMessages.ConstantQueryWildcard, select.Location);

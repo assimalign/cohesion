@@ -127,7 +127,7 @@ public sealed class SqlDialectDocumentationTests
         // Arrange
         string dialect = ReadDialect();
         int supported = SqlLanguageProfile.Instance.Clauses.Count();
-        const int exclusions = 2;
+        const int exclusions = 1;
 
         // Act
         string matrix = dialect.Split("## Statement matrix")[1].Split("\n## ")[0];

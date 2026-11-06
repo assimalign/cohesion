@@ -88,28 +88,52 @@ public sealed class SqlJoinWireTests
         empty.ShouldBeEmpty();
     }
 
-    /// <summary>Unimplemented join forms produce the capability diagnostic before planning over the wire.</summary>
-    /// <param name="statement">The excluded join form.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - JOIN: excluded forms report CK00001 over the wire")]
-    [InlineData(false, "SELECT u.id FROM users u NATURAL JOIN users v")]
-    [InlineData(true, "SELECT u.id FROM users u NATURAL JOIN users v")]
-    [InlineData(false, "SELECT u.* FROM users u JOIN users v USING (id)")]
-    [InlineData(true, "SELECT u.* FROM users u JOIN users v USING (id)")]
-    [InlineData(false, "SELECT u.* FROM users u LEFT JOIN users v USING (id)")]
-    [InlineData(true, "SELECT u.* FROM users u LEFT JOIN users v USING (id)")]
+    /// <summary>NATURAL and qualified projections use the ordinary result exchange.</summary>
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - JOIN: NATURAL and qualified wildcards return exact typed rows (#1792)")]
+    [InlineData(false, "SELECT u.id FROM users u NATURAL JOIN users v ORDER BY u.id", 1)]
+    [InlineData(true, "SELECT u.id FROM users u NATURAL JOIN users v ORDER BY u.id", 1)]
+    [InlineData(false, "SELECT u.* FROM users u JOIN users v USING (id) ORDER BY u.id", 3)]
+    [InlineData(true, "SELECT u.* FROM users u JOIN users v USING (id) ORDER BY u.id", 3)]
+    [InlineData(false, "SELECT u.* FROM users u LEFT JOIN users v USING (id) ORDER BY u.id", 3)]
+    [InlineData(true, "SELECT u.* FROM users u LEFT JOIN users v USING (id) ORDER BY u.id", 3)]
+    public async Task QueryAsync_NaturalAndQualifiedJoin_ShouldReturnTypedRowsOverTheWire(bool tcp, string statement, int width)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout(30));
+
+        // Act
+        var result = await connection.QueryAsync(statement, cancellationToken: SqlClientTestHarness.Timeout(30));
+
+        // Assert
+        object?[][] expected = width == 1 ? [[1], [2]] : [[1, "ada", 100L], [2, "grace", 200L]];
+        string[] names = width == 1 ? ["id"] : ["id", "name", "score"];
+        DatabaseType[] types = width == 1 ? [DatabaseType.Int32] : [DatabaseType.Int32, DatabaseType.String, DatabaseType.Int64];
+        result.Count.ShouldBe(2);
+        result.Columns.Select(column => column.Name).ShouldBe(names);
+        result.Columns.Select(column => column.Type).ShouldBe(types);
+        for (int i = 0; i < expected.Length; i++)
+        { Enumerable.Range(0, width).Select(ordinal => result[i][ordinal]).ShouldBe(expected[i]); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - JOIN: LATERAL and row-valued wildcards retain CK00001 (#1792)")]
+    [InlineData(false, "SELECT COUNT(u.*) FROM users u")]
+    [InlineData(true, "SELECT COUNT(u.*) FROM users u")]
+    [InlineData(false, "SELECT u.id FROM users u JOIN LATERAL (SELECT id FROM users) d ON TRUE")]
+    [InlineData(true, "SELECT u.id FROM users u JOIN LATERAL (SELECT id FROM users) d ON TRUE")]
     public async Task QueryAsync_ExcludedJoin_ShouldReportCapabilityDiagnosticOverTheWire(bool tcp, string statement)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
-        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout(30));
 
         // Act / Assert
         var error = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.QueryAsync(statement, cancellationToken: SqlClientTestHarness.Timeout()));
+            await connection.QueryAsync(statement, cancellationToken: SqlClientTestHarness.Timeout(30)));
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
         error.Message.ShouldContain("CK00001", Case.Sensitive);
         (await connection.QueryAsync("SELECT u.id FROM users u JOIN users v ON u.id = v.id ORDER BY u.id",
-            cancellationToken: SqlClientTestHarness.Timeout())).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+            cancellationToken: SqlClientTestHarness.Timeout(30))).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 
     /// <summary>Ambiguous binding errors remain explicit and leave the client connection usable.</summary>

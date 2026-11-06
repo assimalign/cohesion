@@ -527,7 +527,7 @@ public sealed class SqlLanguageConformanceTests
         // Named savepoint controls (#1726, XT-4) add exactly three measured clauses.
         // SQL/JSON query functions (#1722, SQ-N2) add three measured expression clauses.
         // Table COPY TO STDOUT (#1724, SQ-C1) adds one measured streaming clause.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(91);
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(92);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -1187,6 +1187,9 @@ public sealed class SqlLanguageConformanceTests
         [SqlClauses.Using] = Query("SELECT id FROM t LEFT JOIN t copy USING (id) ORDER BY id;",
             expression => expression is SqlSelectExpression select && select.From[0].Joins[0].UsingColumns.Count == 1,
             [[1], [2], [3]]),
+        [SqlClauses.Natural] = Query("SELECT t.* FROM t NATURAL LEFT JOIN t copy ORDER BY t.id;",
+            expression => expression is SqlSelectExpression select && select.From[0].Joins[0].IsNatural,
+            [[1, "Ada", 36], [2, "Grace", 45], [3, "Alan", 41]]),
         [SqlClauses.Where] = new("SELECT id FROM t WHERE age > 40 AND name LIKE 'G%' ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression { Where: not null },
             async (session, result) =>

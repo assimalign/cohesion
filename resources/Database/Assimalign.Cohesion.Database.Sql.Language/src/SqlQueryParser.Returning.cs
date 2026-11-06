@@ -64,7 +64,7 @@ public sealed partial class SqlQueryParser
         }
 
         if (IsAtEnd(ref lexer)) { AddExpectedDiagnostic(ref lexer, "a RETURNING expression"); return []; }
-        var columns = ParseSelectColumns(ref lexer);
+        var columns = ParseSelectColumns(ref lexer, qualifiedStar: false);
         if (IsWord(ref lexer, "INTO"))
         {
             RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length, "RETURNING ... INTO");

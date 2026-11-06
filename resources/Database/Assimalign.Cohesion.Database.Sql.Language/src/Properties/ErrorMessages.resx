@@ -92,7 +92,7 @@
   <data name="SqlQueryParserParsePrimaryVoid2" xml:space="preserve"><value>A parameter name must be an identifier (a letter or _, then letters, digits or _) or digits only; use $name, @name, or $1.</value></data>
   <data name="SqlQueryParserMissingExpressionVoid" xml:space="preserve"><value>Expected an expression before the end of the statement.</value></data>
   <data name="SqlQueryParserMissingExpressionVoid2" xml:space="preserve"><value>Expected an expression but found {0}.</value></data>
-  <data name="ParseUnsupportedQualifiedStarVoid" xml:space="preserve"><value>Qualified SQL wildcard projections are not supported; select explicit columns or use unqualified *.</value></data>
+  <data name="QualifiedStarContext" xml:space="preserve"><value>Qualified SQL wildcards are supported only as standalone SELECT list items; row-valued wildcards and qualified RETURNING wildcards are not supported.</value></data>
   <data name="QueryParserParseFunctionCallArgsVoid" xml:space="preserve"><value>The SQL function {0} is not supported.</value></data>
   <data name="SqlQueryParserParseNiladicVoid" xml:space="preserve"><value>The precision argument of {0} is not supported.</value></data>
   <data name="SqlQueryParserParseNiladicVoid2" xml:space="preserve"><value>{0} is written without parentheses.</value></data>
@@ -114,6 +114,12 @@
   <data name="SqlQueryParserParseJoinClausesVoid5" xml:space="preserve"><value>SQL supports INNER, LEFT [OUTER], RIGHT [OUTER], FULL [OUTER] and CROSS JOIN.</value></data>
   <data name="SqlQueryParserParseJoinClausesVoid6" xml:space="preserve"><value>CROSS JOIN cannot have ON or USING.</value></data>
   <data name="SqlQueryParserParseJoinClausesVoid7" xml:space="preserve"><value>INNER, LEFT, RIGHT and FULL JOIN require ON or USING.</value></data>
+  <data name="NaturalJoinCondition" xml:space="preserve">
+    <value>NATURAL JOIN cannot have an explicit ON or USING clause.</value>
+  </data>
+  <data name="NaturalDmlSource" xml:space="preserve">
+    <value>NATURAL JOIN in a mutation source is not supported.</value>
+  </data>
   <data name="SqlQueryParserParseJoinClausesVoid8" xml:space="preserve"><value>JOIN accepts exactly one of ON or USING.</value></data>
   <data name="QueryParserParseRelationReferenceVoid" xml:space="preserve"><value>Expected SELECT in a derived table.</value></data>
   <data name="QueryParserParseRelationReferenceVoid2" xml:space="preserve"><value>Expected ')' after the derived query.</value></data>

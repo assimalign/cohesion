@@ -59,6 +59,13 @@ internal sealed partial class SqlPlanner
                     projections.Add(PassThrough(columns[ordinal].Name, ordinal, columns, evaluator, merged: true));
                 }
             }
+            else if (column.Expression is SqlQualifiedStarExpression star)
+            {
+                foreach (int ordinal in evaluator.QualifiedStarOrdinals(star))
+                {
+                    projections.Add(PassThrough(columns[ordinal].Name, ordinal, columns, evaluator, merged: false));
+                }
+            }
             else if (column.Expression is SqlColumnReferenceExpression reference && !evaluator.IsOuterColumn(reference))
             {
                 int ordinal = evaluator.ResolveColumn(reference);

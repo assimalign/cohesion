@@ -159,11 +159,15 @@ internal sealed partial class SqlPlanner
                 (rendered.Text.StartsWith("CAST(", StringComparison.Ordinal) || rendered.Text.StartsWith("CASE ", StringComparison.Ordinal) ||
                     rendered.Text.StartsWith("COALESCE(", StringComparison.Ordinal)))
             { binding.Edits[projected.Location.Start] = (rendered.Length, rendered.Text + " AS " + SqlObjectIdentity.Quote(projected.ColumnName)); }
-            if (column.Expression is not SqlStarExpression { Location: not null } star) { continue; }
+            if (column.Expression is not (SqlStarExpression or SqlQualifiedStarExpression) || column.Expression.Location is null) { continue; }
+            var star = column.Expression;
+            bool qualified = star is SqlQualifiedStarExpression;
+            var ordinals = star is SqlQualifiedStarExpression selected ? scope.QualifiedStarOrdinals(selected)
+                : outputOrdinals ?? Enumerable.Range(0, columns.Count).ToArray();
             var names = new List<string>();
-            foreach (int ordinal in outputOrdinals ?? Enumerable.Range(0, columns.Count).ToArray())
+            foreach (int ordinal in ordinals)
             {
-                string name = RenderViewColumn(ordinal, columns, bindings, select.From[0].Table, scope, merged: true);
+                string name = RenderViewColumn(ordinal, columns, bindings, select.From[0].Table, scope, merged: !qualified);
                 names.Add(name + " AS " + SqlObjectIdentity.Quote(columns[ordinal].Name));
             }
             binding.Edits[star.Location!.Start] = (star.Location.End - star.Location.Start, string.Join(", ", names));

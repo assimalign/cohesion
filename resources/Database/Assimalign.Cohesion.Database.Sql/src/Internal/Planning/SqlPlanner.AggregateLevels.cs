@@ -136,9 +136,18 @@ internal sealed partial class SqlPlanner
         foreach (var item in select.From)
         {
             Match(item.Table, false);
+            var leftNames = item.Joins.Any(join => join.IsNatural) ? AggregateColumnNames(item.Table, select).ToList() : null;
             foreach (var join in item.Joins)
             {
-                Match(join.Table, column.TableAlias is null && join.UsingColumns.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase));
+                if (leftNames is null)
+                {
+                    Match(join.Table, column.TableAlias is null && join.UsingColumns.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase));
+                    continue;
+                }
+                var rightNames = AggregateColumnNames(join.Table, select).ToArray();
+                var names = NaturalUsingNames(join, leftNames, rightNames);
+                Match(join.Table, column.TableAlias is null && names.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase));
+                leftNames.AddRange(rightNames.Where(name => !names.Contains(name, StringComparer.OrdinalIgnoreCase)));
             }
         }
         return (matches == 1, matches > 0 || qualifier);
@@ -149,9 +158,18 @@ internal sealed partial class SqlPlanner
             {
                 RuntimeHelpers.EnsureSufficientExecutionStack();
                 Match(group.Item.Table, hidden);
+                var leftNames = group.Item.Joins.Any(join => join.IsNatural) ? AggregateColumnNames(group.Item.Table, select).ToList() : null;
                 foreach (var join in group.Item.Joins)
                 {
-                    Match(join.Table, hidden || column.TableAlias is null && join.UsingColumns.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase));
+                    if (leftNames is null)
+                    {
+                        Match(join.Table, hidden || column.TableAlias is null && join.UsingColumns.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase));
+                        continue;
+                    }
+                    var rightNames = AggregateColumnNames(join.Table, select).ToArray();
+                    var names = NaturalUsingNames(join, leftNames, rightNames);
+                    Match(join.Table, hidden || column.TableAlias is null && names.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase));
+                    leftNames.AddRange(rightNames.Where(name => !names.Contains(name, StringComparer.OrdinalIgnoreCase)));
                 }
                 return;
             }
@@ -169,8 +187,16 @@ internal sealed partial class SqlPlanner
             var groupNames = AggregateColumnNames(group.Item.Table, owner).ToList();
             foreach (var join in group.Item.Joins)
             {
-                groupNames.AddRange(AggregateColumnNames(join.Table, owner)
-                    .Where(name => !join.UsingColumns.Contains(name, StringComparer.OrdinalIgnoreCase)));
+                if (!join.IsNatural)
+                {
+                    groupNames.AddRange(AggregateColumnNames(join.Table, owner)
+                        .Where(name => !join.UsingColumns.Contains(name, StringComparer.OrdinalIgnoreCase)));
+                    continue;
+                }
+                var rightNames = AggregateColumnNames(join.Table, owner).ToArray();
+                var usingNames = NaturalUsingNames(join, groupNames, rightNames);
+                groupNames = usingNames.Concat(groupNames.Where(name => !usingNames.Contains(name, StringComparer.OrdinalIgnoreCase)))
+                    .Concat(rightNames.Where(name => !usingNames.Contains(name, StringComparer.OrdinalIgnoreCase))).ToList();
             }
             return groupNames;
         }
@@ -190,13 +216,32 @@ internal sealed partial class SqlPlanner
             {
                 foreach (var item in query.From)
                 {
-                    names.AddRange(AggregateColumnNames(item.Table, query));
+                    if (!item.Joins.Any(join => join.IsNatural))
+                    {
+                        names.AddRange(AggregateColumnNames(item.Table, query));
+                        foreach (var join in item.Joins)
+                        {
+                            names.AddRange(AggregateColumnNames(join.Table, query)
+                                .Where(name => !join.UsingColumns.Contains(name, StringComparer.OrdinalIgnoreCase)));
+                        }
+                        continue;
+                    }
+                    var visible = AggregateColumnNames(item.Table, query).ToList();
                     foreach (var join in item.Joins)
                     {
-                        names.AddRange(AggregateColumnNames(join.Table, query)
-                            .Where(name => !join.UsingColumns.Contains(name, StringComparer.OrdinalIgnoreCase)));
+                        var rightNames = AggregateColumnNames(join.Table, query).ToArray();
+                        var usingNames = NaturalUsingNames(join, visible, rightNames);
+                        visible = usingNames.Concat(visible.Where(name => !usingNames.Contains(name, StringComparer.OrdinalIgnoreCase)))
+                            .Concat(rightNames.Where(name => !usingNames.Contains(name, StringComparer.OrdinalIgnoreCase))).ToList();
                     }
+                    names.AddRange(visible);
                 }
+            }
+            else if (projection.Expression is SqlQualifiedStarExpression star)
+            {
+                foreach (var relation in QueryRelations(query).Where(relation =>
+                    SqlExpressionEvaluator.MatchesQualifier(relation, star.TableName, star.SchemaName)))
+                { names.AddRange(AggregateColumnNames(relation, query)); }
             }
             else
             {
@@ -210,6 +255,9 @@ internal sealed partial class SqlPlanner
         }
         return names;
     }
+
+    private static IReadOnlyList<string> NaturalUsingNames(SqlJoinClause join, IEnumerable<string> left, IEnumerable<string> right)
+        => join.IsNatural ? left.Where(name => right.Contains(name, StringComparer.OrdinalIgnoreCase)).ToArray() : join.UsingColumns;
 
     private static IEnumerable<SqlRelationReference> QueryRelations(SqlSelectExpression select)
     {

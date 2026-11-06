@@ -1663,6 +1663,24 @@ use existing target-pinned materialization. In-process, InMemory/TCP, live claus
 parser round trips and the NativeAOT sample exercise these contracts. No public boundary,
 reference, persisted format, protocol frame or metadata field changes.
 
+## NATURAL joins and qualified wildcards (#1792, SQ-J3)
+
+Binding derives NATURAL's common visible names in left-output order, ignoring case,
+then runs the existing USING binder. Repeated common names retain CS01015. No common
+names lower INNER/LEFT/RIGHT/CROSS to CROSS; FULL retains CS05070. NATURAL CROSS with
+common names lowers to INNER USING. These explicit scope decisions differ from PostgreSQL
+for NATURAL CROSS and empty-input zero-name outer joins; see DIALECT and its independent
+oracle corpus (PostgreSQL parse_clause.c:1242-1274 and gram.y:14062-14081).
+
+Qualified stars expand local relation physical ordinals through ordinary pass-through
+projections, preserving qualified USING types and outer nullability. ORDER BY counts each
+expansion independently. No operator, retained buffer, budget or execution contract changes.
+View binding replaces NATURAL keywords with the effective join type and inserts explicit
+USING names, then expands stars through the existing edits mechanism. Reopen tests add
+new common columns and prove unchanged view rows and columns. The canonical audit for
+natural/lateral identifiers changes no quoting, format or wire contract. Direct mutation
+NATURAL joins, qualified RETURNING wildcards and row-valued stars keep CK00001.
+
 ## N-way joins (#1109)
 
 ORDER BY aliases following a wildcard count its visible output columns after USING merges;
@@ -1729,7 +1747,7 @@ Delivery transfers the final fresh index inner; every earlier input retained by 
 detaches only selected binary cells. Null-extended outer rows follow the same ownership rule.
 No interface, visibility grant, project reference, reflection or protocol frame is added.
 The unreleased storage format advances 13 -> 14 for the canonical FROM shape; older files
-are refused without an upgrade path. DIALECT.md records syntax and the retained t.* gap.
+are refused without an upgrade path. DIALECT.md records syntax and qualified SELECT wildcard expansion (#1792).
 
 ## Type-name resolution (#1108)
 
@@ -7896,8 +7914,7 @@ Identity columns, standalone sequences, identity ALTER/RESTART, OVERRIDING, SERI
 Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
-NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
-subqueries, `Serializable`
+LATERAL joins, UPDATE SET subqueries, `Serializable`
 isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash spill,
 and index-only result production (a seek always fetches the row).
 (Row-level MVCC visibility and secondary indexes — DDL, write-path maintenance, and planner seek
