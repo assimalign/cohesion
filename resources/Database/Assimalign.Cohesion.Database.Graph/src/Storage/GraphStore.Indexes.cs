@@ -97,10 +97,13 @@ public sealed partial class GraphStore
                     entries.Capacity = capacity;
                 }
                 reserve?.Invoke(32L + key.Length);
-                visit?.Invoke(); // Refuse before entering the allocating physical bracket.
+                if (text) { visit?.Invoke(); } // Text extraction and insertion share admission.
                 entries.Add((reference, key));
             }
         }
+        // Preserve exact-key validation in label-scan order, then admit buffered insertions
+        // before the first page allocation. Oversized keys retain their original error order.
+        if (!text) { foreach (var entry in entries) { cancellationToken.ThrowIfCancellationRequested(); visit?.Invoke(); } }
         bool published = false;
         ulong inserted = await ApplyAsync(context, async bracket =>
         {
@@ -323,6 +326,10 @@ public sealed partial class GraphStore
             var registrations = new List<BTreeIndexRegistration>();
             foreach (var (registration, page, slot) in ReadRegistrations(_storage))
             {
+                // Open runs after logical scrub. Recheck recovered liveness before attaching
+                // trees or collecting abandoned owners; a refusal cannot reclaim other data.
+                if (registration.RootPageId < 0 && RetirementStatus(registration.ObjectId, _coordinator.PruneBound, receipt: true) == 0)
+                { throw new StorageCorruptionException(page, slot, ErrorMessages.RegistrationIdentityInvalid); }
                 if (registration.RootPageId > 0) { registrations.Add(registration); }
                 _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
                 if (scheduleReclamation) { ScheduleIndexReclamation(registration.ObjectId); }

@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -25,6 +26,12 @@ internal static class GraphRecordCodec
         { throw Corrupt(page, slot, ErrorMessages.RecordTruncated, new EndOfStreamException(ErrorMessages.RecordTruncated)); }
         if (bytes[17] != FormatVersion)
         { throw UnsupportedFormat(page, slot); }
+        if (bytes[16] == 3)
+        {
+            if (bytes.Length < 34) { throw Corrupt(page, slot, ErrorMessages.RecordTruncated); }
+            if (BinaryPrimitives.ReadUInt64LittleEndian(bytes.Slice(26)) > 1)
+            { throw Corrupt(page, slot, ErrorMessages.TextIndexKindInvalid); }
+        }
     }
 
     internal static StorageCorruptionException UnsupportedFormat(PageId? page = null, int slot = 0)
@@ -116,7 +123,6 @@ internal static class GraphRecordCodec
                         source, target, input.ReadString(), Properties(input, page, slot)), TypeId: typeId);
                     break;
                 case 3:
-                    if (revision > 1) { throw Corrupt(page, slot, ErrorMessages.TextIndexKindInvalid); }
                     record = new GraphRecord(kind, id, Label: input.ReadString(), PropertyKey: input.ReadString());
                     break;
                 default: throw Corrupt(page, slot, ErrorMessages.RecordKindInvalid);
