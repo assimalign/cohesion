@@ -13,8 +13,7 @@ DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
 // An opt-in test handshake retains the ordinary SDK entry point and declaration.
 bool handshake = builder.Configuration["Sample:TestHandshake"] == "true";
-using Socket? reservation = handshake ? new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) : null;
-reservation?.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+using Socket? reservation = handshake ? ReserveTestPort() : null;
 int port = reservation is null ? 5740 : ((IPEndPoint)reservation.LocalEndPoint!).Port;
 
 builder.AddSql("sample-sql", sql =>
@@ -59,6 +58,33 @@ else
         await host.StopAsync(shutdown.Token);
     }
     Console.WriteLine("STOPPED");
+}
+
+// Match Hosting.ApplicationModel/tests/TestObjects/TestPorts.cs: bind(0) and outgoing
+// connections cannot claim ports below the platform ephemeral ranges. Retain the reservation
+// through Build, and retry occupied or Windows-reserved ports before selecting a candidate.
+static Socket ReserveTestPort()
+{
+    const int firstPort = 20000;
+    const int portCount = 12000;
+    for (int attempt = 0; ; attempt++)
+    {
+        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        int candidate = firstPort + (Environment.ProcessId % portCount + attempt) % portCount;
+        try
+        {
+            socket.Bind(new IPEndPoint(IPAddress.Loopback, candidate));
+            return socket;
+        }
+        catch (SocketException exception) when (attempt < portCount - 1 &&
+            exception.SocketErrorCode is SocketError.AddressAlreadyInUse or SocketError.AccessDenied)
+        { socket.Dispose(); }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
 }
 
 /// <summary>

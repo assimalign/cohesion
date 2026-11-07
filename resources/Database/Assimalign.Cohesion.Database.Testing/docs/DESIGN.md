@@ -87,13 +87,14 @@ programs compose reaches template CI.
 
 ## Applied-schema rollback SDK acceptance (#1779)
 
-The SampleHost supports an opt-in stdin READY/STOP handshake with a reserved loopback port;
+The SampleHost supports an opt-in stdin READY/STOP handshake with a reserved loopback port in 20000-31999, retrying occupied/reserved candidates;
 its ordinary schema declaration and runtime builder are unchanged. The process acceptance test
 launches that packaged-SDK executable, stops it, publishes an additive schema through the engine,
 and launches the older executable again. It asserts CS03405 with the refused DropColumn, reads
 the newer value through TCP and inserts from the older application using the stored default.
 The main integration gate runs this suite after SDK packing; per-run worktrees do not repack
-the shared NuGet cache.
+the shared NuGet cache. The fixture disables the RID output suffix so the tests' recursive copy
+puts its apphost directly under SampleHost/, as the executable test requires.
 
 ## Diagnostics
 
