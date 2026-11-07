@@ -82,6 +82,9 @@ internal sealed partial class SqlPlanExecutor
             if (result is SqlSpilledResultSet spilled) { spilled.Location = location; }
             return result;
         }
+        catch (StorageTempException exception) { throw SqlSpilledResultSet.Translate(exception, location); }
+        catch (System.AggregateException exception) when (exception.Flatten().InnerExceptions.All(error => error is StorageTempException))
+        { throw SqlSpilledResultSet.TranslateCleanup(exception, location); }
         finally
         {
             if (frame is not null) { metrics.EndAnalysisFrame(frame); }

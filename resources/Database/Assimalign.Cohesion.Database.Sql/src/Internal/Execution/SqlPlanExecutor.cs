@@ -306,7 +306,7 @@ internal sealed partial class SqlPlanExecutor
         bool incrementalDistinct = false, int? retainRows = null, SqlDatabaseSession? spillOwner = null)
     {
         if (isDistinct && incrementalDistinct)
-        { return ProjectUnorderedDistinct(matches, projections, limit, offset, evaluator, cancellationToken); }
+        { return ProjectUnorderedDistinct(matches, projections, limit, offset, evaluator, cancellationToken, spillOwner); }
         var projected = ProjectAndSortRows(matches, projections, orderBy, evaluator, orderByProjections, cancellationToken,
             out var spilled, isDistinct ? null : limit, isDistinct ? null : offset, retainRows, spillOwner, isDistinct, limit, offset);
         if (spilled is not null) { return spilled; }

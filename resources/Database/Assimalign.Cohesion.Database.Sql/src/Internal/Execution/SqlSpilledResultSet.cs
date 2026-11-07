@@ -33,6 +33,7 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     private readonly long _limit;
     private bool _disposed;
     internal Location? Location { get; set; }
+    internal bool OwnsStatement(StorageTempStatement statement) => ReferenceEquals(_statement, statement);
     internal void CaptureMetrics(SqlStatementMetrics metrics)
     {
         // Transform consumes the owning merge first. Once evaluation ends, discard its

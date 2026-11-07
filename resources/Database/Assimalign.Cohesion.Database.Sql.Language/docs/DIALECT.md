@@ -1,5 +1,36 @@
 # The Declared SQL Dialect
 
+## Plain GROUP BY and hash DISTINCT spilling (#1789, SQ-L3a)
+
+An eligible root GROUP BY or unordered SELECT DISTINCT spills on the existing statement
+grant boundary. Existing groups keep accumulating; new-group inputs partition by hash,
+with eight partitions per level and at most eight levels. Exhausting that bound is
+CS05067 with a repartitioning-limit message. A single existing skewed group never spills;
+its live state must still fit. In-memory engines require an explicit TempDirectory.
+
+Spilled and fitting results have the same first-seen group order, first complete DISTINCT
+representative, collated spelling, calls, sequence state, first expression error and visits.
+Keys, FILTER and accepted arguments evaluate once before writing evaluated values. Completed
+groups pass through an external ordinal sort before HAVING and projection. An unordered
+LIMIT/OFFSET also stops projection and sequences at the fitting boundary.
+
+| Row/state shape | Capacity |
+| --- | --- |
+| Scalar key + COUNT(*) | 352 B per live group; 8,000 groups exceed ten 262,144 B grants and complete with default quotas |
+| Native COUNT, SUM/AVG with a proved numeric bound, single-family MIN/MAX | Spillable; fixed state and retained extrema stay charged. SUM/AVG require argument magnitude times physical statement temp quota to fit Decimal, preventing delayed overflow errors |
+| Integer columns/calls, sequences, bounded NUMERIC columns/casts, numeric constants | Can establish the SUM/AVG magnitude proof; unbounded NUMERIC, floating sums and unproven compound inputs retain CS05067 |
+| Encoded row | At most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; G must admit the existing external sorter |
+| STRING_AGG/ARRAY_AGG, aggregate DISTINCT/ORDER BY, statistical/application accumulators, grouping sets, direct window-over-group owners, nested relation bodies | Existing refusal/ownership; no hash spill permission |
+| Deferred collation, second key family, unsupported cells or application-binary cells | CS05067 |
+
+The ordinal reader and a downstream sort share the statement memory grant. Source, partition,
+ordinal and downstream sort files share one physical statement quota, including overlapping
+runs. Temporary CK0500x failures are located and leave the session usable. Success, refusal,
+error and cancellation release the files through the existing result/session lifecycle;
+startup sweeping handles leftovers after an abrupt stop. EXPLAIN ANALYZE adds
+hash_spill_batches and hash_spill_passes and the existing byte/run/merge fields. When both
+hash and downstream sorting spill, hash-prefixed byte/run fields describe the hash phase.
+
 ## Root ORDER BY and ordered DISTINCT spilling (#1789, SQ-L2b)
 
 At the root of a plain SELECT, ORDER BY and ordered DISTINCT may use temporary runs when
@@ -5544,7 +5575,8 @@ identities without taking transaction object locks. Unindexed equijoins can use 
 regardless of actual size: an unknown input estimate is 4096, including an empty or tiny input
 without a countable index. Full ON/WHERE residuals, duplicate keys, NULL and LEFT semantics remain.
 An ON condition referencing any derived String/Json/Character column retains nested loops to
-preserve deferred collation errors. No hash spill exists.
+preserve deferred collation errors. Hash joins retain their existing memory refusal;
+eligible plain hash aggregation and DISTINCT spill as described above.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
 It limits accounted concurrently live hash-build storage per statement. MERGE, UPDATE FROM and

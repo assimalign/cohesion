@@ -50,7 +50,7 @@ TempDirectory overrides must be dedicated descendants of RootPath; option checks
 first segment a database could take (a leading dot is safe) and link components below the root.
 A default RootPath is refused with its own message; an empty RootPath remains in-memory. An in-memory engine has no
 space unless TempDirectory is explicitly set. The options snapshot includes TempDirectory,
-TempSpaceQuota and StatementTempSpaceQuota. Root plain SELECT sorts, including CTAS source roots, consume this substrate as described below; other operators retain their current memory policy.
+TempSpaceQuota and StatementTempSpaceQuota. Root plain SELECT sorts, including CTAS source roots, and eligible plain hash aggregation/DISTINCT consume this substrate as described below; other operators retain their current memory policy.
 
 TempSpaceQuota is nullable: an explicit nonnegative physical-byte cap, or min(10 GiB, 25% of
 available bytes) measured after startup sweeping. An unavailable probe uses zero until CreateRun
@@ -87,6 +87,83 @@ after a kill, and on every OS after power loss, runs can remain until the next d
 Windows process exit deletes delete-on-close runs; OS backups of RootPath can capture live temp files.
 No durable data, catalog, journal, record-space or wire format changes.
 
+
+## Plain hash aggregation and hash DISTINCT spilling (#1789, SQ-L3a)
+
+An explicitly permitted root GROUP BY or unordered SELECT DISTINCT hands off on the
+existing CS05067 reservation boundary. There is no new public API, diagnostic identity,
+durable format or event. PostgreSQL's design is followed at
+`src/backend/executor/nodeAgg.c:1864-1928` (hash_agg_check_limits and spill mode) and
+`:3027-3080` (hashagg_spill_tuple): existing groups continue accumulating; evaluated
+inputs that would create new groups go to eight lazy hash partitions. Each replay
+uses another three hash bits, keeps its new groups in memory and partitions its new
+keys again. Eight partition levels is the limit. Exhaustion retains CS05067 with the
+specific eight-pass repartitioning message; an individual group that grows past its
+live grant also retains CS05067. One repeated key creates one group and never spills.
+
+Keys, FILTER and accepted aggregate arguments execute once, at their original input
+boundary and in their original order. A staged volatile consumer first finishes its
+input predicates into a bounded list or an input-order spool. FILTER rejection skips
+arguments. Partitions contain values and acceptance flags, never expression trees;
+replay makes no application, sequence, predicate or expression call. Only native fixed
+state transitions are eligible. SUM/AVG also require a static magnitude proof: argument
+magnitude times the statement's physical temp quota must fit Decimal. Every spilled
+row consumes at least one physical byte and all root partition files coexist before
+replay, making that quota a conservative cardinality bound. This prevents replay from
+delaying a checked-sum overflow until after later volatile calls or input errors.
+Integer columns, integer-returning calls, sequences, numeric constants and bounded
+NUMERIC columns/casts can supply that proof. Unconstrained NUMERIC, floating sums and
+unproven compound numeric expressions retain CS05067 when the grant fills.
+
+The capacity contract is by live row and state shape:
+
+| Shape | Admission and spill capacity |
+| --- | --- |
+| One scalar group key, COUNT(*) | 96 B key + 128 B group + 128 B accumulator = 352 B per live group; 8,000 groups are 2,816,000 B, over ten 262,144 B grants |
+| K fixed scalar keys, A ordinary native aggregates | 56 + 40K B key and 128 + 128A B state per group, before variable payloads; a replay entry adds 32 B |
+| COUNT, bounded SUM/AVG, single-family MIN/MAX | Fixed native state; MIN/MAX also charge the retained extreme's variable payload and refuse if existing live state outgrows the grant |
+| Unordered hash DISTINCT | Original seen entry and output row each pay their existing charge; the first row/spelling survives. Replayed keys pay their key plus a 64 B entry allowance |
+| Rows in partitions or ordinal spool | Private SQ-L2 row encoding, at most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; G must admit SQ-L2's sorter |
+| STRING_AGG, ARRAY_AGG, DISTINCT/ordered aggregates, statistical or application accumulators | Existing CS05067 refusal; no spill permission |
+| Grouping sets, direct window-over-group owners, correlated/deferred frames, SQL/JSON, DML, nested relation bodies | Existing ownership and refusal; no inherited hash spill permission |
+| Deferred collation, second key family, application-binary cells, unsupported or oversized encoded cells | CS05067; no approximate key, state or result |
+
+Group order is the original first-seen order, including without ORDER BY. On handoff,
+the fitting dictionary's insertion ranks form an already ordered prefix; suffix input
+records receive monotonically increasing ordinals above that prefix. Replays preserve
+the first ordinal and key representative. Completed key/aggregate summaries are spooled,
+their dictionary references and charges are released, and SQ-L2 externally sorts summaries
+by ordinal before HAVING and projection. The prefix ranks avoid enlarging every fitting
+accumulator or allocating a per-group ordinal map. Unordered LIMIT/OFFSET stops projection
+at the same group as the fitting collector, including sequence state. Hash DISTINCT uses
+the same partition and ordinal mechanism, preserving the first complete projected row.
+
+The ordinal merge completes before a downstream ORDER BY starts. Its single summary
+reader plus decoded-row overlap reserves from the statement ledger; the downstream
+collector gets only the remainder. The source spool, hash partitions, ordinal runs and
+downstream sort share one StorageTempStatement and one physical quota. A delivered
+SqlSpilledResultSet takes that owner; otherwise execution disposes it. Partition writers,
+bounded codec frames and the bounded recursion stack are row-count-independent scratch;
+the two-size live-heap corpus pins a 1 MiB allowance above a 1 MiB grant for 128-character
+keys and rejects a mutant retaining one object per input row. Existing fitting-state
+charges and the no-temp ordinary execution representation are retained.
+
+EXPLAIN ANALYZE reports hash_spill_batches and hash_spill_passes, and the existing
+spilled_bytes, spill_peak_bytes, spill_runs and spill_merge_passes. Where a downstream
+sort also spills, its ordinary fields describe the shared final owner and hash-prefixed
+byte/run fields describe the hash phase. Counters reflect actual partitions and ordinal
+sort runs; tests never use durations to decide correctness.
+
+The commerce-shaped default-grant probe completes a 1.5-million-row annual repeat-customers slice with 250,000 groups. The 500,000-product category-rank CTE/window shape still reaches an existing nested/join memory refusal; its completion needs the SQ-L3b/SQ-L4 owners. The 800,000-row eager NOT IN vector also retains CS05067. These probes preserve those explicit scope boundaries.
+
+No durable write or flush boundary is added. Crash images captured at partition append
+and ordinal-merge completion, with the fault-injecting durable recorder armed, reopen
+with the exact original rows and catalog. Existing temp CRC pages, delete-on-close,
+startup sweep, quotas and free-space floor cover abrupt termination. Temp failures are
+located CK0500x SQL errors, outside the durable-storage failure walker, and leave the
+session and an explicit transaction usable. Input producers release page latches before
+every temporary call. Disposal preserves the initiating error and records cleanup failure
+as exception data.
 
 ## Root SELECT sort spilling (#1789, SQ-L2b)
 
@@ -11174,8 +11251,9 @@ scan/seek/system-view scratch remain outside the grant. COUNT(*) and low-cardina
 can consume input much larger than the budget on the pipelined path.
 Every exit releases reservations, including cancellation, failed decoding and budget refusal.
 CS05067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
-message and one diagnostic code. Root sort spilling is described above; the remaining retained
-buffers do not partition or spill yet. Standalone ANALYZE remains later work.
+message and one diagnostic code. Root sort and eligible plain hash aggregation/DISTINCT
+spilling are described above; the remaining retained buffers do not spill yet.
+Standalone ANALYZE remains later work.
 
 Joined UPDATE FROM, DELETE USING and MERGE also reserve retained decoded target identities,
 non-hash input buffers, derived-source copies, normalized intermediate frames, associations,

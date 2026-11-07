@@ -421,9 +421,12 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private DatabaseResult ProjectUnorderedDistinct(IEnumerable<object?[]> matches, IReadOnlyList<SqlProjection> projections,
-        SqlRowCount? limit, SqlRowCount? offset, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        SqlRowCount? limit, SqlRowCount? offset, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         SqlSelectMemory retainedBytes = default, seenBytes = default;
+        HashSpill? spill = null;
+        Exception? spillFailure = null;
+        long ordinal = 0;
         try
         {
             _definitions.ObserveSelectRetention?.Invoke("distinct", true, 0);
@@ -434,6 +437,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var source in matches)
             {
                 var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                long inputOrdinal = ordinal++;
                 // Base projected every row before hashing. A collation/hash failure must not
                 // suppress later projection calls; a projection failure still stops at its base row.
                 if (distinctFailure is not null) { continue; }
@@ -441,9 +445,27 @@ internal sealed partial class SqlPlanExecutor
                 {
                     if (!seen.Contains(output))
                     {
-                        RetainSelectRow(ref seenBytes, output, overhead: 64);
-                        RetainSelectRow(ref retainedBytes, output);
-                        seen.Add(output); rows.Add(output);
+                        if (spill is null)
+                        {
+                            long previous = seenBytes.Bytes;
+                            try
+                            {
+                                RetainSelectRow(ref seenBytes, output, overhead: 64);
+                                RetainSelectRow(ref retainedBytes, output);
+                                seen.Add(output); rows.Add(output);
+                            }
+                            catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode && spillOwner?.Database.Engine.TempSpace is not null)
+                            {
+                                if (seenBytes.Bytes != previous)
+                                {
+                                    long bytes = seenBytes.RemoveRow(output, 64); seenBytes.Bytes -= bytes;
+                                    _metrics!.ReleasePlainSelectMemory(bytes);
+                                }
+                                spill = new HashSpill(this, spillOwner, collations);
+                                spill.Append(output, [], inputOrdinal, cancellationToken);
+                            }
+                        }
+                        else { spill.Append(output, [], inputOrdinal, cancellationToken); }
                     }
                 }
                 catch (Exception failure) when (CanDeferRetentionFailure(failure))
@@ -451,10 +473,18 @@ internal sealed partial class SqlPlanExecutor
             }
             cancellationToken.ThrowIfCancellationRequested();
             distinctFailure?.Throw();
+            if (spill is not null)
+            {
+                spill.EmitDistinct(rows, cancellationToken);
+                rows.Clear(); rows.Capacity = 0; seen.Clear(); seen.TrimExcess();
+                ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes);
+                return spill.FinishDistinct(projections, limit, offset, cancellationToken);
+            }
             _definitions.ObserveSelectRetention?.Invoke("distinct", true, rows.Count);
             return MaterializeProjected(projections, ApplyRowWindow(rows, limit, offset));
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
+        catch (Exception failure) { spillFailure = failure; throw; }
+        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); spill?.Dispose(spillFailure); }
     }
 
     // As in grouped consumption, stack-guard failures wait for the base input drain.
