@@ -192,9 +192,10 @@ internal sealed partial class SqlDeclaredDatabase
         {
             _result = Mode == SqlProvisioningMode.Verify
                 ? await database.VerifySchemaAsync(Schema, cancellationToken).ConfigureAwait(false)
-                : await database.SchemaProvisioner.ApplyAsync(Schema, cancellationToken, !RunMigrationsInline).ConfigureAwait(false);
+                : await database.SchemaProvisioner.ApplyAsync(Schema, cancellationToken, !RunMigrationsInline, holdUnsafeChanges: true).ConfigureAwait(false);
         }
 
+        if (database.Provisioning?.Operation == "SchemaHeld") { return; }
         await ApplyScriptsAsync(database, cancellationToken).ConfigureAwait(false);
 
         // Step 6 (owner decision 65): every persisted definition binds to the engine's catalog. A

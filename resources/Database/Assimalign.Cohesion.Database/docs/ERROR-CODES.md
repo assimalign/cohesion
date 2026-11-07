@@ -266,6 +266,7 @@ structured-carrier messages remain unprefixed.
 | New (#1447, SQ-A3) | CS03402 | Joint preparation/space admission failed or unpublished target/route discarded; old schema retained, unsafe-storage latches still apply |
 | New (#1447, SQ-A3 fix) | CS03403 | Joint publication commit unconfirmed; recovery determines old/new schema |
 | New (#1447, SQ-A3 fix) | CS03404 | Session relation creation or table rename names an unpublished table reserved by a pending joint plan |
+| New (#1779, SQ-A7) | CS03405 | Build holds an earlier applied schema whose reversal is destructive or re-adds a dropped column; stored schema stays online, Degraded, with refused steps |
 | COHSQLS001 | CS03201 | Schema/constraints |
 | COHSQLS002 | CS03202 | Schema/constraints |
 | COHSQLS003 | CS03203 | Schema/constraints |

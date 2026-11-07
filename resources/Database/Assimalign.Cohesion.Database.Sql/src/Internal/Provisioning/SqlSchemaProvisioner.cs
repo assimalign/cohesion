@@ -106,7 +106,8 @@ internal sealed partial class SqlSchemaProvisioner
     internal async ValueTask<SqlSchemaMigrationResult> ApplyAsync(
         SqlCompiledSchema schema,
         CancellationToken cancellationToken,
-        bool deferDataScalingSteps = false)
+        bool deferDataScalingSteps = false,
+        bool holdUnsafeChanges = false)
     {
         ArgumentNullException.ThrowIfNull(schema);
         cancellationToken.ThrowIfCancellationRequested();
@@ -149,17 +150,33 @@ internal sealed partial class SqlSchemaProvisioner
             SqlSchemaMigrationPlan plan;
             try
             {
-                plan = SqlSchemaMigrationPlanner.Plan(current, schema);
+                // Plan the complete diff before applying policy. A private opt-in copy lets
+                // the existing public planner keep its strict contract; never publish its hash.
+                var policySchema = !holdUnsafeChanges || schema.AllowsDestructiveChanges ? schema : new SqlCompiledSchema(
+                    schema.Format, schema.Name, true, schema.Types, schema.Tables, schema.Principals);
+                var diff = SqlSchemaMigrationPlanner.Plan(current, policySchema);
+                plan = new SqlSchemaMigrationPlan(diff.SourceHash, schema.Hash, diff.Operations);
             }
-            catch (SqlSchemaMigrationException refused)
+            catch (SqlSchemaMigrationException policyFailure)
             {
                 // The planner knows the schemas, not where they are applied.
                 throw new SqlSchemaMigrationException(
-                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure2, SqlProvisioningCodes.PolicyRefused, Describe(), refused.Message),
-                    refused);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure2, SqlProvisioningCodes.PolicyRefused, Describe(), policyFailure.Message),
+                    policyFailure);
             }
 
             LastPlan = plan;
+            bool rollback = holdUnsafeChanges && recorded is not null &&
+                !string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal) && _catalog.HasAppliedSchema(schema.Hash);
+            var refused = plan.Operations.Where(operation => rollback
+                ? operation.Safety != SqlSchemaMigrationSafety.Safe || operation.Kind == SqlSchemaMigrationOperationKind.AddColumn
+                : operation.Safety != SqlSchemaMigrationSafety.Safe && !schema.AllowsDestructiveChanges).ToArray();
+            if (refused.Length > 0)
+            {
+                if (holdUnsafeChanges) { return HoldSchema(schema, recorded, plan, refused, rollback); }
+                throw CodedMigrationFailure(SqlProvisioningCodes.PolicyRefused,
+                    DescribeHeldSchema(schema, recorded, refused, rollback));
+            }
             bool jointRewrite = RequiresJointMigration(plan);
             // Joint preparation consumes complete target table descriptions, including
             // reorder/key changes that have no single-statement DDL lowering. Keep the

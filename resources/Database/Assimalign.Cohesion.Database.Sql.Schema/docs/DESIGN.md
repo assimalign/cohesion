@@ -8,8 +8,10 @@ REAL to DOUBLE and same-type facets preserving the entire source range can be Sa
 length, precision or scale, rounding and every unproven conversion require destructive opt-in.
 Domain conversions remain conservative, including schema-declared domains: the engine can retain
 application casts that this assembly cannot inspect. Metadata-only changes keep their existing policy.
-The runtime wraps a planner refusal with CS03105 before any step runs, including reverse
-migrations when an older application declares its schema after a successful publication.
+The planner retains its destructive opt-in refusal. Runtime Build additionally classifies
+applied-schema history: an unsafe reverse migration holds at the stored schema with CS03405;
+a never-seen destructive declaration without opt-in holds with CS03105. Explicit apply keeps
+throwing CS03105 without opt-in. No step of a held plan runs (#1779).
 This changes no serialized schema shape; v12 remains current and SDK files are unchanged.
 
 ## Index key orders and format v12 (#1631, SQ-K1; #1787, SQ-K4)

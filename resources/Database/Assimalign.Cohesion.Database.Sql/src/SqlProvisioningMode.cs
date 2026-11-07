@@ -9,7 +9,10 @@ public enum SqlProvisioningMode : byte
     /// <summary>
     /// The default. The build creates the database when it does not exist, then plans the
     /// difference between the recorded schema and the declared one and applies it on the schema
-    /// session; a schema already applied is skipped.
+    /// session; a schema already applied is skipped. An unsafe earlier applied declaration holds
+    /// at the stored schema with Degraded provisioning (CS03405), ignoring destructive opt-in.
+    /// A never-seen destructive declaration without opt-in also holds (CS03105). No held step runs;
+    /// use Verify when drift must fail the build.
     /// </summary>
     Apply = 0,
 

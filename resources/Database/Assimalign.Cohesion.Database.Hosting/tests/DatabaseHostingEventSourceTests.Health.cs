@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 public sealed partial class DatabaseHostingEventSourceTests
 {
-    private static readonly string[] _healthPayload = ["hostId", "engineName", "database", "reason", "cause", "operation", "objectName", "position", "stepCount", "rowsProcessed", "totalRows"];
+    private static readonly string[] _healthPayload = ["hostId", "engineName", "database", "reason", "cause", "operation", "objectName", "position", "stepCount", "rowsProcessed", "totalRows", "failureCode", "detail"];
 
     [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Health tracing: real provisioning transitions survive concurrent polls")]
     [InlineData(false)]

@@ -633,7 +633,9 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// any schema. The checks run in the order the root base's members use: disposal, the schema,
     /// the token, then the offline refusal, then the declaration.
     /// Potentially lossy TYPE conversions, including reverse migrations after application rollback,
-    /// require the declaration's destructive-change opt-in before any step runs.
+    /// require the declaration's destructive-change opt-in before any step runs. This explicit tool
+    /// call throws CS03105 without opt-in; Build instead holds unsafe declarations online,
+    /// reporting the stored schema and refused steps through Provisioning.
     /// Readers, writers and session DDL naming a touched table wait through the joint job before
     /// binding the published schema. The engine's configured LockTimeout bounds reservation;
     /// zero waits without a timeout. Imperative cancellation or reservation timeout clears the

@@ -1312,6 +1312,7 @@ public sealed partial class SqlCatalog
 
             var locations = new List<(PageId PageId, int SlotIndex)>(records.Count);
 
+            Action? publishHistory = null;
             using var checkpointAdmission8 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using (var transaction = _storage.BeginTransaction("SqlCatalog"))
             {
@@ -1334,11 +1335,13 @@ public sealed partial class SqlCatalog
                     locations.Add(_storage.InsertRow(transaction, record));
                 }
 
+                if (pending is null) { publishHistory = StageSchemaHistory(transaction, state.ContentHash, state.Generation); }
                 transaction.Commit();
             }
 
             if (pending is null)
             {
+                publishHistory!();
                 _schemaStateLocations = locations;
                 _schemaState = state;
                 _pendingMigrationLocations = [];
@@ -1497,6 +1500,10 @@ public sealed partial class SqlCatalog
                         }
                         _scriptStateLocation = (unit.PageId, unit.SlotIndex);
                         break;
+                    case schemaHistoryRecordKind:
+                        LoadSchemaHistory(ref reader, (unit.PageId, unit.SlotIndex));
+                        if (!reader.IsAtEnd) { throw new SqlCatalogException("CS06059", ErrorMessages.SchemaHistoryInvalid); }
+                        break;
                     case functionRecordKind:
                     case domainRecordKind:
                         LoadDefinition(kind, reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
@@ -1535,6 +1542,11 @@ public sealed partial class SqlCatalog
             _schemaState = AssembleSchemaState(schemaStateChunks);
             _schemaStateLocations = schemaStateChunks.Select(chunk => chunk.Location).ToList();
         }
+
+        if (_recordSpaceFormatVersion >= schemaHistoryFormatVersion && (_schemaHistory.Values.Any(value => value.Entry.LastAppliedGeneration > _ddlGeneration) ||
+            _schemaState is { } applied && (!_schemaHistory.TryGetValue(applied.ContentHash, out var history) ||
+                history.Entry.LastAppliedGeneration != applied.Generation)))
+        { throw new SqlCatalogException("CS06059", ErrorMessages.SchemaHistoryInvalid); }
 
         if (pendingChunks.Count > 0)
         {
