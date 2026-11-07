@@ -85,6 +85,16 @@ Database.Sql, Database.Sql.Schema, Database.Client, Database.Sql.Client or
 libraries/Connections change (`tooling-templates.yml`), so an API change those
 programs compose reaches template CI.
 
+## Applied-schema rollback SDK acceptance (#1779)
+
+The SampleHost supports an opt-in stdin READY/STOP handshake with a reserved loopback port;
+its ordinary schema declaration and runtime builder are unchanged. The process acceptance test
+launches that packaged-SDK executable, stops it, publishes an additive schema through the engine,
+and launches the older executable again. It asserts CS03405 with the refused DropColumn, reads
+the newer value through TCP and inserts from the older application using the stored default.
+The main integration gate runs this suite after SDK packing; per-run worktrees do not repack
+the shared NuGet cache.
+
 ## Diagnostics
 
 This test harness owns no EventSource. Database.Hosting reports application transitions and

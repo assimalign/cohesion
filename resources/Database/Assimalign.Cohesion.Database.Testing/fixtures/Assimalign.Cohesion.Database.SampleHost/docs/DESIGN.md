@@ -17,7 +17,13 @@ The fixture is owned by `Database.Testing`. The retired resource integration was
 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource
 integration is `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
 
-The sequence below shows the build and run of the fixture.
+The opt-in Sample:TestHandshake=true mode reserves a loopback port through Build, releases
+it immediately before StartAsync, writes READY with its port and provisioning code/detail,
+and waits for STOP on stdin before graceful shutdown. Database.Testing uses that process
+handshake to verify that an older executable opens a newer schema with CS03405, preserves
+newer values and serves writes using stored defaults (#1779). The ordinary mode retains RunAsync.
+
+The sequence below shows the ordinary build and run of the fixture.
 
 ```mermaid
 sequenceDiagram
