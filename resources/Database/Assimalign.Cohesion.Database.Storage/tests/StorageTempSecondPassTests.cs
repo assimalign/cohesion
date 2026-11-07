@@ -283,19 +283,32 @@ public sealed class StorageTempSecondPassTests : IDisposable
         {
             using var statement = space.CreateStatement(8192);
             using var start = new ManualResetEventSlim(); using var ready = new CountdownEvent(2);
+            // Disposal waits for 0, 1 or 2 creations by turns. Left to the scheduler alone it wins almost
+            // every round: 38,095 rounds gave 114 creations once, and a slow runner passed the timeout.
+            int createdThisRound = 0, wanted = (int)(rounds % 3);
             var creator = Task.Factory.StartNew(() =>
             {
                 using (var seed = statement.CreateRun()) { }
                 ready.Signal(); start.Wait(timeout.Token);
                 try
                 {
-                    while (true) { using var run = statement.CreateRun(); Interlocked.Increment(ref created); }
+                    while (true)
+                    {
+                        using var run = statement.CreateRun();
+                        Interlocked.Increment(ref created); Interlocked.Increment(ref createdThisRound);
+                    }
                 }
                 catch (ObjectDisposedException) { Interlocked.Increment(ref refused); }
             }, timeout.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             var disposer = Task.Factory.StartNew(() =>
             {
-                ready.Signal(); start.Wait(timeout.Token); statement.Dispose();
+                ready.Signal(); start.Wait(timeout.Token);
+                var spin = new SpinWait();
+                while (Volatile.Read(ref createdThisRound) < wanted && !creator.IsCompleted)
+                {
+                    timeout.Token.ThrowIfCancellationRequested(); spin.SpinOnce();
+                }
+                statement.Dispose();
             }, timeout.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             ready.Wait(timeout.Token); start.Set(); await Task.WhenAll(creator, disposer).WaitAsync(timeout.Token); rounds++;
             statement.PhysicalBytes.ShouldBe(0); space.Bytes.ShouldBe(0); space.PendingBytes.ShouldBe(0);
