@@ -26,7 +26,7 @@ public sealed class SqlJoinedDmlAllocationTests
     public async Task ExecuteAsync_NoRetainedRows_ShouldKeepBaseAllocations(string sql, long baseline)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create("joined-memory-allocation", new());
+        await using var engine = SqlDatabaseEngine.Create("joined-memory-allocation", new() { TempDirectory = SqlAllocationTemp.Directory });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         foreach (string setup in new[] { "CREATE TABLE t(id INT PRIMARY KEY,v INT)", "CREATE TABLE s(id INT,v INT)", "INSERT INTO t VALUES(1,1)" })
