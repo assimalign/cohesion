@@ -42,4 +42,3 @@ public sealed class FormatOrderIntegrationTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
     }
 }
-
