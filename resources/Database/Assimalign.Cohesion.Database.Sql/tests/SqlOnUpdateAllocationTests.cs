@@ -26,7 +26,7 @@ public sealed class SqlOnUpdateAllocationTests
     public async Task ExecuteAsync_NoActionCanFire_ShouldKeepBaseAllocations(string sql, string reset, long baseline)
     {
         // Arrange: reset outside each measurement so every request performs its advertised write.
-        await using var engine = SqlDatabaseEngine.Create("ordinary-write-allocation", new());
+        await using var engine = SqlDatabaseEngine.Create("ordinary-write-allocation", new() { TempDirectory = SqlAllocationTemp.Directory });
         var db = await engine.CreateDatabaseAsync("db");
         await using var session = await db.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY,v INT)");

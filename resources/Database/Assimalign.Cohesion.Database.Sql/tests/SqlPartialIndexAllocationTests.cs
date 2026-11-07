@@ -25,7 +25,7 @@ public sealed class SqlPartialIndexAllocationTests
     {
         // Arrange
         const int rows = 512;
-        await using var engine = SqlDatabaseEngine.Create("partial-bulk-allocation", new());
+        await using var engine = SqlDatabaseEngine.Create("partial-bulk-allocation", new() { TempDirectory = SqlAllocationTemp.Directory });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         foreach (string table in new[] { "plain", "parts" })

@@ -12,6 +12,8 @@ internal sealed partial class SqlRowCollector
 {
     // Only a refused reservation creates spill state. Fitting collectors retain their exact layout.
     private static readonly ConditionalWeakTable<SqlRowCollector, Spill> _spills = new();
+    private static readonly ConditionalWeakTable<SqlRowCollector, StorageTempStatement> _sharedStatements = new();
+    internal void ShareSpillStatement(StorageTempStatement statement) => _sharedStatements.Add(this, statement);
     internal static Action<string>? ObserveSpill { get; set; }
     internal static Action<string, object>? ObserveBuffer { get; set; }
     internal bool HasSpilled => _spills.TryGetValue(this, out _);
@@ -34,7 +36,8 @@ internal sealed partial class SqlRowCollector
         for (int i = 0; i < columns.Length; i++)
         { columns[i] = new(_orderBy[i].IsDescending, _orderBy[i].NullsFirst, _collations[i]); }
         SqlSpillLifetime.CheckCapacity(owner);
-        var state = new Spill(owner, space, columns, (int)bound, grant);
+        var state = new Spill(owner, space, columns, (int)bound, grant,
+            _sharedStatements.TryGetValue(this, out var shared) ? shared : null);
         try
         {
             // Validate buffered rows as well as the refused row, before comparison or handoff.
@@ -129,10 +132,10 @@ internal sealed partial class SqlRowCollector
         internal readonly long Grant;
         internal long MaximumDecodedRowBytes;
         internal StorageTempSorter? Sorter;
-        internal Spill(SqlDatabaseSession owner, StorageTempSpace space, SqlTempSortKeyCodec.Column[] columns, int bound, long grant)
+        internal Spill(SqlDatabaseSession owner, StorageTempSpace space, SqlTempSortKeyCodec.Column[] columns, int bound, long grant, StorageTempStatement? shared)
         {
             Owner = owner; Grant = grant; Columns = columns; Families = new byte[columns.Length]; Bound = bound;
-            Statement = space.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
+            Statement = shared ?? space.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
         }
         internal void Validate(object?[] output, object?[] keys, long budget)
         {

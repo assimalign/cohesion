@@ -1,5 +1,43 @@
 # The Declared SQL Dialect
 
+## Plain GROUP BY and hash DISTINCT spilling (#1789, SQ-L3a)
+
+An eligible root GROUP BY or streamed scan/system-view unordered SELECT DISTINCT spills on the existing statement
+grant boundary. Existing groups keep accumulating; new-group inputs partition by hash,
+with eight partitions per level and at most eight levels. Exhausting that bound is
+CS05067 with a repartitioning-limit message. A single existing skewed group never spills;
+its live state must still fit. In-memory engines require an explicit TempDirectory.
+
+Spilled and fitting results have the same first-seen group order, first complete DISTINCT
+representative, collated spelling, calls, sequence state, first expression error and visits.
+Keys, FILTER and accepted arguments evaluate once before writing evaluated values. Completed
+groups pass through one external ordinal sort before HAVING and projection. Unordered output
+appends to an input-order spool without another external sort. An unordered
+LIMIT/OFFSET also stops projection and sequences at the fitting boundary.
+
+| Row/state shape | Capacity |
+| --- | --- |
+| Scalar key + COUNT(*) | 352 B per live group; 8,000 groups exceed ten 262,144 B grants and complete with default quotas |
+| Native COUNT, SUM/AVG with a proved numeric bound, fixed-width MIN/MAX (numeric, temporal, boolean, UUID), BOOL_AND/BOOL_OR/EVERY | Spillable; fixed state stays charged. Text/CHAR and binary MIN/MAX retain CS05067. COUNT(x) partitions nullness only. SUM/AVG require argument magnitude times physical statement temp quota to fit Decimal, preventing delayed overflow errors |
+| Stored integer columns, declared integer calls, sequences, stored bounded NUMERIC columns/casts, numeric constants | Can establish the SUM/AVG magnitude proof; pseudo-type calls, derived/Null-typed columns, unbounded NUMERIC, floating sums and unproven compound inputs retain CS05067 |
+| Encoded row | At most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; each phase's G is its remaining grant after active reader buffers and must admit the existing external sorter |
+| Input-order output spool | The remaining-grant record bound above, without the partition record's 16,384 B cap; wide projections remain admitted when their codec and decoded overlap fit |
+| STRING_AGG/ARRAY_AGG, aggregate DISTINCT/ORDER BY, statistical/application accumulators, grouping sets, direct window-over-group owners, nested relation bodies | Existing refusal/ownership; no hash spill permission |
+| Deferred collation, second key family, unsupported cells or application-binary cells | CS05067 |
+| Join-output hash DISTINCT | Existing memory refusal; join execution is unchanged in SQ-L3a |
+| Subquery-bearing group inputs/expressions or unproved MIN/MAX argument families | Existing refusal; hash eligibility remains conservative |
+
+The ordinal reader and a downstream sort share the statement memory grant. Source, partition,
+ordinal and downstream sort files share one physical statement quota, including overlapping
+runs. Temporary CK0500x failures are located and leave the session usable. Success, refusal,
+error and cancellation release the files through the existing result/session lifecycle;
+startup sweeping handles leftovers after an abrupt stop. EXPLAIN ANALYZE adds
+hash_spill_batches and hash_spill_passes and the existing byte/run/merge fields. When both
+hash and downstream sorting spill, hash-prefixed byte/run fields describe the hash phase.
+Hash batches/passes vary between processes with the hash seed; a statement near the eight-pass
+limit may complete in one process and retain CS05067 in another. Hash keys require equality
+families and the row codec, with no index-backed collation requirement.
+
 ## Root ORDER BY and ordered DISTINCT spilling (#1789, SQ-L2b)
 
 At the root of a plain SELECT, ORDER BY and ordered DISTINCT may use temporary runs when
@@ -3251,7 +3289,7 @@ is CS01062 / 42803, argument count/star is CS01063 / 54023 and invalid placement
 CS05074 / 42803. Existing CS05072/CS05032 reject FILTER/aggregate modifiers on GROUPING.
 
 Grouping-set and grouping-mask plans charge retained state to StatementMemoryBudget and refuse with CS05067;
-there is no spill. Plain GROUP BY retains its original path. EXPLAIN adds expanded
+there is no spill. Plain GROUP BY uses its own state and the eligible hash spill path described above. EXPLAIN adds expanded
 `grouping_sets` and `set_keys=[(...),...]` (zero-based grouping-key ordinals for
 every expanded set, retaining duplicates), PostgreSQL mask order and
 statement-budget/no-spill details for these queries. Views persist canonical grouping
@@ -5588,7 +5626,8 @@ identities without taking transaction object locks. Unindexed equijoins can use 
 regardless of actual size: an unknown input estimate is 4096, including an empty or tiny input
 without a countable index. Full ON/WHERE residuals, duplicate keys, NULL and LEFT semantics remain.
 An ON condition referencing any derived String/Json/Character column retains nested loops to
-preserve deferred collation errors. No hash spill exists.
+preserve deferred collation errors. Hash joins retain their existing memory refusal;
+eligible plain hash aggregation and DISTINCT spill as described above.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
 It limits accounted concurrently live hash-build storage per statement. MERGE, UPDATE FROM and

@@ -421,9 +421,12 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private DatabaseResult ProjectUnorderedDistinct(IEnumerable<object?[]> matches, IReadOnlyList<SqlProjection> projections,
-        SqlRowCount? limit, SqlRowCount? offset, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        SqlRowCount? limit, SqlRowCount? offset, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         SqlSelectMemory retainedBytes = default, seenBytes = default;
+        HashSpill? spill = null;
+        Exception? spillFailure = null;
+        long ordinal = 0;
         try
         {
             _definitions.ObserveSelectRetention?.Invoke("distinct", true, 0);
@@ -434,6 +437,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var source in matches)
             {
                 var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                long inputOrdinal = ordinal++;
                 // Base projected every row before hashing. A collation/hash failure must not
                 // suppress later projection calls; a projection failure still stops at its base row.
                 if (distinctFailure is not null) { continue; }
@@ -441,9 +445,27 @@ internal sealed partial class SqlPlanExecutor
                 {
                     if (!seen.Contains(output))
                     {
-                        RetainSelectRow(ref seenBytes, output, overhead: 64);
-                        RetainSelectRow(ref retainedBytes, output);
-                        seen.Add(output); rows.Add(output);
+                        if (spill is null)
+                        {
+                            long previous = seenBytes.Bytes;
+                            try
+                            {
+                                RetainSelectRow(ref seenBytes, output, overhead: 64);
+                                RetainSelectRow(ref retainedBytes, output);
+                                seen.Add(output); rows.Add(output);
+                            }
+                            catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode && spillOwner?.Database.Engine.TempSpace is not null)
+                            {
+                                if (seenBytes.Bytes != previous)
+                                {
+                                    long bytes = seenBytes.RemoveRow(output, 64); seenBytes.Bytes -= bytes;
+                                    _metrics!.ReleasePlainSelectMemory(bytes);
+                                }
+                                spill = new HashSpill(this, spillOwner, collations);
+                                spill.Append(output, [], inputOrdinal, cancellationToken);
+                            }
+                        }
+                        else { spill.Append(output, [], inputOrdinal, cancellationToken); }
                     }
                 }
                 catch (Exception failure) when (CanDeferRetentionFailure(failure))
@@ -451,10 +473,18 @@ internal sealed partial class SqlPlanExecutor
             }
             cancellationToken.ThrowIfCancellationRequested();
             distinctFailure?.Throw();
+            if (spill is not null)
+            {
+                spill.EmitDistinct(rows, cancellationToken);
+                rows.Clear(); rows.Capacity = 0; seen.Clear(); seen.TrimExcess();
+                ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes);
+                return spill.FinishDistinct(projections, limit, offset, cancellationToken);
+            }
             _definitions.ObserveSelectRetention?.Invoke("distinct", true, rows.Count);
             return MaterializeProjected(projections, ApplyRowWindow(rows, limit, offset));
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
+        catch (Exception failure) { spillFailure = failure; throw; }
+        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); spill?.Dispose(spillFailure); }
     }
 
     // As in grouped consumption, stack-guard failures wait for the base input drain.
@@ -492,12 +522,12 @@ internal sealed partial class SqlPlanExecutor
 
     private async ValueTask<DatabaseResult> ProjectJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
-        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, int? retainRows, SqlDatabaseSession? spillOwner = null)
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, int? retainRows, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
         SqlSelectMemory retainedBytes = default, seenBytes = default;
+        var rows = new List<object?[]>();
         try
         {
-            var rows = new List<object?[]>();
             var seen = plan.IsDistinct ? new HashSet<object?[]>(new GroupKeyComparer(plan.Projections
                 .Select(projection => projection.Collation.Resolve(_subqueryValues)).ToArray())) : null;
             // Eligibility excludes window owners. Base did not create its collector until input
@@ -542,7 +572,12 @@ internal sealed partial class SqlPlanExecutor
                             continue;
                         }
                         if (skip > 0) { skip--; continue; }
-                        if (retainRows is null || rows.Count < retainRows) { RetainSelectRow(ref retainedBytes, output); rows.Add(output); }
+                        if (retainRows is null || rows.Count < retainRows)
+                        {
+                            if (hashInput is null) { RetainSelectRow(ref retainedBytes, output); rows.Add(output); }
+                            else if (RetainStagedSortSource(rows, output, ref retainedBytes, [], spillOwner, cancellationToken, hashInput: hashInput))
+                            { rows.Add(output); }
+                        }
                         remaining--;
                     }
                     else
@@ -583,8 +618,15 @@ internal sealed partial class SqlPlanExecutor
                 rows = ApplyRowWindow(rows, plan.Limit, plan.Offset);
             }
             if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, rows.Count); }
+            if (hashInput is not null && SqlStagedSortSource.For(rows) is { } spooled)
+            {
+                spooled.Seal(cancellationToken);
+                var input = new HashGroupInput(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns, spooled);
+                SqlStagedSortSource.Detach(rows); return input;
+            }
             return MaterializeProjected(plan.Projections, rows);
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
+        catch (Exception failure) { if (hashInput is not null) { SqlStagedSortSource.ReleaseAfterFailure(rows, failure); } throw; }
+        finally { if (hashInput is not null) { SqlStagedSortSource.Release(rows); } ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
     }
 }

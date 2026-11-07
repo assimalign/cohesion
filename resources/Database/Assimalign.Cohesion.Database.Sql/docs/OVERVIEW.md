@@ -450,18 +450,25 @@ The positive StatementMemoryBudget engine option defaults to 64 MiB and limits c
 hash builds, retained SELECT buffers and grouping-set aggregate states per statement.
 CTAS sources charge like any SELECT; CTAS itself admits only kept output after pagination.
 CS05067 (SQLSTATE 53200) refuses newly charged memory and stops input promptly unless an
-eligible root plain SELECT ORDER BY or ordered DISTINCT, including a CTAS source root,
+eligible root plain SELECT ORDER BY, ordered DISTINCT, fixed-state hash GROUP BY or
+streamed scan/system-view hash DISTINCT, including a CTAS source root,
 hands off to configured temporary space. Its fully evaluated result decodes lazily and
 supports repeated or concurrent reads.
 Nested plans, windows, recursion, grouping sets and ordered sequence
-deferral retain their existing refusals; DISTINCT's retained representatives must still fit.
+deferral retain their existing refusals; ordered DISTINCT's retained representatives must still fit.
+Hash aggregation keeps existing groups live and partitions new-group inputs, then restores
+first-seen order before output. COUNT, bounded SUM/AVG, fixed-width MIN/MAX (numeric, temporal,
+boolean and UUID) and native Boolean states qualify; text/binary extrema, unbounded states
+and unproved sums retain CS05067. Unordered output streams to an input-order spool. Hash DISTINCT preserves its
+first complete representative. Hash DISTINCT over join output retains the existing refusal.
+DESIGN.md records row/state capacity, the eight-level repartitioning bound and the shared quota.
 DML sources gain no spill permission; their existing budgeting policy, including the
 INSERT SELECT gap tracked by #1828, is unchanged.
 Window and SQL/JSON grants retain their existing refusal codes when they fail without the
 plain SELECT charges.
 Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
-executes to report candidate work in the same eight-column description; actual root sort spills
-add byte, run and merge-pass details. Unavailable counts remain
+executes to report candidate work in the same eight-column description; actual root sort and hash spills
+add byte, run, batch and pass details. Unavailable counts remain
 NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;
 statement-wide totals include all invocations. No standalone ANALYZE, persisted statistics,
 format change or new wire message is added.

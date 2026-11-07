@@ -96,6 +96,7 @@ internal sealed class SqlStagedSortSource : IDisposable
         catch (StorageTempException exception) { throw SqlSpilledResultSet.Translate(exception); }
     }
     internal StorageTempRun TransferOutput() { _transferred = true; return _run; }
+    internal static void Detach(List<object?[]> rows) => _sources.Remove(rows);
     internal static void Release(List<object?[]> rows)
     {
         if (_sources.TryGetValue(rows, out var source)) { _sources.Remove(rows); source.Dispose(); }

@@ -213,6 +213,20 @@ internal static class Program
                 }
             }
             Check("spilled ORDER BY releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
+            foreach (string sql in new[] { "SELECT id,COUNT(*) FROM t GROUP BY id", "SELECT DISTINCT id FROM t" })
+            {
+                await using var hash = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                Check("hash spill has files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length > 0, true);
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    int count = 0; bool ordered = true;
+                    await foreach (var row in hash.GetRowsAsync())
+                    { ordered &= row.GetInt32(0) == count++; }
+                    Check("hash spill first-seen order", ordered, true);
+                    Check("hash spill repeatable count", count, 4000);
+                }
+            }
+            Check("hash spill releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
             Check("spilled CTAS completion", (await session.ExecuteAsync("CREATE TABLE archive AS SELECT * FROM t ORDER BY id DESC")).AffectedCount, 4000L);
             Check("spilled CTAS physical order", await RowsAsync(session, "SELECT id,k FROM archive LIMIT 3", CancellationToken.None), [[3999, 0], [3998, 1], [3997, 2]]);
             Check("spilled DISTINCT CTAS completion", (await session.ExecuteAsync("CREATE TABLE distinct_archive AS SELECT DISTINCT k%3 AS n FROM t ORDER BY id DESC")).AffectedCount, 3L);

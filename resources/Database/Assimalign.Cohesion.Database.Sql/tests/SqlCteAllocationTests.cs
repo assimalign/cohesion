@@ -23,7 +23,7 @@ public sealed class SqlCteAllocationTests
     public async Task Execute_NonRecursiveCommonTable_ShouldRetainBaseAllocations()
     {
         // Arrange: parsing and setup are outside the measured synchronous execution path.
-        await using var engine = SqlDatabaseEngine.Create("cte-allocation", new());
+        await using var engine = SqlDatabaseEngine.Create("cte-allocation", new() { TempDirectory = SqlAllocationTemp.Directory });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t (id INT)", cancellationToken: CancellationToken.None);

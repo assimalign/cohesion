@@ -67,6 +67,8 @@ public class SqlConformanceTests
     [InlineData("ALTER TABLE t ALTER v TYPE \"\"\"odd\"\"\";", SqlQueryCommandType.Alter)]
     [InlineData("SELECT a, b, GROUPING(a,b), GROUPING_ID(a,b), SUM(v) FILTER (WHERE v>0) FROM t GROUP BY DISTINCT a, GROUPING SETS (ROLLUP(b), CUBE((a,b)), ()) HAVING GROUPING(a,b)>0 ORDER BY GROUPING(a,b);", SqlQueryCommandType.Select)]
     [InlineData("SELECT COUNT(*) FROM t GROUP BY ();", SqlQueryCommandType.Select)]
+    [InlineData("SELECT customer_id,COUNT(*) AS order_count,SUM(total) AS revenue FROM orders GROUP BY customer_id HAVING COUNT(*)>=5 ORDER BY order_count DESC,customer_id LIMIT 100;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT DISTINCT customer_id,CAST(name AS CHAR(20)) COLLATE case_insensitive FROM customers LIMIT 100 OFFSET 7;", SqlQueryCommandType.Select)]
     [InlineData("SELECT a,(SELECT GROUPING(t.a) GROUP BY t.a) FROM t GROUP BY ROLLUP(a);", SqlQueryCommandType.Select)]
     [InlineData("SELECT a,(SELECT GROUPING(t.a)) FROM t GROUP BY ROLLUP(a);", SqlQueryCommandType.Select)]
     [InlineData("SELECT COUNT(*) FROM t GROUP BY GROUPING SETS (ROLLUP((a,(b,c))),GROUPING SETS ((a),()));", SqlQueryCommandType.Select)]

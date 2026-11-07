@@ -28,7 +28,7 @@ public sealed class SqlGroupingAllocationTests
         // Arrange: the SQ-H2 baseline probe measured these budgets at both 46803a9ba
         // and 967254bbd: 1,000 warmups, then the minimum of three 5,000-query rounds.
         SqlDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
-        await using var engine = SqlDatabaseEngine.Create("group-alloc", new());
+        await using var engine = SqlDatabaseEngine.Create("group-alloc", new() { TempDirectory = SqlAllocationTemp.Directory });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t(a INT,b INT)", cancellationToken: CancellationToken.None);

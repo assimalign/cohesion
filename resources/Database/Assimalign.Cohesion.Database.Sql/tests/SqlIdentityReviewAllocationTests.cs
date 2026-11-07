@@ -25,7 +25,7 @@ public sealed class SqlIdentityReviewAllocationTests
     public async Task ExecuteAsync_SequenceFreeDml_ShouldRetainBaseAllocations(string sql, long maximum)
     {
         // Arrange: an FK-referenced parent exercises the former unconditional closure walk.
-        await using var engine = SqlDatabaseEngine.Create("ordinary-allocation-review", new());
+        await using var engine = SqlDatabaseEngine.Create("ordinary-allocation-review", new() { TempDirectory = SqlAllocationTemp.Directory });
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE plain(v INT)", cancellationToken: CancellationToken.None);

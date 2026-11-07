@@ -27,7 +27,7 @@ public sealed class SqlCorrelatedRetentionAllocationTests
     {
         // Arrange: identical test/filter at cc605c78d and head; synchronous request/disposal
         // on one measuring thread excludes workers and process-wide test-runner allocation.
-        await using var engine = SqlDatabaseEngine.Create("correlated-retention-allocation", new());
+        await using var engine = SqlDatabaseEngine.Create("correlated-retention-allocation", new() { TempDirectory = SqlAllocationTemp.Directory });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t(k INT)", cancellationToken: CancellationToken.None);

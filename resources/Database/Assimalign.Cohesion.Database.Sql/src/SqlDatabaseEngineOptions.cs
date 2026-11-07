@@ -87,7 +87,8 @@ public sealed class SqlDatabaseEngineOptions
 
     /// <summary>Gets or sets the statement's physical temporary-byte quota. Null uses four times
     /// StatementMemoryBudget, saturating at Int64.MaxValue. Zero refuses growth. Must be nonnegative.
-    /// Eligible root SELECT and CTAS source-root sorts spill; other SQL buffers retain their CS05067 memory-budget refusal.</summary>
+    /// Eligible root SELECT and CTAS source-root sorts, plain fixed-state hash aggregation and unordered hash DISTINCT spill.
+    /// Their source, partition and sort files share this quota; other SQL buffers retain their existing memory-budget policy.</summary>
     public long? StatementTempSpaceQuota { get; set; }
 
     /// <summary>
