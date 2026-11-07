@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Storage;
 
-/// <summary>Transactional graph records, label and relationship-type postings, adjacency, and exact node-property indexes over a shared coordinator.</summary>
+/// <summary>Transactional graph records, label and relationship-type postings, adjacency, and exact or trigram node-property indexes over a shared coordinator.</summary>
 /// <remarks>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> One sealed type with a private constructor
 /// behind <see cref="Open"/>: it replaces the former <c>IGraphStore</c> interface, the
@@ -63,6 +63,7 @@ public sealed partial class GraphStore
             _records[key] = versions;
         }
         OpenIndexes();
+        CollectAbandonedIndexOwners();
         storage.UndoScopesChanged = UndoScopesChanged;
         storage.UndoTransactionEnded = context => UndoScopesChanged(context.Sequence, false, _coordinator.VersionStore);
     }
@@ -148,7 +149,8 @@ public sealed partial class GraphStore
     }
 
     /// <summary>
-    /// Checks graph record format 5 and that every index tree the storage registers is in the B-tree page format
+    /// Checks graph record format 5, physical index-definition discriminators and recovered
+    /// retirement-receipt liveness, and that every registered tree is in the B-tree page format
     /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading record
     /// headers, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
@@ -164,13 +166,32 @@ public sealed partial class GraphStore
     public static void EnsureIndexFormat(GraphStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
+        var registrations = ReadRegistrations(storage);
+        HashSet<ulong>? retiring = null;
+        foreach (var entry in registrations)
+        {
+            if (entry.Registration.RootPageId < 0)
+            { (retiring ??= new HashSet<ulong>()).Add(entry.Registration.ObjectId); }
+        }
+        // Classify lifecycle records without scrubbing: an abandoned DROP's deleter will
+        // be cleared by recovery, so its definition must already protect the receipt here.
+        var aborted = retiring is null ? null
+            : TransactionRecovery.Analyze(storage.WriteAheadJournal, storage.CheckpointActiveTransactions).Aborted;
         using var records = storage.GetUnitIterator(2);
         while (records.MoveNext())
         {
             var record = records.Current;
             GraphRecordCodec.EnsureFormat(record.Data.Span, record.PageId, record.SlotIndex);
+            if (retiring is not null && record.Data.Length >= 34 && record.Data.Span[16] == 3 &&
+                retiring.Contains(BinaryPrimitives.ReadUInt64LittleEndian(record.Data.Span.Slice(18))) &&
+                !aborted!.Contains(RecordVersionStamp.ReadStamps(record.Data.Span).Writer))
+            {
+                var (_, deleter) = RecordVersionStamp.ReadStamps(record.Data.Span);
+                if (deleter == TransactionSequence.None || aborted.Contains(deleter))
+                { throw new StorageCorruptionException(record.PageId, record.SlotIndex, ErrorMessages.RegistrationIdentityInvalid); }
+            }
         }
-        BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
+        BTreeIndexManager.EnsureFormat(storage, registrations.Where(entry => entry.Registration.RootPageId > 0).Select(entry => entry.Registration));
     }
 
     /// <summary>Creates a node and maintains its label and property indexes.</summary>
@@ -183,8 +204,13 @@ public sealed partial class GraphStore
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="GraphElementTooLargeException">The labels and properties exceed one graph record, or an indexed property value exceeds the index key.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
-    public async ValueTask<StoredGraphNode> CreateNodeAsync(StoredGraphNode node,
+    public ValueTask<StoredGraphNode> CreateNodeAsync(StoredGraphNode node,
         IReadOnlyDictionary<string, Guid> labelIds, TransactionContext context, CancellationToken cancellationToken = default)
+        => CreateNodeAsync(node, labelIds, context, cancellationToken, null, null);
+
+    internal async ValueTask<StoredGraphNode> CreateNodeAsync(StoredGraphNode node,
+        IReadOnlyDictionary<string, Guid> labelIds, TransactionContext context, CancellationToken cancellationToken,
+        Action? visit, Action<long>? reserve)
     {
         ArgumentNullException.ThrowIfNull(labelIds);
         ArgumentNullException.ThrowIfNull(node.Labels);
@@ -200,10 +226,11 @@ public sealed partial class GraphStore
         byte[] bytes = await EncodeAsync(proposed, context.Sequence).ConfigureAwait(false);
         var record = GraphRecordCodec.Decode(bytes); // Own immutable copies, never retain caller dictionaries.
         node = record.Node!.Value;
-        var indexes = Definitions(Latest(context));
-        var changes = indexes.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
-            && node.Properties.ContainsKey(index.PropertyKey!))
-            .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), node.Id))).ToArray();
+        var indexes = MutationDefinitions(context);
+        var changes = HasTextIndexes ? TextChanges(indexes, node, cancellationToken, reserve, visit)
+            : indexes.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
+                && node.Properties.ContainsKey(index.PropertyKey!))
+                .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), node.Id))).ToArray();
         bool published = false;
         ulong inserted = await ApplyAsync(context, async bracket =>
         {
@@ -424,7 +451,11 @@ public sealed partial class GraphStore
     /// <exception cref="InvalidOperationException">A connected node is deleted without detach, or <paramref name="context"/> is not active.</exception>
     /// <exception cref="TransactionAbortedException">The node or its incident relationships changed after the snapshot, or the transaction ended while waiting for its writer lock.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    public async ValueTask DeleteNodeAsync(ulong id, bool detach, TransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask DeleteNodeAsync(ulong id, bool detach, TransactionContext context, CancellationToken cancellationToken = default)
+        => DeleteNodeAsync(id, detach, context, cancellationToken, null, null);
+
+    internal async ValueTask DeleteNodeAsync(ulong id, bool detach, TransactionContext context, CancellationToken cancellationToken,
+        Action? visit, Action<long>? reserve)
     {
         using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
         context = mutation.RefreshSnapshot(context);
@@ -434,7 +465,7 @@ public sealed partial class GraphStore
         var incident = await GetIncidentAsync(id, Latest(context), cancellationToken).ConfigureAwait(false);
         foreach (var relationship in incident) { EnsureUnchanged(2, relationship.Id, context); }
         if (incident.Count != 0 && !detach) { throw new InvalidOperationException(ErrorMessages.ConnectedNodeDeletion); }
-        var indexes = Definitions(Latest(context));
+        var indexes = MutationDefinitions(context);
         await ApplyAsync(context, async bracket =>
         {
             foreach (var relationship in incident)
@@ -446,7 +477,8 @@ public sealed partial class GraphStore
             {
                 if (stored.Labels.Contains(definition.Label!, StringComparer.Ordinal) && stored.Properties.TryGetValue(definition.PropertyKey!, out var value))
                 {
-                    await DeleteIndexEntryAsync(definition.Id, Composite(GraphRecordCodec.Key(value), stored.Id), node.Value.Reference.Location, context, cancellationToken).ConfigureAwait(false);
+                    foreach (var key in PropertyKeys(definition, value, stored.Id, cancellationToken, reserve, visit))
+                    { await DeleteIndexEntryAsync(definition.Id, key, node.Value.Reference.Location, context, cancellationToken).ConfigureAwait(false); }
                 }
             }
             await DeleteLabelsAsync(node.Value.Record, node.Value.Reference.Location, context, cancellationToken).ConfigureAwait(false);

@@ -40,9 +40,15 @@ public sealed class BTreeCursorDifferentialTests
             {
                 var entry = (Key(i / 10), (ulong)i);
                 visible.Add(entry);
-                await index.InsertAsync(seed, entry.Item1, entry.Item2);
+                await index.InsertAsync(seed, entry.Item1, entry.Item2, Payload(i));
             }
             await harness.CommitAsync(seed);
+            using (var physical = harness.Storage.BeginTransaction())
+            {
+                for (int i = -100; i < -96; i++)
+                { await index.InsertVersionAsync(physical, Key(i), (ulong)(100 + i), default, default, Payload(998)); }
+                physical.Commit();
+            }
             var reader = await harness.Manager.BeginAsync();
             int low = random.Next(0, 4);
             int high = random.Next(12, 16);
@@ -53,7 +59,7 @@ public sealed class BTreeCursorDifferentialTests
             if (reverse) { expected.Reverse(); }
             await using var cursor = index.OpenCursor(reader.Snapshot, range, reverse);
             cursor.BatchSizeOverride = batchSize;
-            int[] deck = Enumerable.Range(0, 7).ToArray();
+            int[] deck = Enumerable.Range(0, 8).ToArray();
             random.Shuffle(deck);
             // Rotate starts too, so the large-batch cases exercise every operation.
             int boundary = scenario * 2;
@@ -69,6 +75,7 @@ public sealed class BTreeCursorDifferentialTests
                 actual.Count.ShouldBeLessThan(expected.Count);
                 actual.Add((cursor.CurrentKey, cursor.CurrentEntryReference));
                 actual[^1].ShouldBe(expected[actual.Count - 1]);
+                cursor.CurrentPayload.ToArray().ShouldBe(Payload((int)cursor.CurrentEntryReference));
             }
             actual.ShouldBe(expected);
             await harness.Manager.CommitAsync(reader);
@@ -85,22 +92,22 @@ public sealed class BTreeCursorDifferentialTests
                     case 0: // Duplicate keys on both sides of the logical continuation.
                     {
                         var writer = await harness.BeginAsync();
-                        await index.InsertAsync(writer, near, 0);
-                        await index.InsertAsync(writer, near, nextReference++);
+                        await index.InsertAsync(writer, near, 0, Payload(998));
+                        await index.InsertAsync(writer, near, nextReference++, Payload(998));
                         await harness.CommitAsync(writer);
                         break;
                     }
                     case 1: // Same key/reference, distinct invisible writer tiebreaker.
                     {
                         var writer = await harness.BeginAsync();
-                        await index.InsertAsync(writer, near, last?.EntryReference ?? 7);
+                        await index.InsertAsync(writer, near, last?.EntryReference ?? 7, Payload(998));
                         await harness.CommitAsync(writer);
                         break;
                     }
                     case 2: // Abort after a durable bracket, then purge its entries.
                     {
                         var writer = await harness.BeginAsync();
-                        await index.InsertAsync(writer, near, nextReference++);
+                        await index.InsertAsync(writer, near, nextReference++, Payload(998));
                         await harness.LogicalRollbackAsync(writer, bracket =>
                         {
                             index.PurgeWriters(bracket, new HashSet<TransactionSequence> { writer.Sequence }).ShouldBe(1);
@@ -126,7 +133,7 @@ public sealed class BTreeCursorDifferentialTests
                         do
                         {
                             for (int i = 0; i < 240; i++)
-                            { await index.InsertAsync(writer, SplitKey(100 + inserted++), nextReference++); }
+                            { await index.InsertAsync(writer, SplitKey(100 + inserted++), nextReference++, Payload(998)); }
                             inserted.ShouldBeLessThan(5_000);
                         }
                         while (mutation == 4 && !rootGrown && Height(harness, index) == height);
@@ -147,7 +154,7 @@ public sealed class BTreeCursorDifferentialTests
                         var writer = await harness.BeginAsync();
                         // Reuse the finite slot range, as storage does after purge. Growing
                         // a new empty chain at every empty-page boundary could starve any scan.
-                        for (int i = 0; i < 48; i++) { await index.InsertAsync(writer, Key(low), 2_000UL + (ulong)i); }
+                        for (int i = 0; i < 48; i++) { await index.InsertAsync(writer, Key(low), 2_000UL + (ulong)i, Payload(998)); }
                         await harness.LogicalRollbackAsync(writer, bracket =>
                         {
                             index.PurgeWriters(bracket, new HashSet<TransactionSequence> { writer.Sequence }).ShouldBe(48);
@@ -155,10 +162,84 @@ public sealed class BTreeCursorDifferentialTests
                         });
                         break;
                     }
+                    case 7: // Replace unversioned mappings in a separate physical key range.
+                    {
+                        using var physical = harness.Storage.BeginTransaction();
+                        for (int i = -100; i < -96; i++)
+                        { (await index.ReplacePayloadAsync(physical, Key(i), (ulong)(100 + i), Payload(boundary + i + 100))).ShouldBeTrue(); }
+                        physical.Commit();
+                        // The pinned snapshot does not freeze physical payloads. Check this
+                        // range against its current oracle as well as the versioned scan.
+                        await using var probe = index.OpenCursor(reader.Snapshot, new IndexKeyRange(Key(-100), Key(-97), true, true), reverse);
+                        for (int i = 0; i < 4; i++)
+                        {
+                            int expectedReference = reverse ? 3 - i : i;
+                            (await probe.MoveNextAsync()).ShouldBeTrue();
+                            probe.CurrentKey.ShouldBe(Key(expectedReference - 100));
+                            probe.CurrentEntryReference.ShouldBe((ulong)expectedReference);
+                            probe.CurrentPayload.ToArray().ShouldBe(Payload(boundary + expectedReference));
+                        }
+                        (await probe.MoveNextAsync()).ShouldBeFalse();
+                        break;
+                    }
                 }
             }
         }
-        exercised.Order().ShouldBe(Enumerable.Range(0, 7));
+        exercised.Order().ShouldBe(Enumerable.Range(0, 8));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Cursor: a positioned batch-boundary entry owns its payload across replacement and a split (#1809)")]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(64, false)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(64, true)]
+    public async Task MoveNextAsync_PhysicalReplacementAtBoundary_ShouldResumeAfterSplit(int batchSize, bool reverse)
+    {
+        // Arrange: the one-entry probe ends exactly on the replacement target.
+        await using var harness = new IndexTestHarness();
+        var setup = await harness.BeginAsync();
+        var index = await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("physical_boundary"));
+        await harness.CommitAsync(setup);
+        byte[] original = BTreePayloadTests.Payload(1)[..17];
+        using (var build = harness.Storage.BeginTransaction())
+        {
+            for (int i = 0; i < 7; i++)
+            { await index.InsertVersionAsync(build, BTreePayloadTests.Key(i), (ulong)i, default, default, original); }
+            build.Commit();
+        }
+        await using var cursor = index.OpenCursor(BTreePayloadTests.Snapshot(), IndexKeyRange.All, reverse);
+        (await cursor.MoveNextAsync()).ShouldBeTrue();
+        cursor.BatchSizeOverride = batchSize;
+        int target = reverse ? 6 : 0;
+        cursor.Count.ShouldBe(1);
+        cursor.Continuation!.Value.EntryReference.ShouldBe((ulong)target);
+        var retained = cursor.CurrentPayload;
+
+        // Act: same-length overwrite, then growth that splits the leaf under this position.
+        using (var change = harness.Storage.BeginTransaction())
+        {
+            await index.ReplacePayloadAsync(change, BTreePayloadTests.Key(target), (ulong)target, BTreePayloadTests.Payload(2)[..17]);
+            BTreeShape.Read(harness.Storage, index.RootPageId).Height.ShouldBe(1);
+            cursor.CurrentPayload.ToArray().ShouldBe(original);
+            await index.ReplacePayloadAsync(change, BTreePayloadTests.Key(target), (ulong)target, BTreePayloadTests.Payload(3));
+            BTreeShape.Read(harness.Storage, index.RootPageId).Height.ShouldBe(2);
+            change.Commit();
+        }
+
+        // Assert: strict logical continuation neither repeats nor skips its neighbours.
+        int seen = 1;
+        cursor.CurrentPayload.ToArray().ShouldBe(original);
+        while (await cursor.MoveNextAsync())
+        {
+            cursor.CurrentEntryReference.ShouldBe((ulong)(reverse ? 6 - seen : seen));
+            cursor.CurrentPayload.ToArray().ShouldBe(original);
+            seen++;
+        }
+        seen.ShouldBe(7);
+        await cursor.DisposeAsync();
+        retained.ToArray().ShouldBe(original);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Cursor: Entry separators fence whole erased leaves of a reused-reference run (#1542)")]
@@ -208,6 +289,13 @@ public sealed class BTreeCursorDifferentialTests
         // Assert
         actual.ShouldBe(expected);
         emptyFences.ShouldBeGreaterThan(10);
+    }
+
+    private static byte[] Payload(int value)
+    {
+        var payload = new byte[value % 3 == 0 ? 0 : value % 3 == 1 ? 17 : 1024];
+        new Random(value).NextBytes(payload);
+        return payload;
     }
 
     private static IndexKey Key(int value)

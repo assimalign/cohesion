@@ -263,7 +263,7 @@ public sealed partial class GraphSchema
             if (_database.Store.StreamLabels([name], _database.LatestSnapshot(op.Context), cancellationToken, op.QueryBudget.Consume, memory.Add).Any()) { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.GraphSchemaDropLabelAsyncDatabase); }
             foreach (var index in _database.Catalog.GetIndexes(label.Id, op.Context.Snapshot))
             {
-                await _database.Store.DropIndexAsync(name, index.PropertyKey, op.Context, cancellationToken).ConfigureAwait(false);
+                await _database.Store.DropIndexAsync(name, index.PropertyKey, op.Context, cancellationToken, index.IsText).ConfigureAwait(false);
             }
             await _database.Catalog.DeleteLabelAsync(label.Id, op.Context, cancellationToken).ConfigureAwait(false);
         }, cancellationToken);

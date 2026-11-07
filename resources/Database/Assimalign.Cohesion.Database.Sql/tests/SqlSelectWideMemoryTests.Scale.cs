@@ -9,6 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -47,14 +48,14 @@ public sealed partial class SqlSelectWideMemoryTests
         };
         long expected = shape switch { 0 => 19365976, 1 => forceBase ? 1015216 : 589296, _ => forceBase ? 1073821688 : 1073819680 };
         long legacy = shape switch { 0 => 4398114111488, 1 => forceBase ? 197885952 : 131841752, _ => forceBase ? 1608568800 : 1075884088 };
-        long before = GC.GetTotalMemory(true), heap = 0;
+        long before = LiveHeap.Read(), heap = 0;
         string? payload = shape == 1 ? null : new('x', 1048576);
         int count = 0;
         try
         {
             SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
             {
-                if (metrics.HashMemoryBytes == expected || metrics.HashMemoryBytes == legacy) { heap = GC.GetTotalMemory(true) - before; }
+                if (metrics.HashMemoryBytes == expected || metrics.HashMemoryBytes == legacy) { heap = LiveHeap.Read() - before; }
             };
 
             // Act

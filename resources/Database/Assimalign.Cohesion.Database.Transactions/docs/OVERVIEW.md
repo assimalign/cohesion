@@ -56,6 +56,13 @@ apply gate, so a size-triggered checkpoint cannot be starved by a sustained writ
 it ends, so an engine's checkpoint worker is not held up by one database's long statement. A
 checkpoint asked for inside a statement apply is refused instead of waiting forever.
 
+The shared storage interlock pauses new physical write brackets at half an engine-configured
+journal limit and requests a checkpoint even when the size trigger is disabled (#1283). Undo,
+checkpoints and nested scopes drain. A non-failing pending pause stays online indefinitely;
+operational failures retain the ordinary 100-second default offline window. Checkpoint success
+inside that window resumes admission. Counts, duration, lock order and read behavior are recorded
+in DESIGN.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Database.Storage` (child-to-child: the journal/page substrate the implementations bind to)

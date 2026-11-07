@@ -114,6 +114,7 @@ public static class SqlLanguageProfile
         SqlClauses.From,
         SqlClauses.Join,
         SqlClauses.Using,
+        SqlClauses.Natural,
         SqlClauses.Where,
         SqlClauses.GroupBy,
         SqlClauses.GroupingSets,

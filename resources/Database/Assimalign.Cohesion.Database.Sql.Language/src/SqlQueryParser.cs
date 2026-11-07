@@ -54,18 +54,20 @@ public sealed partial class SqlQueryParser : QueryParser
         _parenthesisDepth = 0;
         _deepestNesting = 0;
         _nestingDiagnostic = -1;
+        _targetListDiagnostic = -1;
+        _mergeSourceRecovery = null;
+        _windowFunctionDiagnostics?.Clear();
         _implicitAlias = null;
         _parseDiagnostics.Clear();
 
-        RejectLexicalErrors(lexer);
-
-        bool hasUnsupportedClause =
-            TryFindUnsupportedClause(lexer, out string unsupportedClause, out Location unsupportedLocation);
-        _preflightClauseStart = hasUnsupportedClause ? unsupportedLocation.Start : -1;
+        // Defer whole-text diagnostics until the bounded parse completes. A refused target
+        // list must not allocate preflight strings, locations or errors for its abandoned tail.
+        var preflightLexer = lexer;
 
         // Advance to the first non-comment token
         if (!AdvancePastComments(ref lexer))
         {
+            RejectLexicalErrors(preflightLexer);
             var emptyExpr = new SqlQueryExpression(SqlQueryCommandType.Unknown, null, null);
             var emptyStmt = new SqlQueryStatement(emptyExpr);
             foreach (var diagnostic in _parseDiagnostics)
@@ -202,6 +204,50 @@ public sealed partial class SqlQueryParser : QueryParser
             ConsumeRemaining(ref lexer);
         }
 
+        bool hasUnsupportedClause = false;
+        string unsupportedClause = string.Empty;
+        Location unsupportedLocation = null!;
+        if (_targetListDiagnostic < 0)
+        {
+            // Keep lexical diagnostics first, as before. During parsing the skipped-construct
+            // guard cannot see the deferred scan, so remove its duplicate at that scan's span.
+            var syntaxDiagnostics = _parseDiagnostics.ToArray();
+            Diagnostic? nestingDiagnostic = _nestingDiagnostic < 0 ? null : syntaxDiagnostics[_nestingDiagnostic];
+            _parseDiagnostics.Clear();
+            RejectLexicalErrors(preflightLexer);
+            int lexicalCount = _parseDiagnostics.Count;
+            hasUnsupportedClause = TryFindUnsupportedClause(preflightLexer, out unsupportedClause, out unsupportedLocation);
+            int preflightClauseStart = hasUnsupportedClause ? unsupportedLocation.Start : -1;
+            int syntaxCount = _mergeSourceRecovery is { } recovery && recovery.Position == preflightClauseStart
+                ? recovery.DiagnosticCount : syntaxDiagnostics.Length;
+            int windowDiagnostic = 0;
+            for (int index = 0; index < syntaxCount; index++)
+            {
+                var diagnostic = syntaxDiagnostics[index];
+                bool window = _windowFunctionDiagnostics is not null && windowDiagnostic < _windowFunctionDiagnostics.Count &&
+                    _windowFunctionDiagnostics[windowDiagnostic] == index;
+                if (window) { windowDiagnostic++; }
+                if (hasUnsupportedClause && window || diagnostic.Code == "CK00001" && diagnostic.Start == preflightClauseStart) { continue; }
+                // Previously a lexical error at this position suppressed syntax recovery there.
+                bool lexicalError = false;
+                for (int i = 0; i < lexicalCount; i++)
+                {
+                    if (_parseDiagnostics[i].Severity == DiagnosticSeverity.Error && _parseDiagnostics[i].Start == diagnostic.Start)
+                    {
+                        // An operand '?' refines its generic lexical error to the supported
+                        // parameter spellings (ParsePrimary), as it did before deferral.
+                        if (diagnostic.Code == "CS00003" && diagnostic.Start is int position &&
+                            position < _sourceText.Length && _sourceText[position] == '?')
+                        { _parseDiagnostics[i] = diagnostic; }
+                        lexicalError = true;
+                        break;
+                    }
+                }
+                if (!lexicalError) { _parseDiagnostics.Add(diagnostic); }
+            }
+            _nestingDiagnostic = nestingDiagnostic is null ? -1 : _parseDiagnostics.IndexOf(nestingDiagnostic);
+        }
+
         // A supported expression parser may deliberately stop at a clause outside
         // this profile, which already carries CK00001, so the text from that clause
         // on adds no second diagnostic. Otherwise every statement kind must have
@@ -236,6 +282,15 @@ public sealed partial class SqlQueryParser : QueryParser
             expression = new SqlQueryExpression(expression.CommandType, null, expression.Location);
         }
 
+        if (_targetListDiagnostic >= 0)
+        {
+            // Enclosing rules met EOF after the list was abandoned. Their recovery errors
+            // describe a partial tree, so retain only diagnostics through the refusal.
+            _parseDiagnostics.RemoveRange(_targetListDiagnostic + 1,
+                _parseDiagnostics.Count - _targetListDiagnostic - 1);
+            expression = new SqlQueryExpression(expression.CommandType, null, expression.Location);
+        }
+
         // An engine whose limit is lower than this parser's reads the measure back instead of
         // parsing the statement again (SqlQueryStatement.ExpressionNestingDepth).
         expression.SetNestingDepth(_deepestNesting);
@@ -267,7 +322,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         // Check for semicolon terminator
-        if (!_sawSemicolon)
+        if (!_sawSemicolon && _targetListDiagnostic < 0)
         {
             statement.AddDiagnostic(new Diagnostic
             {
@@ -291,11 +346,10 @@ public sealed partial class SqlQueryParser : QueryParser
     private bool _sawSemicolon;
     private bool _sawUnrecognizedCharacter;
     private int _lastTokenEnd;
+    private int _targetListDiagnostic = -1;
+    private (int Position, int DiagnosticCount)? _mergeSourceRecovery;
+    private List<int>? _windowFunctionDiagnostics;
 
-    // Where the clause the preflight scan reports starts, or -1. The scan reports only the
-    // first unsupported clause; a construct the parser skips for recovery is reported by the
-    // parser unless it is that clause (#1101).
-    private int _preflightClauseStart = -1;
     private string _sourceText = string.Empty;
     private readonly List<Diagnostic> _parseDiagnostics = [];
 
@@ -903,13 +957,12 @@ public sealed partial class SqlQueryParser : QueryParser
     }
 
     /// <summary>
-    /// Reports a construct the parser recognizes and skips for recovery, unless the preflight
-    /// clause scan already reports it at <paramref name="start"/>. The scan reports only the
-    /// first unsupported clause, so a construct after another one is reported here, once.
+    /// Reports a construct the parser recognizes and skips for recovery. ParseCore coalesces
+    /// a deferred capability diagnostic at the same start position after parsing completes.
     /// </summary>
     private void RequireSkippedConstruct(int start, int end, string construct)
     {
-        if (start != _preflightClauseStart && !Supports(construct))
+        if (!Supports(construct))
         {
             _parseDiagnostics.Add(QueryDiagnostics.UnsupportedClause(construct, Profile.Language,
                 Location.Create(1, 1, start, end)));

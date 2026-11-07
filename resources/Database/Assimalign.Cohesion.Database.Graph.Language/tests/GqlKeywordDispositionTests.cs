@@ -122,6 +122,7 @@ public sealed class GqlKeywordDispositionTests
         ["PERCENTILE_DISC"] = Rejects("MATCH (a) RETURN PERCENTILE_DISC(a.age, 0.5)", "PERCENTILE_DISC"),
         ["DATABASE"] = Rejects("CREATE DATABASE d", "DATABASE"),
         ["SCHEMA"] = Rejects("CREATE SCHEMA s", "SCHEMA"),
+        ["TEXT"] = Parses("CREATE TEXT INDEX ix FOR (n:N) ON (n.p)"),
         ["INDEX"] = Parses("CREATE INDEX ix FOR (n:N) ON (n.p)"),
         ["CATALOG"] = Rejects("CREATE CATALOG c", "CATALOG"),
         // ISO/IEC 39075 delete, path and edge constructs
@@ -311,6 +312,7 @@ public sealed class GqlKeywordDispositionTests
             .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Append("REDUCE") // Lexical binding form; not an ordinary scalar function.
             .Append("ON") // Contextual MERGE branch prefix; ordinary variable spelling stays valid.
+            .Append("TEXT") // Contextual CREATE TEXT INDEX modifier.
             .Concat(new[] { "EXCEPT", "INTERSECT", "OTHERWISE" }) // Contextual query conjunctions.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

@@ -75,7 +75,7 @@ public sealed class BTreeIndexManager
     /// Gets the B-tree page format this engine writes and the only one it reads.
     /// Format 2 (#1194) orders entries by <c>(key, entry reference, writer)</c> and
     /// stamps a magic and this version on every node page; format 1 ordered entries by
-    /// key alone and carried no stamp.
+    /// key alone and carried no stamp. Format 3 (#1809) adds optional leaf payloads.
     /// </summary>
     /// <remarks>
     /// A property, not a constant: the value changes with every page-format change, and

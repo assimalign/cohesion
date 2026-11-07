@@ -20,7 +20,8 @@ public sealed class IndexTestHarness : IAsyncDisposable
     private readonly Dictionary<TransactionContext, StorageTransaction> _pairs = new();
     private readonly object _sync = new();
 
-    public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null, string? name = null)
+    public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null, string? name = null,
+        Func<TransactionSequence>? pruneBound = null)
     {
         Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle(), name);
         LockManager = new Transactions.LockManager();
@@ -30,6 +31,7 @@ public sealed class IndexTestHarness : IAsyncDisposable
             Storage = Storage,
             TransactionSource = GetStorageTransaction,
             LockManager = LockManager,
+            PruneBound = pruneBound,
         });
     }
 

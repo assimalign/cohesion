@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Indexing;
 
 /// <summary>A cursor over snapshot-visible index entries, in the selected scan direction.</summary>
 /// <remarks>
-/// Reads bounded batches and retains owned keys, never pages or latches between calls.
+/// Reads bounded batches and retains owned keys and payloads, never pages or latches between calls.
 /// The caller must keep the statement or transaction's snapshot pin alive until disposal.
 /// Do not mutate through the snapshot owner while enumerating: stamps identify transactions,
 /// not statements. Writers must collect their targets before applying changes.
@@ -26,6 +26,8 @@ public sealed class BTreeCursor : IAsyncDisposable
     private readonly CancellationToken _openingToken;
     private int _position = -1;
     private bool _disposed;
+    private byte[][]? _payloads;
+    private byte _readLimit = 1;
 
     internal BTreeCursor(BTreeIndex index, TransactionSnapshot snapshot, IndexKeyRange range, bool reverse, CancellationToken cancellationToken)
     {
@@ -55,7 +57,8 @@ public sealed class BTreeCursor : IAsyncDisposable
     // The first result is commonly a probe (notably Graph type discovery). Grow only
     // after it is consumed, without exposing a batching policy across assemblies.
     internal int BatchSizeOverride { get; set; }
-    internal int ReadLimit { get; private set; } = 1;
+    internal int ReadLimit => _readLimit;
+    internal bool HasPayloadStorage => _payloads is not null;
 
     internal readonly record struct Entry(byte[] Key, ulong EntryReference, ulong Writer);
 
@@ -73,6 +76,22 @@ public sealed class BTreeCursor : IAsyncDisposable
     public ulong CurrentEntryReference
     {
         get { EnsurePositioned(); return Entries[_position].EntryReference; }
+    }
+
+    /// <summary>Gets the owned payload at the current position, or empty memory.</summary>
+    /// <remarks>The returned memory remains valid after advancing or disposing the cursor.</remarks>
+    /// <exception cref="InvalidOperationException">The cursor is not positioned on an entry.</exception>
+    /// <exception cref="ObjectDisposedException">The cursor is disposed.</exception>
+    public ReadOnlyMemory<byte> CurrentPayload
+    {
+        get { EnsurePositioned(); return _payloads?[_position] ?? ReadOnlyMemory<byte>.Empty; }
+    }
+
+    internal void CopyPayload(int position, ReadOnlySpan<byte> payload)
+    {
+        if (payload.IsEmpty) { return; }
+        _payloads ??= new byte[BatchSize][];
+        _payloads[position] = payload.ToArray();
     }
 
     /// <summary>Advances to the next visible entry, reading another batch when needed.</summary>
@@ -96,6 +115,7 @@ public sealed class BTreeCursor : IAsyncDisposable
             }
 
             Array.Clear(Entries);
+            if (_payloads is not null) { Array.Clear(_payloads); }
             Count = 0;
             _position = -1;
             using var linked = _openingToken.CanBeCanceled && cancellationToken.CanBeCanceled && _openingToken != cancellationToken
@@ -104,7 +124,7 @@ public sealed class BTreeCursor : IAsyncDisposable
             while (!Completed && Count == 0)
             {
                 _index!.ReadCursorBatch(this, token);
-                if (Count > 0) { ReadLimit = BatchSize; }
+                if (Count > 0) { _readLimit = BatchSize; }
                 BatchRead?.Invoke(); // Test seam, after every page pin and the tree latch have left.
             }
             if (Count == 0) { Continuation = null; return new ValueTask<bool>(false); }
@@ -130,6 +150,7 @@ public sealed class BTreeCursor : IAsyncDisposable
     private void Release()
     {
         Entries = [];
+        _payloads = null;
         Continuation = null;
         Boundary = null;
         Snapshot = null!;

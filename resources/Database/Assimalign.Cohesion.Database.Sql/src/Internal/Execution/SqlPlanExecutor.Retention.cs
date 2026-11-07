@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     [Flags]
-    private enum RetentionCheck { Group = 1, Join = 2, BoundedBody = 4, Distinct = 8 }
+    private enum RetentionCheck { Group = 1, Join = 2, BoundedBody = 4, Distinct = 8, OrderedDistinct = 16 }
 
     // Reuse the executor's optional relation-state slot: ordinary statements and ordinary
     // CTEs keep their exact object sizes. Only a correlated statement creates this map.
@@ -55,6 +55,7 @@ internal sealed partial class SqlPlanExecutor
             RetentionCheck.Group => InspectGroupInput((SqlGroupPlan)plan),
             RetentionCheck.Join => InspectJoinOutput((SqlJoinPlan)plan),
             RetentionCheck.BoundedBody => InspectBoundedSubqueryBody(plan),
+            RetentionCheck.OrderedDistinct => InspectPlainDistinct(plan, orderedInput: true),
             _ => InspectPlainDistinct(plan),
         };
         if (cache is not null)
@@ -71,6 +72,9 @@ internal sealed partial class SqlPlanExecutor
     private bool CanBoundSubqueryBody(SqlSubqueryBinding query)
         => query.Kind is SqlSubqueryKind.Exists or SqlSubqueryKind.Scalar
             && CanPipelineSelectRetention() && RetentionEligible(query.Query, RetentionCheck.BoundedBody);
+
+    private bool CanPipelineOrderedDistinct(SqlPlan plan)
+        => plan is SqlSelectPlan { IsDistinct: true } && CanPipelineSelectRetention() && RetentionEligible(plan, RetentionCheck.OrderedDistinct);
 
     private bool CanPipelinePlainDistinct(SqlPlan plan)
         => (plan switch
@@ -192,7 +196,7 @@ internal sealed partial class SqlPlanExecutor
         return true;
     }
 
-    private bool InspectPlainDistinct(SqlPlan plan)
+    private bool InspectPlainDistinct(SqlPlan plan, bool orderedInput = false)
     {
         try
         {
@@ -207,7 +211,7 @@ internal sealed partial class SqlPlanExecutor
                 && !(RetentionInputIsVolatile(plan) && relation.OutputProjections.Any(projection => RetentionHasVolatileCall(projection.Value)))
                 && plan switch
                 {
-                    SqlSelectPlan p => p.IsDistinct && InspectUnorderedDistinct(p.Projections, p.OrderBy),
+                    SqlSelectPlan p => p.IsDistinct && InspectUnorderedDistinct(p.Projections, orderedInput ? [] : p.OrderBy),
                     SqlSystemViewPlan p => p.IsDistinct && InspectUnorderedDistinct(p.Projections, p.OrderBy),
                     SqlConstantPlan p => p.IsDistinct && InspectUnorderedDistinct(p.Projections, p.OrderBy),
                     _ => false,
@@ -488,7 +492,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async ValueTask<DatabaseResult> ProjectJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
-        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, int? retainRows)
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, int? retainRows, SqlDatabaseSession? spillOwner = null)
     {
         SqlSelectMemory retainedBytes = default, seenBytes = default;
         try
@@ -554,7 +558,7 @@ internal sealed partial class SqlPlanExecutor
                         }
                         var keys = new object?[plan.OrderBy.Count];
                         for (int i = 0; i < keys.Length; i++) { keys[i] = evaluator.Evaluate(plan.OrderBy[i].Key, ordered); }
-                        collector.Add(output, keys);
+                        collector.Add(output, keys, spillOwner);
                     }
                 }
                 catch (Exception failure) when (CanDeferRetentionFailure(failure))
@@ -570,6 +574,7 @@ internal sealed partial class SqlPlanExecutor
             distinctFailure?.Throw();
             if (collector is not null)
             {
+                if (collector.HasSpilled) { return FinishCollected(collector, plan.Projections, plan.Limit, plan.Offset, false, evaluator, cancellationToken, resolveEmptyCollations: false); }
                 rows = collector.Finish(resolveEmptyCollations: false);
             }
             if (seen is not null)

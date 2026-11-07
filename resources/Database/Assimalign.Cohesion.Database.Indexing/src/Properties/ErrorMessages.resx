@@ -7,6 +7,8 @@
   <data name="CursorNotPositioned" xml:space="preserve"><value>The cursor is not positioned on an entry.</value></data>
   <data name="LiveLookupRequiresUnique" xml:space="preserve"><value>Latest live-entry lookup requires a unique index.</value></data>
   <data name="BTreeIndexInsertAsyncIndex" xml:space="preserve"><value>Index key of {0} bytes exceeds the {1}-byte maximum.</value></data>
+  <data name="PayloadTooLarge" xml:space="preserve"><value>Index payload of {0} bytes exceeds the {1}-byte maximum.</value></data>
+  <data name="PayloadReplacementRequiresPhysical" xml:space="preserve"><value>Payload replacement requires a live physical entry with zero writer and deleter stamps.</value></data>
   <data name="BTreeIndexInsertCoreIndex" xml:space="preserve"><value>Index '{0}' already holds the entry for reference {1} written by transaction {2} under this key; an entry's (key, reference, writer) identity must be unique.</value></data>
   <data name="TreeIndexManagerCreateIndexAsyncIndex" xml:space="preserve"><value>Index kind {0} is not supported yet; only BTree indexes exist in the MVP.</value></data>
   <data name="TreeIndexManagerCreateIndexAsyncIndex2" xml:space="preserve"><value>An index named '{0}' already exists on object {1}.</value></data>

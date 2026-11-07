@@ -1,5 +1,36 @@
 # Documents engine design
 
+## Journal admission backstop (#1283, EN-C2)
+
+At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
+ordinary size trigger is disabled. New physical brackets wait while that checkpoint is
+pending. A long holder or a checkpoint that has not run never takes the database offline,
+regardless of the pause's duration. Undo and nested brackets drain; health reports
+Degraded/CK06006 while admission is paused.
+
+Checkpoint and page write-back failures retain owner decisions 25, 41 and 42: every operational
+failure counts while paused too. A persistent failure takes its database offline after the
+failure window (100 seconds by default, across at least three failed passes); two failed
+checkpoints with a journal past the cap can take it offline sooner. Every parked writer wakes
+with the existing offline error. A successful checkpoint inside the window resumes admission;
+a reopen recovers an offline database. Blob refuses its failing database while its worker
+failure is held. Storage safety fences and single-admitted-bracket/mandatory-undo overshoot
+remain. Reads retain ordinary MVCC and model-lock rules while the database remains online.
+
+The free-run four-writer phase asserts zero pauses. Three repeated blocked-checkpoint episodes
+compare the internal switch on/off with the same four writers: each writer records admission
+waits with the switch on and the peak stays at or below J; without the switch the peak passes J.
+Writers' wait counts and total pause duration per episode are diagnostics; no duration decides
+a test. Transactions DESIGN records the lock order, events and exact counters. No format change. Stream chunk admission retains upload lifetime
+cancellation through final Flush/Dispose; only two distinct cancellable tokens allocate a link.
+
+Documents holds a database-wide writer grant through admission, so only one writer can reach the
+kernel pause at a time. After recording each wait, the blocked probe cancels that statement,
+finishes its cleanup and holds that writer outside the engine until checkpoint recovery. All
+four real writers therefore reach admission in each episode; this probe does not claim four
+simultaneous kernel waiters. The disabled comparison uses the same load and never cancels
+because it records no admission waits. Production cancellation and writer locking are unchanged.
+
 ## Refused opens preserve every file (#1744)
 
 DocumentCatalog.EnsureIndexFormat reads metadata kind/version headers, physical registrations and
@@ -2074,7 +2105,7 @@ names it leaves with ordinal comparison. Open performs kernel WAL replay with it
 checkpoint deferred, scrubs uncommitted record writers and index changes, and then
 completes the recovery checkpoint. Before the scrub it checks every index tree's
 B-tree page format (`DocumentCatalog.EnsureIndexFormat`, #1194): a database whose
-indexes an engine before #1194 wrote is refused with "Database 'x' cannot be
+indexes use an earlier page format is refused with "Database 'x' cannot be
 opened. CK06101: …". Clean and crashed databases are left byte-identical: gates precede all writes,
 using Storage's recovered read-only view when replay is needed (#1744). A file set in another storage
 format (#1251) is refused by the storage before its journal is read, and the engine names
@@ -3079,14 +3110,14 @@ On-disk record-layout changes require a new format version with no migration or 
 unknown versions are rejected.
 
 The index trees' pages are not catalog records: `Database.Indexing` owns their B-tree page
-format (2 since #1194, entries ordered by key, entry location and writer) and checks each tree's
+format (3 since #1809, entries ordered by key, entry location and writer) and checks each tree's
 root page when the catalog attaches it. Opening the catalog happens after the coordinator's
 recovery scrub, so `DocumentCatalog.EnsureIndexFormat(storage)` makes the same check first,
 reading only metadata kind/version headers, the registration records (which carry no MVCC stamps,
 so the scrub does not change them), and each root page. `Open` decodes metadata payloads once,
 after recovery; the fence does not allocate decoded collections, documents or path lists.
 The Documents engine calls it before recovery and refuses a database
-whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. CK06101: …",
+whose indexes use an earlier page format with "Database 'x' cannot be opened. CK06101: …",
 the `IndexFormatException` as its inner exception. Clean and crashed databases are left
 byte-identical: gates precede all writes, using the recovered read-only preflight when replay is needed (#1744). There is no upgrade path (owner decision
 of 2026-10-02; #1152). The fence runs one way only: engines before #1194 check neither the page

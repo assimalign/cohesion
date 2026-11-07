@@ -49,7 +49,7 @@ public sealed partial class SqlDeferredProvisioningTests
         {
             engine.BeforeProvisioning = database => database.SchemaProvisioner.JointStage = stage =>
             {
-                if (stage is "OwnersDurable" or "TablePrepared" or "Published")
+                if (stage is "OwnersDurable" or "KeepPrepared" or "Published")
                 { crashes.Add(storage.CaptureDurableImages()); }
             };
             return new RecordingWorker(engine);

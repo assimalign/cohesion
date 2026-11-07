@@ -148,7 +148,7 @@ internal sealed class SqlTableReclamation
                     // table or row lock is acquired or awaited inside this interlock.
                     // These identities can never acquire new writers or be reused by CREATE.
                     using (TransactionCheckpointInterlock.ForStorage(_database.DataStorage)
-                        .Enter("SqlTableReclamation", unchecked((long)pending.ObjectId), token))
+                        .Enter("SqlTableReclamation", unchecked((long)pending.ObjectId), token, waitForAdmission: false))
                     {
                         // Admission may have waited behind a writer that crossed the trigger.
                         // Disposal services a size-due checkpoint before the next admission.
@@ -193,6 +193,7 @@ internal sealed class SqlTableReclamation
                     }
                 }
             }
+            catch (TransactionAdmissionCanceledException) when (!token.IsCancellationRequested) { /* Retry on the next maintenance pass. */ }
             finally { Volatile.Write(ref _running, 0); }
         }
     }

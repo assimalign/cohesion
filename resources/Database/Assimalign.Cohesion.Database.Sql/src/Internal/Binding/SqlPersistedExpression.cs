@@ -231,7 +231,7 @@ internal static class SqlPersistedExpression
             case SqlCastExpression { TargetTypeInfo: null } cast:
                 SqlPlanner.ResolveCastTarget(cast, evaluator.Functions.Types);
                 break;
-            case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression or SqlInExpression { Values: null }:
+            case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression or SqlQualifiedStarExpression or SqlInExpression { Values: null }:
                 throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, ErrorMessages.PersistedRowExpressionInvalid);
             case SqlFunctionCallExpression call when evaluator.Functions.Catalog.IsAggregate(call.FunctionName):
                 throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PersistedAggregateInvalid, call.FunctionName));
@@ -390,6 +390,7 @@ internal static class SqlPersistedExpression
             Same(a.ColumnName, b.ColumnName) && Same(a.TableAlias, b.TableAlias) && Same(a.SchemaName, b.SchemaName),
         (SqlParameterExpression a, SqlParameterExpression b) => Same(a.ParameterName, b.ParameterName),
         (SqlStarExpression, SqlStarExpression) => true,
+        (SqlQualifiedStarExpression a, SqlQualifiedStarExpression b) => Same(a.TableName, b.TableName) && Same(a.SchemaName, b.SchemaName),
         (SqlDistinctExpression a, SqlDistinctExpression b) => a.IsNegated == b.IsNegated,
         (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
         (SqlJsonFunctionExpression a, SqlJsonFunctionExpression b) => SqlPersistedExpression.SameJsonFunction(a, b),
@@ -447,7 +448,7 @@ internal static class SqlPersistedExpression
         return first.IsDistinct == second.IsDistinct && first.IsGroupByDistinct == second.IsGroupByDistinct &&
             SameList(first.Columns, second.Columns, (a, b) => Same(a.Alias, b.Alias) && AreEquivalent(a.Expression, b.Expression)) &&
             SameList(first.From, second.From, (a, b) => SameTable(a.Table, b.Table) &&
-                SameList(a.Joins, b.Joins, (x, y) => x.JoinType == y.JoinType && SameTable(x.Table, y.Table) &&
+                SameList(a.Joins, b.Joins, (x, y) => x.JoinType == y.JoinType && x.IsNatural == y.IsNatural && SameTable(x.Table, y.Table) &&
                     SameList(x.UsingColumns, y.UsingColumns, Same) && AreEquivalent(x.Condition, y.Condition))) &&
             AreEquivalent(first.Where, second.Where) &&
             SameList(first.GroupBy, second.GroupBy, AreEquivalent) &&
@@ -478,7 +479,7 @@ internal static class SqlPersistedExpression
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         return SameTable(left.Table, right.Table) && SameList(left.Joins, right.Joins,
-            (a, b) => a.JoinType == b.JoinType && SameTable(a.Table, b.Table) &&
+            (a, b) => a.JoinType == b.JoinType && a.IsNatural == b.IsNatural && SameTable(a.Table, b.Table) &&
                 SameList(a.UsingColumns, b.UsingColumns, Same) && AreEquivalent(a.Condition, b.Condition));
     }
 

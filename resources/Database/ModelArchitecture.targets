@@ -32,9 +32,10 @@
     </ItemGroup>
   </Target>
   <Target Name="CopyDatabaseArchitectureInputs" AfterTargets="Build" Condition="'$(_DatabaseArchitectureTest)' == 'true'">
-    <!-- Ask the model project for its evaluated IntermediateOutputPath, including RID/path overrides. -->
+    <!-- Library project references remove the test executable's RID. Preserve the model's own RID/path overrides. -->
     <MSBuild Projects="$(MSBuildThisFileDirectory)Assimalign.Cohesion.Database.$(_DatabaseArchitectureModel)\src\Assimalign.Cohesion.Database.$(_DatabaseArchitectureModel).csproj"
-             Targets="GetDatabaseArchitectureManifests" Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)">
+             Targets="GetDatabaseArchitectureManifests" Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)"
+             RemoveProperties="RuntimeIdentifier">
       <Output TaskParameter="TargetOutputs" ItemName="_DatabaseArchitectureManifest" />
     </MSBuild>
     <Error Condition="'@(_DatabaseArchitectureManifest->Count())' != '3'" Text="The model build must export all three architecture input manifests." />

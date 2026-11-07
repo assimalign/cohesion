@@ -174,6 +174,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         var unavailableEngines = new List<string>();
         var offlineDatabases = new List<string>();
         var provisioningDatabases = new List<string>();
+        var pausedDatabases = new List<string>();
         int workerCount = 0;
 
         // The databases the application is reopening: a failed reopen left them closed, so their
@@ -241,7 +242,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                 await foreach (var database in engine.GetDatabasesAsync(cancellationToken).ConfigureAwait(false))
                 {
                     var progress = database.Provisioning;
-                    observation?.ObserveDatabase(engine, database, progress);
+                    bool paused = database.IsJournalAdmissionPaused;
+                    observation?.ObserveDatabase(engine, database, progress, paused);
+                    if (paused) { pausedDatabases.Add($"{engine.Name}/{database.Name}"); }
                     if (progress is null)
                     {
                         continue;
@@ -323,6 +326,12 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
             }
         }
 
+        data["journalAdmissionPausedDatabaseCount"] = pausedDatabases.Count;
+        if (pausedDatabases.Count > 0)
+        {
+            data["journalAdmissionPausedDatabases"] = string.Join(", ", pausedDatabases);
+            data["journalAdmissionPauseCode"] = "CK06006";
+        }
         data["workerCount"] = workerCount;
         data["offlineDatabaseCount"] = offlineDatabases.Count;
         data["provisioningDatabaseCount"] = provisioningDatabases.Count;
@@ -356,6 +365,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
             }
 
             return HealthCheckResult.Degraded(description.ToString(), data: data);
+        }
+        else if (pausedDatabases.Count > 0)
+        {
+            return HealthCheckResult.Degraded($"CK06006: Write admission is paused for a pending journal checkpoint: {string.Join(", ", pausedDatabases)}. Reads retain their ordinary snapshot and locking rules.", data: data);
         }
         else if (provisioningDatabases.Count > 0)
         {

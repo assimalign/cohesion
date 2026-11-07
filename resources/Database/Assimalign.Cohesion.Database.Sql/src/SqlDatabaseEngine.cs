@@ -712,6 +712,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 PublishStorageSnapshotLocked(storage, catalogStorage);
                 var catalog = SqlCatalog.Open(catalogStorage, defaultCollation);
                 var database = new SqlDatabase(name, this, storage, catalogStorage, catalog, recover: false);
+                ConfigureJournalAdmission(database, JournalSizeLimit, storage, catalogStorage);
                 // Finish the claim before publication. A durable data checkpoint also fences
                 // a stale directory entry if the claim deletion itself is interrupted.
                 storage.Checkpoint();
@@ -947,6 +948,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 try
                 {
                     database.ResumeProvisioningAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+                    ConfigureJournalAdmission(database, JournalSizeLimit, storage, catalogStorage);
                 }
                 catch
                 {
@@ -1231,6 +1233,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         _checkpointNeededSignal.Dispose();
         _undoDeferredSignal.Dispose();
 
+        try { if (TempSpace is not null) { SqlSpillLifetime.Close(this); } }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        { (failures ??= []).Add(failure); }
         try { TempSpace?.Dispose(); }
         catch (Exception failure) when (failure is not OutOfMemoryException)
         { (failures ??= []).Add(failure); }

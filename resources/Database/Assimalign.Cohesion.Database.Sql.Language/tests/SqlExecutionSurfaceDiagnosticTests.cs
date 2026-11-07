@@ -40,8 +40,8 @@ public class SqlExecutionSurfaceDiagnosticTests
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Reports the explicit execution boundary")]
     [InlineData("SELECT * FROM t JOIN u;", "require ON or USING")]
-    [InlineData("SELECT t.* FROM t JOIN u ON t.id = u.id;", "Qualified SQL wildcard")]
-    [InlineData("SELECT dbo.t.* FROM dbo.t JOIN dbo.u ON dbo.t.id = dbo.u.id;", "Qualified SQL wildcard")]
+    [InlineData("SELECT COUNT(t.*) FROM t;", "Qualified SQL wildcard")]
+    [InlineData("SELECT COUNT(dbo.t.*) FROM dbo.t;", "Qualified SQL wildcard")]
     public void Parse_UnsupportedJoinShape_ReportsPreciseModelDiagnostic(string sql, string message)
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);

@@ -107,8 +107,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         instance.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Hash);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Schema apply: a failed later step compensates completed DDL")]
-    public async Task ApplySchema_WhenLaterStepFails_ShouldRollbackCompletedStepsAndLeaveStateUnchanged()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Schema apply: a failed later preparation keeps every old object online")]
+    public async Task ApplySchema_WhenPreparationFails_ShouldKeepOldSchemaAndLeaveStateUnchanged()
     {
         // Arrange: the desired schema is valid, but its unique-index build fails against
         // duplicate live values after the preceding ADD COLUMN has completed.
@@ -136,8 +136,9 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         SqlSchemaMigrationException exception = await Should.ThrowAsync<SqlSchemaMigrationException>(
             async () => await database.ApplySchemaAsync(invalid));
 
-        // Assert: ADD COLUMN completed first, then its compensation removed it.
-        exception.Message.ShouldContain("Every completed step was compensated");
+        // Assert: ADD COLUMN never published; the old table remains online.
+        exception.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+        database.IsOffline.ShouldBeFalse();
         var instance = database.ShouldBeOfType<SqlDatabase>();
         instance.Catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         table.FindColumn("note").ShouldBeNull();

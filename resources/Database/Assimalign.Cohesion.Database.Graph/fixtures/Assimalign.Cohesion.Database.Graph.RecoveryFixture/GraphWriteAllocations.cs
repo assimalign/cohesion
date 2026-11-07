@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
 internal static class GraphWriteAllocations
 {
-    internal static long[] Measure(int injectedKind, int injectedBytes = 1024, bool typed = false)
+    internal static long[] Measure(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false)
     {
         var engine = GraphDatabaseEngine.Create("allocation", new()
         {
@@ -24,6 +24,11 @@ internal static class GraphWriteAllocations
                 schema.SetGraphTypeAsync(GraphType.Create([
                     GraphNodeType.Create("Counter", properties: [GraphPropertyType.Create("c", Types.DatabaseType.Int64, true)]),
                     GraphNodeType.Create("Temporary", properties: [GraphPropertyType.Create("id", Types.DatabaseType.Int64, true)])]), CancellationToken.None).GetAwaiter().GetResult();
+            }
+            if (indexed)
+            {
+                session.ExecuteAsync("CREATE INDEX counter_c FOR (n:Counter) ON (n.c)", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+                session.ExecuteAsync("CREATE INDEX temporary_id FOR (n:Temporary) ON (n.id)", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
             }
             session.ExecuteAsync("CREATE (:Counter {c:0})", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
             string[] queries = ["CREATE (:Temporary {id:1})", "MATCH (n:Counter) SET n.c=n.c+1", "MATCH (n:Temporary) DELETE n"];

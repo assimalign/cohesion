@@ -36,7 +36,7 @@ internal sealed partial class SqlPlanner
 
         var aggregates = new List<(SqlFunctionCallExpression Call, SqlAggregateFunction Function)>();
         var slots = new Dictionary<SqlExpression, int>();
-        var projections = new List<SqlProjection>();
+        var projections = new List<SqlProjection>(select.Columns.Count);
         foreach (var column in select.Columns)
         {
             BindSlots(column.Expression);
@@ -50,6 +50,8 @@ internal sealed partial class SqlPlanner
             {
                 HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression ||
                     column.Expression is SqlFunctionCallExpression namedCall && IsAggregate(namedCall),
+                HasSynthesizedName = column.Alias is null && column.Expression is SqlColumnReferenceExpression inheritedName &&
+                    evaluator.ColumnMetadata(inheritedName).HasSynthesizedName,
                 MaxLength = evaluator.MaximumLengthOf(column.Expression),
                 // A bare COUNT never returns NULL, even over no rows; every other projection may.
                 IsNullable = !(column.Expression is SqlFunctionCallExpression grouping && IsGrouping(grouping)) &&
@@ -300,7 +302,7 @@ internal sealed partial class SqlPlanner
                 if (evaluator.IsOuterColumn(reference)) { return; }
                 throw new SqlPlanningException("CS05017", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerPlanGroupSqlPlanning3, reference.ColumnName), reference.Location);
             }
-            if (expression is SqlStarExpression)
+            if (expression is SqlStarExpression or SqlQualifiedStarExpression)
             {
                 throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanGroupSqlPlanning4, expression.Location);
             }

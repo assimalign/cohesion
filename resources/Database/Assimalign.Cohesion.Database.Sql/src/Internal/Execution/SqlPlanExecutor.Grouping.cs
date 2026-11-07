@@ -18,22 +18,25 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken) => ExecuteGroupAsync(plan, statement, cancellationToken, plan);
 
     private Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken, SqlGroupPlan retentionPlan) => plan is SqlGroupingSetsPlan grouped
-            ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
-            : ExecutePlainGroupAsync(plan, statement, cancellationToken, retentionPlan);
+        CancellationToken cancellationToken, SqlGroupPlan retentionPlan, SqlDatabaseSession? spillOwner = null)
+    {
+        if (spillOwner is not null && plan.Aggregates.Any(aggregate => aggregate.OrderBy.Count > 0)) { spillOwner = null; }
+        return plan is SqlGroupingSetsPlan grouped ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
+            : ExecutePlainGroupAsync(plan, statement, cancellationToken, retentionPlan, spillOwner);
+    }
 
     /// <summary>
     /// Consumes a filtered relation, accumulates one state per group, then applies
     /// HAVING, ordering, projection and pagination to completed groups.
     /// </summary>
     private Task<DatabaseResult> ExecutePlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken, SqlGroupPlan? retentionPlan = null)
-        => CanPipelineGroupInput(retentionPlan ?? plan) ? ExecutePipelinedGroupAsync(plan, statement, cancellationToken)
-            : ExecuteMaterializedPlainGroupAsync(plan, statement, cancellationToken);
+        CancellationToken cancellationToken, SqlGroupPlan? retentionPlan = null, SqlDatabaseSession? spillOwner = null)
+        => CanPipelineGroupInput(retentionPlan ?? plan) ? ExecutePipelinedGroupAsync(plan, statement, cancellationToken, spillOwner)
+            : ExecuteMaterializedPlainGroupAsync(plan, statement, cancellationToken, spillOwner);
 
     // The staged body remains the reference path for DML, recursive/window owners and differential tests.
     private async Task<DatabaseResult> ExecuteMaterializedPlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         long retainedBytes = 0, inputBytes = 0;
         SqlSelectMemory keyBytes = default, matchBytes = default;
@@ -184,7 +187,7 @@ internal sealed partial class SqlPlanExecutor
                         cancellationToken.ThrowIfCancellationRequested();
                         orderingKeys[i] = evaluator.Evaluate(plan.OrderBy[i].Key, row);
                     }
-                    collected.Add(row[projectionStart..], orderingKeys);
+                    collected.Add(row[projectionStart..], orderingKeys, spillOwner);
                 }
             }
             if (deferredSequence)
@@ -202,7 +205,7 @@ internal sealed partial class SqlPlanExecutor
                 return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
                     plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
             }
-            return FinishSelect(collected.Finish(), plan.Projections, plan.Limit, plan.Offset,
+            return FinishCollected(collected, plan.Projections, plan.Limit, plan.Offset,
                 plan.IsDistinct, evaluator, cancellationToken, projectionCollations);
 
             // One accumulator per group, per aggregate call, per statement, owned here and never shared.
@@ -228,7 +231,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private async Task<DatabaseResult> ExecutePipelinedGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         long retainedBytes = 0;
         SqlSelectMemory keyBytes = default, matchBytes = default;
@@ -373,7 +376,7 @@ internal sealed partial class SqlPlanExecutor
                             cancellationToken.ThrowIfCancellationRequested();
                             orderingKeys[i] = evaluator.Evaluate(plan.OrderBy[i].Key, row);
                         }
-                        collected.Add(row[projectionStart..], orderingKeys);
+                        collected.Add(row[projectionStart..], orderingKeys, spillOwner);
                     }
                 }
                 if (deferredSequence)
@@ -391,7 +394,7 @@ internal sealed partial class SqlPlanExecutor
                     return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
                         plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
                 }
-                return FinishSelect(collected.Finish(), plan.Projections, plan.Limit, plan.Offset,
+                return FinishCollected(collected, plan.Projections, plan.Limit, plan.Offset,
                     plan.IsDistinct, evaluator, cancellationToken, projectionCollations);
 
                 // One accumulator per group, per aggregate call, per statement, owned here and never shared.

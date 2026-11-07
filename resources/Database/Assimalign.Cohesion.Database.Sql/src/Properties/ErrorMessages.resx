@@ -486,6 +486,18 @@
   <data name="StatementMemoryBudgetExceeded" xml:space="preserve">
     <value>The statement memory budget of {0} bytes was exceeded.</value>
   </data>
+  <data name="SortBufferReadOnly" xml:space="preserve">
+    <value>The evaluated sort buffer is read-only.</value>
+  </data>
+  <data name="SortBudgetHandoff" xml:space="preserve">
+    <value>The evaluated sort buffer requires temporary storage.</value>
+  </data>
+  <data name="SpillCleanupFailed" xml:space="preserve">
+    <value>Temporary SQL result cleanup failed.</value>
+  </data>
+  <data name="SpillRowDamaged" xml:space="preserve">
+    <value>A temporary SQL result row is damaged.</value>
+  </data>
   <data name="ExplainAnalyzeSelectOnly" xml:space="preserve">
     <value>EXPLAIN ANALYZE supports SELECT queries only.</value>
   </data>
@@ -502,8 +514,6 @@
   <data name="FileNamesThrowIfInvalidArgument" xml:space="preserve"><value>{0} {1}</value></data>
   <data name="DatabaseMemoryFilesTryOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' was opened or created again while an open copied it.</value></data>
   <data name="DatabaseMemoryFilesThrowIfOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' is still open: its database's storage has not closed, so it cannot be opened again.</value></data>
-  <data name="ResumeProvisioningAsyncFailure" xml:space="preserve"><value>{0}: pending migration target hash is invalid.</value></data>
-  <data name="ResumeProvisioningAsyncFailure2" xml:space="preserve"><value>{0}: database '{1}' has a different pending schema. Finish its recorded migration before replacing the declaration.</value></data>
   <data name="SqlDatabaseDatabase" xml:space="preserve"><value>Database '{0}' cannot be opened. {1}</value></data>
   <data name="SqlDatabaseFailure" xml:space="preserve"><value>Database '{0}' uses data-storage format {1}, but one of its index trees does not: {2}</value></data>
   <data name="ThrowIfFormatIsNotCurrentFailure" xml:space="preserve"><value>Database '{0}' uses data-storage format {1}, but this engine supports only format {2}. {3}</value></data>
@@ -835,9 +845,6 @@
   <data name="SqlDeclaredScriptDatabase" xml:space="preserve"><value>CS03203: Declared scripts own statement transactions; transaction-control statements are not allowed.</value></data>
   <data name="SqlSchemaProvisionerApplyAsyncFailure" xml:space="preserve"><value>{0}: {1}: a different schema is pending. Finish the recorded migration before replacing its declaration.</value></data>
   <data name="SqlSchemaProvisionerApplyAsyncFailure2" xml:space="preserve"><value>{0}: {1}: {2} Nothing was changed.</value></data>
-  <data name="SqlSchemaProvisionerApplyAsyncFailure3" xml:space="preserve"><value>{0}: the applied catalog differs: {1}.</value></data>
-  <data name="SqlSchemaProvisionerApplyAsyncFailure4" xml:space="preserve"><value>{0}: applying schema '{1}' was canceled; every completed step was compensated.</value></data>
-  <data name="SqlSchemaProvisionerApplyAsyncFailure5" xml:space="preserve"><value>{0}: {1}: applying schema '{2}': {3}. {4}{5}</value></data>
   <data name="SchemaProvisionerVerifyAsyncFailure" xml:space="preserve"><value>{0}: {1}: the declared schema (hash {2}) is not the one applied: {3}. The database is declared in Verify mode, so nothing was changed; migrate it out of band, or declare it in Apply mode.</value></data>
   <data name="ProvisionerResolveColumnTypeDatabase" xml:space="preserve"><value>Column '{0}' is declared with type '{1}': {2}.</value></data>
   <data name="ProvisionerResolveColumnTypeDatabase2" xml:space="preserve"><value>Column '{0}' is declared with type '{1}', which is stored as {2}, but its member is stored as {3}; declare a type whose storage is the member's.</value></data>
@@ -856,7 +863,7 @@
     <value>The unpublished migration target or resolved route no longer matches; preparation was discarded and the stored schema remains online.</value>
   </data>
   <data name="JointMigrationFailed" xml:space="preserve">
-    <value>Unpublished joint migration failed. The published schema is unchanged; correct the cause and retry.</value>
+    <value>{0}: applying schema '{1}': joint steps ({2}) failed: {3} The published schema is unchanged; correct the cause and retry.</value>
   </data>
   <data name="JointPlanningRefused" xml:space="preserve"><value>Schema migration planning refused: {0} Nothing was changed.</value></data>
   <data name="JointSpaceInsufficient" xml:space="preserve"><value>Joint migration space refused: {0} bytes needed, {1} bytes available. The published schema is unchanged.</value></data>
@@ -992,10 +999,6 @@
   <data name="StarArgumentCountReceived" xml:space="preserve"><value>{0} arguments including '*'</value></data>
   <data name="OneOrMoreArgumentsExpected" xml:space="preserve"><value>1 or more arguments</value></data>
   <data name="TwoArgumentsExpected" xml:space="preserve"><value>exactly 2 arguments</value></data>
-  <data name="CompensationComplete" xml:space="preserve"><value>Every completed step was compensated.</value></data>
-  <data name="CompensationIncomplete" xml:space="preserve"><value>Compensation was incomplete; the live catalog must be reconciled before retrying.</value></data>
-  <data name="MigrationStepFailureContext" xml:space="preserve"><value>step {0} of {1} ({2}) failed</value></data>
-  <data name="SchemaRecordFailureContext" xml:space="preserve"><value>recording the applied schema failed after all {0} step(s)</value></data>
   <data name="DeclarationDifferenceContext" xml:space="preserve"><value>; first difference from the declaration: {0}</value></data>
   <data name="PrincipalDdlUnavailable" xml:space="preserve"><value>principal '{0}', and principals and grants are refused until their DDL exists</value></data>
   <data name="ColumnSubject" xml:space="preserve"><value>Column '{0}'</value></data>
@@ -1078,4 +1081,12 @@
     <value>Storage replacement publication failed after its catalog commit; recovery decides the outcome.</value>
   </data>
   <data name="TempRootInvalid" xml:space="preserve"><value>must be a valid path or an empty path for an in-memory engine; a default path is invalid.</value></data>
+  <data name="SpillResultsUndisposed" xml:space="preserve"><value>The session has {0} undisposed spilled results. Dispose a result before spilling another statement.</value></data>
+  <data name="SpillReaderBudgetExceeded" xml:space="preserve"><value>The spilled result reader grant of {0} bytes would be exceeded: {1} live bytes and {2} requested bytes. Dispose an active enumeration before opening another.</value></data>
+  <data name="TargetListLimit" xml:space="preserve">
+    <value>A target list can have at most {0} entries; this expansion reaches {1} entries.</value>
+  </data>
+  <data name="NaturalSynthesizedName" xml:space="preserve">
+    <value>NATURAL JOIN input column '{0}' has a synthesized name; give the column an explicit alias.</value>
+  </data>
 </root>

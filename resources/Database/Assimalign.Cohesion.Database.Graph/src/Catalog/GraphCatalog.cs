@@ -418,7 +418,7 @@ public sealed partial class GraphCatalog
     /// <param name="cancellationToken">Cancels the mutation.</param>
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The index metadata is invalid.</exception>
-    /// <exception cref="GraphCatalogException">The label is absent or the name identifies another property.</exception>
+    /// <exception cref="GraphCatalogException">The label is absent or the name identifies another property or index kind.</exception>
     /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The label is schema-owned.</exception>
     public ValueTask SaveIndexAsync(GraphIndexMetadata index, TransactionContext context, CancellationToken cancellationToken = default)
@@ -429,7 +429,7 @@ public sealed partial class GraphCatalog
         RequireMutableDefinition(index.LabelId, context.Snapshot, "ALTER", labelOnly: true);
         EnsureParentUnchanged(index.LabelId, context);
         var prior = EnsureUnchanged(4, index.LabelId, index.Name, context);
-        if (prior?.Record.Index is { } previous && previous.PropertyKey != index.PropertyKey)
+        if (prior?.Record.Index is { } previous && (previous.PropertyKey != index.PropertyKey || previous.IsText != index.IsText))
         {
             throw new GraphCatalogException("CG03003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexPropertyMismatch,
                 index.Name, previous.PropertyKey)) { IsCallerError = true };

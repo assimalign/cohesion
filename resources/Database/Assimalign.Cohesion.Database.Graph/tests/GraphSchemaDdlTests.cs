@@ -72,6 +72,8 @@ public sealed class GraphSchemaDdlTests
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(backfillMemory ? "CG05020" : "CG05004");
         long visited = (relationship ? database.Store.RelationshipTypeEntriesVisited : database.Store.LabelEntriesVisited) - postings;
         visited.ShouldBeGreaterThan(0);
+        // Validate all ten exact keys before precharging buffered insertions; the second
+        // insertion refuses at twelve without allocating any index page.
         if (backfillWork) { visited.ShouldBe(10); session.LastStatementMetrics!.Physical.ShouldBe(12); }
         else { visited.ShouldBeLessThan(10); }
         if (backfillMemory)

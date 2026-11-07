@@ -282,7 +282,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
     /// holds it, its transaction refuses statements (<c>CG04007</c>), or the write failed (a
     /// property that does not match the graph definition, <c>CG03003</c>, or an omitted implied
-    /// label required by a node type, <c>CG03012</c>).
+    /// label required by a node type, <c>CG03012</c>, or exhausted text-index work/memory, <c>CG05004</c>/<c>CG05020</c>).
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The graph catalog changed since the transaction's snapshot (retryable).</exception>
@@ -332,7 +332,8 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
-    /// holds it, its transaction refuses statements (<c>CG04007</c>), or the delete failed.
+    /// holds it, its transaction refuses statements (<c>CG04007</c>), the text-index work/memory budget
+    /// is exhausted (<c>CG05004</c>/<c>CG05020</c>), or the delete failed.
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The node or one of its relationships changed since the transaction's snapshot (retryable).</exception>
@@ -342,7 +343,13 @@ public sealed partial class GraphDatabase : DatabaseInstance
         {
             await LockWriterAsync(operation, cancellationToken).ConfigureAwait(false);
             bool found = Store.FindNode(id.Value, operation.Context.Snapshot) is not null;
-            await Store.DeleteNodeAsync(id.Value, true, operation.Context, cancellationToken).ConfigureAwait(false);
+            if (Store.HasTextIndexes)
+            {
+                var budget = operation.EnsureQueryBudget();
+                using var memory = new GraphMemoryOwner(budget.Memory);
+                await Store.DeleteNodeAsync(id.Value, true, operation.Context, cancellationToken, budget.Consume, memory.Add).ConfigureAwait(false);
+            }
+            else { await Store.DeleteNodeAsync(id.Value, true, operation.Context, cancellationToken).ConfigureAwait(false); }
             return found;
         }, cancellationToken);
 
@@ -516,6 +523,13 @@ public sealed partial class GraphDatabase : DatabaseInstance
     {
         await LockWriterAsync(operation, token).ConfigureAwait(false);
         await ValidateNodeAsync(operation, labels, properties, token).ConfigureAwait(false);
+        if (Store.HasTextIndexes)
+        {
+            var budget = operation.EnsureQueryBudget();
+            using var memory = new GraphMemoryOwner(budget.Memory);
+            return Materialize(await Store.CreateNodeAsync(new StoredGraphNode((ulong)DataStorage.ReserveTransactionSequence(), labels, properties ?? new Dictionary<string, object?>()),
+                NodeLabelIds(labels, operation), operation.Context, token, budget.Consume, memory.Add).ConfigureAwait(false));
+        }
         return Materialize(await Store.CreateNodeAsync(new StoredGraphNode((ulong)DataStorage.ReserveTransactionSequence(), labels, properties ?? new Dictionary<string, object?>()), NodeLabelIds(labels, operation), operation.Context, token).ConfigureAwait(false));
     }
 

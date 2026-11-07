@@ -37,13 +37,13 @@ public sealed partial class SqlJointTypeMigrationTests
             await writer.ExecuteAsync("INSERT INTO filled VALUES(1)", cancellationToken: guard.Token);
             database.SchemaProvisioner.JointStage = phase =>
             {
-                if (phase != "TablePrepared") { return; }
+                if (phase != "KeepPrepared") { return; }
                 prepared++;
                 database.Catalog.PendingMigration.ShouldNotBeNull();
                 var registrations = database.IndexManager.ExportRegistrations(includePrepared: true);
                 registrations.ShouldContain(value => !database.Catalog.Tables.Any(table => table.ObjectId == value.ObjectId));
                 registrations.ShouldContain(value => value.ObjectId == Table(database).ObjectId && database.IndexManager.PageOwner(value) != value.ObjectId);
-                // The completed copy and alternate tree have durable owners before
+                // The prepared new table and alternate tree have durable owners before
                 // the injected failure enters discard. No intent-only forgery.
                 recorder = storage.RecordCrashPoints();
                 throw new InvalidOperationException("injected prepared-table failure");
@@ -75,7 +75,9 @@ public sealed partial class SqlJointTypeMigrationTests
         {
             table.Key(row => row.Value);
             if (third) { table.Index(row => row.Value); }
-            table.Column(row => row.Payload, "VARCHAR(4000)");
+            // Required append now keeps the heap. Change VARCHAR to CHAR as well
+            // so this fixture continues proving multi-bracket physical-copy checkpoints.
+            table.Column(row => row.Payload, target ? "CHAR(4000)" : "VARCHAR(4000)");
             if (target) { table.Column(row => row.Added); table.Default(row => row.Added, 7); }
         });
         if (third) { schema.Table<DeferredThird>("third", table => table.Key(row => row.Id)); }

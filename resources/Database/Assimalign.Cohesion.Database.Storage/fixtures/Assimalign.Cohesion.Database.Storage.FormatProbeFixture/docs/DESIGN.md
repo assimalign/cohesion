@@ -6,7 +6,9 @@ Environment.Exit skips unwinding the live brackets. Engine tests invoke this pro
 all refused files byte for byte, or tear journal-covered pages and verify exact recovery.
 Graph cases include format-4 entities and physical registrations (CG06017), catalog versions
 (CG06019) and B-tree root stamps (CK06101).
-Graph catalog seeds use v3 as current and v2 as legacy (#1806); graph entity format remains 5.
+Graph catalog seeds use v4 as current and v3 as legacy (#1644); graph entity format remains 5.
+The legacy-index2 and clean-legacy-index2 modes combine each model's older marker with
+B-tree page format 2, pinning the first refusal when both gates could reject the image.
 
 The fixture depends on the model assemblies, which use Storage:
 
@@ -15,6 +17,10 @@ flowchart LR
     Fixture["FormatProbeFixture"] --> Models["SQL, KeyValuePair, Graph, Documents, Blob"]
     Models --> Storage["Database.Storage"]
 ```
+
+The sql-spill-stop mode executes and starts delivering a real spilled root SELECT, then
+reports readiness while its result remains live. The parent kills it without cleanup and
+asserts that the next SQL engine open sweeps temporary files and recovers all committed rows.
 
 The fixture adds no shipped API or on-disk format. Each model test imports the common
 FormatProbeTests.targets to build/copy the executable; its csproj explicitly links the test-only process helper.
@@ -40,3 +46,9 @@ The temp-lease-probe mode creates and reopens a real SQL database with disabled 
 locking. It requires startup warnings and a later CK05005 spill refusal while the database
 remains online. Windows verifies ordinary lease success. A test-only UnsafeAccessor reaches
 the internal engine space; no shipped visibility or reference is added.
+
+The sql-ctas-sort-stop and sql-ctas-copy-stop modes stop during spilled CTAS input and
+destination assignment respectively. A registered projection stops after 3,000 input calls;
+a domain constraint stops at destination row 65, after the first bounded copy bracket.
+The parent kills the process, then verifies temp sweeping, unpublished-owner reclamation,
+the unchanged source and successful retry. Neither stop introduces durable state (#1789).

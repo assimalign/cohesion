@@ -9,6 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -181,7 +182,7 @@ public sealed partial class SqlSelectRetentionTests
         builder.Options.PageWriteBackInterval = TimeSpan.FromHours(1);
         builder.Functions.Add(SqlScalarFunction.Create("sample_memory", (long value) =>
         {
-            if (++calls == count - 8) { sampledLive = GC.GetTotalMemory(forceFullCollection: true); }
+            if (++calls == count - 8) { sampledLive = LiveHeap.Read(); }
             return value;
         }));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
@@ -209,7 +210,7 @@ public sealed partial class SqlSelectRetentionTests
             database.Definitions.ForceSelectRetentionBasePath = true;
             observations.Clear();
             calls = 0;
-            long startingLive = GC.GetTotalMemory(forceFullCollection: true);
+            long startingLive = LiveHeap.Read();
             var baseline = await Rows(session, shape.Item2);
             calls.ShouldBe(count);
             long beforeLive = sampledLive - startingLive;
@@ -225,7 +226,7 @@ public sealed partial class SqlSelectRetentionTests
             {
                 observations.Clear();
                 calls = 0;
-                startingLive = GC.GetTotalMemory(forceFullCollection: true);
+                startingLive = LiveHeap.Read();
                 actual = await Rows(session, shape.Item2);
                 calls.ShouldBe(count);
                 afterLive = Math.Min(afterLive, sampledLive - startingLive);

@@ -10,6 +10,7 @@ using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
@@ -124,13 +125,13 @@ public sealed class DocumentStatementMemoryTests
         {
             var memory = operation.GetStatementMemory(CancellationToken.None);
             long baseline = 0;
-            memory.RetentionObserved = () => peakLive = Math.Max(peakLive, GC.GetTotalMemory(true) - baseline);
-            baseline = GC.GetTotalMemory(true);
+            memory.RetentionObserved = () => peakLive = Math.Max(peakLive, LiveHeap.Read() - baseline);
+            baseline = LiveHeap.Read();
             var result = await DocumentPlanExecutor.ExecuteAsync(database, operation, request.Statement, parameters, CancellationToken.None);
             memory.RetentionObserved = null;
             peak = memory.PeakBytes;
             final = memory.Bytes;
-            resultLive = GC.GetTotalMemory(true) - baseline;
+            resultLive = LiveHeap.Read() - baseline;
             return result;
         }, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
 

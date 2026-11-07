@@ -25,7 +25,7 @@ public sealed partial class SqlQueryParser
         if (IsKeyword(ref lexer, "USING"))
         {
             Advance(ref lexer);
-            sources = ParseFromItems(ref lexer);
+            sources = ParseFromItems(ref lexer, natural: false);
         }
 
         // WHERE

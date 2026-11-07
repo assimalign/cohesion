@@ -232,7 +232,7 @@ public sealed partial class SqlCatalog
             if (!_pendingReclamations.TryGetValue(objectId, out var location)) { return default; }
             if (_truncateRetirementsPublishing.Contains(objectId) ||
                 (intent is null ? _preparedTruncateOwners.Contains(objectId) : !ReferenceEquals(intent, location))) { return default; }
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)objectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)objectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)objectId));
             _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
             DefinitionSlot<SqlCatalogSequence>[] orphaned = _sequences.Count == 0 ? [] : _sequences.Values.Where(slot => slot.Value.OwnerTableId == objectId).ToArray();
@@ -295,7 +295,7 @@ public sealed partial class SqlCatalog
 
             var writer = new DatabaseKeyWriter();
             writer.AppendInt32(defaultCollationRecordKind).AppendInt8((sbyte)collation.Id);
-            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog");
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             var location = UpsertRecord(transaction, _defaultCollationLocation, writer.ToArray());
             CommitCatalogChange(transaction);
@@ -497,7 +497,7 @@ public sealed partial class SqlCatalog
             var table = new SqlCatalogTable(_nextObjectId, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
             ValidateConstraints(table);
 
-            using var checkpointAdmission3 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)table.ObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission3 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)table.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)table.ObjectId)))
             {
                 var location = _storage.InsertRow(transaction, EncodeTable(table));
@@ -566,7 +566,7 @@ public sealed partial class SqlCatalog
             {
                 if (publication is not null)
                 {
-                    CommitScriptAbsence(publication, SqlObjectIdentity.Table(schema, name));
+                    CommitScriptAbsence(publication, SqlObjectIdentity.Table(schema, name), cancellationToken);
                     return default;
                 }
                 throw new SqlCatalogException("CS01051", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, name));
@@ -605,7 +605,7 @@ public sealed partial class SqlCatalog
                 }
             }
 
-            using var checkpointAdmission4 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)slot.Table.ObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission4 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)slot.Table.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)slot.Table.ObjectId)))
             {
                 // The intent and unpublication share this commit. Each retired identity owns
@@ -733,7 +733,7 @@ public sealed partial class SqlCatalog
             var columns = slot.Table.Columns.Append(column).ToList();
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
                 slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints, slot.Table.DroppedColumnOrdinals);
-            ReplaceTable(slot, updated, publication);
+            ReplaceTable(slot, updated, publication, cancellationToken: cancellationToken);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }
@@ -877,7 +877,7 @@ public sealed partial class SqlCatalog
             var droppedIndexes = _indexes.Values.Where(index => index.Index.TableObjectId == slot.Table.ObjectId &&
                 index.Index.Predicate is not null && (index.Index.PredicateColumns.Contains(columnName, StringComparer.OrdinalIgnoreCase) ||
                 index.Index.ColumnNames.Contains(columnName, StringComparer.OrdinalIgnoreCase))).ToArray();
-            ReplaceTable(slot, updated, publication, droppedIndexes);
+            ReplaceTable(slot, updated, publication, droppedIndexes, cancellationToken);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }
@@ -1026,7 +1026,7 @@ public sealed partial class SqlCatalog
             }
 
             var mergedRegistrations = MergePublishedRegistrations(registrations, [index]);
-            using var checkpointAdmission5 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)index.TableObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission5 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)index.TableObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)index.TableObjectId)))
             {
                 var location = _storage.InsertRow(transaction, EncodeIndex(index));
@@ -1108,7 +1108,7 @@ public sealed partial class SqlCatalog
             {
                 if (publication is not null && FindTableByObjectId(tableObjectId) is { } existingTable)
                 {
-                    CommitScriptAbsence(publication, SqlObjectIdentity.Index(existingTable.Schema, existingTable.Name, name));
+                    CommitScriptAbsence(publication, SqlObjectIdentity.Index(existingTable.Schema, existingTable.Name, name), cancellationToken);
                     return default;
                 }
                 throw new SqlCatalogException("CS01052", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropIndexCoreAsyncSqlCatalog, name, tableObjectId));
@@ -1118,7 +1118,7 @@ public sealed partial class SqlCatalog
             var remainingRegistrations = _registrations.Where(registration =>
                 registration.ObjectId != tableObjectId ||
                 !string.Equals(registration.Definition.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
-            using var checkpointAdmission6 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)tableObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission6 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)tableObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)tableObjectId)))
             {
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
@@ -1234,7 +1234,7 @@ public sealed partial class SqlCatalog
             writer.AppendInt32(kind).AppendInt32(version);
             byte[] record = writer.ToArray();
 
-            using var checkpointAdmission7 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission7 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using (var transaction = _storage.BeginTransaction("SqlCatalog"))
             {
                 var formatLocation = UpsertRecord(transaction, _formatLocation, record);
@@ -1312,7 +1312,7 @@ public sealed partial class SqlCatalog
 
             var locations = new List<(PageId PageId, int SlotIndex)>(records.Count);
 
-            using var checkpointAdmission8 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission8 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using (var transaction = _storage.BeginTransaction("SqlCatalog"))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -1588,12 +1588,12 @@ public sealed partial class SqlCatalog
         return null;
     }
 
-    private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScriptPublication? publication, IReadOnlyList<IndexSlot>? droppedIndexes = null)
+    private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScriptPublication? publication, IReadOnlyList<IndexSlot>? droppedIndexes = null, CancellationToken cancellationToken = default)
     {
         ValidateColumns(updated.Schema, updated.Name, updated.Columns, updated.PrimaryKeyColumns);
         byte[] record = EncodeTable(updated);
 
-        using var checkpointAdmission9 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)updated.ObjectId));
+        using var checkpointAdmission9 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)updated.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
         using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)updated.ObjectId)))
         {
             var location = UpsertRecord(transaction, slot.Location, record);
@@ -2339,7 +2339,7 @@ public sealed partial class SqlCatalog
             // leave unused trees, but can never reuse their identity for a table.
             // Refuse an unstorable definition before reserving an owner or evaluating CTAS.
             _ = EncodeTable(table);
-            using var checkpointAdmission10 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)table.ObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission10 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)table.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)table.ObjectId));
             var intent = prepareOwner ? _storage.InsertRow(transaction, table.ObjectId,
                 SqlReclamationRecord.Encode(table.ObjectId, schema, name)) : ((PageId PageId, int SlotIndex)?)null;
@@ -2496,7 +2496,7 @@ public sealed partial class SqlCatalog
                 }
             }
             var mergedRegistrations = MergePublishedRegistrations(registrations, indexes);
-            using var checkpointAdmission11 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)table.ObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission11 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)table.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)table.ObjectId));
             var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
             var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
@@ -2532,9 +2532,9 @@ public sealed partial class SqlCatalog
     /// <summary>
     /// Refuses a published definition that would move a stored component to another
     /// column. A new table starts with no dropped column. A replacement keeps the
-    /// definition it replaces as its prefix: the same dropped ordinals and the same live
-    /// columns, by name, at the same positions, so every column keeps its physical
-    /// ordinal; it may only append columns. Every stored version is decoded through these
+    /// definition it replaces as its prefix for ordinary ALTER publication. A joint
+    /// kept table may also mark dropped components, while surviving columns retain
+    /// their physical ordinals and new columns append beyond the old physical count. Every stored version is decoded through these
     /// ordinals, so a replacement that renumbered them would read each value from
     /// another column's component.
     /// </summary>
@@ -2554,15 +2554,28 @@ public sealed partial class SqlCatalog
             return;
         }
 
-        bool kept = existing.DroppedColumnOrdinals.SequenceEqual(table.DroppedColumnOrdinals) &&
-            table.Columns.Count >= existing.Columns.Count;
+        bool kept = keptTable
+            ? existing.DroppedColumnOrdinals.All(table.DroppedColumnOrdinals.Contains) && table.PhysicalColumnCount >= existing.PhysicalColumnCount
+            : existing.DroppedColumnOrdinals.SequenceEqual(table.DroppedColumnOrdinals) && table.Columns.Count >= existing.Columns.Count;
         for (int ordinal = 0; kept && ordinal < existing.Columns.Count; ordinal++)
         {
-            kept = string.Equals(existing.Columns[ordinal].Name, table.Columns[ordinal].Name, StringComparison.OrdinalIgnoreCase);
-            if (!string.Equals(existing.Columns[ordinal].MissingValueLiteral, table.Columns[ordinal].MissingValueLiteral, StringComparison.Ordinal))
+            var column = existing.Columns[ordinal];
+            int targetOrdinal = -1;
+            for (int index = 0; index < table.Columns.Count; index++)
+            { if (table.Columns[index].Name.Equals(column.Name, StringComparison.OrdinalIgnoreCase)) { targetOrdinal = index; break; } }
+            int physical = existing.GetPhysicalOrdinal(ordinal);
+            if (keptTable && targetOrdinal < 0)
+            { kept = table.DroppedColumnOrdinals.Contains(physical); continue; }
+            kept = targetOrdinal >= 0 && table.GetPhysicalOrdinal(targetOrdinal) == physical;
+            if (kept && !string.Equals(column.MissingValueLiteral, table.Columns[targetOrdinal].MissingValueLiteral, StringComparison.Ordinal))
             {
-                throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog2, existing.Columns[ordinal].Name));
+                throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog2, column.Name));
             }
+        }
+        if (keptTable)
+        {
+            for (int ordinal = 0; kept && ordinal < table.Columns.Count; ordinal++)
+            { if (existing.FindColumn(table.Columns[ordinal].Name) is null) { kept = table.GetPhysicalOrdinal(ordinal) >= existing.PhysicalColumnCount; } }
         }
 
         if (!kept)
@@ -2594,7 +2607,7 @@ public sealed partial class SqlCatalog
                 slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema,
                 slot.Table.Constraints.Append(constraint).ToArray(), slot.Table.DroppedColumnOrdinals);
             ValidateConstraints(updated);
-            ReplaceTable(slot, updated, publication: null);
+            ReplaceTable(slot, updated, publication: null, cancellationToken: cancellationToken);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }
@@ -2671,7 +2684,7 @@ public sealed partial class SqlCatalog
             }
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
                 slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema, constraints, slot.Table.DroppedColumnOrdinals);
-            ReplaceTable(slot, updated, publication);
+            ReplaceTable(slot, updated, publication, cancellationToken: cancellationToken);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }

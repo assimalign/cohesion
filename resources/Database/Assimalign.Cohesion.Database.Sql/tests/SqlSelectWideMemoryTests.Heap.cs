@@ -9,6 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -89,7 +90,7 @@ public sealed partial class SqlSelectWideMemoryTests
         {
             parameters = null;
             await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
-            long before = GC.GetTotalMemory(true);
+            long before = LiveHeap.Read();
             if (hasParameter) { parameters = new Dictionary<string, object?> { ["p"] = new string('x', length) }; }
             SqlStatementMetrics? active = null;
             bool captured = false;
@@ -112,7 +113,7 @@ public sealed partial class SqlSelectWideMemoryTests
             void Capture(long charge)
             {
                 captured = true;
-                largestGrowth = Math.Max(largestGrowth, GC.GetTotalMemory(true) - before);
+                largestGrowth = Math.Max(largestGrowth, LiveHeap.Read() - before);
                 observedCharge = charge;
             }
         }

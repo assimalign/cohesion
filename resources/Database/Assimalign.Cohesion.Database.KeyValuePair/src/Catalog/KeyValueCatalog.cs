@@ -67,8 +67,8 @@ public sealed class KeyValueCatalog
 
     /// <summary>
     /// Gets the entry-space format version of the database's data storage: its entry records and
-    /// the primary index tree that shares their file set. 2 = MVCC-stamped key/value entry records
-    /// in the key space's page chain, indexed by a tree of B-tree page format 2 (#1194); 1 = the
+    /// the primary index tree that shares their file set. Marker 2 = MVCC-stamped key/value entry records
+    /// in the key space's page chain; its tree must be in the current page format (#1809). 1 = the
     /// same records over a tree of B-tree page format 1, and also the value reported when no marker
     /// is persisted. The engine reads this at open and refuses a database with a primary index on
     /// any version but its own.
@@ -120,6 +120,7 @@ public sealed class KeyValueCatalog
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="version"/> is zero or negative.</exception>
+    /// <exception cref="TransactionAdmissionCanceledException">Journal admission is paused while this mutation retains the catalog monitor.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask SetEntrySpaceFormatVersionAsync(int version, CancellationToken cancellationToken = default)
     {
@@ -132,7 +133,7 @@ public sealed class KeyValueCatalog
             writer.AppendInt32(entrySpaceFormatKind).AppendInt32(version);
             byte[] record = writer.ToArray();
 
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("KeyValuePairCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("KeyValuePairCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using (var transaction = _storage.BeginTransaction("KeyValuePairCatalog"))
             {
                 _formatLocation = UpsertRecord(transaction, _formatLocation, record);
@@ -152,6 +153,7 @@ public sealed class KeyValueCatalog
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
+    /// <exception cref="TransactionAdmissionCanceledException">Journal admission is paused while this mutation retains the catalog monitor.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask SaveIndexRegistrationsAsync(IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
     {
@@ -162,7 +164,7 @@ public sealed class KeyValueCatalog
         {
             byte[] record = EncodeRegistrations(registrations);
 
-            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("KeyValuePairCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("KeyValuePairCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using (var transaction = _storage.BeginTransaction("KeyValuePairCatalog"))
             {
                 _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, record);

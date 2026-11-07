@@ -59,8 +59,8 @@ internal sealed partial class SqlPlanExecutor
                 reserved, reservedGeneration, expected.SchemaHash, expected.ExpectedObject);
         }
 
-        // Lock before publication, and retain the apply's owner through its final marker
-        // or compensation. PostgreSQL tablecmds.c:1112-1118,1390-1394 likewise retains
+        // Lock before publication and retain the statement's DDL owner through transaction
+        // end. PostgreSQL tablecmds.c:1112-1118,1390-1394 likewise retains
         // AccessExclusiveLock on the newly created relation through transaction end.
         await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
             LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
@@ -176,7 +176,7 @@ internal sealed partial class SqlPlanExecutor
                             await ValidateBuiltUniqueIndexAsync(table, index, statement, cancellationToken).ConfigureAwait(false);
                         }
                         return true;
-                    }, durable: true, cancellationToken).ConfigureAwait(false);
+                    }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
                 }
             }
             await SelfCommitAsync(statement, (publication is null ? _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),

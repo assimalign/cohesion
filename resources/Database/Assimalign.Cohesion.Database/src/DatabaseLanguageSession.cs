@@ -57,7 +57,8 @@ public abstract class DatabaseLanguageSession<TRequest> : DatabaseExecutionSessi
     /// <summary>Executes a typed request belonging to this session's model.</summary>
     /// <param name="request">The model's request.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The request's result.</returns>
+    /// <returns>The request's result. Dispose returned result sets even after enumeration completes
+    /// or is cancelled: SQL spilled results retain temporary files until disposal or session close.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseParseException">The typed statement contains error diagnostics. Its complete
@@ -74,7 +75,8 @@ public abstract class DatabaseLanguageSession<TRequest> : DatabaseExecutionSessi
     /// <param name="statement">The statement text to parse and execute.</param>
     /// <param name="parameters">Parameter values keyed by bare parameter name, or null when the statement takes none.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The query result.</returns>
+    /// <returns>The query result. Dispose returned result sets even after enumeration completes
+    /// or is cancelled: SQL spilled results retain temporary files until disposal or session close.</returns>
     /// <exception cref="ArgumentException"><paramref name="statement"/> is null, empty or white space.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseParseException">The statement text failed to parse in the session's language. The exception carries the complete statement diagnostics, ordered by source offset, as on the typed seam.</exception>
@@ -98,7 +100,8 @@ public abstract class DatabaseLanguageSession<TRequest> : DatabaseExecutionSessi
     /// <param name="statement">The statement text; never null, empty or white space.</param>
     /// <param name="parameters">Parameter values keyed by bare parameter name, or null.</param>
     /// <param name="cancellationToken">Not canceled when the call starts.</param>
-    /// <returns>The query result.</returns>
+    /// <returns>The query result. Dispose returned result sets even after enumeration completes
+    /// or is cancelled: SQL spilled results retain temporary files until disposal or session close.</returns>
     protected abstract ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken);
 
     // The traced statement text: the typed level's prologue (DatabaseExecutionSession<TRequest>)

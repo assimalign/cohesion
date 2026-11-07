@@ -192,7 +192,7 @@ public sealed partial class SqlCatalog
                 }
             }
             // Encode every record before the first write. Cache publication follows the one durable commit.
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)expected.ObjectId));
             var tableSlots = tables.Select(item => new TableSlot(item.Table, UpsertRecord(transaction, item.Old.Location, item.Record))).ToArray();
             var indexSlots = indexes.Select(item => new IndexSlot(item.Index, UpsertRecord(transaction, item.Old.Location, item.Record))).ToArray();

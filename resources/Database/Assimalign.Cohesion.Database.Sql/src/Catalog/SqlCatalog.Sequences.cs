@@ -42,10 +42,10 @@ public sealed partial class SqlCatalog
         lock (_sync) { ThrowIfOffline(); return _sequencesById.TryGetValue(objectId, out var sequence) && (sequence.OwnerTableId == 0 || !_pendingReclamations.ContainsKey(sequence.OwnerTableId)) ? sequence : null; }
     }
 
-    internal long AllocateSequence(ulong objectId)
+    internal long AllocateSequence(ulong objectId, CancellationToken cancellationToken = default, bool waitForAdmission = true)
     {
         var sequence = FindSequence(objectId) ?? throw new SqlCatalogException("CS04067", ErrorMessages.SequenceChanged);
-        return AllocateSequence(sequence);
+        return AllocateSequence(sequence, cancellationToken, waitForAdmission);
     }
 
     internal ValueTask<SqlCatalogSequence> CreateSequenceAsync(string schema, string name, SqlSequenceOptions options,
@@ -63,7 +63,7 @@ public sealed partial class SqlCatalog
             if (RelationExists(schema, name)) { throw RelationNameCollision(schema, name); }
             var sequence = new SqlCatalogSequence(_nextObjectId, schema, name, options, ownerTableId, ownerColumn);
             byte[] record = EncodeSequence(sequence);
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)sequence.ObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)sequence.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)sequence.ObjectId));
             var orphan = StageOrphanSequenceName(transaction, schema, name);
             var location = _storage.InsertRow(transaction, record);
@@ -120,7 +120,7 @@ public sealed partial class SqlCatalog
             options.ValidateRestart(reserved);
             var updated = new SqlCatalogSequence(expected.ObjectId, expected.Schema, expected.Name, options, ownership?.Table ?? expected.OwnerTableId, ownership is null ? expected.OwnerColumn : ownership.Value.Column, expected.IsIdentity);
             byte[] record = EncodeSequence(updated);
-            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)expected.ObjectId));
             var location = UpsertRecord(transaction, previous.Location, record);
             var counterLocation = oldCounter?.Location;
@@ -146,7 +146,7 @@ public sealed partial class SqlCatalog
             cancellationToken.ThrowIfCancellationRequested();
             var slot = RequireSequence(expected);
             EnsureSequenceDroppable(expected);
-            using var checkpointAdmission3 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken);
+            using var checkpointAdmission3 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)expected.ObjectId));
             StageSequenceDefaults(transaction, [expected], false);
             DeleteSequence(transaction, slot);
@@ -158,40 +158,53 @@ public sealed partial class SqlCatalog
         }
     }
 
-    internal long AllocateSequence(SqlCatalogSequence sequence)
+    internal long AllocateSequence(SqlCatalogSequence sequence, CancellationToken cancellationToken = default, bool waitForAdmission = true)
     {
         ArgumentNullException.ThrowIfNull(sequence);
+        cancellationToken.ThrowIfCancellationRequested();
         AllocationEntering?.Invoke();
-        lock (_sync)
+        while (true)
         {
-            return AllocateSequenceCore(sequence);
+            try
+            {
+                lock (_sync) { return AllocateSequenceCore(sequence, cancellationToken); }
+            }
+            catch (TransactionAdmissionCanceledException) when (waitForAdmission && !cancellationToken.IsCancellationRequested)
+            {
+                System.Diagnostics.Debug.Assert(!Monitor.IsEntered(_sync), "Catalog admission waits must leave the metadata monitor.");
+                // Reservation state and the incarnation are revalidated under _sync.
+                // Only ordinary sequence/DML evaluation may wait here: DDL and
+                // provisioning retain metadata leases and refuse instead.
+                using var admission = TransactionCheckpointInterlock.ForStorage(_storage)
+                    .Enter("SqlCatalog", unchecked((long)sequence.ObjectId), cancellationToken);
+            }
         }
     }
 
     // Caller owns _sync. Identity and standalone entry points share this allocator.
-    private long AllocateSequenceCore(SqlCatalogSequence sequence)
+    private long AllocateSequenceCore(SqlCatalogSequence sequence, CancellationToken cancellationToken)
     {
-            ObjectDisposedException.ThrowIf(_allocationClosed, this);
-            ThrowIfOffline();
-            RequireSequence(sequence);
-            var options = sequence.Options;
-            if (!_sequenceCounters.TryGetValue(sequence.ObjectId, out var counter))
+        ObjectDisposedException.ThrowIf(_allocationClosed, this);
+        ThrowIfOffline();
+        RequireSequence(sequence);
+        var options = sequence.Options;
+        if (!_sequenceCounters.TryGetValue(sequence.ObjectId, out var counter))
+        {
+            counter = new SqlSequenceCounter { Next = options.Start, Reserved = options.Start };
+            _sequenceCounters.Add(sequence.ObjectId, counter);
+        }
+        if (!TryAllocate(counter, sequence.ObjectId, sequenceCounterRecordKind, options.Increment,
+            options.Minimum, options.Maximum, options.Cycle, out long value, cancellationToken))
+        {
+            if (sequence.IsIdentity)
             {
-                counter = new SqlSequenceCounter { Next = options.Start, Reserved = options.Start };
-                _sequenceCounters.Add(sequence.ObjectId, counter);
+                string type = options.Type switch { DatabaseType.Int8 => "TINYINT", DatabaseType.Int16 => "SMALLINT", DatabaseType.Int32 => "INT", _ => "BIGINT" };
+                throw new SqlCatalogException("CS02002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IdentityRangeExhausted,
+                    sequence.OwnerColumn, type, options.Increment > 0 ? options.Maximum : options.Minimum));
             }
-            if (!TryAllocate(counter, sequence.ObjectId, sequenceCounterRecordKind, options.Increment,
-                options.Minimum, options.Maximum, options.Cycle, out long value))
-            {
-                if (sequence.IsIdentity)
-                {
-                    string type = options.Type switch { DatabaseType.Int8 => "TINYINT", DatabaseType.Int16 => "SMALLINT", DatabaseType.Int32 => "INT", _ => "BIGINT" };
-                    throw new SqlCatalogException("CS02002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IdentityRangeExhausted,
-                        sequence.OwnerColumn, type, options.Increment > 0 ? options.Maximum : options.Minimum));
-                }
-                throw new SqlCatalogException("CS02002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.SequenceExhausted, sequence.Schema, sequence.Name));
-            }
-            return value;
+            throw new SqlCatalogException("CS02002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.SequenceExhausted, sequence.Schema, sequence.Name));
+        }
+        return value;
     }
 
     internal ValueTask DropSequencesAsync(IReadOnlyList<SqlCatalogSequence> sequences, CancellationToken cancellationToken, bool cascade = false)
@@ -201,7 +214,7 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             foreach (var sequence in sequences) { RequireSequence(sequence); EnsureSequenceDroppable(sequence); }
-            using var checkpointAdmission4 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission4 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             var changed = StageSequenceDefaults(transaction, sequences, cascade);
             foreach (var sequence in sequences) { DeleteSequence(transaction, RequireSequence(sequence)); }
@@ -213,7 +226,7 @@ public sealed partial class SqlCatalog
         }
     }
 
-    internal void SetSequence(SqlCatalogSequence sequence, long value, bool isCalled)
+    internal void SetSequence(SqlCatalogSequence sequence, long value, bool isCalled, CancellationToken cancellationToken = default)
     {
         lock (_sync)
         {
@@ -223,7 +236,7 @@ public sealed partial class SqlCatalog
             if (value < sequence.Options.Minimum || value > sequence.Options.Maximum)
             { throw new SqlCatalogException("CS03075", ErrorMessages.SequenceSetvalBounds); }
             _sequenceCounters.TryGetValue(sequence.ObjectId, out var counter);
-            using var checkpointAdmission5 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)sequence.ObjectId));
+            using var checkpointAdmission5 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)sequence.ObjectId), cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)sequence.ObjectId));
             var location = UpsertRecord(transaction, counter?.Location,
                 EncodeAllocation(sequenceCounterRecordKind, sequence.ObjectId, value, isCalled));

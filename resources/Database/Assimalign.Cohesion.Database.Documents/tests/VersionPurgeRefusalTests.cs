@@ -395,6 +395,8 @@ public sealed class VersionPurgeRefusalTests
             DeferredUndoRetryDelay = TimeSpan.FromHours(1),
             WorkerFailureWindow = TimeSpan.FromMilliseconds(1),
             WorkerFailureMinimumPasses = checkpoint ? int.MaxValue : 1,
+            // This fixture classifies checkpoint refusals; admission is covered separately.
+            JournalSizeLimit = long.MaxValue,
             CheckpointJournalSize = checkpoint ? 1 : 0,
             TimeProvider = clock,
         });
