@@ -522,12 +522,12 @@ internal sealed partial class SqlPlanExecutor
 
     private async ValueTask<DatabaseResult> ProjectJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
-        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, int? retainRows, SqlDatabaseSession? spillOwner = null)
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, int? retainRows, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
         SqlSelectMemory retainedBytes = default, seenBytes = default;
+        var rows = new List<object?[]>();
         try
         {
-            var rows = new List<object?[]>();
             var seen = plan.IsDistinct ? new HashSet<object?[]>(new GroupKeyComparer(plan.Projections
                 .Select(projection => projection.Collation.Resolve(_subqueryValues)).ToArray())) : null;
             // Eligibility excludes window owners. Base did not create its collector until input
@@ -572,7 +572,12 @@ internal sealed partial class SqlPlanExecutor
                             continue;
                         }
                         if (skip > 0) { skip--; continue; }
-                        if (retainRows is null || rows.Count < retainRows) { RetainSelectRow(ref retainedBytes, output); rows.Add(output); }
+                        if (retainRows is null || rows.Count < retainRows)
+                        {
+                            if (hashInput is null) { RetainSelectRow(ref retainedBytes, output); rows.Add(output); }
+                            else if (RetainStagedSortSource(rows, output, ref retainedBytes, [], spillOwner, cancellationToken, hashInput: hashInput))
+                            { rows.Add(output); }
+                        }
                         remaining--;
                     }
                     else
@@ -613,8 +618,15 @@ internal sealed partial class SqlPlanExecutor
                 rows = ApplyRowWindow(rows, plan.Limit, plan.Offset);
             }
             if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, rows.Count); }
+            if (hashInput is not null && SqlStagedSortSource.For(rows) is { } spooled)
+            {
+                spooled.Seal(cancellationToken);
+                var input = new HashGroupInput(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns, spooled);
+                SqlStagedSortSource.Detach(rows); return input;
+            }
             return MaterializeProjected(plan.Projections, rows);
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
+        catch (Exception failure) { if (hashInput is not null) { SqlStagedSortSource.ReleaseAfterFailure(rows, failure); } throw; }
+        finally { if (hashInput is not null) { SqlStagedSortSource.Release(rows); } ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
     }
 }

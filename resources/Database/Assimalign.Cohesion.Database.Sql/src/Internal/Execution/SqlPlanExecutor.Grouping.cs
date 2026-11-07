@@ -33,22 +33,27 @@ internal sealed partial class SqlPlanExecutor
     private Task<DatabaseResult> ExecutePlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken, SqlGroupPlan? retentionPlan = null, SqlDatabaseSession? spillOwner = null)
         => CanPipelineGroupInput(retentionPlan ?? plan) ? ExecutePipelinedGroupAsync(plan, statement, cancellationToken, spillOwner)
-            : CanSpillHashGroup(plan, spillOwner) ? ExecuteStagedHashGroupAsync(plan, statement, cancellationToken, spillOwner!)
             : ExecuteMaterializedPlainGroupAsync(plan, statement, cancellationToken, spillOwner);
 
     // The staged body remains the reference path for DML, recursive/window owners and differential tests.
     private async Task<DatabaseResult> ExecuteMaterializedPlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null, DatabaseResultSet? preparedInput = null,
-        StorageTempStatement? sharedTemp = null)
+        CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         long retainedBytes = 0, inputBytes = 0;
+        HashSpill? hashSpill = null;
+        Exception? hashFailure = null;
+        HashGroupInput? hashInput = null;
+        DatabaseResultSet? input = null;
         SqlSelectMemory keyBytes = default, matchBytes = default;
         SqlSelectMemory[]? aggregateMemory = null;
         try
         {
-            await using var input = preparedInput ?? (DatabaseResultSet)await (RecursiveState is null
-                ? ExecuteAsync(plan.Input, statement, cancellationToken)
+            input = (DatabaseResultSet)await (RecursiveState is null
+                ? spillOwner?.Database.Engine.TempSpace is not null && IsPlainRetentionInput(plan.Input) && CanPipelineSelectRetention()
+                    ? ExecuteSpillRootAsync(plan.Input, statement, cancellationToken, spillOwner, null, plan)
+                    : ExecuteAsync(plan.Input, statement, cancellationToken)
                 : RecursiveGroupInputAsync(plan, statement, cancellationToken)).ConfigureAwait(false);
+            hashInput = input as HashGroupInput;
             _definitions.ObserveSelectRetention?.Invoke("group-input", false,
                 input is SqlMaterializedResultSet retainedInput ? retainedInput.Rows.Count : 0);
             inputBytes = AdmitSelectResult(input, cancellationToken);
@@ -90,7 +95,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 if (!groups.TryGetValue(key, out var states))
                 {
-                    if (ActiveHashSpill is null)
+                    if (hashSpill is null)
                     {
                         long previousBytes = keyBytes.Bytes;
                         try
@@ -107,12 +112,13 @@ internal sealed partial class SqlPlanExecutor
                                 long bytes = keyBytes.RemoveRow(key); keyBytes.Bytes -= bytes;
                                 _metrics!.ReleasePlainSelectMemory(bytes);
                             }
-                            HashSpill.Start(this, spillOwner!, keyCollations, plan, statement, sharedTemp);
+                            hashSpill = new HashSpill(this, spillOwner!, keyCollations, plan, statement, hashInput?.Statement);
+                            hashInput?.Relinquish();
                         }
                     }
                     if (states is null)
                     {
-                        await AppendHashGroupInputAsync(ActiveHashSpill!, key, row, ActiveHashSpill!.NextOrdinal(), plan, evaluator, statement, cancellationToken).ConfigureAwait(false);
+                        await AppendHashGroupInputAsync(hashSpill!, key, row, hashSpill!.NextOrdinal(), plan, evaluator, statement, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
                 }
@@ -148,13 +154,13 @@ internal sealed partial class SqlPlanExecutor
             }
 
             if (input is HashGroupInput stagedInput) { stagedInput.Consumed(); }
-            if (ActiveHashSpill is not null)
+            if (hashSpill is not null)
             {
-                ActiveHashSpill!.EmitGroups(groups, cancellationToken);
+                hashSpill!.EmitGroups(groups, cancellationToken);
                 groups.Clear(); groups.TrimExcess();
                 if (input is SqlMaterializedResultSet materializedInput) { materializedInput.ClearRows(); ReleaseSelectMemory(ref inputBytes); }
                 ReleaseSelectMemory(ref keyBytes); ReleaseGroupMemory(aggregateMemory, ref retainedBytes); aggregateMemory = null;
-                return await FinishHashGroupAsync(ActiveHashSpill!, plan, evaluator, statement, cancellationToken).ConfigureAwait(false);
+                return await FinishHashGroupAsync(hashSpill!, plan, evaluator, statement, cancellationToken).ConfigureAwait(false);
             }
 
             int projectionStart = keys.Count + aggregates.Count;
@@ -261,11 +267,15 @@ internal sealed partial class SqlPlanExecutor
                 return states;
             }
         }
-        catch (Exception failure) { if (ActiveHashSpill is { } spill) { spill.Failure = failure; } throw; }
+        catch (Exception failure) { hashFailure = failure; if (hashInput is not null) { hashInput.Failure = failure; } throw; }
         finally
         {
-            ReleaseSelectMemory(ref inputBytes); ReleaseSelectMemory(ref keyBytes); ReleaseSelectMemory(ref matchBytes); ReleaseGroupMemory(aggregateMemory, ref retainedBytes);
-            ActiveHashSpill?.Dispose();
+            try { if (input is not null) { await input.DisposeAsync().ConfigureAwait(false); } }
+            finally
+            {
+                ReleaseSelectMemory(ref inputBytes); ReleaseSelectMemory(ref keyBytes); ReleaseSelectMemory(ref matchBytes); ReleaseGroupMemory(aggregateMemory, ref retainedBytes);
+                hashSpill?.Dispose(hashFailure);
+            }
         }
     }
 
@@ -273,6 +283,8 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         long retainedBytes = 0;
+        HashSpill? hashSpill = null;
+        Exception? hashFailure = null;
         SqlSelectMemory keyBytes = default, matchBytes = default;
         SqlSelectMemory[]? aggregateMemory = null;
         bool drainInput = true;
@@ -315,7 +327,7 @@ internal sealed partial class SqlPlanExecutor
                     }
                     if (!groups.TryGetValue(key, out var states))
                     {
-                        if (ActiveHashSpill is null)
+                        if (hashSpill is null)
                         {
                             long previousBytes = keyBytes.Bytes;
                             try
@@ -332,12 +344,12 @@ internal sealed partial class SqlPlanExecutor
                                     long bytes = keyBytes.RemoveRow(key); keyBytes.Bytes -= bytes;
                                     _metrics!.ReleasePlainSelectMemory(bytes);
                                 }
-                                HashSpill.Start(this, spillOwner!, keyCollations, plan, statement);
+                                hashSpill = new HashSpill(this, spillOwner!, keyCollations, plan, statement);
                             }
                         }
                         if (states is null)
                         {
-                            await AppendHashGroupInputAsync(ActiveHashSpill!, key, row, ActiveHashSpill!.NextOrdinal(), plan, evaluator, statement, cancellationToken).ConfigureAwait(false);
+                            await AppendHashGroupInputAsync(hashSpill!, key, row, hashSpill!.NextOrdinal(), plan, evaluator, statement, cancellationToken).ConfigureAwait(false);
                             continue;
                         }
                     }
@@ -372,12 +384,12 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
 
-                if (ActiveHashSpill is not null)
+                if (hashSpill is not null)
                 {
-                    ActiveHashSpill!.EmitGroups(groups, cancellationToken);
+                    hashSpill!.EmitGroups(groups, cancellationToken);
                     groups.Clear(); groups.TrimExcess();
                     ReleaseSelectMemory(ref keyBytes); ReleaseGroupMemory(aggregateMemory, ref retainedBytes); aggregateMemory = null;
-                    return await FinishHashGroupAsync(ActiveHashSpill!, plan, evaluator, statement, cancellationToken).ConfigureAwait(false);
+                    return await FinishHashGroupAsync(hashSpill!, plan, evaluator, statement, cancellationToken).ConfigureAwait(false);
                 }
 
                 int projectionStart = keys.Count + aggregates.Count;
@@ -493,11 +505,11 @@ internal sealed partial class SqlPlanExecutor
                 if (drainInput) { while (await inputRows.MoveNextAsync().ConfigureAwait(false)) { } }
             }
         }
-        catch (Exception failure) { if (ActiveHashSpill is { } spill) { spill.Failure = failure; } throw; }
+        catch (Exception failure) { hashFailure = failure; throw; }
         finally
         {
             ReleaseSelectMemory(ref keyBytes); ReleaseSelectMemory(ref matchBytes); ReleaseGroupMemory(aggregateMemory, ref retainedBytes);
-            ActiveHashSpill?.Dispose();
+            hashSpill?.Dispose(hashFailure);
         }
     }
 

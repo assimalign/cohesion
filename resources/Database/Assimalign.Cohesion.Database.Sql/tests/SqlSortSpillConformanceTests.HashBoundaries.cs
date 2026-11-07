@@ -71,10 +71,13 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData(true, 1170, 262144, 262080, true)]
     [InlineData(true, 1171, 262144, 262080, false)]
     [InlineData(true, 1171, 262208, 262208, false)]
-    public async Task ExecuteAsync_HashBoundary_ShouldKeepExactChargedBytes(bool distinct, int rows, long grant, long peak, bool succeeds)
+    [InlineData(false, 744, 262144, 261888, true, true)]
+    [InlineData(true, 1170, 262144, 262080, true, true)]
+    public async Task ExecuteAsync_HashBoundary_ShouldKeepExactChargedBytes(bool distinct, int rows, long grant, long peak, bool succeeds, bool temp = false)
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("hash-boundary"); builder.Options.StatementMemoryBudget = grant;
+        if (temp) { builder.Options.TempDirectory = Path.Combine(_root, ".boundary"); }
         await using var engine = await builder.BuildAsync();
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await Seed(session, rows);
@@ -91,7 +94,7 @@ public sealed partial class SqlSortSpillConformanceTests
         // Assert
         var metrics = session.LastStatementMetrics!;
         metrics.PeakHashMemoryBytes.ShouldBe(peak); metrics.HashMemoryBytes.ShouldBe(0); metrics.PlainSelectMemoryBytes.ShouldBe(0);
-        SqlHashSpillMetrics.For(metrics).ShouldBeNull(); engine.TempSpace.ShouldBeNull();
+        SqlHashSpillMetrics.For(metrics).ShouldBeNull(); if (!temp) { engine.TempSpace.ShouldBeNull(); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Hash failures preserve volatile input boundaries, first errors and access work (#1789)")]

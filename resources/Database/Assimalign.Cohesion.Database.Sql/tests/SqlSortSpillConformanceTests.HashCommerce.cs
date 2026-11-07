@@ -83,4 +83,30 @@ public sealed partial class SqlSortSpillConformanceTests
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
     }
+    [Fact(DisplayName = "Cohesion Test [Sql] - Unordered repeat customers proxy uses one ordinal sort and an output spool (#1789)")]
+    public async Task ExecuteAsync_UnorderedRepeatCustomers_ShouldPreserveOrdinalOutput()
+    {
+        // Arrange
+        using var guard=new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var builder=SqlDatabaseEngine.CreateBuilder("unordered-commerce");
+        builder.Options.TempDirectory=System.IO.Path.Combine(_root,".repeat");
+        builder.Options.StatementMemoryBudget=8388608; builder.Options.StatementTempSpaceQuota=268435456;
+        await using var engine=await builder.BuildAsync(guard.Token);
+        await using var session=await (await engine.CreateDatabaseAsync("db",guard.Token)).CreateSessionAsync(guard.Token);
+        await session.ExecuteAsync("CREATE TABLE orders(order_id BIGINT,customer_id BIGINT,order_date TIMESTAMP,total NUMERIC(12,2))",cancellationToken:guard.Token);
+        for(int first=0;first<1500000;first+=2000)
+        {
+            await session.ExecuteAsync("INSERT INTO orders VALUES"+string.Join(',',Enumerable.Range(first,2000).Select(i=>$"({i},{i%250000},TIMESTAMP '2025-06-01',10.00)")),cancellationToken:guard.Token);
+        }
+        // Act
+        var watch=Stopwatch.StartNew();
+        await using var result=(DatabaseResultSet)await session.ExecuteAsync("SELECT customer_id,COUNT(*) AS order_count,SUM(total) AS revenue FROM orders WHERE order_date>=TIMESTAMP '2025-01-01' AND order_date<TIMESTAMP '2026-01-01' GROUP BY customer_id HAVING COUNT(*)>=5",cancellationToken:guard.Token);
+        long count=0;
+        // Assert
+        await foreach(var row in result.GetRowsAsync(guard.Token))
+        { row.GetInt64(0).ShouldBe(count++); row.GetInt64(1).ShouldBe(6); row.GetValue(2).ShouldBe(60m); }
+        count.ShouldBe(250000);
+        var h=SqlHashSpillMetrics.For(session.LastStatementMetrics!)!;var sort=SqlSortSpillMetrics.For(session.LastStatementMetrics!);
+        _output.WriteLine($"HASH_REPEAT_UNORDERED|rows={count}|hash_bytes={h.PhysicalBytes}|hash_peak={h.PeakBytes}|sort_bytes={sort?.PhysicalBytes}|sort_peak={sort?.PeakBytes}|ms={watch.Elapsed.TotalMilliseconds:F3}");
+    }
 }

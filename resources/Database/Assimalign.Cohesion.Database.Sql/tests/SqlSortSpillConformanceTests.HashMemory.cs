@@ -128,13 +128,22 @@ public sealed partial class SqlSortSpillConformanceTests
         finally { BeforeRead(engine.TempSpace!, null); }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Hash live heap: two row counts fit a fixed allowance and a row-retaining mutant fails it (#1789)")]
-    [InlineData(12000)]
-    [InlineData(24000)]
-    public async Task ExecuteAsync_HashLiveObjects_ShouldRejectRetainingMutant(int count)
+    [Fact(DisplayName = "Cohesion Test [Sql] - Hash live heap: replay stays within 256 KiB scratch and growth below 128 KiB (#1789)")]
+    public async Task ExecuteAsync_HashLiveObjects_ShouldRejectRetainingMutant()
+    {
+        // Arrange / Act: separate fully warmed engines exclude table storage from each sample.
+        long small = await MeasureHashLiveAsync(12000);
+        long large = await MeasureHashLiveAsync(24000);
+
+        // Assert: doubling row count must not retain another row-sized population.
+        (large - small).ShouldBeLessThanOrEqualTo(131072);
+        _output.WriteLine($"HASH_LIVE_DELTA|small={small}|large={large}|delta={large-small}|maximum=131072");
+    }
+
+    private async Task<long> MeasureHashLiveAsync(int count)
     {
         // Arrange
-        const long grant = 1048576, allowance = 1048576;
+        const long grant = 1048576, allowance = 262144;
         bool observe = false, mutant = false;
         var retained = new List<object>(); var weak = new List<WeakReference>();
         var builder = SqlDatabaseEngine.CreateBuilder("hash-live");
@@ -153,10 +162,12 @@ public sealed partial class SqlSortSpillConformanceTests
         const string sql = "SELECT fresh_key(id),COUNT(*) FROM t GROUP BY fresh_key(id)";
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
         long baseline = LiveHeap.Read(), peak = 0;
+        long actualPeak = 0; bool replaySampled = false;
         observe = true;
         SqlPlanExecutor.ObserveHashSpill = (phase, ordinal) =>
         {
-            if (phase == "input" && ordinal % 2000 == 0 || phase == "ordered")
+            if (phase is "batch" or "batch-live") { replaySampled = true; }
+            if (phase == "input" && ordinal % 2000 == 0 || phase is "ordered" or "batch" or "batch-live")
             { peak = Math.Max(peak, Math.Max(0, LiveHeap.Read() - baseline)); }
             if (phase == "ordered") { weak.Count.ShouldBe(200); weak.Count(w => w.IsAlive).ShouldBe(0); }
         };
@@ -167,6 +178,7 @@ public sealed partial class SqlSortSpillConformanceTests
             { int visited = 0; await foreach (var row in result.GetRowsAsync()) { row.GetString(0).ShouldNotBeNull(); visited++; } visited.ShouldBe(count); }
 
             // Assert: a real heap reading, rather than just the reservation ledger.
+            replaySampled.ShouldBeTrue(); actualPeak = peak;
             peak.ShouldBeGreaterThan(0); peak.ShouldBeLessThanOrEqualTo(grant + allowance);
             _output.WriteLine($"HASH_LIVE|rows={count}|bytes={peak}|grant={grant}|constant={allowance}");
             SqlPlanExecutor.ObserveHashSpill = null; observe = false; weak.Clear();
@@ -178,6 +190,7 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         finally { SqlPlanExecutor.ObserveHashSpill = null; retained.Clear(); }
         TempBytes(engine.TempSpace!).ShouldBe(0); session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        return actualPeak;
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Hash crash images: read-only spill boundaries preserve the exact durable state (#1789)")]

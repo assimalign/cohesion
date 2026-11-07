@@ -257,16 +257,16 @@ internal sealed partial class SqlPlanExecutor
         => ExecuteSelect(plan, statement, cancellationToken, retainRows: null);
 
     private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken,
-        int? retainRows, SqlPlan? retentionPlan = null, SqlDatabaseSession? spillOwner = null)
+        int? retainRows, SqlPlan? retentionPlan = null, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
-        if (plan.Access is SqlOrderedIndexPath ordered) { return ExecuteOrderedSelect(plan, ordered, statement, cancellationToken, retentionPlan, spillOwner); }
+        if (plan.Access is SqlOrderedIndexPath ordered) { return ExecuteOrderedSelect(plan, ordered, statement, cancellationToken, retentionPlan, spillOwner, hashInput); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         // The access path narrows the candidate set; the full WHERE stays the
         // residual predicate for both paths, so seek results are equivalent to
         // scan results by construction.
         return MaterializeSelect(Matches(), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
             plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken,
-            incrementalDistinct: CanPipelinePlainDistinct(retentionPlan ?? plan), retainRows: retainRows, spillOwner: spillOwner);
+            incrementalDistinct: CanPipelinePlainDistinct(retentionPlan ?? plan), retainRows: retainRows, spillOwner: spillOwner, hashInput: hashInput);
 
         IEnumerable<object?[]> Matches()
         {
@@ -278,18 +278,18 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private DatabaseResult ExecuteOrderedSelect(SqlSelectPlan plan, SqlOrderedIndexPath path,
-        SqlStatementContext statement, CancellationToken cancellationToken, SqlPlan? retentionPlan = null, SqlDatabaseSession? spillOwner = null)
+        SqlStatementContext statement, CancellationToken cancellationToken, SqlPlan? retentionPlan = null, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
         // Resolve once before omitting the sort. A detached/replaced tree falls back to
         // a heap scan with the original ordering. The statement's reclamation horizon
         // retains a successfully resolved handle's pages even if DROP detaches it later.
         if (!TryResolveSeekTree(plan.Table, path.Index, out var tree))
-        { return ExecuteSelect(plan with { Access = SqlScanPath.Instance }, statement, cancellationToken, retainRows: null, retentionPlan: retentionPlan ?? plan, spillOwner: spillOwner); }
+        { return ExecuteSelect(plan with { Access = SqlScanPath.Instance }, statement, cancellationToken, retainRows: null, retentionPlan: retentionPlan ?? plan, spillOwner: spillOwner, hashInput: hashInput); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         statement.Metrics.AccessPath = "ordered:" + path.Index.Name + (path.Reverse ? ":backward" : ":forward");
         return MaterializeSelect(Matches(), plan.Projections, [], plan.Limit, plan.Offset,
             plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken,
-            incrementalDistinct: CanPipelineOrderedDistinct(retentionPlan ?? plan));
+            incrementalDistinct: CanPipelineOrderedDistinct(retentionPlan ?? plan), spillOwner: spillOwner, hashInput: hashInput);
 
         IEnumerable<object?[]> Matches()
         {
@@ -303,12 +303,12 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, int>? orderByProjections, CancellationToken cancellationToken,
-        bool incrementalDistinct = false, int? retainRows = null, SqlDatabaseSession? spillOwner = null)
+        bool incrementalDistinct = false, int? retainRows = null, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
         if (isDistinct && incrementalDistinct)
         { return ProjectUnorderedDistinct(matches, projections, limit, offset, evaluator, cancellationToken, spillOwner); }
         var projected = ProjectAndSortRows(matches, projections, orderBy, evaluator, orderByProjections, cancellationToken,
-            out var spilled, isDistinct ? null : limit, isDistinct ? null : offset, retainRows, spillOwner, isDistinct, limit, offset);
+            out var spilled, isDistinct ? null : limit, isDistinct ? null : offset, retainRows, spillOwner, isDistinct, limit, offset, hashInput);
         if (spilled is not null) { return spilled; }
 
         return FinishSelect(projected, projections, limit, offset, isDistinct, evaluator, cancellationToken);
@@ -370,7 +370,7 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots, CancellationToken cancellationToken,
         out DatabaseResult? spilled, SqlRowCount? limit = null, SqlRowCount? offset = null, int? retainRows = null,
-        SqlDatabaseSession? spillOwner = null, bool isDistinct = false, SqlRowCount? resultLimit = null, SqlRowCount? resultOffset = null)
+        SqlDatabaseSession? spillOwner = null, bool isDistinct = false, SqlRowCount? resultLimit = null, SqlRowCount? resultOffset = null, SqlGroupPlan? hashInput = null)
     {
         spilled = null;
         SqlSelectMemory outputBytes = default, sourceBytes = default, sortedBytes = default;
@@ -389,12 +389,22 @@ internal sealed partial class SqlPlanExecutor
                     if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, 0); }
                     return projected;
                 }
-                foreach (var source in matches)
+                using var inputs = matches.GetEnumerator();
+                while (inputs.MoveNext())
                 {
-                    var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                    var output = ProjectRow(inputs.Current, projections, evaluator, cancellationToken);
                     if (skip > 0) { skip--; continue; }
                     SqlWindowMemory.For(_metrics)?.Retain(output);
-                    if (retainRows is null || projected.Count < retainRows) { RetainSelectRow(ref outputBytes, output); projected.Add(output); }
+                    if (retainRows is null || projected.Count < retainRows)
+                    {
+                        try { RetainSelectRow(ref outputBytes, output); projected.Add(output); }
+                        catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                            && hashInput is not null && CanSpillHashGroup(hashInput, spillOwner))
+                        {
+                            spilled = SpoolHashGroupInput(projected, output, inputs, projections, evaluator, ref outputBytes, spillOwner!, cancellationToken);
+                            return [];
+                        }
+                    }
                     if (--remaining == 0) { break; }
                 }
                 cancellationToken.ThrowIfCancellationRequested();

@@ -11,15 +11,17 @@ its live state must still fit. In-memory engines require an explicit TempDirecto
 Spilled and fitting results have the same first-seen group order, first complete DISTINCT
 representative, collated spelling, calls, sequence state, first expression error and visits.
 Keys, FILTER and accepted arguments evaluate once before writing evaluated values. Completed
-groups pass through an external ordinal sort before HAVING and projection. An unordered
+groups pass through one external ordinal sort before HAVING and projection. Unordered output
+appends to an input-order spool without another external sort. An unordered
 LIMIT/OFFSET also stops projection and sequences at the fitting boundary.
 
 | Row/state shape | Capacity |
 | --- | --- |
 | Scalar key + COUNT(*) | 352 B per live group; 8,000 groups exceed ten 262,144 B grants and complete with default quotas |
-| Native COUNT, SUM/AVG with a proved numeric bound, single-family MIN/MAX, BOOL_AND/BOOL_OR/EVERY | Spillable; fixed state and retained extrema stay charged. SUM/AVG require argument magnitude times physical statement temp quota to fit Decimal, preventing delayed overflow errors |
-| Integer columns/calls, sequences, bounded NUMERIC columns/casts, numeric constants | Can establish the SUM/AVG magnitude proof; unbounded NUMERIC, floating sums and unproven compound inputs retain CS05067 |
+| Native COUNT, SUM/AVG with a proved numeric bound, fixed-width MIN/MAX (numeric, temporal, boolean, UUID), BOOL_AND/BOOL_OR/EVERY | Spillable; fixed state stays charged. Text/CHAR and binary MIN/MAX retain CS05067. COUNT(x) partitions nullness only. SUM/AVG require argument magnitude times physical statement temp quota to fit Decimal, preventing delayed overflow errors |
+| Stored integer columns, declared integer calls, sequences, stored bounded NUMERIC columns/casts, numeric constants | Can establish the SUM/AVG magnitude proof; pseudo-type calls, derived/Null-typed columns, unbounded NUMERIC, floating sums and unproven compound inputs retain CS05067 |
 | Encoded row | At most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; each phase's G is its remaining grant after active reader buffers and must admit the existing external sorter |
+| Input-order output spool | The remaining-grant record bound above, without the partition record's 16,384 B cap; wide projections remain admitted when their codec and decoded overlap fit |
 | STRING_AGG/ARRAY_AGG, aggregate DISTINCT/ORDER BY, statistical/application accumulators, grouping sets, direct window-over-group owners, nested relation bodies | Existing refusal/ownership; no hash spill permission |
 | Deferred collation, second key family, unsupported cells or application-binary cells | CS05067 |
 | Join-output hash DISTINCT | Existing memory refusal; join execution is unchanged in SQ-L3a |
@@ -32,6 +34,9 @@ error and cancellation release the files through the existing result/session lif
 startup sweeping handles leftovers after an abrupt stop. EXPLAIN ANALYZE adds
 hash_spill_batches and hash_spill_passes and the existing byte/run/merge fields. When both
 hash and downstream sorting spill, hash-prefixed byte/run fields describe the hash phase.
+Hash batches/passes vary between processes with the hash seed; a statement near the eight-pass
+limit may complete in one process and retain CS05067 in another. Hash keys require equality
+families and the row codec, with no index-backed collation requirement.
 
 ## Root ORDER BY and ordered DISTINCT spilling (#1789, SQ-L2b)
 

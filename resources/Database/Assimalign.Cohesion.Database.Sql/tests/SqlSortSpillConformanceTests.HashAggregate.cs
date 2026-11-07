@@ -27,7 +27,7 @@ public sealed partial class SqlSortSpillConformanceTests
         string[] queries =
         [
             "SELECT id,COUNT(*) FROM t GROUP BY id",
-            "SELECT id,COUNT(*),SUM(k),AVG(k),MIN(note),MAX(k) FROM t GROUP BY id",
+            "SELECT id,COUNT(*),SUM(k),AVG(k),MIN(k),MAX(k) FROM t GROUP BY id",
             "SELECT id,BOOL_AND(k>=0),BOOL_OR(k>40),EVERY(k<100) FROM t GROUP BY id",
             "SELECT id/2,COUNT(*),SUM(k) FROM t GROUP BY id/2 HAVING COUNT(*)>0",
             "SELECT id,COUNT(*) FROM t GROUP BY id ORDER BY id DESC",

@@ -239,6 +239,7 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         public override string ToString() => string.Join('|', Cells.Select(value => value?.ToString() ?? "<NULL>"));
         private static bool EqualCell(object? left, object? right) => left?.GetType() == right?.GetType() && (left switch
         {
+            decimal number => decimal.GetBits(number).SequenceEqual(decimal.GetBits((decimal)right!)),
             byte[] bytes => bytes.SequenceEqual((byte[])right!),
             double number => BitConverter.DoubleToInt64Bits(number) == BitConverter.DoubleToInt64Bits((double)right!),
             float number => BitConverter.SingleToInt32Bits(number) == BitConverter.SingleToInt32Bits((float)right!),

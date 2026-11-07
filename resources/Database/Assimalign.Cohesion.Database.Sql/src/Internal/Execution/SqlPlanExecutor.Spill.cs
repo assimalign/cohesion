@@ -42,7 +42,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private async Task<DatabaseResult> ExecuteSpillRootAsync(SqlPlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken, SqlDatabaseSession spillOwner, Location? location)
+        CancellationToken cancellationToken, SqlDatabaseSession spillOwner, Location? location, SqlGroupPlan? hashInput = null)
     {
         bool statementRoot = _metrics is null;
         var metrics = statement.Metrics;
@@ -63,14 +63,14 @@ internal sealed partial class SqlPlanExecutor
                 result = initialized switch
                 {
                     SqlCreateTableAsPlan tableAs => await ExecuteCreateTableAsAsync(tableAs, statement, cancellationToken, spillOwner).ConfigureAwait(false),
-                    SqlSelectPlan scan => ExecuteSelect(scan, statement, cancellationToken, null, plan, spillOwner),
-                    SqlSystemViewPlan view => ExecuteSystemView(view, statement, cancellationToken, plan, spillOwner),
+                    SqlSelectPlan scan => ExecuteSelect(scan, statement, cancellationToken, null, plan, spillOwner, hashInput),
+                    SqlSystemViewPlan view => ExecuteSystemView(view, statement, cancellationToken, plan, spillOwner, hashInput),
                     SqlConstantPlan constant => ExecuteRootConstant(constant, plan, cancellationToken, spillOwner),
                     SqlGroupPlan group => await ExecuteGroupAsync(group, statement, cancellationToken, (SqlGroupPlan)plan, spillOwner).ConfigureAwait(false),
                     SqlSubqueryPlan subquery => await ExecuteRootSubqueriesAsync(subquery.Input, subquery.Queries, statement, cancellationToken, spillOwner, location).ConfigureAwait(false),
                     SqlJoinPlan join => await (CanPipelineJoinOutput((SqlJoinPlan)plan)
-                        ? ExecutePipelinedJoinAsync(join, statement, cancellationToken, spillOwner: spillOwner).AsTask()
-                        : ExecuteJoinAsync(join, statement, cancellationToken, spillOwner)).ConfigureAwait(false),
+                        ? ExecutePipelinedJoinAsync(join, statement, cancellationToken, spillOwner: spillOwner, hashInput: hashInput).AsTask()
+                        : ExecuteJoinAsync(join, statement, cancellationToken, spillOwner, hashInput)).ConfigureAwait(false),
                     _ => await ExecuteAsync(plan, statement, cancellationToken).ConfigureAwait(false),
                 };
             }
@@ -82,6 +82,8 @@ internal sealed partial class SqlPlanExecutor
             if (result is SqlSpilledResultSet spilled) { spilled.Location = location; }
             return result;
         }
+        catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode)
+        { throw exception.At(location); }
         catch (StorageTempException exception) { throw SqlSpilledResultSet.Translate(exception, location); }
         catch (System.AggregateException exception) when (exception.Flatten().InnerExceptions.All(error => error is StorageTempException))
         { throw SqlSpilledResultSet.TranslateCleanup(exception, location); }
@@ -154,14 +156,15 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private bool RetainStagedSortSource(List<object?[]> rows, object?[] row, ref SqlSelectMemory memory,
-        IReadOnlyList<SqlBoundOrdering> orderBy, SqlDatabaseSession? owner, CancellationToken token, bool includeWindow = true)
+        IReadOnlyList<SqlBoundOrdering> orderBy, SqlDatabaseSession? owner, CancellationToken token, bool includeWindow = true, SqlGroupPlan? hashInput = null)
     {
-        if (owner is not null && SqlStagedSortSource.For(rows) is { } source) { source.Append(row, token); return false; }
+        if (owner is not null && (hashInput is null || rows.Count == 0) && SqlStagedSortSource.For(rows) is { } source) { source.Append(row, token); return false; }
         try { RetainSelectRow(ref memory, row, includeWindow: includeWindow); return true; }
         catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
         {
-            if (owner is null || orderBy.Count == 0 || orderBy.Any(order => !order.Collation.IsFixed)) { throw; }
-            SqlStagedSortSource.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner, token);
+            if (hashInput is not null ? !CanSpillHashGroup(hashInput, owner)
+                : owner is null || orderBy.Count == 0 || orderBy.Any(order => !order.Collation.IsFixed)) { throw; }
+            SqlStagedSortSource.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner!, token);
             return false;
         }
     }

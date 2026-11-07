@@ -456,8 +456,9 @@ supports repeated or concurrent reads.
 Nested plans, windows, recursion, grouping sets and ordered sequence
 deferral retain their existing refusals; ordered DISTINCT's retained representatives must still fit.
 Hash aggregation keeps existing groups live and partitions new-group inputs, then restores
-first-seen order before output. COUNT, bounded SUM/AVG, single-family MIN/MAX and native Boolean
-states qualify; unbounded states and unproved sums retain CS05067. Hash DISTINCT preserves its
+first-seen order before output. COUNT, bounded SUM/AVG, fixed-width MIN/MAX (numeric, temporal,
+boolean and UUID) and native Boolean states qualify; text/binary extrema, unbounded states
+and unproved sums retain CS05067. Unordered output streams to an input-order spool. Hash DISTINCT preserves its
 first complete representative. Hash DISTINCT over join output retains the existing refusal.
 DESIGN.md records row/state capacity, the eight-level repartitioning bound and the shared quota.
 DML sources gain no spill permission; their existing budgeting policy, including the

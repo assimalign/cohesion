@@ -16,56 +16,27 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     internal static Action<string, long>? ObserveHashSpill { get => HashSpill.Observe; set => HashSpill.Observe = value; }
-    internal static Func<int, int>? HashSpillPartitionHash { get => HashSpill.PartitionHash; set => HashSpill.PartitionHash = value; }
+    private static readonly AsyncLocal<Func<int, int>?> _hashSpillPartitionHash = new();
+    internal static Func<int, int>? HashSpillPartitionHash { get => _hashSpillPartitionHash.Value; set => _hashSpillPartitionHash.Value = value; }
 
-    private async Task<DatabaseResult> ExecuteStagedHashGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
-        CancellationToken token, SqlDatabaseSession owner)
+    // Called only by an input collector's failed reservation. The prefix already ran
+    // its projections; the enumerator resumes after that row, without repeating predicates.
+    private DatabaseResult SpoolHashGroupInput(List<object?[]> rows, object?[] current,
+        IEnumerator<object?[]> remaining, IReadOnlyList<SqlProjection> projections,
+        SqlExpressionEvaluator evaluator, ref SqlSelectMemory memory, SqlDatabaseSession owner, CancellationToken token)
     {
-        // Match the staged reference: finish WHERE/ON before the first volatile key,
-        // FILTER or argument. Pass-through source projections contain no user calls.
-        var rows = new List<object?[]>();
-        SqlSelectMemory memory = default;
-        DatabaseResult? result = null;
-        Exception? failure = null;
-        SqlStagedSortSource? source = null;
+        var source = new SqlStagedSortSource(owner, _metrics!, _definitions.StatementMemoryBudget,
+            _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes + memory.Bytes);
         try
         {
-            await foreach (var row in EnumerateGroupInputAsync(plan, statement, token).ConfigureAwait(false))
-            {
-                source = SqlStagedSortSource.For(rows);
-                if (source is not null) { source.Append(row, token); continue; }
-                try { RetainSelectRow(ref memory, row); rows.Add(row); }
-                catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
-                { SqlStagedSortSource.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner, token); }
-            }
-            source = SqlStagedSortSource.For(rows);
-            var columns = ((DatabaseResultSet)MaterializeProjected(((SqlRelationPlan)plan.Input).OutputProjections, [])).Columns;
-            ReleaseSelectMemory(ref memory);
-            DatabaseResultSet input;
-            if (source is null) { input = new SqlMaterializedResultSet(columns, rows); }
-            else { source.Seal(token); input = new HashGroupInput(columns, source); }
-            result = await ExecuteMaterializedPlainGroupAsync(plan, statement, token, owner, input, source?.Statement).ConfigureAwait(false);
-            return result;
+            foreach (var row in rows) { source.Append(row, token); }
+            rows.Clear(); rows.Capacity = 0; ReleaseSelectMemory(ref memory);
+            source.Append(current, token);
+            while (remaining.MoveNext()) { source.Append(ProjectRow(remaining.Current, projections, evaluator, token), token); }
+            source.Seal(token);
+            return new HashGroupInput(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns, source);
         }
-        catch (Exception exception) { failure = exception; throw; }
-        finally
-        {
-            ReleaseSelectMemory(ref memory);
-            source ??= SqlStagedSortSource.For(rows);
-            // A hash spill can hand this SAME quota owner to the final result.
-            if (source is not null && (result is not SqlSpilledResultSet spilled || !spilled.OwnsStatement(source.Statement)))
-            {
-                try { source.Statement.Dispose(); }
-                catch (AggregateException cleanup)
-                {
-                    var translated = SqlSpilledResultSet.TranslateCleanup(cleanup);
-                    if (failure is null) { throw translated; }
-                    failure.Data[nameof(HashGroupInput)] = translated;
-                }
-            }
-            if (failure is null) { SqlStagedSortSource.Release(rows); }
-            else { SqlStagedSortSource.ReleaseAfterFailure(rows, failure); }
-        }
+        catch (Exception failure) { DisposeHashTemp(source.Statement, failure); throw; }
     }
 
     [System.Diagnostics.DebuggerDisplay("SQL hash staged input")]
@@ -73,23 +44,33 @@ internal sealed partial class SqlPlanExecutor
     private sealed class HashGroupInput : DatabaseResultSet
     {
         private readonly SqlStagedSortSource _source;
-        internal HashGroupInput(IReadOnlyList<DatabaseColumn> columns, SqlStagedSortSource source)
-        { Columns = columns; _source = source; }
+        private readonly IReadOnlyList<SqlProjection>? _projections;
+        private readonly SqlExpressionEvaluator? _evaluator;
+        private bool _ownsStatement = true;
+        internal HashGroupInput(IReadOnlyList<DatabaseColumn> columns, SqlStagedSortSource source,
+            IReadOnlyList<SqlProjection>? projections = null, SqlExpressionEvaluator? evaluator = null)
+        { Columns = columns; _source = source; _projections = projections; _evaluator = evaluator; }
+        internal StorageTempStatement Statement => _source.Statement;
+        internal void Relinquish() => _ownsStatement = false;
+        internal Exception? Failure { get; set; }
         public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
         public override long AffectedCount => -1;
         public override IReadOnlyList<Diagnostic> Diagnostics => [];
         public override IReadOnlyList<DatabaseColumn> Columns { get; }
-        public override ValueTask DisposeAsync() => default;
+        public override ValueTask DisposeAsync()
+        {
+            if (_ownsStatement) { var failure = DisposeHashTemp(Statement, Failure); if (Failure is null && failure is not null) { throw failure; } }
+            return default;
+        }
         internal void Consumed() => _source.Transfer();
         public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            foreach (var row in _source.Read(cancellationToken)) { yield return new SqlMaterializedRow(row); }
+            foreach (var row in _source.Read(cancellationToken))
+            { yield return new SqlMaterializedRow(_projections is null ? row : ProjectRow(row, _projections, _evaluator!, cancellationToken)); }
             await Task.CompletedTask.ConfigureAwait(false);
         }
         private sealed class DebugView { public DebugView(HashGroupInput target) { } }
     }
-
-    private HashSpill? ActiveHashSpill => HashSpill.For(this);
 
     // No spill bookkeeping on fitting statements. A staged input also consults eligibility
     // before choosing the input-order collector, to preserve volatile evaluation boundaries.
@@ -119,25 +100,46 @@ internal sealed partial class SqlPlanExecutor
                 aggregate.Arguments.Any(HasRetentionSubquery)) { return false; }
             if (aggregate.Function is SqlSumFunction &&
                 (!TryHashNumericBound(aggregate.Arguments[0], plan, out decimal bound) || bound > maximum)) { return false; }
-            if (aggregate.Function is SqlExtremumFunction && !HasFixedHashArgumentFamily(aggregate.Arguments[0])) { return false; }
+            if (aggregate.Function is SqlExtremumFunction && !HasFixedHashArgumentFamily(aggregate.Arguments[0], plan)) { return false; }
         }
         return true;
 
-        static bool HasFixedHashArgumentFamily(SqlBoundExpression argument)
-            => argument is SqlBoundColumn or SqlBoundCast or SqlBoundConstant or SqlBoundSequence ||
-                argument is SqlBoundCall call && call.Function.ReturnType.Storage.Type != DatabaseType.Null;
+        static bool HasFixedHashArgumentFamily(SqlBoundExpression argument, SqlGroupPlan group)
+        {
+            var type = argument switch
+            {
+                SqlBoundColumn column when HasStoredHashColumn(group, column) => group.SourceColumns[column.Ordinal].Type.Type,
+                SqlBoundCast cast => cast.Target.Storage.Type,
+                SqlBoundCall { Function.ReturnType.IsPseudo: false } call => call.Function.ReturnType.Storage.Type,
+                SqlBoundSequence => DatabaseType.Int64,
+                SqlBoundConstant constant => SqlValue.FromObject(constant.Value).Type,
+                _ => DatabaseType.Null,
+            };
+            return type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
+                or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal or DatabaseType.Boolean
+                or DatabaseType.Date or DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset
+                or DatabaseType.TimeSpan or DatabaseType.Guid || argument is SqlBoundConstant { Value: null };
+        }
     }
+
+    private static bool HasStoredHashColumn(SqlGroupPlan plan, SqlBoundColumn column)
+        => plan.Input is SqlSelectPlan || plan.Bindings is not null && plan.Bindings.Any(binding =>
+            binding.Source.Table is not null && column.Ordinal >= binding.Offset &&
+            column.Ordinal < binding.Offset + binding.Source.Columns.Count);
 
     private static bool TryHashNumericBound(SqlBoundExpression expression, SqlGroupPlan plan, out decimal bound)
     {
         if (expression is SqlBoundColumn column)
         {
+            // Derived metadata is not a runtime value contract: a polymorphic NULL-input
+            // function inside COALESCE can even leave text in a BIGINT-typed column.
+            if (!HasStoredHashColumn(plan, column)) { bound = 0; return false; }
             var type = plan.SourceColumns[column.Ordinal].Type;
             return Bound(type.Type, type.Precision, type.Scale, out bound);
         }
         if (expression is SqlBoundCast cast)
         { return Bound(cast.Target.Storage.Type, cast.Target.Storage.Precision, cast.Target.Storage.Scale, out bound); }
-        if (expression is SqlBoundCall call)
+        if (expression is SqlBoundCall { Function.ReturnType.IsPseudo: false } call)
         { return Bound(call.Function.ReturnType.Storage.Type, null, null, out bound); }
         if (expression is SqlBoundSequence) { bound = 9223372036854775808m; return true; }
         if (expression is SqlBoundConstant constant && constant.Value is null or sbyte or short or int or long or decimal)
@@ -152,7 +154,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 DatabaseType.Int8 => 128m, DatabaseType.Int16 => 32768m,
                 DatabaseType.Int32 => 2147483648m, DatabaseType.Int64 => 9223372036854775808m,
-                DatabaseType.Null => 0m, _ => -1m,
+                _ => -1m,
             };
             if (type == DatabaseType.Decimal && precision is > 0 and <= 28 && scale is >= 0 && scale <= precision)
             {
@@ -179,7 +181,8 @@ internal sealed partial class SqlPlanExecutor
                 { await PrepareSubqueriesAsync(argument, row, statement, token).ConfigureAwait(false); }
                 var arguments = new SqlValue[aggregate.Arguments.Length];
                 EvaluateArguments(aggregate, evaluator, row, arguments);
-                foreach (var argument in arguments) { values[position++] = argument.ToObject(); }
+                foreach (var argument in arguments)
+                { values[position++] = aggregate.Function is SqlCountFunction ? (argument.IsNull ? null : true) : argument.ToObject(); }
             }
             else { position += aggregate.Arguments.Length; }
         }
@@ -197,9 +200,9 @@ internal sealed partial class SqlPlanExecutor
         Exception? failure = null;
         try
         {
-            var ordering = plan.OrderBy.Count == 0
-                ? new[] { new SqlBoundOrdering(SqlBoundConstant.Null, false, true, new SqlBoundCollation(Collation.Binary)) }
-                : plan.OrderBy;
+            if (plan.OrderBy.Count == 0)
+            { return await FinishUnorderedHashGroupAsync(spill, summaries, plan, evaluator, statement, token).ConfigureAwait(false); }
+            var ordering = plan.OrderBy;
             using var collected = new SqlRowCollector(ordering, _subqueryValues, plan.Limit, plan.Offset, token, _metrics, SelectBufferBudget);
             collected.ShareSpillStatement(spill.Statement);
             long ordinal = 0;
@@ -239,6 +242,54 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    private async Task<DatabaseResult> FinishUnorderedHashGroupAsync(HashSpill spill, StorageTempRun summaries,
+        SqlGroupPlan plan, SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken token)
+    {
+        StorageTempRun? output = null;
+        long visited = 0, maximumDecoded = 0;
+        long offset = plan.Offset?.Count ?? 0;
+        foreach (var summary in spill.Read(summaries, token))
+        {
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
+            if (plan.Limit is { Count: 0 } || plan.Limit is { } limit && visited >= offset && visited - offset >= limit.Count) { break; }
+            int start = summary.Length;
+            var row = new object?[start + plan.Projections.Count]; summary.CopyTo(row, 0);
+            await PrepareSubqueriesAsync(plan.Having, row, statement, token).ConfigureAwait(false);
+            if (!evaluator.Matches(plan.Having, row)) { continue; }
+            for (int i = 0; i < plan.Projections.Count; i++)
+            {
+                await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, token).ConfigureAwait(false);
+                row[start + i] = NormalizeGroupValue(evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
+            }
+            visited++;
+            var values = row[start..];
+            long grant = Math.Min(int.MaxValue, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes);
+            long bound = (grant - 32768) / 16 - 8192;
+            if (grant < 65536 || !SqlTempRowCodec.TryGetLength(values, out int length) || length + 16L > bound)
+            { throw SqlExecutionException.StatementMemoryBudget(_definitions.StatementMemoryBudget); }
+            long decoded = SqlTempRowCodec.DecodedBytes(values);
+            long scratch = StorageTempSpace.PageSize + length + decoded;
+            _metrics!.ReservePlainSelectMemory(scratch, _definitions.StatementMemoryBudget);
+            try
+            {
+                if (!SqlTempRowCodec.TryEncode(values, out var bytes)) { throw SqlExecutionException.StatementMemoryBudget(_definitions.StatementMemoryBudget); }
+                output ??= spill.Statement.CreateRun(token);
+                output.Append(bytes, token); maximumDecoded = Math.Max(maximumDecoded, decoded);
+            }
+            finally { _metrics.ReleasePlainSelectMemory(scratch); }
+        }
+        summaries.Dispose();
+        if (output is null)
+        { SqlHashSpillMetrics.Refresh(_metrics!, spill.Statement); return MaterializeProjected(plan.Projections, []); }
+        output.Seal(token);
+        SqlRowCollector.ObserveSpill?.Invoke("output-spool");
+        SqlSortSpillMetrics.RecordOutput(_metrics!, spill.Statement);
+        var result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns,
+            spill.Statement, output, offset, plan.Limit?.Count ?? -1, spill.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, maximumDecoded);
+        result.CaptureMetrics(_metrics); SqlHashSpillMetrics.Refresh(_metrics, spill.Statement); spill.Transfer();
+        return result;
+    }
+
     private static Exception? DisposeHashTemp(IDisposable? resource, Exception? initiatingFailure)
     {
         try { resource?.Dispose(); return initiatingFailure; }
@@ -261,20 +312,14 @@ internal sealed partial class SqlPlanExecutor
     private sealed class HashSpill : IDisposable
     {
         private const int partitions = 8, maximumDepth = 8;
-        private static readonly ConditionalWeakTable<SqlPlanExecutor, HashSpill> _active = new();
         private long _ordinal = int.MaxValue;
-        internal Exception? Failure { get; set; }
-        internal static HashSpill? For(SqlPlanExecutor executor) => _active.TryGetValue(executor, out var value) ? value : null;
         internal long NextOrdinal() => _ordinal++;
-        internal static void Start(SqlPlanExecutor executor, SqlDatabaseSession owner, Collation[] collations,
-            SqlGroupPlan plan, SqlStatementContext context, StorageTempStatement? shared = null)
-            => _ = new HashSpill(executor, owner, collations, plan, context, shared);
         private readonly SqlPlanExecutor _executor;
         private readonly SqlGroupPlan? _plan;
         private readonly SqlStatementContext? _context;
         private readonly GroupKeyComparer _comparer;
         private readonly Collation[] _aggregateCollations;
-        private readonly SqlTempSortKeyCodec.Column[] _keyColumns;
+        private readonly Func<int, int>? _partitionHash;
         private readonly byte[] _families;
         private readonly long _budget;
         private readonly int _bound;
@@ -288,7 +333,6 @@ internal sealed partial class SqlPlanExecutor
         internal long MaximumDecodedBytes { get; private set; }
         // Test-only deterministic observers; no process-global collection of rows.
         internal static Action<string, long>? Observe { get; set; }
-        internal static Func<int, int>? PartitionHash { get; set; }
 
         internal HashSpill(SqlPlanExecutor executor, SqlDatabaseSession owner, Collation[] collations,
             SqlGroupPlan? plan = null, SqlStatementContext? context = null, StorageTempStatement? shared = null)
@@ -301,7 +345,7 @@ internal sealed partial class SqlPlanExecutor
             if (grant < 65536 || bound < 16) { throw SqlExecutionException.StatementMemoryBudget(_budget); }
             _bound = (int)Math.Min(16384, bound);
             _comparer = new GroupKeyComparer(collations);
-            _keyColumns = collations.Select(c => new SqlTempSortKeyCodec.Column(false, true, c)).ToArray();
+            _partitionHash = HashSpillPartitionHash;
             _families = new byte[collations.Length];
             _aggregateCollations = plan?.Aggregates.Select(a => a.Collation.Resolve(executor._subqueryValues)).ToArray() ?? [];
             SqlSpillLifetime.CheckCapacity(owner);
@@ -311,16 +355,22 @@ internal sealed partial class SqlPlanExecutor
                 _partitions = StorageTempPartitions.Create(_statement, partitions, partitions * 8704L);
                 _outputs = _statement.CreateRun();
                 SqlHashSpillMetrics.Begin(executor._metrics!);
-                _active.Add(executor, this);
             }
             catch (Exception failure) { SqlSpilledResultSet.ReleaseAfterFailure(_statement, failure); throw; }
         }
 
         internal void Validate(object?[] key)
         {
-            if (!SqlTempRowCodec.TryGetLength(key, out int size) || size + 24L > _bound ||
-                !SqlTempSortKeyCodec.TryEncode(key, _keyColumns, _families, out _))
+            if (!SqlTempRowCodec.TryGetLength(key, out int size) || size + 24L > _bound)
             { throw SqlExecutionException.StatementMemoryBudget(_budget); }
+            for (int i = 0; i < key.Length; i++)
+            {
+                if (key[i] is null) { continue; }
+                byte family = SqlValueComparer.ComparisonFamily(key[i]!);
+                if (family == 0 || _families[i] != 0 && _families[i] != family)
+                { throw SqlExecutionException.StatementMemoryBudget(_budget); }
+                _families[i] = family;
+            }
         }
 
         internal void Append(object?[] key, object?[] values, long ordinal, CancellationToken token)
@@ -335,7 +385,7 @@ internal sealed partial class SqlPlanExecutor
         private void AppendPartition(StorageTempPartitions target, object?[] row, object?[] key, int depth, CancellationToken token)
         {
             int hash = _comparer.GetHashCode(key);
-            if (PartitionHash is { } transform) { hash = transform(hash); }
+            if (_partitionHash is { } transform) { hash = transform(hash); }
             // Successive levels consume fresh hash bits, like nodeAgg.c:hashagg_spill_tuple.
             target.Append(unchecked((uint)hash) >> (3 * depth), Encode(row), token);
         }
@@ -464,6 +514,7 @@ internal sealed partial class SqlPlanExecutor
                             position += aggregate.Arguments.Length;
                         }
                     }
+                    Observe?.Invoke("batch-live", groups.Count);
                     foreach (var entry in groups) { Emit(entry.Key, entry.Value.States, entry.Value.Ordinal, token); }
                     groups.Clear(); groups.TrimExcess(); memory.Clear();
                     _executor.ReleaseGroupMemory(aggregateMemory, ref statesBytes); aggregateMemory = null;
@@ -510,10 +561,9 @@ internal sealed partial class SqlPlanExecutor
             return result;
         }
 
-        public void Dispose() => Dispose(Failure);
+        public void Dispose() => Dispose(null);
         internal void Dispose(Exception? initiatingFailure)
         {
-            _active.Remove(_executor);
             if (_disposed) { return; } _disposed = true;
             try { _statement.Dispose(); }
             catch (AggregateException cleanup)
