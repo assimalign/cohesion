@@ -12,6 +12,7 @@ using Xunit.Abstractions;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -125,7 +126,7 @@ public sealed partial class SqlSelectWideMemoryTests
             }) { await session.ExecuteAsync(command, cancellationToken: CancellationToken.None); }
             await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
             database.Definitions.ForceSelectRetentionBasePath = forceBase;
-            long before = GC.GetTotalMemory(true), retainedHeap = 0;
+            long before = LiveHeap.Read(), retainedHeap = 0;
             string payload = new('x', 200);
             var parameters = new Dictionary<string, object?> { ["p"] = payload };
             int reservations = 0, count = 0;
@@ -139,7 +140,7 @@ public sealed partial class SqlSelectWideMemoryTests
                 {
                     reservations++;
                     trace.Add(metrics.PeakHashMemoryBytes);
-                    if (failAt == 0) { retainedHeap = GC.GetTotalMemory(true) - before; }
+                    if (failAt == 0) { retainedHeap = LiveHeap.Read() - before; }
                     if (reservations != failAt) { return; }
                     if (cancel) { cancellation.Cancel(); cancellation.Token.ThrowIfCancellationRequested(); }
                     throw fault;

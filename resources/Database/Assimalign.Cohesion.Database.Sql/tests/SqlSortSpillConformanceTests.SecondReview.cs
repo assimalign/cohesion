@@ -17,6 +17,7 @@ using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -128,7 +129,7 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var engine = SqlDatabaseEngine.Create("decoded-reader", new() { RootPath = Path.Combine(_root,"decoded-reader"), StatementMemoryBudget = grant });
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await using (var warm = BuildWideReaderResult(session, 3900000)) { }
-        long baseline = GC.GetTotalMemory(true);
+        long baseline = LiveHeap.Read();
         await using var result = BuildWideReaderResult(session, 3900000);
         await using var first = result.GetRowsAsync().GetAsyncEnumerator();
         await using var second = result.GetRowsAsync().GetAsyncEnumerator();
@@ -137,7 +138,7 @@ public sealed partial class SqlSortSpillConformanceTests
         long admitted = ReaderBytes(result);
         // Act
         var failure = await Record.ExceptionAsync(async () => await third.MoveNextAsync());
-        long live = GC.GetTotalMemory(true) - baseline;
+        long live = LiveHeap.Read() - baseline;
         // Assert
         _output.WriteLine($"DECODED_READER_PROBE|workspace={3 * Sorted(result)!.BufferBytes}|live={live}|allowance={allowance}|third_refused={failure is not null}");
         failure.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics[0].Code.ShouldBe("CS05067"); ReaderBytes(result).ShouldBe(admitted);
@@ -160,7 +161,7 @@ public sealed partial class SqlSortSpillConformanceTests
             bool acquired = Monitor.TryEnter(SpillReaderGate(result));
             if (acquired) { Monitor.Exit(SpillReaderGate(result)); }
             acquired.ShouldBeFalse();
-            long overlapLive = GC.GetTotalMemory(true) - baseline;
+            long overlapLive = LiveHeap.Read() - baseline;
             _output.WriteLine($"DECODED_PUBLICATION|live={overlapLive}|allowance={allowance}|gate_held=true|paused_decodes=1");
             overlapLive.ShouldBeLessThanOrEqualTo(allowance);
         }

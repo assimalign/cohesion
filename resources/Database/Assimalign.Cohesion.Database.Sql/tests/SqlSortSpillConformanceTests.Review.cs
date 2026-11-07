@@ -11,6 +11,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -254,11 +255,11 @@ public sealed partial class SqlSortSpillConformanceTests
         };
         string required = shape switch { 0 => "staged-drained", 1 => "output-spool", 2 => "transform", _ => "deduplicate" };
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
-        long baseline = GC.GetTotalMemory(true); var samples = new Dictionary<string, long>();
+        long baseline = LiveHeap.Read(); var samples = new Dictionary<string, long>();
         SqlRowCollector.ObserveSpill = phase =>
         {
             if (phase != required && !(shape == 0 && phase == "staged-sort")) { return; }
-            samples[phase] = Math.Max(samples.GetValueOrDefault(phase),Math.Max(0, GC.GetTotalMemory(true)-baseline));
+            samples[phase] = Math.Max(samples.GetValueOrDefault(phase),Math.Max(0, LiveHeap.Read()-baseline));
         };
         try
         {
@@ -287,7 +288,7 @@ public sealed partial class SqlSortSpillConformanceTests
         SqlRowCollector.ObserveSpill = phase =>
         {
             if (phase != "staged-sort") { return; }
-            GC.GetTotalMemory(true); weak.ShouldNotBeEmpty(); weak.Count(item => item.IsAlive).ShouldBe(0); observed = true;
+            LiveHeap.Read(); weak.ShouldNotBeEmpty(); weak.Count(item => item.IsAlive).ShouldBe(0); observed = true;
         };
         try
         {

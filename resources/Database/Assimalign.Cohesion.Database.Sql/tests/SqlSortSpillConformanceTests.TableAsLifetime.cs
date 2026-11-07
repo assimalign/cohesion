@@ -85,7 +85,7 @@ public sealed partial class SqlSortSpillConformanceTests
             TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
             long baseline = 0, peak = 0; int read = 0, encoded = 0, copies = 0; long workspace = 0;
             var weak = new List<WeakReference>(); var retained = new List<object>();
-            SqlPlanExecutor.TableAsSourceAdmitted = _ => baseline = GC.GetTotalMemory(true);
+            SqlPlanExecutor.TableAsSourceAdmitted = _ => baseline = LiveHeap.Read();
             SqlPlanExecutor.TableAsSourceReading = (source, row) =>
             {
                 read++; workspace = Math.Max(workspace, Sorted(source)!.BufferBytes);
@@ -96,11 +96,11 @@ public sealed partial class SqlSortSpillConformanceTests
             SqlPlanExecutor.TableAsRecordEncoded = record =>
             {
                 if (++encoded % 97 == 0) { weak.Add(new(record)); }
-                if (encoded % 256 == 0) { peak = Math.Max(peak, GC.GetTotalMemory(true) - baseline); }
+                if (encoded % 256 == 0) { peak = Math.Max(peak, LiveHeap.Read() - baseline); }
             };
             SqlPlanExecutor.TableAsStage = (phase, _) =>
             {
-                if (phase == "Copied" && ++copies % 7 == 0) { peak = Math.Max(peak, GC.GetTotalMemory(true) - baseline); }
+                if (phase == "Copied" && ++copies % 7 == 0) { peak = Math.Max(peak, LiveHeap.Read() - baseline); }
             };
             try
             {

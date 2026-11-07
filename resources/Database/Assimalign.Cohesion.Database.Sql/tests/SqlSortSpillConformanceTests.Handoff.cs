@@ -11,6 +11,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -23,7 +24,7 @@ public sealed partial class SqlSortSpillConformanceTests
         const long grant = 1048576, constant = 524288;
         var weak = new List<WeakReference>(); var samples = new Dictionary<string, long>();
         bool observe = false, drained = false; long baseline = 0;
-        void Sample(string phase) => samples[phase] = Math.Max(samples.GetValueOrDefault(phase), Math.Max(0, GC.GetTotalMemory(true) - baseline));
+        void Sample(string phase) => samples[phase] = Math.Max(samples.GetValueOrDefault(phase), Math.Max(0, LiveHeap.Read() - baseline));
         var builder = SqlDatabaseEngine.CreateBuilder("deferred-key-live");
         builder.Options.RootPath = System.IO.Path.Combine(_root, "deferred-live");
         builder.Options.StatementMemoryBudget = grant; builder.Options.StatementTempSpaceQuota = 64 * 1024 * 1024;
@@ -40,7 +41,7 @@ public sealed partial class SqlSortSpillConformanceTests
         await Seed(session, 1000);
         const string sql = "SELECT observe_output(id) FROM t ORDER BY observe_key(id)";
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
-        baseline = GC.GetTotalMemory(true); observe = true;
+        baseline = LiveHeap.Read(); observe = true;
         SqlRowCollector.ObserveSpill = phase =>
         {
             if (phase is "handoff" or "drained" or "arena") { Sample(phase); }

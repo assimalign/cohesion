@@ -81,11 +81,11 @@ public sealed partial class SqlSortSpillConformanceTests
             using var started = new ManualResetEventSlim(); Thread? sampler = null;
             SqlPlanExecutor.TableAsSourceAdmitted = _ =>
             {
-                baseline = GC.GetTotalMemory(true); Volatile.Write(ref sampling, 1);
+                baseline = LiveHeap.Read(); Volatile.Write(ref sampling, 1);
                 sampler = new Thread(() =>
                 {
                     while (Volatile.Read(ref sampling) != 0)
-                    { peak = Math.Max(peak, GC.GetTotalMemory(true) - baseline); samples++; started.Set(); }
+                    { peak = Math.Max(peak, LiveHeap.Read() - baseline); samples++; started.Set(); }
                 }) { IsBackground = true };
                 sampler.Start(); started.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             };

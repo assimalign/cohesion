@@ -12,6 +12,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -27,7 +28,7 @@ public sealed partial class SqlSortSpillConformanceTests
         long baseline = 0; bool observe = false, afterHandoff = false;
         long Sample(string phase)
         {
-            long live = Math.Max(0, GC.GetTotalMemory(true) - baseline);
+            long live = Math.Max(0, LiveHeap.Read() - baseline);
             samples[phase] = Math.Max(samples.GetValueOrDefault(phase), live);
             return live;
         }
@@ -47,7 +48,7 @@ public sealed partial class SqlSortSpillConformanceTests
         await Seed(session);
         const string sql = "SELECT fresh(id) AS value FROM t ORDER BY value,id";
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
-        baseline = GC.GetTotalMemory(true); observe = true;
+        baseline = LiveHeap.Read(); observe = true;
         SqlRowCollector.ObserveSpill = phase =>
         {
             if (phase is "handoff" or "drained" or "arena") { Sample(phase); }
@@ -84,7 +85,7 @@ public sealed partial class SqlSortSpillConformanceTests
         SqlRowCollector.ObserveSpill = phase =>
         {
             if (phase != "drained") { return; }
-            GC.GetTotalMemory(true); vectors.Count.ShouldBe(200);
+            LiveHeap.Read(); vectors.Count.ShouldBe(200);
             vectors.Count(reference => reference.IsAlive).ShouldBe(0); vectorsDrained = true;
         };
         try

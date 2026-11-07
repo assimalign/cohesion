@@ -10,6 +10,7 @@ using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -394,7 +395,7 @@ public sealed partial class SqlSelectMemoryTests
         await session.ExecuteAsync("CREATE TABLE t(k INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 4096).Select(i => $"({i})")), cancellationToken: CancellationToken.None);
         database.Definitions.ForceSelectRetentionBasePath = forceBase;
-        long before = GC.GetTotalMemory(forceFullCollection: true);
+        long before = LiveHeap.Read();
         string payload = new('x', 1048576);
         long retainedHeap = 0;
         try
@@ -402,7 +403,7 @@ public sealed partial class SqlSelectMemoryTests
             SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
             {
                 if (metrics.HashMemoryBytes == 2654296)
-                { retainedHeap = GC.GetTotalMemory(forceFullCollection: true) - before; }
+                { retainedHeap = LiveHeap.Read() - before; }
             };
             // Act
             await using var rows = (DatabaseResultSet)await session.ExecuteAsync("SELECT @p AS p FROM t ORDER BY k,p",
