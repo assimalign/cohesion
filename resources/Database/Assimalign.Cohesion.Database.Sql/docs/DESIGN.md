@@ -492,7 +492,7 @@ storage type. Non-NULL ascending values keep their previous bytes, except floati
 zero and NaN: SQL canonicalizes signed zeros and moves NaN below negative infinity to match
 SqlValueComparer. The shared Indexing/Types encodings and page layouts are unchanged, so their
 format versions do not change. Row storage retains the original values. SQL catalog/record-space
-format 36 introduced the default key order (#1787); current format 37 and mandatory index
+format 36 introduced the default key order (#1787); current format 38 and mandatory index
 extension 3 fence these SQL-specific keys and metadata. Compiled
 schema v12 carries the same effective orders. All three enums use AscendingNullsFirst = 0,
 AscendingNullsLast = 1, DescendingNullsFirst = 2 and DescendingNullsLast = 3; bit 0 means NULLS
@@ -619,7 +619,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Current catalog/record-space format 37 refuses all earlier files before writable data recovery;
+extension 3. Current catalog/record-space format 38 refuses all earlier files before writable data recovery;
 compiled-schema v12 retains CompiledSchemaIndex.Predicate (introduced in v10) and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
@@ -1760,7 +1760,7 @@ canonical body. FROM-less correlated projections also retain provenance when the
 display name differs from the referenced column, or that column was already synthesized.
 An authored view name identical to a synthesized name is also expressed
 as a derived column list in that body; different catalog names already prove an explicit
-list supplied them. Star expansion avoids inventing aliases for synthesized names. SQL format stays 37.
+list supplied them. Star expansion avoids inventing aliases for synthesized names. That change retained SQL format 37; current format 38 adds applied-schema history.
 An older frozen star's same-name AS alias is indistinguishable from an authored re-alias;
 stored-body binding conservatively retains synthesized provenance for that shape (CS01015).
 New fully named same-name re-alias views persist an explicit output list. A mixed view can
@@ -1770,7 +1770,7 @@ An older explicit view column list matching a generated name is ambiguous too: t
 legacy(column1) AS SELECT CAST(1 AS BIGINT) as that body alone plus the name column1.
 It conservatively retains synthesized provenance and refuses NATURAL with CS01015; wrapping
 the view in a derived query with an explicit column list or recreating it resolves this. A reopen fixture writes the base's
-exact body and column contract through the unchanged format-37 kind-17 catalog writer,
+exact body and column contract through the unchanged kind-17 catalog writer in current format 38,
 alongside a new view whose stored wrapper retains the explicit list. No format changes.
 Each BindItem join checks cancellation; NATURAL skips merged-column scans until a binding
 actually has UsingColumns. A synchronous parameter-read witness tests cancellation after
@@ -4162,7 +4162,7 @@ provisioning DROP phase; decision 77 in the program design records the measureme
 
 Catalog kind 9 contains the complete target document/hash, Joint/ operation identities, ordered
 positions and per-table KeepOwner/RewriteOwner choices. Its transaction commits before any
-preparation. Format 37 fences the former per-step meaning. After a crash only a matching target
+preparation. Format 37 fenced the former per-step meaning. After a crash only a matching target
 Build may resume; a different-target Build discards it with CS03402 and uses the stored schema.
 A no-target open discards without a provisioning report or trace.
 The old applied marker stays trusted. One publication commit installs the complete new schema,
@@ -5289,7 +5289,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 37 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 38 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -8260,7 +8260,7 @@ bounded peer-sent names) are in the area's
 | 11 | `StatementTooComplex` | Warning | — | `database`, `depth` (-1 when an execution stack backstop has no measured depth) |
 | 12 | `DdlSelfCommitted` | Verbose | `Statements` | `database`, `commandType` |
 | 13 | `ProvisioningStart` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `mode` (`Apply`/`Verify`/`Resume`/`Replan`), `stepCount` (-1 before planning) |
-| 14 | `ProvisioningStop` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `stepCount`, `outcome` (`Applied`, `Skipped`, `Deferred`, `Verified`, `Restarted`, `Discarded`, `Error`, `Cancelled`), `durationMilliseconds` |
+| 14 | `ProvisioningStop` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `stepCount`, `outcome` (`Applied`, `Skipped`, `Deferred`, `Verified`, `Restarted`, `Discarded`, `Held`, `Error`, `Cancelled`), `durationMilliseconds` |
 | 15 | `ProvisioningFailed` | Error | — | `engineName`, `database`, `schema`, `position`, `kind`, `code`, `exceptionType` (no message) |
 | 16 | `ExtensionRegistered` | Verbose | — | `kind` (`Scalar`, `Aggregate`, `Type`, `Cast`), `name` (cut to 256 characters per identifier; a cast is `source -> target`) |
 | 17 | *(retired)* | — | — | `IndexRegistrationsSaved` reported a separate registration save; B2 publishes an index's registration atomically with its description (#1355), so the id is retired, never reused |
@@ -8902,7 +8902,7 @@ two questions for the planner: *what objects exist* (with stable identities) and
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
 SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
-format **29** introduced kind 18 ownership; current format **37** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+format **29** introduced kind 18 ownership; current format **38** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
 Earlier database formats are refused by the existing format gate; compiled-schema v12 is current.
@@ -9230,7 +9230,7 @@ Typed-schema worker handoff and joint crash/wire convergence are described in SQ
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 37); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 38); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -9553,15 +9553,15 @@ matching intent and reports CS03402 because it cannot schedule a job. With no su
 that reopen also reports CS03402 when its declared schema differs from the stored applied hash;
 a completed job stays Healthy. A no-target open sets no provisioning observation or provisioning
 trace. Successful Verify clears a prior observation. After publication it opens the
-new schema. Rollback after success plans an ordinary reverse migration: every unproven conversion,
-length/precision/scale narrowing and rounding requires destructive opt-in, refused with CS03105
-before any step otherwise. The planner's conservative exact whitelist includes integer widening,
+new schema. Rollback after success uses the applied-schema history and hold policy below (#1779).
+An explicit ApplySchemaAsync retains its strict destructive-change gate (CS03105 without opt-in).
+The planner's conservative exact whitelist includes integer widening,
 exact integer-to-float widening, REAL to DOUBLE and non-narrowing same-type facets. All
 domain conversions require opt-in because application casts are unknown to the schema planner;
 existing metadata-only gating stays unchanged.
 
 Kind 9 identifies joint jobs with Joint/ step kinds; kind 6 and kind 14 keep their encodings.
-SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 37
+SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 38
 also fences the separate tree owners and classification steps described below; every earlier
 format is refused by the existing read-only gate, with no upgrade reader.
 Compiled-schema v12 stays current. There is no new public interface, reference or wire message.
@@ -9577,6 +9577,7 @@ rewrite locks; tablecmds.c:15618-15624 refuses dependent views. No reference cod
 | CS03402 | Joint preparation/space admission failed; old schema retained unless a storage latch fired |
 | CS03403 | Joint publication commit unconfirmed; reopen/recovery decides old or new |
 | CS03404 | Session relation creation/table rename names a relation reserved by a pending joint plan |
+| CS03405 | Earlier applied declaration held at stored schema; unsafe rollback runs no step, Degraded with hashes and refused steps |
 
 #### Joint tables that keep their physical owner (#1777, SQ-A4)
 
@@ -9657,7 +9658,7 @@ the new plan publishes. Joint copy uses its bounded DML memory ledger and direct
 copy nor deferred index build uses plain SELECT buffers. A declared script CTAS can spill an eligible source-root sort; fitting source output and
 copy batches still share StatementMemoryBudget and can refuse with CS05067 online; its next Build
 resumes at the refused statement when given a larger budget. Optional temp-space setup failures
-do not affect joint intent resume or discard. Format 37 fences the per-step kind-9 meaning; no old partially published
+do not affect joint intent resume or discard. Format 37 fenced the per-step kind-9 meaning; no old partially published
 job resumes. A fresh replan uses its new script's executable step total.
 Discard ends the current provisioning trace with outcome Restarted and starts mode Replan.
 Joint intents with malformed ownership choices still fail CS06059 when the replan is joint.
@@ -9780,9 +9781,9 @@ replacements until #1808. Shuffled-key measurements
 count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
 already completed by the engine must not be followed by a redundant forced copy checkpoint.
 
-SQL record-space format 37 requires this joint kind-9 meaning for every deferred job and refuses
+SQL record-space format 37 required this joint kind-9 meaning for every deferred job and refused
 36 before any write through the existing format gate. Compiled-schema v12 and wire messages
-are unchanged; no upgrade reader or new public boundary is added.
+were unchanged; no upgrade reader or new public boundary was added.
 
 #### Joint inline parity and kept layouts (#1778, SQ-A6)
 
@@ -9973,6 +9974,80 @@ before resumption: no cursor or cross-file atomic commit is required. An intent 
 pages is harmless and completes on retry. Catalog itself never walks or frees the data file.
 The #1443 review kept record-space format 11 unchanged. #1437 advances it to 12 for CHAR, as described above.
 
+#### Catalog: Applied-schema history and held declarations (#1779, SQ-A7)
+
+SQL record-space format 38 adds catalog kind 20, distinct from the current kind-6 state.
+Each hash-only history entry stores ContentHash, FirstAppliedGeneration and LastAppliedGeneration.
+Entries are never evicted: forgetting one could let an old opted-in declaration delete newer data.
+A chunk holds at most 32 entries. With 64-character SHA-256 hashes each entry is 86 encoded bytes;
+1,000 distinct schemas occupy 86,320 bytes across 32 chunks (10 header bytes per chunk), versus
+SlottedPage.MaxRecordSize = 8,092 bytes for one record. A full chunk causes another chunk to be
+inserted; a load-derived in-memory tail keeps filling the partial chunk across reopens and
+physical record relocation. No whole-history record reaches that limit. Oversized caller-supplied identities refuse
+CS05042 through EnsureStorable, rolling back the entire state/history transaction. Memory and
+storage exhaustion also refuse the publication without eviction. Load refuses malformed/duplicate
+entries with CS06059. Reapplying a hash preserves its first generation and updates its last.
+
+SaveSchemaDocument (including declared-script bookkeeping) and joint PublishReplacements are the
+two kind-6 write sites. Both stage kind 20 in the very same StorageTransaction. Pending kind 9
+never enters history. All directory allocations precede commit. Cache changes publish only after
+the commit succeeds. The durable boundaries remain intent commit, preparation/copy checkpoints,
+and the single catalog publication commit; no separate history boundary is introduced. The crash
+corpus records every write, flush and length change on both sides of that commit for state-save,
+inline and deferred routes, including first publication and chunk rollover. Every reopened image converges to exactly the old state and old
+history or the new state and new history, with matching generations and unchanged visible rows.
+Joint publication space admission includes one extra bounded catalog chunk.
+
+Build Apply mode skips an identical applied declaration. Otherwise it plans the complete diff
+before rendering or preparing anything. A declaration found in history is a rollback only when
+its FirstAppliedGeneration is less than the stored schema's FirstAppliedGeneration. A later
+first-applied declaration is a roll-forward and follows new-schema rules, including its own
+destructive opt-in. Repeated publications update LastAppliedGeneration without changing this order.
+
+A rollback applies only planner-Safe steps that neither re-create dropped objects nor validate
+existing data. One refused step holds the complete plan, including every otherwise Safe prefix.
+The full step classification is:
+
+| Step | In a rollback | Why |
+| --- | --- | --- |
+| AddTable | Held | A re-created table would be empty instead of recovering its dropped rows. |
+| AddColumn | Held | A re-added column exposes NULL/defaults at a new ordinal instead of its dropped values. |
+| DropTable, DropColumn | Held | Removes data written by the newer application. |
+| AlterTable | Held | The planner classes key/order changes Destructive. |
+| AlterColumn: Safe, with no existing-data validation | Applied | Exact widening without a retained CHECK/FK scan preserves every source value. |
+| AlterColumn: validation or non-Safe | Held | NOT NULL tightening, domain checks, narrowing and default changes can reject or change newer values; CHAR width changes and TYPE rewrites with retained CHECK/FK constraints require validation. |
+| AddConstraint | Held | CHECK and foreign keys validate existing rows; any UNIQUE constraint addition follows the same rule (compiled UNIQUE currently uses a unique AddIndex). |
+| AddIndex: unique | Held | Uniqueness validates existing rows and can reject newer duplicates. |
+| AddIndex: non-unique | Applied | Builds an access path without row validation when the table owner is kept. |
+| AddIndex: non-unique heap-owned replacement with retained constraints | Held | Replacing a same-name heap-owned index copies the table and revalidates CHECK/domain/FK requirements, including incoming references. |
+| DropIndex | Applied | Removes an access path without deleting table values. |
+| DropConstraint | Applied | Removes validation without deleting rows. |
+| AddDomain, DropDomain | Applied | These steps change no catalog and validate no rows; the engine registers domains. A transition into a domain uses AlterColumn and is held. |
+
+A refused reversal runs no step, keeps the stored schema online, and reports CS03405 through
+Provisioning.Detail and Hosting health, naming both hashes and all refused steps. A never-seen
+destructive declaration without opt-in similarly holds with CS03105 (T3-4). New declarations and
+roll-forwards with opt-in retain their forward-migration policy. Build succeeds for holds;
+pipelines requiring failure on drift use Verify (CS03103). Explicit ApplySchemaAsync consults
+the same history and rollback policy, throws CS03105 naming every refused step, and changes
+nothing with or without the earlier declaration's opt-in. That opt-in authorizes only its own
+forward migration. To accept loss deliberately, ship a new declaration with its own opt-in.
+
+A held Build runs no declared script and suspends owner decision 65's step-6 validation of
+removed application functions/domains. Stored definitions still enforce every write; reads stay
+available, while writes that require an unavailable function/domain fail with the existing code.
+Script checksum validation still runs before planning. The internal apply result carries the hold;
+control flow never depends on the public operation string. The engine-lifetime declaration retains
+the hold progress while its stored hash is unchanged: offline/reopen republishes its code, hashes
+and steps, rewrite restores it on completion, and explicit refusal leaves it reported. Restarting
+with the stored or a successfully published newer declaration clears the hold. Old inserts use
+the stored NOT NULL/default rules. Unpublished mismatched intents are discarded with CS03402
+before classification. Ancestors never applied here count as new; lineage remains deferred (T3-5).
+SqlSchemaRollbackTests and SqlSchemaRollbackPolicyTests are the executable provisioning corpus.
+Constraint validation is also explicit in PostgreSQL src/backend/commands/tablecmds.c:13433-13450,
+which queues foreign-key, CHECK and NOT NULL scans; the hold policy here is the owner's
+availability-first decision, independent of inline, scripted or deferred execution.
+
 #### Catalog: Durable pending migrations (49a)
 
 Catalog kind 9 is a chunked UTF-8, source-generated JSON `SqlCatalogPendingMigration` envelope.
@@ -10012,7 +10087,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 37 requires the complete table extension 8 record,
+after the existing constraints. Current format 38 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -10090,7 +10165,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 37 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
+  which this catalog always writes. Current format 38 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).

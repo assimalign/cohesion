@@ -859,6 +859,18 @@
   <data name="ValidateSupportedSchemaFailure" xml:space="preserve"><value>{0}: the database cannot apply schema '{1}'.</value></data>
   <data name="ValidateSupportedSchemaFailure2" xml:space="preserve"><value>{0}: SQL schema '{1}' declares {2}.</value></data>
   <data name="ValidateSupportedSchemaFailure3" xml:space="preserve"><value>{0}: {1}: SQL schema '{2}': {3} Nothing was changed.</value></data>
+  <data name="SchemaHistoryInvalid" xml:space="preserve">
+    <value>The applied-schema history chunk is malformed.</value>
+  </data>
+  <data name="SchemaHeld" xml:space="preserve">
+    <value>{0}: declared schema {1}, stored schema {2}; {3}. No migration step ran. Refused steps: {4}.</value>
+  </data>
+  <data name="RollbackSchemaHeld" xml:space="preserve">
+    <value>the declared schema is an earlier applied schema; opened at the stored schema</value>
+  </data>
+  <data name="NewSchemaHeld" xml:space="preserve">
+    <value>the new declaration requires destructive changes without opt-in; opened at the stored schema</value>
+  </data>
   <data name="JointIntentDiscarded" xml:space="preserve">
     <value>The unpublished migration target or resolved route no longer matches; preparation was discarded and the stored schema remains online.</value>
   </data>

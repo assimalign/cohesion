@@ -2,6 +2,8 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Database.SampleHost</RootNamespace>
 		<OutputType>Exe</OutputType>
+		<!-- The acceptance test launches the copied apphost directly. -->
+		<AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
 		<IsPackable>false</IsPackable>
 		<CohesionDatabaseProject>true</CohesionDatabaseProject>
 	</PropertyGroup>

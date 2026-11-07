@@ -9,6 +9,29 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Rollback docs: Build holds at stored schema and Verify remains strict (#1779)")]
+    public void Documentation_SchemaRollback_ShouldDescribeHoldAndStrictPipeline()
+    {
+        // Arrange
+        string dialect = ReadDialect();
+        string design = ReadDocumentation("Sql", "DESIGN.md");
+
+        // Act / Assert
+        dialect.ShouldContain("Degraded with CS03405 and both hashes plus refused steps", Case.Sensitive);
+        dialect.ShouldContain("Verify (CS03103)", Case.Sensitive);
+        dialect.ShouldContain("all earlier formats, including 34 and 37", Case.Sensitive);
+        design.ShouldContain("86,320 bytes across 32 chunks", Case.Sensitive);
+        design.ShouldContain("the very same StorageTransaction", Case.Sensitive);
+        foreach (string documentation in new[] { design, dialect })
+        {
+            documentation.ShouldContain("FirstAppliedGeneration", Case.Sensitive);
+            foreach (string step in new[] { "AddColumn", "AddTable", "AddConstraint", "AddIndex: unique", "AddIndex: non-unique heap-owned replacement with retained constraints" })
+            { documentation.ShouldContain("| " + step + " | Held |", Case.Sensitive); }
+            documentation.ShouldContain("| AddIndex: non-unique | Applied |", Case.Sensitive);
+            documentation.ShouldContain("owner decision 65", Case.Sensitive);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Batch diagnostics distinguish target/deadline refusals, paused health and retired schema codes (#1792, #1283, #1778)")]
     public void Documentation_BatchDiagnostics_ShouldDistinguishActiveAndRetiredCodes()
     {
@@ -39,7 +62,7 @@ public sealed class SqlDialectDocumentationTests
         dialect.ShouldContain("Statements naming a new table in the plan also wait before binding", Case.Sensitive);
         dialect.ShouldContain("Default-only changes publish jointly", Case.Sensitive);
         dialect.ShouldContain("ApplySchemaAsync use the same joint executor inline", Case.Sensitive);
-        design.ShouldContain("SQL record-space format 37 requires this joint kind-9 meaning", Case.Sensitive);
+        design.ShouldContain("SQL record-space format 37 required this joint kind-9 meaning", Case.Sensitive);
         design.ShouldContain("prepared target plus untouched objects", Case.Sensitive);
     }
 
@@ -120,9 +143,9 @@ public sealed class SqlDialectDocumentationTests
     [InlineData("Sql", "DESIGN.md", "SQL remains format 29. Failed preparation and crash recovery use kind 14 unchanged.")]
     [InlineData("Sql", "DESIGN.md", "SQL stays format 29: ordinary table records and kind 14")]
     [InlineData("Sql.Language", "DIALECT.md", "Format 36 introduced ASC NULLS FIRST as the default key order (#1787). Current")]
-    [InlineData("Sql.Language", "DIALECT.md", "Format 37 requires joint publication for every deferred")]
-    [InlineData("Sql", "DESIGN.md", "current format 37 and mandatory index")]
-    [InlineData("Sql", "DESIGN.md", "Current format 37 also requires extension 8's OnUpdate byte")]
+    [InlineData("Sql.Language", "DIALECT.md", "Format 37 introduced mandatory joint publication for every deferred")]
+    [InlineData("Sql", "DESIGN.md", "current format 38 and mandatory index")]
+    [InlineData("Sql", "DESIGN.md", "Current format 38 also requires extension 8's OnUpdate byte")]
     [InlineData("Indexing", "DESIGN.md", "B-tree page format 2, but this engine supports only format 3")]
     [InlineData("Graph", "DESIGN.md", "catalog v3 and B-tree page format 2 therefore reports only CK06101")]
     [InlineData("Graph", "DESIGN.md", "and roots, and catalog v4 records including")]

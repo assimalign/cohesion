@@ -323,7 +323,12 @@ public sealed partial class SqlJointTypeMigrationTests
         database.Catalog.GetIndexes(Table(database).ObjectId).Single(index => index.IsPrimaryKey).Name.ShouldBe("PrimaryKey_items_Id_0");
         database.Catalog.GetIndexes(filled.ObjectId).Single(index => index.IsPrimaryKey).Name.ShouldBe("PrimaryKey_filled_Id_0");
         database.Catalog.PendingMigration.ShouldBeNull();
-        database.Provisioning.ShouldBeNull();
+        if (mode == 3 && applied)
+        {
+            database.Provisioning!.FailureCode.ShouldBe("CS03405");
+            database.Provisioning.Detail!.ShouldContain("DropTable 'created'", Case.Sensitive);
+        }
+        else { database.Provisioning.ShouldBeNull(); }
         database.IsOffline.ShouldBeFalse();
         await using var reader = await database.CreateSessionAsync(token);
         var rows = await RowsAsync(reader, "SELECT Id FROM items ORDER BY Id", token);

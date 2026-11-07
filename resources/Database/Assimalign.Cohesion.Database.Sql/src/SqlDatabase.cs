@@ -72,11 +72,30 @@ public sealed partial class SqlDatabase : DatabaseInstance
     internal SqlDdlInterlock DdlInterlock { get; } = new();
     internal SqlTableReclamation TableReclamation { get; }
     internal void ReportProvisioning(DatabaseProvisioningProgress? progress) => SetProvisioningProgress(progress);
+    internal DatabaseProvisioningProgress? HeldProvisioning
+    {
+        get
+        {
+            if (_engine.FindDeclaration(Name) is not { HeldProgress: { } held } declaration) { return null; }
+            try { return declaration.GetHeldProgress(_catalog.SchemaState?.ContentHash); }
+            catch (StorageOfflineException)
+            {
+                // Cleanup must release admission even when either file set just latched.
+                // Offline health takes precedence; reopen checks the recovered hash again.
+                return held;
+            }
+        }
+    }
 
     internal async ValueTask ResumeProvisioningAsync(CancellationToken cancellationToken)
     {
         if (_catalog.PendingMigration is not { } pending)
         {
+            if (HeldProvisioning is { } held)
+            {
+                ReportProvisioning(held);
+                return;
+            }
             // A completed Build cannot schedule work on reopen. A prior job may have
             // failed and discarded its intent before an independent storage latch.
             if (_engine.ProvisioningBuildComplete && _engine.FindDeclaration(Name)?.Schema is { } target &&
@@ -618,7 +637,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// The schema targets another database, declares what the engine has no DDL for (principals),
     /// declares a domain the engine does not register with that base type (<c>CS03105</c>: an
     /// imperative apply cannot add to the engine's frozen type catalog), would adopt an ad-hoc object
-    /// (<c>CS03105</c>), needs a destructive step it does not allow (<c>CS03105</c>), or unpublished
+    /// (<c>CS03105</c>), needs a destructive step it does not allow or an unsafe rollback (<c>CS03105</c>), or unpublished
     /// joint preparation failed (<c>CS03402</c>, with the old schema retained online
     /// unless a storage latch fired), or publication is unconfirmed (<c>CS03403</c>:
     /// recovery determines the committed schema).
@@ -632,12 +651,15 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// next build. A database declared without a schema, and one the builder did not declare, accept
     /// any schema. The checks run in the order the root base's members use: disposal, the schema,
     /// the token, then the offline refusal, then the declaration.
-    /// Potentially lossy TYPE conversions, including reverse migrations after application rollback,
-    /// require the declaration's destructive-change opt-in before any step runs.
+    /// New declarations and roll-forwards require destructive-change opt-in for potentially lossy
+    /// steps. An earlier applied declaration uses the rollback policy regardless of its opt-in:
+    /// re-creating dropped objects, data validation and non-Safe steps refuse with CS03105,
+    /// naming the refused steps and changing nothing. Build holds the same refusal online,
+    /// reporting the stored schema and refused steps through Provisioning.
     /// Readers, writers and session DDL naming a touched table wait through the joint job before
     /// binding the published schema. The engine's configured LockTimeout bounds reservation;
     /// zero waits without a timeout. Imperative cancellation or reservation timeout clears the
-    /// provisioning observation because this caller receives the exception.
+    /// provisioning observation because this caller receives the exception; an existing schema hold is restored.
     /// A transient checkpoint-admission refusal waits outside the physical and publication gates,
     /// then resumes the same prepared job with completed copy and index work retained.
     /// </remarks>
@@ -657,8 +679,11 @@ public sealed partial class SqlDatabase : DatabaseInstance
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseApplySchemaAsyncFailure, _engine.Name, Name));
         }
 
-        return _schemaProvisioner.ApplyAsync(schema, cancellationToken);
+        return ApplySchemaCoreAsync(schema, cancellationToken);
     }
+
+    private async ValueTask<SqlSchemaMigrationResult> ApplySchemaCoreAsync(SqlCompiledSchema schema, CancellationToken cancellationToken)
+        => (await _schemaProvisioner.ApplyAsync(schema, cancellationToken).ConfigureAwait(false)).Migration;
 
     /// <summary>
     /// Verifies, without running any DDL, that a compiled schema is the one applied: the recorded

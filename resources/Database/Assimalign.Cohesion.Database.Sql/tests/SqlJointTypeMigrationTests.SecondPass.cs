@@ -183,7 +183,7 @@ public sealed partial class SqlJointTypeMigrationTests
             new CompiledSchemaTable("audit", "audit", [new("id", DatabaseType.Int32, true)], null, [], [])).ToArray()) : source, guard.Token, true);
 
         // Assert
-        result.WasAlreadyApplied.ShouldBe(!apply);
+        result.Migration.WasAlreadyApplied.ShouldBe(!apply);
         database.Provisioning.ShouldBeNull();
         database.IsOffline.ShouldBeFalse();
     }

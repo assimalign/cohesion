@@ -174,7 +174,7 @@ constraint column lists reject these options with CS00003; index expressions and
 remain excluded. The profile adds CREATE INDEX KEY ORDER (+1 declared clause).
 
 Format 36 introduced ASC NULLS FIRST as the default key order (#1787). Current
-catalog/record-space format 37 stores every key's effective order in mandatory index extension 3;
+catalog/record-space format 38 stores every key's effective order in mandatory index extension 3;
 compiled-schema v12 carries KeyOrders. The language, catalog and compiled enums use zero for
 ASC NULLS FIRST; an omitted or zero-filled KeyOrders vector has that default. PRIMARY KEY and
 UNIQUE-constraint indexes also take it. Format 36 and earlier databases and v11 and earlier
@@ -293,7 +293,7 @@ NULL-containing partial keys neither conflict nor take uniqueness locks, includi
 COHESION_SCHEMA.INDEXES and its nonstandard INFORMATION_SCHEMA.INDEXES alias expose nullable
 canonical PREDICATE text per key column. Views over these relations retain that text. Partial
 unique indexes are excluded from TABLE_CONSTRAINTS because their uniqueness is conditional.
-Current SQL record-space format is 37 and compiled-schema format is v12; earlier files and
+Current SQL record-space format is 38 and compiled-schema format is v12; earlier files and
 artifacts are refused with the existing coded format gates and no upgrade reader.
 
 
@@ -305,7 +305,7 @@ ON DELETE and ON UPDATE can appear in either order, once each; omitted actions i
 mean NO ACTION. Canonical constraint SQL renders ON DELETE before ON UPDATE. Duplicate actions
 and incomplete actions report CS00003. Action column lists remain CK00001.
 
-Catalog format 37 and compiled-schema v12 retain OnUpdate; INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
+Catalog format 38 and compiled-schema v12 retain OnUpdate; INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
 and views over it report the stored UPDATE_RULE. CompiledSchemaConstraint exposes the action;
 the typed References builder keeps its existing declaration and defaults update metadata to NO ACTION.
 Declared provisioning scripts may carry the SQL clause and persistent views over its metadata.
@@ -1974,10 +1974,49 @@ they do not refuse a new declared table during planning (including the 49a path)
 Conversion, FK, CHECK, NOT NULL, unique and domain failures discard preparation and the pending
 intent with CS03402, leaving the old schema online. There is no compensation or automatic retry.
 An old/no-target application opens the old schema after interrupted preparation; a matching new
-Build may replan it. After successful publication an older application plans a reverse migration.
-Narrowing length, precision or scale, rounding and every conversion not proven lossless require
-destructive opt-in (CS03105 before any step); exact widening can run without it. Dependent-view
-refusals, old snapshots and retryable CS04006 writers retain the single-statement contract.
+Build may replan it. After successful publication, history orders declarations by
+FirstAppliedGeneration. An earlier first-applied declaration is a rollback; a later one is a
+roll-forward under new-schema rules, including destructive opt-in. LastAppliedGeneration does
+not change that order. Equal applied hashes skip work.
+
+A rollback applies only Safe steps that re-create no dropped object and validate no existing
+data. If any step is held, the whole plan runs no step and opens at the stored schema,
+Degraded with CS03405 and both hashes plus refused steps in Provisioning.Detail and Hosting health.
+The old declaration's opt-in cannot authorize a rollback to delete or hide newer data or reject
+newer rows. The full classification is:
+
+| Step | In a rollback | Why |
+| --- | --- | --- |
+| AddTable | Held | A re-created table would be empty instead of recovering its dropped rows. |
+| AddColumn | Held | A re-added column exposes NULL/defaults at a new ordinal instead of its dropped values. |
+| DropTable, DropColumn | Held | Removes data written by the newer application. |
+| AlterTable | Held | The planner classes key/order changes Destructive. |
+| AlterColumn: Safe, with no existing-data validation | Applied | Exact widening without a retained CHECK/FK scan preserves every source value. |
+| AlterColumn: validation or non-Safe | Held | NOT NULL tightening, domain checks, narrowing and default changes can reject or change newer values; CHAR width changes and TYPE rewrites with retained CHECK/FK constraints require validation. |
+| AddConstraint | Held | CHECK and foreign keys validate existing rows; any UNIQUE constraint addition follows the same rule (compiled UNIQUE currently uses a unique AddIndex). |
+| AddIndex: unique | Held | Uniqueness validates existing rows and can reject newer duplicates. |
+| AddIndex: non-unique | Applied | Builds an access path without row validation when the table owner is kept. |
+| AddIndex: non-unique heap-owned replacement with retained constraints | Held | Replacing a same-name heap-owned index copies the table and revalidates CHECK/domain/FK requirements, including incoming references. |
+| DropIndex | Applied | Removes an access path without deleting table values. |
+| DropConstraint | Applied | Removes validation without deleting rows. |
+| AddDomain, DropDomain | Applied | These steps change no catalog and validate no rows; the engine registers domains. A transition into a domain uses AlterColumn and is held. |
+
+A never-seen destructive declaration without opt-in holds with CS03105 (T3-4); a new declaration
+or roll-forward with opt-in follows the forward-migration policy. Build succeeds for holds;
+pipelines needing failure on drift must select Verify (CS03103). Explicit ApplySchemaAsync
+consults the same history, throws CS03105 with the refused rollback steps and changes nothing,
+with or without opt-in. Deliberately accepting loss requires a new declaration with its own opt-in.
+
+A held Build runs no declared script and suspends owner decision 65's step-6 validation of
+removed application functions/domains. Its hold survives offline/reopen, rewrite and explicit
+refusal while the stored hash is unchanged. Redeploying the stored or a successfully applied
+newer declaration clears health. Health and event detail is capped at 4,096 UTF-16 code units
+including an ellipsis, without splitting a surrogate pair. Writes use the stored schema:
+omitted required columns fail without a default and use the stored default when one exists.
+History is never evicted; an ancestor never applied here counts as new until lineage is added.
+SqlSchemaRollbackTests and SqlSchemaRollbackPolicyTests are the executable provisioning corpus.
+Dependent-view refusals,
+old snapshots and retryable CS04006 writers retain the single-statement contract.
 VARCHAR narrowing always takes the joint TYPE path because assignment may trim excess spaces;
 CHAR width changes also rewrite. Default changes without a TYPE rewrite publish jointly,
 including SET and DROP DEFAULT with destructive opt-in (CS03105 without it); a frozen missing
@@ -2025,9 +2064,10 @@ Space admission counts only new trees for a kept table. Failed preparation recla
 trees and retains its heap and published indexes. The SqlJointTypeMigrationTests.KeepOwners
 conformance corpus covers owner retention, constraint failures, mixed publication and crash images.
 SQL format 35 introduced separate tree ownership and durable per-table classification; format 34
-introduced the Joint/ kind-9 meaning. Format 37 requires joint publication for every deferred
-job and fences all per-step 49a intents before any write. Every earlier format is refused (#1152).
-Compiled-schema v12 remains current; record encodings and wire messages are unchanged.
+introduced the Joint/ kind-9 meaning. Format 37 introduced mandatory joint publication for every deferred
+job and fenced all per-step 49a intents. Format 38 adds chunked hash-only applied-schema history
+(kind 20), atomically with every kind-6 publication; all earlier formats, including 34 and 37,
+refuse CS06041 before any write. Compiled-schema v12 and wire messages are unchanged.
 SQL format 27 introduced the per-column TYPE default-assignment flag in table extension 7; older files
 refuse without an upgrade reader. Compiled-schema v8 was unchanged by SQ-A.
 Compiled-schema v11 was unchanged by SQ-A3.
@@ -2270,8 +2310,8 @@ column1 is an authored identifier and remains valid. Existing wire-visible colum
 are unchanged. Stored, derived, persisted-view and system inputs all participate.
 In stored views, a same-name AS alias over a synthesized source can also have come from
 older frozen star expansion. That ambiguous stored shape conservatively requires a fresh alias;
-format 37 has no record of which spelling was authored.
-The same format-37 ambiguity affects an older explicit view column list whose name matches
+current format 38 has no record of which spelling was authored.
+The same format-38 ambiguity affects an older explicit view column list whose name matches
 an unnamed expression's generated name: CREATE VIEW legacy(column1) AS SELECT CAST(1 AS BIGINT)
 stored only SELECT CAST(1 AS BIGINT) and the catalog name column1. NATURAL conservatively
 refuses that input with CS01015, even though the original list was authored. Wrap the view in
@@ -2326,7 +2366,7 @@ NATURAL as USING (ruleutils.c:12782-12804) or an outer ON TRUE (:12814-12818); f
 is not a departure. NATURAL is risky in an ad-hoc
 query under schema change (PostgreSQL doc/src/sgml/queries.sgml:391-405); views avoid that risk.
 The canonical audit of columns named natural and lateral retains the same quoting, so
-SQL format 37 and wire contracts are unchanged. SqlNaturalJoinTests records independent,
+That change retained SQL format 37 and the wire contract; current format 38 adds applied-schema history. SqlNaturalJoinTests records independent,
 hand-derived PostgreSQL-oracle rows, with the documented dialect departures.
 
 JOIN binds more tightly than comma: in FROM a, b JOIN c ON ..., ON can see b and c,
@@ -2690,7 +2730,7 @@ database is refused too. Format 6 (#1241) keeps format 5's rows and index trees
 but records each table's dropped-column positions in the catalog and decodes
 rows through them, so a format-5 database is refused too. The engine has no
 upgrade path (#1152). It refuses to
-open a database on any format but 37 — older or newer — with an error that names
+open a database on any format but 38 — older or newer — with an error that names
 the database, the format it found and the format it supports. The check reads
 only the database's catalog and runs before the engine opens the data files, so
 a refused open never touches them. Catalog and data format checks read Storage's
@@ -2702,7 +2742,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. Format 29 added owned-sequence metadata to format 28's shared sequence records and retained TYPE default assignment coercion. Format 30 added foreign-key ON UPDATE metadata; new databases use format 37, retaining partial predicates and directed keys and fencing SQL/JSON function spelling; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
+is tracked by #1152. Format 29 added owned-sequence metadata to format 28's shared sequence records and retained TYPE default assignment coercion. Format 30 added foreign-key ON UPDATE metadata; new databases use format 38, retaining partial predicates and directed keys and fencing SQL/JSON function spelling; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
 stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
@@ -4019,7 +4059,7 @@ and `parse_expr.c:2541-2560,3085-3105`.
 
 These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
 SQL function bodies and views. Canonical CHECK text is exposed by
-INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 37 refuses older files;
+INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 38 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
 ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
@@ -5162,6 +5202,10 @@ deferred Build retain cancellation and lock timeouts, with coded admission failu
 CS03104 is retired: schema apply uses joint publication and CS03402/CS03403 for preparation
 failure and unconfirmed publication respectively (#1778).
 
+| Code | Severity | Provisioning condition |
+| --- | --- | --- |
+| `CS03405` | Warning | Earlier applied declaration held at the stored schema; both hashes and refused steps are reported, with no migration step run. |
+
 A refusal carries CS05042 / SQLSTATE 54000, naming the table, actual byte size and limit.
 The failure leaves the session usable and an explicit transaction active, with earlier statements
 intact. Failed upsert preparation releases its new key and row grants, including a row retained
@@ -5305,7 +5349,7 @@ wrappers and domain CHECKs, including domains in casts and function parameter/re
 Reopening with the original compatible registration restores use.
 New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
 on every bind. Domain defaults remain literal-only
-and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 37, with no compatibility reader.
+and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 38, with no compatibility reader.
 Format 28 adds the internal sequence definition and reservation records (#1717). Relation-name
 collisions involving an existing sequence use CS03070 (42P07), as sequence creation does for any
 occupied relation name; the diagnostic names the existing kind. Table-on-table collisions retain
@@ -5471,7 +5515,7 @@ SQL does not infer it from a CLR exception type. This follows PostgreSQL datetim
 REAL and DOUBLE text retain CS02022 / 22P02 for malformed input and CS02002 / 22003
 for overflow/underflow. Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
 
-Catalog format 37 and compiled-schema v12 refuse earlier definitions rather than reinterpret
+Catalog format 38 and compiled-schema v12 refuse earlier definitions rather than reinterpret
 retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
 '2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries CS06041;
 a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,

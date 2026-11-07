@@ -315,6 +315,7 @@ public sealed partial class SqlCatalog
                 }
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(merged));
                 var stateLocations = appliedSchema is null ? null : StageJointSchemaState(transaction, appliedSchema);
+                var publishHistory = appliedSchema is null ? null : StageSchemaHistory(transaction, appliedSchema.ContentHash, checked(_ddlGeneration + 1));
                 var appliedState = appliedSchema is null ? null : new SqlCatalogSchemaState(appliedSchema.ContentHash,
                     appliedSchema.CanonicalDocument, checked(_ddlGeneration + 1));
                 // Allocate every publication directory/vector before the irrevocable commit.
@@ -352,6 +353,7 @@ public sealed partial class SqlCatalog
                 { _tables.Remove((dropped[index].Schema, dropped[index].Name)); }
                 if (appliedSchema is not null)
                 {
+                    publishHistory!();
                     _schemaState = appliedState;
                     _schemaStateLocations = stateLocations!;
                     _pendingMigration = null;

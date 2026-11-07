@@ -144,6 +144,8 @@ translation continuation; the existing zero-allocation creation contract stays i
 The root base instance exposes a nullable immutable `DatabaseProvisioningProgress` through
 `Provisioning`, with a protected publisher for its model. The observation names the model's
 operation/object, step position/total, running state, row counts where available and failure code.
+DatabaseProvisioningProgress.Detail optionally carries the model's complete refusal explanation,
+including declared/stored schema hashes and refused steps for held declarations (#1779).
 It expresses database state, not a schema-execution capability. Hosting consumes it without
 knowing the model; the root worker inventory includes `DatabaseEngineWorkerKind.Provisioning`.
 
