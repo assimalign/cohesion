@@ -125,7 +125,7 @@ public sealed class SqlDialectDocumentationTests
     [InlineData("Sql", "DESIGN.md", "Current format 37 also requires extension 8's OnUpdate byte")]
     [InlineData("Indexing", "DESIGN.md", "B-tree page format 2, but this engine supports only format 3")]
     [InlineData("Graph", "DESIGN.md", "catalog v3 and B-tree page format 2 therefore reports only CK06101")]
-    [InlineData("Graph", "DESIGN.md", "and roots, and catalog v4 records.")]
+    [InlineData("Graph", "DESIGN.md", "and roots, and catalog v4 records including")]
     [InlineData("Sql.Language", "DIALECT.md", "additive indexes and CHECK, NOT NULL, UNIQUE and foreign-key constraint")]
     [InlineData("Sql", "DESIGN.md", "SQL remains format 29: ordinary dense table records")]
     public void Documentation_FormatHistory_ShouldDistinguishHistoricalAndCurrentVersions(string project, string file, string expected)
