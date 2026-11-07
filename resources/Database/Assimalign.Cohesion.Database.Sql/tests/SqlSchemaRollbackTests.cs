@@ -118,6 +118,8 @@ public sealed class SqlSchemaRollbackTests
         await using var reader = await held.CreateSessionAsync(timeout.Token);
         if (kind != "default")
         {
+            string surviving = kind == "middle" ? "Added" : "Value";
+            (await RowsAsync(reader, "SELECT " + surviving + " FROM items WHERE Id=1", timeout.Token)).Single()[0].ShouldBe(kind == "middle" ? 9 : 42);
             string missing = kind == "middle" ? "Value" : "Added";
             held.Catalog.TryGetTable("dbo", "items", out var table).ShouldBeTrue();
             table.FindColumn(missing).ShouldBeNull();
@@ -125,6 +127,7 @@ public sealed class SqlSchemaRollbackTests
         }
         else
         {
+            (await RowsAsync(reader, "SELECT Value, Added FROM items WHERE Id=1", timeout.Token)).Single().ShouldBe([42, 9]);
             await reader.ExecuteAsync("INSERT INTO items (Id, Added) VALUES (2,9)", cancellationToken: timeout.Token);
             (await RowsAsync(reader, "SELECT Value FROM items WHERE Id=2", timeout.Token)).Single()[0].ShouldBe(2);
         }
@@ -171,7 +174,13 @@ public sealed class SqlSchemaRollbackTests
         var storage = new CrashCaptureSqlStorageStrategy();
         var stored = Declare(true);
         var unseen = Declare(false);
-        await using (var seed = await Builder(storage, stored).BuildAsync(timeout.Token)) { storage = storage.CaptureDurableImages(); }
+        await using (var seed = await Builder(storage, stored).BuildAsync(timeout.Token))
+        {
+            var database = await seed.OpenDatabaseAsync("history", timeout.Token);
+            await using var writer = await database.CreateSessionAsync(timeout.Token);
+            await writer.ExecuteAsync("INSERT INTO items VALUES(1,42,9)", cancellationToken: timeout.Token);
+            storage = storage.CaptureDurableImages();
+        }
 
         // Act
         await using (var held = await Builder(storage, unseen, inline).BuildAsync(timeout.Token))
@@ -182,6 +191,9 @@ public sealed class SqlSchemaRollbackTests
             database.Provisioning!.FailureCode.ShouldBe("CS03105");
             database.Provisioning.Detail!.ShouldContain("DropColumn 'items.Added'", Case.Sensitive);
             database.Catalog.AppliedSchemaHistory.Length.ShouldBe(1);
+            database.Catalog.SchemaState!.ContentHash.ShouldBe(stored.Compile().Hash);
+            await using var reader = await database.CreateSessionAsync(timeout.Token);
+            (await RowsAsync(reader, "SELECT Value, Added FROM items", timeout.Token)).Single().ShouldBe([42, 9]);
             await using var explicitEngine = await Builder(storage.CaptureDurableImages()).BuildAsync(timeout.Token);
             var explicitDatabase = await explicitEngine.OpenDatabaseAsync("history", timeout.Token);
             var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await explicitDatabase.ApplySchemaAsync(unseen.Compile(), timeout.Token));
@@ -458,6 +470,15 @@ public sealed class SqlSchemaRollbackTests
         restored.Catalog.SchemaState!.ContentHash.ShouldBe(forwardNarrowing ? first.Compile().Hash : second.Compile().Hash);
         if (forwardNarrowing) { restored.Provisioning.ShouldBeNull(); }
         else { restored.Provisioning!.FailureCode.ShouldBe("CS03405"); restored.Provisioning.Detail!.ShouldContain("AlterColumn 'items.Value'", Case.Sensitive); }
+        await using var reader = await restored.CreateSessionAsync(timeout.Token);
+        Convert.ToInt64((await RowsAsync(reader, "SELECT Value FROM items", timeout.Token)).Single()[0]).ShouldBe(42);
+        // Redeploy the later declaration: narrowing is a roll-forward with its own opt-in.
+        await using var forward = await Builder(storage.CaptureDurableImages(), second).BuildAsync(timeout.Token);
+        var current = await forward.OpenDatabaseAsync("history", timeout.Token);
+        current.Provisioning.ShouldBeNull();
+        current.Catalog.SchemaState!.ContentHash.ShouldBe(second.Compile().Hash);
+        await using var forwardReader = await current.CreateSessionAsync(timeout.Token);
+        Convert.ToInt64((await RowsAsync(forwardReader, "SELECT Value FROM items", timeout.Token)).Single()[0]).ShouldBe(42);
     }
 
     private static SqlDatabaseEngineBuilder Builder(CrashCaptureSqlStorageStrategy storage, SqlSchema? schema = null, bool inline = true)

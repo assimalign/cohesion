@@ -9,9 +9,12 @@ length, precision or scale, rounding and every unproven conversion require destr
 Domain conversions remain conservative, including schema-declared domains: the engine can retain
 application casts that this assembly cannot inspect. Metadata-only changes keep their existing policy.
 The planner retains its destructive opt-in refusal. Runtime Build additionally classifies
-applied-schema history: an unsafe reverse migration holds at the stored schema with CS03405;
-a never-seen destructive declaration without opt-in holds with CS03105. Explicit apply keeps
-throwing CS03105 without opt-in. No step of a held plan runs (#1779).
+applied-schema history: an earlier FirstAppliedGeneration identifies a rollback, while a later
+one identifies a roll-forward under new-schema opt-in rules. A rollback holds with CS03405 on
+non-Safe steps, dropped-object re-creation or existing-data validation (including unique indexes).
+A never-seen destructive declaration without opt-in holds with CS03105. Explicit apply uses the
+same rollback rule and throws CS03105 regardless of the old opt-in. No held step runs (#1779).
+The engine's DESIGN and SQL DIALECT carry the complete step classification.
 This changes no serialized schema shape; v12 remains current and SDK files are unchanged.
 
 ## Index key orders and format v12 (#1631, SQ-K1; #1787, SQ-K4)

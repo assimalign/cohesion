@@ -22,7 +22,14 @@ public sealed class SqlDialectDocumentationTests
         dialect.ShouldContain("all earlier formats, including 34 and 37", Case.Sensitive);
         design.ShouldContain("86,320 bytes across 32 chunks", Case.Sensitive);
         design.ShouldContain("the very same StorageTransaction", Case.Sensitive);
-        design.ShouldContain("every AddColumn is refused", Case.Sensitive);
+        foreach (string documentation in new[] { design, dialect })
+        {
+            documentation.ShouldContain("FirstAppliedGeneration", Case.Sensitive);
+            foreach (string step in new[] { "AddColumn", "AddTable", "AddConstraint", "AddIndex: unique", "AddIndex: non-unique heap-owned replacement with retained constraints" })
+            { documentation.ShouldContain("| " + step + " | Held |", Case.Sensitive); }
+            documentation.ShouldContain("| AddIndex: non-unique | Applied |", Case.Sensitive);
+            documentation.ShouldContain("owner decision 65", Case.Sensitive);
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Batch diagnostics distinguish target/deadline refusals, paused health and retired schema codes (#1792, #1283, #1778)")]
@@ -55,7 +62,7 @@ public sealed class SqlDialectDocumentationTests
         dialect.ShouldContain("Statements naming a new table in the plan also wait before binding", Case.Sensitive);
         dialect.ShouldContain("Default-only changes publish jointly", Case.Sensitive);
         dialect.ShouldContain("ApplySchemaAsync use the same joint executor inline", Case.Sensitive);
-        design.ShouldContain("SQL record-space format 37 requires this joint kind-9 meaning", Case.Sensitive);
+        design.ShouldContain("SQL record-space format 37 required this joint kind-9 meaning", Case.Sensitive);
         design.ShouldContain("prepared target plus untouched objects", Case.Sensitive);
     }
 

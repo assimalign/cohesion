@@ -126,6 +126,8 @@ public sealed partial class SqlJointTypeMigrationTests
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
         await database.ApplySchemaAsync(OwnerDeclaration(false), guard.Token);
         await database.ApplySchemaAsync(OwnerDeclaration(true), guard.Token);
+        await using var reader = await database.CreateSessionAsync(guard.Token);
+        await reader.ExecuteAsync("INSERT INTO items VALUES(7,8)", cancellationToken: guard.Token);
         var registration = database.IndexManager.ExportRegistrations().Single();
         ulong owner = database.IndexManager.PageOwner(registration);
         (ulong, string, string)? encoded = null;
@@ -140,10 +142,18 @@ public sealed partial class SqlJointTypeMigrationTests
         };
 
         // Act
-        await database.ApplySchemaAsync(OwnerDeclaration(false, []), guard.Token);
+        var refused = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
+            await database.ApplySchemaAsync(OwnerDeclaration(false, []), guard.Token));
+        refused.Diagnostics.ShouldContain(value => value.Code == "CS03105");
+        encoded.ShouldBeNull();
+        (await RowsAsync(reader, "SELECT v,w FROM items", guard.Token)).Single().ShouldBe([7, 8]);
+        // A new opted-in declaration can narrow and retire the old tree. An earlier
+        // declaration's opt-in cannot authorize that loss on a historical rollback.
+        await database.ApplySchemaAsync(OwnerDeclaration(false, [new("ix_w", ["w"], false)]), guard.Token);
 
         // Assert
         encoded.ShouldBe((owner, "dbo", "items"));
+        (await RowsAsync(reader, "SELECT v,w FROM items", guard.Token)).Single().ShouldBe([7, 8]);
         await DrainReclamationAsync(database, guard.Token);
         IndexOwnerPages(database, owner).ShouldBe(0);
     }

@@ -311,17 +311,17 @@ internal sealed class DatabaseHostingEventSource : EventSource
 
     private static double Elapsed(long started) => started == 0 ? 0 : Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
-    private static string BoundDetail(string value) => value.Length <= 4096 ? value : value[..4093] + "...";
+    internal static string BoundDetail(string value) => Bound(value, 4096, 4093);
 
-    private static string Bound(string value)
+    private static string Bound(string value, int maxLength = 256, int? prefixLimit = null)
     {
-        const int maxLength = 256;
         if (value.Length <= maxLength)
         {
             return value;
         }
 
-        int length = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        int length = prefixLimit ?? maxLength;
+        if (char.IsHighSurrogate(value[length - 1])) { length--; }
         return string.Concat(value.AsSpan(0, length), "...");
     }
 }

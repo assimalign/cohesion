@@ -103,7 +103,7 @@ internal sealed partial class SqlSchemaProvisioner
         _ = SqlCompiledSchemaSerializer.Deserialize(document);
     }
 
-    internal async ValueTask<SqlSchemaMigrationResult> ApplyAsync(
+    internal async ValueTask<SqlSchemaApplyResult> ApplyAsync(
         SqlCompiledSchema schema,
         CancellationToken cancellationToken,
         bool deferDataScalingSteps = false,
@@ -115,7 +115,7 @@ internal sealed partial class SqlSchemaProvisioner
         _database.Definitions.EnsureDefinitions(cancellationToken);
         if (deferDataScalingSteps && TryGetDeferredResult(schema) is { } deferredResult)
         {
-            return deferredResult;
+            return new SqlSchemaApplyResult(deferredResult);
         }
         // The worker retains this gate after handoff. Never queue outside the lock
         // manager: a caller may own a transaction the current migration needs.
@@ -142,17 +142,18 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 _database.ReportProvisioning(null);
                 TraceOutcome("Skipped", 0);
-                return new SqlSchemaMigrationResult(recorded!.ContentHash, schema.Hash, 0, WasAlreadyApplied: true);
+                return new SqlSchemaApplyResult(new(recorded!.ContentHash, schema.Hash, 0, WasAlreadyApplied: true));
             }
 
             ValidateCatalogOwnership(schema);
             SqlCompiledSchema? current = ReadCurrentSchema(recorded, schema);
+            bool rollback = recorded is not null && _catalog.IsEarlierAppliedSchema(schema.Hash, recorded.ContentHash);
             SqlSchemaMigrationPlan plan;
             try
             {
                 // Plan the complete diff before applying policy. A private opt-in copy lets
                 // the existing public planner keep its strict contract; never publish its hash.
-                var policySchema = !holdUnsafeChanges || schema.AllowsDestructiveChanges ? schema : new SqlCompiledSchema(
+                var policySchema = !(holdUnsafeChanges || rollback) || schema.AllowsDestructiveChanges ? schema : new SqlCompiledSchema(
                     schema.Format, schema.Name, true, schema.Types, schema.Tables, schema.Principals);
                 var diff = SqlSchemaMigrationPlanner.Plan(current, policySchema);
                 plan = new SqlSchemaMigrationPlan(diff.SourceHash, schema.Hash, diff.Operations);
@@ -166,10 +167,10 @@ internal sealed partial class SqlSchemaProvisioner
             }
 
             LastPlan = plan;
-            bool rollback = holdUnsafeChanges && recorded is not null &&
-                !string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal) && _catalog.HasAppliedSchema(schema.Hash);
+            var validatingTables = rollback ? RollbackValidationTables(schema) : null;
+            var validatingIndexes = rollback ? RollbackIndexValidations(plan, validatingTables!) : null;
             var refused = plan.Operations.Where(operation => rollback
-                ? operation.Safety != SqlSchemaMigrationSafety.Safe || operation.Kind == SqlSchemaMigrationOperationKind.AddColumn
+                ? RefusesRollback(operation, validatingTables!, validatingIndexes!)
                 : operation.Safety != SqlSchemaMigrationSafety.Safe && !schema.AllowsDestructiveChanges).ToArray();
             if (refused.Length > 0)
             {
@@ -211,7 +212,7 @@ internal sealed partial class SqlSchemaProvisioner
                         var result = new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, 0, WasAlreadyApplied: false);
                         joint.ReleaseApplyGate = true;
                         transferred = true;
-                        return result;
+                        return new SqlSchemaApplyResult(result);
                     }
                 }
                 catch (Exception failure)
@@ -235,7 +236,7 @@ internal sealed partial class SqlSchemaProvisioner
                 }
                 await joint.RunInlineAsync(preparation.Stop.Token).ConfigureAwait(false);
                 TraceOutcome("Applied");
-                return new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, plan.Operations.Count, WasAlreadyApplied: false);
+                return new SqlSchemaApplyResult(new(plan.SourceHash, schema.Hash, plan.Operations.Count, WasAlreadyApplied: false));
             }
             finally { EndJointPreparation(preparation); }
         }
@@ -256,6 +257,7 @@ internal sealed partial class SqlSchemaProvisioner
         }
         finally
         {
+            if (planning && _database.HeldProvisioning is { } held) { _database.ReportProvisioning(held); }
             ddl?.Dispose();
             EndTrace();
             if (transferred && Deferred is { } pending)

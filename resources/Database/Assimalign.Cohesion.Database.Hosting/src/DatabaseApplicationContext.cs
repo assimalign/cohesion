@@ -268,12 +268,13 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     {
                         data[$"{progressPrefix}.failureCode"] = code;
                     }
-                    if (progress.Detail is { } detail) { data[$"{progressPrefix}.detail"] = detail; }
+                    string? detail = progress.Detail is { } refusal ? DatabaseHostingEventSource.BoundDetail(refusal) : null;
+                    if (detail is not null) { data[$"{progressPrefix}.detail"] = detail; }
                     provisioningDatabases.Add($"{engine.Name}/{database.Name}: {progress.Operation} {progress.ObjectName}, " +
                         $"step {progress.Position} of {progress.StepCount}, " +
                         (progress.RowsProcessed is { } rows ? $"{rows} of {progress.TotalRows?.ToString() ?? "unknown"} rows" : "pending") +
                         (progress.FailureCode is { } failed ? $", {failed}" : string.Empty) +
-                        (progress.Detail is { } refusal ? $", {refusal}" : string.Empty));
+                        (detail is not null ? $", {detail}" : string.Empty));
                 }
                 data[$"engine.{engineIndex}.provisioningDatabaseCount"] = databaseIndex;
                 List<string> offline = [.. engine.OfflineDatabases.Select(name => (string)name)];

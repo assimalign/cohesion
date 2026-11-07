@@ -11,6 +11,8 @@ public enum SqlProvisioningMode : byte
     /// difference between the recorded schema and the declared one and applies it on the schema
     /// session; a schema already applied is skipped. An unsafe earlier applied declaration holds
     /// at the stored schema with Degraded provisioning (CS03405), ignoring destructive opt-in.
+    /// First-applied generations distinguish rollback from roll-forward. Re-creating dropped
+    /// objects and validating existing data hold a rollback even when the planner classes them Safe.
     /// A never-seen destructive declaration without opt-in also holds (CS03105). No held step runs;
     /// use Verify when drift must fail the build.
     /// </summary>

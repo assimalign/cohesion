@@ -12,7 +12,8 @@ snapshot-consistent UTF-8 text/CSV (#1724).
 
 Typed migrations containing TYPE rewrites prepare the entire target unpublished and publish
 it in one catalog commit. Failed preparation leaves the old schema online and available to
-a rolled-back application; potentially lossy reversals require destructive opt-in (#1447).
+a rolled-back application. Earlier applied declarations refuse unsafe rollback regardless of
+their opt-in; Build holds online with CS03405 and explicit apply throws CS03105 (#1779).
 
 Index DDL defaults to ASC NULLS FIRST and DESC NULLS LAST, matching ORDER BY (#1787).
 Default nullable indexes can remove sorts in both directions. SQL format 38 and compiled-schema

@@ -1974,20 +1974,48 @@ they do not refuse a new declared table during planning (including the 49a path)
 Conversion, FK, CHECK, NOT NULL, unique and domain failures discard preparation and the pending
 intent with CS03402, leaving the old schema online. There is no compensation or automatic retry.
 An old/no-target application opens the old schema after interrupted preparation; a matching new
-Build may replan it. After successful publication, hash-only applied-schema history identifies an
-older declaration. A Safe reversal applies, except re-adding a dropped column always holds:
-even a trailing re-addition would expose NULL instead of the application's former bytes. Every
-other reversal runs no step, ignores the old declaration's destructive opt-in and opens at the
-stored schema, Degraded with CS03405 and both hashes plus refused steps in Provisioning.Detail
-and Hosting health. A never-seen destructive declaration without opt-in also opens at the stored
-schema, runs no step and reports CS03105 (T3-4). Build succeeds for these holds; pipelines needing
-a failure on drift must select Verify (CS03103). Explicit ApplySchemaAsync keeps throwing CS03105
-without destructive opt-in; explicit opted-in applies retain their existing authorization.
-A held Build runs no declared script. Redeploying the stored or a successfully applied newer
-schema clears health. Writes always use the stored schema: an old application's omitted required
-column fails without a default and uses the stored default when one exists. History is never
-evicted; an ancestor never applied here still counts as new until compiled lineage is added.
-SqlSchemaRollbackTests is the executable provisioning conformance corpus. Dependent-view refusals,
+Build may replan it. After successful publication, history orders declarations by
+FirstAppliedGeneration. An earlier first-applied declaration is a rollback; a later one is a
+roll-forward under new-schema rules, including destructive opt-in. LastAppliedGeneration does
+not change that order. Equal applied hashes skip work.
+
+A rollback applies only Safe steps that re-create no dropped object and validate no existing
+data. If any step is held, the whole plan runs no step and opens at the stored schema,
+Degraded with CS03405 and both hashes plus refused steps in Provisioning.Detail and Hosting health.
+The old declaration's opt-in cannot authorize a rollback to delete or hide newer data or reject
+newer rows. The full classification is:
+
+| Step | In a rollback | Why |
+| --- | --- | --- |
+| AddTable | Held | A re-created table would be empty instead of recovering its dropped rows. |
+| AddColumn | Held | A re-added column exposes NULL/defaults at a new ordinal instead of its dropped values. |
+| DropTable, DropColumn | Held | Removes data written by the newer application. |
+| AlterTable | Held | The planner classes key/order changes Destructive. |
+| AlterColumn: Safe, with no existing-data validation | Applied | Exact widening without a retained CHECK/FK scan preserves every source value. |
+| AlterColumn: validation or non-Safe | Held | NOT NULL tightening, domain checks, narrowing and default changes can reject or change newer values; CHAR width changes and TYPE rewrites with retained CHECK/FK constraints require validation. |
+| AddConstraint | Held | CHECK and foreign keys validate existing rows; any UNIQUE constraint addition follows the same rule (compiled UNIQUE currently uses a unique AddIndex). |
+| AddIndex: unique | Held | Uniqueness validates existing rows and can reject newer duplicates. |
+| AddIndex: non-unique | Applied | Builds an access path without row validation when the table owner is kept. |
+| AddIndex: non-unique heap-owned replacement with retained constraints | Held | Replacing a same-name heap-owned index copies the table and revalidates CHECK/domain/FK requirements, including incoming references. |
+| DropIndex | Applied | Removes an access path without deleting table values. |
+| DropConstraint | Applied | Removes validation without deleting rows. |
+| AddDomain, DropDomain | Applied | These steps change no catalog and validate no rows; the engine registers domains. A transition into a domain uses AlterColumn and is held. |
+
+A never-seen destructive declaration without opt-in holds with CS03105 (T3-4); a new declaration
+or roll-forward with opt-in follows the forward-migration policy. Build succeeds for holds;
+pipelines needing failure on drift must select Verify (CS03103). Explicit ApplySchemaAsync
+consults the same history, throws CS03105 with the refused rollback steps and changes nothing,
+with or without opt-in. Deliberately accepting loss requires a new declaration with its own opt-in.
+
+A held Build runs no declared script and suspends owner decision 65's step-6 validation of
+removed application functions/domains. Its hold survives offline/reopen, rewrite and explicit
+refusal while the stored hash is unchanged. Redeploying the stored or a successfully applied
+newer declaration clears health. Health and event detail is capped at 4,096 UTF-16 code units
+including an ellipsis, without splitting a surrogate pair. Writes use the stored schema:
+omitted required columns fail without a default and use the stored default when one exists.
+History is never evicted; an ancestor never applied here counts as new until lineage is added.
+SqlSchemaRollbackTests and SqlSchemaRollbackPolicyTests are the executable provisioning corpus.
+Dependent-view refusals,
 old snapshots and retryable CS04006 writers retain the single-statement contract.
 VARCHAR narrowing always takes the joint TYPE path because assignment may trim excess spaces;
 CHAR width changes also rewrite. Default changes without a TYPE rewrite publish jointly,

@@ -4162,7 +4162,7 @@ provisioning DROP phase; decision 77 in the program design records the measureme
 
 Catalog kind 9 contains the complete target document/hash, Joint/ operation identities, ordered
 positions and per-table KeepOwner/RewriteOwner choices. Its transaction commits before any
-preparation. Format 37 fences the former per-step meaning. After a crash only a matching target
+preparation. Format 37 fenced the former per-step meaning. After a crash only a matching target
 Build may resume; a different-target Build discards it with CS03402 and uses the stored schema.
 A no-target open discards without a provisioning report or trace.
 The old applied marker stays trusted. One publication commit installs the complete new schema,
@@ -9658,7 +9658,7 @@ the new plan publishes. Joint copy uses its bounded DML memory ledger and direct
 copy nor deferred index build uses plain SELECT buffers. A declared script CTAS can spill an eligible source-root sort; fitting source output and
 copy batches still share StatementMemoryBudget and can refuse with CS05067 online; its next Build
 resumes at the refused statement when given a larger budget. Optional temp-space setup failures
-do not affect joint intent resume or discard. Format 37 fences the per-step kind-9 meaning; no old partially published
+do not affect joint intent resume or discard. Format 37 fenced the per-step kind-9 meaning; no old partially published
 job resumes. A fresh replan uses its new script's executable step total.
 Discard ends the current provisioning trace with outcome Restarted and starts mode Replan.
 Joint intents with malformed ownership choices still fail CS06059 when the replan is joint.
@@ -9781,9 +9781,9 @@ replacements until #1808. Shuffled-key measurements
 count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
 already completed by the engine must not be followed by a redundant forced copy checkpoint.
 
-SQL record-space format 37 requires this joint kind-9 meaning for every deferred job and refuses
+SQL record-space format 37 required this joint kind-9 meaning for every deferred job and refused
 36 before any write through the existing format gate. Compiled-schema v12 and wire messages
-are unchanged; no upgrade reader or new public boundary is added.
+were unchanged; no upgrade reader or new public boundary was added.
 
 #### Joint inline parity and kept layouts (#1778, SQ-A6)
 
@@ -9999,24 +9999,54 @@ history or the new state and new history, with matching generations and unchange
 Joint publication space admission includes one extra bounded catalog chunk.
 
 Build Apply mode skips an identical applied declaration. Otherwise it plans the complete diff
-before rendering or preparing anything. A declared hash found in history is a rollback: every
-non-Safe operation and every AddColumn is refused, ignoring that declaration's destructive opt-in.
-Re-adding even a trailing dropped column would expose NULL rather than its former physical bytes;
-non-trailing re-additions also require a reorder. Both hold before script generation. An entirely
-Safe reversal, such as re-adding an index or widening a type, publishes normally. A refused reversal
-runs no step, keeps the stored schema online, and reports CS03405 through Provisioning.Detail and
-Hosting health, naming both hashes and all refused steps. A never-seen destructive declaration
-without opt-in similarly holds with CS03105 (T3-4). New opted-in migrations retain their policy.
-Build returns successfully for these holds; pipelines that relied on failure must use Verify,
-which still refuses drift with CS03103. ApplySchemaAsync remains an explicit, strict tool call:
-CS03105 still throws without opt-in; an explicit opted-in apply retains its existing authorization.
-A held Build runs no declared script and does not validate removed code definitions as though it
-had applied the old declaration. Stored definitions still enforce every write. An old application
-may therefore fail on a newer NOT NULL column without a default; with a default, omission uses
-the stored default. Redeploying the stored or a successfully applied newer schema clears health.
-An unpublished mismatched intent is discarded with CS03402 before this classification. Ancestors
-never applied to this database count as new; compiled lineage remains deferred (T3-5).
-SqlSchemaRollbackTests is the executable provisioning conformance corpus for these rules.
+before rendering or preparing anything. A declaration found in history is a rollback only when
+its FirstAppliedGeneration is less than the stored schema's FirstAppliedGeneration. A later
+first-applied declaration is a roll-forward and follows new-schema rules, including its own
+destructive opt-in. Repeated publications update LastAppliedGeneration without changing this order.
+
+A rollback applies only planner-Safe steps that neither re-create dropped objects nor validate
+existing data. One refused step holds the complete plan, including every otherwise Safe prefix.
+The full step classification is:
+
+| Step | In a rollback | Why |
+| --- | --- | --- |
+| AddTable | Held | A re-created table would be empty instead of recovering its dropped rows. |
+| AddColumn | Held | A re-added column exposes NULL/defaults at a new ordinal instead of its dropped values. |
+| DropTable, DropColumn | Held | Removes data written by the newer application. |
+| AlterTable | Held | The planner classes key/order changes Destructive. |
+| AlterColumn: Safe, with no existing-data validation | Applied | Exact widening without a retained CHECK/FK scan preserves every source value. |
+| AlterColumn: validation or non-Safe | Held | NOT NULL tightening, domain checks, narrowing and default changes can reject or change newer values; CHAR width changes and TYPE rewrites with retained CHECK/FK constraints require validation. |
+| AddConstraint | Held | CHECK and foreign keys validate existing rows; any UNIQUE constraint addition follows the same rule (compiled UNIQUE currently uses a unique AddIndex). |
+| AddIndex: unique | Held | Uniqueness validates existing rows and can reject newer duplicates. |
+| AddIndex: non-unique | Applied | Builds an access path without row validation when the table owner is kept. |
+| AddIndex: non-unique heap-owned replacement with retained constraints | Held | Replacing a same-name heap-owned index copies the table and revalidates CHECK/domain/FK requirements, including incoming references. |
+| DropIndex | Applied | Removes an access path without deleting table values. |
+| DropConstraint | Applied | Removes validation without deleting rows. |
+| AddDomain, DropDomain | Applied | These steps change no catalog and validate no rows; the engine registers domains. A transition into a domain uses AlterColumn and is held. |
+
+A refused reversal runs no step, keeps the stored schema online, and reports CS03405 through
+Provisioning.Detail and Hosting health, naming both hashes and all refused steps. A never-seen
+destructive declaration without opt-in similarly holds with CS03105 (T3-4). New declarations and
+roll-forwards with opt-in retain their forward-migration policy. Build succeeds for holds;
+pipelines requiring failure on drift use Verify (CS03103). Explicit ApplySchemaAsync consults
+the same history and rollback policy, throws CS03105 naming every refused step, and changes
+nothing with or without the earlier declaration's opt-in. That opt-in authorizes only its own
+forward migration. To accept loss deliberately, ship a new declaration with its own opt-in.
+
+A held Build runs no declared script and suspends owner decision 65's step-6 validation of
+removed application functions/domains. Stored definitions still enforce every write; reads stay
+available, while writes that require an unavailable function/domain fail with the existing code.
+Script checksum validation still runs before planning. The internal apply result carries the hold;
+control flow never depends on the public operation string. The engine-lifetime declaration retains
+the hold progress while its stored hash is unchanged: offline/reopen republishes its code, hashes
+and steps, rewrite restores it on completion, and explicit refusal leaves it reported. Restarting
+with the stored or a successfully published newer declaration clears the hold. Old inserts use
+the stored NOT NULL/default rules. Unpublished mismatched intents are discarded with CS03402
+before classification. Ancestors never applied here count as new; lineage remains deferred (T3-5).
+SqlSchemaRollbackTests and SqlSchemaRollbackPolicyTests are the executable provisioning corpus.
+Constraint validation is also explicit in PostgreSQL src/backend/commands/tablecmds.c:13433-13450,
+which queues foreign-key, CHECK and NOT NULL scans; the hold policy here is the owner's
+availability-first decision, independent of inline, scripted or deferred execution.
 
 #### Catalog: Durable pending migrations (49a)
 

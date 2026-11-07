@@ -23,6 +23,17 @@ public sealed partial class SqlCatalog
         lock (_sync) { ThrowIfOffline(); return _schemaHistory.ContainsKey(hash); }
     }
 
+    internal bool IsEarlierAppliedSchema(string declaredHash, string storedHash)
+    {
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            return _schemaHistory.TryGetValue(declaredHash, out var declared) &&
+                _schemaHistory.TryGetValue(storedHash, out var stored) &&
+                declared.Entry.FirstAppliedGeneration < stored.Entry.FirstAppliedGeneration;
+        }
+    }
+
     internal SqlAppliedSchemaHistoryEntry[] AppliedSchemaHistory
     {
         get { lock (_sync) { ThrowIfOffline(); return _schemaHistory.Values.Select(value => value.Entry).ToArray(); } }

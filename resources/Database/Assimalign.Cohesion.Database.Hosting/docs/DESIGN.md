@@ -251,7 +251,10 @@ rollback, including re-adding a dropped column; CS03105 identifies a never-seen 
 change without opt-in. Build succeeds and runs no migration step or declared script. Verify
 remains the strict pipeline path (CS03103). Redeploying the stored schema clears the hold.
 HealthDegraded and HealthRestored append failureCode and detail to their payloads; detail is
-bounded to 4,096 characters for events, while the health result retains the complete refusal.
+bounded to 4,096 UTF-16 code units including the ellipsis for both events and health (description
+and detail data), with a surrogate-safe cut. The SQL engine's declaration retains a hold across
+offline/reopen, rewrite and refused explicit apply while the stored hash remains held. A restart
+with the stored or a successfully published newer declaration clears it.
 Restoration on a later observation carries the prior condition's code/detail. A new application's
 observer starts fresh and does not invent a restoration event for an earlier process.
 
