@@ -237,14 +237,18 @@ public sealed class SqlSchemaRollbackTests
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var storage = new CrashCaptureSqlStorageStrategy();
-        await using (var seed = await Builder(storage).BuildAsync(timeout.Token))
+        string document = Declare(false).Compile().CanonicalDocument;
+        // Act: reopen between non-aligned batches to retain exactly one partial chunk
+        // even when catalog relocation changes physical record order.
+        for (int first = 0; first < 1000; first += 17)
         {
-            var database = await seed.CreateDatabaseAsync("history", timeout.Token);
-            string document = Declare(false).Compile().CanonicalDocument;
-            // Act
-            for (int index = 0; index < 1000; index++)
+            await using var seed = await Builder(storage).BuildAsync(timeout.Token);
+            var database = first == 0 ? await seed.CreateDatabaseAsync("history", timeout.Token)
+                : await seed.OpenDatabaseAsync("history", timeout.Token);
+            for (int index = first; index < Math.Min(first + 17, 1000); index++)
             { await database.Catalog.SaveSchemaStateAsync(new(index.ToString("x64"), document, database.Catalog.DdlGeneration), timeout.Token); }
-            await database.Catalog.SaveSchemaStateAsync(new(0.ToString("x64"), document, database.Catalog.DdlGeneration), timeout.Token);
+            if (first + 17 >= 1000)
+            { await database.Catalog.SaveSchemaStateAsync(new(0.ToString("x64"), document, database.Catalog.DdlGeneration), timeout.Token); }
             storage = storage.CaptureDurableImages();
         }
         await using var reopened = await Builder(storage).BuildAsync(timeout.Token);

@@ -48,7 +48,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         var stop = NewEvent(recorder, 14, "ProvisioningStop", _provisioningStopPayload);
         stop.Payload![5].ShouldBe("Held");
         recorder.Events.Count(entry => entry.EventId == 13).ShouldBe(1);
-        recorder.Events.ShouldNotContain(entry => entry.EventId is 0 or 15 or 18 or 19 or 20 or 21);
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0 || entry.EventId == 15 || entry.EventId == 18 || entry.EventId == 19 || entry.EventId == 20 || entry.EventId == 21);
         (await held.OpenDatabaseAsync("held", timeout.Token)).Provisioning!.FailureCode.ShouldBe("CS03405");
     }
 

@@ -311,7 +311,7 @@ internal sealed class DatabaseHostingEventSource : EventSource
 
     private static double Elapsed(long started) => started == 0 ? 0 : Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
-    private static string BoundDetail(string value) => value.Length <= 4096 ? value : value[..4096] + "...";
+    private static string BoundDetail(string value) => value.Length <= 4096 ? value : value[..4093] + "...";
 
     private static string Bound(string value)
     {

@@ -93,7 +93,7 @@ public sealed partial class DatabaseHostingEventSourceTests
                 polls.ShouldBeGreaterThanOrEqualTo(32);
                 var degraded = Event(recorder, 16, "HealthDegraded", _healthPayload);
                 degraded.Level.ShouldBe(EventLevel.Warning);
-                degraded.Payload!.Skip(1).ShouldBe(["sql", "health", "Provisioning", "", "Joint/AddConstraint", "items", 1, 1, 1L, -1L]);
+                degraded.Payload!.Skip(1).ShouldBe(["sql", "health", "Provisioning", "", "Joint/AddConstraint", "items", 1, 1, 1L, -1L, "", ""]);
                 var sqlEngine = (SqlDatabaseEngine)application.Context.Engines.Single();
                 var database = await sqlEngine.OpenDatabaseAsync("health", timeout.Token);
                 // A failed joint job keeps this instance online with its old schema.

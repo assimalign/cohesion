@@ -9982,7 +9982,8 @@ Entries are never evicted: forgetting one could let an old opted-in declaration 
 A chunk holds at most 32 entries. With 64-character SHA-256 hashes each entry is 86 encoded bytes;
 1,000 distinct schemas occupy 86,320 bytes across 32 chunks (10 header bytes per chunk), versus
 SlottedPage.MaxRecordSize = 8,092 bytes for one record. A full chunk causes another chunk to be
-inserted; no whole-history record reaches that limit. Oversized caller-supplied identities refuse
+inserted; a load-derived in-memory tail keeps filling the partial chunk across reopens and
+physical record relocation. No whole-history record reaches that limit. Oversized caller-supplied identities refuse
 CS05042 through EnsureStorable, rolling back the entire state/history transaction. Memory and
 storage exhaustion also refuse the publication without eviction. Load refuses malformed/duplicate
 entries with CS06059. Reapplying a hash preserves its first generation and updates its last.

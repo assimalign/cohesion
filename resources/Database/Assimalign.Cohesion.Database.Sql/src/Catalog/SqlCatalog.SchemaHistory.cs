@@ -14,6 +14,7 @@ public sealed partial class SqlCatalog
     private const int schemaHistoryFormatVersion = 38;
     private const int schemaHistoryRecordKind = 20;
     private const int schemaHistoryChunkEntries = 32;
+    private int _schemaHistoryTailChunk = -1;
     private readonly Dictionary<string, (SqlAppliedSchemaHistoryEntry Entry, int Chunk)> _schemaHistory = new(StringComparer.Ordinal);
     private readonly List<(SqlAppliedSchemaHistoryEntry[] Entries, (PageId PageId, int SlotIndex) Location)> _schemaHistoryChunks = [];
 
@@ -32,9 +33,7 @@ public sealed partial class SqlCatalog
     private Action StageSchemaHistory(StorageTransaction transaction, string hash, ulong generation)
     {
         bool seen = _schemaHistory.TryGetValue(hash, out var previous);
-        int chunk = seen ? previous.Chunk : _schemaHistoryChunks.Count - 1;
-        if (chunk < 0 || !seen && _schemaHistoryChunks[chunk].Entries.Length == schemaHistoryChunkEntries)
-        { chunk = _schemaHistoryChunks.Count; }
+        int chunk = seen ? previous.Chunk : _schemaHistoryTailChunk >= 0 ? _schemaHistoryTailChunk : _schemaHistoryChunks.Count;
         bool append = chunk == _schemaHistoryChunks.Count;
         var entries = append ? [] : _schemaHistoryChunks[chunk].Entries;
         var entry = new SqlAppliedSchemaHistoryEntry(hash, seen ? previous.Entry.FirstAppliedGeneration : generation, generation);
@@ -57,6 +56,7 @@ public sealed partial class SqlCatalog
             if (append) { _schemaHistoryChunks.Add((replacement, location)); }
             else { _schemaHistoryChunks[chunk] = (replacement, location); }
             _schemaHistory[hash] = (entry, chunk);
+            if (!seen) { _schemaHistoryTailChunk = replacement.Length < schemaHistoryChunkEntries ? chunk : -1; }
         };
     }
 
@@ -76,6 +76,7 @@ public sealed partial class SqlCatalog
             entries[index] = new SqlAppliedSchemaHistoryEntry(hash, first, last);
             _schemaHistory.Add(hash, (entries[index], _schemaHistoryChunks.Count));
         }
+        if (count < schemaHistoryChunkEntries) { _schemaHistoryTailChunk = _schemaHistoryChunks.Count; }
         _schemaHistoryChunks.Add((entries, location));
     }
 
