@@ -51,6 +51,11 @@ public sealed partial class SqlSortSpillConformanceTests
             // Assert
             admitted.ShouldAllBe(bytes => bytes == 17472); peaks.ShouldAllBe(peak => peak == 23744);
             _output.WriteLine($"CTAS_FITTING_FRAME|bytes={minimum}|admitted=17472|peak=23744");
+            // The simple fitting form measured 141,736-142,016 B. This full
+            // publication loop measured 194,329 B at 57500fb3f and 194,398 B at
+            // the batch head. A 1.5x simple-form bound covers that frame while
+            // rejecting the review's extra 1 MiB per CTAS on every configuration.
+            minimum.ShouldBeLessThanOrEqualTo(142016L * 3 / 2);
         }
         finally { SqlPlanExecutor.TableAsSourceAdmitted = null; database.TableReclamation.ExitStatement(epoch); }
     }

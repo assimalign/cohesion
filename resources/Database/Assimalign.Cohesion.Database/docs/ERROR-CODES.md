@@ -141,7 +141,7 @@ structured-carrier messages remain unprefixed.
 | SQL0001 | CS00001 | Language/syntax |
 | SQL0002 | CS00002 | Language/syntax |
 | SQL0003 | CS00003 | Language/syntax |
-| SQL0004 | CS00004 | Language/syntax |
+| SQL0004 | CS00004 | Retired (E3): non-built-in type names are left to the engine catalog; identity remains reserved |
 | SQL0005 | CS00005 | Language/syntax |
 | SQL0006 | CS00006 | Language/syntax |
 | SQL0007 | CS00007 | Language/syntax |

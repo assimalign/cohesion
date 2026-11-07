@@ -128,7 +128,7 @@ internal static class Program
         string root = args[1];
         bool clean = args[2].StartsWith("clean-", StringComparison.Ordinal);
         string mode = clean ? args[2][6..] : args[2];
-        bool legacy = mode == "legacy";
+        bool legacy = mode is "legacy" or "legacy-index2";
         string directory = Path.Combine(root, "probe");
         switch (model)
         {
@@ -259,7 +259,7 @@ internal static class Program
                 using var read = storage.PageManager.GetPage((PageId)id);
                 if (read.Page.Type != PageType.Index) { continue; }
                 using var write = storage.OpenPageForWrite(bracket, (PageId)id);
-                if (mode is "index" or "index2") { write.Page.AsBodySpan()[2] = mode == "index2" ? (byte)2 : (byte)1; }
+                if (mode is "index" or "index2" or "legacy-index2") { write.Page.AsBodySpan()[2] = mode == "index" ? (byte)1 : (byte)2; }
                 write.MarkDirty();
             }
             bracket.Commit();

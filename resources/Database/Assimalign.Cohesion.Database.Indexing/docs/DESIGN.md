@@ -573,6 +573,13 @@ upgrades are #1152). How each model surfaces the refusal:
 | Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. CK06101: …" |
 | Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |
 
+When both the model marker and B-tree page stamp are old, refusal order is stable for clean
+and abruptly stopped images: SQL reports CS06041, KeyValuePair CV06107, Documents CD06105,
+and Graph CK06101. SQL/KeyValuePair check their catalog marker first; Documents checks catalog
+headers before roots; Graph checks entity/registration and root formats before catalog v4.
+Graph's CK06101 retains its existing message-only carrier. FormatOrderIntegrationTests in
+each model repeats the open and compares every file byte (#1809, #1644).
+
 Every engine runs its format checks against Storage's shared recovered read-only view (#1744).
 The view uses the same commit selection, page-image decoder and LSN-chain checks as physical
 recovery. Catalog and data sets, metadata, registrations and roots pass before writable handles

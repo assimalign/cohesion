@@ -197,6 +197,8 @@ A fitting source retains ReserveMemory, TableAsSourceAdmitted and the existing b
 charges exactly. With fresh metrics for every execution, fitting projection/collector and
 Release dispatch allocations are equal; Debug dispatch allocations are only lower. Debug uses
 smaller dispatcher frames; WITH executes inline to avoid an extra Task.
+A separate whole-CTAS allocation bound includes source execution, copy and publication;
+the review's extra 1 MiB per statement is rejected without changing the source/batch charge pins.
 A spilled source admits zero retained-result bytes and reads one row at a
 time into the existing 64-row encoded batch. Its reader owns bounded merge/decode workspace;
 CTAS reserves only its batch and fixed 536 B list buffer. The batch contains only storable
@@ -9801,6 +9803,10 @@ enforced. Plan targets hold X from reservation through validation and publicatio
 already holding the table finishes before validation takes its current snapshot; one queued
 behind preparation binds the published declaration or receives the existing stale-plan retry.
 For DROP COLUMN, queued statements naming the removed field are refused after publication.
+Queued qualified stars expand against the published columns under both ApplySchemaAsync and
+deferred jobs. Persisted stars and NATURAL USING lists instead retain frozen dependencies:
+a drop keeps the old schema and the statement dependency code CS03302 inside the existing
+CS03105 migration planning wrapper (#1778, #1792).
 No component is erased or renumbered before the commit; discard leaves the heap and published
 trees untouched. Precision tightening validates every current value without rewriting it;
 a prior violating writer is caught by validation, and a queued violating writer is refused

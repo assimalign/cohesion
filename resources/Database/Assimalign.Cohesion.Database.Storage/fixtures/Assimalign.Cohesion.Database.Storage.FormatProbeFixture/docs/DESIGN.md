@@ -7,6 +7,8 @@ all refused files byte for byte, or tear journal-covered pages and verify exact 
 Graph cases include format-4 entities and physical registrations (CG06017), catalog versions
 (CG06019) and B-tree root stamps (CK06101).
 Graph catalog seeds use v4 as current and v3 as legacy (#1644); graph entity format remains 5.
+The legacy-index2 and clean-legacy-index2 modes combine each model's older marker with
+B-tree page format 2, pinning the first refusal when both gates could reject the image.
 
 The fixture depends on the model assemblies, which use Storage:
 
