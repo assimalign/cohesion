@@ -121,11 +121,12 @@ The capacity contract is by live row and state shape:
 | --- | --- |
 | One scalar group key, COUNT(*) | 96 B key + 128 B group + 128 B accumulator = 352 B per live group; 8,000 groups are 2,816,000 B, over ten 262,144 B grants |
 | K fixed scalar keys, A ordinary native aggregates | 56 + 40K B key and 128 + 128A B state per group, before variable payloads; a replay entry adds 32 B |
-| COUNT, bounded SUM/AVG, single-family MIN/MAX | Fixed native state; MIN/MAX also charge the retained extreme's variable payload and refuse if existing live state outgrows the grant |
-| Unordered hash DISTINCT | Original seen entry and output row each pay their existing charge; the first row/spelling survives. Replayed keys pay their key plus a 64 B entry allowance |
-| Rows in partitions or ordinal spool | Private SQ-L2 row encoding, at most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; G must admit SQ-L2's sorter |
+| COUNT, bounded SUM/AVG, single-family MIN/MAX, native BOOL_AND/BOOL_OR/EVERY | Fixed native state; MIN/MAX also charge the retained extreme's variable payload and refuse if existing live state outgrows the grant |
+| Streamed scan/system-view unordered hash DISTINCT | Original seen entry and output row each pay their existing charge; the first row/spelling survives. Replayed keys pay their key plus a 64 B entry allowance. Join-output DISTINCT retains its existing refusal |
+| Rows in partitions or ordinal spool | Private SQ-L2 row encoding, at most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; each phase's G is its remaining grant after active reader buffers and must admit SQ-L2's sorter |
 | STRING_AGG, ARRAY_AGG, DISTINCT/ordered aggregates, statistical or application accumulators | Existing CS05067 refusal; no spill permission |
 | Grouping sets, direct window-over-group owners, correlated/deferred frames, SQL/JSON, DML, nested relation bodies | Existing ownership and refusal; no inherited hash spill permission |
+| Subquery-bearing group inputs/expressions or unproved MIN/MAX argument families | Existing refusal; hash eligibility remains conservative |
 | Deferred collation, second key family, application-binary cells, unsupported or oversized encoded cells | CS05067; no approximate key, state or result |
 
 Group order is the original first-seen order, including without ORDER BY. On handoff,
@@ -8117,7 +8118,7 @@ Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
 LATERAL joins, UPDATE SET subqueries, `Serializable`
-isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash spill,
+isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash-join spill,
 and index-only result production (a seek always fetches the row).
 (Row-level MVCC visibility and secondary indexes — DDL, write-path maintenance, and planner seek
 adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC

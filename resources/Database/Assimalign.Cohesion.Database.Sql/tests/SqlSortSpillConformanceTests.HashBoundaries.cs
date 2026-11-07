@@ -13,6 +13,26 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Hash ordinal merge: source reader workspace narrows the record bound with CS05067 (#1789)")]
+    public async Task ExecuteAsync_HashOrdinalRecord_ShouldRefuseBeforeKernelBound()
+    {
+        // Arrange: the 5,800-byte key fits the handoff record ceiling, but the
+        // ordinal sort's grant must also leave room for its active input reader.
+        await using var engine = await Create("hash-record-bound", 262144);
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        await Seed(session, 100);
+        await session.ExecuteAsync("UPDATE t SET note=@note", new System.Collections.Generic.Dictionary<string, object?> { ["note"] = new string('x', 5800) });
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT id,COUNT(*) FROM t GROUP BY id,note"));
+
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+        (await session.ExecuteAsync("SELECT 1")).Status.ShouldBe(DatabaseResultStatus.Success);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Hash cleanup: close failures preserve the initiating projection error and release the shared owner (#1789)")]
     [InlineData(false)]
     [InlineData(true)]

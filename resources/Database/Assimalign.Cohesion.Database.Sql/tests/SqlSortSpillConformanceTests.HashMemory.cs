@@ -19,6 +19,40 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Hash and downstream sort share one quota owner and one memory grant (#1789)")]
+    public async Task ExecuteAsync_HashThenSort_ShouldShareOneQuotaOwner()
+    {
+        // Arrange
+        const long grant = 262144;
+        var builder = SqlDatabaseEngine.CreateBuilder("hash-shared-owner");
+        builder.Options.StatementMemoryBudget = grant; builder.Options.TempDirectory = Path.Combine(_root, ".shared-owner");
+        await using var engine = await builder.BuildAsync();
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        await Seed(session, 8000);
+        bool observed = false;
+        SqlRowCollector.ObserveSpill = phase =>
+        {
+            if (phase != "handoff") { return; }
+            observed = true;
+            Statements(engine.TempSpace!).ShouldHaveSingleItem().Quota.ShouldBe(4 * grant);
+        };
+        try
+        {
+            // Act
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,COUNT(*) FROM t GROUP BY id ORDER BY id DESC");
+            int expected = 7999;
+            await foreach (var row in result.GetRowsAsync()) { row.GetInt32(0).ShouldBe(expected--); }
+
+            // Assert
+            expected.ShouldBe(-1); observed.ShouldBeTrue();
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(grant);
+            session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+            Statements(engine.TempSpace!).ShouldHaveSingleItem().PeakBytes.ShouldBeLessThanOrEqualTo(4 * grant);
+        }
+        finally { SqlRowCollector.ObserveSpill = null; }
+        TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Hash spill capacity: ten grants complete under default quotas with and without file storage (#1789)")]
     [InlineData(false)]
     [InlineData(true)]

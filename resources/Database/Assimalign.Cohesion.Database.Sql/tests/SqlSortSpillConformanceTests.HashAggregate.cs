@@ -28,6 +28,7 @@ public sealed partial class SqlSortSpillConformanceTests
         [
             "SELECT id,COUNT(*) FROM t GROUP BY id",
             "SELECT id,COUNT(*),SUM(k),AVG(k),MIN(note),MAX(k) FROM t GROUP BY id",
+            "SELECT id,BOOL_AND(k>=0),BOOL_OR(k>40),EVERY(k<100) FROM t GROUP BY id",
             "SELECT id/2,COUNT(*),SUM(k) FROM t GROUP BY id/2 HAVING COUNT(*)>0",
             "SELECT id,COUNT(*) FROM t GROUP BY id ORDER BY id DESC",
             "SELECT id,COUNT(*) FROM t GROUP BY id ORDER BY COUNT(*),id DESC LIMIT 2000 OFFSET 7",
@@ -47,6 +48,8 @@ public sealed partial class SqlSortSpillConformanceTests
             await using var left = (DatabaseResultSet)await a.ExecuteAsync(sql);
             await using var right = (DatabaseResultSet)await b.ExecuteAsync(sql);
             (await Rows(right)).ShouldBe(await Rows(left), customMessage: sql);
+            right.Columns.Select(c => (c.Name, c.Type, c.MaxLength, c.IsNullable)).ShouldBe(
+                left.Columns.Select(c => (c.Name, c.Type, c.MaxLength, c.IsNullable)), customMessage: sql);
             logs[1].ShouldBe(logs[0], customMessage: sql);
             var am = a.LastStatementMetrics!; var bm = b.LastStatementMetrics!;
             bm.RecordsExamined.ShouldBe(am.RecordsExamined, customMessage: sql);
@@ -72,8 +75,8 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var engine = await Create("hash-skew", 262144);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await Seed(session, 20000);
-        await using (var one = (DatabaseResultSet)await session.ExecuteAsync("SELECT k%1,COUNT(*) FROM t GROUP BY k%1"))
-        { (await Rows(one)).Length.ShouldBe(2); SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldBeNull(); }
+        await using (var one = (DatabaseResultSet)await session.ExecuteAsync("SELECT id%1,COUNT(*) FROM t GROUP BY id%1"))
+        { (await Rows(one)).Length.ShouldBe(1); SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldBeNull(); }
         SqlPlanExecutor.HashSpillPartitionHash = _ => 0;
         try
         {

@@ -112,7 +112,8 @@ internal sealed partial class SqlPlanExecutor
         decimal maximum = decimal.MaxValue / Math.Max(1, rows);
         foreach (var aggregate in plan.Aggregates)
         {
-            if (aggregate.Function is not (SqlCountFunction or SqlSumFunction or SqlExtremumFunction) ||
+            bool fixedBoolean = SqlStandardLibrary.Contains(aggregate.Function) && aggregate.Function.Name is "BOOL_AND" or "BOOL_OR" or "EVERY";
+            if (!(aggregate.Function is SqlCountFunction or SqlSumFunction or SqlExtremumFunction || fixedBoolean) ||
                 aggregate.Call.Quantifier == Language.SqlSetQuantifier.Distinct || aggregate.OrderBy.Count != 0 ||
                 !aggregate.Collation.IsFixed || HasRetentionSubquery(aggregate.Filter) ||
                 aggregate.Arguments.Any(HasRetentionSubquery)) { return false; }
@@ -139,14 +140,9 @@ internal sealed partial class SqlPlanExecutor
         if (expression is SqlBoundCall call)
         { return Bound(call.Function.ReturnType.Storage.Type, null, null, out bound); }
         if (expression is SqlBoundSequence) { bound = 9223372036854775808m; return true; }
-        if (expression is SqlBoundConstant constant)
+        if (expression is SqlBoundConstant constant && constant.Value is null or sbyte or short or int or long or decimal)
         {
-            try
-            {
-                if (constant.Value is null or sbyte or short or int or long or decimal)
-                { bound = Math.Abs(Convert.ToDecimal(constant.Value, CultureInfo.InvariantCulture)); return true; }
-            }
-            catch (OverflowException) { } // Decimal.MinValue's magnitude cannot prove a safe sum.
+            bound = Math.Abs(Convert.ToDecimal(constant.Value, CultureInfo.InvariantCulture)); return true;
         }
         bound = 0; return false;
 
@@ -384,7 +380,9 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var row in Read(_outputs, token))
                 {
                     var key = new byte[8]; BinaryPrimitives.WriteInt64BigEndian(key, (long)row[0]!);
-                    sorter.Append(key, Encode(row[1..]), token);
+                    var value = Encode(row[1..]);
+                    if (value.Length + 24L > bound) { throw SqlExecutionException.StatementMemoryBudget(_budget); }
+                    sorter.Append(key, value, token);
                 }
                 _outputs.Dispose();
                 sorted = sorter.Complete(token);
