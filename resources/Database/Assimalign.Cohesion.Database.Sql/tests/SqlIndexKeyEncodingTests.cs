@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-public sealed class SqlIndexKeyEncodingTests
+public sealed partial class SqlIndexKeyEncodingTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - Directed key oracle: encoded scalar order equals SQL value order (#1631)")]
     [InlineData(0)]

@@ -2033,8 +2033,8 @@ newer rows. The full classification is:
 | AlterColumn: validation or non-Safe | Held | NOT NULL tightening, domain checks, narrowing and default changes can reject or change newer values; CHAR width changes and TYPE rewrites with retained CHECK/FK constraints require validation. |
 | AddConstraint | Held | CHECK and foreign keys validate existing rows; any UNIQUE constraint addition follows the same rule (compiled UNIQUE currently uses a unique AddIndex). |
 | AddIndex: unique | Held | Uniqueness validates existing rows and can reject newer duplicates. |
-| AddIndex: non-unique | Applied | Builds an access path without row validation when the table owner is kept. |
-| AddIndex: non-unique heap-owned replacement with retained constraints | Held | Replacing a same-name heap-owned index copies the table and revalidates CHECK/domain/FK requirements, including incoming references. |
+| AddIndex: non-unique, no predicate, keys provably within limit | Applied | The complete encoded key fits 1,024 bytes for every row the stored schema can hold, without retained heap-owner validation. |
+| AddIndex: other non-unique | Held | Predicates, unbounded or unproved key widths, oversized composite keys, and heap-owned replacements with retained CHECK/domain/FK validation can reject newer rows. |
 | DropIndex | Applied | Removes an access path without deleting table values. |
 | DropConstraint | Applied | Removes validation without deleting rows. |
 | AddDomain, DropDomain | Applied | These steps change no catalog and validate no rows; the engine registers domains. A transition into a domain uses AlterColumn and is held. |

@@ -170,7 +170,7 @@ internal sealed partial class SqlSchemaProvisioner
             var validatingTables = rollback ? RollbackValidationTables(schema) : null;
             var validatingIndexes = rollback ? RollbackIndexValidations(plan, validatingTables!) : null;
             var refused = plan.Operations.Where(operation => rollback
-                ? RefusesRollback(operation, validatingTables!, validatingIndexes!)
+                ? RefusesRollback(operation, schema, validatingTables!, validatingIndexes!)
                 : operation.Safety != SqlSchemaMigrationSafety.Safe && !schema.AllowsDestructiveChanges).ToArray();
             if (refused.Length > 0)
             {

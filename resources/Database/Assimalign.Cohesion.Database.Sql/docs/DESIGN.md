@@ -10139,11 +10139,22 @@ The full step classification is:
 | AlterColumn: validation or non-Safe | Held | NOT NULL tightening, domain checks, narrowing and default changes can reject or change newer values; CHAR width changes and TYPE rewrites with retained CHECK/FK constraints require validation. |
 | AddConstraint | Held | CHECK and foreign keys validate existing rows; any UNIQUE constraint addition follows the same rule (compiled UNIQUE currently uses a unique AddIndex). |
 | AddIndex: unique | Held | Uniqueness validates existing rows and can reject newer duplicates. |
-| AddIndex: non-unique | Applied | Builds an access path without row validation when the table owner is kept. |
-| AddIndex: non-unique heap-owned replacement with retained constraints | Held | Replacing a same-name heap-owned index copies the table and revalidates CHECK/domain/FK requirements, including incoming references. |
+| AddIndex: non-unique, no predicate, keys provably within limit | Applied | The complete encoded key fits 1,024 bytes for every row the stored schema can hold, without retained heap-owner validation. |
+| AddIndex: other non-unique | Held | Predicates, unbounded or unproved key widths, oversized composite keys, and heap-owned replacements with retained CHECK/domain/FK validation can reject newer rows. |
 | DropIndex | Applied | Removes an access path without deleting table values. |
 | DropConstraint | Applied | Removes validation without deleting rows. |
 | AddDomain, DropDomain | Applied | These steps change no catalog and validate no rows; the engine registers domains. A transition into a domain uses AlterColumn and is held. |
+
+Rollback index admission uses declarations and the catalog before any preparation or step runs;
+it never scans rows or attempts a build to discover a hold. SqlRowCodec derives component bounds
+through the actual encoder's longest-value witnesses. The proof counts every key column, NULL
+marker, collation expansion, escape and terminator, under both stored and target types. KeyOrders
+transforms preserve length; BuildIndexKey adds no suffix (B-tree entry references and stamps are
+outside the key). Fixed-width scalars and fitting VARCHAR(n)/CHAR(n) can be restored. TEXT,
+unbounded VARCHAR, binary, JSON and unknown codecs hold. The property corpus checks scalar
+extrema and every Unicode scalar under all index-backed collations, then repeats maximum-width
+strings at declared-size boundaries under every key order. A single unproved index holds the
+whole rollback, including otherwise Safe steps; roll-forwards and never-seen schemas are unchanged.
 
 A refused reversal runs no step, keeps the stored schema online, and reports CS03405 through
 Provisioning.Detail and Hosting health, naming both hashes and all refused steps. A never-seen

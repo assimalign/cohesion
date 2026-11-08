@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Schema;
 
@@ -10,13 +11,39 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlSchemaProvisioner
 {
-    private bool RefusesRollback(SqlSchemaMigrationOperation operation, HashSet<string> validatingTables,
+    private bool RefusesRollback(SqlSchemaMigrationOperation operation, SqlCompiledSchema schema, HashSet<string> validatingTables,
         HashSet<SqlSchemaMigrationOperation> validatingIndexes)
         => operation.Safety != SqlSchemaMigrationSafety.Safe ||
             operation.Kind is SqlSchemaMigrationOperationKind.AddColumn or SqlSchemaMigrationOperationKind.AddTable or SqlSchemaMigrationOperationKind.AddConstraint ||
-            operation.Kind == SqlSchemaMigrationOperationKind.AddIndex && (operation.Index!.IsUnique || validatingIndexes.Contains(operation)) ||
+            operation.Kind == SqlSchemaMigrationOperationKind.AddIndex && (operation.Index!.IsUnique || validatingIndexes.Contains(operation) ||
+                !RollbackIndexBuildCannotRejectRows(operation, schema)) ||
             operation.Kind == SqlSchemaMigrationOperationKind.AlterColumn && (RequiresValueValidation(operation) ||
                 validatingTables.Contains(operation.ParentName!) && RewritesRollbackValues(operation));
+
+    private bool RollbackIndexBuildCannotRejectRows(SqlSchemaMigrationOperation operation, SqlCompiledSchema schema)
+    {
+        var index = operation.Index!;
+        if (index.Predicate is not null || !_catalog.TryGetTable(SqlPlanner.DefaultSchema, operation.ParentName!, out var stored))
+        { return false; }
+        var desired = schema.Tables.Single(table => table.Name.Equals(operation.ParentName, StringComparison.OrdinalIgnoreCase));
+        long total = 0;
+        for (int i = 0; i < index.Columns.Count; i++)
+        {
+            var column = stored.FindColumn(index.Columns[i]);
+            var target = desired.Columns.SingleOrDefault(value => value.Name.Equals(index.Columns[i], StringComparison.OrdinalIgnoreCase));
+            if (column is null || target is null || (uint)index.KeyOrders[i] > 3) { return false; }
+            var targetType = ResolveColumnType(target, _database.Engine.Types, out _);
+            var collation = column.Collation ?? _catalog.DefaultCollation;
+            if (!SqlRowCodec.TryGetMaximumKeyLength(column.Type, collation, out long storedLength) ||
+                !SqlRowCodec.TryGetMaximumKeyLength(targetType, _catalog.DefaultCollation, out long targetLength)) { return false; }
+            // Widening can change the target codec too. Transform only changes byte
+            // values, never length. BuildIndexKey appends no row-id/primary-key suffix:
+            // the B-tree stores entry references and version stamps outside the key.
+            total += Math.Max(storedLength, targetLength);
+            if (total > BTreeIndex.MaxKeyLength) { return false; }
+        }
+        return true;
+    }
 
     private HashSet<string> RollbackValidationTables(SqlCompiledSchema schema)
     {
