@@ -197,7 +197,8 @@ public sealed partial class SqlCatalog
             ValidateStorageReplacement(expectedKept ?? [], null);
             dropped ??= [];
             kept ??= [];
-            treeOwners ??= [];
+            treeOwners = (treeOwners ?? []).Concat(registrations.Select(registration => IndexPageOwner?.Invoke(registration) ?? registration.ObjectId)
+                .Where(owner => _preparedTruncateOwners.Contains(owner))).Distinct().ToArray();
             foreach (var table in kept)
             {
                 var previous = _tables[(table.Schema, table.Name)].Table;

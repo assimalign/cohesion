@@ -1375,6 +1375,12 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `MERGE` | Ordered actions, BY SOURCE and RETURNING, ReadCommitted target rechecks and mixed-action final-state foreign keys | Existing constraint/action codes; CS04064 for Snapshot target conflicts |
 | `GRANT` | Not in the dialect | `CS00002` |
 
+CREATE INDEX and constraint backing builds retain the table lock and statement snapshot while
+committing at most 64 source rows per physical bracket (#1808). Metadata publishes once after
+all chunks succeed; a failed build leaves the previous schema available. Buffered build rows
+charge the existing statement memory grant. DROP INDEX retains pages for old snapshots and
+statement handles, then reclaims only that index's physical owner.
+
 ## Unique-build failure order (#1444)
 
 CREATE UNIQUE INDEX and UNIQUE/PRIMARY KEY constraint backing builds construct the whole

@@ -16,7 +16,15 @@ public sealed partial class SqlCatalog
 {
     internal Action? BeforeJointDiscard { get; set; }
     internal Func<BTreeIndexRegistration, ulong>? IndexPageOwner { get; set; }
+    private readonly Dictionary<long, ulong> _registrationOwners = new();
+    internal ulong PhysicalIndexOwner(BTreeIndexRegistration registration)
+    {
+        ulong live = IndexPageOwner?.Invoke(registration) ?? registration.ObjectId;
+        return live != registration.ObjectId ? live : _registrationOwners.GetValueOrDefault(registration.RootPageId, live);
+    }
     internal ulong NextReservedIdentity { get { lock (_sync) { return _nextObjectId; } } }
+    internal bool IsOwnerPrepared(ulong owner)
+    { lock (_sync) { return _preparedTruncateOwners.Contains(owner); } }
     // Old snapshot descriptions can still read the same physical layout. Weak
     // keys avoid retaining one description per owner-keeping publication forever.
     private readonly ConditionalWeakTable<SqlCatalogTable, object> _keptReadVersions = new();
@@ -46,6 +54,20 @@ public sealed partial class SqlCatalog
                 _pendingReclamations.ContainsKey(table.ObjectId));
 
     internal ulong ReserveJointTreeOwner(SqlCatalogTable table, CancellationToken token)
+        => ReserveTreeOwner(table.Schema, table.Name, token);
+
+    internal ulong ReserveIndexTreeOwner(ulong tableId, CancellationToken token)
+    {
+        lock (_sync)
+        {
+            var table = FindTableByObjectId(tableId);
+            ulong owner = _nextObjectId;
+            try { return ReserveTreeOwner(table?.Schema ?? "dbo", table?.Name ?? "index", token); }
+            catch { _preparedTruncateOwners.Remove(owner); throw; }
+        }
+    }
+
+    private ulong ReserveTreeOwner(string schema, string name, CancellationToken token)
     {
         lock (_sync)
         {
@@ -55,7 +77,7 @@ public sealed partial class SqlCatalog
             using var admission = TransactionCheckpointInterlock.ForStorage(_storage)
                 .Enter("SqlCatalog", unchecked((long)owner), token, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)owner));
-            var location = _storage.InsertRow(transaction, owner, SqlReclamationRecord.Encode(owner, table.Schema, table.Name));
+            var location = _storage.InsertRow(transaction, owner, SqlReclamationRecord.Encode(owner, schema, name));
             var counter = PersistCounter(transaction, checked(owner + 1), _ddlGeneration);
             var intent = new SqlReclamationIntent(location.PageId, location.SlotIndex);
             _pendingReclamations.EnsureCapacity(_pendingReclamations.Count + 1);
@@ -67,6 +89,26 @@ public sealed partial class SqlCatalog
             _nextObjectId = owner + 1;
             return owner;
         }
+    }
+
+    // Clear abandonment intents in the SAME durable publication as the registrations.
+    private Action StageTreePublications(StorageTransaction transaction, IReadOnlyList<BTreeIndexRegistration> registrations)
+    {
+        var owners = registrations.Select(registration => IndexPageOwner?.Invoke(registration) ?? registration.ObjectId)
+            .Where(owner => _preparedTruncateOwners.Contains(owner)).Distinct().ToArray();
+        foreach (ulong owner in owners)
+        {
+            var intent = _pendingReclamations[owner];
+            _storage.DeleteRow(transaction, intent.PageId, intent.SlotIndex);
+        }
+        return () =>
+        {
+            foreach (ulong owner in owners)
+            {
+                _pendingReclamations.Remove(owner);
+                _preparedTruncateOwners.Remove(owner);
+            }
+        };
     }
 
     // Alternate tree owners use kind 14 unchanged. Stage retirement in exactly the

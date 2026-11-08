@@ -66,7 +66,7 @@ public sealed partial class SqlCatalog
 {
     private const int tableRecordKind = 1;
     private const int counterRecordKind = SqlCatalogCreation.CounterRecordKind;
-    private const int indexRegistrationsKind = 3;
+    private const int indexRegistrationsKind = 21; // Per-tree owner map, SQL format 39 (#1808).
     private const int recordSpaceFormatKind = 4;
     private const int indexRecordKind = 5;
     private const int schemaStateRecordKind = 6;
@@ -1031,7 +1031,9 @@ public sealed partial class SqlCatalog
             {
                 var location = _storage.InsertRow(transaction, EncodeIndex(index));
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
+                var publishTrees = StageTreePublications(transaction, mergedRegistrations);
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Index(table.Schema, table.Name, index.Name), createsObject: true);
+                publishTrees();
                 _registrationsLocation = registrationsLocation;
                 SetIndexSlot(new IndexSlot(index, location));
             }
@@ -2521,10 +2523,12 @@ public sealed partial class SqlCatalog
                 var intent = _pendingReclamations[table.ObjectId];
                 _storage.DeleteRow(transaction, intent.PageId, intent.SlotIndex);
             }
+            var publishTrees = StageTreePublications(transaction, mergedRegistrations);
             ulong next = _nextObjectId;
             var owned = StageOwnedSequences(transaction, existing?.Table, table, ref next);
             CommitCatalogChange(transaction, next, publication: publication, actualObject: SqlObjectIdentity.Table(table.Schema, table.Name), createsObject: !replaceExisting);
             owned();
+            publishTrees();
             if (prepared)
             {
                 _pendingReclamations.Remove(table.ObjectId);
@@ -2744,7 +2748,7 @@ public sealed partial class SqlCatalog
         return (owner, owningSchema);
     }
 
-    private static byte[] EncodeRegistrations(IReadOnlyList<BTreeIndexRegistration> registrations)
+    private byte[] EncodeRegistrations(IReadOnlyList<BTreeIndexRegistration> registrations)
     {
         var writer = new DatabaseKeyWriter();
         writer.AppendInt32(indexRegistrationsKind).AppendInt32(registrations.Count);
@@ -2755,13 +2759,14 @@ public sealed partial class SqlCatalog
                   .AppendString(registration.Definition.Name, Collation.Binary)
                   .AppendInt8((sbyte)registration.Definition.Kind)
                   .AppendBoolean(registration.Definition.IsUnique)
-                  .AppendInt64(registration.RootPageId);
+                  .AppendInt64(registration.RootPageId)
+                  .AppendInt64((long)PhysicalIndexOwner(registration));
         }
 
         return EnsureStorable(writer.ToArray(), string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogRegistrationsSubject, registrations.Count));
     }
 
-    private static IReadOnlyList<BTreeIndexRegistration> DecodeRegistrations(ref DatabaseKeyReader reader)
+    private IReadOnlyList<BTreeIndexRegistration> DecodeRegistrations(ref DatabaseKeyReader reader)
     {
         int count = reader.ReadInt32();
         var registrations = new List<BTreeIndexRegistration>(count);
@@ -2773,6 +2778,8 @@ public sealed partial class SqlCatalog
             var kind = (IndexKind)reader.ReadInt8();
             bool unique = reader.ReadBoolean();
             long rootPageId = reader.ReadInt64();
+            ulong owner = (ulong)reader.ReadInt64();
+            if (owner == 0 || !_registrationOwners.TryAdd(rootPageId, owner)) { throw new System.IO.InvalidDataException(ErrorMessages.JointIndexShapeInvalid); }
 
             registrations.Add(new BTreeIndexRegistration(
                 objectId, new IndexDefinition(indexName, kind, unique), rootPageId));

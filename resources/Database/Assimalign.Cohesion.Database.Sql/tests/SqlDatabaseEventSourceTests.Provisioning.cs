@@ -15,8 +15,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlDatabaseEventSourceTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Dropped table reclamation emits one start and completion with bounded identity payloads")]
-    public async Task DropTable_Reclamation_ShouldReportLifecycleOnce()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Dropped table reclamation emits one start and completion per physical owner with bounded identity payloads")]
+    public async Task DropTable_Reclamation_ShouldReportLifecycleOncePerOwner()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -27,23 +27,36 @@ public sealed partial class SqlDatabaseEventSourceTests
         await session.ExecuteAsync("CREATE TABLE retired (id INT PRIMARY KEY)", cancellationToken: timeout.Token);
         await session.ExecuteAsync("INSERT INTO retired VALUES (1)", cancellationToken: timeout.Token);
         database.Catalog.TryGetTable("dbo", "retired", out var table).ShouldBeTrue();
+        var registration = database.IndexManager.ExportRegistrations().Single();
+        ulong treeOwner = database.IndexManager.PageOwner(registration);
+        treeOwner.ShouldNotBe(table.ObjectId);
+        (ulong Owner, long Pages)[] owners =
+        [
+            (table.ObjectId, database.DataStorage.GetOwnerPages(table.ObjectId).LongCount()),
+            (treeOwner, database.DataStorage.GetOwnerIndexPageCount(treeOwner)),
+        ];
 
         // Act
         await session.ExecuteAsync("DROP TABLE retired", cancellationToken: timeout.Token);
         while (database.TableReclamation.HasWork) { await Task.Delay(5, timeout.Token); }
 
         // Assert
-        var started = recorder.Events.Single(entry => entry.EventId == 23);
-        var completed = recorder.Events.Single(entry => entry.EventId == 24);
-        started.EventName.ShouldBe("TableReclamationStarted");
-        completed.EventName.ShouldBe("TableReclamationCompleted");
-        started.PayloadNames.ShouldBe(["engineName", "database", "objectId"]);
-        completed.PayloadNames.ShouldBe(["engineName", "database", "objectId", "pages"]);
-        started.Payload!.ShouldBe([engine.Name, "traced", table.ObjectId]);
-        completed.Payload!.Take(3).ShouldBe(started.Payload);
-        ((long)completed.Payload![3]!).ShouldBe(2);
-        recorder.Events.Count(entry => entry.EventId == 23).ShouldBe(1);
-        recorder.Events.Count(entry => entry.EventId == 24).ShouldBe(1);
+        foreach (var (owner, pages) in owners)
+        {
+            pages.ShouldBe(1);
+            var started = recorder.Events.Single(entry => entry.EventId == 23 && Equals(entry.Payload![2], owner));
+            var completed = recorder.Events.Single(entry => entry.EventId == 24 && Equals(entry.Payload![2], owner));
+            started.EventName.ShouldBe("TableReclamationStarted");
+            completed.EventName.ShouldBe("TableReclamationCompleted");
+            started.PayloadNames.ShouldBe(["engineName", "database", "objectId"]);
+            completed.PayloadNames.ShouldBe(["engineName", "database", "objectId", "pages"]);
+            started.Payload!.ShouldBe([engine.Name, "traced", owner]);
+            completed.Payload!.Take(3).ShouldBe(started.Payload);
+            ((long)completed.Payload![3]!).ShouldBe(pages);
+        }
+        recorder.Events.Count(entry => entry.EventId == 23).ShouldBe(owners.Length);
+        recorder.Events.Count(entry => entry.EventId == 24).ShouldBe(owners.Length);
+        recorder.Events.Where(entry => entry.EventId == 30).Sum(entry => (int)entry.Payload![2]!).ShouldBe(2);
         recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
     }
 

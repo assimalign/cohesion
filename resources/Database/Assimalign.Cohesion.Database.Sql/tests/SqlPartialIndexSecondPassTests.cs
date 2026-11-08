@@ -9,6 +9,9 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -294,13 +297,39 @@ public sealed class SqlPartialIndexSecondPassTests
         await SqlPartialIndexTests.Execute(writer, "CREATE INDEX ix ON t(k) WHERE ABS(k)>0");
         var table = first.Catalog.Tables.Single();
         var index = first.Catalog.GetIndexes(table.ObjectId).Single();
-        var registrations = first.Catalog.GetIndexRegistrations();
-        await first.Catalog.DropIndexAsync(table.ObjectId, "ix", [], CancellationToken.None);
-        await first.Catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix", ["k"], false,
+        var damaged = new SqlCatalogIndex(table.ObjectId, "ix", ["k"], false,
             predicate: damage == "syntax" ? "k >" : damage == "missing-column" ? "missing > 0" : index.Predicate,
             predicateColumns: damage == "columns" ? [] : ["k"],
-            predicateFunctionCalls: damage is "functions" or "missing-column" or "syntax" ? [] : index.PredicateFunctionCalls),
-            registrations, CancellationToken.None);
+            predicateFunctionCalls: damage is "functions" or "missing-column" or "syntax" ? [] : index.PredicateFunctionCalls);
+        // Corrupt only kind 5's predicate metadata. DROP now retires the physical owner,
+        // so dropping and republishing the same root would test owner-map corruption first.
+        var encoded = new DatabaseKeyWriter().AppendInt32(5).AppendInt64((long)table.ObjectId)
+            .AppendString(damaged.Name, Collation.Binary).AppendBoolean(damaged.IsUnique).AppendInt32(1)
+            .AppendString("k", Collation.Binary).AppendInt8((sbyte)damaged.Owner).AppendNull()
+            .AppendInt32(3).AppendBoolean(false).AppendString(damaged.Predicate!, Collation.Binary)
+            .AppendInt32(damaged.PredicateColumns.Count);
+        foreach (string column in damaged.PredicateColumns) { encoded.AppendString(column, Collation.Binary); }
+        encoded.AppendInt32(damaged.PredicateFunctionCalls.Count);
+        foreach (string call in damaged.PredicateFunctionCalls) { encoded.AppendString(call, Collation.Binary); }
+        encoded.AppendInt8((sbyte)damaged.KeyOrders[0]);
+        (PageId Page, int Slot)? location = null;
+        using (var rows = first.CatalogStorage.GetUnitIterator())
+        {
+            while (rows.MoveNext())
+            {
+                var reader = new DatabaseKeyReader(rows.Current.Data.Span);
+                if (reader.ReadInt32() != 5 || (ulong)reader.ReadInt64() != table.ObjectId || reader.ReadString(out _) != "ix") { continue; }
+                location = (rows.Current.PageId, rows.Current.SlotIndex);
+                break;
+            }
+        }
+        var target = location.ShouldNotBeNull();
+        using (TransactionCheckpointInterlock.ForStorage(first.CatalogStorage).Enter("PredicateDamage"))
+        using (var bracket = first.CatalogStorage.BeginTransaction())
+        {
+            first.CatalogStorage.UpdateRow(bracket, target.Page, target.Slot, encoded.ToArray());
+            bracket.Commit();
+        }
         var next = SqlDatabaseEngine.CreateBuilder("partial-damaged");
         next.Options.StorageStrategy = storage.CaptureDurableImages();
         await using var reopened = await next.BuildAsync(CancellationToken.None);

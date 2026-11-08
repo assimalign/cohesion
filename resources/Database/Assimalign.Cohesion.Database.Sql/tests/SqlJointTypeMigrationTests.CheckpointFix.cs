@@ -102,7 +102,7 @@ public sealed partial class SqlJointTypeMigrationTests
         else { SeedRaw(database, [1], rows); }
         database.Coordinator.Checkpoint(guard.Token);
         int height = keyed ? SqlSchemaProvisioner.JointTreeHeight(database.DataStorage,
-            database.IndexManager.ExportRegistrations().Single().RootPageId, Table(database).ObjectId, out _) : 0;
+            database.IndexManager.ExportRegistrations().Single().RootPageId, database.IndexManager.PageOwner(database.IndexManager.ExportRegistrations().Single()), out _) : 0;
         var source = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Storage");
         using var events = new EventSourceRecorder(source, EventLevel.Informational);
         int observed = 0, forced = 0, completedAtObservation = 0, injected = 0;

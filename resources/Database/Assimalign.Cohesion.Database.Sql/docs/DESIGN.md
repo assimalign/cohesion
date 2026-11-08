@@ -613,7 +613,7 @@ storage type. Non-NULL ascending values keep their previous bytes, except floati
 zero and NaN: SQL canonicalizes signed zeros and moves NaN below negative infinity to match
 SqlValueComparer. The shared Indexing/Types encodings and page layouts are unchanged, so their
 format versions do not change. Row storage retains the original values. SQL catalog/record-space
-format 36 introduced the default key order (#1787); current format 38 and mandatory index
+format 36 introduced the default key order (#1787); current format 39 and mandatory index
 extension 3 fence these SQL-specific keys and metadata. Compiled
 schema v12 carries the same effective orders. All three enums use AscendingNullsFirst = 0,
 AscendingNullsLast = 1, DescendingNullsFirst = 2 and DescendingNullsLast = 3; bit 0 means NULLS
@@ -740,7 +740,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Current catalog/record-space format 38 refuses all earlier files before writable data recovery;
+extension 3. Current catalog/record-space format 39 refuses all earlier files before writable data recovery;
 compiled-schema v12 retains CompiledSchemaIndex.Predicate (introduced in v10) and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
@@ -1881,7 +1881,7 @@ canonical body. FROM-less correlated projections also retain provenance when the
 display name differs from the referenced column, or that column was already synthesized.
 An authored view name identical to a synthesized name is also expressed
 as a derived column list in that body; different catalog names already prove an explicit
-list supplied them. Star expansion avoids inventing aliases for synthesized names. That change retained SQL format 37; current format 38 adds applied-schema history.
+list supplied them. Star expansion avoids inventing aliases for synthesized names. That change retained SQL format 37; format 38 added applied-schema history; current format 39 records physical index owners.
 An older frozen star's same-name AS alias is indistinguishable from an authored re-alias;
 stored-body binding conservatively retains synthesized provenance for that shape (CS01015).
 New fully named same-name re-alias views persist an explicit output list. A mixed view can
@@ -1891,7 +1891,7 @@ An older explicit view column list matching a generated name is ambiguous too: t
 legacy(column1) AS SELECT CAST(1 AS BIGINT) as that body alone plus the name column1.
 It conservatively retains synthesized provenance and refuses NATURAL with CS01015; wrapping
 the view in a derived query with an explicit column list or recreating it resolves this. A reopen fixture writes the base's
-exact body and column contract through the unchanged kind-17 catalog writer in current format 38,
+exact body and column contract through the unchanged kind-17 catalog writer in current format 39,
 alongside a new view whose stored wrapper retains the explicit list. No format changes.
 Each BindItem join checks cancellation; NATURAL skips merged-column scans until a binding
 actually has UsingColumns. A synchronous parameter-read witness tests cancellation after
@@ -5410,7 +5410,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 38 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 39 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -6033,6 +6033,49 @@ mapping on Windows, whose file system folds case, as on Linux).
 UTF-16 code unit is tried, and the verdicts are literals, never read from the
 running platform.
 
+## Per-index owners and bounded builds (#1808)
+
+SQL record-space format 39 and catalog registration kind 21 require a separate owner for every
+physical index, including first Build and ordinary constraint trees. Each registration persists
+logical table id, name/kind/uniqueness, fixed root and physical owner id. Root headers must agree
+with that map; owners cannot alias a table, sequence, retired owner or another live tree. The
+recovered read-only preflight refuses earlier formats and malformed maps before writable open.
+Kind 3 registrations are retired; there is no compatibility reader or upgrade path.
+
+Before root allocation, the catalog reserves a monotonic identity and a kind-14 abandonment
+intent. Successful registration publication removes that intent in the same catalog commit.
+The preparation fence prevents reclamation even when the physical builder has committed
+and its publishing transaction has not begun. An unpublished failure releases that fence,
+so the durable intent survives for ordinary bounded owner reclamation. DROP INDEX stages a new intent atomically
+with removing its registration and description. The existing table-reclamation worker protects
+transaction snapshots and detached statement handles using its post-unpublication sequence
+fence and statement epochs, frees exactly that owner in 32-page durable batches, and removes
+the intent only after data durability and an empty owner directory. It yields to checkpoint
+signals, interval/size due checks and the shared admission pause. Other indexes and the heap
+remain allocated. Table and namespace retirement stage all their distinct tree owners too.
+
+SQL shares the global 64-leaf prune grant across small per-tree managers, using constant-time
+owner-page counts as conservative leaf-work bounds; a large tree retains the next full turn.
+No directory snapshot or page I/O occurs under the manager directory monitor.
+
+Inline, constraint and deferred builds share IndexBuildLoop: 64 retained rows per durable
+bracket, bounded statement-memory charging, preserved source MVCC stamps, cursor-based unique
+validation, and one catalog publication. Checkpoint admission occurs between chunks, while the
+table X reservation and creator/reader pins span the entire build. Same-name replacement now
+keeps the heap, reports Joint/KeepOwner, and rewrites zero rows when the remaining layout permits
+keeping it. The heap-owned collision refusal is removed. Rollback's encoder/predicate and
+validation policy remains owned by SQ-A7; page ownership does not relax its key-rejection rule.
+
+The 80,000-row regression uses a 1 MiB pool, an 11,429-page heap and a 16,666-page index;
+1,250 brackets retain at most 64 rows, with a measured checkpoint journal peak of 1,135,631 bytes.
+Dropping that owner preserves the heap and a second index, whose 80,000 keys remain readable.
+
+Crash boundaries include the owner-intent commit, root commit, each chunk before/after commit,
+registration/description publication, every reclamation page-batch commit and intent removal.
+PagesReclaimed (30) reports committed owner-page batches; IndexBuildStart/Stop (28/29) reports
+one build activity with database, physical index objectId and succeeded on stop. Payloads never
+contain indexed values. No new diagnostic identity or wire format is introduced.
+
 ## Secondary indexes
 
 The CREATE INDEX memory regression reads storage's existing encoded pre-image accounting at
@@ -6051,7 +6094,7 @@ description + exported registrations), the engine binds them.
 
 - **DDL flow.** CREATE INDEX takes the table's Exclusive lock (DDL-blocking
   build — in-flight writers finish first, Indexing's documented no-online-rebuild
-  posture), builds inside one gated **durably committed** bracket (the
+  posture), builds inside bounded gated **durably committed** brackets (the
   self-committing DDL posture: the catalog record commits independently and must
   never describe a tree a crash could revert), walks **every stored version** and
   inserts entries carrying the version's original writer/deleter stamps — so
@@ -6059,8 +6102,7 @@ description + exported registrations), the engine binds them.
   then persists metadata + registrations in **one catalog self-commit** (the two
   must never tear: a registration without a description is an unused tree; a
   description without a registration would promise uniqueness no tree enforces).
-  Crash windows leave only orphaned tree pages — safe leaks, never a
-  half-attached index. DROP INDEX inverts the order (catalog first — the
+  Crash windows leave durable abandonment intents, never a half-attached index. DROP INDEX inverts the order (catalog first — the
   authoritative drop — then the in-memory directory) under the same lock; DROP
   TABLE drops its indexes' metadata/registrations atomically with the table
   record and DROP COLUMN on an indexed column is rejected (drop the index
@@ -8393,6 +8435,9 @@ bounded peer-sent names) are in the area's
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
 | 27 | `TableReclamationYielded` | Verbose | — | `engineName`, `database`, `objectId` (each poll yielding to a due or pending checkpoint) |
+| 28 | `IndexBuildStart` | Informational | — | `database`, `objectId` (physical index owner) |
+| 29 | `IndexBuildStop` | Informational | — | `database`, `objectId`, `succeeded` |
+| 30 | `PagesReclaimed` | Informational | — | `database`, `objectId` (physical owner), `pages` |
 | 25 | `TransactionCleanupFailed` | Warning | — | `transactionId`, `exceptionType`, `exceptionMessage` (bounded to 1024 characters) |
 
 `Sessions = 0x1`; `Statements = 0x2`. Provisioning has no keyword. Id 17 stays retired.
@@ -9023,7 +9068,7 @@ two questions for the planner: *what objects exist* (with stable identities) and
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
 SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
-format **29** introduced kind 18 ownership; current format **38** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+format **29** introduced kind 18 ownership; current format **39** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
 Earlier database formats are refused by the existing format gate; compiled-schema v12 is current.
@@ -9351,7 +9396,7 @@ Typed-schema worker handoff and joint crash/wire convergence are described in SQ
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 38); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 39); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -9682,7 +9727,7 @@ domain conversions require opt-in because application casts are unknown to the s
 existing metadata-only gating stays unchanged.
 
 Kind 9 identifies joint jobs with Joint/ step kinds; kind 6 and kind 14 keep their encodings.
-SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 38
+SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 39
 also fences the separate tree owners and classification steps described below; every earlier
 format is refused by the existing read-only gate, with no upgrade reader.
 Compiled-schema v12 stays current. There is no new public interface, reference or wire message.
@@ -9720,12 +9765,9 @@ unless the declaration has that index name or the plan drops it. A declared name
 a script claim, including a stale receipt. Publication refuses duplicate index names with
 CS05060 before opening its catalog transaction. Dropping a preserved index dependency column
 refuses before intent save with CS03105, naming the blocking index through CS03056 (#1821).
-Dropping a heap-owned tree without a same-name replacement keeps the heap. Its pages remain
-on that owner and are reclaimed when the table retires (DROP TABLE or a later TYPE rewrite),
-and by IX-S1 (#1808) once indexes have their own pages. This is the owner-directed exception to
-SQ-A4's rewrite-for-reclamation rule (#1778 review fix). A same-name heap-owned replacement
-still forces RewriteOwner. Alternate-tree drops/replacements can keep the heap; kind 14
-reclaims their separate owners. Kind 9 records Joint/KeepOwner or
+Every tree has its own owner in format 39 (#1808). Index drops and same-name replacements
+keep the heap when its physical layout permits; kind 14 reclaims the separate old tree owner.
+The former heap-owned replacement exception no longer forces RewriteOwner. Kind 9 records Joint/KeepOwner or
 Joint/RewriteOwner for each existing target. Empty Build, RunMigrationsInline, ApplySchemaAsync
 and the worker use this same metadata classification. The joint X-lock protocol is unchanged:
 owned sequences, then every touched table, in ascending identity order, through publication.
@@ -9770,8 +9812,8 @@ description. Length widening and validated precision changes retain their stored
 Layout refusals distinguish a joint kept table from a generic ALTER replacement; both preserve
 the published layout and retain CS05060.
 Kept columns retain their declared spelling while preserving physical ordinals and facets.
-Before commit, the index directory refuses any prepared
-key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
+The index directory permits a prepared same-name replacement because its physical owner
+is separate from both the old tree and the kept heap.
 Registered domains are outside the schema hash. A matching interrupted intent is discarded and
 replanned when registration changes switch an existing joint table between KeepOwner and
 RewriteOwner. Every inline replan uses the same joint executor. The old schema remains online until
@@ -9785,11 +9827,9 @@ Discard ends the current provisioning trace with outcome Restarted and starts mo
 Joint intents with malformed ownership choices still fail CS06059 when the replan is joint.
 The lock order is table X -> apply gate -> tree/page latches for building, and snapshot gate -> catalog monitor
 -> index directory monitor for publication; the directory never calls back into the catalog.
-Maintenance selects one physical manager per call, preserving the global 64-leaf budget.
-With N alternate managers each manager runs once per N+1 purge passes, and small trees can
-leave part of the budget unused. Indexing reports entries removed, not leaves visited; using
-the remaining budget would need a new public Indexing member, so that improvement is deferred
-to #1808 rather than widening the boundary for this implementation.
+Maintenance shares a global 64-leaf grant across physical managers (#1808). Constant-time
+owner-index-page counts conservatively bound work without adding an Indexing bridge member.
+Small trees share a pass; a larger tree receives the next full grant when it cannot fit.
 SQL still acquires unique-key locks by logical heap identity before entering the apply gate;
 alternate managers omit Indexing's redundant key-lock acquisition, so physical tree owners
 cannot introduce a second lock namespace or a wait inside that gate.
@@ -9833,8 +9873,8 @@ Before any inline DDL commits, the provisioner classifies the complete rendered 
 49a data-scaling step would defer, the entire plan goes to joint preparation: indexes, CHECK,
 UNIQUE, FK and NOT NULL validation, bounded facet changes and required/domain column backfills.
 Cheap additions, drops and other steps in that plan remain unpublished too. Additive index
-changes and changes to alternate trees keep their heaps using SQ-A4; dropping a
-heap-owned tree keeps its pages until table retirement or IX-S1 (#1808); a same-name replacement still rewrites. One catalog commit publishes every change and
+changes, drops and same-name replacements keep their heaps using the separate tree owners
+required by format 39 (#1808). One catalog commit publishes every change and
 the applied marker.
 RunMigrationsInline, empty-table Build and ApplySchemaAsync use the same joint executor inline
 (#1778, SQ-A6). Default-only changes publish jointly, including SET and DROP DEFAULT.
@@ -9897,8 +9937,8 @@ publication writes 202; both rewrite zero rows and decode 65,536 versions. Colum
 primary-key tables with three columns measure 227 to 228 pages; adding a new keyed table in
 that plan measures 228 to 230. At the measured 64 MiB engine budget, the ten-percent page-write
 bound covers additive index builds, including plans that add a table. Page-write costs for
-changes to alternate trees remain unmeasured. Heap-owned drops keep the heap with zero row rewrites; the bound excludes same-name heap-owned
-replacements until #1808. Shuffled-key measurements
+other changes to alternate trees remain unmeasured. Index drops keep the heap with zero row
+rewrites; #1808 extends the ten-percent bound to a same-name index replacement. Shuffled-key measurements
 count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
 already completed by the engine must not be followed by a redundant forced copy checkpoint.
 
@@ -9948,9 +9988,8 @@ Nullable checked-domain missing values validate once; only an invalid missing va
 emptiness probe. An empty or fully tombstoned table retains 49a's exception for that missing value. NOT NULL, new CHECKs and tighter precision use validation scans, with one bound
 table and evaluator per scan. Metadata-only admission visits no heap rows or retained trees;
 JointSpace still supplies the metadata floor, publication bound, engine reserve and watchdog.
-Dropping a heap-owned tree without replacement keeps the heap and strands its pages until
-the table retires, and IX-S1 (#1808) will reclaim each index separately. Same-name heap-owned
-replacement retains the rewrite; alternate-tree drops and constraint removal keep the heap. Script-index preservation and the
+Index drops, same-name replacements and constraint removal keep the heap when its layout
+permits. Each retired tree is reclaimed separately under format 39 (#1808). Script-index preservation and the
 existing declared-name precedence remain unchanged; promotion policy is not changed here.
 
 No new durable boundary is introduced. Inline/default/kept-layout crash images cover every
@@ -10219,7 +10258,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 38 requires the complete table extension 8 record,
+after the existing constraints. Current format 39 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -10297,7 +10336,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 38 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
+  which this catalog always writes. Current format 39 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).

@@ -166,12 +166,7 @@ internal sealed partial class SqlPlanExecutor
                     var column = table.FindColumn(previous.Name)!;
                     return !SqlMigrationScriptGenerator.RequiresTypeRewrite(previous.Type, previous.DomainName, column.Type, column.DomainName) &&
                         previous.Collation == column.Collation && previous.Identity == column.Identity;
-                }) &&
-                image.GetIndexes(old.ObjectId).Where(index => !SameJointIndex(index, tableIndexes)).All(index =>
-                    !tableIndexes.Any(replacement => replacement.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase)) ||
-                    !registrations.Any(registration => registration.ObjectId == old.ObjectId &&
-                        registration.Definition.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase) &&
-                        _indexManager.PageOwner(registration) == old.ObjectId));
+                });
             if (keepsOwner)
             {
                 var columns = table.Columns.Select(column =>

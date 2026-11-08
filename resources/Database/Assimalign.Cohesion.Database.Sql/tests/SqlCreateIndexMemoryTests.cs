@@ -8,26 +8,17 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
-/// A <c>CREATE INDEX</c> runs in one durable storage bracket, and a bracket keeps the pre-image of
-/// every page it touches until it completes. Storage format 2 kept each as a full 8 KiB copy, so an
-/// index build held a copy of every page it built, whatever the buffer pool's size. Format 3
-/// (#1253) keeps each pre-image as its encoded byte runs, a few dozen bytes for a page the bracket
-/// allocated, and spills past a budget (Storage DESIGN.md, "The memory bound of pre-images").
+/// A <c>CREATE INDEX</c> commits at most 64 rows per physical bracket (#1808).
+/// Pre-image accounting must remain bounded when a later chunk updates pages made
+/// by an earlier chunk, including randomly ordered keys over a small buffer pool.
 /// </summary>
-/// <remarks>
-/// Storage counts encoded pre-image bytes plus a fixed bookkeeping allowance, independently of
-/// GC heap layout, page reservation granularity and unrelated runtime/worker objects. The
-/// checkpoint-size hook runs inside commit while all pre-images remain held. Fresh index pages
-/// have only header runs in their pre-images: the existing storage regression bounds these at
-/// 2% of the fixed 8 KiB page size. Together with a pool at most one tenth of the index, these
-/// page buffers and pre-images account for at most 12% of the index bytes. This is an accounting
-/// bound on those structures, not a measurement of the process heap.
-/// </remarks>
+/// <remarks>The probe counts encoded pre-images and bookkeeping, independently of GC heap layout.</remarks>
 [Collection(SqlTimingCollection.Name)]
 public sealed class SqlCreateIndexMemoryTests : IDisposable
 {
@@ -52,7 +43,7 @@ public sealed class SqlCreateIndexMemoryTests : IDisposable
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CREATE INDEX: an index ten times the buffer pool, built in one bracket, keeps a small fraction of its pages on the heap (#1253)")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CREATE INDEX: an index ten times the buffer pool keeps bounded pre-images per chunk (#1253, #1808)")]
     public async Task CreateIndex_IndexTenTimesThePool_ShouldKeepItsPreImagesSmall()
     {
         // Arrange: a table of wide, randomly ordered keys over the smallest pool.
@@ -83,8 +74,16 @@ public sealed class SqlCreateIndexMemoryTests : IDisposable
         long pagesBefore = storage.PageManager.PageCount;
         long spilledBefore = SqlStorageMemoryProbe.SpilledPreImages(storage);
 
-        // The hook fires once the commit has journaled a megabyte of the index's pages: the build
-        // itself journals only the images of freshly allocated pages, a few dozen bytes each.
+        // Observe every build bracket before commit while its pre-images remain held.
+        long buildPeak = 0;
+        int chunks = 0;
+        SqlPlanExecutor.IndexBuildBoundary = (stage, count, _) =>
+        {
+            if (stage != "chunk-before-commit") { return; }
+            count.ShouldBeInRange(1, 64);
+            chunks++;
+            buildPeak = Math.Max(buildPeak, SqlStorageMemoryProbe.PreImageBytes(storage));
+        };
         long atCommit = 0;
         var engineHook = storage.OnCheckpointNeeded;
         storage.OnCheckpointNeeded = () =>
@@ -99,18 +98,20 @@ public sealed class SqlCreateIndexMemoryTests : IDisposable
         {
             await session.ExecuteAsync("CREATE INDEX t_k ON t(k)", cancellationToken: TestTimeout.Token(300));
         }
-        finally { storage.OnCheckpointNeeded = engineHook; }
+        finally { storage.OnCheckpointNeeded = engineHook; SqlPlanExecutor.IndexBuildBoundary = null; }
 
-        // Assert: every page is built in one bracket, with compact pre-images and no spilling.
+        // Assert: existing pages have larger pre-images than fresh headers, but only one chunk retains them.
         // The 8 KiB storage page is format-defined; the OS/GC page size does not enter this bound.
         long indexPages = storage.PageManager.PageCount - pagesBefore;
         long poolPages = poolBytes / Page.Size;
         storage.BufferPoolCapacity.ShouldBe((int)poolPages);
         indexPages.ShouldBeGreaterThanOrEqualTo(10 * poolPages, "the index must be built over at least ten times the pool");
         atCommit.ShouldBeGreaterThan(0, "the checkpoint-size hook never observed pre-images inside the build's commit");
-        SqlStorageMemoryProbe.PeakPreImageBytes(storage).ShouldBe(atCommit);
-        atCommit.ShouldBeLessThan(indexPages * Page.Size / 50,
-            "freshly allocated index pages must retain header runs, not full page copies");
+        chunks.ShouldBe((rows + 63) / 64);
+        buildPeak.ShouldBeGreaterThan(0);
+        buildPeak.ShouldBeLessThanOrEqualTo(64L * 2 * Page.Size,
+            "pre-images must be bounded by one chunk rather than the whole tree");
+        atCommit.ShouldBeLessThanOrEqualTo(buildPeak);
         SqlStorageMemoryProbe.SpilledPreImages(storage).ShouldBe(spilledBefore);
         SqlStorageMemoryProbe.PreImageBytes(storage).ShouldBe(0);
     }

@@ -176,7 +176,7 @@ internal sealed partial class SqlPlanExecutor
         // leftmost path per bracket; never infer its height from source rows.
         var copyRoots = statement.CheckpointCopy ? _indexManager.ExportRegistrations()
             .Where(registration => registration.ObjectId == replacement.ObjectId)
-            .ToDictionary(registration => registration.Definition.Name, registration => registration.RootPageId, StringComparer.OrdinalIgnoreCase) : null;
+            .ToDictionary(registration => registration.Definition.Name, registration => registration, StringComparer.OrdinalIgnoreCase) : null;
         var maximumKeys = statement.CheckpointCopy ? new int[indexes.Length] : null;
         var snapshot = ConstraintCurrentSnapshot(statement);
         long processed = 0;
@@ -243,7 +243,7 @@ internal sealed partial class SqlPlanExecutor
                                 BuildIndexKey(replacement, index.Ordinals, converted[row], index.Metadata.KeyOrders).Length);
                         }
                     }
-                    int height = SqlSchemaProvisioner.JointTreeHeight(_storage, copyRoots![index.Metadata.Name], replacement.ObjectId, out int free);
+                    int height = SqlSchemaProvisioner.JointTreeHeight(_storage, copyRoots![index.Metadata.Name].RootPageId, _indexManager.PageOwner(copyRoots[index.Metadata.Name]), out int free);
                     int entryBytes = maximumKeys![tree] + 28; // key, slot, length, both ties, child
                     int growth = free >= batch.Count * entryBytes ? 0 : SqlSchemaProvisioner.JointTreeGrowth(batch.Count, entryBytes);
                     height += growth;

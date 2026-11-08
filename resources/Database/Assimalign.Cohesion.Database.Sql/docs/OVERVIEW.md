@@ -16,7 +16,7 @@ a rolled-back application. Earlier applied declarations refuse unsafe rollback r
 their opt-in; Build holds online with CS03405 and explicit apply throws CS03105 (#1779).
 
 Index DDL defaults to ASC NULLS FIRST and DESC NULLS LAST, matching ORDER BY (#1787).
-Default nullable indexes can remove sorts in both directions. SQL format 38 and compiled-schema
+Default nullable indexes can remove sorts in both directions. SQL format 39 and compiled-schema
 v12 fence the new enum meanings; earlier databases and artifacts must be recreated or rebuilt.
 
 Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
@@ -187,7 +187,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 38). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 39). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.

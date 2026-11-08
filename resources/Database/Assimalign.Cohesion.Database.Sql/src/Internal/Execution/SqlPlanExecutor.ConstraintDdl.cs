@@ -146,37 +146,11 @@ internal sealed partial class SqlPlanExecutor
         {
             if (indexes.Count > 0)
             {
-                if (statement.ProvisioningProgress is not null)
+                foreach (var metadata in indexes)
                 {
-                    foreach (var metadata in indexes)
-                    {
-                        await BuildDeferredIndexAsync(table, new IndexDefinition(metadata.Name, IndexKind.BTree, true),
-                            metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray(), statement,
-                            () => created.Add(metadata.Name), cancellationToken).ConfigureAwait(false);
-                    }
-                }
-                else
-                {
-                    // Durable, but not a self-commit the session counts (#1272): the trees are orphaned
-                    // pages until the publish below describes them.
-                    await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
-                    {
-                        foreach (var metadata in indexes)
-                        {
-                            var index = await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId,
-                                new IndexDefinition(metadata.Name, IndexKind.BTree, true), cancellationToken).ConfigureAwait(false);
-                            created.Add(metadata.Name);
-                            var ordinals = metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray();
-                            foreach (var version in ScanVersions(table, cancellationToken))
-                            {
-                                var key = BuildIndexKey(table, ordinals, version.Values);
-                                await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
-                                    version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
-                            }
-                            await ValidateBuiltUniqueIndexAsync(table, index, statement, cancellationToken).ConfigureAwait(false);
-                        }
-                        return true;
-                    }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
+                    await BuildDeferredIndexAsync(table, new IndexDefinition(metadata.Name, IndexKind.BTree, true),
+                        metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray(), statement,
+                        () => created.Add(metadata.Name), cancellationToken).ConfigureAwait(false);
                 }
             }
             await SelfCommitAsync(statement, (publication is null ? _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),

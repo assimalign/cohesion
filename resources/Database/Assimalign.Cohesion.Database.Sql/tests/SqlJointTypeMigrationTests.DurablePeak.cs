@@ -42,7 +42,7 @@ public sealed partial class SqlJointTypeMigrationTests
             }
         }
         db.Coordinator.Checkpoint(guard.Token);
-        int height = SqlSchemaProvisioner.JointTreeHeight(db.DataStorage, db.IndexManager.ExportRegistrations().Single().RootPageId, Table(db).ObjectId, out _);
+        int height = SqlSchemaProvisioner.JointTreeHeight(db.DataStorage, db.IndexManager.ExportRegistrations().Single().RootPageId, db.IndexManager.PageOwner(db.IndexManager.ExportRegistrations().Single()), out _);
         long reserve = SqlSchemaProvisioner.JointCopyCheckpointBytes + 64L * (2 + 4 * height + 3) * 2 * (Page.Size + 46) + 152;
         using var events = new EventSourceRecorder(EventSource.GetSources().Single(e => e.Name == "Assimalign.Cohesion.Database.Storage"), EventLevel.Informational);
         using var reclamations = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);

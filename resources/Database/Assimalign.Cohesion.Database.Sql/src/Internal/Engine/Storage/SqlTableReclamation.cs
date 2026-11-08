@@ -176,12 +176,14 @@ internal sealed class SqlTableReclamation
                     // so the next bracket check yields: exactly one retry wake per cycle.
                     if (_database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
                     { _database.Engine.CheckpointNeededSignal.Set(); }
+                    SqlDatabaseEventSource.Log.PagesReclaimed(_database.DataStorage, pending.ObjectId, reclaimed);
                     pending.Pages += reclaimed;
                     AfterBatch?.Invoke(pending.ObjectId, reclaimed);
 
                     // A short batch alone does not prove the directory is empty: FreeOwnerPages
                     // skips stale snapshot entries (#1273), so completion checks the directory.
-                    if (reclaimed < BatchSize && !_database.DataStorage.HasOwnerPages(pending.ObjectId))
+                    if (reclaimed < BatchSize && !_database.DataStorage.HasOwnerPages(pending.ObjectId) &&
+                        _database.DataStorage.GetOwnerIndexPageCount(pending.ObjectId) == 0)
                     {
                         // Data durability precedes intent removal. A crash in between just
                         // visits the remaining owner directory again; freed pages have no owner.
@@ -234,6 +236,9 @@ internal sealed class SqlTableReclamation
 
     private bool CanReclaim(Pending pending)
     {
+        // A durable abandonment intent also covers a tree still eligible for publication.
+        // Its physical builder may have committed before the catalog publisher starts.
+        if (_database.Catalog.IsOwnerPrepared(pending.ObjectId)) { return false; }
         if (_database.Coordinator.Manager.OldestActive <= pending.Fence
             || _database.Coordinator.GetOpenContexts().Any(context => context.Sequence <= pending.Fence))
         {

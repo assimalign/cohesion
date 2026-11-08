@@ -67,8 +67,8 @@ internal sealed partial class SqlSchemaProvisioner
                 // depends on declaration size, without visiting a 500M-row heap.
                 if (item.KeepsOwner && item.Indexes.All(index => SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(item.Previous!.ObjectId))))
                 {
-                    // Heap-owned dropped trees stay on the heap until its retirement;
-                    // neither traverse them nor charge their pages as reclamation work.
+                    // Dropped trees have separate owners. Charge their exact retired
+                    // pages without scanning or rewriting the retained heap.
                     foreach (var registration in registrations.Where(value => value.ObjectId == item.Previous!.ObjectId &&
                         _database.IndexManager.PageOwner(value) != item.Previous!.ObjectId &&
                         !item.Indexes.Any(index => index.Name.Equals(value.Definition.Name, StringComparison.OrdinalIgnoreCase))))
@@ -301,7 +301,7 @@ internal sealed partial class SqlSchemaProvisioner
                         SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(registration.ObjectId))))))
                 .Select(_database.IndexManager.PageOwner).Distinct().LongCount();
             _jointReclamationOwners = Math.Max(plan.Tables.Count(table => !table.KeepsOwner) +
-                plan.Tables.Where(table => table.KeepsOwner).Sum(table => table.Indexes.Count(index =>
+                plan.Tables.Sum(table => table.Indexes.Count(index => !table.KeepsOwner ||
                     !SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(table.Previous!.ObjectId)))),
                 retiredHeaps.Count + retiredTrees);
             long overshoot = JointBracketBytes(SqlTableReclamation.BatchSize, 0);

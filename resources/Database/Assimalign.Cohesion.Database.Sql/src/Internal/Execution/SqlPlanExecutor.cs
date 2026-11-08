@@ -1821,32 +1821,8 @@ internal sealed partial class SqlPlanExecutor
         {
             // Table X precedes apply gate, index directory/tree latch and page pins.
             // X remains held through publication and all cleanup; session disposal releases it.
-            if (statement.ProvisioningProgress is not null || metadata.Predicate is not null)
-            {
-                await BuildDeferredIndexAsync(plan.Table, definition, ordinals, statement,
-                    () => registered = true, cancellationToken, metadata).ConfigureAwait(false);
-            }
-            else
-            {
-                // Durable, but not a self-commit the session counts (#1272): the tree is orphaned pages
-                // until the catalog commit below describes it, so a failure here leaves no index.
-                await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
-                {
-                    var index = await _indexManager.CreateIndexAsync(statement.Transaction, plan.Table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
-                    registered = true;
-
-                    foreach (var (location, values, writer, deleter) in ScanVersions(plan.Table, cancellationToken))
-                    {
-                        if (!MatchesIndex(plan.Table, metadata, values)) { continue; }
-                        var key = BuildIndexKey(plan.Table, ordinals, values, metadata.KeyOrders);
-
-                        await index.InsertVersionAsync(
-                            bracket, key, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), writer, deleter, cancellationToken).ConfigureAwait(false);
-                    }
-                    await ValidateBuiltUniqueIndexAsync(plan.Table, index, statement, cancellationToken, ordinals, metadata.Predicate is not null).ConfigureAwait(false);
-                    return true;
-                }, durable: true, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
-            }
+            await BuildDeferredIndexAsync(plan.Table, definition, ordinals, statement,
+                () => registered = true, cancellationToken, metadata).ConfigureAwait(false);
             // Metadata + registrations persist in ONE catalog self-commit: a crash
             // cannot leave a described index without a tree registration (or the
             // reverse). A crash before this write leaves only orphaned tree pages.

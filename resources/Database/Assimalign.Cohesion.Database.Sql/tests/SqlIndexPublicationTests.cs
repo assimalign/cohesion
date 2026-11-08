@@ -42,9 +42,20 @@ public sealed class SqlIndexPublicationTests
         var jSnapshot = Snapshot(database, j);
         wSnapshot.Length.ShouldBe(1);
         jSnapshot.Length.ShouldBe(1);
+        var owners = wSnapshot.Concat(jSnapshot).Select(database.IndexManager.PageOwner).ToArray();
+        var pages = owners.Select(owner => database.DataStorage.GetOwnerIndexPages(owner).ToArray()).ToArray();
+        for (int pass = 0; pass < 3; pass++)
+        {
+            database.TableReclamation.Request();
+            database.TableReclamation.RunBatch(timeout.Token);
+            for (int tree = 0; tree < owners.Length; tree++)
+            { database.DataStorage.GetOwnerIndexPages(owners[tree]).ShouldBe(pages[tree]); }
+        }
 
         // Act: the second publisher's snapshot cannot contain the first publication.
         await database.Catalog.CreateIndexAsync(w, wSnapshot, timeout.Token);
+        database.TableReclamation.RunBatch(timeout.Token);
+        database.DataStorage.GetOwnerIndexPages(owners[1]).ShouldBe(pages[1]);
         if (publishTable)
         {
             await database.Catalog.PublishTableAsync(second, [j], jSnapshot, replaceExisting: true, timeout.Token);
