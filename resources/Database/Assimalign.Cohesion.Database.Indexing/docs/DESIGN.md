@@ -4,6 +4,58 @@
 
 Every model needs ordered lookups: SQL secondary indexes, document indexes, graph adjacency, the KV primary structure. Building four bespoke trees would quadruple the hardest code in the platform, so index structures live in the kernel and models bring only their key extraction. The SQL engine is the first real consumer (#912): CREATE/DROP INDEX, write-path maintenance, and planner seeks all compose this package's manager, trees, and cursors.
 
+## Structure directory (#1808)
+
+The internal IndexStructure NVI base is the maintenance boundary. Its leaves own format
+validation, writer purge, bounded pruning and retirement; public structures remain sealed.
+IndexStructureDirectory contains identities and base instances, with no B-tree casts or
+kind-specific maintenance loops. BTreeIndexManager supplies the B-tree adapter and preserves
+its public lookup/registration surface. A posting or HNSW implementation supplies another
+internal adapter when that structure ships. Format validation visits every adapter before
+attaching any tree. One call grants 64 leaf pages across the directory, preserving the
+B-tree round-robin position and empty-leaf behavior. Retirement removes an adapter with
+constant directory work and leaves detached handles valid under the model's reader horizon.
+The ordinary insert path gains no directory allocations or maintenance calls.
+
+## Retired trees (#1808)
+
+A model owns durable catalog publication and proves its reclamation horizon; Indexing owns
+physical structure maintenance. Each model assigns each physical tree a distinct page owner.
+DROP first unpublishes the definition durably, retaining the old physical tree for pinned
+snapshots and detached statement handles. SQL uses its existing kind-14 owner intents and
+transaction/statement-epoch fences; Graph and Documents use signed-root registration receipts.
+A receipt is committed before freeing the root and is excluded from attachment and pruning.
+Recovered liveness is checked before any write; a live definition cannot be overridden by a
+receipt. FreeOwnerPages commits bounded batches, and owner-directory emptiness, rather than a
+short batch, proves completion. Receipt/intent removal follows data durability. A restart can
+therefore repeat any stage without attaching a partly freed tree or freeing a live owner.
+SQL keeps its existing 32-page reclamation grant; Graph and Documents share a 64-page grant.
+Every pass yields to a due checkpoint, a pending model checkpoint signal and admission pause.
+Maintenance already holds its coordinator apply gate; it must not enter that gate recursively.
+
+## Bounded builds (#1808)
+
+The Build shared-source module supplies one IndexBuildLoop to SQL, Documents and
+Graph without a new public implementation bridge or shipped friend grant. It retains at most
+64 source entries per chunk, commits each model-supplied physical bracket durably, then invokes
+one publication callback. Source enumeration, memory charging and cancellation occur outside
+the apply gate; writer reservations and the logical creator remain held across chunks.
+The shared IndexBuildBudget meters model-owned reservations without depending on an engine.
+Model roots provide event callbacks; Catalog/Storage do not reference engine diagnostics.
+SQL charges chunk rows/arrays against its statement memory budget. Graph retains its existing
+budgeted extraction/work preflight before root allocation. Documents charges retained metadata,
+unique-key validation, per-document extraction and chunk workspace against StatementMemoryBudget
+(256 MiB for a raw catalog unless the engine supplies its configured value). Existing budget
+refusals apply; no diagnostic identity is added. KeyValuePair only bootstraps an empty primary
+tree, so it has no row backfill loop.
+
+Durable boundaries are owner reservation/abandonment intent, root/registration creation, every
+64-entry chunk, final definition/catalog publication, logical commit, retirement receipt,
+page-batch retyping before commit, confirmed page-batch commit, and receipt/intent deletion.
+Crash images on both sides of these boundaries converge to exact owners and registrations;
+root pages remain fixed through splits. The storage size trigger can overshoot by the currently
+admitted chunk. Online builds, leaf merges and empty-leaf reclamation remain outside this work.
+
 ## Undo binding identity (#1726)
 
 `BTreeRecordVersionIndex` compares and hashes by logical tree: the shared latch identifies its
@@ -568,8 +620,8 @@ upgrades are #1152). How each model surfaces the refusal:
 
 | Model | Where its open checks | Error |
 |---|---|---|
-| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 38, #1779; format 37 required every deferred plan to publish jointly, #1778; format 36 changed default key order, #1787; format 35 separated tree ownership, #1777; format 32 introduced directed keys, #1631), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 38"; a marker that does not describe its trees, the attach check's `CK06101` |
-| Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. CK06101: …" |
+| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 39, #1808; format 37 required every deferred plan to publish jointly, #1778; format 36 changed default key order, #1787; format 35 separated tree ownership, #1777; format 32 introduced directed keys, #1631), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 39"; a marker that does not describe its trees, the attach check's `CK06101` |
+| Key-value | Its catalog's entry-space format marker, current version 3 with a separate primary-tree owner (#1808), before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 3"; a marker that does not describe its tree, "Database 'x' cannot be opened. CK06101: …" |
 | Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. CK06101: …" |
 | Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |
 
@@ -1039,7 +1091,7 @@ writes two or three pages; no event is written on a lookup, a cursor or an inser
 
 ## Non-goals
 
-- No full-text or spatial indexes in the MVP surface (future `IndexKind` members; the enum is the extension point).
+- Full-text, spatial and HNSW structures are separate implementations; this substrate supplies their maintenance directory, not those index algorithms.
 - No online index rebuild in the contract yet — DDL-blocking builds first.
 - No cost/statistics surface here — planners get statistics through their model catalogs.
 - No in-place upgrade of index pages from an older page format (#1152).

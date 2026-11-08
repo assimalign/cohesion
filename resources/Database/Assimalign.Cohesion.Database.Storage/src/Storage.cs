@@ -2319,6 +2319,18 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>Counts the owner's allocated index pages without copying its page directory.</summary>
+    /// <param name="ownerId">The physical index owner to inspect.</param>
+    /// <returns>The number of index pages currently held by the owner.</returns>
+    /// <remarks>Runs in constant time. A release becomes visible when its storage transaction commits.</remarks>
+    public int GetOwnerIndexPageCount(ulong ownerId)
+    {
+        lock (_ownerLock)
+        {
+            return _indexOwnerPages.TryGetValue(ownerId, out var pages) ? pages.Count : 0;
+        }
+    }
+
     /// <summary>
     /// Gets a point-in-time snapshot of the data pages currently belonging to the
     /// specified owner's record chain, in ascending page order.

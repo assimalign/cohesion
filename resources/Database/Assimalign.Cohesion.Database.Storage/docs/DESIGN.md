@@ -218,7 +218,10 @@ or recovery error still reaches the caller. `ProvisioningFailure` is the other n
 in-memory publication failed after a catalog commit and recovery must decide the published state. Both reuse the
 existing offline write fence and add no new events or on-disk storage format.
 
-`HasOwnerPages(ownerId)` is a constant-time physical-allocation query beside `GetOwnerPages`.
+`HasOwnerPages(ownerId)` is a constant-time data-page allocation query beside `GetOwnerPages`.
+`GetOwnerIndexPageCount(ownerId)` probes the separate index directory with the same constant-time,
+allocation-free contract (#1808). Retirement checks both directories before removing an intent;
+a short release batch cannot prove that the physical owner is empty.
 It reads the native owner directory without loading a page or copying its ids. The existing
 owner-scoped iterator snapshots the entire directory before its first `MoveNext`, so it is not
 a bounded presence probe. Final-slot deletion, commit, rollback and recovery maintain the same
@@ -2585,11 +2588,13 @@ reference is PostgreSQL's `max_wal_size` of 1 GB (`max_wal_size_mb = 1024`,
   beside another engine's suite, one late checkpoint took a peak to 4.4 sizes while the journal
   written per truncation stayed between 0.89 and 1.06 sizes (in format 2 a peak reached almost
   ten). It is not a hard bound: a single statement journals all of its bracket before the
-  checkpoint can run, so one statement that writes more than the size (a large index build or
-  `INSERT ... SELECT`, a large upload) overshoots it by that much. The owner default for
+  checkpoint can run, so one statement that writes more than the size (`INSERT ... SELECT` or a large upload) overshoots it by that much. The owner default for
   #1270 keeps this soft trigger: bracket caps remain rejected, and splitting a statement
   requires a separate design that preserves statement atomicity.
-  The journal-size hard bound is deferred; #1270 is not fully delivered by this soft trigger.
+  Index builds (#1808) now use a shared 64-entry durable-bracket loop in the models,
+  preserving one logical/catalog publication while allowing checkpoints between chunks.
+  Their size overshoot is limited to the admitted chunk; the generic journal-size hard
+  bound remains deferred, and #1270 is not fully delivered by this soft trigger.
 - Recovery replayed about 20 ms per MB of journal from a warm file cache in format 2 (the #1251
   table below: a 50.2 MB journal in 0.9–1.2 s), so the bound capped a crash recovery at about five
   seconds. Format 3 (#1253) replays 5–8 ms per MB from a file, a journal of small deltas or of

@@ -160,6 +160,43 @@ public sealed class StorageOwnerChainTests
         allocated.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Storage] - Index owner presence is allocation-free and follows committed releases (#1808)")]
+    public void GetOwnerIndexPageCount_RepeatedProbe_ShouldTrackCommittedAllocationWithoutSnapshots()
+    {
+        // Arrange.
+        using var storage = ChainStorage.Create(new CrashSimulationStream(), new CrashSimulationStream(), poolCapacity: 64);
+        using (var transaction = storage.BeginTransaction())
+        {
+            for (int page = 0; page < 130; page++)
+            { using var handle = storage.AllocatePageForWrite(transaction, PageType.Index, ownerId: 7); handle.MarkDirty(); }
+            transaction.Commit();
+        }
+        storage.HasOwnerPages(7).ShouldBeFalse();
+        storage.GetOwnerIndexPageCount(7).ShouldBe(130);
+        int hits = 0;
+
+        // Act.
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int attempt = 0; attempt < 1000; attempt++)
+        { if ((storage.GetOwnerIndexPageCount(7) != 0)) { hits++; } }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        using (var rollback = storage.BeginTransaction()) { storage.FreeOwnerPages(rollback, 7); }
+        (storage.GetOwnerIndexPageCount(7) != 0).ShouldBeTrue();
+        int freed = 0;
+        while ((storage.GetOwnerIndexPageCount(7) != 0))
+        {
+            using var transaction = storage.BeginTransaction();
+            freed += storage.FreeOwnerPages(transaction, 7, 64);
+            transaction.Commit();
+        }
+
+        // Assert.
+        hits.ShouldBe(1000);
+        allocated.ShouldBe(0);
+        freed.ShouldBe(130);
+        (storage.GetOwnerIndexPageCount(7) != 0).ShouldBeFalse();
+    }
+
     /// <summary>
     /// A concrete storage exposing owner-scoped record operations for the tests.
     /// </summary>
