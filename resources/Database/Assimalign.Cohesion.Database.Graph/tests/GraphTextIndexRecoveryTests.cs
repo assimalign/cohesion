@@ -20,6 +20,7 @@ public sealed class GraphTextIndexRecoveryTests
     [InlineData("label")] [InlineData("catalog")] [InlineData("property")] [InlineData("tree")]
     [InlineData("commit-record")] [InlineData("committed")]
     [InlineData("drop-catalog")] [InlineData("drop-tree")] [InlineData("committed-drop")]
+    [InlineData("build-root")] [InlineData("build-chunk")] [InlineData("build-published")]
     [InlineData("update")] [InlineData("committed-update")] [InlineData("delete")]
     [InlineData("retire-registration")] [InlineData("reclaim-pages")] [InlineData("reclaim-registration")] [InlineData("reclaimed")]
     [InlineData("reclaim-batch")] [InlineData("reclaim-batch-large")]
@@ -65,8 +66,10 @@ public sealed class GraphTextIndexRecoveryTests
         if (reclamation)
         { await session.ExecuteAsync("DROP INDEX text_p", cancellationToken: token); }
         int captured = 0;
+        bool buildPublished = false;
         database.Store.AfterTextIndexMutation = stage =>
         {
+            if (stage == "build-published") { buildPublished = true; }
             if (stage != (boundary == "reclaim-batch-large" ? "reclaim-batch" : boundary)) { return; }
             if (boundary == "reclaim-batch-large")
             {
@@ -91,7 +94,7 @@ public sealed class GraphTextIndexRecoveryTests
         {
             if (boundary == "commit-record")
             {
-                FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () => { CaptureIdentity(); strategy.CopyDatabase("source", "image"); captured++; };
+                FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () => { if (!buildPublished) { return; } CaptureIdentity(); strategy.CopyDatabase("source", "image"); captured++; };
                 await session.ExecuteAsync(build, cancellationToken: token);
             }
             else if (boundary is "committed" or "committed-drop" or "committed-update")

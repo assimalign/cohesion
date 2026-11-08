@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -17,6 +18,10 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 
 public sealed partial class GraphStore
 {
+    internal Action<ulong>? IndexBuildStarted { get; set; }
+    internal Action<ulong, bool>? IndexBuildStopped { get; set; }
+    internal Action<ulong, int>? IndexPagesReclaimed { get; set; }
+
     private static readonly string _errorGraphStoreDropIndexAsyncFailure2 = ErrorMessages.GraphStoreDropIndexAsyncFailure2;
 
     private const ulong adjacencyId = GraphLockNamespaces.Adjacency;
@@ -65,8 +70,21 @@ public sealed partial class GraphStore
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
     /// <exception cref="GraphElementTooLargeException">The names exceed one graph record, or an existing node's value exceeds the index key.</exception>
+    /// <exception cref="GraphIndexBuildLimitException">The direct-store build exceeds 1,000,000 work units or 256 MiB of retained build memory.</exception>
     public ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
-        => CreateIndexAsync(label, propertyKey, context, null, null, cancellationToken, false);
+    {
+        const long workLimit = 1_000_000;
+        long work = 0;
+        var memory = new IndexBuildBudget(256L * 1024 * 1024, cancellationToken, limit =>
+            new GraphIndexBuildLimitException("CG05020", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryMemoryBudgetExceeded, limit)));
+        void Visit()
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++work > workLimit)
+            { throw new GraphIndexBuildLimitException("CG05004", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpansionLimitExceeded, work, 0, workLimit)); }
+        }
+        return CreateIndexAsync(label, propertyKey, context, Visit, memory.Charge, cancellationToken, false);
+    }
 
     internal async ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context,
         Action? visit, Action<long>? reserve, CancellationToken cancellationToken, bool text = false)
@@ -104,23 +122,47 @@ public sealed partial class GraphStore
         // Preserve exact-key validation in label-scan order, then admit buffered insertions
         // before the first page allocation. Oversized keys retain their original error order.
         if (!text) { foreach (var entry in entries) { cancellationToken.ThrowIfCancellationRequested(); visit?.Invoke(); } }
-        bool published = false;
-        ulong inserted = await ApplyAsync(context, async bracket =>
+        reserve?.Invoke(80L + IndexBuildLoop.ChunkSize * 96L);
+        IndexBuildStarted?.Invoke(id);
+        bool buildSucceeded = false;
+        try
         {
-            var index = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
-            foreach (var entry in entries)
+            var index = await ApplyAsync(context, async bracket =>
             {
-                await index.InsertVersionAsync(bracket, entry.Key, entry.Reference.Location,
-                    entry.Reference.Writer, TransactionSequence.None, cancellationToken).ConfigureAwait(false);
-                AfterTextIndexMutation?.Invoke("build-entry");
-            }
-            var location = Insert(bracket, bytes, context);
-            SaveRegistrations(bracket);
-            published = PublishMarked(record, location, context.Sequence);
-            return location;
-        }, cancellationToken).ConfigureAwait(false);
-        if (!published) { Add(record, inserted, context.Sequence); }
-        ScheduleIndexReclamation(id); // Also finds a build abandoned after its physical bracket committed.
+                var created = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
+                SaveRegistrations(bracket);
+                return created;
+            }, cancellationToken, durable: true).ConfigureAwait(false);
+            ScheduleIndexReclamation(id);
+            AfterTextIndexMutation?.Invoke("build-root");
+            bool published = false;
+            await IndexBuildLoop.RunAsync(entries, async (chunk, token) =>
+            {
+                await ApplyAsync(context, async bracket =>
+                {
+                    foreach (var entry in chunk)
+                    {
+                        await index.InsertVersionAsync(bracket, entry.Key, entry.Reference.Location,
+                            entry.Reference.Writer, TransactionSequence.None, token).ConfigureAwait(false);
+                        AfterTextIndexMutation?.Invoke("build-entry");
+                    }
+                    return true;
+                }, token, durable: true).ConfigureAwait(false);
+                AfterTextIndexMutation?.Invoke("build-chunk");
+            }, async token =>
+            {
+                ulong inserted = await ApplyAsync(context, bracket =>
+                {
+                    var location = Insert(bracket, bytes, context);
+                    published = PublishMarked(record, location, context.Sequence);
+                    return new ValueTask<ulong>(location);
+                }, token).ConfigureAwait(false);
+                if (!published) { Add(record, inserted, context.Sequence); }
+                AfterTextIndexMutation?.Invoke("build-published");
+            }, cancellationToken).ConfigureAwait(false);
+            buildSucceeded = true;
+        }
+        finally { IndexBuildStopped?.Invoke(id, buildSucceeded); }
     }
 
     /// <summary>Drops a node-property index definition; older snapshots retain its tree.</summary>
@@ -330,7 +372,13 @@ public sealed partial class GraphStore
                 // trees or collecting abandoned owners; a refusal cannot reclaim other data.
                 if (registration.RootPageId < 0 && RetirementStatus(registration.ObjectId, _coordinator.PruneBound, receipt: true) == 0)
                 { throw new StorageCorruptionException(page, slot, ErrorMessages.RegistrationIdentityInvalid); }
-                if (registration.RootPageId > 0) { registrations.Add(registration); }
+                if (registration.RootPageId > 0)
+                {
+                    using var root = _storage.PageManager.GetPage((PageId)registration.RootPageId);
+                    if (root.Page.OwnerId != registration.ObjectId)
+                    { throw new StorageCorruptionException(page, slot, ErrorMessages.RegistrationIdentityInvalid); }
+                    registrations.Add(registration);
+                }
                 _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
                 if (scheduleReclamation) { ScheduleIndexReclamation(registration.ObjectId); }
             }
@@ -368,6 +416,11 @@ public sealed partial class GraphStore
             long root = reader.ReadInt64();
             if (id == 0 || root == 0 || root == long.MinValue || !ids.Add(id) ||
                 root < 0 && (id <= 2 || id == adjacencyId || id == labelsId || id == relationshipTypesId)) { throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationIdentityInvalid); }
+            if (root > 0)
+            {
+                using var page = storage.PageManager.GetPage((PageId)root);
+                if (page.Page.OwnerId != id) { throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationIdentityInvalid); }
+            }
             registrations.Add((new BTreeIndexRegistration(id, new IndexDefinition(treeName), root), unit.PageId, unit.SlotIndex));
         }
         return registrations;

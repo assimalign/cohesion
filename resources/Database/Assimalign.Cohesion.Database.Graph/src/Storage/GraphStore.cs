@@ -740,11 +740,11 @@ public sealed partial class GraphStore
         }
     }
 
-    private async ValueTask<T> ApplyAsync<T>(TransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
+    private async ValueTask<T> ApplyAsync<T>(TransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken, bool durable = false)
     {
         try
         {
-            var result = await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var result = await _coordinator.ApplyStatementAsync(context, apply, durable: durable, cancellationToken: cancellationToken).ConfigureAwait(false);
             AfterApply?.Invoke();
             return result;
         }

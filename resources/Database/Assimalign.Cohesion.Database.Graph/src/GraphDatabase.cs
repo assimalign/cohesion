@@ -90,6 +90,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
         var recovery = recover ? Coordinator.AnalyzeAndScrub() : null;
         Catalog = GraphCatalog.Open(storage, Coordinator);
         Store = GraphStore.Open(storage, Coordinator);
+        Store.IndexBuildStarted = owner => GraphDatabaseEventSource.Log.IndexBuildStart(storage, owner);
+        Store.IndexBuildStopped = (owner, succeeded) => GraphDatabaseEventSource.Log.IndexBuildStop(storage, owner, succeeded);
+        Store.IndexPagesReclaimed = (owner, pages) => GraphDatabaseEventSource.Log.PagesReclaimed(storage, owner, pages);
+        Store.ReclamationCheckpointDue = () => engine.CheckpointNeededSignal.IsSet || storage.IsCheckpointDue(engine.EngineOptions.CheckpointInterval);
         if (recovery is not null)
         {
             // The stop closes the activity the start opened on this flow even when the recovery

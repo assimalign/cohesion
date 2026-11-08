@@ -123,6 +123,8 @@ public sealed partial class GraphDatabase
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
+        GraphIndexBuildLimitException budget => new DatabaseException(error.Message, [new Types.Diagnostic
+            { Code = budget.Code, Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         GraphElementTooLargeException => new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = "CG02009", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         _ when DatabaseFailure.Find<StorageException>(error) is not null || DatabaseFailure.Find<System.IO.IOException>(error) is not null

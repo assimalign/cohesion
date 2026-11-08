@@ -16,8 +16,8 @@ AnalyzeAndScrub can append to the journal. Exact and text indexes on one pair ha
 
 CREATE TEXT INDEX and DROP INDEX wait for journal admission outside catalog/directory monitors;
 metadata and data reads remain available (#1283). A backfill already admitted when J/2 is crossed
-drains its one physical bracket and mandatory logical commit. That bracket can exceed J by its
-entire bounded build; J is not a per-bracket byte cap. No further physical bracket is admitted
+drains its current 64-entry physical chunk. Later chunks wait outside the apply gate until
+a checkpoint completes. The admitted chunk can exceed J by its bounded work; J is not a per-bracket byte cap. No further physical bracket is admitted
 during the pause. Ordinary posting maintenance waits and resumes once; a held-checkpoint
 reclamation pass yields through the coordinator's non-waiting IndexPrune admission.
 
@@ -113,8 +113,7 @@ retirement path; fixed label/type/adjacency trees are excluded. Tests assert eac
 and the exact total reclaimed owner-page count. IndexOwnerPagesReclaimed counts both exact and text owner pages, separately from
 the existing version-purge event's version count. No Indexing API or B-tree format assumption is added.
 
-Crash boundaries are label discovery, kind-4 catalog publication, property discovery, atomic
-backfill/tree-definition/registration publication, node/posting replacement or deletion,
+Crash boundaries are label discovery, kind-4 catalog publication, property discovery, durable root/registration creation, every durable 64-entry backfill chunk, final tree-definition publication, node/posting replacement or deletion,
 logical commit record before flush confirmation and confirmed commit; drop has catalog and
 physical-definition tombstones plus logical commit. Reclamation boundaries are the committed
 negative-root receipt, owner-page retyping before commit, confirmed page-batch commit,
@@ -136,6 +135,27 @@ TrigramIndexReader.java:65-67 requires the store filter. Cohesion deliberately s
 patterns as specified by the owner. The new internal helpers keep Storage's dependency
 boundary and the concrete-first Database rule; no public interface or assembly reference is
 added. Existing CG02009, CG05004, CG05020, CG06006 and CG06019 keep their conditions.
+
+## Shared index substrate (#1808)
+
+Direct GraphStore builds use the existing 1,000,000-work-unit and 256 MiB defaults; session
+builds use their configured grants. Budget refusal precedes root allocation. Direct calls report
+GraphIndexBuildLimitException with the existing CG05004/CG05020 code; the model root preserves it.
+
+Exact and text builds use IndexBuildLoop's 64-entry durable chunks after the existing work
+and memory preflight. The writer reservation and logical creator span the root bracket,
+chunks and single final definition publication. A root/registration survives an abandoned
+build as an orphan; the existing receipt worker retires it below the safe horizon. Reclamation
+now yields before each candidate/page batch to size/interval checkpoints, pending checkpoint
+signals and admission pauses. Maintenance owns the coordinator apply gate already; the shared
+physical freeing helper does not recursively acquire it. The registry/rebuild lock order,
+read-only discriminator/liveness preflight and receipt validation remain unchanged.
+Graph catalog v4, record format 5 and B-tree format 3 remain current: these lifecycle changes
+introduce no new persisted discriminator. Start/stop events 16/17 carry database, physical
+objectId and succeeded on stop; PagesReclaimed (18, #1842) reports each committed owner-page
+batch. No indexed value is emitted and no diagnostic identity is added.
+With 8,176 identical postings and a 64 KiB checkpoint trigger, the controlled whole-bracket
+backfill measured 379,872 journal bytes versus 207,780 with 128 shared-loop chunks.
 
 ## Journal admission backstop (#1283, EN-C2)
 
@@ -3470,6 +3490,9 @@ four servers.
 | 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code` (first Error diagnostic, otherwise the first diagnostic; empty when absent), `exceptionType` |
 | 13 | `StatementCleanupFailed` | Warning | — | `database`, `exceptionType`; snapshot-pin cleanup failed after a successful autocommit |
 | 15 | `PathPhaseCompleted` | Verbose | `Sessions` | `sessionId`, `phase`, `durationMilliseconds` |
+| 16 | `IndexBuildStart` | Informational | — | `database`, `objectId` |
+| 17 | `IndexBuildStop` | Informational | — | `database`, `objectId`, `succeeded` |
+| 18 | `PagesReclaimed` | Informational | — | `database`, `objectId`, `pages` |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,

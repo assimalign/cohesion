@@ -109,7 +109,9 @@ public sealed class GraphTextIndexAdmissionIntegrationTests
             pages.ShouldBeGreaterThan(0);
             await Task.Run(() => database.Coordinator.RunVersionPurgePass(guard.Token), guard.Token).WaitAsync(guard.Token);
             database.DataStorage.GetOwnerIndexPages(id).Count.ShouldBe(pages);
-            gate.JournalSizeLimit = 0; retiredHolder.Rollback(); database.Coordinator.Checkpoint(guard.Token);
+            gate.JournalSizeLimit = 0; retiredHolder.Rollback();
+            database.DataStorage.CheckpointJournalSize = 0;
+            database.Coordinator.Checkpoint(guard.Token);
             database.Coordinator.RunVersionPurgePass(guard.Token);
             database.DataStorage.GetOwnerIndexPages(id).ShouldBeEmpty();
         }
@@ -138,20 +140,23 @@ public sealed class GraphTextIndexAdmissionIntegrationTests
             gate.ObserveAdmissionPause().ShouldBeTrue();
             beginsAtPause = database.DataStorage.WriteAheadJournal.ReadAll().Count(r => r.Type == JournalRecordType.BeginTransaction);
         };
+        using var admissionEvents = RecordAdmission();
         var building = Task.Run(async () => await session.ExecuteAsync("CREATE TEXT INDEX t FOR (n:N) ON (n.p)", cancellationToken: guard.Token), guard.Token);
         try
         {
-            // Act: catalog metadata preceded the build. Its admitted bracket and the
-            // mandatory logical commit drain even while the checkpoint remains held.
-            await building.WaitAsync(guard.Token);
+            // Act: the first admitted chunk drains, then the next chunk waits outside
+            // the apply gate until a checkpoint can end the pause.
+            await WaitForAdmissionAsync(admissionEvents, guard.Token);
+            building.IsCompleted.ShouldBeFalse();
             // Assert: only the admitted build bracket grew past J, by its measured bytes.
-            inserted.ShouldBe(8 * 1022); gate.IsAdmissionPaused.ShouldBeTrue();
+            inserted.ShouldBe(64); gate.IsAdmissionPaused.ShouldBeTrue();
             database.DataStorage.WriteAheadJournal.ReadAll().Count(r => r.Type == JournalRecordType.BeginTransaction).ShouldBe(beginsAtPause);
             long peak = database.DataStorage.JournalLength;
             peak.ShouldBeGreaterThan(2);
             _output.WriteLine($"TEXT_BUILD_BRACKET|entries={inserted}|J=2|journal={peak}|additionalBrackets=0");
             gate.JournalSizeLimit = 0; holder.Rollback(); database.Coordinator.Checkpoint(guard.Token);
             await building.WaitAsync(guard.Token);
+            inserted.ShouldBe(8 * 1022);
             (await GraphSchema.Open(database, session).GetIndexesAsync(guard.Token)).ShouldHaveSingleItem().IsText.ShouldBeTrue();
         }
         finally { database.Store.AfterTextIndexMutation = null; gate.JournalSizeLimit = 0; holder.Dispose(); await building.WaitAsync(guard.Token); }
