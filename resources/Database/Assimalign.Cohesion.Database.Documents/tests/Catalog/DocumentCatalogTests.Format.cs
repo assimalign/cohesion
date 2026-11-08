@@ -17,11 +17,13 @@ namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
 
 public sealed partial class DocumentCatalogTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - V1 and v2 index records are refused before recovery writes (#1530)")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - Earlier index records are refused before recovery writes (#1530)")]
     [InlineData((byte)4, (byte)1)]
     [InlineData((byte)5, (byte)1)]
     [InlineData((byte)4, (byte)2)]
     [InlineData((byte)5, (byte)2)]
+    [InlineData((byte)4, (byte)3)]
+    [InlineData((byte)5, (byte)3)]
     public async Task EnsureIndexFormat_EarlierIndexRecord_ShouldRefuseWithoutWritesAsync(byte kind, byte version)
     {
         // Arrange: hand-build a v1 header on an otherwise current physical record.
@@ -67,7 +69,7 @@ public sealed partial class DocumentCatalogTests
         var error = Should.Throw<DocumentCatalogException>(() => DocumentCatalog.EnsureIndexFormat(fixture.Storage));
 
         // Assert.
-        error.Message.ShouldContain($"found {version}, supported 3");
+        error.Message.ShouldContain($"found {version}, supported 4");
         error.Message.ShouldContain("Recreate");
         fixture.Data.ToArray().ShouldBe(before);
         fixture.Journal.ToArray().ShouldBe(journal);
@@ -110,7 +112,7 @@ public sealed partial class DocumentCatalogTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Catalog] - Composite UNIQUE records round trip on reopen (#1135)")]
-    public async Task Open_CompositeUniqueIndex_ShouldRoundTripV3RecordsAsync()
+    public async Task Open_CompositeUniqueIndex_ShouldRoundTripV4RecordsAsync()
     {
         // Arrange.
         await using var fixture = await Fixture.Create();
@@ -129,7 +131,7 @@ public sealed partial class DocumentCatalogTests
         actual.Paths.ShouldBe(["a", "b[0]", "['x.y']"]);
         using var registrations = fixture.Storage.GetUnitIterator(1);
         registrations.MoveNext().ShouldBeTrue();
-        registrations.Current.Data.Span[17].ShouldBe((byte)3);
+        registrations.Current.Data.Span[17].ShouldBe((byte)4);
         registrations.Current.Data.Span[^1].ShouldBe((byte)1);
         await fixture.Coordinator.CommitAsync(reader);
     }

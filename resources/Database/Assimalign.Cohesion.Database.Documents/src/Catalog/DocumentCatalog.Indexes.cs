@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.ExceptionServices;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
@@ -11,6 +12,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
@@ -25,6 +27,10 @@ public sealed partial class DocumentCatalog
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
     private readonly Dictionary<ulong, bool> _uniqueIndexes = new();
     private BTreeIndexManager _indexes = null!;
+    internal Action<ulong>? IndexBuildStarted { get; set; }
+    internal Action<ulong, bool>? IndexBuildStopped { get; set; }
+    internal Action<ulong, int>? IndexPagesReclaimed { get; set; }
+    internal long IndexBuildMemoryBudget { get; set; } = 256L * 1024 * 1024;
 
     // Instance-local fault/cancellation seam; each callback observes a completed
     // posting application inside the still-uncommitted physical bracket.
@@ -73,6 +79,7 @@ public sealed partial class DocumentCatalog
     /// encodes beyond the index key limit, or the encoded definition exceeds 8,092 bytes (CD03026).
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the build applied.</exception>
+    /// <exception cref="DocumentCatalogException">Build workspace exceeds the configured statement memory budget (CD05018).</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the build was applied.</exception>
     public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, string path,
         TransactionContext context, CancellationToken cancellationToken = default)
@@ -121,6 +128,7 @@ public sealed partial class DocumentCatalog
     /// <exception cref="InvalidOperationException">The context is not active.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended before publication.</exception>
     /// <exception cref="OperationCanceledException">The build was canceled.</exception>
+    /// <exception cref="DatabaseException">Build workspace exceeds the configured statement memory budget (CD05018).</exception>
     public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, IReadOnlyList<DocumentIndexKey> keys,
         bool isUnique, bool includeMissing, TransactionContext context, CancellationToken cancellationToken = default)
     {
@@ -151,13 +159,31 @@ public sealed partial class DocumentCatalog
         var encoded = DocumentCatalogCodec.Encode(new CatalogRecord(null, null, metadata), context.Sequence);
         if (encoded.Length > SlottedPage.MaxRecordSize)
         { throw new DocumentCatalogException("CD03026", ErrorMessages.IndexDefinitionTooLarge); }
+        var memory = new IndexBuildBudget(IndexBuildMemoryBudget, cancellationToken, limit =>
+            new DocumentCatalogException("CD05018", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AggregateMemoryExceeded, limit)));
+        memory.Charge(64);
         var documents = new List<(DocumentCatalogEntry Document, Reference Reference)>();
         lock (_sync)
         {
-            foreach (var document in GetDocuments(collectionId, null, context.Snapshot))
+            // Charge the name snapshot before growth. GetDocuments materializes and sorts
+            // its whole result before returning, so it cannot provide bounded admission.
+            using var namesGrant = memory.Reserve();
+            namesGrant.Charge(64);
+            var names = new List<string>();
+            foreach (var key in _documents.Keys)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var found = FindDocumentVersion(collectionId, document.Id, context.Snapshot)!.Value;
+                if (key.CollectionId != collectionId) { continue; }
+                namesGrant.Charge(48);
+                names.Add(key.Name);
+            }
+            names.Sort(StringComparer.Ordinal);
+            foreach (string documentName in names)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (FindDocumentVersion(collectionId, documentName, context.Snapshot) is not { } found) { continue; }
+                var document = found.Record.Document!.Value;
+                memory.Charge(256L + document.Id.Length * 2L);
                 documents.Add((document, found.Reference));
             }
         }
@@ -168,43 +194,73 @@ public sealed partial class DocumentCatalog
             var uniqueKeys = new HashSet<IndexKey>();
             foreach (var (document, _) in documents)
             {
-                foreach (var key in KeysFor(document, metadata, out bool distinct, cancellationToken))
+                using var extraction = memory.Reserve();
+                foreach (var key in KeysFor(document, metadata, out bool distinct, cancellationToken, extraction.Charge))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    memory.Charge(128L + key.Length);
                     if (!distinct && !uniqueKeys.Add(key)) { throw Duplicate(metadata, context.Snapshot); }
                 }
             }
         }
-        var location = await ApplyAsync(context, async bracket =>
+        IndexBuildStarted?.Invoke(metadata.ObjectId);
+        bool buildSucceeded = false;
+        try
         {
-            // The catalog pre-check implements NULLS DISTINCT under the writer lock;
-            // physical trees remain nonunique even when registrations persist UNIQUE.
-            var index = await _indexes.CreateIndexAsync(context, metadata.ObjectId, new IndexDefinition(name), cancellationToken).ConfigureAwait(false);
-            _uniqueIndexes[metadata.ObjectId] = metadata.IsUnique;
-            int applied = 0;
-            foreach (var (document, reference) in documents)
+            var index = await ApplyAsync(context, async bracket =>
             {
-                var documentKeys = KeysFor(document, metadata, out _, cancellationToken);
-                IndexBuildPostingsBuffered?.Invoke(documentKeys.Count);
-                foreach (var key in documentKeys)
+                var created = await _indexes.CreateIndexAsync(context, metadata.ObjectId, new IndexDefinition(name), cancellationToken).ConfigureAwait(false);
+                _uniqueIndexes[metadata.ObjectId] = metadata.IsUnique;
+                SaveRegistrations(bracket);
+                return created;
+            }, cancellationToken, durable: true).ConfigureAwait(false);
+            AfterIndexRetirementMutation?.Invoke("build-root");
+            int applied = 0;
+            IEnumerable<(Reference Reference, IndexKey Key)> Entries()
+            {
+                foreach (var (document, reference) in documents)
                 {
-                    // Preserve source stamps so a newly visible definition agrees with scans.
-                    await index.InsertVersionAsync(bracket, key,
-                        DocumentStorage.PackLocation(reference.PageId, reference.SlotIndex),
-                        reference.Writer, TransactionSequence.None, cancellationToken).ConfigureAwait(false);
-                    AfterIndexPostingApplied?.Invoke(++applied);
+                    using var extraction = memory.Reserve();
+                    var keys = KeysFor(document, metadata, out _, cancellationToken, extraction.Charge);
+                    IndexBuildPostingsBuffered?.Invoke(keys.Count);
+                    foreach (var key in keys) { yield return (reference, key); }
                 }
             }
-            cancellationToken.ThrowIfCancellationRequested();
-            var inserted = _storage.InsertEntry(bracket, encoded);
-            _coordinator.VersionStore.RecordCreated(context.Sequence, inserted.PageId, inserted.SlotIndex);
-            SaveRegistrations(bracket);
-            return inserted;
-        }, cancellationToken).ConfigureAwait(false);
-        lock (_sync)
-        {
-            Add(new CatalogRecord(null, null, metadata), new Reference(location.PageId, location.SlotIndex, context.Sequence));
+            await IndexBuildLoop.RunAsync(Entries(), async (chunk, token) =>
+            {
+                await ApplyAsync(context, async bracket =>
+                {
+                    foreach (var entry in chunk)
+                    {
+                        await index.InsertVersionAsync(bracket, entry.Key,
+                            DocumentStorage.PackLocation(entry.Reference.PageId, entry.Reference.SlotIndex),
+                            entry.Reference.Writer, TransactionSequence.None, token).ConfigureAwait(false);
+                        AfterIndexPostingApplied?.Invoke(++applied);
+                    }
+                    return true;
+                }, token, durable: true).ConfigureAwait(false);
+                AfterIndexRetirementMutation?.Invoke("build-chunk");
+            }, async token =>
+            {
+                var location = await ApplyAsync(context, bracket =>
+                {
+                    var inserted = _storage.InsertEntry(bracket, encoded);
+                    _coordinator.VersionStore.RecordCreated(context.Sequence, inserted.PageId, inserted.SlotIndex);
+                    return new ValueTask<(PageId PageId, int SlotIndex)>(inserted);
+                }, token).ConfigureAwait(false);
+                lock (_sync)
+                {
+                    Add(new CatalogRecord(null, null, metadata), new Reference(location.PageId, location.SlotIndex, context.Sequence));
+                }
+            }, cancellationToken, beginChunk: () =>
+            {
+                var chunk = memory.Reserve();
+                try { chunk.Charge(80L + IndexBuildLoop.ChunkSize * 1120L); return chunk; }
+                catch { chunk.Dispose(); throw; }
+            }).ConfigureAwait(false);
+            buildSucceeded = true;
         }
+        finally { IndexBuildStopped?.Invoke(metadata.ObjectId, buildSucceeded); }
         return metadata;
     }
 
@@ -412,12 +468,13 @@ public sealed partial class DocumentCatalog
     }
 
     private HashSet<IndexKey> KeysFor(DocumentCatalogEntry document, DocumentIndexMetadata metadata, out bool distinct,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Action<long>? reserve = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        reserve?.Invoke(document.Length);
         BeforeIndexKeysRead?.Invoke(Monitor.IsEntered(_sync));
         return DocumentIndexKeys.Read(_storage.ReadContent(new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum)),
-            metadata, out distinct, cancellationToken);
+            metadata, out distinct, cancellationToken, reserve);
     }
 
     private DocumentConstraintViolationException Duplicate(DocumentIndexMetadata metadata, TransactionSnapshot snapshot)
@@ -474,7 +531,7 @@ public sealed partial class DocumentCatalog
             ? index : throw new DocumentCatalogException("CD06105", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogResolveIndexDocumentCatalog, metadata.Name));
 
     private async ValueTask<T> ApplyAsync<T>(TransactionContext context,
-        Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
+        Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken, bool durable = false)
     {
         // Lock/latch order: caller's database writer lock -> coordinator apply
         // gate -> B-tree latch -> storage page latch. Key preparation may take
@@ -483,7 +540,7 @@ public sealed partial class DocumentCatalog
         // cursors release their tree latch before we read catalog/content pages.
         try
         {
-            return await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return await _coordinator.ApplyStatementAsync(context, apply, durable: durable, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -494,27 +551,46 @@ public sealed partial class DocumentCatalog
         }
     }
 
-    internal ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
-        => _indexes.PruneAsync(bound, cancellationToken);
+    internal async ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+    {
+        ExceptionDispatchInfo? failure = null;
+        long pruned = 0;
+        try { ReclaimIndexes(bound, cancellationToken); }
+        catch (Exception error) when (error is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        { failure = ExceptionDispatchInfo.Capture(error); }
+        try { pruned = await _indexes.PruneAsync(bound, cancellationToken).ConfigureAwait(false); }
+        catch (Exception error) when (error is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        { failure ??= ExceptionDispatchInfo.Capture(error); }
+        failure?.Throw();
+        return pruned;
+    }
 
     private void OpenIndexes()
     {
-        _registrations.Clear();
-        _uniqueIndexes.Clear();
-        var registrations = new List<BTreeIndexRegistration>();
-        foreach (var (registration, page, slot, isUnique) in ReadRegistrations(_storage))
+        lock (_indexRegistrySync)
         {
-            registrations.Add(registration);
-            _uniqueIndexes.Add(registration.ObjectId, isUnique);
-            _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
+            _registrations.Clear();
+            _uniqueIndexes.Clear();
+            var registrations = new List<BTreeIndexRegistration>();
+            foreach (var (registration, page, slot, isUnique) in ReadRegistrations(_storage))
+            {
+                if (registration.RootPageId < 0 && IndexRetirementStatus(registration.ObjectId, _coordinator.PruneBound, true) == 0)
+                { throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationInvalid); }
+                if (registration.RootPageId > 0) { registrations.Add(registration); }
+                _uniqueIndexes.Add(registration.ObjectId, isUnique);
+                _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
+                ScheduleIndexRetirement(registration.ObjectId);
+            }
+            _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+            {
+                Storage = _storage,
+                TransactionSource = ResolveStatementBracket,
+                PruneBound = () => _coordinator.PruneBound,
+                ExistingIndexes = registrations
+            });
         }
-        _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
-        {
-            Storage = _storage,
-            TransactionSource = ResolveStatementBracket,
-            PruneBound = () => _coordinator.PruneBound,
-            ExistingIndexes = registrations
-        });
     }
 
     private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot, bool IsUnique)> ReadRegistrations(DocumentStorage storage)
@@ -538,9 +614,14 @@ public sealed partial class DocumentCatalog
                 long root = reader.ReadInt64();
                 string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationNameMissing);
                 byte flags = reader.ReadByte();
-                if (flags > 1 || objectId == 0 || root <= 0 || stream.Position != stream.Length || !objectIds.Add(objectId))
+                if (flags > 1 || objectId <= 1 || root == 0 || root == long.MinValue || stream.Position != stream.Length || !objectIds.Add(objectId))
                 {
                     throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationInvalid);
+                }
+                if (root > 0)
+                {
+                    using var page = storage.PageManager.GetPage((PageId)root);
+                    if (page.Page.OwnerId != objectId) { throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationInvalid); }
                 }
                 registrations.Add((new BTreeIndexRegistration(objectId, new IndexDefinition(name), root), unit.PageId, unit.SlotIndex, flags == 1));
             }
@@ -582,6 +663,7 @@ public sealed partial class DocumentCatalog
             {
                 var location = _storage.InsertIndexRegistration(bracket, bytes);
                 _registrations[registration.ObjectId] = (location.PageId, location.SlotIndex, registration.RootPageId);
+                ScheduleIndexRetirement(registration.ObjectId);
             }
         }
     }

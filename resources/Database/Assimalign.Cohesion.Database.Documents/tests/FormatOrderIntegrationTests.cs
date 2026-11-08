@@ -34,7 +34,7 @@ public sealed class FormatOrderIntegrationTests
                         await engine.OpenDatabaseAsync("probe", CancellationToken.None));
                     failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06105");
                     failure.Message.ShouldNotContain("CK06101", Case.Sensitive);
-                    failure.Message.ShouldContain("Document catalog kind 4 format: found 2, supported 3", Case.Sensitive);
+                    failure.Message.ShouldContain("Document catalog kind 4 format: found 2, supported 4", Case.Sensitive);
                 }
                 FormatProbeCrash.AssertUnchanged(root, before);
             }

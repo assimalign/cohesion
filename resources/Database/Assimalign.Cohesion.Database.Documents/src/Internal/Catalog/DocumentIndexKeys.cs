@@ -20,9 +20,15 @@ internal static class DocumentIndexKeys
     // Each component begins with a Documents-owned collation byte. Scalar payloads
     // retain DatabaseKeyWriter's self-delimiting representation; no tag is 0xFF.
     internal static HashSet<IndexKey> Read(ReadOnlyMemory<byte> content, DocumentIndexMetadata metadata,
-        out bool distinct, System.Threading.CancellationToken cancellationToken = default)
+        out bool distinct, System.Threading.CancellationToken cancellationToken = default, Action<long>? reserve = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (reserve is not null)
+        {
+            long pathCharacters = 0;
+            foreach (var key in metadata.Keys) { pathCharacters += key.Path.Length + (key.ArraySource?.Length ?? 0); }
+            reserve(1024L + content.Length * 16L + pathCharacters * 80L);
+        }
         using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 128 });
         var result = new HashSet<IndexKey>();
         var paths = new Dictionary<string, List<object>>(StringComparer.Ordinal);
@@ -45,15 +51,16 @@ internal static class DocumentIndexKeys
             { distinct = false; return result; }
             components[i] = Component(value, value.ValueKind, metadata, key.Path, ref unknown);
         }
-        if (arrayIndex < 0) { Add(default); }
+        if (arrayIndex < 0) { reserve?.Invoke(8192); Add(default); }
         else
         {
             var key = metadata.Keys[arrayIndex];
             var source = Navigate(document.RootElement, Path(key.ArraySource!));
-            if (source.ValueKind == JsonValueKind.Undefined) { Add(default); }
+            if (source.ValueKind == JsonValueKind.Undefined) { reserve?.Invoke(8192); Add(default); }
             else if (source.ValueKind != JsonValueKind.Array)
             {
                 // ARRAY over a present non-array produces NULL, matching #1728.
+                reserve?.Invoke(8192);
                 Add(default, JsonValueKind.Null);
             }
             else
@@ -66,6 +73,7 @@ internal static class DocumentIndexKeys
                     // Comprehensions omit MISSING projections. This restricted index
                     // stores scalar projections only, never lossy complex element tags.
                     if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Array or JsonValueKind.Object) { continue; }
+                    reserve?.Invoke(8192);
                     Add(value);
                 }
             }

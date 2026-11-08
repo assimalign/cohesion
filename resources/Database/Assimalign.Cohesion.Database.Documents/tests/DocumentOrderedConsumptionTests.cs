@@ -175,13 +175,20 @@ public sealed class DocumentOrderedConsumptionTests
     public async Task Execute_OversizedTieBucket_ShouldFailBudgetBeforeFetchingAndReleaseStatementAsync()
     {
         // Arrange: even LIMIT 1 must retain this whole metadata bucket before emitting.
-        await using var engine = DocumentDatabaseEngine.Create("ordered-budget", new() { StatementMemoryBudget = 16 * 1024 });
-        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        await using (var seed = DocumentDatabaseEngine.Create("ordered-budget-seed", new() { StorageStrategy = strategy }))
+        {
+            var source = await seed.CreateDatabaseAsync("test", CancellationToken.None);
+            await using var writer = await source.CreateSessionAsync(CancellationToken.None);
+            var collection = await writer.CreateCollectionAsync("items", CancellationToken.None);
+            for (int i = 0; i < 128; i++)
+            { await collection.PutAsync(writer, i.ToString("D3"), "{\"v\":1}"u8.ToArray(), cancellationToken: CancellationToken.None); }
+            await writer.ExecuteAsync("CREATE INDEX ix ON items (v INCLUDE MISSING)", cancellationToken: CancellationToken.None);
+        }
+        // Backfill has its own bounded grant now; the 16 KiB grant below still tests only consumption.
+        await using var engine = DocumentDatabaseEngine.Create("ordered-budget", new() { StorageStrategy = strategy, StatementMemoryBudget = 16 * 1024 });
+        var database = await engine.OpenDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
-        for (int i = 0; i < 128; i++)
-        { await collection.PutAsync(session, i.ToString("D3"), "{\"v\":1}"u8.ToArray(), cancellationToken: CancellationToken.None); }
-        await session.ExecuteAsync("CREATE INDEX ix ON items (v INCLUDE MISSING)", cancellationToken: CancellationToken.None);
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT META().id FROM items ORDER BY v LIMIT 1", cancellationToken: CancellationToken.None));

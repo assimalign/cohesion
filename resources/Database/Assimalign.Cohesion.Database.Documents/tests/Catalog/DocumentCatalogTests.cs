@@ -325,7 +325,7 @@ public sealed partial class DocumentCatalogTests
         registrations.MoveNext().ShouldBeTrue();
         var registration = registrations.Current.Data;
         registration.Span[16].ShouldBe((byte)5);
-        registration.Span[17].ShouldBe((byte)3);
+        registration.Span[17].ShouldBe((byte)4);
         BinaryPrimitives.ReadUInt64LittleEndian(registration.Span[18..]).ShouldBe(metadata.ObjectId);
         long rootPage = BinaryPrimitives.ReadInt64LittleEndian(registration.Span[26..]);
         registrations.MoveNext().ShouldBeFalse();
