@@ -46,8 +46,11 @@ public sealed class SqlTableReclamationWireTests
                 await connection.ExecuteAsync("INSERT INTO users VALUES (3, 'after-drop', 300)", cancellationToken: timeout.Token);
                 events.Events.ShouldNotContain(entry => entry.EventId == 24);
                 await old.ExecuteAsync("COMMIT", cancellationToken: timeout.Token);
-                while (!events.Events.Any(entry => entry.EventId == 24)) { await Task.Delay(5, timeout.Token); }
-                reclaimed = (long)events.Events.Single(entry => entry.EventId == 24).Payload![3]!;
+                while (events.Events.Count(entry => entry.EventId == 24) < 2) { await Task.Delay(5, timeout.Token); }
+                var completed = events.Events.Where(entry => entry.EventId == 24).ToArray();
+                completed.Length.ShouldBe(2);
+                completed.Select(entry => entry.Payload![2]).Distinct().Count().ShouldBe(2);
+                reclaimed = completed.Sum(entry => (long)entry.Payload![3]!);
                 reclaimed.ShouldBeGreaterThan(32);
                 await connection.ExecuteAsync("CREATE TABLE retired (id INT PRIMARY KEY, payload VARCHAR(2000))", cancellationToken: timeout.Token);
                 await FillAsync(connection, timeout.Token);
@@ -61,7 +64,10 @@ public sealed class SqlTableReclamationWireTests
                 using var events = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Sql"), EventLevel.Informational);
                 await using var connection = await harness.Client.ConnectAsync(timeout.Token);
                 await connection.ExecuteAsync("DROP TABLE retired", cancellationToken: timeout.Token);
-                while (!events.Events.Any(entry => entry.EventId == 24)) { await Task.Delay(5, timeout.Token); }
+                while (events.Events.Count(entry => entry.EventId == 24) < 2) { await Task.Delay(5, timeout.Token); }
+                var completed = events.Events.Where(entry => entry.EventId == 24).ToArray();
+                completed.Select(entry => entry.Payload![2]).Distinct().Count().ShouldBe(2);
+                completed.Sum(entry => (long)entry.Payload![3]!).ShouldBe(reclaimed);
             }
             using var storage = SqlStorage.Open(File.Open(dataFile, FileMode.Open, FileAccess.ReadWrite),
                 File.Open(Path.Combine(path, "app", "sql.log"), FileMode.Open, FileAccess.ReadWrite),

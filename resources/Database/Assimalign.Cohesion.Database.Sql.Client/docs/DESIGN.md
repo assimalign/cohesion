@@ -172,6 +172,9 @@ FK sets, CS04066 inside BEGIN, identity continuity/restart, and usable connectio
 Engine-owned wire tests also run reclamation while the old snapshot remains active and verify
 no frees until it ends. No client surface, result shape or protocol version changes.
 
+DROP TABLE wire reclamation checks wait for both heap and separately owned primary-tree
+completion before asserting exact page frees and reuse without file growth (#1808).
+
 ## Quantified comparisons (#1718)
 
 Grouping sets (#1720, SQ-H2) use the existing execute exchange. InMemory and TCP

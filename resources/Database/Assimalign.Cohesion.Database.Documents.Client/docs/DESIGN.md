@@ -117,6 +117,9 @@ the forced-sort control across complete duplicate prefixes and residual rejectio
 transports; dynamic projections preserve full-result type inference. The NativeAOT sample checks
 selected consumption and LIMIT/OFFSET execution. No client API, capability, codec or frame changes.
 
+The 16 KiB tie-bucket refusal fixture seeds its index under the normal build grant, then
+reopens the same file set at 16 KiB before testing query refusal and explicit rollback (#1808).
+
 ## Contract-only dependencies
 
 Direct references are Database.Client, Documents.Protocol, Database.Types, Database.Protocol, Database.Execution and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.

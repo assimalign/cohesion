@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -54,27 +56,37 @@ public sealed class DocumentOrderingWireTests
     [InlineData(true)]
     public async Task QueryAsync_OrderedBucketBudget_ShouldFailAndReuseConnectionAsync(bool tcp)
     {
-        // Arrange
-        await using var harness = await DocumentClientTestHarness.StartAsync(tcp,
-            configureEngine: builder => builder.Options.StatementMemoryBudget = 16 * 1024);
-        await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        await connection.CreateCollectionAsync("items", harness.Token);
-        for (int i = 0; i < 128; i++)
-        { await connection.PutAsync("items", i.ToString("D3"), "{\"v\":1}"u8.ToArray(), cancellationToken: harness.Token); }
-        await connection.ExecuteAsync("CREATE INDEX ix ON items (v INCLUDE MISSING)", cancellationToken: harness.Token);
-        await connection.ExecuteAsync("BEGIN", cancellationToken: harness.Token);
+        // Arrange: build the index with its normal grant, then test query consumption at 16 KiB.
+        string path = Path.Combine(Environment.CurrentDirectory, "_out", "ordered-wire-budget", Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var seed = await DocumentClientTestHarness.StartAsync(tcp,
+                configureEngine: builder => builder.Options.RootPath = path))
+            {
+                await using var seeded = await seed.Client.ConnectAsync(seed.Token);
+                await seeded.CreateCollectionAsync("items", seed.Token);
+                for (int i = 0; i < 128; i++)
+                { await seeded.PutAsync("items", i.ToString("D3"), "{\"v\":1}"u8.ToArray(), cancellationToken: seed.Token); }
+                await seeded.ExecuteAsync("CREATE INDEX ix ON items (v INCLUDE MISSING)", cancellationToken: seed.Token);
+            }
+            await using var harness = await DocumentClientTestHarness.StartAsync(tcp,
+                configureEngine: builder => { builder.Options.RootPath = path; builder.Options.StatementMemoryBudget = 16 * 1024; });
+            await using var connection = await harness.Client.ConnectAsync(harness.Token);
+            await connection.ExecuteAsync("BEGIN", cancellationToken: harness.Token);
 
-        // Act
-        var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
-            await connection.QueryAsync("SELECT META().id FROM items ORDER BY v LIMIT 1", cancellationToken: harness.Token));
+            // Act
+            var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
+                await connection.QueryAsync("SELECT META().id FROM items ORDER BY v LIMIT 1", cancellationToken: harness.Token));
 
-        // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05018");
-        var faulted = await Should.ThrowAsync<DocumentClientException>(async () =>
-            await connection.QueryAsync("SELECT 1 FROM items", cancellationToken: harness.Token));
-        faulted.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
-        await connection.ExecuteAsync("ROLLBACK", cancellationToken: harness.Token);
-        (await connection.GetAsync("items", "000", harness.Token)).ShouldNotBeNull();
+            // Assert
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05018");
+            var faulted = await Should.ThrowAsync<DocumentClientException>(async () =>
+                await connection.QueryAsync("SELECT 1 FROM items", cancellationToken: harness.Token));
+            faulted.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
+            await connection.ExecuteAsync("ROLLBACK", cancellationToken: harness.Token);
+            (await connection.GetAsync("items", "000", harness.Token)).ShouldNotBeNull();
+        }
+        finally { if (Directory.Exists(path)) { Directory.Delete(path, true); } }
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Both transports preserve null placement, alias ordering and paging (#1730)")]
