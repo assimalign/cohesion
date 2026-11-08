@@ -41,11 +41,12 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
         SqlClientObserver? observer = null,
         Action<SqlDatabaseEngineOptions>? configureEngine = null,
         bool reopen = false,
-        bool tcp = false)
+        bool tcp = false,
+        SqlDatabaseEngine? engine = null)
     {
         var engineOptions = new SqlDatabaseEngineOptions();
         configureEngine?.Invoke(engineOptions);
-        var engine = SqlDatabaseEngine.Create("sql-typed-client-e2e", engineOptions);
+        engine ??= SqlDatabaseEngine.Create("sql-typed-client-e2e", engineOptions);
 
         var database = reopen ? await engine.OpenDatabaseAsync(DatabaseName) : await engine.CreateDatabaseAsync(DatabaseName);
 

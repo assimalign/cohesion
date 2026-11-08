@@ -15,13 +15,19 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed class SqlPartialIndexThirdPassTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - Partial predicates: JSON representations check the converter's runtime slots (#1630)")]
-    [InlineData("JSONB", "CASE WHEN k>0 THEN 0 ELSE doc END")]
-    [InlineData("JSONB", "COALESCE(k,doc)")]
-    [InlineData("JSON", "CASE WHEN k>0 THEN 0 ELSE doc END")]
-    [InlineData("JSON", "COALESCE(k,doc)")]
-    [InlineData("native_doc", "CASE WHEN k>0 THEN 0 ELSE doc END")]
-    [InlineData("native_doc", "COALESCE(k,doc)")]
-    public async Task ExecuteAsync_JsonAlternativeCast_ShouldRefuseBeforeCallback(string type, string operand)
+    [InlineData("JSONB", "CASE WHEN k>0 THEN 0 ELSE doc END", "CS02080")]
+    [InlineData("JSONB", "COALESCE(k,doc)", "CS02080")]
+    [InlineData("JSON", "CASE WHEN k>0 THEN 0 ELSE doc END", "CS02080")]
+    [InlineData("JSON", "COALESCE(k,doc)", "CS02080")]
+    [InlineData("native_doc", "CASE WHEN k>0 THEN 0 ELSE doc END", "CS02080")]
+    [InlineData("native_doc", "COALESCE(k,doc)", "CS02080")]
+    [InlineData("JSONB", "CASE WHEN k>0 THEN NULL ELSE doc END", "CS05091")]
+    [InlineData("JSONB", "COALESCE(NULL,doc)", "CS05091")]
+    [InlineData("JSON", "CASE WHEN k>0 THEN NULL ELSE doc END", "CS05091")]
+    [InlineData("JSON", "COALESCE(NULL,doc)", "CS05091")]
+    [InlineData("native_doc", "CASE WHEN k>0 THEN NULL ELSE doc END", "CS05091")]
+    [InlineData("native_doc", "COALESCE(NULL,doc)", "CS05091")]
+    public async Task ExecuteAsync_JsonAlternativeCast_ShouldRefuseBeforeCallback(string type, string operand, string code)
     {
         // Arrange
         int calls = 0;
@@ -52,7 +58,7 @@ public sealed class SqlPartialIndexThirdPassTests
 
         // Assert
         calls.ShouldBe(0);
-        refusal.ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05091");
+        refusal.ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
         database.IndexManager.ExportRegistrations().ShouldBeEmpty();
     }
 

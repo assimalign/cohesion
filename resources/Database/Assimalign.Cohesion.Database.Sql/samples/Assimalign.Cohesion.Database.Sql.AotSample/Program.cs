@@ -508,7 +508,10 @@ internal static class Program
             new SqlFunctionContext(default, null, CancellationToken.None, DateTimeOffset.UnixEpoch).TransactionTimestamp, DateTimeOffset.UnixEpoch);
         Check<DateTimeOffset?>("in process: absent function timestamp (#1373)", default(SqlFunctionContext).TransactionTimestamp, null);
         CheckFailure("in process: non-Boolean WHERE (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE 1")), "CS02003");
-        CheckFailure("in process: mixed Boolean alternatives (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE COALESCE(TRUE, 1)")), "CS02003");
+        CheckFailure("in process: mixed Boolean alternatives (#1788)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE COALESCE(TRUE, 1)")), "CS02080");
+        Check("in process: common alternative conversions (#1788)", await RowsAsync(session,
+            "SELECT CASE WHEN FALSE THEN 1 ELSE 2.5 END, COALESCE(NULL::INT, '3'), COALESCE(CASE WHEN TRUE THEN 16777217 ELSE NULL::REAL END, 0::DOUBLE PRECISION)"), [[2.5m, 3, 16777216d]]);
+        CheckFailure("in process: skipped unknown alternative (#1788)", await FailureAsync(() => RowsAsync(session, "SELECT COALESCE(1, 'x')")), "CS02022");
         Check("in process: Boolean string literal (#1190)", await RowsAsync(session, "SELECT 1 WHERE 'YeS'"), [[1L]]);
         Check("in process: Boolean UNKNOWN (#1190)", await RowsAsync(session, "SELECT NULL AND TRUE, NULL OR FALSE, CASE WHEN NULL THEN 1 END"), [[null, null, null]]);
         Check("in process: FROM-less aggregate (#1373)", await RowsAsync(session, "SELECT COUNT(*) WHERE FALSE"), [[0L]]);

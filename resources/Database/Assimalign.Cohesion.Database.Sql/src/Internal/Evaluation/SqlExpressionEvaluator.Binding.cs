@@ -27,6 +27,8 @@ internal sealed partial class SqlExpressionEvaluator
     /// statement over an empty table, or one whose short-circuit skips the node, still succeeds.
     /// Missing parameters are the exception: the request contract rejects them during planning
     /// and binding, before a data row is read or written (#1102).
+    /// CASE/COALESCE common-type checks and unknown literal input conversions also run during
+    /// binding, including skipped alternatives (#1788).
     /// The walk checks the stack before it descends (#1151), as every expression walker does, so a
     /// tree the thread cannot walk fails the statement with <c>CS05004</c>.
     /// </para>
@@ -100,8 +102,8 @@ internal sealed partial class SqlExpressionEvaluator
     /// method (or the switch) is entered, on every call.
     /// </para>
     /// </remarks>
-    // Statistical arguments normalize numeric alternatives throughout this walk. The flag
-    // stays local to binding; ordinary expressions and child query scopes keep their rules.
+    // Statistical arguments retain their overload-specific normalization throughout this
+    // walk; ordinary alternatives use the shared per-node common-type conversions.
     private SqlBoundExpression Bind(SqlExpression expression, out SqlCollationCandidate collation, bool requireBoolean = false, bool statisticsInput = false)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -199,8 +201,8 @@ internal sealed partial class SqlExpressionEvaluator
             var types = new Dictionary<SqlExpression, DatabaseType>();
             var source = ValidateJsonOperand(binary.Left, selector: false, predicate: false, types);
             var selectorType = ValidateJsonOperand(binary.Right, selector: true, predicate: false, types);
-            var operand = BindJsonOperand(binary.Left, out _, statisticsInput, types);
-            var selector = BindJsonOperand(binary.Right, out var selectorCollation, statisticsInput, types);
+            var operand = BindAlternativeOperand(binary.Left, out _, statisticsInput, types, jsonPosition: true);
+            var selector = BindAlternativeOperand(binary.Right, out var selectorCollation, statisticsInput, types, jsonPosition: true);
             collation = binary.Operator == SqlBinaryOperator.JsonTextAccess ? selectorCollation : default;
             var step = new SqlBoundJsonStep(selector, selectorType, selectorType is DatabaseType.Int16 or DatabaseType.Int32, binary.Location);
             // Only adjacent AST arrows combine. CAST/COLLATE and all other expressions
@@ -239,8 +241,8 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     // Validate result alternatives, not their selection conditions or explicitly cast inputs.
-    // StaticTypeOf alone reports a single CASE/COALESCE alternative and maps unknown CLR
-    // parameter types to Null; neither can authorize every value a wrapper might return.
+    // Supplied unsupported CLR parameter values still map to Null in static typing.
+    // Unknown SQL literals instead convert at their CASE/COALESCE boundary.
     [MethodImpl(MethodImplOptions.NoInlining)]
     private DatabaseType ValidateBitwiseOperand(SqlExpression expression, string op, bool shiftCount = false)
     {
@@ -259,17 +261,24 @@ internal sealed partial class SqlExpressionEvaluator
                 ValidateBitwiseOperand(plus.Operand, op, shiftCount);
                 break;
             case SqlCaseExpression conditional:
-                foreach (var clause in conditional.WhenClauses) { ValidateBitwiseOperand(clause.Result, op, shiftCount); }
-                if (conditional.ElseResult is not null) { ValidateBitwiseOperand(conditional.ElseResult, op, shiftCount); }
+                foreach (var clause in conditional.WhenClauses) { ValidateBitwiseAlternative(clause.Result, op, shiftCount); }
+                if (conditional.ElseResult is not null) { ValidateBitwiseAlternative(conditional.ElseResult, op, shiftCount); }
                 break;
             case SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName):
-                foreach (var argument in call.Arguments) { ValidateBitwiseOperand(argument, op, shiftCount); }
+                foreach (var argument in call.Arguments) { ValidateBitwiseAlternative(argument, op, shiftCount); }
                 break;
             case SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase) && call.Arguments.Count > 0:
                 ValidateBitwiseOperand(call.Arguments[0], op, shiftCount);
                 break;
         }
         return type;
+    }
+
+    private void ValidateBitwiseAlternative(SqlExpression alternative, string op, bool shiftCount)
+    {
+        while (alternative is SqlCollateExpression collate) { alternative = collate.Operand; }
+        if (alternative is not SqlLiteralExpression { LiteralType: SqlLiteralType.String or SqlLiteralType.Null })
+        { ValidateBitwiseOperand(alternative, op, shiftCount); }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -733,8 +742,9 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindCase(SqlCaseExpression conditional, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput, Dictionary<SqlExpression, DatabaseType>? jsonTypes = null)
+    private SqlBoundExpression BindCase(SqlCaseExpression conditional, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput, Dictionary<SqlExpression, DatabaseType>? alternativeTypes = null, bool jsonPosition = false)
     {
+        alternativeTypes ??= new();
         SqlBoundExpression? input = null;
         SqlCollationCandidate inputCollation = default;
         if (conditional.Input is not null)
@@ -743,7 +753,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         // CASE conditions select a result; their collation does not describe that result.
-        var resultType = jsonTypes is not null ? JsonOperandType(conditional, types: jsonTypes) : StaticTypeOf(conditional);
+        var resultType = GroupedAlternativeBindingType(conditional, AlternativeResultType(conditional, types: alternativeTypes), jsonPosition);
         bool textResult = !requireBoolean && resultType == DatabaseType.String;
         var clauses = conditional.WhenClauses;
         var whens = new SqlBoundWhen[clauses.Count];
@@ -755,9 +765,8 @@ internal sealed partial class SqlExpressionEvaluator
             {
                 condition = BindCharacterComparand(clauses[index].Condition, condition, conditional.Input);
             }
-            var result = jsonTypes is not null ? BindJsonOperand(clauses[index].Result, out results[index], statisticsInput, jsonTypes)
-                : Bind(clauses[index].Result, out results[index], requireBoolean, statisticsInput: statisticsInput);
-            if (jsonTypes is not null) { result = CoerceJsonAlternative(clauses[index].Result, result, resultType, jsonTypes); }
+            var result = BindAlternativeOperand(clauses[index].Result, out results[index], statisticsInput, alternativeTypes, jsonPosition);
+            result = CoerceAlternative(clauses[index].Result, result, resultType, alternativeTypes, jsonPosition);
             if (textResult) { result = CharacterToText(clauses[index].Result, result); }
             whens[index] = new SqlBoundWhen(condition, result,
                 input is null ? default : SqlBoundCollation.Of(inputCollation, conditionCollation, _defaultCollation), clauses[index].Condition.Location);
@@ -766,9 +775,8 @@ internal sealed partial class SqlExpressionEvaluator
         SqlBoundExpression? elseResult = null;
         if (conditional.ElseResult is not null)
         {
-            elseResult = jsonTypes is not null ? BindJsonOperand(conditional.ElseResult, out results[^1], statisticsInput, jsonTypes)
-                : Bind(conditional.ElseResult, out results[^1], requireBoolean, statisticsInput: statisticsInput);
-            if (jsonTypes is not null) { elseResult = CoerceJsonAlternative(conditional.ElseResult, elseResult, resultType, jsonTypes); }
+            elseResult = BindAlternativeOperand(conditional.ElseResult, out results[^1], statisticsInput, alternativeTypes, jsonPosition);
+            elseResult = CoerceAlternative(conditional.ElseResult, elseResult, resultType, alternativeTypes, jsonPosition);
             if (textResult) { elseResult = CharacterToText(conditional.ElseResult, elseResult); }
         }
 
@@ -789,7 +797,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// <c>src/backend/optimizer/util/clauses.c</c>); one that fails is left to fail when it is reached.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput, Dictionary<SqlExpression, DatabaseType>? jsonTypes = null)
+    private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput, Dictionary<SqlExpression, DatabaseType>? alternativeTypes = null, bool jsonPosition = false)
     {
         if (SqlSequenceExecution.IsFunction(call.FunctionName))
         {
@@ -806,7 +814,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             ValidateEvaluatorForm(call);
-            var operands = BindArguments(call.Arguments, out var specialCollation, statisticsInput, jsonTypes);
+            var operands = BindArguments(call.Arguments, out var specialCollation, statisticsInput, alternativeTypes, jsonPosition);
             collation = CollationOf(call, ChildCollations(call));
             // NULLIF uses equality's CHAR identity for untyped text, while returning the
             // original first value. PostgreSQL: src/backend/parser/parse_expr.c:1083.
@@ -843,20 +851,20 @@ internal sealed partial class SqlExpressionEvaluator
             return UnsupportedFunction(call.FunctionName, call.Location);
         }
 
+        if (coalesce) { alternativeTypes ??= new(); }
         var arguments = new SqlBoundExpression[call.Arguments.Count];
         var collations = new SqlCollationCandidate[arguments.Length];
         for (int index = 0; index < arguments.Length; index++)
         {
-            arguments[index] = jsonTypes is not null ? BindJsonOperand(call.Arguments[index], out collations[index], statisticsInput, jsonTypes)
+            arguments[index] = alternativeTypes is not null ? BindAlternativeOperand(call.Arguments[index], out collations[index], statisticsInput, alternativeTypes, jsonPosition)
                 : Bind(call.Arguments[index], out collations[index], requireBoolean && coalesce, statisticsInput: statisticsInput);
         }
 
         collation = CollationOf(call, collations);
         if (coalesce)
         {
-            var resultType = jsonTypes is not null ? JsonOperandType(call, types: jsonTypes) : StaticCallType(call);
-            if (jsonTypes is not null)
-            { for (int index = 0; index < arguments.Length; index++) { arguments[index] = CoerceJsonAlternative(call.Arguments[index], arguments[index], resultType, jsonTypes); } }
+            var resultType = GroupedAlternativeBindingType(call, AlternativeResultType(call, types: alternativeTypes), jsonPosition);
+            for (int index = 0; index < arguments.Length; index++) { arguments[index] = CoerceAlternative(call.Arguments[index], arguments[index], resultType, alternativeTypes!, jsonPosition); }
             if (!requireBoolean && resultType == DatabaseType.String)
             {
                 for (int index = 0; index < arguments.Length; index++)

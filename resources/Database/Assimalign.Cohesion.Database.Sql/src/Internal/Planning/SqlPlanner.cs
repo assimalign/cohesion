@@ -1587,28 +1587,8 @@ internal sealed partial class SqlPlanner
         RuntimeHelpers.EnsureSufficientExecutionStack();
         // ORDER BY aliases acquire their types in the completed output scope.
         if (boundValues is not null && ContainsBoundOutput(expression, boundValues)) { return; }
-        // PostgreSQL resolves all CASE/COALESCE alternatives before execution, including
-        // unreachable ones (parse_expr.c:1742,2244). Do not trust the first inferred type.
-        if (expression is SqlCaseExpression conditional)
-        {
-            foreach (var branch in conditional.WhenClauses)
-            {
-                ValidateBooleanOperand(branch.Result, evaluator, clause, boundSubqueries, boundValues);
-            }
-            if (conditional.ElseResult is { } alternative)
-            {
-                ValidateBooleanOperand(alternative, evaluator, clause, boundSubqueries, boundValues);
-            }
-            return;
-        }
-        if (expression is SqlFunctionCallExpression call && SqlStandardLibrary.IsCoalesce(call.FunctionName))
-        {
-            foreach (var argument in call.Arguments)
-            {
-                ValidateBooleanOperand(argument, evaluator, clause, boundSubqueries, boundValues);
-            }
-            return;
-        }
+        // CASE/COALESCE resolve their own common result before Boolean admission.
+        // An all-unknown result is TEXT, even when its literals spell TRUE/FALSE.
         if (SqlExpressionEvaluator.TryBooleanLiteral(expression, out _)) { return; }
         if (expression is SqlParameterExpression parameter &&
             evaluator.TryGetParameterValue(parameter, out var value) && value is not null && value is not bool)

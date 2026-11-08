@@ -55,17 +55,17 @@ public sealed class SqlBooleanPredicateTests
     [InlineData("SELECT 1 WHERE 1", "WHERE")]
     [InlineData("SELECT (SELECT 1 WHERE 1)", "WHERE")]
     [InlineData("WITH bad AS (SELECT 1 WHERE 1) SELECT 2", "WHERE")]
-    [InlineData("DELETE FROM t WHERE CASE WHEN TRUE THEN TRUE ELSE 1 END", "WHERE")]
-    [InlineData("DELETE FROM t WHERE TRUE OR COALESCE(TRUE, 1)", "OR")]
-    [InlineData("DELETE FROM t WHERE FALSE AND CASE WHEN TRUE THEN TRUE ELSE 1 END", "AND")]
-    [InlineData("SELECT 1 FROM t WHERE COALESCE(TRUE, 1)", "WHERE")]
-    [InlineData("SELECT 1 FROM t WHERE COALESCE(NULL, TRUE, 'invalid')", "WHERE")]
-    [InlineData("SELECT 1 FROM t WHERE CASE 1 WHEN 1 THEN TRUE ELSE 1 END", "WHERE")]
+    [InlineData("DELETE FROM t WHERE CASE WHEN TRUE THEN TRUE ELSE 1 END", "WHERE", "CS02080")]
+    [InlineData("DELETE FROM t WHERE TRUE OR COALESCE(TRUE, 1)", "OR", "CS02080")]
+    [InlineData("DELETE FROM t WHERE FALSE AND CASE WHEN TRUE THEN TRUE ELSE 1 END", "AND", "CS02080")]
+    [InlineData("SELECT 1 FROM t WHERE COALESCE(TRUE, 1)", "WHERE", "CS02080")]
+    [InlineData("SELECT 1 FROM t WHERE COALESCE(NULL, TRUE, 'invalid')", "WHERE", "CS02022")]
+    [InlineData("SELECT 1 FROM t WHERE CASE 1 WHEN 1 THEN TRUE ELSE 1 END", "WHERE", "CS02080")]
     [InlineData("SELECT 1 FROM t WHERE 'invalid'", "WHERE")]
     [InlineData("SELECT 1 FROM t WHERE TRUE OR 'invalid'", "OR")]
     [InlineData("SELECT 1 FROM t WHERE CAST('true' AS TEXT)", "WHERE")]
-    [InlineData("SELECT (CASE WHEN TRUE THEN TRUE ELSE 1 END) IS TRUE FROM t", "IS TRUE")]
-    public async Task ExecuteAsync_NonBooleanPredicate_ShouldFailBeforeReadingRows(string sql, string clause)
+    [InlineData("SELECT (CASE WHEN TRUE THEN TRUE ELSE 1 END) IS TRUE FROM t", "IS TRUE", "CS02080")]
+    public async Task ExecuteAsync_NonBooleanPredicate_ShouldFailBeforeReadingRows(string sql, string clause, string code = "CS02003")
     {
         foreach (bool populated in new[] { false, true })
         {
@@ -84,9 +84,9 @@ public sealed class SqlBooleanPredicateTests
 
             // Assert
             var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("CS02003");
+            diagnostic.Code.ShouldBe(code);
             diagnostic.Start.ShouldNotBeNull();
-            failure.Message.ShouldContain(clause, Case.Sensitive);
+            if (code == "CS02003") { failure.Message.ShouldContain(clause, Case.Sensitive); }
             session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
             (await SqlConstantSelectTests.RowsAsync(session, "SELECT COUNT(*) FROM t")).ShouldHaveSingleItem()[0].ShouldBe(populated ? 1L : 0L);
             await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None);
@@ -188,22 +188,22 @@ public sealed class SqlBooleanPredicateTests
         // Act
         var rows = await SqlConstantSelectTests.RowsAsync(session,
             $"SELECT '{literal}' AND TRUE, FALSE OR '{literal}', NOT '{literal}', CASE WHEN '{literal}' THEN TRUE ELSE FALSE END, '{literal}' IS TRUE");
-        var filtered = await SqlConstantSelectTests.RowsAsync(session,
-            $"SELECT 1 WHERE COALESCE(NULL, CASE WHEN TRUE THEN '{literal}' ELSE 'false' END) IS TRUE");
+        var failure = await Should.ThrowAsync<DatabaseException>(() => SqlConstantSelectTests.RowsAsync(session,
+            $"SELECT 1 WHERE COALESCE(NULL, CASE WHEN TRUE THEN '{literal}' ELSE 'false' END) IS TRUE"));
 
         // Assert
         rows.ShouldHaveSingleItem().ShouldBe(new object?[] { expected, expected, !expected, expected, expected });
-        filtered.Count.ShouldBe(expected ? 1 : 0);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02003");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - CHECK: all non-Boolean roots use CS02003 (#1190)")]
     [InlineData("CREATE TABLE t (a INT CHECK (a))")]
     [InlineData("CREATE TABLE t (a INT CHECK (a AND TRUE))")]
     [InlineData("CREATE TABLE t (a INT CHECK (NOT a))")]
-    [InlineData("CREATE TABLE t (a INT CHECK (COALESCE(TRUE, a)))")]
+    [InlineData("CREATE TABLE t (a INT CHECK (COALESCE(TRUE, a)))", "CS02080")]
     [InlineData("CREATE DOMAIN d AS INT CHECK (VALUE)")]
     [InlineData("CREATE DOMAIN d AS INT CHECK (VALUE OR FALSE)")]
-    public async Task ExecuteAsync_NonBooleanCheck_ShouldUseOperandDiagnostic(string sql)
+    public async Task ExecuteAsync_NonBooleanCheck_ShouldUseOperandDiagnostic(string sql, string code = "CS02003")
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("boolean-check", new());
@@ -215,7 +215,7 @@ public sealed class SqlBooleanPredicateTests
             await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02003");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         failure.Diagnostics[0].Start.ShouldNotBeNull();
     }
 

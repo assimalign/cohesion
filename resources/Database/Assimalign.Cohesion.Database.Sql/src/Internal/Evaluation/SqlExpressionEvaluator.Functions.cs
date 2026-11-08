@@ -124,10 +124,11 @@ internal sealed partial class SqlExpressionEvaluator
     /// <param name="arguments">The call's arguments.</param>
     /// <param name="collation">The collation the arguments' values compare under.</param>
     /// <param name="statisticsInput">Whether to normalize every numeric CASE/COALESCE boundary.</param>
-    /// <param name="jsonTypes">Resolved JSON-position types for NULLIF's first operand, when applicable.</param>
+    /// <param name="alternativeTypes">Resolved alternative types for NULLIF's first operand, when applicable.</param>
+    /// <param name="jsonPosition">Whether JSON's existing per-node conversions apply within grouped output.</param>
     /// <returns>The bound arguments.</returns>
     internal SqlBoundExpression[] BindArguments(IReadOnlyList<SqlExpression> arguments, out SqlBoundCollation collation, bool statisticsInput = false,
-        Dictionary<SqlExpression, DatabaseType>? jsonTypes = null)
+        Dictionary<SqlExpression, DatabaseType>? alternativeTypes = null, bool jsonPosition = false)
     {
         if (arguments.Count == 1 && arguments[0] is SqlStarExpression star)
         {
@@ -136,8 +137,8 @@ internal sealed partial class SqlExpressionEvaluator
         }
         if (arguments.Count == 1)
         {
-            var value = jsonTypes is null ? Bind(arguments[0], out SqlCollationCandidate candidate, statisticsInput: statisticsInput)
-                : BindJsonOperand(arguments[0], out candidate, statisticsInput, jsonTypes);
+            var value = alternativeTypes is null ? Bind(arguments[0], out SqlCollationCandidate candidate, statisticsInput: statisticsInput)
+                : BindAlternativeOperand(arguments[0], out candidate, statisticsInput, alternativeTypes, jsonPosition);
             collation = SqlBoundCollation.Of(candidate, default, _defaultCollation);
             return [value];
         }
@@ -147,7 +148,7 @@ internal sealed partial class SqlExpressionEvaluator
         for (int index = 0; index < bound.Length; index++)
         {
             // NULLIF returns its first operand; the second remains an ordinary comparand.
-            bound[index] = index == 0 && jsonTypes is not null ? BindJsonOperand(arguments[index], out candidates[index], statisticsInput, jsonTypes)
+            bound[index] = index == 0 && alternativeTypes is not null ? BindAlternativeOperand(arguments[index], out candidates[index], statisticsInput, alternativeTypes, jsonPosition)
                 : Bind(arguments[index], out candidates[index], statisticsInput: statisticsInput);
         }
 
@@ -266,8 +267,8 @@ internal sealed partial class SqlExpressionEvaluator
     /// calls an overload over INTEGER.
     /// </summary>
     /// <param name="expression">The expression.</param>
-    /// <returns>The static type. JSON alternatives enforce their common-type check during binding.</returns>
-    /// <exception cref="SqlPlanningException">JSON-position alternatives have incompatible declared types.</exception>
+    /// <returns>The static type. Alternatives enforce their common-type check during binding.</returns>
+    /// <exception cref="SqlPlanningException">Alternatives have incompatible declared types.</exception>
     /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the expression.</exception>
     internal DatabaseType StaticTypeOf(SqlExpression expression)
     {
@@ -338,12 +339,7 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlSubqueryExpression:
                 return _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.Type : DatabaseType.Null;
             case SqlCaseExpression conditional:
-                DatabaseType alternative = DatabaseType.Null;
-                foreach (var clause in conditional.WhenClauses)
-                {
-                    alternative = AlternativeType(alternative, StaticTypeOf(clause.Result));
-                }
-                return conditional.ElseResult is null ? alternative : AlternativeType(alternative, StaticTypeOf(conditional.ElseResult));
+                return GroupedAlternativeBindingType(conditional, AlternativeResultType(conditional));
             case SqlNextValueExpression:
                 return DatabaseType.Int64;
             case SqlFunctionCallExpression call:
@@ -369,12 +365,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)) { return call.Arguments.Count > 0 ? StaticTypeOf(call.Arguments[0]) : DatabaseType.Null; }
         if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
-            DatabaseType alternative = DatabaseType.Null;
-            foreach (var argument in call.Arguments)
-            {
-                alternative = AlternativeType(alternative, StaticTypeOf(argument));
-            }
-            return alternative;
+            return GroupedAlternativeBindingType(call, AlternativeResultType(call));
         }
 
         return ResolvedCallType(call, scalarOnly);
@@ -491,9 +482,8 @@ internal sealed partial class SqlExpressionEvaluator
         }
     }
 
-    // Statistics have different exact/floating overloads. The ordinary evaluator keeps
-    // the first alternative's type for CASE/COALESCE; these calls need their numeric
-    // common type and a matching conversion before DISTINCT or the transition runs.
+    // Keep statistical overload selection and null-only inputs unchanged. Numeric
+    // widening is shared with ordinary alternatives; transition contracts stay local.
     private DatabaseType StatisticsInputType(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();

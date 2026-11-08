@@ -127,6 +127,13 @@ Boolean existence and SQL NULL/default results. Structured path, context, cardin
 empty and structural refusals leave the connection usable. No client API or wire format
 change is required.
 
+## CASE and COALESCE wire conformance (#1788)
+
+The existing exchange carries resolved common types and CS02080/CS02022 binding refusals,
+including skipped invalid literals, while preserving connection reuse. Runtime incomparable-sort
+coverage uses a native polymorphic result; a mixed INTEGER/unknown-text CASE now refuses before sorting.
+No client API or protocol format changes are required.
+
 ## JSON access wire conformance (#1722, SQ-N1)
 
 InMemory and TCP preserve JSON text, JSONB bytes, unescaped extraction text, Boolean

@@ -1075,7 +1075,7 @@
   <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
   <data name="WindowFrameWorkLimit" xml:space="preserve"><value>Window frame recomputation exceeded the statement limit of {0} input visits.</value></data>
   <data name="RecursiveReaderCountExceeded" xml:space="preserve"><value>The CTE '{0}' opened more readers than its execution plan counted.</value></data>
-  <data name="JsonAlternativesMismatch" xml:space="preserve"><value>CASE/COALESCE alternatives in a JSON operand require compatible types; found {0} and {1}.</value></data>
+  <data name="AlternativesMismatch" xml:space="preserve"><value>CASE/COALESCE alternatives require compatible types; found {0} and {1}.</value></data>
   <data name="JointIndexShapeInvalid" xml:space="preserve">
     <value>A prepared migration source index has invalid page geometry or ownership.</value>
   </data>

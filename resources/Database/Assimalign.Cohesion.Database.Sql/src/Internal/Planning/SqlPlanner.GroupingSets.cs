@@ -46,7 +46,7 @@ internal sealed partial class SqlPlanner
                 SqlFunctionCallExpression call when IsAggregate(call) => call.FunctionName.ToLowerInvariant(),
                 _ => $"column{projections.Count + 1}",
             });
-            projections.Add(new SqlProjection(name, null, column.Expression, GroupExpressionType(column.Expression, columns, evaluator))
+            projections.Add(new SqlProjection(name, null, column.Expression, GroupExpressionType(column.Expression, columns, evaluator, grouped: true))
             {
                 HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression ||
                     column.Expression is SqlFunctionCallExpression namedCall && IsAggregate(namedCall),

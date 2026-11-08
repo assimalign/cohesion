@@ -1405,9 +1405,12 @@ predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refu
 The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
 ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
 including grouping, windows, correlation, persisted equivalence and definition checks.
-The engine resolves CASE/COALESCE alternatives through one scoped common-type path in JSON
-positions, records the selector overload, and folds adjacent bound arrows over one validated
-document. Source syntax and canonical rendering are unchanged. DIALECT.md records unknown
+The engine shares the existing CASE/COALESCE common-type path across scalar and persisted
+positions (#1788), records the selector overload, and folds adjacent bound arrows over one
+validated document. Alternatives convert at each boundary, with unknown literals converted
+during binding even when skipped; all-unknown sets become TEXT. CS02080 covers incompatible
+declared alternatives in every position. DDL binds definitions before publication; grouped
+output normalization and statistical transitions retain their established contracts. Source syntax and canonical rendering are unchanged. DIALECT.md records unknown
 literal coercion and the CS02080 declared-type mismatch refusal; the conformance corpus covers
 common selectors and JSON partial predicates.
 The shared reader validates complete input with strict UTF-8 and maximum depth 128;
@@ -1429,7 +1432,7 @@ admission now refuses malformed input; it does not rewrite existing row bytes.
 | CS01067 | Invalid JSON access or IS JSON signature (42883) |
 | CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
 | CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
-| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives (42804/42846) |
 
 The extraction oracle performs 10,240 comparisons over generated nested values,
 negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.
