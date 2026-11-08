@@ -145,7 +145,9 @@ GraphIndexBuildLimitException with the existing CG05004/CG05020 code; the model 
 Exact and text builds use IndexBuildLoop's 64-entry durable chunks after the existing work
 and memory preflight. The writer reservation and logical creator span the root bracket,
 chunks and single final definition publication. A root/registration survives an abandoned
-build as an orphan; the existing receipt worker retires it below the safe horizon. Reclamation
+build as an orphan; the existing receipt worker retires it below the safe horizon. Durable
+build brackets use a separate apply helper so ordinary writes retain their original helper
+signature and state machine, including their allocation guards. Reclamation
 now yields before each candidate/page batch to size/interval checkpoints, pending checkpoint
 signals and admission pauses. Maintenance owns the coordinator apply gate already; the shared
 physical freeing helper does not recursively acquire it. The registry/rebuild lock order,

@@ -740,11 +740,24 @@ public sealed partial class GraphStore
         }
     }
 
-    private async ValueTask<T> ApplyAsync<T>(TransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken, bool durable = false)
+    private async ValueTask<T> ApplyAsync<T>(TransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
     {
         try
         {
-            var result = await _coordinator.ApplyStatementAsync(context, apply, durable: durable, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var result = await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+            AfterApply?.Invoke();
+            return result;
+        }
+        catch { OpenIndexes(); throw; }
+    }
+
+    // Keep the ordinary-write helper's signature and state machine unchanged. Builds alone
+    // need durable intermediate brackets; carrying that flag through every write affects JIT code.
+    private async ValueTask<T> ApplyIndexBuildAsync<T>(TransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _coordinator.ApplyStatementAsync(context, apply, durable: true, cancellationToken: cancellationToken).ConfigureAwait(false);
             AfterApply?.Invoke();
             return result;
         }

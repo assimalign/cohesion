@@ -127,18 +127,18 @@ public sealed partial class GraphStore
         bool buildSucceeded = false;
         try
         {
-            var index = await ApplyAsync(context, async bracket =>
+            var index = await ApplyIndexBuildAsync(context, async bracket =>
             {
                 var created = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
                 SaveRegistrations(bracket);
                 return created;
-            }, cancellationToken, durable: true).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
             ScheduleIndexReclamation(id);
             AfterTextIndexMutation?.Invoke("build-root");
             bool published = false;
             await IndexBuildLoop.RunAsync(entries, async (chunk, token) =>
             {
-                await ApplyAsync(context, async bracket =>
+                await ApplyIndexBuildAsync(context, async bracket =>
                 {
                     foreach (var entry in chunk)
                     {
@@ -147,7 +147,7 @@ public sealed partial class GraphStore
                         AfterTextIndexMutation?.Invoke("build-entry");
                     }
                     return true;
-                }, token, durable: true).ConfigureAwait(false);
+                }, token).ConfigureAwait(false);
                 AfterTextIndexMutation?.Invoke("build-chunk");
             }, async token =>
             {
