@@ -273,6 +273,63 @@ internal static class SqlRowCodec
     }
 
     /// <summary>
+    /// Bounds a complete key component, including its tag, collation and terminator.
+    /// Unknown/unbounded families have no proof. Witnesses go through the real encoder;
+    /// SqlIndexKeyEncodingTests checks all scalar families and every Unicode scalar
+    /// against these witnesses (including collation expansion and zero escaping).
+    /// </summary>
+    internal static bool TryGetMaximumKeyLength(DatabaseTypeInfo type, Collation collation, out long length)
+    {
+        length = 0;
+        if (type.Type is DatabaseType.String or DatabaseType.Character)
+        {
+            if (type.MaxLength is not > 0 || !collation.IsIndexBacked) { return false; }
+            // SQL widths count Unicode scalars. Binary/simple case folding emits at
+            // most one four-byte scalar; accent folding's longest output is
+            // U+16D6A's three four-byte scalars in Unicode 17. U+0000's two-byte
+            // escape is smaller. The exhaustive codec oracle pins this maximum.
+            string witness = collation == Collation.CaseAccentInsensitive ? "\U00016D6A" : "\U0010FFFF";
+            var textWriter = new DatabaseKeyWriter();
+            AppendKeyValue(textWriter, DatabaseType.String, string.Empty, collation);
+            int overhead = textWriter.Length;
+            textWriter.Reset();
+            AppendKeyValue(textWriter, DatabaseType.String, witness, collation);
+            length = overhead + (long)type.MaxLength.Value * (textWriter.Length - overhead);
+            return true;
+        }
+
+        // Fixed-width codecs have the same length for every non-NULL value.
+        // Decimal's longest significand has 29 digits; its sign/exponent and
+        // terminator have fixed widths for either sign, independently of scale.
+        object? maximum = type.Type switch
+        {
+            DatabaseType.Boolean => true,
+            DatabaseType.Int8 => sbyte.MaxValue,
+            DatabaseType.Int16 => short.MaxValue,
+            DatabaseType.Int32 => int.MaxValue,
+            DatabaseType.Int64 => long.MaxValue,
+            DatabaseType.Float32 => float.MaxValue,
+            DatabaseType.Float64 => double.MaxValue,
+            DatabaseType.Decimal => decimal.MaxValue,
+            DatabaseType.Date => DateOnly.MaxValue,
+            DatabaseType.Time => TimeOnly.MaxValue,
+            DatabaseType.DateTime => DateTime.MaxValue,
+            DatabaseType.DateTimeOffset => DateTimeOffset.MaxValue,
+            DatabaseType.TimeSpan => TimeSpan.MaxValue,
+            DatabaseType.Guid => Guid.Empty,
+            _ => null,
+        };
+        if (maximum is null) { return false; }
+        var writer = new DatabaseKeyWriter();
+        AppendKeyValue(writer, type.Type, maximum, collation);
+        length = writer.Length;
+        writer.Reset();
+        AppendKeyValue(writer, type.Type, null, collation);
+        length = Math.Max(length, writer.Length);
+        return true;
+    }
+
+    /// <summary>
     /// Maps a value to the canonical member of its SQL equality class for key
     /// encoding (#1099). A <c>TIMESTAMP</c> keeps its ticks and drops its
     /// <see cref="DateTimeKind"/> (encoded as <see cref="DateTimeKind.Unspecified"/>;

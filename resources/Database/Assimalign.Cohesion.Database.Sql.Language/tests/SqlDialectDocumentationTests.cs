@@ -25,9 +25,9 @@ public sealed class SqlDialectDocumentationTests
         foreach (string documentation in new[] { design, dialect })
         {
             documentation.ShouldContain("FirstAppliedGeneration", Case.Sensitive);
-            foreach (string step in new[] { "AddColumn", "AddTable", "AddConstraint", "AddIndex: unique", "AddIndex: non-unique heap-owned replacement with retained constraints" })
+            foreach (string step in new[] { "AddColumn", "AddTable", "AddConstraint", "AddIndex: unique", "AddIndex: other non-unique" })
             { documentation.ShouldContain("| " + step + " | Held |", Case.Sensitive); }
-            documentation.ShouldContain("| AddIndex: non-unique | Applied |", Case.Sensitive);
+            documentation.ShouldContain("| AddIndex: non-unique, no predicate, keys provably within limit | Applied |", Case.Sensitive);
             documentation.ShouldContain("owner decision 65", Case.Sensitive);
         }
     }
