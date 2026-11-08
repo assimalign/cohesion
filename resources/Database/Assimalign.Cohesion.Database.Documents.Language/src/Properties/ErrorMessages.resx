@@ -24,6 +24,10 @@
   <data name="OqlQueryParserParseCreateIndexVoid" xml:space="preserve"><value>An index supports at most 32 key paths.</value></data>
   <data name="IncludeMissingLeadingKey" xml:space="preserve"><value>INCLUDE MISSING is permitted only on the leading scalar index key.</value></data>
   <data name="OqlQueryParserParseCreateIndexVoid2" xml:space="preserve"><value>Index key paths must be distinct.</value></data>
+  <data name="MergeActionOrderInvalid" xml:space="preserve"><value>MERGE actions must occur once each in UPDATE, DELETE, INSERT order.</value></data>
+  <data name="MergeSourceAliasRequired" xml:space="preserve"><value>A MERGE expression source requires an alias or a final named path member.</value></data>
+  <data name="MergeActionsMissing" xml:space="preserve"><value>MERGE requires at least one action.</value></data>
+  <data name="MergeRenderInvalid" xml:space="preserve"><value>The MERGE tree contains an unsupported shape or exceeds the rendering depth limit.</value></data>
   <data name="OqlQueryParserParseUpdateVoid" xml:space="preserve"><value>UPDATE requires at least one SET assignment or UNSET path.</value></data>
   <data name="OqlQueryParserParseWriteVoid" xml:space="preserve"><value>{0} requires an explicit KEY header; document ids are not generated.</value></data>
   <data name="OqlQueryParserParseWriteVoid2" xml:space="preserve"><value>Expected SELECT after the KEY output binding.</value></data>
@@ -52,4 +56,5 @@
   <data name="OqlQueryParserParseSelectVoid3" xml:space="preserve"><value>UNNEST requires an alias for an expression without a final path name.</value></data>
   <data name="OqlQueryParserParseSelectVoid4" xml:space="preserve"><value>Multiple {0} clauses are not allowed.</value></data>
   <data name="OqlQueryParserParseCountVoid" xml:space="preserve"><value>Expected an integer literal or parameter after {0}.</value></data>
+
 </root>

@@ -60,6 +60,7 @@ public static class OqlLanguageProfile
         OqlClauses.Update,
         OqlClauses.Unset,
         OqlClauses.Delete,
+        OqlClauses.Merge,
         OqlClauses.Returning,
         OqlClauses.Values,
         OqlClauses.Select,

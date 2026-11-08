@@ -13,8 +13,8 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 public sealed class DocumentClientDiagnosticTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Rejections preserve carrier diagnostics and compose text once on both transports")]
-    [InlineData(false, "\nMERGE INTO items", "CK00001", "MERGE", ProtocolErrorCode.ParseFailure)]
-    [InlineData(true, "\nMERGE INTO items", "CK00001", "MERGE", ProtocolErrorCode.ParseFailure)]
+    [InlineData(false, "\nMERGE INTO items USING [1] AS s ON TRUE WHEN MATCHED THEN DELETE", "CK00001", "ON", ProtocolErrorCode.ParseFailure)]
+    [InlineData(true, "\nMERGE INTO items USING [1] AS s ON TRUE WHEN MATCHED THEN DELETE", "CK00001", "ON", ProtocolErrorCode.ParseFailure)]
     [InlineData(false, "SELECT *\nFROM absent", "CD01002", "SELECT *\nFROM absent", ProtocolErrorCode.ExecutionFailure)]
     [InlineData(true, "SELECT *\nFROM absent", "CD01002", "SELECT *\nFROM absent", ProtocolErrorCode.ExecutionFailure)]
     [InlineData(false, "CREATE COLLECTION \" \"", "CD05001", "\" \"", ProtocolErrorCode.ExecutionFailure)]

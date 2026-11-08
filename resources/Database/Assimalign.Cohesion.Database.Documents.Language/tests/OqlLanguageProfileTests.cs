@@ -32,6 +32,7 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.Update)]
     [InlineData(OqlClauses.Unset)]
     [InlineData(OqlClauses.Delete)]
+    [InlineData(OqlClauses.Merge)]
     [InlineData(OqlClauses.Returning)]
     [InlineData(OqlClauses.Values)]
     [InlineData(OqlClauses.Select)]

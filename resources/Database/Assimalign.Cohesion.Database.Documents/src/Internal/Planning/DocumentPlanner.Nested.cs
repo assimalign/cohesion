@@ -24,6 +24,11 @@ internal sealed partial class DocumentPlanner
             return false;
         }
         if (expression is OqlSubqueryExpression) { return true; }
+        if (expression is OqlMergeExpression merge)
+        {
+            foreach (var child in NestedChildren(merge)) { if (HasSubquery(child, cancellationToken)) { return true; } }
+            return false;
+        }
         if (expression is OqlSelectExpression query)
         {
             if (query.Source is not null || query.Bindings != query.Unnest) { return true; }
@@ -106,7 +111,34 @@ internal sealed partial class DocumentPlanner
         string? unboundValuesName = null;
         bool valuesAliasExplicit = false;
         int subqueryDepth = 0;
+        string? unavailableMergeTarget = null;
+        string? unavailableMergeReturningSource = null;
         if (expression is OqlQueryExpression query) { VisitQuery(query, empty, free); }
+        else if (expression is OqlMergeExpression merge)
+        {
+            ValidateMergeDeclaration(merge);
+            string target = DocumentSourceName.Of(merge.Collection, merge.Alias);
+            string source = MergeSourceName(merge.Source);
+            VisitQuery(MergeSourceQuery(merge.Source), empty, free);
+            // Preserve OQ-K1 provenance: implicit names do not redirect an inner FROM
+            // keyspace, while explicit correlation aliases can supply expression rows.
+            var both = new Dictionary<string, bool>(StringComparer.Ordinal)
+            { [source] = merge.Source.Alias is null, [target] = merge.Alias is null };
+            var sourceOnly = new Dictionary<string, bool>(StringComparer.Ordinal) { [source] = merge.Source.Alias is null };
+            unavailableMergeTarget = merge.IsLookup ? target : null;
+            Visit(merge.On, "MERGE ON", merge.IsLookup ? sourceOnly : both, empty, free);
+            unavailableMergeTarget = null;
+            foreach (var child in MergeActionExpressions(merge))
+            {
+                if (child is OqlReturningExpression)
+                {
+                    unavailableMergeReturningSource = source;
+                    Visit(child, "RETURNING", new Dictionary<string, bool>(StringComparer.Ordinal) { [target] = merge.Alias is null }, empty, free);
+                    unavailableMergeReturningSource = null;
+                }
+                else { Visit(child, "MERGE action", both, empty, free); }
+            }
+        }
         else
         {
             string? name = expression switch
@@ -206,6 +238,10 @@ internal sealed partial class DocumentPlanner
             if (node is null) { return; }
             if (node is OqlPathExpression path && path.Segments.Count > 0 && path.Segments[0].Name is string name)
             {
+                if (name == unavailableMergeTarget && !local.ContainsKey(name) && !outer.ContainsKey(name))
+                { throw new DocumentPlanningException("CD01040", ErrorMessages.MergeBindingInvalid, node.Location); }
+                if (name == unavailableMergeReturningSource && !local.ContainsKey(name) && !outer.ContainsKey(name))
+                { throw new DocumentPlanningException("CK00001", ErrorMessages.MergeReturningSourceUnsupported, node.Location); }
                 if (subqueryDepth > 0 && name == unboundValuesName && !local.ContainsKey(name) && !outer.ContainsKey(name))
                 { throw new DocumentPlanningException("CD01036", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.ValuesDestinationUnbound, name), node.Location); }
@@ -268,6 +304,11 @@ internal sealed partial class DocumentPlanner
     {
         switch (node)
         {
+            case OqlMergeExpression merge:
+                if (merge.Source.Expression is not null) { yield return merge.Source.Expression; }
+                yield return merge.On;
+                foreach (var child in MergeActionExpressions(merge)) { yield return child; }
+                break;
             case OqlInsertExpression insert:
                 if (insert.Select is not null) { yield return insert.Select; }
                 foreach (var pair in insert.Values) { yield return pair.Key; yield return pair.Value; }
@@ -339,6 +380,7 @@ internal sealed partial class DocumentPlanner
             }
             OqlExpression query = queryPlan switch
             {
+                DocumentMergePlan merge => merge.Statement,
                 DocumentUpdatePlan update => update.Statement,
                 DocumentDeletePlan delete => delete.Statement,
                 DocumentInsertPlan insert => insert.Statement,
@@ -346,6 +388,13 @@ internal sealed partial class DocumentPlanner
                 DocumentUpsertPlan upsert => upsert.Statement,
                 _ => QueryLogical(queryPlan).Query,
             };
+            if (queryPlan is DocumentMergePlan mergePlan)
+            {
+                AddQuery(mergePlan.Source, offset);
+                foreach (var child in MergeActionExpressions(mergePlan.Statement).Prepend(mergePlan.Statement.On))
+                { AddExpressions(child, offset); }
+                return;
+            }
             var writeSource = queryPlan switch
             {
                 DocumentInsertSelectPlan insert => insert.Source is DocumentFromPlan or DocumentJoinPlan or DocumentSetOperationPlan ? insert.Source : null,

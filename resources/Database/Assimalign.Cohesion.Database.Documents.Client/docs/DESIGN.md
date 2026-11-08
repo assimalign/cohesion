@@ -125,6 +125,14 @@ Direct references are Database.Client, Documents.Protocol, Database.Types, Datab
 
 `DocumentClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
 
+## MERGE planning wire conformance (#1804, OQ-M1)
+
+Lookup and key-equality ANSI MERGE use existing OQL request text and EXPLAIN result rows.
+DocumentMergeWireTests and the NativeAOT consumer check both forms on InMemory/TCP: the plan
+includes Merge, source access and actions; execution reports one located CD05022/ExecutionFailure
+and leaves document contents intact. The same connection accepts the next query. No client API,
+capability, frame or version changes are needed; execution remains OQ-M2 work.
+
 ## Key join wire results (#1732)
 
 INNER/LEFT document-key JOIN and NEST use existing request text, JSON result cells and MISSING

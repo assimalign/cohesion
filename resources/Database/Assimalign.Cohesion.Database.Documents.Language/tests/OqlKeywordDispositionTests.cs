@@ -112,7 +112,7 @@ public sealed class OqlKeywordDispositionTests
         ["OFFSET"] = Parses("SELECT * FROM c ORDER BY a DESC OFFSET 2"),
         ["FETCH"] = Rejects("SELECT * FROM c ORDER BY a FETCH FIRST 5 ROWS ONLY", "FETCH"),
         ["UPSERT"] = Parses("UPSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})"),
-        ["MERGE"] = Rejects("MERGE INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE"),
+        ["MERGE"] = Parses("MERGE INTO c USING d ON META(c).id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a"),
         ["NEST"] = Parses("SELECT * FROM c AS a NEST d AS b ON META(b).id = a.k"),
         ["WITHIN"] = Rejects("SELECT * FROM c WHERE ANY x WITHIN a SATISFIES TRUE END", "WITHIN"),
         ["INNER"] = Parses("SELECT * FROM c d INNER UNNEST d.a t"),
@@ -261,7 +261,7 @@ public sealed class OqlKeywordDispositionTests
     private static string[] Words()
         => OqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(OqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
-            .Concat(new[] { "NULLS", "INCLUDE" })
+            .Concat(new[] { "NULLS", "INCLUDE", "MERGE" })
             .Concat(new[] { "UNNEST", "INNER", "LEFT", "OUTER", "EVERY", "SATISFIES" }).Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

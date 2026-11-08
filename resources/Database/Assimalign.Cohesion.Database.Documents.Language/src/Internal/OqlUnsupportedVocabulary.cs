@@ -78,7 +78,6 @@ internal static class OqlUnsupportedVocabulary
         // SQL++ statement words.
         // Enabled by OqlClauses.Upsert; retained for contextual keyword coverage.
         new("UPSERT", "UPSERT", OqlWordPosition.Statement),
-        new("MERGE", "MERGE", OqlWordPosition.Statement),
     ];
 
     /// <summary>Finds the entry for an unquoted word, compared case-insensitively.</summary>

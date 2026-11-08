@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentPlanner
 {
-    private DocumentUpdatePlan PlanUpdate(OqlUpdateExpression update)
+    private DocumentUpdatePlan PlanUpdate(OqlUpdateExpression update, IReadOnlySet<string>? outerNames = null)
     {
         if (update.Alias is { Length: 0 })
         { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, update.Location); }
@@ -19,7 +19,7 @@ internal sealed partial class DocumentPlanner
         foreach (var assignment in update.Assignments)
         {
             Add(assignment.Path, assignment.Value);
-            ValidateMetadata(assignment.Value, DocumentSourceName.Of(update.Collection, update.Alias), storedSource: true);
+            ValidateMetadata(assignment.Value, DocumentSourceName.Of(update.Collection, update.Alias), storedSource: true, outerNames);
             Validate(assignment.Value, allowAggregate: false, functions: _functions);
         }
         foreach (var path in update.Unset) { Add(path, null); }
@@ -29,7 +29,7 @@ internal sealed partial class DocumentPlanner
         }
         if (update.Predicate is { } predicate)
         {
-            ValidateMetadata(predicate, DocumentSourceName.Of(update.Collection, update.Alias), storedSource: true);
+            ValidateMetadata(predicate, DocumentSourceName.Of(update.Collection, update.Alias), storedSource: true, outerNames);
             Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentUpdatePlan(collection, update, targets.AsReadOnly(),

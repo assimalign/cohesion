@@ -30,6 +30,7 @@ internal sealed partial class DocumentPlanner
         DocumentUpsertPlan => "Upsert",
         DocumentDeletePlan => "Delete",
         DocumentUpdatePlan => "Update",
+        DocumentMergePlan => "Merge",
         DocumentInsertSelectPlan => "InsertSelect",
         DocumentCreateCollectionPlan => "CreateCollection",
         DocumentDropCollectionPlan => "DropCollection",
@@ -47,6 +48,28 @@ internal sealed partial class DocumentPlanner
     private static IReadOnlyList<DatabasePlanNode> DescribeNodes(DocumentStatementPlan plan)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (plan is DocumentMergePlan merge)
+        {
+            var mergeNodes = new List<DatabasePlanNode>
+            {
+                new() { NodeId = 0, Operator = "Merge", Target = merge.Collection.Name,
+                    Detail = "source=" + merge.SourceName + "; target=" + merge.TargetName + "; execution=deferred" },
+                new() { NodeId = 1, ParentId = 0, Operator = merge.Statement.IsLookup ? "KeyLookup" : "KeyJoin", Target = merge.Collection.Name,
+                    Detail = "key_scope=" + (merge.Statement.IsLookup ? "source" : "source,target") },
+            };
+            if (merge.Statement.Update is { } mergeUpdate)
+            { Action("MergeUpdate", mergeUpdate.Predicate, "set=" + mergeUpdate.Assignments.Count + "; unset=" + mergeUpdate.Unset.Count + "; scope=source,target"); }
+            if (merge.Statement.Delete is { } mergeDelete) { Action("MergeDelete", mergeDelete.Predicate, "scope=source,target"); }
+            if (merge.Statement.Insert is { } insert) { Action("MergeInsert", insert.Predicate, "scope=source; target=MISSING"); }
+            if (merge.Returning is { } mergeReturning)
+            { mergeNodes.Add(new DatabasePlanNode { NodeId = mergeNodes.Count, ParentId = 0, Operator = mergeReturning.Query.IsValue ? "ReturningValue" : "Returning",
+                Target = merge.Collection.Name, Detail = "columns=" + mergeReturning.Projections.Count }); }
+            return mergeNodes;
+
+            void Action(string name, OqlExpression? predicate, string detail)
+                => mergeNodes.Add(new DatabasePlanNode { NodeId = mergeNodes.Count, ParentId = 0, Operator = name, Target = merge.Collection.Name,
+                    Detail = "filter=" + (predicate is not null) + "; " + detail });
+        }
         if (plan is DocumentSetOperationPlan compound)
         {
             var compoundNodes = new List<DatabasePlanNode>

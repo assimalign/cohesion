@@ -394,6 +394,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC014 | CD01014 | Binding/names |
 | COHDOC017 | CD01017 | Binding/names |
 | COHDOC023 | CD01023 | Binding/names |
+| New (#1804, OQ-M1) | CD01039 | Binding/names — direct MERGE AST has an invalid source, form or action shape |
 | COHDOC025 | CD01025 | Binding/names |
 | New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
 | New (#1728) | CD01027 | Binding/names — empty comprehension variable in a directly constructed AST |
@@ -405,6 +406,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1731, OQ-Q2) | CD01033 | Binding/names — FROM expression has no explicit alias or implicit field name |
 | New (#1731, OQ-Q2) | CD01034 | Binding/names — unbound variable in a FROM expression without an input-row scope |
 | New (#1732) | CD01035 | Binding/names — unbound/self/forward key source reference or ambiguous/invalid joined META receiver |
+| New (#1804, OQ-M1) | CD01040 | Binding/names — MERGE references an unavailable binding or invalid metadata receiver |
 | New (#1767) | CD01036 | Binding/names — VALUES references its destination binding without a source row or local declaration |
 | New (#1803, OQ-S1) | CD01037 | Binding/names — ORDER BY over an all-RAW/VALUE compound has no named result members |
 | New (#1803, OQ-S1) | CD01038 | Binding/names — compound ORDER BY uses an unbound result member, source metadata or star |
@@ -613,6 +615,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
 | CD05020 | Shared expression/lookup/set-operation work budget exhausted across a statement's subqueries, expression sources, key joins and compounds (#1731, #1732) | — |
 | CD05021 | Statement planning, EXPLAIN or evaluation needs more execution stack than the executing thread has left; the statement fails and the session stays open (#1803) | — |
+| CD05022 | MERGE execution is unavailable until OQ-M2; EXPLAIN MERGE remains available (#1804) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

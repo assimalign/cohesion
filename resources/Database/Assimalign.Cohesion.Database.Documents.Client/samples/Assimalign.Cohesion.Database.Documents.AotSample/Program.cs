@@ -13,6 +13,7 @@ using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Documents.Client;
 using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Transactions;
@@ -426,7 +427,7 @@ internal static class Program
             Check(await connection.ExecuteAsync("DROP INDEX IF EXISTS absent ON items", cancellationToken: token) == 0, "absent index drop");
             try
             {
-                await connection.QueryAsync("MERGE INTO items", cancellationToken: token);
+                await connection.QueryAsync("MERGE INTO items t USING [1] AS s ON TRUE WHEN MATCHED THEN DELETE", cancellationToken: token);
                 throw new InvalidOperationException("Unsupported OQL succeeded.");
             }
             catch (DocumentClientException exception)
@@ -482,6 +483,20 @@ internal static class Program
             var deletePlan = await connection.QueryAsync("EXPLAIN DELETE FROM archive WHERE amount >= 1", cancellationToken: token);
             Check(deletePlan.Documents.Any(document => document.GetProperty("operator").GetString() == "Delete" &&
                 document.GetProperty("detail").GetString() == "filter=True; access=IndexSeek"), "DELETE EXPLAIN seek");
+            foreach (string on in new[] { "KEY s.k", "META(t).id = s.k" })
+            {
+                string merge = "MERGE INTO archive t USING [{k:'f'}] AS s ON " + on + " WHEN MATCHED THEN DELETE";
+                var mergeAst = (OqlMergeExpression)((OqlQueryStatement)new OqlQueryParser().Parse(merge)).OqlExpression;
+                Check(!new OqlQueryParser().Parse(mergeAst.ToString()).Diagnostics.Any(), "MERGE canonical rendering");
+                var mergePlan = await connection.QueryAsync("EXPLAIN " + merge, cancellationToken: token);
+                Check(mergePlan.Documents.Any(document => document.GetProperty("operator").GetString() == "Merge"), "MERGE EXPLAIN");
+                Check(mergePlan.Documents.Any(document => document.GetProperty("operator").GetString() == (on.StartsWith("KEY", StringComparison.Ordinal) ? "KeyLookup" : "KeyJoin")), "MERGE key access");
+                bool refused = false;
+                try { await connection.QueryAsync(merge, cancellationToken: token); }
+                catch (DocumentClientException exception)
+                { refused = exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Count == 1 && exception.Diagnostics[0].Code == "CD05022"; }
+                Check(refused, "MERGE deferred execution diagnostic");
+            }
             Check(await connection.ExecuteAsync("DELETE FROM archive", cancellationToken: token) == 1, "DELETE all affected count");
             Check((await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES WHERE COLLECTION_NAME = 'archive'", cancellationToken: token)).Count == 1, "DELETE retains index");
             Check(await connection.ExecuteAsync("DROP COLLECTION archive", cancellationToken: token) == 0, "reuse after duplicate");

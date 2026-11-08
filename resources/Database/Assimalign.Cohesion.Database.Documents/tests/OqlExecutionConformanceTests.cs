@@ -93,6 +93,16 @@ public sealed class OqlExecutionConformanceTests
                 new("DELETE FROM items", [["by_score"]], ["CREATE INDEX by_score ON items (details.score)"],
                     "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES", ExpectedAffectedCount: 4),
             ],
+            [OqlClauses.Merge] =
+            [
+                new("EXPLAIN MERGE INTO items t USING items s ON KEY s.k WHEN MATCHED THEN DELETE",
+                    [[0, null, "Merge", "items", null, "source=s; target=t; execution=deferred", null, null],
+                     [1, 0, "KeyLookup", "items", null, "key_scope=source", null, null],
+                     [2, 0, "MergeDelete", "items", null, "filter=False; scope=source,target", null, null],
+                     [3, 0, "Select", "items", null, "filter=False; grouped=False; order_keys=0; limit=none; offset=0", null, null],
+                     [4, 3, "Project", "items", null, null, null, null],
+                     [5, 4, "CollectionScan", "items", null, null, null, null]]),
+            ],
             [OqlClauses.Returning] =
             [
                 new("INSERT INTO items (KEY, VALUE) VALUES ('e', {name:'echo'}) RETURNING name", [["echo"]], ExpectedAffectedCount: 1),
@@ -410,7 +420,7 @@ public sealed class OqlExecutionConformanceTests
         };
 
     /// <summary>Fails on an unmapped capability and executes every mapped representative with result assertions.</summary>
-    [Fact(DisplayName = "Cohesion Test [Documents] - Profile: Every advertised OQL clause executes")]
+    [Fact(DisplayName = "Cohesion Test [Documents] - Profile: Every advertised OQL clause executes or describes its deferred plan")]
     public async Task Profile_AdvertisedClauses_AllExecuteAsync()
     {
         // Arrange: the profile drives enumeration; the case table cannot omit a new capability.
@@ -668,6 +678,7 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Insert => expression is OqlInsertExpression,
         OqlClauses.Upsert => expression is OqlUpsertExpression,
         OqlClauses.Delete => expression is OqlDeleteExpression,
+        OqlClauses.Merge => expression is OqlExplainExpression { Statement: OqlMergeExpression },
         OqlClauses.Update => expression is OqlUpdateExpression,
         OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },

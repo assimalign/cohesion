@@ -160,6 +160,9 @@ internal sealed partial class DocumentExpressionEvaluator
                 ValidateInputs(update.Predicate);
                 ValidateInputs(update.Returning);
                 break;
+            case OqlMergeExpression merge:
+                foreach (var child in DocumentPlanner.NestedChildren(merge)) { ValidateInputs(child); }
+                break;
             case OqlInsertExpression insert:
                 foreach (var pair in insert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
                 ValidateInputs(insert.Select);

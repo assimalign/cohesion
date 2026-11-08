@@ -107,7 +107,7 @@ flowchart TD
 
 ## Supported-clause matrix
 
-The profile's supported set is deliberately the executable subset of `OqlClauses`.
+The profile advertises parse-and-plan capabilities from `OqlClauses`; MERGE execution is separately gated until OQ-M2.
 Lexical recognition preserves the established vocabulary so rejected constructs receive
 `CK00001`; recognizing a token does not make its operation supported.
 
@@ -127,13 +127,13 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `ARRAY CONSTRUCTOR` | Yes | Expressions in brackets; MISSING elements become NULL |
 | `ARRAY ... FOR` | Yes | One IN binding, optional WHEN; ordered mapped array omits MISSING |
 | `FIRST ... FOR` | Yes | First qualifying mapping, or MISSING |
-| `EXPLAIN` | Yes | SELECT, INSERT, UPSERT, UPDATE or DELETE plan description without reading document data or writing |
+| `EXPLAIN` | Yes | SELECT, INSERT, UPSERT, UPDATE, DELETE or MERGE plan description without reading document data or writing |
 | `INSERT` | Yes | Explicit KEY/VALUE pairs, or KEY and optional VALUE bindings to SELECT output names |
 | `UPSERT` | Yes | The same KEY/VALUE grammar; inserts absent keys and wholly replaces existing documents |
 | `UPDATE` | Yes | One collection, optional alias, SET assignments and/or UNSET paths, optional WHERE |
 | `UNSET` | Yes | Removes properties in UPDATE; a final array index is invalid |
 | `DELETE` | Yes | `DELETE FROM collection [AS? alias] [WHERE expression]`; keeps the collection and indexes |
-| `RETURNING` | Yes | Affected-image expressions with optional AS labels, or one RAW/VALUE expression, on all four writes |
+| `RETURNING` | Yes | Affected-image expressions with optional AS labels, or one RAW/VALUE expression, on INSERT/UPSERT/UPDATE/DELETE and planned MERGE |
 | `OPTIONS` | No | INSERT/UPSERT header element; one CK00001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
 | `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST/JOIN/NEST bindings |
@@ -163,7 +163,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DROP INDEX` | Yes | One named index in one collection, optional IF EXISTS; ON is required |
 | `SUBQUERY` | Yes | Parenthesized SELECT returns an array; lexical correlation and DML expression positions execute |
 | `EXISTS` | Yes | Unary collection operator; arrays test nonemptiness, MISSING propagates, other inputs give NULL |
-| `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
+| `MERGE` | Plan/EXPLAIN | Couchbase lookup and key-equality ANSI forms; execution refuses with CD05022 until OQ-M2 (#1804) |
 
 `OqlFunctions.All` is the public, immutable standard-function metadata consumed by the
 standalone parser, profile and engine's native registrations. It classifies scalar versus aggregate
@@ -325,6 +325,30 @@ rule, including repeated literal names; arrays preserve source order and replace
 with JSON null. Constructors use Utf8JsonWriter and owned JsonElement values, preserving decimal
 scale and the decimal scalar domain. The existing 128-level parser limit also covers constructors.
 
+### MERGE grammar and planning (#1804, OQ-M1)
+
+OqlMergeExpression is a sealed statement leaf with sealed UPDATE, DELETE and INSERT action
+records and an OqlMergeSource record. Its canonical ToString renders both Couchbase forms,
+including keyspace, aliased subquery and expression sources and RETURNING. MERGE is a contextual
+statement prefix, absent from the unsupported table and lexer keywords; FROM c merge still parses.
+The ordinary nested-expression limit, a complete 128-level MERGE tree bound and a 128-level
+canonical-parse cost bound protect parsing, planning and canonical reparsing. Prefix grouping
+costs two levels; 63 prefixes or 127 left-associated binary terms fit. A fourth or repeated/out-of-order
+action stops immediately with CD00002; overdeep trees receive CD00005.
+
+ON KEY sees only the source. ANSI ON binds both names but supports only META(target).id = expr,
+where expr can be computed before target lookup; target-dependent keys retain CK00001. Matched
+actions bind both names. INSERT binds the source and a MISSING target, including target metadata.
+Expression/derived source metadata retains the existing NULL rule.
+The engine validates direct AST declarations with CD01023 and form/action shape with CD01039;
+CD01040 identifies an unavailable MERGE binding or invalid metadata receiver. Unqualified value
+paths and ANSI INSERT KEY/VALUE omission rules remain CK00001 until their semantics are settled.
+RETURNING retains ordinary target-image scope; source references remain CK00001. Other MERGE
+expressions require explicit META receivers. UPDATE destination paths retain ordinary target-relative
+rules and CD02016/CD01017.
+EXPLAIN plans the full source and actions without evaluation; execution receives CD05022.
+See [DIALECT](DIALECT.md#merge-1804-oq-m1) for grammar, refusals and scope details.
+
 ### RETURNING (#1727)
 
 Each public write AST has an optional OqlReturningExpression with ordered OqlProjection values,
@@ -427,7 +451,7 @@ a name:
   identifiers elsewhere. A Clause word cannot be an implicit FROM alias: FROM c WITHIN
   reports WITHIN, while FROM c AS within keeps it a name. JOIN and NEST are parsed in SELECT source clauses. LIMIT and OFFSET execute and are
   reserved; use quoted names or path segments such as d.limit. SELECT a AS limit still parses.
-- **Statement** (`DEFINE`, `MERGE` and the enabled `UPSERT` coverage entry): only the first word of the
+- **Statement** (`DEFINE` and the enabled `UPSERT` coverage entry): only the first word of the
   statement. UPSERT bypasses refusal through OqlClauses.Upsert; its table entry retains contextual
   keyword coverage. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
   as it did before #1101.
@@ -445,7 +469,7 @@ a name:
   ODMG's `FOR ALL name IN` and `EXISTS name IN` retain their single refusal. Non-binding ANY
   and SOME uses remain unsupported. EVERY and SATISFIES remain contextual names elsewhere.
 
-A statement whose first word is unsupported, such as `MERGE INTO c ...`, is one construct:
+A statement whose first word is unsupported, such as `DEFINE c ...`, is one construct:
 the scan reports that word and nothing after it. Each
 operand of a set operation starts its own `SELECT`, which is not reported as a subquery, and a
 set operation with `ALL` or `DISTINCT` is one construct spanning both words. All three operators execute;
@@ -635,7 +659,7 @@ INSERT, UPSERT, UPDATE and DELETE, including RETURNING. SELECT
 quantifiers and reserved labels retain their existing positional rules within nested scopes.
 IN with a direct SELECT requires RAW or VALUE (CD00014); an ordinary parenthesized expression
 keeps the existing value-list interpretation. Source Text remains the statement renderer;
-there is no separate OQL AST renderer. The engine renders nested plans in EXPLAIN.
+MERGE owns a canonical AST renderer; other parsed OQL retains source text. The engine renders nested plans in EXPLAIN.
 The [dialect](DIALECT.md#expression-subqueries-and-exists-1731-oq-q1) records every default,
 cache policy, scope, retention and deferred form. OqlSubqueryParserTests and the engine's
 advertised-clause corpus cover the syntax together with the runtime and transport suites.
@@ -701,7 +725,7 @@ keyword disposition and the engine's profile-driven conformance corpus cover the
 ## Grammar, statement, and expression trees
 
 ```text
-statement    := (query | insert | upsert | update | delete | EXPLAIN (query | insert | upsert | update | delete) | create-collection | drop-collection | create-index | drop-index) [';']
+statement    := (query | insert | upsert | update | delete | merge | EXPLAIN (query | insert | upsert | update | delete | merge) | create-collection | drop-collection | create-index | drop-index) [';']
 query        := SELECT [ALL | DISTINCT] select-kind from-clause
                 [WHERE expression] [GROUP BY expression [[AS] alias] (',' expression [[AS] alias])* [GROUP AS alias]]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
@@ -845,7 +869,7 @@ disposable resources beyond those used by the shared analyzer pipeline.
 
 ## EXPLAIN (#1104)
 
-SQL++'s EXPLAIN for SELECT, INSERT, UPSERT, UPDATE and DELETE produces the shared plan-description columns documented by
+SQL++'s EXPLAIN for SELECT, INSERT, UPSERT, UPDATE, DELETE and MERGE produces the shared plan-description columns documented by
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
 `OqlExplainExpression.Statement` retains the query for ordinary parameter validation and
 planning. The parser rejects DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE with
@@ -861,6 +885,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | Code | Meaning |
 | --- | --- |
 | `CK00001` | A recognized clause or operation lies outside the executable profile, reported once at the word that names it (see Keyword disposition) |
+| `CD05022` | MERGE execution is deferred until OQ-M2; EXPLAIN is available |
 | `CD00001` | Empty statement, including whitespace/comment-only text |
 | `CD00002` | Syntax error, missing token, invalid identifier/path, multiple statements or leftover tokens, or a character OQL does not use (`?`, `#`, `^`, `§`, ...) |
 | `CD00003` | Unterminated quoted text or block comment |
@@ -870,14 +895,16 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00007` | Invalid LIMIT/OFFSET operand or value; same clause-specific message at parse and plan time, located at the operand |
 | `CD00008` | Unknown function name; standalone parsing or deferred engine binding |
 | `CD00009` | More than 32 index key paths, at the 33rd path |
-| `CD00010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
+| `CD00010` | A duplicate variable within one FROM/UNNEST, MERGE or quantifier binding list, at the repeated name |
 | `CD00011` | ALL/DISTINCT on a scalar or star call, at the quantifier |
 | `CD00013` | NULLS without FIRST or LAST, at the expected option |
 | `CD00014` | IN subquery requires SELECT RAW or SELECT VALUE (direct SELECT or compound, including a parenthesized first operand) |
 | `CD00015` | Derived FROM subquery requires an alias |
 | `CD00016` | Retired and reserved: former joined-statement explicit-alias requirement (#1767) |
 | `CD01033` | FROM expression requires an explicit alias or implicit field name |
+| `CD01039` | Direct MERGE AST has an invalid source, form or action shape |
 | `CD01034` | Unbound FROM expression variable; there is no implicit input-row scope |
+| `CD01040` | MERGE references an unavailable binding or invalid metadata receiver |
 | `CD01037` | ORDER BY on a compound whose operands are all RAW/VALUE |
 | `CD01038` | Compound ORDER BY uses an unbound result member, source metadata or star |
 
