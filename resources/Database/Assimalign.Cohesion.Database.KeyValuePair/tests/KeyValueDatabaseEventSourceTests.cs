@@ -16,6 +16,7 @@ using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Testing;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
@@ -33,6 +34,96 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 [Collection(nameof(KeyValueDatabaseEventSourceCollection))]
 public sealed class KeyValueDatabaseEventSourceTests
 {
+    [Fact(DisplayName = "Cohesion Test [KeyValuePair] - Primary bootstrap owns separate pages and reports one build activity (#1808)")]
+    public async Task CreateDatabaseAsync_PrimaryTree_ShouldSeparateOwnerAndReportBuild()
+    {
+        // Arrange.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var events = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Informational);
+        await using var engine = KeyValueDatabaseEngine.Create("primary-owner", new());
+
+        // Act.
+        var database = await engine.CreateDatabaseAsync("primary", guard.Token);
+        await using var session = await database.CreateSessionAsync(guard.Token);
+        await database.PutAsync(session, "k"u8.ToArray(), "v"u8.ToArray(), cancellationToken: guard.Token);
+
+        // Assert.
+        var registration = database.Catalog.GetIndexRegistrations().ShouldHaveSingleItem();
+        registration.ObjectId.ShouldBeGreaterThan(1UL);
+        database.DataStorage.GetOwnerPages(1).ShouldNotBeEmpty();
+        database.DataStorage.GetOwnerIndexPages(1).ShouldBeEmpty();
+        database.DataStorage.GetOwnerIndexPages(registration.ObjectId).ShouldHaveSingleItem();
+        events.Events.ShouldNotContain(item => item.EventId == 0);
+        var start = events.Events.Where(item => item.EventId == 13).ShouldHaveSingleItem();
+        start.PayloadNames.ShouldBe(["database", "objectId"]);
+        var stop = events.Events.Where(item => item.EventId == 14).ShouldHaveSingleItem();
+        stop.PayloadNames.ShouldBe(["database", "objectId", "succeeded"]);
+        stop.Payload![2].ShouldBe(true);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [KeyValuePair] - Every orphan reclamation commit converges without touching the registered primary tree (#1808)")]
+    public async Task OpenDatabaseAsync_OrphanCrashImages_ShouldReclaimExactOwnerAndKeepPrimary()
+    {
+        // Arrange: an interrupted bootstrap can leave more than one batch of index pages.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = KeyValueDatabaseEngine.Create("orphan-crashes", new()
+        {
+            StorageStrategy = strategy, MaintenanceInterval = TimeSpan.FromHours(1),
+            CheckpointInterval = TimeSpan.FromHours(1), CheckpointJournalSize = 0,
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+        });
+        var source = await engine.CreateDatabaseAsync("source", guard.Token);
+        await using (var writer = await source.CreateSessionAsync(guard.Token))
+        { await source.PutAsync(writer, "k"u8.ToArray(), "v"u8.ToArray(), cancellationToken: guard.Token); }
+        var registration = source.Catalog.GetIndexRegistrations().ShouldHaveSingleItem();
+        var primaryPages = source.DataStorage.GetOwnerIndexPages(registration.ObjectId).ToArray();
+        ulong orphan = (ulong)source.DataStorage.ReserveTransactionSequence();
+        for (int start = 0; start < 130; start += 64)
+        {
+            using var admission = TransactionCheckpointInterlock.ForStorage(source.DataStorage).Enter("OrphanSeed", cancellationToken: guard.Token);
+            using var bracket = source.DataStorage.BeginTransaction();
+            for (int page = start; page < Math.Min(start + 64, 130); page++)
+            {
+                using var handle = source.DataStorage.AllocatePageForWrite(bracket, PageType.Index, ownerId: orphan);
+                handle.MarkDirty();
+            }
+            bracket.Commit();
+        }
+        source.DataStorage.GetOwnerIndexPages(orphan).Count.ShouldBe(130);
+        source.Coordinator.Checkpoint(guard.Token);
+        strategy.CopyDatabase("source", "reclaim");
+        int images = 0;
+        using var events = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Informational);
+        FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () =>
+            strategy.CopyDatabase("reclaim", "boundary" + images++);
+
+        // Act: capture each durable boundary before the opened database is published.
+        KeyValueDatabase current;
+        try { current = await engine.OpenDatabaseAsync("reclaim", guard.Token); }
+        finally { FaultInjectingJournalStorageStrategy.BeforeCommitFlush = null; }
+
+        // Assert: every captured prefix converges twice to exactly the original live tree.
+        images.ShouldBeGreaterThanOrEqualTo(3);
+        current.DataStorage.GetOwnerIndexPages(orphan).ShouldBeEmpty();
+        current.DataStorage.GetOwnerIndexPages(registration.ObjectId).ShouldBe(primaryPages);
+        events.Events.Where(item => item.EventId == 15).Sum(item => (int)item.Payload![2]!).ShouldBe(130);
+        for (int image = 0; image < images; image++)
+        {
+            string name = "boundary" + image;
+            for (int reopen = 0; reopen < 2; reopen++)
+            {
+                var recovered = await engine.OpenDatabaseAsync(name, guard.Token);
+                recovered.DataStorage.GetOwnerIndexPages(orphan).ShouldBeEmpty();
+                recovered.DataStorage.GetOwnerIndexPages(registration.ObjectId).ShouldBe(primaryPages);
+                recovered.Catalog.GetIndexRegistrations().ShouldHaveSingleItem().ShouldBe(registration);
+                await using (var reader = await recovered.CreateSessionAsync(guard.Token))
+                { (await recovered.GetAsync(reader, "k"u8.ToArray(), cancellationToken: guard.Token)).ShouldNotBeNull().Value.ToArray().ShouldBe("v"u8.ToArray()); }
+                await recovered.DisposeAsync();
+            }
+        }
+    }
+
     private static readonly string[] _sessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should be named for its assembly")]

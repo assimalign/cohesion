@@ -292,23 +292,23 @@ and explicit-transaction cases are regression guards, not proof of that session 
   key is stored in the record (not only in the index) so recovery scrubs and
   integrity checks are self-describing. The entry-space format version is
   catalog-persisted and gated at open (below); there is no upgrade machinery.
-- **Entry-space format 2 (#1194), gated in both directions.** The marker
+- **Entry-space format 3 (#1808), gated in both directions.** The marker
   describes the whole data file set: the entry records and the primary index
   tree that rides it. The engine opens and validates the catalog before opening
   the data set, so a catalog refusal cannot apply data recovery (#1270).
-  Format 2 keeps format 1's entry records, but its primary
-  index now uses `Database.Indexing`'s B-tree page format 3 (#1809; entries ordered
+  Format 3 keeps the entry records and gives the primary tree its own page owner. Its
+  index uses `Database.Indexing`'s B-tree page format 3 (#1809; entries ordered
   by key, entry location and writer) instead of format 1 (ordered by key alone).
   The engine stamps the marker at creation before it registers the primary
   index, and at open, before it attaches the index or recovery writes anything,
   it refuses any database that registers a primary index on a marker other than
-  2 — "Database 'x' uses entry-space format 1, but this engine supports only
-  format 2. …" with the export, drop and recreate remedy, or the newer-engine
+  3 — "Database 'x' uses entry-space format 1, but this engine supports only
+  format 3. …" with the export, drop and recreate remedy, or the newer-engine
   remedy for a higher marker. (A catalog that registers no primary index is a
   creation interrupted before the registration; nothing was written through it,
-  so the open bootstraps the index and stamps 2.) The bump also fences the other
+  so the open bootstraps the index and stamps 3.) The bump also fences the other
   direction: an engine before #1194 rejects a marker newer than its own 1, so it
-  refuses a format-2 database before it attaches the tree instead of misreading
+  refuses a format-3 database before it attaches the tree instead of misreading
   it. **Behind the marker, the index manager checks the tree itself**: it reads
   the root page's B-tree page format when the instance attaches the
   registration, and a tree the marker does not describe is refused with
@@ -1325,6 +1325,9 @@ bounded peer-sent names) are in the area's
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |
 | 12 | TerminalDrainTimedOut | Warning | — | sessionId, drainTimeoutMilliseconds, suppressedCount |
+| 13 | `IndexBuildStart` | Informational | — | `database`, `objectId` |
+| 14 | `IndexBuildStop` | Informational | — | `database`, `objectId`, `succeeded` |
+| 15 | `PagesReclaimed` | Informational | — | `database`, `objectId`, `pages` |
 | 1 | `SessionAccepted` | Verbose | `Sessions` | `engineName`, `sessionId`, `activeSessions` (this one included, as the accept loop counted them) |
 | 2 | `SessionRejected` | Warning | — | `engineName`, `reason` (`SessionLimit`), `activeSessions`, `maxSessions` |
 | 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them, cut to 256 characters; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message, cut to 1024 characters) |
@@ -1458,6 +1461,22 @@ security semantics behind a raw dictionary metaphor") is honored by making the
 catalog **explicit and small**, not by inventing relational ceremony for a model
 that has none.
 
+#### Catalog: Primary-tree identity (#1808)
+
+Entry-space format 3 separates the primary tree's physical owner from entry/key-space owner 1.
+The tree gets a reserved monotonic storage sequence and the catalog persists that identity in
+its registration. Key-space introspection continues to expose logical key-space id 1. Earlier
+entry-space markers are refused through the recovered read-only gate before any write. There
+is no upgrade reader. Before admitting sessions, open reclaims unregistered index owners in
+64-page durable batches, yielding to size-due checkpoints and admission; a crash repeats owner
+discovery. A registered tree is excluded. KeyValuePair has one empty-tree bootstrap and no DROP
+INDEX or populated backfill surface. Build start/stop (13/14) and pages reclaimed (15) use this
+model's EventSource with database, physical objectId and succeeded/pages as appropriate.
+No wire or diagnostic identity changes. The bootstrap boundaries remain root commit, logical
+commit, format-marker commit and registration commit; orphan cleanup adds page-batch commits.
+Crash images at each orphan-batch commit flush, including a tree spanning multiple batches,
+converge on two reopens to the exact registered primary owner and its readable entries.
+
 #### Catalog: Why-this-not-that
 
 - **A dedicated catalog file set, not records mixed into the data file.** The SQL
@@ -1469,8 +1488,7 @@ that has none.
 - **The `SqlCatalog` persistence pattern, reduced** (the former `DefaultSqlCatalog`,
   collapsed into `SqlCatalog` at phase 4 of the concrete-types plan). One tuple-codec record
   per concern (kind 1 = registrations, kind 2 = format version), rewritten in
-  place when it fits and relocated when it grows. The registration codec matches
-  `SqlCatalog`'s byte-for-byte so the family stays mutually legible; a
+  place when it fits and relocated when it grows. The registration codec remains model-owned; SQL format 39 additionally persists an explicit index-to-table/owner map; a
   shared registration-codec helper is deliberately not extracted yet (two
   instances, both trivial — the extraction threshold is the third model).
 - **Format version named `EntrySpaceFormatVersion`, not `RecordSpaceFormatVersion`.**

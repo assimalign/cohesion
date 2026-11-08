@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
@@ -168,7 +169,33 @@ public sealed class KeyValueDatabase : DatabaseInstance
             _coordinator.CompleteRecovery();
         }
 
+        ReclaimAbandonedIndexes();
         _primaryIndex = EnsurePrimaryIndex();
+    }
+
+    private void ReclaimAbandonedIndexes()
+    {
+        // Open only, after recovery, before any session can hold a detached handle.
+        var live = new HashSet<ulong>();
+        foreach (var registration in _catalog.GetIndexRegistrations()) { live.Add(registration.ObjectId); }
+        var abandoned = new HashSet<ulong>();
+        for (long page = 1; page < _storage.PageManager.PageCount; page++)
+        {
+            if (!_storage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
+            using var handle = _storage.PageManager.GetPage((PageId)page);
+            if (handle.Page.Type == PageType.Index && handle.Page.OwnerId > KeyValueOperationExecutor.KeySpaceObjectId &&
+                !live.Contains(handle.Page.OwnerId)) { abandoned.Add(handle.Page.OwnerId); }
+        }
+        foreach (ulong owner in abandoned)
+        {
+            while ((_storage.GetOwnerIndexPageCount(owner) != 0))
+            {
+                if (IndexRetirement.MustYield(_storage)) { _coordinator.Checkpoint(); }
+                using var admission = TransactionCheckpointInterlock.ForStorage(_storage).Enter("IndexReclamation", unchecked((long)owner));
+                if (!IndexRetirement.TryFreePages(_storage, owner, IndexRetirement.PageBudget, CancellationToken.None, out int freed)) { continue; }
+                KeyValueDatabaseEventSource.Log.PagesReclaimed(_storage, owner, freed);
+            }
+        }
     }
 
     /// <summary>
@@ -183,7 +210,8 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// </summary>
     private BTreeIndex EnsurePrimaryIndex()
     {
-        if (_indexManager.TryGetIndex(KeyValueOperationExecutor.KeySpaceObjectId, KeyValueOperationExecutor.PrimaryIndexName, out var existing))
+        var registration = _catalog.GetIndexRegistrations();
+        if (registration.Count != 0 && _indexManager.TryGetIndex(registration[0].ObjectId, KeyValueOperationExecutor.PrimaryIndexName, out var existing))
         {
             return existing;
         }
@@ -194,44 +222,65 @@ public sealed class KeyValueDatabase : DatabaseInstance
         var context = _coordinator.BeginAsync(IsolationLevel.Snapshot)
             .AsTask().GetAwaiter().GetResult();
 
+        ulong owner = (ulong)_storage.ReserveTransactionSequence();
+        KeyValueDatabaseEventSource.Log.IndexBuildStart(_storage, owner);
+        bool built = false;
         BTreeIndex index;
         try
         {
-            index = _coordinator.ApplyStatementAsync(
-                context,
-                bracket => _indexManager.CreateIndexAsync(
-                    context,
-                    KeyValueOperationExecutor.KeySpaceObjectId,
-                    new IndexDefinition(KeyValueOperationExecutor.PrimaryIndexName, IndexKind.BTree, IsUnique: true)),
-                durable: true).AsTask().GetAwaiter().GetResult();
-
-            _coordinator.CommitAsync(context).AsTask().GetAwaiter().GetResult();
-        }
-        catch
-        {
-            if (context.State == TransactionState.Active)
+            try
             {
-                _coordinator.RollbackAsync(context).AsTask().GetAwaiter().GetResult();
+                index = _coordinator.ApplyStatementAsync(
+                    context,
+                    bracket => _indexManager.CreateIndexAsync(
+                        context,
+                        owner,
+                        new IndexDefinition(KeyValueOperationExecutor.PrimaryIndexName, IndexKind.BTree, IsUnique: true)),
+                    durable: true).AsTask().GetAwaiter().GetResult();
+
+                _coordinator.CommitAsync(context).AsTask().GetAwaiter().GetResult();
+            }
+            catch
+            {
+                if (context.State == TransactionState.Active)
+                {
+                    _coordinator.RollbackAsync(context).AsTask().GetAwaiter().GetResult();
+                }
+
+                throw;
             }
 
-            throw;
+            // The marker first: a catalog that registers a primary index then always
+            // carries the format of the engine that built it, which is what the format
+            // gate relies on (a crash between the two leaves a marker and no
+            // registration, and the next open bootstraps again).
+            _catalog.SetEntrySpaceFormatVersionAsync(KeyValueRecordCodec.EntrySpaceFormatVersion)
+                .AsTask().GetAwaiter().GetResult();
+            _catalog.SaveIndexRegistrationsAsync(_indexManager.ExportRegistrations())
+                .AsTask().GetAwaiter().GetResult();
+
+            built = true;
+            return index;
         }
-
-        // The marker first: a catalog that registers a primary index then always
-        // carries the format of the engine that built it, which is what the format
-        // gate relies on (a crash between the two leaves a marker and no
-        // registration, and the next open bootstraps again).
-        _catalog.SetEntrySpaceFormatVersionAsync(KeyValueRecordCodec.EntrySpaceFormatVersion)
-            .AsTask().GetAwaiter().GetResult();
-        _catalog.SaveIndexRegistrationsAsync(_indexManager.ExportRegistrations())
-            .AsTask().GetAwaiter().GetResult();
-
-        return index;
+        finally { KeyValueDatabaseEventSource.Log.IndexBuildStop(_storage, owner, built); }
     }
 
     internal static void EnsureIndexFormats(string name, KeyValueStorage storage, KeyValueCatalog catalog)
     {
-        try { BTreeIndexManager.EnsureFormat(storage, catalog.GetIndexRegistrations()); }
+        try
+        {
+            var registrations = catalog.GetIndexRegistrations();
+            BTreeIndexManager.EnsureFormat(storage, registrations);
+            if (registrations.Count > 1) { throw new StorageCorruptionException(ErrorMessages.PrimaryIndexRegistrationInvalid); }
+            foreach (var registration in registrations)
+            {
+                using var root = storage.PageManager.GetPage((PageId)registration.RootPageId);
+                if (registration.ObjectId <= KeyValueOperationExecutor.KeySpaceObjectId ||
+                    root.Page.OwnerId != registration.ObjectId || !registration.Definition.IsUnique ||
+                    registration.Definition.Name != KeyValueOperationExecutor.PrimaryIndexName)
+                { throw new StorageCorruptionException(root.Id, ErrorMessages.PrimaryIndexRegistrationInvalid); }
+            }
+        }
         catch (IndexFormatException exception)
         {
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueDatabaseDatabase, name, exception.Message);

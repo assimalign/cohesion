@@ -166,11 +166,11 @@ internal sealed class KeyValueOperationExecutor
         // its source of identity and index metadata; physical pages stay private.
         foreach (var registration in catalog.IndexRegistrations)
         {
-            if (registration.ObjectId == KeySpaceObjectId &&
+            if (registration.ObjectId != KeySpaceObjectId &&
                 string.Equals(registration.Definition.Name, PrimaryIndexName, StringComparison.Ordinal))
             {
                 rows.Add([
-                    _databaseName.ToString(), (long)registration.ObjectId, catalog.EntrySpaceFormatVersion,
+                    _databaseName.ToString(), (long)KeySpaceObjectId, catalog.EntrySpaceFormatVersion,
                     registration.Definition.Name, registration.Definition.Kind.ToString(), registration.Definition.IsUnique,
                 ]);
             }
