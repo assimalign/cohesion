@@ -110,7 +110,8 @@ internal sealed partial class SqlPlanExecutor
                     statement.AddCopyAllocations(allocationStart);
                     IndexBuildBoundary?.Invoke("chunk-before-commit", included.Length, _storage.JournalLength);
                     return true;
-                }, durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
+                }, durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken,
+                    retryIndexAdmission: true).ConfigureAwait(false);
                 IndexBuildBoundary?.Invoke("chunk-committed", batch.Length, _storage.JournalLength);
                 await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
                 processed += batch.Length;

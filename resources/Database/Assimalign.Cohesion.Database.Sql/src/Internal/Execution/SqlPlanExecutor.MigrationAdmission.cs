@@ -12,13 +12,15 @@ internal sealed partial class SqlPlanExecutor
     // rechecks its protected state after reacquiring its own gates. The delegate must
     // unwind those gates before this catch runs (especially publication's snapshot gate).
     private async ValueTask<T> WithMigrationAdmissionAsync<T>(Func<ValueTask<T>> operation,
-        bool catalogStorage, SqlStatementContext statement, CancellationToken token, Action? onRefusal = null)
+        bool catalogStorage, SqlStatementContext statement, CancellationToken token, Action? onRefusal = null,
+        bool retryIndexAdmission = false)
     {
         var admission = statement.MigrationAdmission;
         while (true)
         {
             try { return await operation().ConfigureAwait(false); }
-            catch (TransactionAdmissionCanceledException) when (!token.IsCancellationRequested)
+            catch (TransactionAdmissionCanceledException) when (!token.IsCancellationRequested &&
+                (admission is not null || retryIndexAdmission))
             {
                 onRefusal?.Invoke();
                 if (admission is not null) { await admission(catalogStorage, token).ConfigureAwait(false); }
@@ -41,7 +43,8 @@ internal sealed partial class SqlPlanExecutor
 
     private ValueTask<T> WithCatalogMigrationAdmissionAsync<T>(Func<T> operation, SqlStatementContext statement,
         CancellationToken token, Action? onRefusal = null)
-        => WithMigrationAdmissionAsync(() => new ValueTask<T>(operation()), true, statement, token, onRefusal);
+        => WithMigrationAdmissionAsync(() => new ValueTask<T>(operation()), true, statement, token, onRefusal,
+            retryIndexAdmission: true);
 
     private async ValueTask CheckMigrationAdmissionAsync(SqlStatementContext statement, CancellationToken token)
     {
