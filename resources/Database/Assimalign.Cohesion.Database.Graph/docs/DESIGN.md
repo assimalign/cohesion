@@ -4507,6 +4507,8 @@ For a file with at least 1 GiB of valid allocated pages under an unrelated owner
 
 IndexBuildBegan and IndexBuildEnded report build lifetimes without EventSource Start/Stop activity semantics. Every begun build emits one end event on success, failure or abandonment; end includes succeeded. PagesReclaimed reports only nonempty committed batches.
 
-Before direct open records a receipt for an unknown index owner, it loads every page of that owner through checksum verification. Ordinary registered owners incur no extra reads. A failed root bracket with no registration records its receipt during live retirement, so its allocated page does not wait for reopen.
+Before direct open records a receipt for an unknown index owner, it loads every page of that owner through checksum verification. Ordinary registered owners incur no extra reads. The reserved owner enters the retirement queue before the root bracket. Its active creator pins the retirement horizon, so early purge passes only requeue it. A failed root bracket with no registration records its receipt during live retirement after the creator ends, so its allocated page does not wait for reopen.
 
 The journal bound is also checked with a 256 KiB trigger above the largest chunk delta, requiring a window that accumulates multiple chunks. The original 64 KiB comparison still measures the reduction from the former whole-build bracket.
+
+Exact property keys count UTF-16BE bytes and zero escapes before encoding, and builds reserve their temporary prefix and composite buffers before allocation. Text extraction already walks the original string and reserves each fixed nine-byte trigram before yielding it. Planner enum validation uses allocation-free comparisons; GC eviction of reflection enum caches must not alter ordinary-write allocation floors or ceilings.

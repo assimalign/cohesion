@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -66,23 +65,33 @@ public sealed class GraphIndexDamagedOwnerTests
     [Fact(DisplayName = "Cohesion Test [Graph] - An allocated root without registration retires in the live process (#1808)")]
     public async Task ReclaimIndexes_RolledBackRootWithoutRegistration_ShouldRecordReceiptAndFree()
     {
-        // Arrange: allocation survives a failed root bracket, as in a canceled create.
+        // Arrange: refuse registration inside the real root bracket after allocation.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         await using var engine = GraphDatabaseEngine.Create("failed-root", new()
         { MaintenanceInterval = TimeSpan.FromHours(1), CheckpointInterval = TimeSpan.FromHours(1) });
         var database = await engine.CreateDatabaseAsync("test", guard.Token);
-        ulong owner;
-        do { owner = (ulong)database.DataStorage.ReserveTransactionSequence(); } while (owner <= 2);
-        using (var bracket = database.DataStorage.BeginTransaction())
-        {
-            using var page = database.DataStorage.AllocatePageForWrite(bracket, PageType.Index, ownerId: owner);
-            page.MarkDirty();
-        }
-        database.DataStorage.GetOwnerIndexPages(owner).ShouldHaveSingleItem();
-        var horizon = await database.Coordinator.BeginSnapshotPinAsync(guard.Token);
-        await database.Coordinator.RollbackAsync(horizon, guard.Token);
-        ScheduleRetirement(database.Store, owner);
 
+        ulong owner = 0;
+        database.Store.IndexBuildStarted += id => owner = id;
+        int refusals = 0;
+        database.Store.BeforeIndexRegistrationInsert = () =>
+        {
+            database.DataStorage.GetOwnerIndexPages(owner).ShouldHaveSingleItem();
+            var status = typeof(Storage.GraphStore).GetMethod("RetirementStatus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(database.Store, [owner, database.Coordinator.Manager.OldestActive, false]);
+            status.ShouldBe(1, "the creator must pin even an unregistered reserved owner");
+            refusals++;
+            throw new InvalidOperationException("injected registration refusal");
+        };
+        var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
+        try { await Should.ThrowAsync<InvalidOperationException>(async () => { await database.Store.CreateIndexAsync("N", "v", context, guard.Token); }); }
+        finally
+        {
+            database.Store.BeforeIndexRegistrationInsert = null;
+            await database.Coordinator.RollbackAsync(context, guard.Token);
+        }
+        refusals.ShouldBe(1);
+        database.DataStorage.GetOwnerIndexPages(owner).ShouldHaveSingleItem();
         // Act.
         for (int pass = 0; pass < 8; pass++) { database.Coordinator.RunVersionPurgePass(guard.Token); }
 
@@ -91,6 +100,4 @@ public sealed class GraphIndexDamagedOwnerTests
         database.IsOffline.ShouldBeFalse();
     }
 
-    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ScheduleIndexReclamation")]
-    private static extern void ScheduleRetirement(Storage.GraphStore target, ulong owner);
 }

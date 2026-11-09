@@ -104,6 +104,8 @@ public sealed class GraphIndexBuildJournalTests
         bool inChunk = false;
         var chunkCommits = new List<long>();
         var deltas = new List<long>();
+        var windowBytes = new List<long>();
+        long chunkStartAfterLastCheckpoint = 0, lastCommit = 0;
         FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () =>
         {
             // Commit durability runs while the physical bracket is active.
@@ -114,11 +116,19 @@ public sealed class GraphIndexBuildJournalTests
         };
         database.Store.AfterTextIndexMutation = stage =>
         {
-            if (stage == "build-chunk-start") { chunkStart = database.DataStorage.JournalLength; committedLength = chunkStart; inChunk = true; }
+            if (stage == "build-chunk-start")
+            {
+                chunkStart = database.DataStorage.JournalLength;
+                if (chunks == 0 || chunkStart < lastCommit) { chunkStartAfterLastCheckpoint = chunkStart; }
+                committedLength = chunkStart;
+                inChunk = true;
+            }
             if (stage == "build-entry") { entries++; }
             if (stage != "build-chunk") { return; }
             inChunk = false;
             chunkCommits.Add(committedLength); deltas.Add(committedLength - chunkStart);
+            windowBytes.Add(committedLength - chunkStartAfterLastCheckpoint);
+            lastCommit = committedLength;
             (entries - previous).ShouldBeInRange(1, 64);
             previous = entries;
             chunks++;
@@ -145,7 +155,7 @@ public sealed class GraphIndexBuildJournalTests
         else
         {
             deltas.Max().ShouldBeLessThan(trigger);
-            chunkCommits.ShouldContain(length => length > deltas.Max(), "at least one checkpoint window must accumulate chunks");
+            windowBytes.ShouldContain(length => length > deltas.Max(), "at least one checkpoint window must accumulate chunks after its starting offset");
         }
         _output.WriteLine($"TEXT_BUILD_JOURNAL|entries={entries}|whole-bracket={peaks[0]}|chunked={peaks[1]}|chunks={chunks}|largest-chunk-delta={deltas.Max()}|commits={string.Join(',', chunkCommits)}");
     }

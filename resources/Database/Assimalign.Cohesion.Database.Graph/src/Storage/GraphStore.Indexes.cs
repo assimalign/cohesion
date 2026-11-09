@@ -18,6 +18,7 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 
 public sealed partial class GraphStore
 {
+    internal Action? BeforeIndexRegistrationInsert { get; set; }
     internal Action<ulong>? IndexBuildStarted { get; set; }
     internal Action<ulong, bool>? IndexBuildStopped { get; set; }
     internal Action<ulong, int>? IndexPagesReclaimed { get; set; }
@@ -88,11 +89,18 @@ public sealed partial class GraphStore
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         reserve?.Invoke(32);
         var entries = new List<(Reference Reference, IndexKey Key)>();
+        long keyWorkspace = 0;
+        void ReserveKeyWorkspace(long required)
+        {
+            if (required <= keyWorkspace) { return; }
+            reserve?.Invoke(required - keyWorkspace);
+            keyWorkspace = required;
+        }
         foreach (var node in StreamLabels([label], latest, cancellationToken, visit, reserve))
         {
             if (!node.Properties.TryGetValue(propertyKey, out var value)) { continue; }
             var reference = Find(1, node.Id, latest)!.Value.Reference;
-            foreach (var key in PropertyKeys(record, value, node.Id, cancellationToken, reserve, visit))
+            foreach (var key in PropertyKeys(record, value, node.Id, cancellationToken, text ? reserve : ReserveKeyWorkspace, visit))
             {
                 if (entries.Count == entries.Capacity)
                 {
@@ -117,13 +125,13 @@ public sealed partial class GraphStore
             // The creator pins this later owner, while this short fence advances the
             // manager's idle horizon so abandoned chunks retire without a new user write.
             await AdvanceIndexOwnerHorizonAsync(cancellationToken).ConfigureAwait(false);
+            ScheduleIndexReclamation(id);
             var index = await ApplyIndexBuildAsync(context, async bracket =>
             {
                 var created = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
                 SaveRegistrations(bracket);
                 return created;
             }, cancellationToken).ConfigureAwait(false);
-            ScheduleIndexReclamation(id);
             AfterTextIndexMutation?.Invoke("build-root");
             bool published = false;
             await IndexBuildLoop.RunAsync(entries, async (chunk, token) =>
@@ -436,6 +444,7 @@ public sealed partial class GraphStore
             }
             else
             {
+                BeforeIndexRegistrationInsert?.Invoke();
                 var location = _storage.InsertOwned(bracket, 1, stream.ToArray());
                 _registrations[registration.ObjectId] = (location.PageId, location.SlotIndex, registration.RootPageId);
             }

@@ -410,7 +410,7 @@ public sealed partial class GraphStore
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        if (!Enum.IsDefined(direction)) { throw new ArgumentOutOfRangeException(nameof(direction)); }
+        if (!(direction is GraphIncidentDirection.Both or GraphIncidentDirection.Outgoing or GraphIncidentDirection.Incoming)) { throw new ArgumentOutOfRangeException(nameof(direction)); }
         cancellationToken.ThrowIfCancellationRequested();
         if (typeIds is { Count: 0 } || !_indexes.TryGetIndex(adjacencyId, treeName, out var index)) { yield break; }
         // Copy the caller's selection once; duplicate type ids must not duplicate visits.

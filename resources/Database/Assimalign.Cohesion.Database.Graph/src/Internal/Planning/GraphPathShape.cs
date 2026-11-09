@@ -96,7 +96,7 @@ internal sealed class GraphPathShape
             if (!visited.Add(current)) { throw Invalid(); }
             if (current.Selector is { } selector)
             {
-                if (creating || !Enum.IsDefined(selector.Kind) || selector.Count <= 0 ||
+                if (creating || !(selector.Kind is >= GqlPathSelectorKind.Any and <= GqlPathSelectorKind.ShortestGroups) || selector.Count <= 0 ||
                     selector.Kind is not (GqlPathSelectorKind.Shortest or GqlPathSelectorKind.ShortestGroups) && selector.Count != 1)
                 { throw Invalid(); }
                 if (item.Depth != 0) { throw new GraphPlanningException("CK00001", ErrorMessages.NestedPathSelectorUnsupported, selector.Location); }
