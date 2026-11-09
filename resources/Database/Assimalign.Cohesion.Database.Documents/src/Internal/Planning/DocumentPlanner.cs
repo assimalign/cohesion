@@ -47,7 +47,7 @@ internal sealed partial class DocumentPlanner
 
     internal DocumentStatementPlan Plan(OqlExpression expression)
     {
-        if (expression is OqlInsertExpression { Select: OqlSetOperationExpression } or OqlUpsertExpression { Select: OqlSetOperationExpression } ||
+        if (expression is OqlMergeExpression or OqlInsertExpression { Select: OqlSetOperationExpression } or OqlUpsertExpression { Select: OqlSetOperationExpression } ||
             HasSubquery(expression, _cancellationToken)) { return PlanNested(expression); }
         _cancellationToken.ThrowIfCancellationRequested();
         return PlanCore(expression);
@@ -61,6 +61,7 @@ internal sealed partial class DocumentPlanner
         OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName, nested, queryOuterNames),
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
+        OqlMergeExpression merge => PlanMerge(merge, nested, queryOuterNames),
         OqlSetOperationExpression compound => PlanSetOperation(compound, nested, outerNames, queryOuterNames),
         OqlSelectExpression select when select.Bindings != select.Unnest => PlanJoins(select, nested, outerNames),
         OqlSelectExpression { Source: not null } select => PlanFrom(select, nested, outerNames),

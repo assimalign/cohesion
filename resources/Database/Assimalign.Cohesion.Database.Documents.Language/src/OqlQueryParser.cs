@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
-/// <summary>Parses the executable OQL profile into an expression tree with diagnostics.</summary>
+/// <summary>Parses the declared OQL profile into an expression tree with diagnostics.</summary>
 /// <remarks>Instances serialize concurrent calls. Offsets are zero-based UTF-16 positions with exclusive ends.</remarks>
 [global::System.Diagnostics.DebuggerDisplay("OqlQueryParser")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser.DebugView))]
@@ -126,6 +126,10 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 expression = new OqlExplainExpression(ParseUpdate(), Span(start, Previous));
             }
+            else if (Is("MERGE"))
+            {
+                expression = new OqlExplainExpression(ParseMerge(), Span(start, Previous));
+            }
             else
             {
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"EXPLAIN {Current.Text}", Profile.Language, Span(start, Current)));
@@ -155,6 +159,10 @@ public sealed partial class OqlQueryParser : QueryParser
         else if (Is("UPDATE"))
         {
             expression = ParseUpdate();
+        }
+        else if (Is("MERGE"))
+        {
+            expression = ParseMerge();
         }
         else if (IsIndexStatement("CREATE"))
         {
@@ -237,6 +245,7 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         List<(string, Lexeme)> result = [];
         int statementStart = IsWord(_tokens[0], "EXPLAIN") ? 1 : 0;
+        bool merge = IsWord(_tokens[statementStart], "MERGE");
         var (updateHeaderEnd, updateClause) = FindUpdateClause(statementStart);
         bool hasGroupBy = false;
         int parentheses = 0;
@@ -286,6 +295,9 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             string value = token.Text.ToUpperInvariant();
+            // Only the action-clause SET is structural. SET(...) in a MERGE value
+            // retains its ordinary unsupported-vocabulary refusal.
+            if (merge && value == "SET" && index > statementStart && IsWord(_tokens[index - 1], "UPDATE")) { continue; }
             // UPDATE's parsed destination and alias keep ordinary contextual names such
             // as use. SET is exempt only at the assignment-clause token after that header;
             // SET(...) elsewhere still refuses.
@@ -416,7 +428,7 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 // A nested MERGE statement owns its text, while a field named merge
                 // remains an ordinary expression in SATISFIES.
-                AddUnsupported(result, "MERGE", token);
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("MERGE", Profile.Language, Span(token, token)));
                 break;
             }
 
@@ -537,7 +549,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             if (value is "JOIN" or "NEST")
-            { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + " in UPDATE or DELETE", Profile.Language, Span(token, token))); break; }
+            { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + (merge ? " in MERGE" : " in UPDATE or DELETE"), Profile.Language, Span(token, token))); break; }
 
             var reported = token;
 

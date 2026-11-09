@@ -86,6 +86,7 @@ public class OqlLanguageProfileTests
 
     [Theory]
     [InlineData("ON KEYS")]
+    [InlineData(OqlClauses.Merge)]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {
         OqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();

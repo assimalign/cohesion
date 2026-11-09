@@ -640,6 +640,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD05018` | Retained statement source rows, ordered candidate buckets, key-lookup caches, groups, compound state, RETURNING results or aggregate values exceed the statement memory budget |
 | `CD05020` | Shared expression/lookup/set-operation work budget exhausted across nested queries, expression sources, key joins and compounds |
 | `CD05021` | Planning, EXPLAIN or evaluation needs more execution stack than the executing thread has left; the statement fails and the session stays open |
+| `CD05022` | MERGE execution is deferred until OQ-M2; EXPLAIN is available |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
 | `CD00014` | IN subquery requires RAW/VALUE (direct SELECT or compound, including a parenthesized first operand) |
@@ -648,6 +649,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD01033` | FROM expression has no explicit alias or implicit field name |
 | `CD01034` | Unbound variable in a FROM expression without an input-row scope |
 | `CD01035` | Invalid key-join binding scope or ambiguous/invalid joined META receiver |
+| `CD01040` | An unavailable ON KEY target binding, unnamed MERGE AST root or invalid metadata receiver |
 | `CD01036` | VALUES references its destination binding without a source row or local declaration |
 | `CD01037` | ORDER BY over an all-RAW/VALUE compound has no named result members |
 | `CD01038` | Compound ORDER BY references an unbound result member, metadata or star |
@@ -661,7 +663,8 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03020` | A UNIQUE index found a duplicate valued scalar key (23505) |
 | `CD02021` | A UNIQUE key contains an array or object |
 | `CD03022` | An index has fewer than one or more than 32 paths |
-| `CD01023` | A direct SELECT AST repeats a FROM/JOIN/NEST/UNNEST binding name, or a SELECT/DML AST supplies an empty binding name |
+| `CD01023` | A direct SELECT or MERGE AST repeats a binding name, or a SELECT/DML AST supplies an empty binding name |
+| `CD01039` | A direct MERGE AST has an invalid source, form or action shape |
 | `CD03024` | Index already exists |
 | `CD03025` | Multiple array keys, a UNIQUE array index, or IncludeMissing with a leading array key |
 | `CD03026` | Encoded index definition exceeds the 8,092-byte catalog record limit; refused before building postings |
@@ -1642,9 +1645,42 @@ read the raw B-tree to prove both committed old-key removal and abandoned new-ke
 rather than relying on catalog filtering in a seek. No catalog layout or wire encoding changes;
 no format version or upgrade reader is added.
 
+## MERGE planning boundary (#1804, OQ-M1)
+
+The planner binds Couchbase lookup and key-equality ANSI MERGE against snapshot-visible catalog
+metadata. DocumentMergePlan retains the source plan, source and target names, lookup key, reused
+UPDATE patch targets and action scopes. ON KEY has no target binding; matched actions have both;
+INSERT retains the target identity with TargetIsMissing=true. Nested queries capture the same
+lexical identities. ANSI keys must be computable before lookup; target-dependent keys retain
+CK00001. Unqualified value paths, omitted ANSI INSERT KEY/VALUE semantics and other unsettled
+forms stay CK00001. RETURNING retains target-image scope; source references remain CK00001. UPDATE paths reuse CD02016/CD01017. Duplicate direct aliases reuse CD01023;
+invalid direct form/action shape uses CD01039; unavailable ON KEY target bindings, unnamed AST roots and invalid metadata receivers use CD01040.
+System targets retain CD04004. The language owns 128-level complete-tree and canonical-parse cost bounds in addition
+to its recursive expression bound; runtime direct AST stack exhaustion retains CD05021.
+Direct AST regressions cover all five recursive positions at the guarded input traversal's
+measured boundary on a one-MiB thread, including action conjunctions; stack refusals retain CD05021.
+
+EXPLAIN emits Merge with the complete source, KeyLookup/KeyJoin, ordered action nodes (including
+filters and the MISSING insert target) and RETURNING without reading documents or evaluating
+callbacks, keys or action expressions. DocumentPlanExecutor refuses a planned MERGE with one
+located CD05022 before creating the nested execution context or reading its source. OQ-M2 owns
+snapshot staging, patch/delete/insert application, counts, RETURNING images and duplicate-write
+rules. No storage, catalog or wire contract changes occur in OQ-M1.
+
+MERGE action WHERE predicates are residual filters after key matching. Reused UPDATE target
+validation therefore uses a scan placeholder and skips target access-path selection and index-range
+counting, under both EXPLAIN and execution admission. Unbound named value roots consistently use
+CK00001 regardless of path length; unavailable ON KEY target bindings and invalid META receivers
+retain CD01040. The profile continues to advertise only executable clauses.
+Nested key, action and RETURNING subqueries are parented to the operator that owns them.
+
+The parser, planner and canonical round-trip corpora cover both forms, source shapes, scopes,
+refusals, action bounds and contextual names. InMemory/TCP and the NativeAOT consumer pin the
+EXPLAIN/refusal contract and continued connection usability.
+
 ## EXPLAIN operator vocabulary and wire shape (#1104)
 
-EXPLAIN for SELECT, INSERT, UPSERT, UPDATE and DELETE performs ordinary parameter validation and snapshot-visible planning, then
+EXPLAIN for SELECT, INSERT, UPSERT, UPDATE, DELETE and MERGE performs ordinary parameter validation and snapshot-visible planning, then
 materialize a `DatabasePlanDescription` before reading document content or invoking the plan
 executor. Its columns and nullable count fields follow
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
@@ -1656,6 +1692,9 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Union`, `UnionAll` | Set-operation parent with both complete operand trees, result shape, order-key count and resolved paging |
 | `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
+| `KeyJoin`, `LeftKeyJoin`, `KeyNest`, `LeftKeyNest` | Key-equality source lookup, including left and nested-image variants |
+| `Merge`, `KeyLookup` | Deferred MERGE statement and its source-key target access; ANSI access uses KeyJoin |
+| `MergeUpdate`, `MergeDelete`, `MergeInsert` | Ordered actions with residual filters and binding scopes; INSERT retains a MISSING target |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | Catalog index name, collection, inclusive/exclusive bounds and bounded index-entry estimate |
 | `IndexOrderCandidate` | Per-index ordering eligibility, reason, direction and equal-key bucket contract; consumed=True and sort=elided when selected |

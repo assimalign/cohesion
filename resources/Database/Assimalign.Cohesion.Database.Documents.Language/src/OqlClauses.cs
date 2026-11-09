@@ -49,6 +49,9 @@ public static class OqlClauses
     /// <summary>Deletes documents from one collection.</summary>
     public const string Delete = "DELETE";
 
+    /// <summary>Plans lookup or key-equality ANSI MERGE; execution is deferred.</summary>
+    public const string Merge = "MERGE";
+
     /// <summary>Projects each affected document, optionally as one RAW or VALUE expression.</summary>
     public const string Returning = "RETURNING";
 
@@ -83,7 +86,7 @@ public static class OqlClauses
     /// <summary>Returns the first qualifying array element's mapping.</summary>
     public const string FirstComprehension = "FIRST ... FOR";
 
-    /// <summary>Describes a SELECT, INSERT, UPSERT, UPDATE or DELETE statement without executing it.</summary>
+    /// <summary>Describes a SELECT, INSERT, UPSERT, UPDATE, DELETE or MERGE statement without executing it.</summary>
     public const string Explain = "EXPLAIN";
 
     /// <summary>Introduces the source collections and iteration variables for a query.</summary>

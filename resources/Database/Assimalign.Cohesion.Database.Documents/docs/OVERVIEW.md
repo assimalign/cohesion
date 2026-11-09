@@ -10,6 +10,10 @@ versioned UTF-8 JSON documents. Each session is bound to one database. The engin
 supports document CRUD, OQL queries, KEY/VALUE INSERT and UPSERT, SET/UNSET UPDATE, DELETE and collection/index DDL, secondary B+Tree indexes,
 snapshot and read-committed transactions, durable file or in-memory storage, and a wire server.
 
+Lookup and key-equality ANSI MERGE bind both source names, action scopes and ordinary UPDATE paths.
+EXPLAIN describes the complete source, key access and actions without reading documents. MERGE
+execution refuses with CD05022 until OQ-M2; no disk or wire format changes are introduced.
+
 OQL executes UNION/INTERSECT/EXCEPT [ALL] with independent operand scopes, parenthesized local pages,
 compound ordering/paging and statically chosen RAW/typed/document headers (T3-30). UNION ALL
 streams operands; distinct keys, sorts and output share statement memory and work budgets.

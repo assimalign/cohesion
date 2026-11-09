@@ -418,6 +418,75 @@ General ON predicates, ON KEYS, expression/derived right-hand sources and comma 
 named CK00001 refusals. No format or wire
 version changes are required.
 
+## MERGE (#1804, OQ-M1)
+
+Both Couchbase forms parse, bind and plan. They accept at least one action, each at most once,
+in UPDATE, DELETE, INSERT order:
+
+```sql
+MERGE INTO targets [AS t] USING sources [AS s] ON [PRIMARY] KEY s.key
+  WHEN MATCHED THEN UPDATE SET t.n = s.n UNSET t.old WHERE s.enabled
+  WHEN MATCHED THEN DELETE WHERE t.deleted
+  WHEN NOT MATCHED THEN INSERT s WHERE t IS MISSING
+  RETURNING RAW t;
+
+MERGE INTO targets t USING [{key:'a', n:2}] AS s ON META(t).id = s.key
+  WHEN NOT MATCHED THEN INSERT (KEY s.key, VALUE s) WHERE t IS MISSING;
+```
+
+The brackets in the first header denote optional syntax. Sources are a keyspace, an aliased
+parenthesized query (including compounds), or an expression. Generic expressions require AS
+before their alias; a path can supply its final named member implicitly. Collections use the
+same implicit names as SELECT, including the final segment of a reserved system source.
+Aliases are ordinal and must differ; duplicate implicit or explicit declarations give CD00010
+in text and CD01023 in a direct AST. A subquery requires an alias (CD00015 in text).
+Bare MERGE aliases cannot be keys, options, limit, offset or use, or a word starting a
+JOIN, NEST or UNNEST clause (including LEFT/INNER forms); use AS and a quoted identifier
+for those names. Generic expression aliases require AS even when a bare name is written.
+
+ON KEY binds only the source. ANSI ON sees both names and is restricted to the written
+META(target).id = expression shape; reversed equalities and general predicates receive one
+CK00001. The key expression must be computable from the source before lookup; a target-dependent
+key, including a correlated subquery capturing the target, receives CK00001. UPDATE values and
+WHERE, and DELETE WHERE, see both sides. INSERT key, value and WHERE see the source and a
+MISSING target binding, including MISSING target metadata. RETURNING keeps ordinary target-image
+field and META() binding; source references remain CK00001 until their scope is established.
+Lookup INSERT inherits the ON KEY
+key; ANSI INSERT currently requires explicit KEY and VALUE expressions. The omitted KEY/VALUE
+rules are not established by the available references and receive CK00001. Outside nested SELECTs
+and RETURNING, value paths must
+name a visible source, target or local expression variable; unqualified field resolution remains
+CK00001. META requires an explicit visible binding; its unqualified form outside RETURNING stays
+CK00001. Expression and derived source metadata retain the existing NULL rule. An unavailable ON KEY
+target binding or invalid META receiver gives CD01040. UPDATE destination paths keep existing target-
+relative SET/UNSET rules, including CD02016 and CD01017; a source-prefixed destination is invalid.
+
+LIMIT, OFFSET, OPTIONS, USE INDEX, USE KEYS, join hints and source joins remain one CK00001.
+A system target receives CD04004. Missing, repeated or out-of-order actions receive CD00002;
+an invalid direct AST form/action/source receives CD01039. Expression nesting retains the parser
+limit. Both the complete MERGE tree and the parser recursion needed by its fully grouped canonical
+text stop at 128 levels with CD00005. Prefixes consume two canonical levels (63 fit; 64 refuse),
+while 127 left-associated binary terms fit. Long action lists stop at the first repetition or
+ordering violation.
+
+OqlMergeExpression.ToString renders canonical syntax that reparses to the same tree shape.
+Array-form IN keeps its precedence-four operand distinct from an IN value list, including
+arithmetic, prefixes and IS tests. Only the two reserved system collection names render with
+qualification; a user name such as "COHESION_SCHEMA." remains one quoted identifier.
+The MERGE constructors reject null required members and null mutation-list elements and take
+read-only snapshots of the SET/UNSET lists. Parse recovery returns a renderable empty expression
+instead of an incomplete MERGE. The executable profile's Supports("MERGE") remains false.
+MERGE remains contextual: SELECT merge.x FROM c merge parses. A nested MERGE statement in an
+expression retains its single CK00001 refusal. EXPLAIN MERGE validates bindings and describes
+Merge, its source plan, KeyLookup or KeyJoin access, ordered MergeUpdate/MergeDelete/MergeInsert
+actions and RETURNING. It does not evaluate source/action expressions, perform key probes, read
+documents or write. Source plans retain their collection/derived/expression operators.
+
+Execution is deliberately unavailable until OQ-M2: a valid executed MERGE receives one located
+CD05022, with no source reads or writes. It follows the existing statement failure and explicit-
+transaction abort contract. RETURNING's image, count and snapshot execution semantics remain
+OQ-M2 work. There is no disk, catalog or wire format change.
+
 ## RETURNING (#1727)
 
 INSERT and UPSERT (VALUES or SELECT), UPDATE and DELETE accept a final
