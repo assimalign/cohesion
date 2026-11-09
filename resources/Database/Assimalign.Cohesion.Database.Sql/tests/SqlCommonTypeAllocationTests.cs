@@ -2,6 +2,7 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -22,28 +23,41 @@ public sealed class SqlCommonTypeAllocationTests
 
     public SqlCommonTypeAllocationTests(ITestOutputHelper output) { _output = output; }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: Decimal identity alternatives keep base row allocations (#1788)")]
-    public async Task Execute_DecimalCaseInput_ShouldKeepBaseRowAllocations()
+    [Theory(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: Decimal identity alternatives keep base row allocations (#1788)")]
+    [InlineData("CASE WHEN flag THEN amount END")]
+    [InlineData("CASE WHEN flag THEN amount ELSE 0.0 END")]
+    public async Task Execute_DecimalCaseInput_ShouldKeepBaseRowAllocations(string expression)
     {
         // Arrange: the two-column table isolates the Decimal CASE input cost.
-        // The cap leaves 12 bytes/row for runtime/architecture variation while still
-        // detecting 58b85171a's extra 32-byte Decimal box on every qualifying row.
+        // Base 17e22bb08, 5000 -> 10000 rows, measured on ARM64 and --arch x64:
+        // no ELSE: 1,890,736 -> 3,772,040 bytes; 376.2608 B/row on each architecture.
+        // ELSE 0.0: 1,891,104 -> 3,772,408 bytes; 376.2608 B/row on each architecture.
+        // Both ceilings are the measured architecture's base slope plus 4 B/row.
         await using var engine = SqlDatabaseEngine.Create("common-allocation", new());
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t(flag BOOLEAN,amount NUMERIC)");
         string insert = "INSERT INTO t VALUES " + string.Join(',', Enumerable.Repeat("(TRUE,1.25)", 100));
-        for (int index = 0; index < 100; index++) { await session.ExecuteAsync(insert); }
+        for (int index = 0; index < 50; index++) { await session.ExecuteAsync(insert); }
         await using var transaction = await session.BeginTransactionAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
-        var request = SqlQueryRequest.FromSql("SELECT SUM(CASE WHEN flag THEN amount END) FROM t");
-        for (int warmup = 0; warmup < 4; warmup++) { Measure(); }
+        var request = SqlQueryRequest.FromSql($"SELECT SUM({expression}) FROM t");
 
         // Act
-        long minimum = long.MaxValue;
-        for (int round = 0; round < 3; round++) { minimum = Math.Min(minimum, Measure()); }
+        long small = Minimum();
+        for (int index = 0; index < 50; index++) { await session.ExecuteAsync(insert); }
+        long large = Minimum();
+        double slope = (large - small) / 5000d;
 
         // Assert
-        _output.WriteLine($"Decimal CASE: {minimum} bytes / 10000 rows = {minimum / 10000d:F4} bytes/row");
-        minimum.ShouldBeLessThanOrEqualTo(3_900_000);
+        _output.WriteLine($"{RuntimeInformation.ProcessArchitecture} {expression}: 5000={small}; 10000={large}; slope={slope:F4} B/row");
+        slope.ShouldBeLessThanOrEqualTo(376.2608 + 4);
+
+        long Minimum()
+        {
+            for (int warmup = 0; warmup < 4; warmup++) { Measure(); }
+            long minimum = long.MaxValue;
+            for (int round = 0; round < 3; round++) { minimum = Math.Min(minimum, Measure()); }
+            return minimum;
+        }
 
         long Measure()
         {
