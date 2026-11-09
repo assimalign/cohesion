@@ -47,6 +47,7 @@ public sealed partial class SqlJointTypeMigrationTests
         measured.KeepsOwner.ShouldBeTrue();
         measured.KeepsHeap.ShouldBeTrue();
         _output.WriteLine($"Index replacement ({rows} rows): 49a={measured.OldPages}; joint={measured.JointPages}; ratio={(double)measured.JointPages / measured.OldPages:P2}");
+        measured.JointPages.ShouldBeLessThanOrEqualTo(measured.OldPages * 110 / 100);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: nullable append inside another table's deferred plan keeps the heap")]

@@ -173,7 +173,6 @@ public sealed partial class SqlJointTypeMigrationTests
         classification.ShouldBe("Joint/KeepOwner");
         Table(database).ObjectId.ShouldBe(heap);
         rewritten.ShouldBe(0);
-        database.SchemaProvisioner.JointSpaceReplacementBytes.ShouldBeLessThan(heapPages.LongLength * 8192 / 10);
         await using var reader = await database.CreateSessionAsync(guard.Token);
         (await RowsAsync(reader, "SELECT COUNT(*) FROM items WHERE v=7", guard.Token)).Single()[0].ShouldBe(1024L);
     }

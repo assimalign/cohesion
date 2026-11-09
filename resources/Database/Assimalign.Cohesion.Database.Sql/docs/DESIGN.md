@@ -9938,7 +9938,7 @@ primary-key tables with three columns measure 227 to 228 pages; adding a new key
 that plan measures 228 to 230. At the measured 64 MiB engine budget, the ten-percent page-write
 bound covers additive index builds, including plans that add a table. Page-write costs for
 other changes to alternate trees remain unmeasured. Index drops keep the heap with zero row
-rewrites; #1808 extends the ten-percent bound to a same-name index replacement. Shuffled-key measurements
+rewrites; #1808 asserts the ten-percent bound for same-name replacement; the 8,192-row fixture currently measures 75 joint page writes against 43 ordinary-DDL writes (174.42%), exceeding that bound and requiring an owner decision. Shuffled-key measurements
 count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
 already completed by the engine must not be followed by a redundant forced copy checkpoint.
 
