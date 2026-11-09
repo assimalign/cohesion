@@ -3359,3 +3359,5 @@ Concrete eligible types carry their own concise display and private nested Debug
 Size-only checkpoint hints (TimeSpan.MaxValue) short-circuit elapsed-time sampling after the
 journal-size trigger. Failed physical-bracket registration completes the unreturned transaction;
 probe write refusal still precedes construction in all BeginTransaction overloads (#1283, #1744).
+
+GetIndexOwners(afterOwner, maximumOwners) enumerates nonzero index owners in bounded ordered snapshots from the directory already rebuilt by the storage open scan. It returns one page identity per owner without loading pages through the buffer pool. Open-time model orphan discovery uses this directory before admitting sessions. Each snapshot is independent of later directory changes; releases become visible only at commit, as for GetOwnerIndexPageCount.

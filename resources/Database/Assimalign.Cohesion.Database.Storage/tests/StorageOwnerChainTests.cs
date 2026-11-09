@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// the owner's current write page, owner-scoped iteration touches only the owner's
 /// pages, and a chain release returns its pages to the allocator transactionally.
 /// </summary>
-public sealed class StorageOwnerChainTests
+public sealed partial class StorageOwnerChainTests
 {
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "GetOwnerIndexPages")]
     private static extern IReadOnlyList<PageId> IndexDirectory(Storage storage, ulong owner);

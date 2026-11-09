@@ -31,5 +31,7 @@ internal abstract class IndexStructure
     protected abstract void EnsureFormatCore();
     protected abstract long PurgeWritersCore(StorageTransaction bracket, IReadOnlySet<TransactionSequence> writers);
     protected abstract (long Removed, bool Completed) PruneCore(TransactionSequence bound, CancellationToken token);
+    // Called under the directory monitor. Adapters may change in-memory state
+    // only; no I/O, waits or callbacks into the model are permitted here.
     protected abstract void RetireCore();
 }

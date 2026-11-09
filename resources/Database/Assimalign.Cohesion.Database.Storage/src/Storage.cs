@@ -2331,6 +2331,32 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>Copies a bounded, ordered snapshot of nonzero index owners from the recovered allocation directory.</summary>
+    /// <param name="afterOwner">The exclusive lower owner identity; zero starts enumeration.</param>
+    /// <param name="maximumOwners">The positive maximum number of owners to return.</param>
+    /// <returns>Owner identities and one allocated index page per owner, in ascending owner order.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumOwners"/> is not positive.</exception>
+    /// <remarks>No page is read. Each call snapshots independently; concurrent directory mutations may
+    /// change later batches. Open-time consumers enumerate before admitting sessions.</remarks>
+    public IReadOnlyList<(ulong OwnerId, PageId Page)> GetIndexOwners(ulong afterOwner, int maximumOwners = 64)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumOwners);
+        lock (_ownerLock)
+        {
+            var result = new List<(ulong OwnerId, PageId Page)>();
+            foreach (var pair in _indexOwnerPages)
+            {
+                if (pair.Key <= afterOwner || pair.Value.Count == 0) { continue; }
+                int at = 0;
+                while (at < result.Count && result[at].OwnerId < pair.Key) { at++; }
+                if (at == maximumOwners) { continue; }
+                if (result.Count == maximumOwners) { result.RemoveAt(result.Count - 1); }
+                result.Insert(at, (pair.Key, (PageId)pair.Value.Min));
+            }
+            return result;
+        }
+    }
+
     /// <summary>
     /// Gets a point-in-time snapshot of the data pages currently belonging to the
     /// specified owner's record chain, in ascending page order.

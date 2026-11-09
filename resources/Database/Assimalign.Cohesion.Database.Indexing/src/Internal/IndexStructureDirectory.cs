@@ -32,6 +32,8 @@ internal sealed class IndexStructureDirectory
         lock (_sync)
         {
             var structure = _byIdentity[(owner, name)];
+            // Adapters must retire in memory only: no I/O, waits or callbacks into
+            // the model while the directory monitor is held.
             structure.Retire();
             int position = _positions[structure];
             var last = _structures[^1];

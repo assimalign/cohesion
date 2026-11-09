@@ -12,6 +12,8 @@ internal static class IndexRetirement
 {
     internal const int PageBudget = 64;
 
+    // Covers the size trigger and admission pause only. Callers must also check
+    // their engine's pending checkpoint signal and interval before another batch.
     internal static bool MustYield(Storage.Storage storage)
         => storage.IsCheckpointDue(TimeSpan.MaxValue) ||
             TransactionCheckpointInterlock.ForStorage(storage).IsAdmissionPaused;
