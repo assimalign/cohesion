@@ -365,8 +365,10 @@ public sealed partial class OqlQueryParser
                     return new OqlMetaExpression(arguments.AsReadOnly(), member, Span(start, Previous));
                 }
                 var call = new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous), quantifier);
-                if (!Failed && Take("OVER"))
+                if (!Failed && Is("OVER") && _position + 1 < _tokens.Count &&
+                    _tokens[_position + 1].Type is TokenType.LeftParen or TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function)
                 {
+                    Advance();
                     if (Take(TokenType.LeftParen))
                     {
                         var specification = ParseWindowSpecification(Previous);
@@ -376,7 +378,7 @@ public sealed partial class OqlQueryParser
                     return new OqlWindowExpression(call, name: windowName, location: Span(start, Previous));
                 }
                 if (!Failed && definition?.WindowKind is not (null or OqlWindowFunctionKind.None))
-                { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("window function without OVER", Profile.Language, call.Location!)); }
+                { Error("CD01044", ErrorMessages.WindowPlacementInvalid, start); }
                 return call;
             }
             var path = ParsePath(start, name);

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Documents.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
@@ -60,14 +61,53 @@ public sealed partial class OqlQueryParser
     }
 
     // WINDOW stays usable as an implicit source/group alias outside declaration heads.
-    private bool IsWindowDeclaration() => Is("WINDOW") && _position + 2 < _tokens.Count && IsWord(_tokens[_position + 2], "AS");
+    private bool IsWindowDeclaration() => Is("WINDOW") && _position + 2 < _tokens.Count &&
+        _tokens[_position + 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+        IsWord(_tokens[_position + 2], "AS");
+
+    private bool IsCallNullModifier(int index)
+    {
+        return index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "NULLS") && FollowsCall(index);
+    }
+
+    private bool HasWindowSuffix()
+    {
+        for (int index = 1; index + 1 < _tokens.Count; index++)
+        {
+            if (IsWord(_tokens[index], "OVER") && _tokens[index + 1].Type is
+                TokenType.LeftParen or TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && FollowsCall(index))
+            { return true; }
+        }
+        return false;
+    }
+
+    private bool FollowsCall(int index)
+    {
+        if (index == 0 || _tokens[index - 1].Type != TokenType.RightParen) { return false; }
+        int depth = 1;
+        for (int previous = index - 2; previous > 0; previous--)
+        {
+            if (_tokens[previous].Type == TokenType.RightParen) { depth++; }
+            else if (_tokens[previous].Type == TokenType.LeftParen && --depth == 0)
+            { return _tokens[previous - 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function; }
+        }
+        return false;
+    }
 
     private bool IsWindowFrame() => Is("ROWS") || Is("RANGE") || Is("GROUPS") || Is("EXCLUDE");
 
-    private void ValidateWindowPositions(OqlExpression expression, bool allowed = false)
+    private void WindowError(string code, string message, OqlExpression expression)
+    {
+        var location = expression.Location ?? Span(Current, Current);
+        _diagnostics.Add(new Diagnostic(code, message, location.Start, location.End, DiagnosticSeverity.Error)
+        { Line = location.StartLine, Location = DiagnosticLocation.Absolute });
+    }
+
+    private void ValidateWindowPositions(OqlExpression expression, bool allowed = false, bool insideWindow = false)
     {
         if (Failed) { return; }
-        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (!System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        { WindowError("CD00005", ErrorMessages.OqlQueryParserParseExpressionVoid, expression); return; }
         if (expression is OqlExplainExpression explain) { ValidateWindowPositions(explain.Statement); return; }
         if (expression is OqlSubqueryExpression subquery) { ValidateWindowPositions(subquery.Query); return; }
         if (expression is OqlUpdateExpression update)
@@ -106,22 +146,28 @@ public sealed partial class OqlQueryParser
             foreach (var key in query.GroupBy) { ValidateWindowPositions(key); }
             if (query.Having is not null) { ValidateWindowPositions(query.Having); }
             foreach (var binding in query.Bindings) { ValidateWindowPositions(binding.Expression); }
-            foreach (var definition in query.Windows) { ValidateWindowPositions(definition.Specification); }
+            foreach (var definition in query.Windows) { ValidateWindowPositions(definition.Specification, insideWindow: true); }
             return;
         }
         if (expression is OqlWindowExpression window)
         {
-            if (!allowed || OqlFunctions.Find(window.Call.Name)?.WindowKind is null or OqlWindowFunctionKind.None)
+            if (insideWindow || !allowed)
             {
-                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("window placement, nesting or function", Profile.Language, window.Location!));
+                WindowError(insideWindow ? "CD01045" : "CD01044",
+                    insideWindow ? ErrorMessages.WindowNestingInvalid : ErrorMessages.WindowPlacementInvalid, window);
                 return;
             }
-            foreach (var argument in window.Call.Arguments) { ValidateWindowPositions(argument); }
-            if (window.Specification is not null) { ValidateWindowPositions(window.Specification); }
+            if (OqlFunctions.Find(window.Call.Name)?.WindowKind is null or OqlWindowFunctionKind.None)
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("window function", Profile.Language, window.Location!));
+                return;
+            }
+            foreach (var argument in window.Call.Arguments) { ValidateWindowPositions(argument, insideWindow: true); }
+            if (window.Specification is not null) { ValidateWindowPositions(window.Specification, insideWindow: true); }
             return;
         }
         bool childrenAllowed = allowed && !(expression is OqlCallExpression call && OqlFunctions.Find(call.Name)?.IsAggregate == true) &&
             expression is not (OqlQuantifiedExpression or OqlComprehensionExpression);
-        foreach (var child in OqlMergeRenderer.Children(expression)) { ValidateWindowPositions(child, childrenAllowed); }
+        foreach (var child in OqlMergeRenderer.Children(expression)) { ValidateWindowPositions(child, childrenAllowed, insideWindow); }
     }
 }

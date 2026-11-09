@@ -122,6 +122,9 @@ public sealed class DocumentWindowTests
     [InlineData("SELECT RANK() OVER () FROM [] AS x WINDOW w AS (),w AS ()", "CD01041")]
     [InlineData("SELECT RANK() OVER (w PARTITION BY x) FROM [] AS x WINDOW w AS ()", "CD01043")]
     [InlineData("SELECT RANK() OVER (w ORDER BY x) FROM [] AS x WINDOW w AS (ORDER BY x)", "CD01043")]
+    [InlineData("SELECT RANK() OVER w FROM [] AS x WINDOW w AS (w)", "CD01042")]
+    [InlineData("SELECT NTILE($n) OVER () FROM [] AS x", "CK00001")]
+    [InlineData("SELECT LAG(x,$n) OVER () FROM [] AS x", "CK00001")]
     [InlineData("SELECT NTILE(0) OVER () FROM [] AS x", "CK00001")]
     [InlineData("SELECT NTILE(x) OVER () FROM [] AS x", "CK00001")]
     [InlineData("SELECT LAG(x,-1) OVER () FROM [] AS x", "CK00001")]
@@ -133,9 +136,11 @@ public sealed class DocumentWindowTests
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         // Act / Assert
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(text, cancellationToken: CancellationToken.None));
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(text, new Dictionary<string, object?> { ["n"] = 1L }, CancellationToken.None));
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         error.Diagnostics[0].Start.ShouldNotBeNull();
+        if (text.Contains("$n", StringComparison.Ordinal))
+        { error.Diagnostics[0].Start.ShouldBe(text.IndexOf("$n", StringComparison.Ordinal)); error.Diagnostics[0].End.ShouldBe(error.Diagnostics[0].Start + 2); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - Windows: navigation defaults evaluate only outside the partition")]
@@ -184,7 +189,7 @@ public sealed class DocumentWindowTests
         Number(joined[0][1]).ShouldBe(1m);
         var plan = await RowsAsync(session, "EXPLAIN SELECT RANK() OVER () AS r FROM items");
         plan.Select(r => r[2]).ShouldBe(new object?[] { "Select", "Project", "WindowAggregate", "CollectionScan" });
-        plan[2][5].ShouldBe("functions=RANK; partitions=complete; spill=False");
+        plan[2][5].ShouldBe("functions=RANK; partitions=complete; spill=False; sort_groups=1; group1={partition=[]; order=[]; functions=RANK}");
         await using var missing = (DatabaseResultSet)await session.ExecuteAsync("SELECT LAG(x.v,0,1/0) OVER () AS n FROM [{},{v:NULL},{v:2}] AS x", cancellationToken: CancellationToken.None);
         int ordinal = 0;
         await foreach (var row in missing.GetRowsAsync(CancellationToken.None))
@@ -215,7 +220,7 @@ public sealed class DocumentWindowTests
             null, [], null, [], false, false, source: new OqlArrayExpression([]));
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new DocumentQueryRequest(new OqlQueryStatement(query)), CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD01044");
         // An execution-only result frame cannot shadow a caller's identical binding name.
         string name = DocumentPlanExecutor.WindowBindingName;
         var source = new OqlArrayExpression([new OqlObjectExpression([new KeyValuePair<string, OqlExpression>("v", new OqlLiteralExpression(1))])]);
@@ -228,6 +233,65 @@ public sealed class DocumentWindowTests
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         { Number(row.GetValue(0)).ShouldBe(1m); row.GetInt64(1).ShouldBe(1L); count++; }
         count.ShouldBe(1);
+    }
+
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Windows: direct OVER shapes have a binding diagnostic (#1805)")]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Execute_InvalidDirectShape_ShouldRefuseAsync(bool both)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("window-shape", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var window = new OqlWindowExpression(new OqlCallExpression("RANK", []), both ? new OqlWindowSpecification([], []) : null, both ? "w" : null);
+        var query = new OqlSelectExpression("", "x", [new OqlProjection(window, "n")], null, [], null, [], false, false,
+            source: new OqlArrayExpression([]));
+        // Act / Assert
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            new DocumentQueryRequest(new OqlQueryStatement(query)), CancellationToken.None));
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD01043");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - Windows: system sources DISTINCT and UNNEST execute in stage order (#1805)")]
+    public async Task Execute_AdditionalSources_ShouldPreserveStageOrderAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("window-sources", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
+        // Act / Assert
+        await session.ExecuteAsync("CREATE INDEX ix ON items (v)", cancellationToken: CancellationToken.None);
+        var system = await RowsAsync(session, "SELECT ROW_NUMBER() OVER (ORDER BY c.COLLECTION_NAME) AS n FROM COHESION_SCHEMA.INDEXES AS c ORDER BY n");
+        system.Count.ShouldBeGreaterThan(0);
+        system.Select(r => Number(r[0])).ShouldBe(Enumerable.Range(1, system.Count).Select(n => (decimal)n));
+        var explain = await RowsAsync(session, "EXPLAIN SELECT RANK() OVER () AS r FROM COHESION_SCHEMA.INDEXES AS c");
+        explain.Select(r => r[2]).ShouldContain("WindowAggregate");
+        explain.Select(r => r[2]).ShouldContain("SystemCollection");
+        (await RowsAsync(session, "SELECT DISTINCT ROW_NUMBER() OVER (ORDER BY x) AS n FROM [1,1,1] AS x ORDER BY n"))
+            .Select(r => Number(r[0])).ShouldBe(new[] { 1m, 2m, 3m });
+        (await RowsAsync(session, "SELECT u AS v, ROW_NUMBER() OVER (ORDER BY u) AS n FROM [[3,1],[2]] AS a UNNEST a AS u ORDER BY n"))
+            .Select(r => string.Join(",", r)).ShouldBe(new[] { "1,1", "2,2", "3,3" });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - Windows: EXPLAIN names keys and sort sharing (#1805)")]
+    public async Task Explain_SharedSpecifications_ShouldNameKeysAndSortGroupsAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("window-explain", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
+        // Act
+        var plan = await RowsAsync(session, "EXPLAIN SELECT ROW_NUMBER() OVER (PARTITION BY items.p ORDER BY items.o DESC NULLS FIRST) AS n," +
+            "RANK() OVER (PARTITION BY p ORDER BY o DESC NULLS FIRST) AS r,DENSE_RANK() OVER (ORDER BY p) AS d FROM items ORDER BY n");
+        // Assert
+        string detail = (string)plan.Single(row => Equals(row[2], "WindowAggregate"))[5]!;
+        detail.ShouldContain("sort_groups=2", Case.Sensitive);
+        detail.ShouldContain("group1={partition=[\"items\".\"p\"]; order=[\"items\".\"o\" DESC NULLS FIRST]; functions=ROW_NUMBER,RANK}", Case.Sensitive);
+        detail.ShouldContain("group2={partition=[]; order=[\"p\" ASC NULLS FIRST]; functions=DENSE_RANK}", Case.Sensitive);
+        session.LastQueryDocumentsRead.ShouldBe(0);
     }
 
     private static string Key(JsonElement row, string name) => !row.TryGetProperty(name, out var value) ? "missing" :

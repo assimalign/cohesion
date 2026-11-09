@@ -969,8 +969,11 @@ checks equality, budgets and both transports.
 OVER accepts an inline (PARTITION BY ... ORDER BY ...) specification, OVER name, or a
 parenthesized copy (name ...). WINDOW name AS (...) declarations follow GROUP BY, GROUP AS
 and HAVING and precede final ORDER BY/LIMIT/OFFSET. LETTING remains CK00001. Names preserve
-OQL's ordinal, case-sensitive identifier rules. OVER, PARTITION and WINDOW stay contextual;
-WINDOW followed by name AS starts a declaration instead of an implicit alias. Definitions may copy earlier definitions only;
+OQL's ordinal, case-sensitive identifier rules. The new window words remain usable as field,
+collection, alias and binding names in window-free statements. After a call, OVER starts a window only before a parenthesis or an
+identifier (quoted or unquoted, including function-name tokens); otherwise ordinary implicit aliases apply. WINDOW followed by
+an identifier (including a function name) or quoted identifier, then AS, starts a declaration. RESPECT and IGNORE are modifiers only
+as RESPECT NULLS or IGNORE NULLS immediately after a call's closing parenthesis. Definitions may copy earlier definitions only;
 self/forward references fail CD01042. Duplicate or empty names fail CD01041. A copy cannot
 supply PARTITION BY, even when its base has none, or replace an existing ORDER BY (CD01043).
 A direct AST with neither or both a name and specification also fails CD01043.
@@ -978,11 +981,16 @@ A direct AST with neither or both a name and specification also fails CD01043.
 ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE, LAG and LEAD require OVER.
 They execute after WHERE, grouping and HAVING, before projection, DISTINCT, final ordering and
 paging. SELECT projections and SELECT ORDER BY are their only positions at each query level.
-Aggregate arguments, another window's arguments/keys, SATISFIES and comprehension bodies,
-WHERE, GROUP BY, HAVING, DML values/actions and RETURNING refuse with one located CK00001.
+Aggregate arguments, SATISFIES and comprehension bodies, WHERE, GROUP BY, HAVING,
+DML values/actions and RETURNING refuse with one located CD01044.
+A window-only function without OVER also fails CD01044. A window in another window's arguments
+or keys, including a named definition's keys, fails CD01045.
 An independent subquery, including a MERGE source, owns its own window scope and placements.
-A compound's result-only ORDER BY retains CK00001 for window calls; wrap the compound in SELECT.
+A compound's result-only ORDER BY fails CD01044 for window calls; wrap the compound in SELECT.
 Grouped expressions and ordinary aggregate results may supply window arguments and keys.
+Window keys and arguments do not see projection aliases, including in final ORDER BY.
+A window named rows, range, groups, exclude or partition must be quoted in a parenthesized
+copy, for example OVER ("rows" ORDER BY x); frame vocabulary belongs to the later frame stage.
 
 Partitions use GROUP BY equality: MISSING and NULL are different partitions, numeric
 representations compare by value, strings use ordinal collation, and arrays/objects use the
@@ -1015,10 +1023,20 @@ specifications evaluate keys independently. Window row storage, result bindings,
 key payloads, navigation values and output charge StatementMemoryBudget (CD05018); there is
 no spill. Work shares StatementWorkBudget (CD05020), including sort comparisons. Reservations
 release on success, error and cancellation. EXPLAIN includes WindowAggregate without reading
-input values. Window-free plans, descriptions and instance layouts retain their prior shapes.
+input values; its detail names partition/order keys and groups that share a sort. Window-only
+children have separate iterators; the shared planner and MERGE child iterators retain their base
+instance layouts (21 and 28 fields respectively). Exact JOIN-plan and MERGE-parse allocation
+guards pin the window-free paths on ARM64 and x64, including an OVER field name.
+Using OVER as an identifier does not start the post-parse window walk. Deferred value-function names
+also remain usable as collection and header-alias names before a parenthesized key/value list.
+Adding OVER selects the nested execution path for the entire statement: scan predicates and
+projections also consume StatementWorkBudget and can refuse with CD05020.
 
 Frames (ROWS/RANGE/GROUPS/EXCLUDE), aggregate OVER, FIRST_VALUE/LAST_VALUE/NTH_VALUE,
 RATIO_TO_REPORT and RESPECT/IGNORE NULLS remain located CK00001 for OQ-W2/OQ-W3.
+Function registration reserves all twelve window names: ROW_NUMBER, RANK, DENSE_RANK,
+PERCENT_RANK, CUME_DIST, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE and RATIO_TO_REPORT.
+The four deferred value/ratio names follow the existing REGEXP_* reservation policy.
 No implicit frame is evaluated by these ranking/navigation functions. No storage or wire
 version changes. The sealed window AST and OqlFunction.WindowKind are public metadata;
 MERGE's canonical renderer traverses declarations, keys and arguments within its 128-level bound.

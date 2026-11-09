@@ -16,6 +16,6 @@ internal sealed partial class DocumentExpressionEvaluator
             if (binding.Name == DocumentPlanExecutor.WindowBindingName &&
                 binding.Value is Dictionary<OqlWindowExpression, object?> values && values.TryGetValue(window, out var value)) { return value; }
         }
-        throw new DocumentPlanningException("CK00001", ErrorMessages.WindowPlacementInvalid, window.Location);
+        throw new DocumentPlanningException("CD01044", ErrorMessages.WindowPlacementInvalid, window.Location);
     }
 }

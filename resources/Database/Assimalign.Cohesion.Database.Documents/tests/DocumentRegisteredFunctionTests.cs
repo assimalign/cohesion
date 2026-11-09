@@ -182,6 +182,10 @@ public sealed partial class DocumentRegisteredFunctionTests
     [InlineData("ROW_NUMBER")]
     [InlineData("LAG")]
     [InlineData("REGEXP_LIKE")]
+    [InlineData("FIRST_VALUE")]
+    [InlineData("LAST_VALUE")]
+    [InlineData("NTH_VALUE")]
+    [InlineData("RATIO_TO_REPORT")]
     public void Add_ReservedFunctionName_ShouldRefuse(string name)
     {
         var builder = DocumentDatabaseEngine.CreateBuilder("reserved-functions");

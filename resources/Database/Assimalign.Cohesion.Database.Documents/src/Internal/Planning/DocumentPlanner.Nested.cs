@@ -309,15 +309,9 @@ internal sealed partial class DocumentPlanner
     {
         switch (node)
         {
-            case OqlWindowExpression window:
-                foreach (var argument in window.Call.Arguments) { yield return argument; }
-                if (window.Specification is not null) { yield return window.Specification; }
+            case OqlWindowExpression or OqlWindowSpecification or OqlWindowDefinition:
+                foreach (var child in WindowNodeChildren(node)) { yield return child; }
                 break;
-            case OqlWindowSpecification specification:
-                foreach (var key in specification.PartitionBy) { yield return key; }
-                foreach (var order in specification.OrderBy) { yield return order.Expression; }
-                break;
-            case OqlWindowDefinition definition: yield return definition.Specification; break;
             case OqlMergeExpression merge:
                 if (merge.Source.Expression is not null) { yield return merge.Source.Expression; }
                 yield return merge.On;
@@ -359,7 +353,7 @@ internal sealed partial class DocumentPlanner
                 if (query.Predicate is not null) { yield return query.Predicate; }
                 foreach (var key in query.GroupBy) { yield return key; }
                 if (query.Having is not null) { yield return query.Having; }
-                foreach (var definition in query.Windows) { yield return definition; }
+                foreach (var definition in (IEnumerable<OqlExpression>)query.Windows) { yield return definition; }
                 foreach (var order in query.OrderBy) { yield return order.Expression; }
                 foreach (var binding in query.Bindings) { yield return binding.Expression; }
                 break;
@@ -372,6 +366,23 @@ internal sealed partial class DocumentPlanner
             default: foreach (var child in PredicateChildren(node)) { yield return child; } break;
         }
     }
+
+    private static IEnumerable<OqlExpression> WindowNodeChildren(OqlExpression node)
+    {
+        switch (node)
+        {
+            case OqlWindowExpression window:
+                foreach (var argument in window.Call.Arguments) { yield return argument; }
+                if (window.Specification is not null) { yield return window.Specification; }
+                break;
+            case OqlWindowSpecification specification:
+                foreach (var key in specification.PartitionBy) { yield return key; }
+                foreach (var order in specification.OrderBy) { yield return order.Expression; }
+                break;
+            case OqlWindowDefinition definition: yield return definition.Specification; break;
+        }
+    }
+
     private static DatabasePlanDescription DescribeNested(DocumentNestedPlan plan, IEnumerable<Diagnostic>? diagnostics)
     {
         var nodes = new List<DatabasePlanNode>();

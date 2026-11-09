@@ -1168,12 +1168,19 @@ Window-bearing queries use the existing statement-local async execution context 
 subqueries. After grouping/HAVING, the window path owns complete representative rows and groups,
 shares equal-specification sorts through EquivalentPath-aware scoped expression equivalence,
 computes peer ranks and navigation values, then projects, deduplicates, orders and pages.
-Ordinary row methods and instance layouts remain unchanged for allocation guards.
+Ordinary row methods and their closure/state-machine layouts remain unchanged. Window-only
+children use separate iterators; shared NestedChildren and MERGE Children retain the base's
+21 and 28 instance fields. Exact JOIN-plan and MERGE-parse guards pin window-free allocations
+on ARM64 and x64; the parser differential pins base acceptance and rendered canonical text.
 
 Window row/result bindings, dictionaries, indexes, key payloads, navigation values and output
 reserve StatementMemoryBudget before retention (CD05018, no spill). Scratch unwinds at sort,
 partition and expression boundaries; output alone remains charged through result disposal.
 StatementWorkBudget covers expressions, partition/peer visits and sort comparisons (CD05020).
+Adding OVER moves the whole statement to nested execution, so scan predicates and projections
+also consume that budget. Window keys and arguments do not see projection aliases, even when
+the window appears in final ORDER BY. Function kind, bucket count and navigation offset are
+prepared once per function; key-free specifications skip sorting. Navigation values are retained once.
 Cancellation and coded comparer failures retain their identities. LiveHeap.Read plus weak-value
 checks prove completed statements release navigation objects at 256 and 2,048 rows.
 The dedicated window row method keeps ordinary pipeline closures unchanged; OQ-W2 can extend
@@ -1190,10 +1197,20 @@ WINDOW follows grouping/HAVING; LETTING remains unavailable. Named/copy failures
 | CD01041 | Empty or duplicate WINDOW name |
 | CD01042 | Unknown, self or forward window reference |
 | CD01043 | Invalid copied partition/order clause or direct OVER shape |
+| CD01044 | Window in an invalid position or a window-only function missing OVER |
+| CD01045 | Window nested in a window argument or key |
 
 Generated brute-force ranking/navigation cases, placement refusals, complete-partition paging,
 EXPLAIN snapshots, InMemory/TCP wire and NativeAOT checks cover this stage. The MERGE source
-renderer round trip includes windows. No SQL internals, new references, disk or wire formats.
+renderer round trip draws reference/inline/empty/copied specifications, 0–2 partition/order
+keys, every direction/null placement, all eight functions and escaped names. EXPLAIN names
+partition/order keys and sort-sharing groups. Registration reserves the eight implemented
+window names plus FIRST_VALUE, LAST_VALUE, NTH_VALUE and RATIO_TO_REPORT (the REGEXP_* precedent).
+No SQL internals, new references, disk or wire formats.
+
+The dedicated window row pipeline intentionally duplicates grouping/HAVING, DISTINCT and final
+ordering to protect ordinary allocation layouts. Consolidating it, including the inherited DISTINCT
+node accounting, remains a follow-up; changes to shared semantics must reach both pipelines.
 
 #### Result paging (#1129)
 

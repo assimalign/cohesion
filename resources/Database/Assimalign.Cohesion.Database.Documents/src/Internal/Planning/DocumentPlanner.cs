@@ -633,9 +633,10 @@ internal sealed partial class DocumentPlanner
         switch (expression)
         {
             case OqlWindowExpression window:
-                if (!allowWindow) { throw new DocumentPlanningException("CK00001", ErrorMessages.WindowPlacementInvalid, window.Location); }
+                if (!allowWindow) { throw new DocumentPlanningException("CD01044", ErrorMessages.WindowPlacementInvalid, window.Location); }
                 ValidateWindowCall(window);
-                foreach (var child in WindowChildren(window)) { Validate(child, true, functions: functions); }
+                foreach (var child in WindowChildren(window))
+                { ValidateNoNestedWindow(child); Validate(child, true, functions: functions); }
                 return;
             case OqlComprehensionExpression comprehension:
                 if (comprehension.Variable.Length == 0)
@@ -671,7 +672,7 @@ internal sealed partial class DocumentPlanner
                 return;
             case OqlCallExpression call:
                 if (OqlFunctions.Find(call.Name)?.WindowKind is not (null or OqlWindowFunctionKind.None))
-                { throw new DocumentPlanningException("CK00001", ErrorMessages.WindowPlacementInvalid, call.Location); }
+                { throw new DocumentPlanningException("CD01044", ErrorMessages.WindowPlacementInvalid, call.Location); }
                 if (call.Quantifier != OqlAggregateQuantifier.None &&
                     (call.Quantifier is not (OqlAggregateQuantifier.All or OqlAggregateQuantifier.Distinct) ||
                      call.Arguments.Count != 1 || call.Arguments[0] is OqlStarExpression ||

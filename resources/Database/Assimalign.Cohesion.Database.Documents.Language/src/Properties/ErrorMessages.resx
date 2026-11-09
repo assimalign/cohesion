@@ -57,4 +57,6 @@
   <data name="OqlQueryParserParseSelectVoid4" xml:space="preserve"><value>Multiple {0} clauses are not allowed.</value></data>
   <data name="OqlQueryParserParseCountVoid" xml:space="preserve"><value>Expected an integer literal or parameter after {0}.</value></data>
 
+  <data name="WindowPlacementInvalid" xml:space="preserve"><value>Window functions require OVER in a projection or ORDER BY.</value></data>
+  <data name="WindowNestingInvalid" xml:space="preserve"><value>A window function cannot contain another window in its arguments or keys.</value></data>
 </root>

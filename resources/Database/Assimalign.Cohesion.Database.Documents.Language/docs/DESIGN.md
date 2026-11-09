@@ -390,11 +390,19 @@ function calls, partition/order keys, direct names and copied references. OqlFun
 classifies eight ranking/navigation functions separately from scalar/aggregate registrations.
 WINDOW metadata travels with the existing optional GroupBy wrapper, preserving ordinary SELECT
 instance layouts and allocation guards. Lists snapshot their declarations and keys.
-The parser refuses invalid placement/nesting and deferred frame/value forms with CK00001;
-the engine repeats context validation for hand-built ASTs. Named binding uses CD01041-43.
+The parser reports located CD01044 for invalid placement or a window-only call missing OVER,
+and CD01045 for a window nested in a window argument/key. Deferred frames, aggregate/value
+windows and null modifiers retain CK00001. The engine repeats validation for hand-built ASTs.
+Named binding uses CD01041-43. The post-parse walk uses the non-throwing stack backstop (CD00005).
+Window keys and arguments do not see projection aliases. OVER selects the nested execution
+path for scan predicates and projections too, so those expressions consume CD05020's work budget.
+The shared MERGE child iterator retains its base layout; window-only children use a separate iterator.
 DIALECT's Window stage records defaults, literal-only offsets/counts, lazy navigation defaults,
 ordinal names, JSON peers and null ordering. The MERGE renderer's child and query walkers include
-all window metadata and the seeded 10,000-statement round trip generates window source queries.
+all window metadata and the seeded 10,000-statement round trip generates varied window source
+queries through GROUP BY, HAVING and final ORDER BY. The runtime window-free corpus and identifier
+renames retain base acceptance and canonical rendering. DIALECT lists all twelve reserved window
+function names; RESPECT/IGNORE NULLS, OVER and WINDOW are recognized only at their construct heads.
 No shared SQL implementation or new assembly reference is introduced (T3-31).
 
 ## ORDER BY null placement (#1730)

@@ -329,11 +329,11 @@ internal sealed partial class DocumentExpressionEvaluator
         if (path.Segments.Count > 0)
         {
             for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
-            { if (!IsWindowBinding(frame) && frame.Name == path.Segments[0].Name) { found = frame; break; } }
+            { if (frame.Name == path.Segments[0].Name && !IsWindowBinding(frame)) { found = frame; break; } }
             if (found is null && start == 0)
             {
                 for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
-                { if (!IsWindowBinding(frame) && frame.Name == path.Segments[0].Name) { found = frame; break; } }
+                { if (frame.Name == path.Segments[0].Name && !IsWindowBinding(frame)) { found = frame; break; } }
             }
         }
         if (found is not null)
@@ -371,11 +371,11 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             DocumentVariableBinding? found = null;
             for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
-            { if (!IsWindowBinding(frame) && frame.Name == name) { found = frame; break; } }
+            { if (frame.Name == name && !IsWindowBinding(frame)) { found = frame; break; } }
             if (found is null)
             {
                 for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
-                { if (!IsWindowBinding(frame) && frame.Name == name) { found = frame; break; } }
+                { if (frame.Name == name && !IsWindowBinding(frame)) { found = frame; break; } }
             }
             if (found?.Value is DocumentMissing missing && !ReferenceEquals(missing, DocumentMissing.Instance))
             { return DocumentMissing.Instance; }

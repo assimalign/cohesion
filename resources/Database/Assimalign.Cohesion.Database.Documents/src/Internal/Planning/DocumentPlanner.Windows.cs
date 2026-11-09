@@ -132,15 +132,25 @@ internal sealed partial class DocumentPlanner
 
         void ValidateKeys(OqlWindowSpecification specification)
         {
-            foreach (var key in specification.PartitionBy) { Validate(key, true, functions: functions); ValidateQueryMetadata(key, query, outerNames); }
+            foreach (var key in specification.PartitionBy) { ValidateNoNestedWindow(key); Validate(key, true, functions: functions); ValidateQueryMetadata(key, query, outerNames); }
             foreach (var order in specification.OrderBy)
             {
                 if (order.NullPlacement is not (OqlNullPlacement.Default or OqlNullPlacement.First or OqlNullPlacement.Last))
                 { throw new DocumentPlanningException("CD01032", ErrorMessages.NullPlacementInvalid, order.Expression.Location); }
+                ValidateNoNestedWindow(order.Expression);
                 Validate(order.Expression, true, functions: functions);
                 ValidateQueryMetadata(order.Expression, query, outerNames);
             }
         }
+    }
+
+    private static void ValidateNoNestedWindow(OqlExpression expression)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is OqlSubqueryExpression) { return; }
+        if (expression is OqlWindowExpression window)
+        { throw new DocumentPlanningException("CD01045", ErrorMessages.WindowNestingInvalid, window.Location); }
+        foreach (var child in NestedChildren(expression)) { ValidateNoNestedWindow(child); }
     }
 
     private static void ValidateWindowCall(OqlWindowExpression window)

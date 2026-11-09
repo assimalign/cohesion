@@ -176,6 +176,7 @@ public sealed class OqlMergeRegressionTests
         var kinds = new HashSet<string>(StringComparer.Ordinal);
         var arrayKinds = new HashSet<string>(StringComparer.Ordinal);
         var listKinds = new HashSet<string>(StringComparer.Ordinal);
+        var windowShapes = new Dictionary<string, int>(StringComparer.Ordinal);
         string[] names = ["c", "\"COHESION_SCHEMA.\"", "\"COHESION_SCHEMA.custom\"", "\"SELECT\"", "\"a\"\"b\"", "\"with space\""];
         // Act / Assert
         for (int index = 0; index < 10000; index++)
@@ -199,6 +200,13 @@ public sealed class OqlMergeRegressionTests
         _output.WriteLine($"IN array operand kinds={arrayKinds.Count}: {string.Join(", ", arrayKinds.Order())}; list operand kinds={listKinds.Count}: {string.Join(", ", listKinds.Order())}");
         arrayKinds.Count.ShouldBe(15);
         listKinds.Count.ShouldBe(18);
+        _output.WriteLine("Window shapes: " + string.Join("; ", windowShapes.OrderBy(p => p.Key).Select(p => p.Key + "=" + p.Value)));
+        foreach (string shape in new[] { "reference", "inline", "empty", "copy", "partition=0", "partition=1", "partition=2",
+            "order=0", "order=1", "order=2", "ASC", "DESC", "NULLS DEFAULT", "NULLS FIRST", "NULLS LAST",
+            "ROW_NUMBER", "RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST", "NTILE", "LAG", "LEAD", "escaped name",
+            "GROUP BY", "HAVING", "final ORDER BY", "LAG arguments=1", "LAG arguments=2", "LAG arguments=3",
+            "LEAD arguments=1", "LEAD arguments=2", "LEAD arguments=3" })
+        { windowShapes.ShouldContainKey(shape); }
 
         void Collect(OqlExpression node)
         {
@@ -218,19 +226,67 @@ public sealed class OqlMergeRegressionTests
         string Query(int depth)
         {
             bool window = random.Next(4) == 0;
-            string projection = window ? "[" + Expression(depth) + ", RANK() OVER w, LAG(q.a,0) OVER (base ORDER BY q.o DESC NULLS FIRST)]" : Expression(depth);
+            string windowName = random.Next(2) == 0 ? "\"with space\"" : "\"a\"\"b\"";
+            string projection = window ? "[" + Expression(depth) + ", " + WindowCall(windowName) + "]" : Expression(depth);
             string left = "SELECT RAW " + projection + " FROM " + names[random.Next(names.Length)] + " AS q";
             if (random.Next(3) == 0)
             { left += (random.Next(2) == 0 ? " LEFT " : " INNER ") + (random.Next(2) == 0 ? "JOIN " : "NEST ") +
                 names[random.Next(names.Length)] + " AS j ON META(j).id = q.k"; }
             if (random.Next(3) == 0) { left += (random.Next(2) == 0 ? " LEFT UNNEST " : " UNNEST ") + "q.a AS u"; }
-            if (window) { left += " WINDOW base AS (PARTITION BY q.p), w AS (base ORDER BY q.o)"; return left; }
+            if (window)
+            {
+                if (random.Next(2) == 0) { left += " GROUP BY q.a AS g GROUP AS grouped HAVING TRUE"; Seen("GROUP BY"); Seen("HAVING"); }
+                left += " WINDOW " + windowName + " AS (" + Keys(partitionsOnly: true) + ")";
+                Seen("escaped name");
+                if (random.Next(2) == 0) { left += " ORDER BY " + WindowCall(windowName); Seen("final ORDER BY"); }
+                if (random.Next(3) == 0) { left += " LIMIT +2 OFFSET -0"; }
+                return left;
+            }
             if (random.Next(2) == 0)
             { return random.Next(3) == 0 ? left + " GROUP BY q.a AS g GROUP AS grouped HAVING TRUE ORDER BY g DESC NULLS LAST LIMIT +2 OFFSET -0" : left; }
             if (random.Next(3) == 0) { left = "(" + left + " LIMIT +1 OFFSET -0)"; }
             string right = depth > 0 && random.Next(2) == 0 ? Query(depth - 1) : "SELECT RAW " + Expression(depth) + " FROM [1] AS z";
             string compound = left + " " + new[] { "UNION", "UNION ALL", "INTERSECT", "INTERSECT ALL", "EXCEPT", "EXCEPT ALL" }[random.Next(6)] + " (" + right + ")";
             return random.Next(4) == 0 ? compound + " LIMIT $1 OFFSET 0" : compound;
+        }
+
+
+        void Seen(string shape) => windowShapes[shape] = windowShapes.GetValueOrDefault(shape) + 1;
+
+        string WindowCall(string name)
+        {
+            string function = new[] { "ROW_NUMBER", "RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST", "NTILE", "LAG", "LEAD" }[random.Next(8)];
+            Seen(function);
+            string arguments = function == "NTILE" ? new[] { "1", "+2", "7", "9223372036854775807" }[random.Next(4)] :
+                function is "LAG" or "LEAD" ? new[] { "q.a", "q.a,0", "q.a,+2,NULL", "q.a,9223372036854775807,q.d" }[random.Next(4)] : "";
+            if (function is "LAG" or "LEAD") { Seen(function + " arguments=" + (arguments.Count(c => c == ',') + 1)); }
+            string over;
+            switch (random.Next(4))
+            {
+                case 0: Seen("reference"); over = name; break;
+                case 1: Seen("inline"); over = "(" + Keys() + ")"; break;
+                case 2: Seen("empty"); over = "()"; break;
+                default: Seen("copy"); over = "(" + name + " " + Keys(orderOnly: true) + ")"; break;
+            }
+            return function + "(" + arguments + ") OVER " + over;
+        }
+
+        string Keys(bool partitionsOnly = false, bool orderOnly = false)
+        {
+            int partitions = orderOnly ? 0 : random.Next(3), orders = partitionsOnly ? 0 : random.Next(3);
+            Seen("partition=" + partitions); Seen("order=" + orders);
+            string text = partitions == 0 ? "" : "PARTITION BY " + string.Join(",", Enumerable.Range(0, partitions).Select(i => "q.p" + i));
+            if (orders > 0)
+            {
+                text += " ORDER BY " + string.Join(",", Enumerable.Range(0, orders).Select(i =>
+                {
+                    string direction = random.Next(2) == 0 ? "ASC" : "DESC";
+                    string nulls = new[] { "", " NULLS FIRST", " NULLS LAST" }[random.Next(3)];
+                    Seen(direction); Seen(nulls.Length == 0 ? "NULLS DEFAULT" : nulls.Trim());
+                    return "q.o" + i + " " + direction + nulls;
+                }));
+            }
+            return text.Trim();
         }
 
         string Expression(int depth, int? forced = null)

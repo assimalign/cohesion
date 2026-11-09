@@ -218,7 +218,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             expression = EmptyExpression();
         }
-        if (!Failed && _tokens.Exists(static token => IsWord(token, "OVER"))) { ValidateWindowPositions(expression); }
+        if (!Failed && HasWindowSuffix()) { ValidateWindowPositions(expression); }
         expression.SetStatementText(_source);
         var statement = new OqlQueryStatement(expression);
         foreach (var (clause, token) in unsupported)
@@ -529,6 +529,11 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 continue;
             }
+
+            if (value is "RESPECT" or "IGNORE" && !IsCallNullModifier(index)) { continue; }
+            if (value is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" or "RATIO_TO_REPORT" && index > 0 &&
+                (IsWord(_tokens[index - 1], "INTO") || IsWord(_tokens[index - 1], "AS") ||
+                 IsWord(_tokens[index - 1], "ON") && IsIndexStatement("CREATE"))) { continue; }
 
             // Words of other languages are not reserved field names: they name a construct
             // only where it can start, so mixed-shape fields such as fetch still parse. A

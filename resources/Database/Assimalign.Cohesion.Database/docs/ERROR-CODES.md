@@ -410,6 +410,8 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1805, OQ-W1) | CD01041 | Binding/names — empty or duplicate WINDOW name |
 | New (#1805, OQ-W1) | CD01042 | Binding/names — unknown, self or forward window reference |
 | New (#1805, OQ-W1) | CD01043 | Binding/names — copied window overrides PARTITION/ORDER BY or direct OVER has neither/both a name and specification |
+| New (#1805, OQ-W1) | CD01044 | Binding/names — window in an invalid position or a window-only function without OVER |
+| New (#1805, OQ-W1) | CD01045 | Binding/names — window nested in another window's argument or key |
 | New (#1767) | CD01036 | Binding/names — VALUES references its destination binding without a source row or local declaration |
 | New (#1803, OQ-S1) | CD01037 | Binding/names — ORDER BY over an all-RAW/VALUE compound has no named result members |
 | New (#1803, OQ-S1) | CD01038 | Binding/names — compound ORDER BY uses an unbound result member, source metadata or star |

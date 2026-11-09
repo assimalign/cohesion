@@ -32,6 +32,14 @@ internal static partial class DocumentPlanExecutor
             var compatible = pending.Where(w => DocumentPlanner.EquivalentWindowSpecifications(specification,
                 DocumentPlanner.ResolveWindow(w, definitions), query)).ToArray();
             foreach (var function in compatible) { pending.Remove(function); }
+            var prepared = compatible.Select(function =>
+            {
+                var kind = OqlFunctions.Find(function.Call.Name)!.WindowKind;
+                long buckets = kind == OqlWindowFunctionKind.Ntile ? DocumentPlanner.WindowInteger(function.Call.Arguments[0], true) : 0;
+                long offset = kind is OqlWindowFunctionKind.Lag or OqlWindowFunctionKind.Lead && function.Call.Arguments.Count > 1
+                    ? DocumentPlanner.WindowInteger(function.Call.Arguments[1], false) : 1;
+                return (Function: function, Kind: kind, Buckets: buckets, Offset: offset);
+            }).ToArray();
             using var sortMemory = memory.Reserve();
             sortMemory.Charge(512L + rows.Count * (128L + 16L * (specification.PartitionBy.Count + specification.OrderBy.Count)));
             var partitions = new object?[rows.Count][];
@@ -50,14 +58,17 @@ internal static partial class DocumentPlanExecutor
             // Array.Sort wraps comparer exceptions. Restore the original coded budget/cancel failure.
             try
             {
-                Array.Sort(indexes, (a, b) =>
+                if (specification.PartitionBy.Count > 0 || specification.OrderBy.Count > 0)
                 {
-                    nested.ConsumeWork(cancellationToken);
-                    int comparison = TupleComparer.Instance.Compare(partitions[a], partitions[b]);
-                    if (comparison != 0) { return comparison; }
-                    comparison = ComparePeers(a, b);
-                    return comparison != 0 ? comparison : a.CompareTo(b);
-                });
+                    Array.Sort(indexes, (a, b) =>
+                    {
+                        nested.ConsumeWork(cancellationToken);
+                        int comparison = TupleComparer.Instance.Compare(partitions[a], partitions[b]);
+                        if (comparison != 0) { return comparison; }
+                        comparison = ComparePeers(a, b);
+                        return comparison != 0 ? comparison : a.CompareTo(b);
+                    });
+                }
             }
             catch (InvalidOperationException error) when (error.InnerException is DocumentPlanningException or OperationCanceledException)
             { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error.InnerException).Throw(); throw; }
@@ -69,12 +80,8 @@ internal static partial class DocumentPlanExecutor
                 while (end < indexes.Length && TupleComparer.Instance.Compare(partitions[indexes[start]], partitions[indexes[end]]) == 0)
                 { nested.ConsumeWork(cancellationToken); end++; }
                 int count = end - start;
-                foreach (var function in compatible)
+                foreach (var (function, kind, buckets, offset) in prepared)
                 {
-                    var kind = OqlFunctions.Find(function.Call.Name)!.WindowKind;
-                    long buckets = kind == OqlWindowFunctionKind.Ntile ? DocumentPlanner.WindowInteger(function.Call.Arguments[0], true) : 0;
-                    long offset = kind is OqlWindowFunctionKind.Lag or OqlWindowFunctionKind.Lead && function.Call.Arguments.Count > 1
-                        ? DocumentPlanner.WindowInteger(function.Call.Arguments[1], false) : 1;
                     long dense = 0;
                     int peerStart = 0;
                     while (peerStart < count)
@@ -108,8 +115,9 @@ internal static partial class DocumentPlanExecutor
                                 }
                                 else if (function.Call.Arguments.Count == 3)
                                 { value = await EvaluateAsync(function.Call.Arguments[2], rows[ordinal], retained).ConfigureAwait(false); }
+                                else { retained.Retain(value); }
                             }
-                            retained.Retain(value);
+                            else { retained.Retain(value); }
                             results[ordinal].Add(function, value);
                         }
                         peerStart = peerEnd;
