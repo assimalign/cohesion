@@ -176,7 +176,7 @@ internal sealed class SqlTableReclamation
                     // so the next bracket check yields: exactly one retry wake per cycle.
                     if (_database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
                     { _database.Engine.CheckpointNeededSignal.Set(); }
-                    SqlDatabaseEventSource.Log.PagesReclaimed(_database.DataStorage, pending.ObjectId, reclaimed);
+                    SqlDatabaseEventSource.Log.PagesReclaimed(_database.Engine.Name, _database.DataStorage, pending.ObjectId, reclaimed);
                     pending.Pages += reclaimed;
                     AfterBatch?.Invoke(pending.ObjectId, reclaimed);
 
@@ -207,6 +207,9 @@ internal sealed class SqlTableReclamation
         foreach (var (objectId, intent) in _database.Catalog.CaptureTableReclamations())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // Prepared builds request discovery again when published or abandoned.
+            // They must not keep the purge worker polling an unreclaimable fence.
+            if (_database.Catalog.IsOwnerPrepared(objectId)) { continue; }
             if (_pending.TryGetValue(objectId, out var existing))
             {
                 if (ReferenceEquals(existing.Intent, intent)) { continue; }

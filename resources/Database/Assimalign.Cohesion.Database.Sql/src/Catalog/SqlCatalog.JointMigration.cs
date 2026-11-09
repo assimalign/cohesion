@@ -15,7 +15,17 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public sealed partial class SqlCatalog
 {
     internal Action? BeforeJointDiscard { get; set; }
+    internal Action? IndexReclamationRequested { get; set; }
+    internal Action<ulong, bool>? IndexBuildFinished { get; set; }
+    internal string EngineName { get; set; } = string.Empty;
+    private readonly HashSet<ulong> _buildingIndexes = new();
+    internal void BeginIndexBuild(ulong owner) { lock (_sync) { _buildingIndexes.Add(owner); } }
+    internal void EndIndexBuild(ulong owner, bool succeeded)
+    {
+        lock (_sync) { if (_buildingIndexes.Remove(owner)) { IndexBuildFinished?.Invoke(owner, succeeded); } }
+    }
     internal Func<BTreeIndexRegistration, ulong>? IndexPageOwner { get; set; }
+    internal Func<BTreeIndexRegistration, bool>? IndexOwnerKnown { get; set; }
     private readonly Dictionary<long, ulong> _registrationOwners = new();
     internal ulong PhysicalIndexOwner(BTreeIndexRegistration registration)
     {
@@ -25,6 +35,14 @@ public sealed partial class SqlCatalog
     internal ulong NextReservedIdentity { get { lock (_sync) { return _nextObjectId; } } }
     internal bool IsOwnerPrepared(ulong owner)
     { lock (_sync) { return _preparedTruncateOwners.Contains(owner); } }
+    internal bool IsOwnerRetiring(ulong owner)
+    { lock (_sync) { return _pendingReclamations.ContainsKey(owner) && !_preparedTruncateOwners.Contains(owner); } }
+
+    internal void WaitForIndexAdmission(CancellationToken token)
+    {
+        using var admission = TransactionCheckpointInterlock.ForStorage(_storage)
+            .Enter("SqlIndexBuild", cancellationToken: token);
+    }
     // Old snapshot descriptions can still read the same physical layout. Weak
     // keys avoid retaining one description per owner-keeping publication forever.
     private readonly ConditionalWeakTable<SqlCatalogTable, object> _keptReadVersions = new();
@@ -61,9 +79,7 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             var table = FindTableByObjectId(tableId);
-            ulong owner = _nextObjectId;
-            try { return ReserveTreeOwner(table?.Schema ?? "dbo", table?.Name ?? "index", token); }
-            catch { _preparedTruncateOwners.Remove(owner); throw; }
+            return ReserveTreeOwner(table?.Schema ?? "dbo", table?.Name ?? "index", token);
         }
     }
 
@@ -107,6 +123,7 @@ public sealed partial class SqlCatalog
             {
                 _pendingReclamations.Remove(owner);
                 _preparedTruncateOwners.Remove(owner);
+                EndIndexBuild(owner, true);
             }
         };
     }
@@ -135,6 +152,7 @@ public sealed partial class SqlCatalog
         return () =>
         {
             foreach (var item in intents) { _pendingReclamations.Add(item.Owner, item.Intent); }
+            if (intents.Length != 0) { IndexReclamationRequested?.Invoke(); }
             if (hidden.Length != 0)
             {
                 foreach (ulong owner in hidden) { _truncateRetirementsPublishing.Add(owner); }

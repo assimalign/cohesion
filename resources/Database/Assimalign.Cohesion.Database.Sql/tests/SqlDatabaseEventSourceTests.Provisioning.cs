@@ -56,7 +56,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         }
         recorder.Events.Count(entry => entry.EventId == 23).ShouldBe(owners.Length);
         recorder.Events.Count(entry => entry.EventId == 24).ShouldBe(owners.Length);
-        recorder.Events.Where(entry => entry.EventId == 30).Sum(entry => (int)entry.Payload![2]!).ShouldBe(2);
+        recorder.Events.Where(entry => entry.EventId == 30).Sum(entry => (int)entry.Payload![3]!).ShouldBe(2);
         recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
     }
 

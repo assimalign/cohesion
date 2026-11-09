@@ -31,6 +31,8 @@ public sealed partial class SqlCatalog
     internal void AbandonTableAs(ulong objectId)
     {
         lock (_sync) { _preparedTruncateOwners.Remove(objectId); }
+        EndIndexBuild(objectId, false);
+        IndexReclamationRequested?.Invoke();
     }
 
     internal ValueTask<bool> PublishTableAsAsync(SqlCatalogTable table, bool ifNotExists,

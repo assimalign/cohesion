@@ -1155,6 +1155,13 @@ public sealed partial class SqlCatalog
                 throw new SqlCatalogException("CS05060",
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MergePublishedRegistrationsSqlCatalog, index.Name));
             }
+            ulong owner = IndexPageOwner?.Invoke(matches[0]) ?? matches[0].ObjectId;
+            if (owner == index.TableObjectId || IndexOwnerKnown?.Invoke(matches[0]) != true ||
+                _pendingReclamations.ContainsKey(owner) && !_preparedTruncateOwners.Contains(owner))
+            {
+                throw new SqlCatalogException("CS05060",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MergePublishedRegistrationsSqlCatalog, index.Name));
+            }
             merged[(index.TableObjectId, index.Name)] = matches[0];
         }
         return merged.Values.ToArray();

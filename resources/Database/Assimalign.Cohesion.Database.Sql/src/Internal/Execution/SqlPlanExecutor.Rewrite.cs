@@ -66,6 +66,7 @@ internal sealed partial class SqlPlanExecutor
         if (additionalIndexes is { Count: > 0 })
         { indexes = indexes.Concat(additionalIndexes.Select(index => new SqlCatalogIndex(replacements[0].ObjectId, index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls, index.KeyOrders))).ToArray(); }
         var created = new List<SqlCatalogIndex>();
+        var treeOwners = new Dictionary<SqlCatalogIndex, ulong>();
         bool published = false;
         Exception? operationFailure = null;
         try
@@ -89,12 +90,17 @@ internal sealed partial class SqlPlanExecutor
             }
             if (indexes.Length != 0)
             {
+                foreach (var index in indexes)
+                {
+                    treeOwners.Add(index, await WithCatalogMigrationAdmissionAsync(() =>
+                        _catalog.ReserveIndexTreeOwner(index.TableObjectId, cancellationToken), statement, cancellationToken).ConfigureAwait(false));
+                }
                 await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
                 {
                     foreach (var index in indexes)
                     {
                         await _indexManager.CreateIndexAsync(statement.Transaction, index.TableObjectId,
-                            new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken).ConfigureAwait(false);
+                            new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken, treeOwners[index]).ConfigureAwait(false);
                         created.Add(index);
                     }
                     return true;
@@ -157,7 +163,11 @@ internal sealed partial class SqlPlanExecutor
             }
             finally
             {
-                if (!published) { _catalog.AbandonStorageReplacement(replacements); }
+                if (!published)
+                {
+                    foreach (ulong owner in treeOwners.Values) { _catalog.AbandonTableAs(owner); }
+                    _catalog.AbandonStorageReplacement(replacements);
+                }
             }
         }
     }

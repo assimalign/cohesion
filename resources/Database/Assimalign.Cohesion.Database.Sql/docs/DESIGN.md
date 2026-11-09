@@ -8435,9 +8435,9 @@ bounded peer-sent names) are in the area's
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
 | 27 | `TableReclamationYielded` | Verbose | — | `engineName`, `database`, `objectId` (each poll yielding to a due or pending checkpoint) |
-| 28 | `IndexBuildStart` | Informational | — | `database`, `objectId` (physical index owner) |
-| 29 | `IndexBuildStop` | Informational | — | `database`, `objectId`, `succeeded` |
-| 30 | `PagesReclaimed` | Informational | — | `database`, `objectId` (physical owner), `pages` |
+| 28 | `IndexBuildStart` | Informational | — | `engineName`, `database`, `objectId` (physical index owner) |
+| 29 | `IndexBuildStop` | Informational | — | `engineName`, `database`, `objectId`, `succeeded` |
+| 30 | `PagesReclaimed` | Informational | — | `engineName`, `database`, `objectId` (physical owner), `pages` |
 | 25 | `TransactionCleanupFailed` | Warning | — | `transactionId`, `exceptionType`, `exceptionMessage` (bounded to 1024 characters) |
 
 `Sessions = 0x1`; `Statements = 0x2`. Provisioning has no keyword. Id 17 stays retired.
@@ -11709,3 +11709,8 @@ The function argument view snapshots only Count; the function context view snaps
 TransactionTimestamp. Neither view retains a ref struct, span, context, or cancellation token.
 The SQL value view reads Type and IsNull without decoding its payload. Internal-only plan or
 metrics state stays hidden rather than being promoted to a public debugger projection.
+
+Index reclamation events 23 and 24 fire once per reclaimed physical owner, whether table or index. Indexing IndexCreated/IndexDropped objectId identifies SQL's physical index owner. Events 28–30 carry engineName, database and the physical objectId; build success fires only after catalog publication.
+
+Index publication refuses CS05060 before catalog persistence when the resolved physical owner equals the table identity, is absent from the live owner directory, or has an unprepared pending intent. A dropped registration cannot be republished. Prepared owners remain valid for KeepOwner, provisioning, TRUNCATE and rewrite. Every index owner is reserved before entering the data apply bracket, so admission retries are idempotent and perform no catalog I/O under that gate. Chunked builds wait for admission outside gates and retry, including ordinary CREATE INDEX and constraints. An ordinary build decodes the heap once; only a progress consumer requests the counting pass. DROP and abandon request reclamation themselves. Prepared owners do not keep the purge worker polling; abandonment requests discovery again.
+A catalog-only DROP can leave a stale manager handle until reopen. Pruning and writer purge skip an owner whose retirement intent is pending, and writer purge also skips an emptied owner, so partial retirement cannot send maintenance through a freed root. Detached undo/read handles remain protected by their existing context and statement fences.

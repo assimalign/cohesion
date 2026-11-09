@@ -439,7 +439,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
         }
     }
 
-    [Event(23, Level = EventLevel.Informational, Message = "Reclaiming dropped table {2} in {0}/{1}.")]
+    [Event(23, Level = EventLevel.Informational, Message = "Reclaiming dropped owner {2} in {0}/{1}.")]
     private void TableReclamationStarted(string engineName, string database, ulong objectId)
         => WriteEvent(23, engineName, database, objectId);
 
@@ -452,7 +452,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
         }
     }
 
-    [Event(24, Level = EventLevel.Informational, Message = "Reclaimed dropped table {2} in {0}/{1}: {3} pages in this process.")]
+    [Event(24, Level = EventLevel.Informational, Message = "Reclaimed dropped owner {2} in {0}/{1}: {3} pages in this process.")]
     private void TableReclamationCompleted(string engineName, string database, ulong objectId, long pages)
         => WriteEvent(24, engineName, database, objectId, pages);
 
@@ -468,34 +468,34 @@ internal sealed class SqlDatabaseEventSource : EventSource
         => WriteEvent(27, engineName, database, objectId);
 
     [NonEvent]
-    internal void IndexBuildStart(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId)
+    internal void IndexBuildStart(string engineName, global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
-        { IndexBuildStart(storage.Name.ToString(), unchecked((long)objectId)); }
+        { IndexBuildStart(engineName, storage.Name.ToString(), unchecked((long)objectId)); }
     }
 
-    [Event(28, Level = EventLevel.Informational, Message = "Database '{0}' started building index object {1}.")]
-    private void IndexBuildStart(string database, long objectId) => WriteEvent(28, database, objectId);
+    [Event(28, Level = EventLevel.Informational, Message = "Database '{0}/{1}' started building index object {2}.")]
+    private void IndexBuildStart(string engineName, string database, long objectId) => WriteEvent(28, engineName, database, objectId);
 
     [NonEvent]
-    internal void IndexBuildStop(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, bool succeeded)
+    internal void IndexBuildStop(string engineName, global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, bool succeeded)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
-        { IndexBuildStop(storage.Name.ToString(), unchecked((long)objectId), succeeded); }
+        { IndexBuildStop(engineName, storage.Name.ToString(), unchecked((long)objectId), succeeded); }
     }
 
-    [Event(29, Level = EventLevel.Informational, Message = "Database '{0}' stopped building index object {1}; succeeded: {2}.")]
-    private void IndexBuildStop(string database, long objectId, bool succeeded) => WriteEvent(29, database, objectId, succeeded);
+    [Event(29, Level = EventLevel.Informational, Message = "Database '{0}/{1}' stopped building index object {2}; succeeded: {3}.")]
+    private void IndexBuildStop(string engineName, string database, long objectId, bool succeeded) => WriteEvent(29, engineName, database, objectId, succeeded);
 
     [NonEvent]
-    internal void PagesReclaimed(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, int pages)
+    internal void PagesReclaimed(string engineName, global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, int pages)
     {
         if (pages != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
-        { PagesReclaimed(storage.Name.ToString(), unchecked((long)objectId), pages); }
+        { PagesReclaimed(engineName, storage.Name.ToString(), unchecked((long)objectId), pages); }
     }
 
-    [Event(30, Level = EventLevel.Informational, Message = "Database '{0}' reclaimed {2} pages of object {1}.")]
-    private void PagesReclaimed(string database, long objectId, int pages) => WriteEvent(30, database, objectId, pages);
+    [Event(30, Level = EventLevel.Informational, Message = "Database '{0}/{1}' reclaimed {3} pages of object {2}.")]
+    private void PagesReclaimed(string engineName, string database, long objectId, int pages) => WriteEvent(30, engineName, database, objectId, pages);
 
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
     private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)

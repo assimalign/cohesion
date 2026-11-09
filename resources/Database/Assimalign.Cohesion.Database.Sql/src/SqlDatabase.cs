@@ -227,7 +227,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
                 LockManager = _coordinator.LockManager,
                 ExistingIndexes = _catalog.GetIndexRegistrations(),
             }, _catalog.Tables.Select(table => table.ObjectId).Concat(_catalog.Sequences.Select(sequence => sequence.ObjectId))
-                .Concat(_catalog.GetPendingTableReclamations()).ToHashSet(), _catalog.NextReservedIdentity, _catalog.ReserveIndexTreeOwner, _catalog.AbandonTableAs, _catalog.PhysicalIndexOwner);
+                .Concat(_catalog.GetPendingTableReclamations()).ToHashSet(), _catalog.NextReservedIdentity, _catalog.ReserveIndexTreeOwner, _catalog.AbandonTableAs, _catalog.PhysicalIndexOwner, _catalog.IsOwnerRetiring);
         }
         catch (IndexFormatException exception)
         {
@@ -248,7 +248,12 @@ public sealed partial class SqlDatabase : DatabaseInstance
             throw;
         }
         _catalog.IndexPageOwner = _indexManager.PageOwner;
+        _catalog.IndexOwnerKnown = registration => _indexManager.IsKnownRegistration(registration) &&
+            _storage.GetOwnerIndexPageCount(_indexManager.PageOwner(registration)) != 0;
         TableReclamation = new SqlTableReclamation(this);
+        _catalog.EngineName = engine.Name;
+        _catalog.IndexReclamationRequested = TableReclamation.Request;
+        _catalog.IndexBuildFinished = (owner, succeeded) => SqlDatabaseEventSource.Log.IndexBuildStop(engine.Name, _storage, owner, succeeded);
         _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
         engine.BeforeProvisioning?.Invoke(this);
 

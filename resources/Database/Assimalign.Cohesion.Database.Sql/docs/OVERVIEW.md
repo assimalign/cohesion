@@ -603,3 +603,5 @@ The function argument view snapshots only Count; the function context view snaps
 TransactionTimestamp. Neither view retains a ref struct, span, context, or cancellation token.
 The SQL value view reads Type and IsNull without decoding its payload. Internal-only plan or
 metrics state stays hidden rather than being promoted to a public debugger projection.
+
+Chunked index builds wait for journal admission between chunks while retaining the table writer reservation. Owners are reserved before data apply, and publication refuses a dropped, unknown or heap-owned registration with CS05060. DROP and failed builds request exact owner reclamation automatically.

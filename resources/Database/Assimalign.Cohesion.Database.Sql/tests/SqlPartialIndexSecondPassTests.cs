@@ -16,7 +16,7 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(SqlTimingCollection.Name)]
-public sealed class SqlPartialIndexSecondPassTests
+public sealed partial class SqlPartialIndexSecondPassTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - Partial predicates: unreachable application cast slots permit creation and maintain the scan subset (#1630)")]
     [InlineData("k")]

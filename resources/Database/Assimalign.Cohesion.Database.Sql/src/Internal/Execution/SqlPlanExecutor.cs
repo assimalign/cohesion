@@ -1827,11 +1827,13 @@ internal sealed partial class SqlPlanExecutor
             // cannot leave a described index without a tree registration (or the
             // reverse). A crash before this write leaves only orphaned tree pages.
             var registrations = PublishedRegistrations([metadata]);
+            IndexBuildBoundary?.Invoke("publication-before", 0, _storage.JournalLength);
             await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.CreateIndexAsync(
                 metadata,
                 registrations, cancellationToken) : _catalog.CreateIndexAsync(
                 metadata,
                 registrations, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
+            IndexBuildBoundary?.Invoke("publication-after", 0, _storage.JournalLength);
         }
         catch
         {

@@ -5692,3 +5692,5 @@ standard .NET argument guards retain their own contracts.
 ## Modifier diagnostic templates (#1470)
 
 Type-modifier refusal templates come from each consuming assembly's generated resources. Runtime, schema and SDK consumers share the same grammar and text. Diagnostic identities, SQLSTATEs, accepted declarations and canonical modifier spelling are unchanged.
+
+CREATE INDEX and constraint backfills retain the table writer lock across bounded durable chunks, wait for journal admission outside the apply gate between chunks, then publish once. A refused or cancelled build leaves no visible definition and its committed owner pages are reclaimed after the safe horizon. DROP INDEX requests reclamation immediately; readers with older snapshots retain the tree until their pins end (#1808).

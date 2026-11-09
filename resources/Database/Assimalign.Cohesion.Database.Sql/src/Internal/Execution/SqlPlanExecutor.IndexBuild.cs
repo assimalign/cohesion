@@ -26,16 +26,19 @@ internal sealed partial class SqlPlanExecutor
         int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken, SqlCatalogIndex? metadata = null,
         ulong physicalOwner = 0)
     {
-        ulong eventOwner = physicalOwner == 0 ? _catalog.ReserveIndexTreeOwner(table.ObjectId, cancellationToken) : physicalOwner;
-        SqlDatabaseEventSource.Log.IndexBuildStart(_storage, eventOwner);
+        ulong eventOwner = physicalOwner == 0 ? await WithCatalogMigrationAdmissionAsync(
+            () => _catalog.ReserveIndexTreeOwner(table.ObjectId, cancellationToken), statement, cancellationToken).ConfigureAwait(false) : physicalOwner;
+        _catalog.BeginIndexBuild(eventOwner);
+        SqlDatabaseEventSource.Log.IndexBuildStart(_catalog.EngineName, _storage, eventOwner);
         bool buildSucceeded = false;
         try
         {
-            // Counting is worker work too. Build only checks owner allocation metadata.
+            IndexBuildBoundary?.Invoke("owner-reserved", 0, _storage.JournalLength);
+            // Only progress consumers need a second, counting scan.
             long total = 0;
-            foreach (var row in ScanVersions(table, cancellationToken))
+            if (statement.ProvisioningProgress is not null)
             {
-                total++;
+                foreach (var row in ScanVersions(table, cancellationToken)) { total++; }
             }
             statement.ProvisioningProgress?.Invoke(0, total);
             statement.ObserveCopyJournalStart(_storage.JournalLength);
@@ -55,6 +58,7 @@ internal sealed partial class SqlPlanExecutor
                     // Track registration before the bracket's durable end can fail.
                     created();
                     statement.AddCopyAllocations(allocationStart);
+                    IndexBuildBoundary?.Invoke("root-before-commit", 0, _storage.JournalLength);
                     return createdIndex;
                 },
                 durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
@@ -88,6 +92,7 @@ internal sealed partial class SqlPlanExecutor
                     statement.ObserveCopyJournalStart(_storage.JournalLength);
                     statement.CheckCopySpace(touches, allocations);
                 }
+                IndexBuildBoundary?.Invoke("chunk-start", batch.Length, _storage.JournalLength);
                 await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
                 {
                     IndexBuildBracketOpened?.Invoke(bracket);
@@ -125,7 +130,7 @@ internal sealed partial class SqlPlanExecutor
         }
         finally
         {
-            SqlDatabaseEventSource.Log.IndexBuildStop(_storage, eventOwner, buildSucceeded);
+            if (!buildSucceeded) { _catalog.EndIndexBuild(eventOwner, false); }
             if (!buildSucceeded && physicalOwner == 0) { _catalog.AbandonTableAs(eventOwner); }
         }
     }

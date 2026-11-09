@@ -463,6 +463,7 @@ public sealed partial class SqlTableRewriteTests
                     finally { historyGate.Release(); }
                     await using var pinned = snapshot;
                     reads.Add(await ReadAsync(concurrent, captured, stop.Token));
+                    // In-memory DDL can complete synchronously; let the other stress actors acquire admission.
                     await Task.Yield();
                     reads.Add(await ReadAsync(concurrent, captured, stop.Token));
                     Interlocked.Increment(ref snapshots);
@@ -482,6 +483,7 @@ public sealed partial class SqlTableRewriteTests
                     added = !added;
                     Interlocked.Increment(ref ddl);
                     await ExecAsync(concurrent, "TRUNCATE t CASCADE", stop.Token);
+                    // In-memory DDL can complete synchronously; let the other stress actors acquire admission.
                     await Task.Yield();
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }

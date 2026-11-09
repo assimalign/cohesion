@@ -19,9 +19,9 @@ internal sealed class SqlIndexManager
     private static readonly IEqualityComparer<(ulong, string)> _keys = EqualityComparer<(ulong, string)>.Create(
         (left, right) => left.Item1 == right.Item1 && StringComparer.OrdinalIgnoreCase.Equals(left.Item2, right.Item2),
         value => HashCode.Combine(value.Item1, StringComparer.OrdinalIgnoreCase.GetHashCode(value.Item2)));
-    private readonly BTreeIndexManager _normal;
     private readonly Func<ulong, CancellationToken, ulong> _reserveOwner;
     private readonly Action<ulong> _abandonOwner;
+    private readonly Func<ulong, bool> _retiringOwner;
     private readonly BTreeIndexManagerOptions _options;
     private readonly object _sync = new();
     private readonly Dictionary<(ulong, string), Entry> _alternate = new(_keys);
@@ -32,12 +32,12 @@ internal sealed class SqlIndexManager
 
     private SqlIndexManager(BTreeIndexManagerOptions options, IReadOnlySet<ulong> forbiddenOwners, ulong nextIdentity,
         Func<ulong, CancellationToken, ulong> reserveOwner, Action<ulong> abandonOwner,
-        Func<BTreeIndexRegistration, ulong> expectedOwner)
+        Func<BTreeIndexRegistration, ulong> expectedOwner, Func<ulong, bool> retiringOwner)
     {
         _reserveOwner = reserveOwner;
         _abandonOwner = abandonOwner;
+        _retiringOwner = retiringOwner;
         _options = options;
-        var normal = new List<BTreeIndexRegistration>();
         var treeOwners = new HashSet<ulong>();
         foreach (var registration in options.ExistingIndexes ?? [])
         {
@@ -55,17 +55,12 @@ internal sealed class SqlIndexManager
                 _maintenance.Add((manager, owner));
             }
         }
-        _normal = BTreeIndexManager.Create(new BTreeIndexManagerOptions
-        {
-            Storage = options.Storage, TransactionSource = options.TransactionSource,
-            LockManager = options.LockManager, PruneBound = options.PruneBound, ExistingIndexes = normal,
-        });
     }
 
     internal static SqlIndexManager Create(BTreeIndexManagerOptions options, IReadOnlySet<ulong> forbiddenOwners, ulong nextIdentity,
         Func<ulong, CancellationToken, ulong> reserveOwner, Action<ulong> abandonOwner,
-        Func<BTreeIndexRegistration, ulong> expectedOwner)
-        => new(options, forbiddenOwners, nextIdentity, reserveOwner, abandonOwner, expectedOwner);
+        Func<BTreeIndexRegistration, ulong> expectedOwner, Func<ulong, bool> retiringOwner)
+        => new(options, forbiddenOwners, nextIdentity, reserveOwner, abandonOwner, expectedOwner, retiringOwner);
     private static (ulong, string) Key(ulong table, string name) => (table, name);
 
     private BTreeIndexManager CreatePhysical(IReadOnlyList<BTreeIndexRegistration>? indexes = null)
@@ -119,7 +114,8 @@ internal sealed class SqlIndexManager
         lock (_sync)
         {
             if (_alternate.TryGetValue(Key(table, name), out var entry)) { tree = entry.Tree; return true; }
-            return _normal.TryGetIndex(table, name, out tree!);
+            tree = null!;
+            return false;
         }
     }
 
@@ -136,12 +132,25 @@ internal sealed class SqlIndexManager
     internal ulong PageOwner(BTreeIndexRegistration registration)
     { lock (_sync) { return _owners.GetValueOrDefault(registration.RootPageId, registration.ObjectId); } }
 
+    internal bool IsKnownRegistration(BTreeIndexRegistration registration)
+    {
+        lock (_sync)
+        {
+            var key = Key(registration.ObjectId, registration.Definition.Name);
+            return _alternate.TryGetValue(key, out var live) && Matches(live, registration) ||
+                _prepared.TryGetValue(key, out var prepared) && Matches(prepared, registration);
+        }
+        static bool Matches(Entry entry, BTreeIndexRegistration registration)
+            => entry.Registration.RootPageId == registration.RootPageId &&
+                entry.Registration.Definition.Kind == registration.Definition.Kind &&
+                entry.Registration.Definition.IsUnique == registration.Definition.IsUnique;
+    }
+
     internal IReadOnlyList<BTreeIndexRegistration> ExportRegistrations(bool includePrepared = false)
     {
         lock (_sync)
         {
-            if (_alternate.Count == 0 && (!includePrepared || _prepared.Count == 0)) { return _normal.ExportRegistrations(); }
-            var values = _normal.ExportRegistrations().ToDictionary(value => Key(value.ObjectId, value.Definition.Name), _keys);
+            var values = new Dictionary<(ulong, string), BTreeIndexRegistration>(_keys);
             foreach (var pair in _alternate) { values[pair.Key] = pair.Value.Registration; }
             if (includePrepared) { foreach (var pair in _prepared) { values[pair.Key] = pair.Value.Registration; } }
             return values.Values.ToArray();
@@ -193,14 +202,15 @@ internal sealed class SqlIndexManager
             token.ThrowIfCancellationRequested();
             if (_alternate.Remove(Key(table, name), out removed))
             {
-                owner = _owners.GetValueOrDefault(removed.Registration.RootPageId, table);
+                owner = _owners.GetValueOrDefault(removed.Registration.RootPageId);
                 _maintenance.Remove((removed.Manager, owner));
                 _owners.Remove(removed.Registration.RootPageId);
             }
         }
-        if (removed is null) { return _normal.DropIndexAsync(transaction, table, name, token); }
+        if (removed is null) { return default; }
         // Catalog -> directory is the publication lock order. Never call back into
         // the catalog while holding the directory monitor, including failure cleanup.
+        if (owner == 0) { return default; }
         _abandonOwner(owner);
         return removed.Manager.DropIndexAsync(transaction, owner, name, token);
     }
@@ -222,6 +232,11 @@ internal sealed class SqlIndexManager
                 _prunePosition %= _maintenance.Count;
                 selected = _maintenance[_prunePosition];
             }
+            // A public catalog-only DROP can leave a stale directory handle. Its
+            // receipt owns maintenance now, including when the root was in the first
+            // reclaimed batch. Call back only after releasing the directory monitor.
+            if (_retiringOwner(selected.Owner))
+            { lock (_sync) { _prunePosition++; } continue; }
             // Index pages include branches, so this is a conservative leaf-work grant.
             // Count without copying/loading the directory. A large tree keeps the next turn
             // when it cannot fit the remaining grant; small trees share the same 64 leaves.
@@ -240,7 +255,11 @@ internal sealed class SqlIndexManager
     internal async ValueTask<long> PurgeWritersAsync(StorageTransaction bracket, IReadOnlySet<TransactionSequence> writers, CancellationToken token)
     {
         long count = 0;
-        foreach (var item in _maintenance) { count += await item.Manager.PurgeWritersAsync(bracket, writers, token).ConfigureAwait(false); }
+        foreach (var item in _maintenance)
+        {
+            if (_retiringOwner(item.Owner) || _options.Storage.GetOwnerIndexPageCount(item.Owner) == 0) { continue; }
+            count += await item.Manager.PurgeWritersAsync(bracket, writers, token).ConfigureAwait(false);
+        }
         return count;
     }
 

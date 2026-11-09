@@ -353,6 +353,14 @@ internal sealed partial class SqlPlanExecutor
                     index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls, index.KeyOrders))).ToArray();
             var roots = descriptions.Where(index => prepared.Any(table => table.ObjectId == index.TableObjectId)).ToArray();
             created.EnsureCapacity(roots.Length);
+            var rootOwners = new Dictionary<SqlCatalogIndex, ulong>();
+            foreach (var index in roots)
+            {
+                ulong owner = await WithCatalogMigrationAdmissionAsync(() =>
+                    _catalog.ReserveIndexTreeOwner(index.TableObjectId, cancellationToken), statement, cancellationToken).ConfigureAwait(false);
+                rootOwners.Add(index, owner);
+                reservedTrees.Add(owner);
+            }
             foreach (var table in prepared)
             {
                 await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(table.ObjectId),
@@ -371,7 +379,7 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var index in roots)
                 {
                     await _indexManager.CreateIndexAsync(statement.Transaction, index.TableObjectId,
-                        new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken).ConfigureAwait(false);
+                        new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken, rootOwners[index]).ConfigureAwait(false);
                     created.Add(index);
                 }
                 statement.AddCopyAllocations(allocationStart);

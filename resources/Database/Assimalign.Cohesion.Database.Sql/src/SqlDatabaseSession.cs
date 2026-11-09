@@ -415,7 +415,7 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
         {
             try
             {
-                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression or SqlTruncateExpression or SqlCreateTableAsExpression or SqlAlterTableExpression)
+                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression or SqlTruncateExpression or SqlCreateTableAsExpression or SqlAlterTableExpression or SqlDropIndexExpression or SqlCreateIndexExpression)
                 {
                     _database.TableReclamation.Request();
                 }

@@ -376,6 +376,7 @@ public sealed partial class SqlCatalog
                 {
                     _pendingReclamations.Remove(owner);
                     _preparedTruncateOwners.Remove(owner);
+                    EndIndexBuild(owner, true);
                 }
                 for (int index = 0; index < retired.Length; index++)
                 {

@@ -18,10 +18,21 @@ internal sealed partial class SqlPlanExecutor
         while (true)
         {
             try { return await operation().ConfigureAwait(false); }
-            catch (TransactionAdmissionCanceledException) when (admission is not null && !token.IsCancellationRequested)
+            catch (TransactionAdmissionCanceledException) when (!token.IsCancellationRequested)
             {
                 onRefusal?.Invoke();
-                await admission(catalogStorage, token).ConfigureAwait(false);
+                if (admission is not null) { await admission(catalogStorage, token).ConfigureAwait(false); }
+                else
+                {
+                    // The failed bracket unwound every apply/page gate. The logical
+                    // writer lock survives while checkpoint admission waits here.
+                    await Task.Run(() =>
+                    {
+                        if (catalogStorage) { _catalog.WaitForIndexAdmission(token); return; }
+                        using var lease = TransactionCheckpointInterlock.ForStorage(_storage)
+                            .Enter("SqlIndexBuild", cancellationToken: token);
+                    }, CancellationToken.None).ConfigureAwait(false);
+                }
             }
             catch (TransactionAdmissionCanceledException failure) when (admission is not null)
             { onRefusal?.Invoke(); throw SqlTimeoutException.Statement(failure, null); }

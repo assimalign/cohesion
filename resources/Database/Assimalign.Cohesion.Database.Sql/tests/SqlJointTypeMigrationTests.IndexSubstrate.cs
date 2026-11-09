@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Globalization;
 using System.IO;
@@ -132,7 +133,33 @@ public sealed partial class SqlJointTypeMigrationTests
 
             // Act: a snapshot and its detached physical tree remain readable through DROP.
             await writer.ExecuteAsync("DROP INDEX ix_v ON items", cancellationToken: guard.Token);
-            database.TableReclamation.Request();
+            int reads = 0, passes = 0, overlaps = 0, reading = 0;
+            using var started = new ManualResetEventSlim();
+            var race = Stopwatch.StartNew();
+            var readTask = Task.Run(async () =>
+            {
+                Volatile.Write(ref reading, 1); started.Set();
+                do
+                {
+                    await using var cursor = detached.OpenCursor(snapshot.Context.Snapshot, IndexKeyRange.All, cancellationToken: guard.Token);
+                    (await cursor.MoveNextAsync(guard.Token)).ShouldBeTrue();
+                    Interlocked.Increment(ref reads);
+                } while (race.Elapsed < TimeSpan.FromSeconds(1) || Volatile.Read(ref overlaps) == 0);
+                Volatile.Write(ref reading, 0);
+            }, guard.Token);
+            var reclaimTask = Task.Run(() =>
+            {
+                started.Wait(guard.Token);
+                do
+                {
+                    guard.Token.ThrowIfCancellationRequested();
+                    database.TableReclamation.RunBatch(guard.Token);
+                    if (Volatile.Read(ref reading) != 0) { Interlocked.Increment(ref overlaps); }
+                    Interlocked.Increment(ref passes);
+                } while (race.Elapsed < TimeSpan.FromSeconds(1) || Volatile.Read(ref reading) != 0);
+            }, guard.Token);
+            await Task.WhenAll(readTask, reclaimTask).WaitAsync(guard.Token);
+            reads.ShouldBeGreaterThan(0); passes.ShouldBeGreaterThan(0); overlaps.ShouldBeGreaterThan(0);
             database.TableReclamation.RunBatch(guard.Token);
             database.DataStorage.GetOwnerIndexPages(owner).ShouldBe(treePages);
             await using (var cursor = detached.OpenCursor(snapshot.Context.Snapshot, IndexKeyRange.All, cancellationToken: guard.Token))
@@ -153,9 +180,9 @@ public sealed partial class SqlJointTypeMigrationTests
             for (int row = 0; row < rows; row++) { keptRows[row][0].ShouldBe(row); }
             database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
             events.Events.ShouldNotContain(item => item.EventId == 0);
-            events.Events.Where(item => item.EventId == 28).ShouldHaveSingleItem().Payload![1].ShouldBe(unchecked((long)owner));
+            events.Events.Where(item => item.EventId == 28).ShouldHaveSingleItem().Payload![2].ShouldBe(unchecked((long)owner));
             events.Events.Count(item => item.EventId == 29).ShouldBe(1);
-            events.Events.Where(item => item.EventId == 30).Sum(item => (int)item.Payload![2]!).ShouldBe(treePages.Length);
+            events.Events.Where(item => item.EventId == 30).Sum(item => (int)item.Payload![3]!).ShouldBe(treePages.Length);
             _output.WriteLine($"rows={rows}; heap pages={heapPages.Length}; index pages={treePages.Length}; chunks={chunks}; maximum rows/bracket={largest}; journal peak={journalPeak}");
         }
         finally
