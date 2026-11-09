@@ -244,6 +244,63 @@ public sealed partial class SqlJointTypeMigrationTests
         database.IsOffline.ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - A held checkpoint makes the next ordinary index chunk wait and retry (#1808)")]
+    public async Task ExecuteAsync_HeldCheckpointBetweenChunks_ShouldRetryWithoutAbandoningOwner()
+    {
+        // Arrange: keep the pause open so the checkpoint worker cannot win the race.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        await using var engine = SqlDatabaseEngine.Create("held-index-admission", new()
+        { CheckpointJournalSize = 0, MaintenanceInterval = TimeSpan.FromHours(1), CheckpointInterval = TimeSpan.FromHours(1) });
+        var database = await engine.CreateDatabaseAsync("typed", guard.Token);
+        await using var writer = await database.CreateSessionAsync(guard.Token);
+        await writer.ExecuteAsync("CREATE TABLE items(v INT)", cancellationToken: guard.Token);
+        SeedRaw(database, [1], 130);
+        database.Coordinator.Checkpoint(guard.Token);
+        var gate = TransactionCheckpointInterlock.ForStorage(database.DataStorage);
+        using var holder = database.DataStorage.BeginTransaction("HoldIndexChunkCheckpoint");
+        using var events = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Transactions"), EventLevel.Verbose);
+        int committed = 0;
+        bool armed = false;
+        SqlPlanExecutor.IndexBuildBoundary = (stage, _, _) =>
+        {
+            if (stage == "chunk-committed") { Interlocked.Increment(ref committed); }
+            if (stage != "chunk-before-commit" || armed) { return; }
+            armed = true;
+            database.DataStorage.CheckpointJournalSize = 1;
+            gate.JournalSizeLimit = 2;
+            gate.ObserveAdmissionPause().ShouldBeTrue();
+        };
+        var building = Task.Run(async () => await writer.ExecuteAsync("CREATE INDEX ix ON items(v)", cancellationToken: guard.Token), guard.Token);
+        try
+        {
+            // Act: observe the actual refused/waiting admission, rather than a duration.
+            while (!events.Events.Any(item => item.EventId == 25 && Equals(item.Payload![0], database.DataStorage.Name.ToString())))
+            {
+                if (building.IsCompleted) { await building; }
+                await Task.Delay(1, guard.Token);
+            }
+            building.IsCompleted.ShouldBeFalse();
+            Volatile.Read(ref committed).ShouldBe(1);
+            gate.IsAdmissionPaused.ShouldBeTrue();
+            gate.JournalSizeLimit = 0; holder.Rollback(); database.DataStorage.CheckpointJournalSize = 0;
+            database.Coordinator.Checkpoint(guard.Token);
+            await building.WaitAsync(guard.Token);
+
+            // Assert: the retried chunk contributes each row once, and publication succeeds.
+            committed.ShouldBe(3);
+            var registration = database.Catalog.GetIndexRegistrations().ShouldHaveSingleItem();
+            database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
+            await ReadSurvivingTreeAsync(database, registration, 130, guard.Token);
+            database.IsOffline.ShouldBeFalse();
+        }
+        finally
+        {
+            SqlPlanExecutor.IndexBuildBoundary = null;
+            gate.JournalSizeLimit = 0; database.DataStorage.CheckpointJournalSize = 0; holder.Dispose();
+            await building.WaitAsync(guard.Token);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - An abandoned multi-chunk build reclaims without reopening (#1808)")]
     public async Task ExecuteAsync_AbandonedBuild_ShouldReclaimCommittedChunksLive()
     {
