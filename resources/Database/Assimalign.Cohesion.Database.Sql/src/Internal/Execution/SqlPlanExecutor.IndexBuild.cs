@@ -32,7 +32,6 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             _catalog.BeginIndexBuild(eventOwner);
-            SqlDatabaseEventSource.Log.IndexBuildBegan(_catalog.EngineName, _storage, eventOwner);
             IndexBuildBoundary?.Invoke("owner-reserved", 0, _storage.JournalLength);
             // Only progress consumers need a second, counting scan.
             long total = 0;

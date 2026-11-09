@@ -48,6 +48,9 @@ public sealed partial class SqlJointTypeMigrationTests
         measured.KeepsOwner.ShouldBeTrue();
         measured.KeepsHeap.ShouldBeTrue();
         _output.WriteLine($"Index replacement ({rows} rows): 49a={measured.OldPages}; joint={measured.JointPages}; ratio={(double)measured.JointPages / measured.OldPages:P2}");
+        measured.Reclaimed[0].ShouldBeGreaterThan(0);
+        measured.Reclaimed[1].ShouldBe(measured.Reclaimed[0]);
+        (measured.JointPages - measured.Reclaimed[1]).ShouldBeLessThanOrEqualTo((measured.OldPages - measured.Reclaimed[0]) * 110 / 100);
         measured.JointPages.ShouldBeLessThanOrEqualTo(measured.OldPages * 110 / 100);
     }
 
@@ -150,10 +153,11 @@ public sealed partial class SqlJointTypeMigrationTests
         }
     }
 
-    private async Task<(long OldPages, long JointPages, long Rewritten, int Checkpoints, bool KeepsHeap, bool KeepsOwner, long Threshold, int ForcedCheckpoints)> MeasureDeferredCostAsync(
+    private async Task<(long OldPages, long JointPages, long Rewritten, int Checkpoints, bool KeepsHeap, bool KeepsOwner, long Threshold, int ForcedCheckpoints, long[] Reclaimed)> MeasureDeferredCostAsync(
         CrashCaptureSqlStorageStrategy storage, SqlCompiledSchema source, SqlCompiledSchema target, CancellationToken token)
     {
         var pages = new long[2];
+        var reclaimedByMode = new long[2];
         long rewritten = 0;
         int checkpoints = 0;
         int observedCheckpoints = 0;
@@ -220,11 +224,12 @@ public sealed partial class SqlJointTypeMigrationTests
                 database.Coordinator.Checkpoint();
                 database.CatalogStorage.Checkpoint();
                 pages[mode] = image.PageWrites("typed") - before;
+                reclaimedByMode[mode] = reclaimed;
                 _output.WriteLine($"Reclamation drained, mode={mode}: pages={pages[mode]}, reclaimed={reclaimed}, batches={batches}");
             }
             finally { SqlPlanExecutor.RewriteStage = null; }
         }
-        return (pages[0], pages[1], rewritten, observedCheckpoints, keepsHeap, keepsOwner, threshold, checkpoints);
+        return (pages[0], pages[1], rewritten, observedCheckpoints, keepsHeap, keepsOwner, threshold, checkpoints, reclaimedByMode);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: kept-owner checkpoint threshold falls back on a small volume or disabled engine threshold")]

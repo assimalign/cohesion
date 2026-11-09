@@ -95,6 +95,7 @@ internal sealed partial class SqlPlanExecutor
                     treeOwners.Add(index, await WithCatalogMigrationAdmissionAsync(() =>
                         _catalog.ReserveIndexTreeOwner(index.TableObjectId, cancellationToken), statement, cancellationToken).ConfigureAwait(false));
                 }
+                foreach (ulong owner in treeOwners.Values) { _catalog.BeginIndexBuild(owner); }
                 await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
                 {
                     foreach (var index in indexes)

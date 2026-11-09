@@ -189,7 +189,7 @@ internal sealed class SqlIndexManager
         ulong[] owners;
         lock (_sync)
         {
-            owners = _prepared.Values.Select(entry => _owners[entry.Registration.RootPageId]).ToArray();
+            owners = _prepared.Values.Select(entry => _owners.TryGetValue(entry.Registration.RootPageId, out ulong owner) ? owner : 0UL).Where(owner => owner != 0).ToArray();
             foreach (var entry in _prepared.Values) { _owners.Remove(entry.Registration.RootPageId); }
             _prepared.Clear();
         }

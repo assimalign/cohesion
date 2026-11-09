@@ -17,11 +17,17 @@ public sealed partial class SqlCatalog
 {
     internal Action? BeforeJointDiscard { get; set; }
     internal Action? IndexReclamationRequested { get; set; }
+    internal Action<ulong>? IndexBuildStarted { get; set; }
     internal Action<ulong, bool>? IndexBuildFinished { get; set; }
     internal string EngineName { get; set; } = string.Empty;
     private readonly HashSet<ulong> _buildingIndexes = new();
     private ImmutableHashSet<ulong> _retiringIndexOwners = ImmutableHashSet<ulong>.Empty;
-    internal void BeginIndexBuild(ulong owner) { lock (_sync) { _buildingIndexes.Add(owner); } }
+    internal void BeginIndexBuild(ulong owner)
+    {
+        bool began;
+        lock (_sync) { began = _buildingIndexes.Add(owner); }
+        if (began) { IndexBuildStarted?.Invoke(owner); }
+    }
     internal void EndIndexBuild(ulong owner, bool succeeded)
     {
         bool ended;
@@ -223,7 +229,11 @@ public sealed partial class SqlCatalog
                 { _preparedTruncateOwners.Remove(prepared[index].ObjectId); }
             }
             if (preparedTrees is not null)
-            { foreach (ulong owner in preparedTrees) { _preparedTruncateOwners.Remove(owner); } }
+            {
+                var retiring = _retiringIndexOwners.Union(preparedTrees);
+                foreach (ulong owner in preparedTrees) { _preparedTruncateOwners.Remove(owner); }
+                Volatile.Write(ref _retiringIndexOwners, retiring);
+            }
             _pendingMigrationLocations = [];
             _pendingMigration = null;
         }

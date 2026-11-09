@@ -25,7 +25,7 @@ a test. Transactions DESIGN records the lock order, events and exact counters. N
 
 SQL catalog writes use non-waiting admission under _sync. Ordinary sequence/identity reservations
 release that monitor, wait with the statement token, then retry and revalidate the incarnation.
-Session catalog mutations retain validated metadata and refuse immediately with CK04014. Physical index-owner identity reservations release the catalog monitor and wait with the caller's LockTimeout before the statement's first data admission. Migration
+Session catalog mutations retain validated metadata and refuse immediately with CK04014. Physical index-owner identity reservations release the catalog monitor and wait, per refusal, up to the caller's LockTimeout (no limit at 0) and report CK04014 on expiry. Migration
 copy, index, validation, publication and cleanup boundaries retry transient admission refusals:
 the same job retains its table/name/definition reservations and prepared work, releases the schema
 apply semaphore, catalog monitor and publication snapshot gate before waiting with its token,
@@ -6073,7 +6073,7 @@ Dropping that owner preserves the heap and a second index, whose 80,000 keys rem
 Crash boundaries include the owner-intent commit, root commit, each chunk before/after commit,
 registration/description publication, every reclamation page-batch commit and intent removal.
 PagesReclaimed (30) reports nonempty committed owner-page batches of at most 32 pages. IndexBuildBegan/IndexBuildEnded (28/29) report
-one build lifetime with engineName, database, physical index objectId and succeeded on end. These Informational events use no Start/Stop activity semantics; end fires once at publication (true) or failure/abandonment (false). An unconfirmed joint attempt ends with false without abandoning any tree or changing recovery state. Payloads never
+every physical index-owner build, including schema provisioning, CREATE INDEX, TRUNCATE and table rewrites, with engineName, database, physical index objectId and succeeded on end. These Informational events use no Start/Stop activity semantics; end fires once at publication (true) or failure/abandonment (false). An unconfirmed joint attempt ends with false without abandoning any tree or changing recovery state. Payloads never
 contain indexed values. No new diagnostic identity or wire format is introduced.
 
 ## Secondary indexes
@@ -8435,8 +8435,8 @@ bounded peer-sent names) are in the area's
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
 | 27 | `TableReclamationYielded` | Verbose | — | `engineName`, `database`, `objectId` (each poll yielding to a due or pending checkpoint) |
-| 28 | `IndexBuildBegan` | Informational | — | `engineName`, `database`, `objectId` (physical index owner) |
-| 29 | `IndexBuildEnded` | Informational | — | `engineName`, `database`, `objectId`, `succeeded` |
+| 28 | `IndexBuildBegan` | Informational | — | `engineName`, `database`, `objectId` (physical index owner; every build, including schema provisioning, TRUNCATE and rewrites) |
+| 29 | `IndexBuildEnded` | Informational | — | `engineName`, `database`, `objectId`, `succeeded` (publication true; failure, cancellation or abandonment false) |
 | 30 | `PagesReclaimed` | Informational | — | `engineName`, `database`, `objectId` (physical owner), `pages` |
 | 25 | `TransactionCleanupFailed` | Warning | — | `transactionId`, `exceptionType`, `exceptionMessage` (bounded to 1024 characters) |
 
@@ -9936,7 +9936,7 @@ For 32,768 rows on a primary-key table the retained 49a builder writes 201 pages
 publication writes 202; both rewrite zero rows and decode 65,536 versions. Column and composite
 primary-key tables with three columns measure 227 to 228 pages; adding a new keyed table in
 that plan measures 228 to 230. At the measured 64 MiB engine budget, the ten-percent page-write
-bound covers additive index builds, including plans that add a table. Index drops keep the heap with zero row rewrites. Like-for-like same-name replacement measurements drain old-tree reclamation before both final checkpoints: 8,192 rows write 78 pages in each mode, and 65,536 rows write 586 in each mode (both 100.00%, within the unchanged ten-percent bound). Holding reclamation in both 8,192-row modes writes 43/43 pages on ARM64 and x64; draining both writes 78/78 on both architectures. The former 43 versus 75–78 comparison counted reclamation only in the joint window. Shuffled-key measurements
+bound covers additive index builds, including plans that add a table. Index drops keep the heap with zero row rewrites. Like-for-like same-name replacement measurements drain old-tree reclamation before both final checkpoints: 8,192 rows write 78 pages in each mode, and 65,536 rows write 586 in each mode (both 100.00%, within the unchanged ten-percent bound). Holding reclamation in both 8,192-row modes writes 43/43 pages on ARM64 and x64; draining both writes 78/78 on both architectures. The former 43 versus 75–78 comparison counted reclamation only in the joint window. Replacement guards require equal nonzero reclaimed pages in both modes and apply the ten-percent bound to writes with those frees subtracted as well as the full cost. Shuffled-key measurements
 count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
 already completed by the engine must not be followed by a redundant forced copy checkpoint.
 

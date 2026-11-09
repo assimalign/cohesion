@@ -360,6 +360,7 @@ internal sealed partial class SqlPlanExecutor
                     _catalog.ReserveIndexTreeOwner(index.TableObjectId, cancellationToken), statement, cancellationToken).ConfigureAwait(false);
                 rootOwners.Add(index, owner);
                 reservedTrees.Add(owner);
+                _catalog.BeginIndexBuild(owner);
             }
             foreach (var table in prepared)
             {
@@ -518,7 +519,8 @@ internal sealed partial class SqlPlanExecutor
             catch (Exception cleanup) { failures.Add(cleanup); }
             if (!published && !unconfirmed)
             {
-                _indexManager.DiscardPrepared(owner => _catalog.EndIndexBuild(owner, false));
+                try { _indexManager.DiscardPrepared(owner => _catalog.EndIndexBuild(owner, false)); }
+                catch (Exception cleanup) { failures.Add(cleanup); }
                 try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared, reservedTrees, drain: true).ConfigureAwait(false); }
                 catch (Exception cleanup) { failures.Add(cleanup); }
                 finally { _catalog.AbandonStorageReplacement(prepared); _catalog.AbandonJointTreeOwners(reservedTrees); }
