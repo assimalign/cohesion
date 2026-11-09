@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Text;
 using System.Threading;
@@ -42,6 +43,33 @@ public sealed class DocumentIndexRetirementTests
 
         // Act.
         await writer.ExecuteAsync("DROP INDEX ix ON items", cancellationToken: guard.Token);
+        int reads = 0, passes = 0, overlaps = 0, reading = 0;
+        using var started = new ManualResetEventSlim();
+        var race = Stopwatch.StartNew();
+        var readTask = Task.Run(async () =>
+        {
+            Volatile.Write(ref reading, 1); started.Set();
+            do
+            {
+                (await database.Catalog.SearchIndexAsync(metadata.CollectionId, "ix", prefix + "0000", true,
+                    prefix + "0000", true, pin.Snapshot, guard.Token)).ShouldHaveSingleItem();
+                Interlocked.Increment(ref reads);
+            } while (race.Elapsed < TimeSpan.FromSeconds(1) || Volatile.Read(ref overlaps) == 0);
+            Volatile.Write(ref reading, 0);
+        }, guard.Token);
+        var reclaimTask = Task.Run(() =>
+        {
+            started.Wait(guard.Token);
+            do
+            {
+                guard.Token.ThrowIfCancellationRequested();
+                database.Coordinator.RunVersionPurgePass(guard.Token);
+                if (Volatile.Read(ref reading) != 0) { Interlocked.Increment(ref overlaps); }
+                Interlocked.Increment(ref passes);
+            } while (race.Elapsed < TimeSpan.FromSeconds(1) || Volatile.Read(ref reading) != 0);
+        }, guard.Token);
+        await Task.WhenAll(readTask, reclaimTask).WaitAsync(guard.Token);
+        reads.ShouldBeGreaterThan(0); passes.ShouldBeGreaterThan(0); overlaps.ShouldBeGreaterThan(0);
         database.Coordinator.RunVersionPurgePass(guard.Token);
         database.DataStorage.GetOwnerIndexPages(metadata.ObjectId).ShouldBe(pages);
         (await database.Catalog.SearchIndexAsync(database.Catalog.FindCollection("items", pin.Snapshot)!.Value.Id, "ix", prefix + "0000", true,
@@ -64,6 +92,7 @@ public sealed class DocumentIndexRetirementTests
     [Theory(DisplayName = "Cohesion Test [Documents] - Every durable build and retirement boundary converges after two reopens (#1808)")]
     [InlineData("build-root")]
     [InlineData("build-chunk")]
+    [InlineData("build-published")]
     [InlineData("retire-registration")]
     [InlineData("reclaim-pages")]
     [InlineData("reclaim-batch")]
@@ -84,6 +113,12 @@ public sealed class DocumentIndexRetirementTests
         var collection = await writer.CreateCollectionAsync("items", guard.Token);
         for (int row = 0; row < 130; row++)
         { await collection.PutAsync(writer, row.ToString(), Encoding.UTF8.GetBytes($"{{\"v\":{row}}}"), cancellationToken: guard.Token); }
+        await writer.ExecuteAsync("CREATE INDEX kept ON items(v)", cancellationToken: guard.Token);
+        var metadataPin = await database.Coordinator.BeginSnapshotPinAsync(guard.Token);
+        Guid collectionId = database.Catalog.FindCollection("items", metadataPin.Snapshot)!.Value.Id;
+        var kept = database.Catalog.GetIndexes(collectionId, metadataPin.Snapshot).Single();
+        var keptPages = database.DataStorage.GetOwnerIndexPages(kept.ObjectId).ToArray();
+        await database.Coordinator.RollbackAsync(metadataPin, guard.Token);
         bool build = boundary.StartsWith("build", StringComparison.Ordinal);
         if (!build)
         {
@@ -126,15 +161,15 @@ public sealed class DocumentIndexRetirementTests
             var items = await reader.GetCollectionAsync("items", guard.Token);
             (await items.GetAsync(reader, "129", cancellationToken: guard.Token)).ShouldNotBeNull();
             var pin = await image.Coordinator.BeginSnapshotPinAsync(guard.Token);
-            image.Catalog.GetIndexes(image.Catalog.FindCollection("items", pin.Snapshot)!.Value.Id, pin.Snapshot).ShouldBeEmpty();
+            image.Catalog.GetIndexes(collectionId, pin.Snapshot).ShouldBe([kept]);
+            (await image.Catalog.SearchIndexAsync(collectionId, "kept", 129m, true, 129m, true, pin.Snapshot, guard.Token)).ShouldHaveSingleItem();
             await image.Coordinator.RollbackAsync(pin, guard.Token);
-            using (var registrations = image.DataStorage.GetUnitIterator(1)) { registrations.MoveNext().ShouldBeFalse(); }
-            for (long page = 1; page < image.DataStorage.PageManager.PageCount; page++)
+            using (var registrations = image.DataStorage.GetUnitIterator(1))
             {
-                if (!image.DataStorage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
-                using var handle = image.DataStorage.PageManager.GetPage((PageId)page);
-                handle.Page.Type.ShouldNotBe(PageType.Index);
+                registrations.MoveNext().ShouldBeTrue(); registrations.MoveNext().ShouldBeFalse();
             }
+            image.DataStorage.GetIndexOwners(0).Select(owner => owner.OwnerId).ShouldBe([kept.ObjectId]);
+            image.DataStorage.GetOwnerIndexPages(kept.ObjectId).ShouldBe(keptPages);
             await reader.DisposeAsync();
             await image.DisposeAsync();
         }

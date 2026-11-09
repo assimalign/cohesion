@@ -40,23 +40,28 @@ public sealed partial class DocumentCatalog
         }
         if (detached) { OpenIndexes(); }
         // Open only, after recovered liveness has passed and before admitting operations.
-        for (long page = 1; page < _storage.PageManager.PageCount; page++)
+        ulong afterOwner = 0;
+        while (true)
         {
-            if (!_storage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
-            using var handle = _storage.PageManager.GetPage((PageId)page);
-            ulong owner = handle.Page.OwnerId;
-            if (handle.Page.Type != PageType.Index || owner <= 1 || _registrations.ContainsKey(owner) || _indexOwners.ContainsKey(owner)) { continue; }
-            using var stream = new MemoryStream();
-            using var writer = new BinaryWriter(stream, Encoding.UTF8, true);
-            writer.Write(0UL); writer.Write(0UL); writer.Write((byte)5); writer.Write(DocumentCatalogCodec.IndexRecordVersion);
-            writer.Write(owner); writer.Write(-page);
-            DocumentCatalogCodec.WriteString(writer, "retired"); writer.Write(false);
-            using var bracket = _storage.BeginTransaction();
-            var location = _storage.InsertIndexRegistration(bracket, stream.ToArray());
-            bracket.Commit();
-            _registrations.Add(owner, (location.PageId, location.SlotIndex, -page));
-            ScheduleIndexRetirement(owner);
+            var owners = _storage.GetIndexOwners(afterOwner);
+            if (owners.Count == 0) { break; }
+            foreach (var (owner, page) in owners)
+            {
+                afterOwner = owner;
+                if (owner <= 1 || _registrations.ContainsKey(owner) || _indexOwners.ContainsKey(owner)) { continue; }
+                using var stream = new MemoryStream();
+                using var writer = new BinaryWriter(stream, Encoding.UTF8, true);
+                writer.Write(0UL); writer.Write(0UL); writer.Write((byte)5); writer.Write(DocumentCatalogCodec.IndexRecordVersion);
+                writer.Write(owner); writer.Write(-(long)page);
+                DocumentCatalogCodec.WriteString(writer, "retired"); writer.Write(false);
+                using var bracket = _storage.BeginTransaction();
+                var location = _storage.InsertIndexRegistration(bracket, stream.ToArray());
+                bracket.Commit();
+                _registrations.Add(owner, (location.PageId, location.SlotIndex, -(long)page));
+                ScheduleIndexRetirement(owner);
+            }
         }
+        foreach (ulong owner in _indexOwners.Keys) { if (!_registrations.ContainsKey(owner)) { ScheduleIndexRetirement(owner); } }
     }
 
     private void ScheduleIndexRetirement(ulong owner)
@@ -105,12 +110,18 @@ public sealed partial class DocumentCatalog
                     bool finished = false;
                     try
                     {
-                        if (!_registrations.TryGetValue(owner, out var registration)) { finished = true; continue; }
+                        if (!_registrations.TryGetValue(owner, out var registration))
+                        {
+                            if (IndexRetirementStatus(owner, bound, false) == 2)
+                            { lock (_sync) { _indexOwners.Remove(owner); } }
+                            finished = true;
+                            continue;
+                        }
                         int status = IndexRetirementStatus(owner, bound, registration.Root < 0);
                         if (status == 0)
                         {
                             if (registration.Root < 0) { throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationInvalid); }
-                            // Keep live candidates queued: a later DROP needs no full-directory scan.
+                            finished = true; // DROP schedules the owner again.
                             continue;
                         }
                         if (status == 1) { continue; }
@@ -157,7 +168,7 @@ public sealed partial class DocumentCatalog
                     }
                 }
             }
-            finally { if (rebuild) { OpenIndexes(); } }
+            finally { if (rebuild) { OpenIndexes(scheduleReclamation: false); } }
         }
     }
 }

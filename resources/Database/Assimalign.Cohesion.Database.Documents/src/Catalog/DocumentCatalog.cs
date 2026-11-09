@@ -52,7 +52,7 @@ public sealed partial class DocumentCatalog
         _coordinator = coordinator;
     }
 
-    /// <summary>Loads the metadata directory after the coordinator's recovery scrub.</summary>
+    /// <summary>Loads recovered metadata and durably detaches abandoned index registrations or inserts orphan receipts before admitting operations.</summary>
     /// <param name="storage">The same storage that holds chunk records.</param>
     /// <param name="coordinator">The coordinator bound to that storage and its record space.</param>
     /// <returns>The database's metadata catalog.</returns>

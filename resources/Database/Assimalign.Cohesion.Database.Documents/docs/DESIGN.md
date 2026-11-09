@@ -2638,10 +2638,10 @@ B5). Engine sessions, statements, transactions and storage remain reported by th
 | 10 | `SessionCleanupFailed` | Warning | sessionId, exceptionType, exceptionMessage, suppressedCount |
 | 11 | `SessionsAborted` | Warning | engineName, sessions, drainTimeoutMilliseconds, suppressedCount |
 | 12 | `StatementParseFailed` | Error | sessionId, database, code, exceptionType, suppressedCount |
+| 13 | `StatementCleanupFailed` | Warning | database, exceptionType; snapshot cleanup failed after a successful automatic commit |
 | 15 | `IndexBuildStart` | Informational | `database`, `objectId` |
 | 16 | `IndexBuildStop` | Informational | `database`, `objectId`, `succeeded` |
 | 17 | `PagesReclaimed` | Informational | `database`, `objectId`, `pages` |
-| 13 | `StatementCleanupFailed` | Warning | database, exceptionType; snapshot cleanup failed after a successful automatic commit |
 
 Every open of an existing database writes both around `DocumentCatalog.RecoverIndexesAsync`,
 from the constructor that recovers it; a create writes neither. The stop is written from a
@@ -3073,9 +3073,7 @@ or retained definition into receipts after all format/liveness checks pass.
 
 Builds use the shared 64-posting loop with a durable root/registration bracket, durable chunks
 and one final definition publication. The logical transaction and writer reservation span all
-chunks. A budgeted name snapshot preserves ordinal validation order without first calling the
-unbounded GetDocuments materializer. Retained metadata, UNIQUE preflight, per-document JSON/key extraction and chunk arrays
-share the configured statement memory budget; direct raw catalogs default to 256 MiB.
+chunks. An exact-size array snapshots references to existing catalog names (24 + 8 bytes per name), preserving ordinal validation order. Visible versions resolve briefly under the catalog monitor once per source chunk. The build retains only a bounded chunk and one document's extracted keys, charged by actual entries and encoded sizes. UNIQUE validation walks adjacent built keys without a collection-wide set. Build state shares the configured statement memory budget; direct raw catalogs default to 256 MiB. Duplicate refusal keeps CD03020 and still names the same index and collection.
 The existing CD05018 retained-memory refusal applies. Start/stop events 15/16 carry database,
 physical objectId and succeeded on stop; event 17 reports committed pages reclaimed. No values
 are emitted and no new diagnostic identity or wire layout is added. Crash boundaries are root
@@ -3792,3 +3790,10 @@ Every negotiated statement Ready now carries transaction I/T/E followed by a zer
 byte. This model retains no state requiring a family reset and declares no reset statement. Pool
 return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
 the former form without a compatibility reader; see Database.Protocol DESIGN.
+
+Open discovers orphan owners through bounded Storage.GetIndexOwners batches rather than reading every allocated page again. Its detach brackets and orphan-receipt inserts are durable crash boundaries, before operations are admitted. DROP schedules its owner for retirement; a confirmed live candidate leaves the queue and is scheduled again only by a later DROP. A retired definition whose receipt was already deleted releases its owner-directory reference on the next pass. Ordinary writes keep the original apply helper; only build chunks use the durable helper. Per-checkpoint journal peaks include final publication metadata and must fit the configured trigger plus the largest measured chunk delta.
+A short snapshot fence advances the coordinator's idle horizon beyond each reserved build owner before allocation. The older logical creator pins that owner for the entire build; after a failed creator ends, committed chunks can retire without waiting for another user transaction. Open-time detach commits and orphan-receipt inserts are explicit crash boundaries.
+
+Forced-GC marginal retained-state checks use LiveHeap.Read at two populations for name references, resolved source chunks, posting chunks and extracted-key sets. Release fresh-process PUT/DELETE minima match d33f62363 on ARM64 and x64: 23,224/14,160 bytes without an index and 35,920/26,736 with one. Guards allow 128 bytes of runtime headroom and reject an injected 129-byte allocation.
+
+For a file with at least 1 GiB of valid allocated pages under an unrelated owner, the minimum of three Release opens on the same ARM64 host was 4.871 s at d33f62363 and 2.732 s with bounded owner-directory discovery. This measures removal of the second page scan, rather than a document/node/value workload.

@@ -40,6 +40,7 @@ internal sealed class IndexBuildBudget
         private readonly IndexBuildBudget _owner;
         private long _bytes;
         internal Reservation(IndexBuildBudget owner) { _owner = owner; }
+        internal long Bytes => _bytes;
         internal void Charge(long bytes) { _owner.Charge(bytes); _bytes += bytes; }
         public void Dispose() { _owner._bytes -= _bytes; _bytes = 0; }
         private sealed class DebugView

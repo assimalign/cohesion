@@ -358,3 +358,5 @@ derive from scalar/aggregate bases with protected cores. Function context suppli
 statement cancellation and transaction clock. Callback faults carry CD05017 with their original
 cause; native arithmetic codes, query planning, rollback, formats and wire layouts are preserved.
 See [DESIGN.md](DESIGN.md#engine-registered-document-functions) for contracts and reference anchors.
+
+Index backfill retains existing name references, a bounded chunk and one document's extracted keys under StatementMemoryBudget. UNIQUE validation walks the completed tree. DROP schedules exact owner reclamation after old snapshots end; open discovers orphan owners from the recovered storage directory without another full-page scan.

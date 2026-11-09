@@ -27,7 +27,24 @@ internal static class DocumentIndexKeys
         {
             long pathCharacters = 0;
             foreach (var key in metadata.Keys) { pathCharacters += key.Path.Length + (key.ArraySource?.Length ?? 0); }
-            reserve(1024L + content.Length * 16L + pathCharacters * 80L);
+            // Count without allocating. DOM metadata has 12-byte token rows and
+            // pooled arrays grow by powers of two; include the old growth buffer.
+            // Large unindexed strings must not be charged as millions of tokens.
+            long tokens = 0;
+            int depth = 0;
+            var reader = new Utf8JsonReader(content.Span, new JsonReaderOptions { MaxDepth = 128 });
+            while (reader.Read())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                tokens++;
+                depth = Math.Max(depth, reader.CurrentDepth + 1);
+            }
+            long metadataBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2(
+                (ulong)Math.Max(16L, Math.Max(content.Length + 12L, tokens * 12L)));
+            // JsonDocument starts with 64 eight-byte stack rows even for a shallow
+            // document; include the old buffer while a deeper stack grows.
+            long stackBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(512, depth * 8));
+            reserve(320L + metadataBytes + metadataBytes / 2 + stackBytes + stackBytes / 2 + pathCharacters * 80L);
         }
         using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 128 });
         var result = new HashSet<IndexKey>();
@@ -51,17 +68,16 @@ internal static class DocumentIndexKeys
             { distinct = false; return result; }
             components[i] = Component(value, value.ValueKind, metadata, key.Path, ref unknown);
         }
-        if (arrayIndex < 0) { reserve?.Invoke(8192); Add(default); }
+        if (arrayIndex < 0) { Add(default, reserveKey: reserve); }
         else
         {
             var key = metadata.Keys[arrayIndex];
             var source = Navigate(document.RootElement, Path(key.ArraySource!));
-            if (source.ValueKind == JsonValueKind.Undefined) { reserve?.Invoke(8192); Add(default); }
+            if (source.ValueKind == JsonValueKind.Undefined) { Add(default, reserveKey: reserve); }
             else if (source.ValueKind != JsonValueKind.Array)
             {
                 // ARRAY over a present non-array produces NULL, matching #1728.
-                reserve?.Invoke(8192);
-                Add(default, JsonValueKind.Null);
+                Add(default, JsonValueKind.Null, reserve);
             }
             else
             {
@@ -73,15 +89,14 @@ internal static class DocumentIndexKeys
                     // Comprehensions omit MISSING projections. This restricted index
                     // stores scalar projections only, never lossy complex element tags.
                     if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Array or JsonValueKind.Object) { continue; }
-                    reserve?.Invoke(8192);
-                    Add(value);
+                    Add(value, reserveKey: reserve);
                 }
             }
         }
         distinct = unknown;
         return result;
 
-        void Add(JsonElement element, JsonValueKind? forcedKind = null)
+        void Add(JsonElement element, JsonValueKind? forcedKind = null, Action<long>? reserveKey = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (arrayIndex >= 0)
@@ -96,7 +111,14 @@ internal static class DocumentIndexKeys
                 bytes.AddRange(component);
                 if (bytes.Count > 1024) { throw new DocumentCatalogException("CD02026", ErrorMessages.IndexKeyTooLarge); }
             }
-            result.Add(new IndexKey(bytes.ToArray()));
+            var encoded = new IndexKey(bytes.ToArray());
+            if (reserveKey is null) { result.Add(encoded); return; }
+            if (!result.Contains(encoded))
+            {
+                // Key bytes plus aligned array/header and HashSet growth peaks.
+                reserveKey(128L + encoded.Length);
+                result.Add(encoded);
+            }
         }
     }
 

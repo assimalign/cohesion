@@ -39,6 +39,7 @@ public sealed partial class DocumentCatalog
     // Instance-local work observations for bounded build staging and lock-order tests.
     internal Action<int>? IndexBuildPostingsBuffered { get; set; }
     internal Action<bool>? BeforeIndexKeysRead { get; set; }
+    internal Action<string, object, long>? IndexBuildStateCaptured { get; set; }
 
     /// <summary>Lists visible index definitions in ordinal name order.</summary>
     /// <param name="collectionId">The collection identity.</param>
@@ -97,7 +98,8 @@ public sealed partial class DocumentCatalog
     /// <exception cref="ArgumentException">A name or path is invalid.</exception>
     /// <exception cref="DatabaseException">The path count is zero or exceeds 32 (CD03022).</exception>
     /// <exception cref="DocumentCatalogException">The collection is absent, the name exists, a key exceeds 1024 bytes,
-    /// or the encoded definition exceeds 8,092 bytes (CD03026).</exception>
+    /// the encoded definition exceeds 8,092 bytes (CD03026), or build workspace exceeds
+    /// the configured statement memory budget (CD05018).</exception>
     /// <exception cref="DocumentConstraintViolationException">A UNIQUE key is duplicate or non-scalar.</exception>
     /// <exception cref="InvalidOperationException">The context is not active.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended before publication.</exception>
@@ -161,74 +163,82 @@ public sealed partial class DocumentCatalog
         { throw new DocumentCatalogException("CD03026", ErrorMessages.IndexDefinitionTooLarge); }
         var memory = new IndexBuildBudget(IndexBuildMemoryBudget, cancellationToken, limit =>
             new DocumentCatalogException("CD05018", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AggregateMemoryExceeded, limit)));
-        memory.Charge(64);
-        var documents = new List<(DocumentCatalogEntry Document, Reference Reference)>();
+        memory.Charge(128L + encoded.Length + 8L * metadata.Keys.Count);
+        string[] names;
         lock (_sync)
         {
-            // Charge the name snapshot before growth. GetDocuments materializes and sorts
-            // its whole result before returning, so it cannot provide bounded admission.
-            using var namesGrant = memory.Reserve();
-            namesGrant.Charge(64);
-            var names = new List<string>();
+            // The catalog owns the strings. Snapshot references, with an exact-size
+            // array, without decoding or retaining the collection's document versions.
+            int count = _documents.Keys.Count(key => key.CollectionId == collectionId);
+            memory.Charge(24L + 8L * count);
+            names = new string[count];
+            int position = 0;
             foreach (var key in _documents.Keys)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (key.CollectionId != collectionId) { continue; }
-                namesGrant.Charge(48);
-                names.Add(key.Name);
-            }
-            names.Sort(StringComparer.Ordinal);
-            foreach (string documentName in names)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (FindDocumentVersion(collectionId, documentName, context.Snapshot) is not { } found) { continue; }
-                var document = found.Record.Document!.Value;
-                memory.Charge(256L + document.Id.Length * 2L);
-                documents.Add((document, found.Reference));
+                names[position++] = key.Name;
             }
         }
-        // Only scalar UNIQUE builds need collection-wide keys, to refuse duplicates
-        // before creating a physical tree. Extraction never needs the catalog monitor.
-        if (isUnique)
-        {
-            var uniqueKeys = new HashSet<IndexKey>();
-            foreach (var (document, _) in documents)
-            {
-                using var extraction = memory.Reserve();
-                foreach (var key in KeysFor(document, metadata, out bool distinct, cancellationToken, extraction.Charge))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    memory.Charge(128L + key.Length);
-                    if (!distinct && !uniqueKeys.Add(key)) { throw Duplicate(metadata, context.Snapshot); }
-                }
-            }
-        }
+        Array.Sort(names, StringComparer.Ordinal);
+        IndexBuildStateCaptured?.Invoke("names", names, 24L + 8L * names.Length);
         IndexBuildStarted?.Invoke(metadata.ObjectId);
         bool buildSucceeded = false;
         try
         {
-            var index = await ApplyAsync(context, async bracket =>
+            // Bring the coordinator's idle horizon past the externally reserved
+            // owner. The older logical creator still pins it throughout the build;
+            // after failure, retirement can progress without another user statement.
+            await AdvanceIndexOwnerHorizonAsync(cancellationToken).ConfigureAwait(false);
+            var index = await ApplyIndexBuildAsync(context, async bracket =>
             {
                 var created = await _indexes.CreateIndexAsync(context, metadata.ObjectId, new IndexDefinition(name), cancellationToken).ConfigureAwait(false);
                 _uniqueIndexes[metadata.ObjectId] = metadata.IsUnique;
                 SaveRegistrations(bracket);
                 return created;
-            }, cancellationToken, durable: true).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
             AfterIndexRetirementMutation?.Invoke("build-root");
             int applied = 0;
             IEnumerable<(Reference Reference, IndexKey Key)> Entries()
             {
-                foreach (var (document, reference) in documents)
+                const int documentChunkSize = 16;
+                for (int first = 0; first < names.Length; first += documentChunkSize)
                 {
-                    using var extraction = memory.Reserve();
-                    var keys = KeysFor(document, metadata, out _, cancellationToken, extraction.Charge);
-                    IndexBuildPostingsBuffered?.Invoke(keys.Count);
-                    foreach (var key in keys) { yield return (reference, key); }
+                    using var documentsGrant = memory.Reserve();
+                    int count = Math.Min(documentChunkSize, names.Length - first);
+                    documentsGrant.Charge(24L + 64L * count);
+                    var documents = new (DocumentCatalogEntry Document, Reference? Reference)[count];
+                    // Resolve visible versions once per source chunk. Extraction and all
+                    // physical apply/admission waits happen after releasing the monitor.
+                    lock (_sync)
+                    {
+                        for (int offset = 0; offset < count; offset++)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            string documentName = names[first + offset];
+                            documentsGrant.Charge(32L + documentName.Length * 2L);
+                            if (FindDocumentVersion(collectionId, documentName, context.Snapshot) is { } found)
+                            { documents[offset] = (found.Record.Document!.Value, found.Reference); }
+                        }
+                    }
+                    IndexBuildStateCaptured?.Invoke("documents", documents, documentsGrant.Bytes);
+                    foreach (var (document, reference) in documents)
+                    {
+                        if (reference is null) { continue; }
+                        using var extraction = memory.Reserve();
+                        var keys = KeysFor(document, metadata, out _, cancellationToken, extraction.Charge);
+                        IndexBuildStateCaptured?.Invoke("keys", keys, extraction.Bytes);
+                        IndexBuildPostingsBuffered?.Invoke(keys.Count);
+                        foreach (var key in keys) { yield return (reference, key); }
+                    }
                 }
             }
+            IndexBuildBudget.Reservation? chunkGrant = null;
             await IndexBuildLoop.RunAsync(Entries(), async (chunk, token) =>
             {
-                await ApplyAsync(context, async bracket =>
+                AfterIndexRetirementMutation?.Invoke("build-chunk-start");
+                IndexBuildStateCaptured?.Invoke("chunk", chunk, chunkGrant!.Bytes);
+                await ApplyIndexBuildAsync(context, async bracket =>
                 {
                     foreach (var entry in chunk)
                     {
@@ -238,10 +248,29 @@ public sealed partial class DocumentCatalog
                         AfterIndexPostingApplied?.Invoke(++applied);
                     }
                     return true;
-                }, token, durable: true).ConfigureAwait(false);
+                }, token).ConfigureAwait(false);
                 AfterIndexRetirementMutation?.Invoke("build-chunk");
             }, async token =>
             {
+                if (isUnique)
+                {
+                    // The completed tree supplies key order. Retain just the previous
+                    // key, rather than a collection-wide UNIQUE preflight hash set.
+                    await using var cursor = index.OpenCursor(context.Snapshot, IndexKeyRange.All, cancellationToken: token);
+                    IndexKey? previous = null;
+                    while (await cursor.MoveNextAsync(token).ConfigureAwait(false))
+                    {
+                        var key = cursor.CurrentKey;
+                        bool unknown = false;
+                        for (int component = 0; component < metadata.Keys.Count; component++)
+                        {
+                            int offset = component == 0 ? 0 : DocumentIndexKeys.OrderPrefix(key, component).Length;
+                            if (key.Encoded.Span[offset] is 0 or 1) { unknown = true; break; }
+                        }
+                        if (!unknown && previous is { } last && last.Equals(key)) { throw Duplicate(metadata, context.Snapshot); }
+                        previous = unknown ? null : key;
+                    }
+                }
                 var location = await ApplyAsync(context, bracket =>
                 {
                     var inserted = _storage.InsertEntry(bracket, encoded);
@@ -252,12 +281,15 @@ public sealed partial class DocumentCatalog
                 {
                     Add(new CatalogRecord(null, null, metadata), new Reference(location.PageId, location.SlotIndex, context.Sequence));
                 }
+                AfterIndexRetirementMutation?.Invoke("build-published");
             }, cancellationToken, beginChunk: () =>
             {
-                var chunk = memory.Reserve();
-                try { chunk.Charge(80L + IndexBuildLoop.ChunkSize * 1120L); return chunk; }
-                catch { chunk.Dispose(); throw; }
-            }).ConfigureAwait(false);
+                chunkGrant = memory.Reserve();
+                // The loop allocates one full-capacity array. Reserve a shortened
+                // copy's slots per actual entry, before that copy can be allocated.
+                try { chunkGrant.Charge(80L + IndexBuildLoop.ChunkSize * 24L); return chunkGrant; }
+                catch { chunkGrant.Dispose(); throw; }
+            }, retain: entry => chunkGrant!.Charge(24L + 32L + entry.Key.Length)).ConfigureAwait(false);
             buildSucceeded = true;
         }
         finally { IndexBuildStopped?.Invoke(metadata.ObjectId, buildSucceeded); }
@@ -290,6 +322,7 @@ public sealed partial class DocumentCatalog
             throw new DocumentCatalogException("CD01025", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexDoesNotExist, name));
         }
         await DeleteAsync(previous, context, cancellationToken).ConfigureAwait(false);
+        ScheduleIndexRetirement(previous.Value.Record.Index!.Value.ObjectId);
     }
 
     /// <summary>Seeks a scalar key range and returns visible documents in ordinal identity order.</summary>
@@ -471,7 +504,7 @@ public sealed partial class DocumentCatalog
         CancellationToken cancellationToken, Action<long>? reserve = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        reserve?.Invoke(document.Length);
+        reserve?.Invoke(32L + document.Length);
         BeforeIndexKeysRead?.Invoke(Monitor.IsEntered(_sync));
         return DocumentIndexKeys.Read(_storage.ReadContent(new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum)),
             metadata, out distinct, cancellationToken, reserve);
@@ -531,7 +564,7 @@ public sealed partial class DocumentCatalog
             ? index : throw new DocumentCatalogException("CD06105", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogResolveIndexDocumentCatalog, metadata.Name));
 
     private async ValueTask<T> ApplyAsync<T>(TransactionContext context,
-        Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken, bool durable = false)
+        Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
     {
         // Lock/latch order: caller's database writer lock -> coordinator apply
         // gate -> B-tree latch -> storage page latch. Key preparation may take
@@ -540,7 +573,7 @@ public sealed partial class DocumentCatalog
         // cursors release their tree latch before we read catalog/content pages.
         try
         {
-            return await _coordinator.ApplyStatementAsync(context, apply, durable: durable, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -549,6 +582,19 @@ public sealed partial class DocumentCatalog
             OpenIndexes();
             throw;
         }
+    }
+
+    private async ValueTask<T> ApplyIndexBuildAsync<T>(TransactionContext context,
+        Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
+    {
+        try { return await _coordinator.ApplyStatementAsync(context, apply, durable: true, cancellationToken: cancellationToken).ConfigureAwait(false); }
+        catch { OpenIndexes(); throw; }
+    }
+
+    private async ValueTask AdvanceIndexOwnerHorizonAsync(CancellationToken cancellationToken)
+    {
+        var fence = await _coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
+        await _coordinator.RollbackAsync(fence, CancellationToken.None).ConfigureAwait(false);
     }
 
     internal async ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
@@ -567,7 +613,7 @@ public sealed partial class DocumentCatalog
         return pruned;
     }
 
-    private void OpenIndexes()
+    private void OpenIndexes(bool scheduleReclamation = true)
     {
         lock (_indexRegistrySync)
         {
@@ -581,7 +627,9 @@ public sealed partial class DocumentCatalog
                 if (registration.RootPageId > 0) { registrations.Add(registration); }
                 _uniqueIndexes.Add(registration.ObjectId, isUnique);
                 _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
-                ScheduleIndexRetirement(registration.ObjectId);
+                if (scheduleReclamation && (registration.RootPageId < 0 ||
+                    IndexRetirementStatus(registration.ObjectId, _coordinator.PruneBound, false) != 0))
+                { ScheduleIndexRetirement(registration.ObjectId); }
             }
             _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
             {

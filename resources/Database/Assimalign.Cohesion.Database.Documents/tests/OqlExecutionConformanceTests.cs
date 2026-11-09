@@ -31,6 +31,10 @@ public sealed class OqlExecutionConformanceTests
         await using var session = await database.CreateSessionAsync(guard.Token);
         var collection = await session.CreateCollectionAsync("items", guard.Token);
         await collection.PutAsync(session, "one", "{\"v\":1}"u8.ToArray(), cancellationToken: guard.Token);
+        // The exact-size snapshot retains 5,001 name references (40,032 bytes),
+        // which alone genuinely exceeds the 32 KiB statement grant.
+        for (int row = 0; row < 5000; row++)
+        { await collection.PutAsync(session, row.ToString("D10"), "{\"v\":1}"u8.ToArray(), cancellationToken: guard.Token); }
 
         // Act.
         var error = await Should.ThrowAsync<DatabaseException>(async () =>

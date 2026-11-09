@@ -42,9 +42,9 @@ one publication callback. Source enumeration, memory charging and cancellation o
 the apply gate; writer reservations and the logical creator remain held across chunks.
 The shared IndexBuildBudget meters model-owned reservations without depending on an engine.
 Model roots provide event callbacks; Catalog/Storage do not reference engine diagnostics.
-SQL charges chunk rows/arrays against its statement memory budget. Graph retains its existing
-budgeted extraction/work preflight before root allocation. Documents charges retained metadata,
-unique-key validation, per-document extraction and chunk workspace against StatementMemoryBudget
+SQL charges chunk rows/arrays against its statement memory budget. Graph session builds retain their existing
+budgeted extraction/work preflight before root allocation. Documents charges name references and bounded metadata,
+adjacent-key validation, per-document extraction and chunk workspace against StatementMemoryBudget
 (256 MiB for a raw catalog unless the engine supplies its configured value). Existing budget
 refusals apply; no diagnostic identity is added. KeyValuePair only bootstraps an empty primary
 tree, so it has no row backfill loop.
@@ -103,8 +103,7 @@ The storage owner directory for index pages is separate from its row directory. 
 table reclamation uses these tags to free complete retired trees, including abandoned allocations,
 after its reader horizon; no B-tree traversal or tree-wide latch is needed once that identity is
 unreachable. SQL format 11 requires this tagging, with no upgrade reader. The B-tree node format
-is unchanged. Standalone DROP INDEX still removes the directory registration; its tagged pages
-are reclaimable when the containing table is retired (index-only vacuum remains separate work).
+is unchanged. Standalone DROP INDEX removes the registration and reclaims its own physical owner after the model's reader horizon.
 
 `BTreeIndexManager.Create(options)` composes B+Trees over `PageType.Index` pages —
 one node per page, a sorted offset directory with entry data growing from the body
@@ -1202,3 +1201,7 @@ structured diagnostic carrier exists. Standard .NET guards retain their argument
 Index debugger views filter nonpublic traversal and page state. BTreeIndex exposes its existing Name, Kind and IsUnique values; IndexKey exposes Length. Cursor positioning guards, entry/key construction and pointer-backed node/search-key state are omitted. The ref-struct views retain no stack-only instance or span; internal-only views can be empty.
 
 Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.
+
+Owner enumeration uses Storage.GetIndexOwners in bounded independent batches from the recovered header directory; model open does not read every allocated page again. Directory adapters perform retirement in memory only, without I/O or model callbacks under the directory monitor. IndexRetirement.MustYield checks size and admission only; each caller adds its interval and pending engine checkpoint signal.
+
+Documents retains existing name references, a bounded source/posting workspace and one document's extracted keys. UNIQUE checks adjacent built keys. Failed or cancelled builds retain an unpublished owner until the safe horizon, and ordinary Documents writes use a separate non-durable apply helper with their original state-machine shape. Journal figures describe per-checkpoint peaks and are checked against the trigger plus the largest measured single-chunk delta. Documents and Graph include publication metadata in the same file; SQL measures its data journal, including creator lifecycle records, while catalog publication has a separate journal.
