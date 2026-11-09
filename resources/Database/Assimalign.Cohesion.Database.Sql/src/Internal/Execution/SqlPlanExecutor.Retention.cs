@@ -495,16 +495,16 @@ internal sealed partial class SqlPlanExecutor
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
         => plan.Tree is not null && plan.Where is not null
-            ? EnumerateFilteredRetentionTreeAsync(plan, statement, sharedColumns, derived, evaluator, cancellationToken, spillOwner)
+            ? EnumerateFilteredRetentionTreeAsync(plan, spillOwner is null ? statement.WithoutSession() : statement.WithSession(spillOwner), sharedColumns, derived, evaluator, cancellationToken)
             : EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derived, streamRoot: true, spillOwner: spillOwner);
 
     private async IAsyncEnumerable<object?[]> EnumerateFilteredRetentionTreeAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
-        SqlExpressionEvaluator evaluator, [EnumeratorCancellation] CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
+        SqlExpressionEvaluator evaluator, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ExceptionDispatchInfo? whereFailure = null;
         await foreach (var source in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derived,
-            streamRoot: true, spillOwner: spillOwner).ConfigureAwait(false))
+            streamRoot: true, spillOwner: statement.Session).ConfigureAwait(false))
         {
             // Base completed the root's ON work before its first WHERE. A WHERE failure
             // stops further predicates, but must still drain every remaining ON candidate.
@@ -591,7 +591,6 @@ internal sealed partial class SqlPlanExecutor
                         }
                         var keys = new object?[plan.OrderBy.Count];
                         for (int i = 0; i < keys.Length; i++) { keys[i] = evaluator.Evaluate(plan.OrderBy[i].Key, ordered); }
-                        if (SqlHashSpillMetrics.For(statement.Metrics)?.JoinStatement is { } shared) { collector.ShareSpillStatement(shared); }
                         collector.Add(output, keys, spillOwner);
                     }
                 }

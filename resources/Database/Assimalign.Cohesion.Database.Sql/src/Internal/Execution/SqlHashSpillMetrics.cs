@@ -16,6 +16,11 @@ internal sealed class SqlHashSpillMetrics
     internal long Batches { get; private set; }
     internal int Passes { get; private set; }
     internal int MergePasses { get; private set; }
+    internal long ProbeChunkReads { get; private set; }
+    internal long ProbeBytesRead { get; set; }
+    internal void ReadJoinChunk() => ProbeChunkReads++;
+    internal void EndFullJoin() => FullJoin = false;
+    internal bool JoinSpilled => _joinPhysicalBytes != 0;
     internal StorageTempStatement? JoinStatement { get; private set; }
     internal bool FullJoin { get; private set; }
     internal Exception? JoinCleanupFailure { get; private set; }

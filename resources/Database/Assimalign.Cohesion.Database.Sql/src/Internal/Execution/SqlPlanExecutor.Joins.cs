@@ -254,7 +254,7 @@ internal sealed partial class SqlPlanExecutor
                                 {
                                     try { table.Add(item, cancellationToken); }
                                     catch (SqlExecutionException error) when (CanSpillJoinBuild(plan, hashKeys, spillOwner, error))
-                                    { table.Spill(spillOwner!, item, cancellationToken); }
+                                    { table.Spill(spillOwner!, item, cancellationToken, error); }
                                 }
                             }
                             candidates = hashes[level]!.Probe(outer, cancellationToken);

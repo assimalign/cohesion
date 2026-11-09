@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -208,100 +209,39 @@ internal sealed class SqlHashJoinTable : IDisposable
         _count = 0;
     }
 
-    internal void Spill(SqlDatabaseSession owner, object?[] current, CancellationToken token)
+    internal void Spill(SqlDatabaseSession owner, object?[] current, CancellationToken token, SqlExecutionException? cause = null)
     {
-        if (_state is SqlHashJoinSpill) { throw SqlExecutionException.StatementMemoryBudget(_budget); }
-        var spill = new SqlHashJoinSpill(owner, _keys, _metrics, _budget, _trackUnmatched);
+        if (_state is SqlHashJoinSpill)
+        {
+            if (cause is not null) { ExceptionDispatchInfo.Throw(cause); }
+            throw SqlExecutionException.StatementMemoryBudget(_budget);
+        }
+        var spill = new SqlHashJoinSpill(owner, _keys, _metrics, _budget, _trackUnmatched, _reserved);
         try
         {
-            spill.AdoptBatchZero(this, token);
+            spill.AdoptBuild(this, token);
             _state = spill;
             spill.Add(current, token);
         }
         catch { spill.Dispose(); throw; }
     }
 
-    internal int SpillCount => _count;
-    internal long SpillReserved => _reserved;
-    internal object?[] SpillRow(int entry) => _entries[entry].Row;
-    internal int SpillHash(int entry) => _entries[entry].Hash;
-    internal int SpillOrdinal(int entry) => _entries[entry].Next;
-    internal void SpillMatch(int entry) => _matched[entry] = true;
-
     internal void ExportSpillPrefix(SqlHashJoinSpill spill, CancellationToken token)
     {
-        int kept = 0, count = _count;
-        for (int i = 0; i < count; i++)
-        {
-            var entry = _entries[i];
-            if (spill.InitialRow(entry.Row, entry.Next != -2, entry.Hash, token))
-            { _entries[kept++] = entry with { Next = i }; }
-            else { ReleaseSpillRow(entry.Row); _entries[i] = default; }
-        }
-        Array.Clear(_entries, kept, count - kept); _count = kept;
-        ShrinkSpillEntries();
-    }
-
-    internal void RetainSpillZero(SqlHashJoinSpill spill, List<long>? ordinals, CancellationToken token)
-    {
-        int kept = 0, count = _count;
-        for (int i = 0; i < count; i++)
-        {
-            token.ThrowIfCancellationRequested();
-            var entry = _entries[i];
-            long ordinal = ordinals is null ? entry.Next : ordinals[i];
-            if (spill.KeepZero(entry.Hash))
-            {
-                _entries[kept] = entry;
-                if (ordinals is not null) { ordinals[kept] = ordinal; }
-                kept++;
-            }
-            else
-            { spill.Store(entry.Row, true, entry.Hash, ordinal, token); ReleaseSpillRow(entry.Row); _entries[i] = default; }
-        }
-        Array.Clear(_entries, kept, count - kept); _count = kept;
-        if (ordinals is not null) { ordinals.RemoveRange(kept, count - kept); ordinals.TrimExcess(); }
-        ShrinkSpillEntries();
-    }
-
-    internal void RehashSpillEntries(CancellationToken token)
-    {
-        Array.Clear(_buckets);
         for (int i = 0; i < _count; i++)
         {
-            token.ThrowIfCancellationRequested();
-            int bucket = (int)((uint)_entries[i].Hash % (uint)_buckets.Length);
-            _entries[i] = _entries[i] with { Next = _buckets[bucket] - 1 }; _buckets[bucket] = i + 1;
+            var entry = _entries[i];
+            spill.AddHashed(entry.Row, entry.Next != -2, entry.Hash, token);
+            _metrics.ReleaseHashMemory(RowBytes(entry.Row));
+            _reserved -= RowBytes(entry.Row); _entries[i] = default;
         }
-    }
-
-    private void ReleaseSpillRow(object?[] row)
-    { long bytes = RowBytes(row); _reserved -= bytes; _metrics.ReleaseHashMemory(bytes); }
-
-    private void ShrinkSpillEntries()
-    {
-        int capacity = _count == 0 ? 0 : 16;
-        while (capacity < _count) { capacity = checked(capacity * 2); }
-        if (capacity >= _entries.Length) { return; }
-        long old = ArrayBytes(_entries.Length);
-        if (capacity == 0) { _entries = []; _buckets = []; _matched = []; }
-        else
+        if (_entries.Length != 0)
         {
-            Reserve(ArrayBytes(capacity));
-            var entries = new Entry[capacity]; Array.Copy(_entries, entries, _count);
-            _entries = entries; _buckets = new int[capacity]; _matched = _trackUnmatched ? new bool[capacity] : [];
+            long arrays = ArrayBytes(_entries.Length);
+            _metrics.ReleaseHashMemory(arrays); _reserved -= arrays;
         }
-        _reserved -= old; _metrics.ReleaseHashMemory(old);
-    }
-
-    // A spill can reuse this table as its initial resident batch. Eviction must release
-    // the raw storage without recursively disposing the spill in the evaluator slot.
-    internal void ClearSpillEntries()
-    {
-        _metrics.ReleaseHashMemory(_reserved); _reserved = 0;
         _entries = []; _buckets = []; _matched = []; _count = 0;
     }
-
     private readonly record struct Entry(int Hash, int Next, object?[] Row);
 
     private sealed class DebugView

@@ -178,7 +178,7 @@ internal sealed partial class SqlPlanExecutor
                             foreach (int entry in hash.ProbeEntries(left, cancellationToken)) { yield return (hash.RowAt(entry), entry); }
                             yield break;
                         }
-                        IEnumerable<object?[]> candidates = ReadBuffer(inner.Rows);
+                        IEnumerable<object?[]> candidates = inner.Rows;
                         if (seek)
                         {
                             var access = step.Access!;
@@ -193,6 +193,7 @@ internal sealed partial class SqlPlanExecutor
                 finally
                 {
                     hash?.Dispose();
+                    if (step.Kind == SqlJoinType.FullOuter) { SqlHashSpillMetrics.For(statement.Metrics)?.EndFullJoin(); }
                     ReleaseSelectRows(ref outer.Rows.Memory, outer.Rows);
                     // The iterator can hoist these lists beyond their dictionary entries.
                     // Drop consumed cells as soon as their charge is released.
@@ -223,11 +224,6 @@ internal sealed partial class SqlPlanExecutor
             catch (SqlExecutionException cleanup) when (cleanup.Diagnostics[0].Code == "CK05005")
             { SqlHashSpillMetrics.JoinCleanup(statement.Metrics, cleanup); }
         }
-        IEnumerable<object?[]> ReadBuffer(SelectJoinBuffer buffer)
-        {
-            if (SqlStagedSortSource.For(buffer) is not { } source) { return buffer; }
-            source.Seal(cancellationToken); return source.Read(cancellationToken);
-        }
         SelectJoinRows ReadRows(SelectJoinBuffer buffer)
         {
             if (SqlStagedSortSource.For(buffer) is not { } source) { return new(buffer); }
@@ -244,7 +240,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 try { sink.Add(row, cancellationToken); }
                 catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session, error))
-                { sink.Spill(statement.Session!, row, cancellationToken); }
+                { sink.Spill(statement.Session!, row, cancellationToken, error); }
                 FullJoinProgress?.Invoke("build", statement.Metrics, cancellationToken);
             }
             else
@@ -254,7 +250,7 @@ internal sealed partial class SqlPlanExecutor
                     memory.Retain(row);
                     memory.Reserve(32); // list storage, including growth
                 }
-                if (SqlStagedSortSource.For(buffer) is { } source) { source.Append(row, cancellationToken); return; }
+                if (buffer.Count == 0 && SqlStagedSortSource.For(buffer) is { } source) { source.Append(row, cancellationToken); return; }
                 try { RetainSelectRow(ref buffer.Memory, row, includeWindow: true); buffer.Add(row); }
                 catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session, error))
                 {

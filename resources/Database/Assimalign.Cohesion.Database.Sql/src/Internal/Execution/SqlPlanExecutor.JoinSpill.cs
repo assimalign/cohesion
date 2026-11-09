@@ -18,6 +18,16 @@ internal sealed partial class SqlPlanExecutor
         SqlDatabaseSession? owner, SqlExecutionException error)
         => keys is { InnerExpressions: null, OuterExpressions: null } && CanSpillJoinRows(plan, owner, error);
 
+    private static bool IsJoinTempCleanupFailure(Exception failure)
+        => failure is AggregateException aggregate && aggregate.Flatten().InnerExceptions.All(error => error is StorageTempException);
+
+    private static SqlExecutionException CloseJoinFailure(SqlStatementMetrics metrics, SqlExecutionException failure,
+        bool statementRoot, Location? location)
+    {
+        if (statementRoot) { CloseJoinTemp(metrics, failure, location); }
+        return failure;
+    }
+
     private static void CloseJoinTemp(SqlStatementMetrics metrics, object? outcome, Location? location)
     {
         if (SqlHashSpillMetrics.DetachJoinTemp(metrics) is not { } statement) { return; }
@@ -38,7 +48,8 @@ internal sealed partial class SqlPlanExecutor
             _ = DisposeHashTemp(statement, failure);
             throw failure.At(location);
         }
-        if (outcome is SqlSpilledResultSet or HashGroupInput) { return; }
+        if (outcome is SqlSpilledResultSet delivered && delivered.OwnsStatement(statement)
+            || outcome is HashGroupInput input && ReferenceEquals(input.Statement, statement)) { return; }
         var cleanup = DisposeHashTemp(statement, null);
         if (cleanup is SqlExecutionException located) { throw located.At(location); }
         if (cleanup is not null) { throw cleanup; }

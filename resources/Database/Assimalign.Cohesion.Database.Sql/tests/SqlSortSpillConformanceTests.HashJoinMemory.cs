@@ -90,7 +90,7 @@ public sealed partial class SqlSortSpillConformanceTests
         (large.Replay-small.Replay).ShouldBeLessThanOrEqualTo(131072);
         (retainedLarge.Replay-retainedSmall.Replay).ShouldBeGreaterThan(131072);
         _output.WriteLine($"JOIN_LIVE|full={full}|small={small.Peak}|large={large.Peak}|delta={large.Peak-small.Peak}|replay_delta={large.Replay-small.Replay}|mutant_replay_delta={retainedLarge.Replay-retainedSmall.Replay}");
-        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+        TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Seeded hash join replay corpus preserves duplicate order and decimal bits at 1, 4 and 16 MiB (#1789)")]
@@ -134,11 +134,11 @@ public sealed partial class SqlSortSpillConformanceTests
             var expectedRows = reference.Unmatched(CancellationToken.None).Select(r => new RowValues(r)).ToArray();
             actual.Unmatched(CancellationToken.None).Select(r => new RowValues(r)).ToArray().ShouldBe(expectedRows);
             metrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(grant);
-            SqlHashSpillMetrics.For(metrics).ShouldNotBeNull().Batches.ShouldBeGreaterThan(0);
+            SqlHashSpillMetrics.For(metrics).ShouldNotBeNull().Runs.ShouldBeGreaterThan(0);
             _output.WriteLine($"JOIN_CORPUS|seed=178906|grant={grant}|rows={count}|probes={probe.Length}|unmatched={expectedRows.Length}");
         }
         finally { actual.Dispose(); SqlHashSpillMetrics.DetachJoinTemp(metrics)?.Dispose(); }
-        metrics.HashMemoryBytes.ShouldBe(0); TempBytes(engine.TempSpace!).ShouldBe(0);
+        metrics.HashMemoryBytes.ShouldBe(0); TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

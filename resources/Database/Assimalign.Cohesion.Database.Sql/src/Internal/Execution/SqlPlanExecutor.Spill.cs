@@ -48,12 +48,12 @@ internal sealed partial class SqlPlanExecutor
         bool statementRoot = _metrics is null;
         var metrics = statement.Metrics;
         var frame = metrics.IsAnalyzing ? metrics.BeginAnalysisFrame() : null;
-        object? result = null;
         try
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             _metrics = metrics; _containsLike |= plan.ContainsLike;
             var initialized = InitializeWindow(plan, cancellationToken);
+            DatabaseResult result;
             if (initialized is SqlWithPlan with)
             {
                 foreach (var relation in with.Relations) { await MaterializeRelationAsync(relation, statement, cancellationToken).ConfigureAwait(false); }
@@ -81,19 +81,26 @@ internal sealed partial class SqlPlanExecutor
                 else if (plan is SqlJoinPlan { Steps.Count: > 0 }) { metrics.Analysis(plan)!.Candidates += metrics.JoinCandidatePairs - frame.StartPairs - frame.ChildPairs; }
             }
             if (result is SqlSpilledResultSet spilled) { spilled.Location = location; }
-            return (DatabaseResult)result;
+            if (statementRoot) { CloseJoinTemp(metrics, result, location); }
+            return result;
         }
         catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode)
-        { result = exception.At(location); throw (SqlExecutionException)result; }
-        catch (StorageTempException exception) { result = SqlSpilledResultSet.Translate(exception, location); throw (SqlExecutionException)result; }
-        catch (System.AggregateException exception) when (exception.Flatten().InnerExceptions.All(error => error is StorageTempException))
-        { result = SqlSpilledResultSet.TranslateCleanup(exception, location); throw (SqlExecutionException)result; }
-        catch (System.Exception exception) { result = exception; throw; }
+        { throw CloseJoinFailure(metrics, exception.At(location), statementRoot, location); }
+        catch (StorageTempException exception)
+        { throw CloseJoinFailure(metrics, SqlSpilledResultSet.Translate(exception, location), statementRoot, location); }
+        // Cleanup preserves the original evaluator/cancellation failure and releases the
+        // shared owner even when no result was created.
+        catch (System.Exception exception)
+        {
+            if (IsJoinTempCleanupFailure(exception))
+            { throw CloseJoinFailure(metrics, SqlSpilledResultSet.TranslateCleanup((System.AggregateException)exception, location), statementRoot, location); }
+            if (statementRoot) { CloseJoinTemp(metrics, exception, location); }
+            throw;
+        }
         finally
         {
             if (frame is not null) { metrics.EndAnalysisFrame(frame); }
             if (statementRoot && _materializedRelations is { } relations) { ReleaseSelectMemory(ref relations.Reserved); }
-            if (statementRoot) { CloseJoinTemp(metrics, result, location); }
         }
     }
 
@@ -180,7 +187,7 @@ internal sealed partial class SqlPlanExecutor
         if (!deferProjection && !distinct && limit?.Count == 0) { return MaterializeProjected(projections, []); }
         source.Seal(token);
         long budget = _definitions.StatementMemoryBudget;
-        long grant = System.Math.Min(int.MaxValue, budget - _metrics!.HashMemoryBytes - source.ReadBufferBytes);
+        long grant = System.Math.Min(int.MaxValue, budget - _metrics!.HashMemoryBytes - source.ReadReservation);
         int bound = (int)((grant - 32768) / 16 - 8192);
         if (grant < 65536 || bound < 16) { throw SqlExecutionException.StatementMemoryBudget(budget); }
         var columns = orderBy.Select(order => new SqlTempSortKeyCodec.Column(order.IsDescending, order.NullsFirst,

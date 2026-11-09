@@ -55,8 +55,8 @@ public sealed class StorageTempRunReader : IDisposable
             try
             {
                 _run.Check(); cancellationToken.ThrowIfCancellationRequested();
-                if (_records == 0 || _seeked) { _run.ValidateLength(); }
-                if (_records == _run.RecordCount || _seeked && _pageIndex == _run.PageCount && _position == _used)
+                if (_records == 0) { _run.ValidateLength(); }
+                if (!_seeked && _records == _run.RecordCount || _seeked && _pageIndex == _run.PageCount && _position == _used)
                 {
                     _run.ValidateLength();
                     if (_position != _used || _pageIndex != _run.PageCount) { throw StorageTempException.Damage(); }
@@ -67,7 +67,7 @@ public sealed class StorageTempRunReader : IDisposable
                 int size = BinaryPrimitives.ReadInt32LittleEndian(header);
                 if (size < 0 || size > _run.MaximumRecordLength) { throw StorageTempException.Damage(); }
                 Read(destination[..size], cancellationToken);
-                if (!_seeked) { _records++; }
+                _records++;
                 length = size; return true;
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)

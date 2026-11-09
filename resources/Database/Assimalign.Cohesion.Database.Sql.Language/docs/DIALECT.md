@@ -1,29 +1,35 @@
 # The Declared SQL Dialect
 
-## Hash join batch spilling (#1789, SQ-L3b)
+## Indexed hash join spilling (#1789, SQ-L3b)
 
-Eligible root INNER, LEFT, RIGHT and FULL hash joins can spill after their existing memory
-reservation refuses. A file engine uses its configured temp space; an in-memory engine
-requires an explicit TempDirectory. The minimum grant is 256 KiB. Eight batch partitions
-use fresh hash bits for at most eight replay levels; an unsplittable skewed batch refuses
-CS05067 with its own repartitioning-limit message. Quotas and the free-space floor keep
-the existing CK0500x diagnostics and cleanup rules.
+Eligible root INNER, LEFT, RIGHT and FULL hash joins spill on the existing memory refusal,
+including when another operator owns part of the grant. File engines use their temp space;
+in-memory engines need an explicit TempDirectory. The minimum grant is 256 KiB. Quotas,
+the free-space floor, damage and I/O retain located CK0500x. Unsupported shapes keep CS05067.
 
-Results retain the fitting path's order, collision-chain order, NULL extensions, candidate
-counts and evaluated values. A probe batch replays at its original cursor boundary. FULL
-tracks matches by original build ordinal in each batch and externally restores unmatched
-build order. Residual ON, WHERE and projections remain in the caller; replay executes no
-SQL expression. Existing hash planning excludes volatile/throwing ON expressions. Computed
-key vectors, correlated/lateral inputs, non-hash steps, deferred collations, SQL/JSON,
-application-binary cells, joined DML and join-output DISTINCT keep their existing refusal
-or ownership. Downstream sorting shares the same physical quota, including when FULL's
-unmatched merge must finish before the downstream sort can acquire its grant. Final result
-spooling, window/recursive/set owners and eager NOT IN vectors remain separate work.
+The build is sorted once by unsigned composed hash and insertion ordinal into an indexed
+run. Probes read only their hash's chunks through a cache targeting one quarter of the
+grant. Probes never write temp records. Equal-hash groups stream across any number of
+chunks in descending ordinal order; joins have no repartitioning or skew depth limit.
+FULL uses an ordinal bitmap and sorts unmatched rows by build ordinal, NULL keys included.
+Results retain fitting order, NULL extensions, candidate counts, calls and the first error.
+ON, WHERE and projections remain in the caller. Computed keys, correlated/lateral inputs,
+non-hash steps, deferred collations, SQL/JSON, application binary build cells, joined DML
+and join-output DISTINCT keep their eligibility. Probe payloads are not codec-checked.
+Final result spooling, windows, recursion, set owners and NOT IN remain separate work.
 
-EXPLAIN ANALYZE uses hash_spill_batches, hash_spill_passes and the existing byte/run/merge
-fields. Fitting joins keep their original representation and charges. Probes alternating
-partitions can reread batches; the bounded replay policy prioritizes unchanged evaluation
-order over minimizing temporary I/O.
+Sorting shares the exact temporary statement and physical quota. FULL can stage already
+evaluated output/key records until its unmatched sort releases the grant. Top-N ties keep
+input ordinal order; the collector then uses the ordinary sorter.
+
+EXPLAIN ANALYZE reports spilled_bytes (largest physical snapshot), spill_peak_bytes (owner
+high-water mark), spill_runs (initial sorter runs), spill_merge_passes (sum of merge depths)
+and hash_join_probe_chunk_reads (decoded cache misses during probing, excluding build and
+unmatched work). With separate sort metrics, hash owner byte/run/merge fields have a hash_
+prefix. Physical fields do not count cumulative I/O. Joins do not report batches or replay
+passes. Aggregation's hash_spill_batches and hash_spill_passes keep their meanings when an
+aggregation also spills. Fitting joins keep base representation, charges and allocations.
+
 ## Plain GROUP BY and hash DISTINCT spilling (#1789, SQ-L3a)
 
 An eligible root GROUP BY or streamed scan/system-view unordered SELECT DISTINCT spills on the existing statement
@@ -2467,7 +2473,7 @@ Unmatched rows from both sides receive NULL for all columns of the opposite subt
 WHERE filters after null extension. EXPLAIN JoinStep names FullHashJoin and unmatched=both;
 ANALYZE counts tested candidate pairs, excluding emitted unmatched rows. All retained hash
 rows and match flags share StatementMemoryBudget (default 64 MiB), including nested builds;
-CS05067 refuses exhaustion without spill. Reservations unwind on success, failure and
+Eligible root hash joins hand off to temp storage; other exhaustion retains CS05067. Reservations unwind on success, failure and
 cancellation. Joined DML also charges retained outer/intermediate inputs and associations as
 described in the statement-memory contract below. Plain SELECT result materialization also shares that grant, as described below.
 PostgreSQL anchors: optimizer/path/joinrels.c:1157-1180, executor/nodeHashjoin.c:578-592,634-679,729-756.
@@ -5676,8 +5682,8 @@ keep that owner. An independent cache first materialized in a window remains cha
 the statement. When plain bytes fill the grant first, refusal reports CS05067, including statements whose
 earlier ledger would later refuse with CS05079 or CS05094. With no plain bytes live, window
 and SQL/JSON grant refusals retain their specific code. Statement memory refusal aborts input
-immediately, including input with a later error, except when an eligible root sort hands
-its retained rows to temporary storage and continues under the same grant. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
+immediately, including input with a later error, except when an eligible root sort, hash join, normalized join buffer,
+or plain hash aggregation/DISTINCT hands retained state to temp storage under the same grant. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
 buffer owner by reference identity, plus a fixed 64 B per distinct wide-cell map entry
 (#1776, SQ-L1c). Further references pay their array slots; smaller cells still pay per
 reference. Equal but separate objects, including binary clones, each pay. Output and ordering

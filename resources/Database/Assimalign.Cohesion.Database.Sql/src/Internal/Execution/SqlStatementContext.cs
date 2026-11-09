@@ -198,8 +198,10 @@ internal readonly struct SqlStatementContext
         return new(this, session);
     }
 
-    private SqlStatementContext(SqlStatementContext original, SqlDatabaseSession session)
-    { this = original; _names = session; }
+    internal SqlStatementContext WithoutSession() => new(this, DatabaseName);
+
+    private SqlStatementContext(SqlStatementContext original, object names)
+    { this = original; _names = names; }
 
     /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
     internal SqlCatalogSnapshot? CatalogSnapshot => Metrics.CatalogSnapshot;

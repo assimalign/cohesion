@@ -495,9 +495,6 @@
   <data name="SpillCleanupFailed" xml:space="preserve">
     <value>Temporary SQL result cleanup failed.</value>
   </data>
-  <data name="HashJoinSpillDepthExceeded" xml:space="preserve">
-    <value>Hash join spill exhausted its {0}-pass repartitioning limit; a skewed build batch exceeds the statement memory grant.</value>
-  </data>
   <data name="HashSpillDepthExceeded" xml:space="preserve">
     <value>Hash aggregation or DISTINCT exceeded the {0}-pass repartitioning limit within the statement memory budget.</value>
   </data>

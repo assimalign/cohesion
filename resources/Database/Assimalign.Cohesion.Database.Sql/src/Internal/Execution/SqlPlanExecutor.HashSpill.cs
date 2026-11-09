@@ -61,6 +61,7 @@ internal sealed partial class SqlPlanExecutor
         public override IReadOnlyList<DatabaseColumn> Columns { get; }
         public override ValueTask DisposeAsync()
         {
+            _source.ReleaseOperator();
             if (_ownsStatement) { var failure = DisposeHashTemp(Statement, Failure); if (Failure is null && failure is not null) { throw failure; } }
             return default;
         }

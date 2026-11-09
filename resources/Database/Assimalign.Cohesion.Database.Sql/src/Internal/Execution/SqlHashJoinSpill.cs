@@ -1,353 +1,415 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-// Demand-driven batches keep the original probe cursor in charge of evaluation. A cache
-// miss spills its one evaluated probe before replay. No residual, projection or function
-// executes here; callers keep their existing candidate loop and first-error boundary.
-[System.Diagnostics.DebuggerDisplay("SQL hash join spill")]
+// The build is indexed once. A probe visits only its hash's chunks, backwards, and
+// leaves expression evaluation and candidate accounting at the original caller boundary.
+[System.Diagnostics.DebuggerDisplay("SQL indexed hash join spill")]
 [System.Diagnostics.DebuggerTypeProxy(typeof(SqlHashJoinSpill.DebugView))]
 internal sealed class SqlHashJoinSpill : IDisposable
 {
+    internal const int ChunkBytes = 8192;
+    internal const long OperatorBytes = 2048;
+    internal const int DirectoryEntryBytes = 48;
+    internal const long ReaderBytes = 8704;
+    internal static long DirectoryBytes(int capacity) => 24 + (long)DirectoryEntryBytes * capacity;
+    internal static long BitmapBytes(long count) => 24 + (((count + 7) / 8 + 7) & ~7L);
+    internal static long CachedRecordBytes(object?[] row) => 32 + SqlTempRowCodec.DecodedBytes(row);
+    internal static long BuildSorterGrant(int bound) => Math.Max(65536, 32768 + 2L * (8192 + bound));
+    internal static long SorterCharge(long grant) => grant;
     private readonly SqlHashJoinPath _keys;
     private readonly SqlStatementMetrics _metrics;
     private readonly long _budget;
     private readonly bool _trackUnmatched;
     private readonly StorageTempStatement _statement;
-    private readonly StorageTempPartitions _build;
-    private readonly StorageTempRun?[] _flags = new StorageTempRun?[SqlHashSpillPartitioning.Count];
+    private readonly SqlHashSpillMetrics _counters;
     private readonly byte[] _families;
-    private readonly Func<int, int>? _partitionHash;
     private readonly Action<string, long>? _observe;
     private readonly int _bound;
-    private long _count;
+    private readonly long _sorterGrant;
+    private StorageTempSorter? _sorter;
+    private StorageTempRun? _index;
+    private Chunk[] _directory = [];
+    private int _chunks;
+    private byte[] _matched = [];
+    private readonly LinkedList<CachedChunk> _cache = new();
+    private long _cacheBytes;
+    private long _cacheGrant;
+    private long _reserved;
+    private long _scratch;
+    private long _maximumDecoded;
+    private long _maximumChunk;
+    private int _count;
     private int _width = -1;
     private bool _sealed;
     private bool _disposed;
-    private SqlHashJoinTable? _cache;
-    private List<long>? _ordinals;
-    private long _ordinalBytes;
-    private int _cacheDepth;
-    private uint _cachePrefix;
-    private int _cachePartition;
-    private long _scratch;
-    private long _maximumDecoded;
-    private bool _buildingZero;
-    private bool _cacheIsOwner;
+    private bool _charged;
 
     internal SqlHashJoinSpill(SqlDatabaseSession owner, SqlHashJoinPath keys,
-        SqlStatementMetrics metrics, long budget, bool trackUnmatched)
+        SqlStatementMetrics metrics, long budget, bool trackUnmatched, long retiringBytes = 0)
     {
-        // Computed key expressions would require storing evaluated keys at the original
-        // Add call, before the refusal. Keep that shape on its existing refusal path.
         if (keys.InnerExpressions is not null || keys.OuterExpressions is not null || budget < 262144)
         { throw SqlExecutionException.StatementMemoryBudget(budget); }
         _keys = keys; _metrics = metrics; _budget = budget; _trackUnmatched = trackUnmatched;
         _bound = (int)Math.Min(16384, (Math.Min(int.MaxValue, budget) - 32768) / 16 - 8192);
+        long available = budget - metrics.HashMemoryBytes + retiringBytes;
+        _sorterGrant = Math.Max(BuildSorterGrant(_bound), Math.Min(131072, available / 2));
         _families = new byte[keys.InnerOrdinals.Length];
-        _partitionHash = SqlPlanExecutor.HashSpillPartitionHash;
         _observe = SqlPlanExecutor.ObserveHashSpill;
         _statement = SqlHashSpillMetrics.JoinTemp(metrics, owner, trackUnmatched);
-        _build = StorageTempPartitions.Create(_statement, SqlHashSpillPartitioning.Count, SqlHashSpillPartitioning.Count * 8704L);
+        _counters = SqlHashSpillMetrics.For(metrics)!;
+        // Prefix handoff's bounded arena is covered by the single statement allowance
+        // until the old table has drained. It is charged before accepting later input.
+        _sorter = StorageTempSorter.Create(_statement, _sorterGrant, _bound, 32);
         _observe?.Invoke("join-handoff", 0);
+    }
+
+    internal void AdoptBuild(SqlHashJoinTable owner, CancellationToken token)
+    {
+        owner.ExportSpillPrefix(this, token);
+        _scratch = 32768 + 2L * _bound + 2 * _maximumDecoded;
+        Reserve(OperatorBytes + _families.Length + SorterCharge(_sorterGrant) + _scratch);
+        _charged = true;
     }
 
     internal void Add(object?[] row, CancellationToken token)
     {
         bool valid = Hash(row, _keys.InnerOrdinals, out int hash);
-        if (!valid && !_trackUnmatched) { return; }
-        AddHashed(row, valid, hash, token);
+        if (valid || _trackUnmatched) { AddHashed(row, valid, hash, token); }
     }
 
     internal void AddHashed(object?[] row, bool valid, int hash, CancellationToken token)
     {
-        long ordinal = _count++;
-        var bytes = Record(row, valid, hash, ordinal, token);
-        if (_buildingZero && valid && KeepZero(hash))
-        {
-            while (_cache!.SpillReserved + _ordinalBytes + SqlHashJoinTable.RowBytes(row) + 112 > _budget / 4)
-            {
-                AdvanceZero(token);
-                if (!KeepZero(hash)) { break; }
-            }
-            if (KeepZero(hash))
-            {
-                _metrics.ReserveHashMemory(32, _budget); _ordinalBytes += 32;
-                _cache!.AddHashed(row, true, hash, token); _ordinals!.Add(ordinal);
-                _observe?.Invoke("join-input", _count); return;
-            }
-        }
-        _build.Append(PartitionHash(hash), bytes, token);
-        _observe?.Invoke("join-input", _count);
-    }
-
-    internal bool KeepZero(int hash) => SqlHashSpillPartitioning.Prefix(PartitionHash(hash), _cacheDepth) == 0;
-
-    internal bool InitialRow(object?[] row, bool valid, int hash, CancellationToken token)
-    {
-        var bytes = Record(row, valid, hash, _count++, token);
-        bool keep = valid && KeepZero(hash);
-        if (!keep) { _build.Append(PartitionHash(hash), bytes, token); }
-        _observe?.Invoke("join-input", _count); return keep;
-    }
-
-    internal void Store(object?[] row, bool valid, int hash, long ordinal, CancellationToken token)
-        => _build.Append(PartitionHash(hash), Record(row, valid, hash, ordinal, token), token);
-
-    private byte[] Record(object?[] row, bool valid, int hash, long ordinal, CancellationToken token)
-    {
         token.ThrowIfCancellationRequested();
         ValidateKeys(row, _keys.InnerOrdinals);
         if (_width < 0) { _width = row.Length; }
-        if (row.Length != _width) { Refuse(); }
-        var record = new object?[row.Length + 3];
-        record[0] = ordinal; record[1] = hash; record[2] = valid; row.CopyTo(record, 3);
-        _maximumDecoded = Math.Max(_maximumDecoded, SqlTempRowCodec.DecodedBytes(record));
-        return Encode(record);
-    }
-
-    internal void AdoptBatchZero(SqlHashJoinTable owner, CancellationToken token)
-    {
-        _cache = owner; _cacheIsOwner = true; _cacheDepth = 1; _cachePrefix = 0; _cachePartition = 0;
-        owner.ExportSpillPrefix(this, token);
-        while (owner.SpillReserved + 32L * owner.SpillCount > _budget / 4) { AdvanceZero(token); }
-        long bytes = 32L * owner.SpillCount;
-        _metrics.ReserveHashMemory(bytes, _budget); _ordinalBytes = bytes;
-        _ordinals = new List<long>(owner.SpillCount);
-        for (int i = 0; i < owner.SpillCount; i++) { _ordinals.Add(owner.SpillOrdinal(i)); }
-        // Prefix handoff uses the fixed allowance only until the old table has drained.
-        // Long-lived writer pages must be charged when several joins are building.
-        const long writers = SqlHashSpillPartitioning.Count * 8704L;
-        _metrics.ReserveHashMemory(writers, _budget); _scratch = writers;
-        owner.RehashSpillEntries(token); _buildingZero = true;
-        SqlHashSpillMetrics.Batch(_metrics, _cacheDepth);
-        _observe?.Invoke("join-batch-live", owner.SpillCount);
-    }
-
-    private void AdvanceZero(CancellationToken token)
-    {
-        if (_cacheDepth == SqlHashSpillPartitioning.MaximumDepth)
-        { SqlHashSpillMetrics.Batch(_metrics, _cacheDepth); DepthExceeded(); }
-        _cacheDepth++;
-        int count = _cache!.SpillCount;
-        _cache.RetainSpillZero(this, _ordinals, token);
-        if (_ordinals is not null)
+        if (row.Length != _width || _count == int.MaxValue) { Refuse(); }
+        // Preserve the original build-record admission bound before private framing
+        // removes NULL padding or packs bytes (the former metadata occupied 16 B).
+        if (!SqlTempRowCodec.TryGetLength(row, out int originalLength) || originalLength + 48L > _bound) { Refuse(); }
+        long decoded = SqlTempRowCodec.DecodedBytes(row) + 24 + 8L * row.Length;
+        _maximumDecoded = Math.Max(_maximumDecoded, decoded);
+        if (_charged)
         {
-            long released = 32L * (count - _cache.SpillCount);
-            _metrics.ReleaseHashMemory(released); _ordinalBytes -= released;
-            _cache.RehashSpillEntries(token);
+            long scratch = 32768 + 2L * _bound + 2 * _maximumDecoded;
+            if (scratch > _scratch) { Reserve(scratch - _scratch); _scratch = scratch; }
         }
-        SqlHashSpillMetrics.Batch(_metrics, _cacheDepth);
-    }
-
-    internal IEnumerable<int> Probe(object?[] outer, CancellationToken token)
-    {
-        _maximumDecoded = Math.Max(_maximumDecoded, SqlTempRowCodec.DecodedBytes(outer));
-        Seal(token);
-        ValidateKeys(outer, _keys.OuterOrdinals);
-        if (!Hash(outer, _keys.OuterOrdinals, out int hash)) { yield break; }
-        uint partitionHash = PartitionHash(hash);
-        if (_cache is null || SqlHashSpillPartitioning.Prefix(partitionHash, _cacheDepth) != _cachePrefix)
-        {
-            // One probe batch is sufficient: replaying a later probe before the current
-            // residual would change calls and the first error. Resident probes need no file.
-            using var probe = _statement.CreateRun(token);
-            var record = new object?[outer.Length + 3]; record[0] = 0L; record[1] = hash; record[2] = true; outer.CopyTo(record, 3);
-            probe.Append(Encode(record), token); probe.Seal(token);
-            foreach (var replay in Read(probe, outer.Length, token, probe: true))
-            { LoadBatch(PartitionHash((int)replay[1]!), token); }
-        }
-        foreach (int entry in _cache!.ProbeHashEntries(hash, token)) { yield return entry; }
-    }
-
-    internal object?[] RowAt(int entry) => _cache!.SpillRow(entry);
-
-    internal IEnumerable<object?[]> ProbeRows(object?[] outer, CancellationToken token)
-    { foreach (int entry in Probe(outer, token)) { yield return RowAt(entry); } }
-
-    internal void MarkMatched(int entry)
-    {
-        if (_cache!.IsMatched(entry)) { return; }
-        _cache.SpillMatch(entry);
-        Span<byte> ordinal = stackalloc byte[8];
-        SqlHashSpillPartitioning.WriteOrdinal(ordinal, _ordinals![entry]);
-        (_flags[_cachePartition] ??= _statement.CreateRun()).Append(ordinal);
+        int start = 0, end = row.Length;
+        while (start < end && row[start] is null) { start++; }
+        while (end > start && row[end - 1] is null) { end--; }
+        var value = Pack(Encode(row.AsSpan(start, end - start)));
+        var bytes = new byte[5 + value.Length];
+        bytes[0] = valid ? (byte)1 : (byte)0;
+        BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(1), start);
+        value.CopyTo(bytes, 5);
+        Span<byte> key = stackalloc byte[8];
+        BinaryPrimitives.WriteUInt32BigEndian(key, unchecked((uint)hash));
+        BinaryPrimitives.WriteUInt32BigEndian(key[4..], (uint)_count++);
+        _sorter!.Append(key, bytes, token);
+        _observe?.Invoke("join-input", _count);
     }
 
     private void Seal(CancellationToken token)
     {
-        if (!_sealed)
+        if (_sealed) { return; }
+        // Other operators may own the rest of G. Releasing the build arena and
+        // scratch must leave enough room for one chunk after the probe reader.
+        long decodedTarget = Math.Min(_budget / 4, SorterCharge(_sorterGrant) + 32768 + _bound - ReaderBytes);
+        _index = _statement.CreateRun(token);
+        using (var sorted = _sorter!.Complete(token))
         {
-            if (_buildingZero)
+            SqlHashSpillMetrics.Sort(_metrics, _statement, _sorter);
+            int size = 0, count = 0, first = 0;
+            uint firstHash = 0, lastHash = 0;
+            long position = 0, decoded = 24, firstOrdinal = 0, lastOrdinal = -1;
+            while (sorted.MoveNext(token))
             {
-                for (int i = 0; i < _cache!.SpillCount; i++)
-                { Store(_cache.SpillRow(i), true, _cache.SpillHash(i), _ordinals![i], token); }
-                _buildingZero = false;
+                if (sorted.Key.Length != 8) { Damage(); }
+                var encoded = new byte[8 + sorted.Value.Length];
+                sorted.Key.Span.CopyTo(encoded); sorted.Value.Span.CopyTo(encoded.AsSpan(8));
+                var record = Decode(encoded);
+                uint hash = unchecked((uint)record.Hash);
+                if (first + count != 0 && (hash < lastHash || hash == lastHash && record.Ordinal <= lastOrdinal)) { Damage(); }
+                if (BinaryPrimitives.ReadUInt32BigEndian(sorted.Key.Span) != hash ||
+                    BinaryPrimitives.ReadUInt32BigEndian(sorted.Key.Span[4..]) != record.Ordinal) { Damage(); }
+                long bytes = CachedRecordBytes(record.Row);
+                if (count != 0 && (size + encoded.Length + 4 > ChunkBytes || decoded + bytes + 128 > decodedTarget))
+                {
+                    AddChunk(new(firstHash, lastHash, position, first, count, firstOrdinal, lastOrdinal), decoded);
+                    first += count; count = 0; size = 0; decoded = 24;
+                }
+                if (count == 0) { position = _index.Position; firstHash = hash; firstOrdinal = record.Ordinal; }
+                lastHash = hash; lastOrdinal = record.Ordinal; count++; size += encoded.Length + 4; decoded += bytes;
+                _index.Append(encoded, token);
             }
-            _build.Seal(token); _sealed = true;
-            SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
-            _observe?.Invoke("join-partitioned", _count);
+            if (count != 0) { AddChunk(new(firstHash, lastHash, position, first, count, firstOrdinal, lastOrdinal), decoded); }
         }
-        // Match-writer pages remain live across cache switches. Readers and bounded
-        // codec/decoded overlap are covered as well, from the statement's same grant.
-        long scratch = 32768 + (_trackUnmatched ? 65536 : 0) + 2L * _bound + 2 * _maximumDecoded;
-        if (scratch > _scratch) { _metrics.ReserveHashMemory(scratch - _scratch, _budget); _scratch = scratch; }
+        _sorter.Dispose(); _sorter = null;
+        _index.Seal(token);
+        Release(SorterCharge(_sorterGrant) + _scratch); _scratch = 0;
+        if (_trackUnmatched)
+        {
+            long bytes = BitmapBytes(_count);
+            Reserve(bytes); _matched = new byte[(_count + 7L) / 8];
+        }
+        _scratch = ReaderBytes + _bound + 2 * _maximumDecoded;
+        Reserve(_scratch);
+        _cacheGrant = Math.Min(_budget / 4, _budget - _metrics.HashMemoryBytes);
+        if (_cacheGrant < _maximumChunk + 128) { Refuse(); }
+        Reserve(_cacheGrant);
+        _sealed = true;
+        SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
+        _observe?.Invoke("join-partitioned", _count);
     }
 
-    private void LoadBatch(uint hash, CancellationToken token)
+    private void AddChunk(Chunk chunk, long bytes)
     {
-        Evict();
-        int partition = (int)(hash % SqlHashSpillPartitioning.Count);
-        var run = _build.GetPartition(partition);
-        for (int depth = 1; depth <= SqlHashSpillPartitioning.MaximumDepth; depth++)
+        if (_chunks == _directory.Length)
         {
-            _cache = new SqlHashJoinTable(_keys, _metrics, _budget, _trackUnmatched);
-            _ordinals = new List<long>();
-            long start = _metrics.HashMemoryBytes;
-            bool overflow = false;
-            uint prefix = SqlHashSpillPartitioning.Prefix(hash, depth);
-            SqlHashSpillMetrics.Batch(_metrics, depth);
-            if (run is not null)
-            {
-                foreach (var record in Read(run, _width, token))
-                {
-                    if (!(bool)record[2]! || SqlHashSpillPartitioning.Prefix(PartitionHash((int)record[1]!), depth) != prefix) { continue; }
-                    var row = record[3..];
-                    // Leave downstream consumers a grant too. This bounds a resident
-                    // batch independently of the previous cache's favorable cardinality.
-                    if (_metrics.HashMemoryBytes - start + SqlHashJoinTable.RowBytes(row) + 112 > _budget / 4)
-                    { overflow = true; break; }
-                    try
-                    {
-                        _metrics.ReserveHashMemory(32, _budget); _ordinalBytes += 32;
-                        _cache.AddHashed(row, true, (int)record[1]!, token);
-                        _ordinals.Add((long)record[0]!);
-                    }
-                    catch (SqlExecutionException error) when (error.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
-                    { overflow = true; break; }
-                }
-            }
-            if (!overflow)
-            {
-                _cacheDepth = depth; _cachePrefix = prefix; _cachePartition = partition;
-                _observe?.Invoke("join-batch-live", _ordinals.Count);
-                SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
-                return;
-            }
-            Evict();
+            int capacity = _chunks == 0 ? 16 : checked(_chunks * 2);
+            long allocation = DirectoryBytes(capacity);
+            Reserve(allocation);
+            var directory = new Chunk[capacity]; _directory.CopyTo(directory, 0);
+            if (_directory.Length != 0) { Release(DirectoryBytes(_directory.Length)); }
+            _directory = directory;
         }
-        DepthExceeded();
+        _directory[_chunks++] = chunk; _maximumChunk = Math.Max(_maximumChunk, bytes);
     }
+
+    internal IEnumerable<int> Probe(object?[] outer, CancellationToken token)
+    {
+        Seal(token);
+        ValidateKeys(outer, _keys.OuterOrdinals);
+        if (!Hash(outer, _keys.OuterOrdinals, out int composed)) { yield break; }
+        uint hash = unchecked((uint)composed);
+        int low = 0, high = _chunks;
+        while (low < high)
+        {
+            int middle = low + (high - low) / 2;
+            if (_directory[middle].FirstHash <= hash) { low = middle + 1; } else { high = middle; }
+        }
+        for (int chunk = low - 1; chunk >= 0 && _directory[chunk].LastHash >= hash; chunk--)
+        {
+            var rows = Load(chunk, token);
+            for (int i = rows.Length - 1; i >= 0; i--)
+            {
+                token.ThrowIfCancellationRequested();
+                if (unchecked((uint)rows[i].Hash) == hash && rows[i].Valid) { yield return _directory[chunk].First + i; }
+            }
+            rows = []; // An evicted chunk must not survive across the next allocation.
+        }
+    }
+
+    private BuildRecord[] Load(int at, CancellationToken token)
+    {
+        for (var node = _cache.First; node is not null; node = node.Next)
+        {
+            if (node.Value.Index != at) { continue; }
+            _cache.Remove(node); _cache.AddFirst(node); return node.Value.Rows;
+        }
+        // Evict before allocating; the reservation covers the maximum decoded chunk,
+        // its two LRU objects and all retained cached chunks, including array headers.
+        long needed = _maximumChunk + 128;
+        while (_cache.Last is not null && _cacheBytes + needed > _cacheGrant) { EvictLast(); }
+        var chunk = _directory[at];
+        using var reader = _index!.OpenReader(StorageTempSpace.PageSize, chunk.Position);
+        var buffer = new byte[_index.MaximumRecordLength];
+        var rows = new BuildRecord[chunk.Count];
+        uint previous = 0; long ordinal = -1, bytes = 24 + 128;
+        for (int i = 0; i < rows.Length; i++)
+        {
+            if (!reader.TryRead(buffer, out int size, token)) { Damage(); }
+            _counters.ProbeBytesRead += size + 4L;
+            var record = Decode(buffer.AsSpan(0, size));
+            uint hash = unchecked((uint)record.Hash);
+            if (i == 0 ? hash != chunk.FirstHash || record.Ordinal != chunk.FirstOrdinal
+                : hash < previous || hash == previous && record.Ordinal <= ordinal) { Damage(); }
+            previous = hash; ordinal = record.Ordinal; rows[i] = record;
+            bytes += CachedRecordBytes(record.Row);
+        }
+        if (previous != chunk.LastHash || ordinal != chunk.LastOrdinal || bytes > _cacheGrant) { Damage(); }
+        _cache.AddFirst(new CachedChunk(at, rows, bytes)); _cacheBytes += bytes;
+        _counters.ReadJoinChunk();
+        _observe?.Invoke("join-batch-live", chunk.Count);
+        return rows;
+    }
+
+    private void EvictLast()
+    {
+        // Keep the removed node out of Load's frame, including unoptimized builds.
+        _cacheBytes -= _cache.Last!.Value.Bytes; _cache.RemoveLast();
+    }
+
+    private BuildRecord Entry(int entry)
+    {
+        int low = 0, high = _chunks;
+        while (low < high)
+        {
+            int middle = low + (high - low) / 2;
+            if (_directory[middle].First <= entry) { low = middle + 1; } else { high = middle; }
+        }
+        int chunk = low - 1;
+        if (chunk < 0 || entry >= _directory[chunk].First + _directory[chunk].Count) { Damage(); }
+        return Load(chunk, CancellationToken.None)[entry - _directory[chunk].First];
+    }
+    internal object?[] RowAt(int entry) => Entry(entry).Row;
+    internal IEnumerable<object?[]> ProbeRows(object?[] outer, CancellationToken token)
+    { foreach (int entry in Probe(outer, token)) { yield return RowAt(entry); } }
+    internal void MarkMatched(int entry)
+    { long ordinal = Entry(entry).Ordinal; _matched[ordinal / 8] |= (byte)(1 << (int)(ordinal % 8)); }
 
     internal IEnumerable<object?[]> Unmatched(CancellationToken token)
     {
-        Seal(token); Evict();
-        foreach (var flags in _flags) { flags?.Seal(token); }
-        _metrics.ReleaseHashMemory(_scratch); _scratch = 0;
-        // Restore the build's original entry order while merging per-batch match flags.
-        // A flag sorts before the build row of the same ordinal, so duplicates need no set.
-        long readerBytes = 8704 + _bound + 2 * _maximumDecoded;
+        Seal(token);
+        _cache.Clear(); _cacheBytes = 0; Release(_cacheGrant + _scratch); _cacheGrant = 0; _scratch = 0;
+        if (_directory.Length != 0) { Release(DirectoryBytes(_directory.Length)); _directory = []; _chunks = 0; }
+        // An ordinal sort avoids retaining a second copy of the entire build on disk.
+        long readerBytes = ReaderBytes + _bound + 2 * _maximumDecoded;
         long grant = Math.Min(int.MaxValue, _budget - _metrics.HashMemoryBytes - readerBytes);
-        int bound = (int)Math.Min(_bound, (grant - 32768) / 16 - 8192);
-        if (grant < 65536 || bound < 32) { Refuse(); }
-        _metrics.ReserveHashMemory(grant + readerBytes, _budget);
+        if (grant < _sorterGrant) { Refuse(); }
+        Reserve(readerBytes + grant);
         try
         {
-            using var sorter = StorageTempSorter.Create(_statement, grant, bound, 64);
+            using var sorter = StorageTempSorter.Create(_statement, grant, _bound, 64);
             _observe?.Invoke("join-match-sort-live", 0);
-            for (int partition = 0; partition < SqlHashSpillPartitioning.Count; partition++)
+            using (var reader = _index!.OpenReader(StorageTempSpace.PageSize))
             {
-                if (_build.GetPartition(partition) is { } run)
+                var buffer = new byte[_index.MaximumRecordLength];
+                while (reader.TryRead(buffer, out int size, token))
                 {
-                    foreach (var record in Read(run, _width, token))
-                    {
-                        var key = SqlHashSpillPartitioning.OrdinalKey((long)record[0]!, 1);
-                        var value = Encode(record[3..]);
-                        if (value.Length + 25L > bound) { Refuse(); }
-                        sorter.Append(key, value, token);
-                    }
-                    run.Dispose();
+                    var record = Decode(buffer.AsSpan(0, size));
+                    if ((_matched[record.Ordinal / 8] & 1 << (int)(record.Ordinal % 8)) != 0) { continue; }
+                    var key = SqlHashSpillPartitioning.OrdinalKey(record.Ordinal, 0);
+                    sorter.Append(key, Encode(record.Row), token);
                 }
-                if (_flags[partition] is not { } flags) { continue; }
-                using var reader = flags.OpenReader(StorageTempSpace.PageSize);
-                var ordinal = new byte[8];
-                while (reader.TryRead(ordinal, out int size, token))
-                {
-                    long entry = BinaryPrimitives.ReadInt64BigEndian(ordinal);
-                    if (size != 8 || entry < 0 || entry >= _count) { Damage(); }
-                    var key = SqlHashSpillPartitioning.OrdinalKey(entry, 0); sorter.Append(key, [], token);
-                }
-                reader.Dispose(); flags.Dispose();
             }
+            _index.Dispose(); _index = null;
+            _matched = []; Release(BitmapBytes(_count));
             using var sorted = sorter.Complete(token);
-            _observe?.Invoke("join-match-sort-live", _count);
             SqlHashSpillMetrics.Sort(_metrics, _statement, sorter);
             using var output = _statement.CreateRun(token);
-            long matched = -1;
-            while (sorted.MoveNext(token))
-            {
-                var key = sorted.Key.Span;
-                if (key.Length != 9) { Damage(); }
-                long ordinal = BinaryPrimitives.ReadInt64BigEndian(key);
-                if (key[8] == 0) { matched = ordinal; continue; }
-                if (key[8] != 1 || ordinal < 0 || ordinal >= _count || !SqlTempRowCodec.TryDecode(sorted.Value.Span, out var row) || row.Length != _width)
-                { Damage(); yield break; }
-                row = []; // Validation scratch must not survive into output-reader yields.
-                if (matched != ordinal) { output.Append(sorted.Value.Span, token); }
-            }
+            while (sorted.MoveNext(token)) { output.Append(sorted.Value.Span, token); }
             output.Seal(token); sorted.Dispose(); sorter.Dispose();
-            _metrics.ReleaseHashMemory(grant); grant = 0;
+            Release(grant); grant = 0;
+            // The FULL producer no longer needs a sort grant. Later collectors can use
+            // the ordinary sorter; already deferred collectors finish on TakeSpilled.
+            _counters.EndFullJoin();
             SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
             _observe?.Invoke("join-ordered", output.RecordCount);
             using var outputReader = output.OpenReader(StorageTempSpace.PageSize);
-            var buffer = new byte[output.MaximumRecordLength];
+            var bytes = new byte[output.MaximumRecordLength];
             long emitted = 0;
-            while (outputReader.TryRead(buffer, out int size, token))
+            while (outputReader.TryRead(bytes, out int size, token))
             {
-                if (!SqlTempRowCodec.TryDecode(buffer.AsSpan(0, size), out var row) || row.Length != _width) { Damage(); yield break; }
+                if (!SqlTempRowCodec.TryDecode(bytes.AsSpan(0, size), out var row) || row.Length != _width) { Damage(); yield break; }
                 if ((emitted++ & 1023) == 0) { _observe?.Invoke("join-unmatched-live", emitted); }
                 yield return row;
             }
         }
-        finally { _metrics.ReleaseHashMemory(grant + readerBytes); }
+        finally { Release(grant + readerBytes); }
     }
 
-    private IEnumerable<object?[]> Read(StorageTempRun run, int width, CancellationToken token, bool probe = false)
+    private BuildRecord Decode(ReadOnlySpan<byte> bytes)
     {
-        using var reader = run.OpenReader(StorageTempSpace.PageSize);
-        var buffer = new byte[run.MaximumRecordLength];
-        while (reader.TryRead(buffer, out int size, token))
+        if (bytes.Length < 14 || !SqlTempRowCodec.TryDecode(Unpack(bytes[13..]), out var cells))
+        { Damage(); return default; }
+        long ordinal = BinaryPrimitives.ReadUInt32BigEndian(bytes[4..]);
+        int storedHash = BinaryPrimitives.ReadInt32BigEndian(bytes);
+        int start = BinaryPrimitives.ReadInt32BigEndian(bytes[9..]);
+        if (ordinal >= _count || bytes[8] > 1 || start < 0 || start > _width || cells.Length > _width - start) { Damage(); }
+        var row = new object?[_width]; cells.CopyTo(row, start);
+        for (int i = 0; i < _keys.InnerOrdinals.Length; i++)
         {
-            if (!SqlTempRowCodec.TryDecode(buffer.AsSpan(0, size), out var record) || record.Length != width + 3 ||
-                record[0] is not long ordinal || ordinal < 0 || ordinal >= Math.Max(1, _count) || record[1] is not int || record[2] is not bool)
-            { Damage(); yield break; }
-            int[] ordinals = probe ? _keys.OuterOrdinals : _keys.InnerOrdinals;
-            var row = record[3..];
-            for (int i = 0; i < ordinals.Length; i++)
-            {
-                if (ordinals[i] < 0 || ordinals[i] >= row.Length || row[ordinals[i]] is { } value && SqlValueComparer.ComparisonFamily(value) != _families[i])
-                { Damage(); }
-            }
-            bool valid = Hash(row, ordinals, out int hash);
-            if (valid != (bool)record[2]! || hash != (int)record[1]!) { Damage(); }
-            row = []; // Only the validated record crosses this iterator boundary.
-            yield return record;
+            int at = _keys.InnerOrdinals[i];
+            if (at < 0 || at >= row.Length || row[at] is { } value && SqlValueComparer.ComparisonFamily(value) != _families[i]) { Damage(); }
         }
+        bool valid = Hash(row, _keys.InnerOrdinals, out int hash);
+        if (valid != (bytes[8] == 1) || hash != storedHash) { Damage(); }
+        return new(hash, ordinal, valid, row);
     }
-
-    private byte[] Encode(object?[] record)
+    private byte[] Encode(ReadOnlySpan<object?> row)
     {
-        if (!SqlTempRowCodec.TryGetLength(record, out int size) || size + 32L > _bound ||
-            !SqlTempRowCodec.TryEncode(record, out var bytes)) { Refuse(); return []; }
+        if (!SqlTempRowCodec.TryGetLength(row, out int size) || size + 32L > _bound || !SqlTempRowCodec.TryEncode(row, out var bytes))
+        { Refuse(); return []; }
         return bytes;
     }
 
+    // Private managed framing compresses repeated four-byte patterns (not SQL values).
+    // This keeps booleans and padded normalized frames within the same physical quota
+    // while the sorter's inputs coexist with the indexed output. Raw frames gain one
+    // marker byte; B is still checked on the original exact row codec before packing.
+    private static byte[] Pack(byte[] value)
+    {
+        var scratch = new byte[2 * value.Length + 1]; scratch[0] = 1;
+        int used = 1;
+        for (int at = 0; at < value.Length;)
+        {
+            int count = 1;
+            while (count < 255 && at + 4 * (count + 1) <= value.Length &&
+                value.AsSpan(at, 4).SequenceEqual(value.AsSpan(at + 4 * count, 4))) { count++; }
+            if (count >= 2)
+            {
+                scratch[used++] = 255; scratch[used++] = (byte)count;
+                value.AsSpan(at, 4).CopyTo(scratch.AsSpan(used)); used += 4; at += 4 * count;
+            }
+            else
+            {
+                byte next = value[at++]; scratch[used++] = next;
+                if (next == 255) { scratch[used++] = 0; }
+            }
+        }
+        if (used < value.Length + 1) { return scratch.AsSpan(0, used).ToArray(); }
+        var raw = new byte[value.Length + 1]; value.CopyTo(raw, 1); return raw;
+    }
+
+    private ReadOnlySpan<byte> Unpack(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.IsEmpty || bytes[0] > 1) { Damage(); }
+        if (bytes[0] == 0) { return bytes[1..]; }
+        int length = 0;
+        for (int at = 1; at < bytes.Length;)
+        {
+            if (bytes[at++] != 255) { length++; }
+            else
+            {
+                if (at == bytes.Length) { Damage(); }
+                int count = bytes[at++];
+                if (count == 0) { length++; }
+                else
+                {
+                    if (count < 2 || bytes.Length - at < 4) { Damage(); }
+                    length += 4 * count; at += 4;
+                }
+            }
+            if (length > _bound) { Damage(); }
+        }
+        var output = new byte[length]; int used = 0;
+        for (int at = 1; at < bytes.Length;)
+        {
+            byte next = bytes[at++];
+            if (next != 255)
+            {
+                if (used == output.Length) { Damage(); }
+                output[used++] = next; continue;
+            }
+            if (at == bytes.Length) { Damage(); }
+            int count = bytes[at++];
+            if (count == 0)
+            {
+                if (used == output.Length) { Damage(); }
+                output[used++] = 255; continue;
+            }
+            if (count < 2 || bytes.Length - at < 4 || output.Length - used < 4 * count) { Damage(); }
+            for (int i = 0; i < count; i++) { bytes.Slice(at, 4).CopyTo(output.AsSpan(used)); used += 4; }
+            at += 4;
+        }
+        return output.AsSpan(0, used);
+    }
     private void ValidateKeys(object?[] row, int[] ordinals)
     {
         for (int i = 0; i < ordinals.Length; i++)
@@ -358,7 +420,6 @@ internal sealed class SqlHashJoinSpill : IDisposable
             _families[i] = family;
         }
     }
-
     private bool Hash(object?[] row, int[] ordinals, out int result)
     {
         var hash = new HashCode();
@@ -369,35 +430,34 @@ internal sealed class SqlHashJoinSpill : IDisposable
         }
         result = hash.ToHashCode(); return true;
     }
-
-    private uint PartitionHash(int hash) => unchecked((uint)(_partitionHash?.Invoke(hash) ?? hash));
-    private static void DepthExceeded() => throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
-        string.Format(CultureInfo.CurrentCulture, ErrorMessages.HashJoinSpillDepthExceeded, SqlHashSpillPartitioning.MaximumDepth));
+    private void Reserve(long bytes) { _metrics.ReserveHashMemory(bytes, _budget); _reserved += bytes; }
+    private void Release(long bytes) { _metrics.ReleaseHashMemory(bytes); _reserved -= bytes; }
     private void Refuse() => throw SqlExecutionException.StatementMemoryBudget(_budget);
     private static void Damage() => throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged);
-
-    private void Evict()
-    {
-        if (_cacheIsOwner) { _cache?.ClearSpillEntries(); _cacheIsOwner = false; }
-        else { _cache?.Dispose(); }
-        _cache = null; _ordinals = null;
-        _metrics.ReleaseHashMemory(_ordinalBytes); _ordinalBytes = 0;
-    }
-
     public void Dispose()
     {
         if (_disposed) { return; }
-        _disposed = true; SqlHashSpillMetrics.RefreshJoin(_metrics, _statement); Evict();
-        _metrics.ReleaseHashMemory(_scratch); _scratch = 0;
-        Exception? failure = null;
-        foreach (var flags in _flags)
-        { try { flags?.Dispose(); } catch (StorageTempException error) { failure ??= error; } }
-        try { _build.Dispose(); } catch (AggregateException error) { failure ??= error; }
+        _disposed = true;
         SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
-        // The root reports a close failure after every iterator has released its grant;
-        // a cleanup exception must never replace an earlier ON/WHERE/cancellation error.
-        if (failure is not null) { SqlHashSpillMetrics.JoinCleanup(_metrics, failure); }
+        _cache.Clear(); _directory = []; _matched = [];
+        _metrics.ReleaseHashMemory(_reserved); _reserved = 0;
+        try { _sorter?.Dispose(); }
+        catch (AggregateException error) { SqlHashSpillMetrics.JoinCleanup(_metrics, error); }
+        try { _index?.Dispose(); }
+        catch (StorageTempException error) { SqlHashSpillMetrics.JoinCleanup(_metrics, error); }
+        SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
     }
-
+    internal readonly record struct Chunk(uint FirstHash, uint LastHash, long Position, int First, int Count, long FirstOrdinal, long LastOrdinal);
+    internal readonly record struct BuildRecord(int Hash, long Ordinal, bool Valid, object?[] Row);
+    [System.Diagnostics.DebuggerDisplay("Cached join chunk")]
+    [System.Diagnostics.DebuggerTypeProxy(typeof(CachedChunk.DebugView))]
+    internal sealed class CachedChunk
+    {
+        internal readonly int Index;
+        internal readonly BuildRecord[] Rows;
+        internal readonly long Bytes;
+        internal CachedChunk(int index, BuildRecord[] rows, long bytes) { Index = index; Rows = rows; Bytes = bytes; }
+        private sealed class DebugView { public DebugView(CachedChunk target) { } }
+    }
     private sealed class DebugView { public DebugView(SqlHashJoinSpill target) { } }
 }

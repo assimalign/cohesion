@@ -19,10 +19,11 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed partial class SqlSortSpillConformanceTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - Hash join spill records reject codec-valid metadata and key type damage (#1789)")]
-    [InlineData(41, DatabaseType.Float64)]
-    [InlineData(50, DatabaseType.Date)]
-    [InlineData(55, DatabaseType.Int8)]
-    [InlineData(57, DatabaseType.Date)]
+    [InlineData(40, DatabaseType.Float64)] // build ordinal
+    [InlineData(44, DatabaseType.Int8)] // NULL flag
+    [InlineData(45, DatabaseType.Date)] // padding/width
+    [InlineData(55, DatabaseType.Float64)] // numeric key/hash disagreement
+    [InlineData(55, DatabaseType.DateTime)] // same-width key from another family
     public async Task ExecuteAsync_HashJoinDamagedRecord_ShouldLocateAndRelease(int offset, DatabaseType tag)
     {
         // Arrange
@@ -34,7 +35,8 @@ public sealed partial class SqlSortSpillConformanceTests
         BeforeRead(engine.TempSpace!, () =>
         {
             if (!armed || injected) { return; }
-            // HashCode's process seed changes which batch this probe reads first.
+            // FULL's unmatched scan visits the damaged record even when no probe
+            // requests its indexed chunk. The checksum remains valid.
             foreach (var run in StatementRuns(engine.TempSpace!).Where(r => r.IsSealed && r.RecordCount > 1))
             {
                 var page = new byte[8192]; RandomAccess.Read(Handle(run),page,0); page[offset] = (byte)tag;
@@ -50,11 +52,11 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             // Act
             var failure = await Should.ThrowAsync<DatabaseException>(async () =>
-                await session.ExecuteAsync("SELECT l.id FROM jl l LEFT JOIN jr r ON l.id=r.id LIMIT 1"));
+                await session.ExecuteAsync("SELECT l.id FROM jl l FULL JOIN jr r ON l.id=r.id LIMIT 1"));
             // Assert
             injected.ShouldBeTrue(); failure.Diagnostics[0].Code.ShouldBe("CK05004");
             failure.Diagnostics[0].Start.ShouldNotBeNull(); failure.Diagnostics[0].End.ShouldNotBeNull();
-            TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         }
         finally { BeforeRead(engine.TempSpace!,null); SqlPlanExecutor.ObserveHashSpill = null; }
@@ -90,7 +92,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 recorder.Count.ShouldBe(1); images.Count.ShouldBe(3);
             }
             finally { SqlPlanExecutor.ObserveHashSpill = null; }
-            TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
         }
         // Act / Assert
         foreach (var image in images.Values)

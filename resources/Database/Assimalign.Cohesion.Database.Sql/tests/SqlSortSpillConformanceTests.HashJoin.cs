@@ -42,8 +42,9 @@ public sealed partial class SqlSortSpillConformanceTests
         bm.HashMemoryBytes.ShouldBe(0); bm.PlainSelectMemoryBytes.ShouldBe(0);
         bm.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(262144);
         var metrics = SqlHashSpillMetrics.For(bm).ShouldNotBeNull();
-        metrics.Batches.ShouldBeGreaterThan(0); metrics.Passes.ShouldBeGreaterThan(0); metrics.PhysicalBytes.ShouldBeGreaterThan(0);
-        TempBytes(spilled.TempSpace!).ShouldBe(0); Files(spilled).ShouldBe(0);
+        metrics.Runs.ShouldBeGreaterThan(0); metrics.PhysicalBytes.ShouldBeGreaterThan(0);
+        await actual.DisposeAsync();
+        TempBytes(spilled.TempSpace!).ShouldBe(0); Statements(spilled.TempSpace!).ShouldBeEmpty(); Files(spilled).ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Hash join reports written batches when every probe key is NULL (#1789)")]
@@ -60,30 +61,8 @@ public sealed partial class SqlSortSpillConformanceTests
         var metrics = SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull();
         metrics.PhysicalBytes.ShouldBeGreaterThan(0); metrics.PeakBytes.ShouldBeGreaterThan(0);
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
-        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Sql] - Hash join skew exhausts fresh partition bits and keeps CS05067 (#1789)")]
-    public async Task ExecuteAsync_HashJoinSkew_ShouldRefuseAtLimitAndRelease()
-    {
-        // Arrange
-        await using var engine = await Create("join-skew", 262144);
-        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
-        await SeedHashJoin(session);
-        await session.ExecuteAsync("UPDATE jr SET id=0");
-        await session.ExecuteAsync("UPDATE jl SET id=0 WHERE id=1");
-
-        // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync("SELECT l.id FROM jl l LEFT JOIN jr r ON l.id=r.id LIMIT 1"));
-
-        // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
-        failure.Message.ShouldContain("8-pass repartitioning limit", Case.Sensitive);
-        SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull().Passes.ShouldBe(8);
-        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
-        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
-        (await session.ExecuteAsync("SELECT 1")).Status.ShouldBe(DatabaseResultStatus.Success);
+        await result.DisposeAsync();
+        TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Hash join temporary failures and cancellation release all batches and keep the session online (#1789)")]
@@ -113,7 +92,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 failure.Diagnostics[0].Start.ShouldNotBeNull(); failure.Diagnostics[0].End.ShouldNotBeNull();
             }
             injected.ShouldBeTrue();
-            TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
         }
         finally { SqlPlanExecutor.ObserveHashSpill = null; BeforeRead(engine.TempSpace!, null); }
@@ -151,7 +130,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 actual.Message.ShouldBe(expected.Message);
             }
             calls[1].ShouldBe(calls[0]); calls[1].ShouldNotBeEmpty();
-            TempBytes(spilled.TempSpace!).ShouldBe(0); Files(spilled).ShouldBe(0);
+            TempBytes(spilled.TempSpace!).ShouldBe(0); Statements(spilled.TempSpace!).ShouldBeEmpty(); Files(spilled).ShouldBe(0);
         }
     }
     [Fact(DisplayName = "Cohesion Test [Sql] - Two hash joins spill in one N-way statement and share one physical quota (#1789)")]
@@ -184,7 +163,8 @@ public sealed partial class SqlSortSpillConformanceTests
             b.LastStatementMetrics!.RecordsExamined.ShouldBe(a.LastStatementMetrics!.RecordsExamined);
             b.LastStatementMetrics.JoinCandidatePairs.ShouldBe(a.LastStatementMetrics.JoinCandidatePairs);
             b.LastStatementMetrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(1048576);
-            b.LastStatementMetrics.HashMemoryBytes.ShouldBe(0); TempBytes(spilled.TempSpace!).ShouldBe(0);
+            await actual.DisposeAsync();
+            b.LastStatementMetrics.HashMemoryBytes.ShouldBe(0); TempBytes(spilled.TempSpace!).ShouldBe(0); Statements(spilled.TempSpace!).ShouldBeEmpty();
         }
         finally { SqlPlanExecutor.ObserveHashSpill = null; }
     }
@@ -215,7 +195,8 @@ public sealed partial class SqlSortSpillConformanceTests
             b.LastStatementMetrics!.JoinCandidatePairs.ShouldBe(a.LastStatementMetrics!.JoinCandidatePairs);
             b.LastStatementMetrics.RecordsExamined.ShouldBe(a.LastStatementMetrics.RecordsExamined);
             b.LastStatementMetrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(1048576);
-            b.LastStatementMetrics.HashMemoryBytes.ShouldBe(0); TempBytes(spilled.TempSpace!).ShouldBe(0); Files(spilled).ShouldBe(0);
+            await actual.DisposeAsync();
+            b.LastStatementMetrics.HashMemoryBytes.ShouldBe(0); TempBytes(spilled.TempSpace!).ShouldBe(0); Statements(spilled.TempSpace!).ShouldBeEmpty(); Files(spilled).ShouldBe(0);
         }
         finally { SqlPlanExecutor.ObserveHashSpill = null; }
     }
@@ -250,10 +231,11 @@ public sealed partial class SqlSortSpillConformanceTests
         // Assert
         (await Rows(result)).Length.ShouldBe(64);
         var metrics = session.LastStatementMetrics!;
-        SqlHashSpillMetrics.For(metrics).ShouldNotBeNull().Batches.ShouldBeGreaterThan(0);
+        SqlHashSpillMetrics.For(metrics).ShouldNotBeNull().Runs.ShouldBeGreaterThan(0);
         SqlHashSpillMetrics.For(metrics)!.PeakBytes.ShouldBeLessThanOrEqualTo(4 * grant);
         metrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(grant); metrics.HashMemoryBytes.ShouldBe(0);
-        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+        await result.DisposeAsync();
+        TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
     }
     [Theory(DisplayName = "Cohesion Test [Sql] - Hash join keys preserve collated representatives, NaN, signed zero and decimal bits (#1789)")]
     [InlineData("DOUBLE PRECISION",0)]
@@ -304,7 +286,7 @@ public sealed partial class SqlSortSpillConformanceTests
             await using var actual = (DatabaseResultSet)await b.ExecuteAsync(sql);
             (await Rows(actual)).ShouldBe(await Rows(expected));
         }
-        TempBytes(spilled.TempSpace!).ShouldBe(0); Files(spilled).ShouldBe(0);
+        TempBytes(spilled.TempSpace!).ShouldBe(0); Statements(spilled.TempSpace!).ShouldBeEmpty(); Files(spilled).ShouldBe(0);
     }
     [Theory(DisplayName = "Cohesion Test [Sql] - Hash join quota and free-space floor refusals remain coded and located (#1789)")]
     [InlineData("CK05001")]
@@ -327,7 +309,7 @@ public sealed partial class SqlSortSpillConformanceTests
         // Assert
         failure.Diagnostics[0].Code.ShouldBe(code); failure.Diagnostics[0].Start.ShouldNotBeNull(); failure.Diagnostics[0].End.ShouldNotBeNull();
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
-        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0); engine.OfflineDatabases.ShouldBeEmpty();
+        TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0); engine.OfflineDatabases.ShouldBeEmpty();
         (await session.ExecuteAsync("SELECT 1")).Status.ShouldBe(DatabaseResultStatus.Success);
     }
     [Theory(DisplayName = "Cohesion Test [Sql] - In-memory hash join spill requires explicit temp permission (#1789)")]
@@ -352,12 +334,13 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             await using var result=(DatabaseResultSet)await session.ExecuteAsync(sql);
             (await Rows(result)).Length.ShouldBe(32);
-            SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull().Batches.ShouldBeGreaterThan(0);
+            SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull().Runs.ShouldBeGreaterThan(0);
             await using var explained=(DatabaseResultSet)await session.ExecuteAsync("EXPLAIN ANALYZE "+sql);
             string detail=string.Join(' ',(await Rows(explained)).SelectMany(r=>r.Cells).OfType<string>());
-            detail.ShouldContain("hash_spill_batches=",Case.Sensitive); detail.ShouldContain("hash_spill_passes=",Case.Sensitive);
+            detail.ShouldContain("hash_join_probe_chunk_reads=",Case.Sensitive); detail.ShouldContain("spill_merge_passes=",Case.Sensitive);
             detail.ShouldContain("spilled_bytes=",Case.Sensitive);
-            TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            await result.DisposeAsync(); await explained.DisposeAsync();
+            TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
         }
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
     }
