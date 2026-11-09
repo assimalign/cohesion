@@ -28,6 +28,9 @@ public sealed partial class SqlSortSpillConformanceTests
 
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
+        var spill = SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull();
+        spill.Batches.ShouldBeGreaterThan(0); spill.Passes.ShouldBe(1); spill.Runs.ShouldBe(0);
+        error.Message.ShouldBe("The hash ordinal sort record exceeds its bound after reserving the source reader workspace.");
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         (await session.ExecuteAsync("SELECT 1")).Status.ShouldBe(DatabaseResultStatus.Success);

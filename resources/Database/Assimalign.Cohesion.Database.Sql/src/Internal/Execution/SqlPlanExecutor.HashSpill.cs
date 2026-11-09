@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    // Reader, iterator and the two byte-array headers; measured by the marginal cursor test.
+    private const long hashReaderObjectBytes = 256;
     internal static Action<string, long>? ObserveHashSpill { get => HashSpill.Observe; set => HashSpill.Observe = value; }
     private static readonly AsyncLocal<Func<int, int>?> _hashSpillPartitionHash = new();
     internal static Func<int, int>? HashSpillPartitionHash { get => _hashSpillPartitionHash.Value; set => _hashSpillPartitionHash.Value = value; }
@@ -195,7 +197,7 @@ internal sealed partial class SqlPlanExecutor
         var summaries = spill.Complete(token);
         // The ordinal merge is finished before a downstream sort starts. Its single run
         // reader and decoding overlap reserve from the SAME statement ledger as that sort.
-        long scratch = StorageTempSpace.PageSize + summaries.MaximumRecordLength + 2 * spill.MaximumDecodedBytes;
+        long scratch = hashReaderObjectBytes + StorageTempSpace.PageSize + summaries.MaximumRecordLength + 2 * spill.MaximumDecodedBytes;
         _metrics!.ReservePlainSelectMemory(scratch, _definitions.StatementMemoryBudget);
         Exception? failure = null;
         try
@@ -321,6 +323,8 @@ internal sealed partial class SqlPlanExecutor
         private readonly Collation[] _aggregateCollations;
         private readonly Func<int, int>? _partitionHash;
         private readonly byte[] _families;
+        private readonly DatabaseType[] _inputTypes;
+        private readonly DatabaseType[] _outputTypes;
         private readonly long _budget;
         private readonly int _bound;
         private readonly StorageTempStatement _statement;
@@ -347,6 +351,8 @@ internal sealed partial class SqlPlanExecutor
             _comparer = new GroupKeyComparer(collations);
             _partitionHash = HashSpillPartitionHash;
             _families = new byte[collations.Length];
+            _inputTypes = new DatabaseType[plan?.Aggregates.Sum(a => 1 + a.Arguments.Length) ?? 0];
+            _outputTypes = new DatabaseType[plan?.Aggregates.Count ?? 0];
             _aggregateCollations = plan?.Aggregates.Select(a => a.Collation.Resolve(executor._subqueryValues)).ToArray() ?? [];
             SqlSpillLifetime.CheckCapacity(owner);
             _statement = shared ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
@@ -376,6 +382,7 @@ internal sealed partial class SqlPlanExecutor
         internal void Append(object?[] key, object?[] values, long ordinal, CancellationToken token)
         {
             Validate(key);
+            RememberTypes(values, _inputTypes);
             var row = new object?[1 + key.Length + values.Length]; row[0] = ordinal;
             key.CopyTo(row, 1); values.CopyTo(row, 1 + key.Length);
             AppendPartition(_partitions, row, key, 0, token);
@@ -406,6 +413,7 @@ internal sealed partial class SqlPlanExecutor
         {
             var row = new object?[1 + key.Length + states.Length]; row[0] = ordinal; key.CopyTo(row, 1);
             for (int i = 0; i < states.Length; i++) { row[1 + key.Length + i] = states[i].Accumulator.Finish(token).ToObject(); }
+            RememberTypes(row.AsSpan(1 + key.Length), _outputTypes);
             MaximumDecodedBytes = Math.Max(MaximumDecodedBytes, SqlTempRowCodec.DecodedBytes(row));
             _outputs.Append(Encode(row), token);
         }
@@ -416,7 +424,7 @@ internal sealed partial class SqlPlanExecutor
             Process(_partitions, 0, token);
             _outputs.Seal(token);
             Observe?.Invoke("partitioned", _outputs.RecordCount);
-            long scratch = StorageTempSpace.PageSize + _outputs.MaximumRecordLength;
+            long scratch = hashReaderObjectBytes + StorageTempSpace.PageSize + _outputs.MaximumRecordLength + 2 * MaximumDecodedBytes;
             long grant = Math.Min(int.MaxValue, _budget - _executor._metrics!.HashMemoryBytes - scratch);
             int bound = (int)((grant - 32768) / 16 - 8192);
             if (grant < 65536 || bound < 16) { throw SqlExecutionException.StatementMemoryBudget(_budget); }
@@ -427,11 +435,14 @@ internal sealed partial class SqlPlanExecutor
             try
             {
                 sorter = StorageTempSorter.Create(_statement, grant, bound, 64);
-                foreach (var row in Read(_outputs, token))
+                foreach (var row in ReadRecords(_outputs, token, ordinal: true))
                 {
-                    var key = new byte[8]; BinaryPrimitives.WriteInt64BigEndian(key, (long)row[0]!);
+                    if (row[0] is not long ordinal)
+                    { throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged); }
+                    var key = new byte[8]; BinaryPrimitives.WriteInt64BigEndian(key, ordinal);
                     var value = Encode(row[1..]);
-                    if (value.Length + 24L > bound) { throw SqlExecutionException.StatementMemoryBudget(_budget); }
+                    if (value.Length + 24L > bound)
+                    { throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode, ErrorMessages.HashSpillOrdinalRecordTooLarge); }
                     sorter.Append(key, value, token);
                 }
                 _outputs.Dispose();
@@ -469,8 +480,10 @@ internal sealed partial class SqlPlanExecutor
                 Exception? failure = null;
                 try
                 {
-                    foreach (var row in Read(run, token))
+                    foreach (var row in ReadRecords(run, token, ordinal: true, input: true))
                     {
+                        if (row[0] is not long ordinal)
+                        { throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged); }
                         var key = row[1..(1 + _families.Length)];
                         if (!groups.TryGetValue(key, out var entry))
                         {
@@ -488,7 +501,7 @@ internal sealed partial class SqlPlanExecutor
                                         ? new ExtremumGroupAggregateState(accumulator, aggregate, _executor._subqueryValues)
                                         : new GroupAggregateState(accumulator, aggregate, _executor._subqueryValues);
                                 }
-                                entry = new HashSpillEntry(states, (long)row[0]!); groups.Add(key, entry);
+                                entry = new HashSpillEntry(states, ordinal); groups.Add(key, entry);
                             }
                             else
                             {
@@ -504,7 +517,8 @@ internal sealed partial class SqlPlanExecutor
                         for (int i = 0; i < _plan.Aggregates.Count; i++)
                         {
                             var aggregate = _plan.Aggregates[i];
-                            bool accepted = (bool)row[position++]!;
+                            if (row[position++] is not bool accepted)
+                            { throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged); }
                             if (accepted)
                             {
                                 var values = row[position..(position + aggregate.Arguments.Length)];
@@ -538,15 +552,69 @@ internal sealed partial class SqlPlanExecutor
             return bytes;
         }
 
-        internal IEnumerable<object?[]> Read(StorageTempRun run, CancellationToken token)
+        internal IEnumerable<object?[]> Read(StorageTempRun run, CancellationToken token) => ReadRecords(run, token);
+
+        private IEnumerable<object?[]> ReadRecords(StorageTempRun run, CancellationToken token, bool ordinal = false, bool input = false)
         {
             using var reader = run.OpenReader(StorageTempSpace.PageSize);
             var buffer = new byte[run.MaximumRecordLength];
             while (reader.TryRead(buffer, out int size, token))
             {
-                if (!SqlTempRowCodec.TryDecode(buffer.AsSpan(0, size), out var row))
+                if (!SqlTempRowCodec.TryDecode(buffer.AsSpan(0, size), out var row) || !MatchesRecord(row, ordinal, input))
                 { throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged); }
                 yield return row;
+            }
+        }
+
+        private bool MatchesRecord(object?[] row, bool ordinal, bool input)
+        {
+            var types = input ? _inputTypes : _outputTypes;
+            int start = ordinal ? 1 : 0;
+            if (row.Length != start + _families.Length + types.Length || ordinal && row[0] is not long) { return false; }
+            for (int i = 0; i < _families.Length; i++)
+            {
+                if (row[start + i] is { } value && SqlValueComparer.ComparisonFamily(value) != _families[i]) { return false; }
+            }
+            start += _families.Length;
+            for (int i = 0; i < types.Length; i++)
+            {
+                if (row[start + i] is { } value && !MatchesStateType(value, types[i])) { return false; }
+                if (!input && row[start + i] is null && _plan!.Aggregates[i].Function.IsNeverNull) { return false; }
+            }
+            // Acceptance flags are never nullable, including rejected rows.
+            if (input && _plan is not null)
+            {
+                int position = start;
+                foreach (var aggregate in _plan.Aggregates)
+                {
+                    if (row[position] is not bool) { return false; }
+                    position += 1 + aggregate.Arguments.Length;
+                }
+            }
+            return true;
+        }
+
+        private static bool MatchesStateType(object value, DatabaseType type) => type switch
+        {
+            DatabaseType.Int8 => value is sbyte, DatabaseType.Int16 => value is short,
+            DatabaseType.Int32 => value is int, DatabaseType.Int64 => value is long,
+            DatabaseType.Float32 => value is float, DatabaseType.Float64 => value is double,
+            DatabaseType.Decimal => value is decimal, DatabaseType.Boolean => value is bool,
+            DatabaseType.Date => value is DateOnly, DatabaseType.Time => value is TimeOnly,
+            DatabaseType.DateTime => value is DateTime, DatabaseType.DateTimeOffset => value is DateTimeOffset,
+            DatabaseType.TimeSpan => value is TimeSpan, DatabaseType.Guid => value is Guid,
+            _ => false,
+        };
+
+        private void RememberTypes(ReadOnlySpan<object?> values, DatabaseType[] types)
+        {
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (values[i] is not { } value) { continue; }
+                var type = SqlValue.FromObject(value).Type;
+                if (types[i] != DatabaseType.Null && types[i] != type)
+                { throw SqlExecutionException.StatementMemoryBudget(_budget); }
+                types[i] = type;
             }
         }
 
