@@ -79,6 +79,7 @@ public sealed partial class SqlSortSpillConformanceTests
             error.Diagnostics.ShouldContain(d => d.Code == "CS05067");
             var metrics = session.LastStatementMetrics!;
             _output.WriteLine($"COMMERCE_REMAINING|shape={(sql.StartsWith("WITH", StringComparison.Ordinal) ? "category-rank-window" : "unshipped-orders")}|code={error.Diagnostics[0].Code}|peak_memory={metrics.PeakHashMemoryBytes}|examined={metrics.RecordsExamined}|message={error.Message}");
+            _output.WriteLine($"COMMERCE_STACK|{error.InnerException?.StackTrace ?? error.StackTrace}");
             metrics.HashMemoryBytes.ShouldBe(0); metrics.PlainSelectMemoryBytes.ShouldBe(0);
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }

@@ -44,15 +44,16 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteSpillRootAsync(SqlPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken, SqlDatabaseSession spillOwner, Location? location, SqlGroupPlan? hashInput = null)
     {
+        statement = statement.WithSession(spillOwner);
         bool statementRoot = _metrics is null;
         var metrics = statement.Metrics;
         var frame = metrics.IsAnalyzing ? metrics.BeginAnalysisFrame() : null;
+        object? result = null;
         try
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             _metrics = metrics; _containsLike |= plan.ContainsLike;
             var initialized = InitializeWindow(plan, cancellationToken);
-            DatabaseResult result;
             if (initialized is SqlWithPlan with)
             {
                 foreach (var relation in with.Relations) { await MaterializeRelationAsync(relation, statement, cancellationToken).ConfigureAwait(false); }
@@ -80,17 +81,19 @@ internal sealed partial class SqlPlanExecutor
                 else if (plan is SqlJoinPlan { Steps.Count: > 0 }) { metrics.Analysis(plan)!.Candidates += metrics.JoinCandidatePairs - frame.StartPairs - frame.ChildPairs; }
             }
             if (result is SqlSpilledResultSet spilled) { spilled.Location = location; }
-            return result;
+            return (DatabaseResult)result;
         }
         catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode)
-        { throw exception.At(location); }
-        catch (StorageTempException exception) { throw SqlSpilledResultSet.Translate(exception, location); }
+        { result = exception.At(location); throw (SqlExecutionException)result; }
+        catch (StorageTempException exception) { result = SqlSpilledResultSet.Translate(exception, location); throw (SqlExecutionException)result; }
         catch (System.AggregateException exception) when (exception.Flatten().InnerExceptions.All(error => error is StorageTempException))
-        { throw SqlSpilledResultSet.TranslateCleanup(exception, location); }
+        { result = SqlSpilledResultSet.TranslateCleanup(exception, location); throw (SqlExecutionException)result; }
+        catch (System.Exception exception) { result = exception; throw; }
         finally
         {
             if (frame is not null) { metrics.EndAnalysisFrame(frame); }
             if (statementRoot && _materializedRelations is { } relations) { ReleaseSelectMemory(ref relations.Reserved); }
+            if (statementRoot) { CloseJoinTemp(metrics, result, location); }
         }
     }
 
@@ -150,7 +153,7 @@ internal sealed partial class SqlPlanExecutor
                     _metrics!, _definitions.StatementMemoryBudget, cancellationToken);
             }
             result.CaptureMetrics(_metrics!);
-            return result;
+            return (DatabaseResult)result;
         }
         catch (System.Exception exception) { result.DisposeAfterFailure(exception); throw; }
     }
@@ -240,7 +243,7 @@ internal sealed partial class SqlPlanExecutor
             if (deferProjection) { result.Transform(row => ProjectRow(row, projections, evaluator, token), _metrics, budget, bound, token); }
             if (distinct) { result.Deduplicate(new GroupKeyComparer(projections.Select(p => p.Collation.Resolve(evaluator.SubqueryValues)).ToArray()), _metrics, budget, token); }
             result.CaptureMetrics(_metrics);
-            return result;
+            return (DatabaseResult)result;
         }
         catch (System.Exception exception) { result.DisposeAfterFailure(exception); throw; }
     }
@@ -260,7 +263,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (distinct) { result.Deduplicate(new GroupKeyComparer(projections.Select(p => p.Collation.Resolve(evaluator.SubqueryValues)).ToArray()), _metrics!, _definitions.StatementMemoryBudget, token); }
             result.CaptureMetrics(_metrics!);
-            return result;
+            return (DatabaseResult)result;
         }
         catch (System.Exception exception) { result.DisposeAfterFailure(exception); throw; }
     }

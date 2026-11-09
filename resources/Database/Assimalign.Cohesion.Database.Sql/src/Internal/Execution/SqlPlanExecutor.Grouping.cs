@@ -291,7 +291,7 @@ internal sealed partial class SqlPlanExecutor
         bool drainInput = true;
         try
         {
-            await using var inputRows = EnumerateGroupInputAsync(plan, statement, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            await using var inputRows = EnumerateGroupInputAsync(plan, statement, cancellationToken, spillOwner).GetAsyncEnumerator(cancellationToken);
             try
             {
                 var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);

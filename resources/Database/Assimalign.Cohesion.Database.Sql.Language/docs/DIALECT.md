@@ -1,5 +1,29 @@
 # The Declared SQL Dialect
 
+## Hash join batch spilling (#1789, SQ-L3b)
+
+Eligible root INNER, LEFT, RIGHT and FULL hash joins can spill after their existing memory
+reservation refuses. A file engine uses its configured temp space; an in-memory engine
+requires an explicit TempDirectory. The minimum grant is 256 KiB. Eight batch partitions
+use fresh hash bits for at most eight replay levels; an unsplittable skewed batch refuses
+CS05067 with its own repartitioning-limit message. Quotas and the free-space floor keep
+the existing CK0500x diagnostics and cleanup rules.
+
+Results retain the fitting path's order, collision-chain order, NULL extensions, candidate
+counts and evaluated values. A probe batch replays at its original cursor boundary. FULL
+tracks matches by original build ordinal in each batch and externally restores unmatched
+build order. Residual ON, WHERE and projections remain in the caller; replay executes no
+SQL expression. Existing hash planning excludes volatile/throwing ON expressions. Computed
+key vectors, correlated/lateral inputs, non-hash steps, deferred collations, SQL/JSON,
+application-binary cells, joined DML and join-output DISTINCT keep their existing refusal
+or ownership. Downstream sorting shares the same physical quota, including when FULL's
+unmatched merge must finish before the downstream sort can acquire its grant. Final result
+spooling, window/recursive/set owners and eager NOT IN vectors remain separate work.
+
+EXPLAIN ANALYZE uses hash_spill_batches, hash_spill_passes and the existing byte/run/merge
+fields. Fitting joins keep their original representation and charges. Probes alternating
+partitions can reread batches; the bounded replay policy prioritizes unchanged evaluation
+order over minimizing temporary I/O.
 ## Plain GROUP BY and hash DISTINCT spilling (#1789, SQ-L3a)
 
 An eligible root GROUP BY or streamed scan/system-view unordered SELECT DISTINCT spills on the existing statement
@@ -5626,8 +5650,8 @@ identities without taking transaction object locks. Unindexed equijoins can use 
 regardless of actual size: an unknown input estimate is 4096, including an empty or tiny input
 without a countable index. Full ON/WHERE residuals, duplicate keys, NULL and LEFT semantics remain.
 An ON condition referencing any derived String/Json/Character column retains nested loops to
-preserve deferred collation errors. Hash joins retain their existing memory refusal;
-eligible plain hash aggregation and DISTINCT spill as described above.
+preserve deferred collation errors. Eligible root hash joins, plain hash aggregation and
+DISTINCT spill as described above; other shapes retain their existing memory refusal.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
 It limits accounted concurrently live hash-build storage per statement. MERGE, UPDATE FROM and

@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>Executes normalized joins, including FULL's independently tracked build rows.</summary>
     private async IAsyncEnumerable<object?[]> EnumerateNormalizedJoinRowsAsync(SqlJoinPlan plan,
         SqlStatementContext statement, Func<int, IEnumerable<object?[]>> readInput,
-        [EnumeratorCancellation] CancellationToken cancellationToken, int? dmlTarget = null, bool streamRoot = false)
+        [EnumeratorCancellation] CancellationToken cancellationToken, int? dmlTarget = null, SqlJoinRowMode mode = SqlJoinRowMode.None)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var indexes = new Dictionary<SqlJoinStep, BTreeIndex>(ReferenceEqualityComparer.Instance);
@@ -57,8 +57,8 @@ internal sealed partial class SqlPlanExecutor
                         var frame = new object?[plan.Columns.Count + (dmlTarget is null ? 0 : 2)];
                         input.CopyTo(frame, binding.Offset);
                         if (node.Binding == dmlTarget) { frame[^2] = input; }
-                        if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return frame; }
-                        else { Retain(node, frame, rows); }
+                        if ((mode & SqlJoinRowMode.StreamRoot) != 0 && ReferenceEquals(node, plan.Tree)) { yield return frame; }
+                        else { Retain(node, frame, rows, dmlTarget); }
                     }
                     continue;
                 }
@@ -72,7 +72,7 @@ internal sealed partial class SqlPlanExecutor
                 var outer = results[node.Left!];
                 if (next.Phase == 1)
                 {
-                    if (outer.Rows.Count == 0 && step.Kind != SqlJoinType.FullOuter)
+                    if (outer.Rows.Count == 0 && SqlStagedSortSource.For(outer.Rows) is null && step.Kind != SqlJoinType.FullOuter)
                     {
                         var leaves = node.Leaves().ToArray();
                         var last = plan.Bindings[leaves.Max()];
@@ -105,7 +105,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     builds.Remove(node, out hash);
                     sinks.Remove(node.Right!);
-                    foreach (var left in outer.Rows)
+                    foreach (var left in ReadRows(outer.Rows))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         bool matched = false;
@@ -144,23 +144,30 @@ internal sealed partial class SqlPlanExecutor
                                 hash!.MarkMatched(candidate.Entry);
                                 FullJoinProgress?.Invoke("match", statement.Metrics, cancellationToken);
                             }
-                            if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return joined; }
-                            else { Retain(node, joined, output); }
+                            if ((mode & SqlJoinRowMode.StreamRoot) != 0 && ReferenceEquals(node, plan.Tree)) { yield return joined; }
+                            else { Retain(node, joined, output, dmlTarget); }
                         }
                         if (!matched && step.Kind is SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.FullOuter)
                         {
-                            if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return left; }
-                            else { Retain(node, left, output); }
+                            if ((mode & SqlJoinRowMode.StreamRoot) != 0 && ReferenceEquals(node, plan.Tree)) { yield return left; }
+                            else { Retain(node, left, output, dmlTarget); }
                         }
                     }
                     if (step.Kind == SqlJoinType.FullOuter)
                     {
+                        // Probe input is exhausted. Release its rows/readers before the
+                        // unmatched ordinal merge claims the remaining shared grant/quota.
+                        if (SqlHashSpillMetrics.For(statement.Metrics)?.JoinStatement is not null)
+                        {
+                            ReleaseSelectRows(ref outer.Rows.Memory, outer.Rows);
+                            ReleaseSpool(outer.Rows); outer.Rows.Clear();
+                        }
                         foreach (var row in hash!.Unmatched(cancellationToken))
                         {
                             FullJoinProgress?.Invoke("unmatched", statement.Metrics, cancellationToken);
                             cancellationToken.ThrowIfCancellationRequested();
-                            if (streamRoot && ReferenceEquals(node, plan.Tree)) { yield return row; }
-                            else { Retain(node, row, output); }
+                            if ((mode & SqlJoinRowMode.StreamRoot) != 0 && ReferenceEquals(node, plan.Tree)) { yield return row; }
+                            else { Retain(node, row, output, dmlTarget); }
                         }
                     }
 
@@ -171,7 +178,7 @@ internal sealed partial class SqlPlanExecutor
                             foreach (int entry in hash.ProbeEntries(left, cancellationToken)) { yield return (hash.RowAt(entry), entry); }
                             yield break;
                         }
-                        IEnumerable<object?[]> candidates = inner.Rows;
+                        IEnumerable<object?[]> candidates = ReadBuffer(inner.Rows);
                         if (seek)
                         {
                             var access = step.Access!;
@@ -189,14 +196,16 @@ internal sealed partial class SqlPlanExecutor
                     ReleaseSelectRows(ref outer.Rows.Memory, outer.Rows);
                     // The iterator can hoist these lists beyond their dictionary entries.
                     // Drop consumed cells as soon as their charge is released.
+                    ReleaseSpool(outer.Rows);
                     outer.Rows.Clear();
                     if (!seek) { ReleaseSelectRows(ref inner.Rows.Memory, inner.Rows); }
+                    ReleaseSpool(inner.Rows);
                     inner.Rows.Clear();
                 }
                 results.Remove(node.Left!);
                 results.Remove(node.Right!);
             }
-            foreach (var row in results[plan.Tree!].Rows)
+            foreach (var row in ReadRows(results[plan.Tree!].Rows))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return row;
@@ -205,18 +214,37 @@ internal sealed partial class SqlPlanExecutor
         finally
         {
             foreach (var build in builds.Values) { build.Dispose(); }
-            foreach (var result in results.Values) { ReleaseSelectMemory(ref result.Rows.Memory); }
+            foreach (var result in results.Values) { ReleaseSpool(result.Rows); ReleaseSelectMemory(ref result.Rows.Memory); }
         }
 
-        void Retain(SqlJoinTree node, object?[] row, SelectJoinBuffer buffer)
+        void ReleaseSpool(SelectJoinBuffer buffer)
+        {
+            try { SqlStagedSortSource.Release(buffer); }
+            catch (SqlExecutionException cleanup) when (cleanup.Diagnostics[0].Code == "CK05005")
+            { SqlHashSpillMetrics.JoinCleanup(statement.Metrics, cleanup); }
+        }
+        IEnumerable<object?[]> ReadBuffer(SelectJoinBuffer buffer)
+        {
+            if (SqlStagedSortSource.For(buffer) is not { } source) { return buffer; }
+            source.Seal(cancellationToken); return source.Read(cancellationToken);
+        }
+        SelectJoinRows ReadRows(SelectJoinBuffer buffer)
+        {
+            if (SqlStagedSortSource.For(buffer) is not { } source) { return new(buffer); }
+            source.Seal(cancellationToken); return new(source.Read(cancellationToken).GetEnumerator());
+        }
+
+        void Retain(SqlJoinTree node, object?[] row, SelectJoinBuffer buffer, int? target)
         {
             // Presence is independent of user NULLs, including an all-NULL derived source.
             // The target's original array survives both FULL build output and join clones.
-            if (dmlTarget is not null && ReferenceEquals(node,
-                plan.Tree!.Left!.Binding == dmlTarget ? plan.Tree.Right : plan.Tree.Left)) { row[^1] = true; }
+            if (target is not null && ReferenceEquals(node,
+                plan.Tree!.Left!.Binding == target ? plan.Tree.Right : plan.Tree.Left)) { row[^1] = true; }
             if (sinks.TryGetValue(node, out var sink))
             {
-                sink.Add(row, cancellationToken);
+                try { sink.Add(row, cancellationToken); }
+                catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session, error))
+                { sink.Spill(statement.Session!, row, cancellationToken); }
                 FullJoinProgress?.Invoke("build", statement.Metrics, cancellationToken);
             }
             else
@@ -226,14 +254,55 @@ internal sealed partial class SqlPlanExecutor
                     memory.Retain(row);
                     memory.Reserve(32); // list storage, including growth
                 }
-                RetainSelectRow(ref buffer.Memory, row, includeWindow: true);
-                buffer.Add(row);
+                if (SqlStagedSortSource.For(buffer) is { } source) { source.Append(row, cancellationToken); return; }
+                try { RetainSelectRow(ref buffer.Memory, row, includeWindow: true); buffer.Add(row); }
+                catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session, error))
+                {
+                    _ = SqlHashSpillMetrics.JoinTemp(statement.Metrics, statement.Session!, plan.Steps.Any(s => s.Kind == SqlJoinType.FullOuter));
+                    SqlStagedSortSource.Add(buffer, row, ref buffer.Memory, statement.Metrics, _definitions.StatementMemoryBudget, statement.Session!, cancellationToken);
+                }
             }
         }
     }
 
+    [Flags]
+    private enum SqlJoinRowMode : byte { None = 0, StreamRoot = 1, AllowSpill = 2 }
+
     private sealed class SelectJoinBuffer : List<object?[]>
     {
         internal SqlSelectMemory Memory;
+    }
+
+    // The ordinary foreach had a 24-byte List.Enumerator. Keep two reference slots
+    // and two scalar slots, with no boxed IEnumerable/Enumerator on fitting buffers.
+    // Buffers are private and never mutated until their consumer has finished.
+    private readonly struct SelectJoinRows
+    {
+        private readonly object _source;
+        internal SelectJoinRows(object source) { _source = source; }
+        public Enumerator GetEnumerator() => new(_source);
+        internal struct Enumerator : IDisposable
+        {
+            private readonly object _source;
+            private int _index;
+            private readonly bool _spilled;
+            private object?[] _current;
+            internal Enumerator(object source)
+            { _source = source; _index = 0; _spilled = source is not SelectJoinBuffer; _current = null!; }
+            public object?[] Current => _current;
+            public bool MoveNext()
+            {
+                if (_spilled)
+                {
+                    var reader = (IEnumerator<object?[]>)_source;
+                    if (!reader.MoveNext()) { _current = null!; return false; }
+                    _current = reader.Current; return true;
+                }
+                var rows = (SelectJoinBuffer)_source;
+                if (_index >= rows.Count) { _current = null!; return false; }
+                _current = rows[_index++]; return true;
+            }
+            public void Dispose() { if (_spilled) { ((IDisposable)_source).Dispose(); } }
+        }
     }
 }

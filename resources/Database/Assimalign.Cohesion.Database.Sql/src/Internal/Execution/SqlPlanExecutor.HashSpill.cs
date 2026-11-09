@@ -1,5 +1,4 @@
 using System;
-using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -33,12 +32,13 @@ internal sealed partial class SqlPlanExecutor
         {
             foreach (var row in rows) { source.Append(row, token); }
             rows.Clear(); rows.Capacity = 0; ReleaseSelectMemory(ref memory);
+            source.ReserveWriter();
             source.Append(current, token);
             while (remaining.MoveNext()) { source.Append(ProjectRow(remaining.Current, projections, evaluator, token), token); }
             source.Seal(token);
             return new HashGroupInput(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns, source);
         }
-        catch (Exception failure) { DisposeHashTemp(source.Statement, failure); throw; }
+        catch (Exception failure) { source.DisposeAfterFailure(failure); throw; }
     }
 
     [System.Diagnostics.DebuggerDisplay("SQL hash staged input")]
@@ -313,7 +313,7 @@ internal sealed partial class SqlPlanExecutor
     [System.Diagnostics.DebuggerTypeProxy(typeof(HashSpill.DebugView))]
     private sealed class HashSpill : IDisposable
     {
-        private const int partitions = 8, maximumDepth = 8;
+        private const int partitions = SqlHashSpillPartitioning.Count, maximumDepth = SqlHashSpillPartitioning.MaximumDepth;
         private long _ordinal = int.MaxValue;
         internal long NextOrdinal() => _ordinal++;
         private readonly SqlPlanExecutor _executor;
@@ -336,7 +336,8 @@ internal sealed partial class SqlPlanExecutor
         internal void Transfer() => _disposed = true;
         internal long MaximumDecodedBytes { get; private set; }
         // Test-only deterministic observers; no process-global collection of rows.
-        internal static Action<string, long>? Observe { get; set; }
+        private static readonly AsyncLocal<Action<string, long>?> _observe = new();
+        internal static Action<string, long>? Observe { get => _observe.Value; set => _observe.Value = value; }
 
         internal HashSpill(SqlPlanExecutor executor, SqlDatabaseSession owner, Collation[] collations,
             SqlGroupPlan? plan = null, SqlStatementContext? context = null, StorageTempStatement? shared = null)
@@ -355,7 +356,7 @@ internal sealed partial class SqlPlanExecutor
             _outputTypes = new DatabaseType[plan?.Aggregates.Count ?? 0];
             _aggregateCollations = plan?.Aggregates.Select(a => a.Collation.Resolve(executor._subqueryValues)).ToArray() ?? [];
             SqlSpillLifetime.CheckCapacity(owner);
-            _statement = shared ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
+            _statement = shared ?? SqlHashSpillMetrics.For(executor._metrics!)?.JoinStatement ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
             try
             {
                 _partitions = StorageTempPartitions.Create(_statement, partitions, partitions * 8704L);
@@ -394,7 +395,7 @@ internal sealed partial class SqlPlanExecutor
             int hash = _comparer.GetHashCode(key);
             if (_partitionHash is { } transform) { hash = transform(hash); }
             // Successive levels consume fresh hash bits, like nodeAgg.c:hashagg_spill_tuple.
-            target.Append(unchecked((uint)hash) >> (3 * depth), Encode(row), token);
+            target.Append(SqlHashSpillPartitioning.HashAt(hash, depth), Encode(row), token);
         }
 
         internal void EmitGroups(Dictionary<object?[], GroupAggregateState[]> groups, CancellationToken token)
@@ -439,7 +440,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     if (row[0] is not long ordinal)
                     { throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged); }
-                    var key = new byte[8]; BinaryPrimitives.WriteInt64BigEndian(key, ordinal);
+                    var key = SqlHashSpillPartitioning.OrdinalKey(ordinal);
                     var value = Encode(row[1..]);
                     if (value.Length + 24L > bound)
                     { throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode, ErrorMessages.HashSpillOrdinalRecordTooLarge); }

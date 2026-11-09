@@ -19,6 +19,8 @@ internal sealed class SqlStagedSortSource : IDisposable
     private readonly long _budget;
     private readonly SqlStatementMetrics _metrics;
     private bool _transferred;
+    private readonly bool _sharedStatement;
+    private long _writerBytes;
     internal StorageTempStatement Statement { get; }
     internal SqlDatabaseSession Owner { get; }
     internal long MaximumDecodedRowBytes { get; private set; }
@@ -31,7 +33,9 @@ internal sealed class SqlStagedSortSource : IDisposable
         long bound = (Math.Min(grant, int.MaxValue) - 32768) / 16 - 8192;
         if (grant < 65536 || bound < 16) { Refuse(); }
         _bound = (int)bound;
-        Statement = owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
+        var shared = SqlHashSpillMetrics.For(metrics)?.JoinStatement;
+        _sharedStatement = shared is not null;
+        Statement = shared ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
         try { _run = Statement.CreateRun(); }
         catch (StorageTempException exception) { var failure = SqlSpilledResultSet.Translate(exception); SqlSpilledResultSet.ReleaseAfterFailure(Statement, failure); throw failure; }
         catch (Exception exception) { SqlSpilledResultSet.ReleaseAfterFailure(Statement, exception); throw; }
@@ -51,6 +55,7 @@ internal sealed class SqlStagedSortSource : IDisposable
                 metrics.ReleasePlainSelectMemory(bytes); memory.Bytes -= bytes;
             }
             rows.Clear(); rows.Capacity = 0; memory.Clear();
+            source.ReserveWriter();
             SqlRowCollector.ObserveSpill?.Invoke("staged-drained");
             source.Append(row, token); _sources.Add(rows, source);
         }
@@ -68,10 +73,21 @@ internal sealed class SqlStagedSortSource : IDisposable
     {
         try { _run.Seal(token); }
         catch (StorageTempException exception) { throw SqlSpilledResultSet.Translate(exception); }
+        finally { ReleaseWriter(); }
+        if (_sharedStatement) { SqlHashSpillMetrics.RefreshJoin(_metrics, Statement); }
     }
+    internal void ReserveWriter()
+    {
+        if (!_sharedStatement || _writerBytes != 0) { return; }
+        _metrics.ReservePlainSelectMemory(StorageTempSpace.PageSize + 512, _budget);
+        _writerBytes = StorageTempSpace.PageSize + 512;
+    }
+    private void ReleaseWriter()
+    { _metrics.ReleasePlainSelectMemory(_writerBytes); _writerBytes = 0; }
     internal IEnumerable<object?[]> Read(CancellationToken token)
     {
-        _metrics.ReservePlainSelectMemory(ReadBufferBytes, _budget);
+        long reservation = ReadBufferBytes + (_sharedStatement ? 256 + 2 * MaximumDecodedRowBytes : 0);
+        _metrics.ReservePlainSelectMemory(reservation, _budget);
         try
         {
             using var reader = _run.OpenReader(StorageTempSpace.PageSize);
@@ -83,7 +99,7 @@ internal sealed class SqlStagedSortSource : IDisposable
                 yield return row;
             }
         }
-        finally { _metrics.ReleasePlainSelectMemory(ReadBufferBytes); }
+        finally { _metrics.ReleasePlainSelectMemory(reservation); }
     }
     private static bool ReadNext(StorageTempRunReader reader, byte[] bytes, CancellationToken token, out int length)
     {
@@ -105,15 +121,17 @@ internal sealed class SqlStagedSortSource : IDisposable
     {
         if (_sources.TryGetValue(rows, out var source)) { _sources.Remove(rows); source.DisposeAfterFailure(failure); }
     }
-    private void DisposeAfterFailure(Exception failure)
+    internal void DisposeAfterFailure(Exception failure)
     {
         try { Dispose(); }
         catch (SqlExecutionException cleanup) { failure.Data[nameof(SqlStagedSortSource)] = cleanup; }
     }
     public void Dispose()
     {
-        try { if (!_transferred) { Statement.Dispose(); } }
+        try { if (!_transferred) { if (_sharedStatement) { _run.Dispose(); } else { Statement.Dispose(); } } }
+        catch (StorageTempException exception) { throw SqlSpilledResultSet.Translate(exception); }
         catch (AggregateException exception) { throw SqlSpilledResultSet.TranslateCleanup(exception); }
+        finally { ReleaseWriter(); }
     }
     private void Refuse() => throw SqlExecutionException.StatementMemoryBudget(_budget);
     private sealed class DebugView { public DebugView(SqlStagedSortSource target) { } }

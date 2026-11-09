@@ -88,6 +88,90 @@ Windows process exit deletes delete-on-close runs; OS backups of RootPath can ca
 No durable data, catalog, journal, record-space or wire format changes.
 
 
+## Hash join batch spilling (#1789, SQ-L3b)
+
+A permitted root hash join hands off only after its original CS05067 build or normalized
+row-buffer reservation refuses. Fitting tables keep their 104-byte header, entry/bucket
+arrays, tracking flags, row charges and original probe iterators. The evaluator reference
+slot holds the spill object after handoff; no executor-keyed owner table is introduced.
+Normalized buffers use a 24-byte value cursor, as did the original list enumerator.
+Their session identity reuses the existing statement-context name slot; an explicit
+stream-mode flag grants spill permission, independently of that identity.
+The existing statement-metrics sidecar coordinates one temporary statement across nested
+joins, staged inputs, aggregation and downstream sorting. The root detaches that reference
+on completion, disposing it or transferring it to the delivered result.
+
+The original table compacts batch zero in place, releasing other rows into eight lazy
+batch files and charging both arrays during shrinking. Batch zero stays resident while
+the build continues; fresh hash bits split its excess rows into files. Its original
+ordinals use a separately charged list. At seal its rows are mirrored into the build files
+for later revisits and unmatched output. One batch is resident at a time, targeting a
+quarter of the statement grant for entries and ordinal slots; array growth also pays its
+temporary overlap from the same grant. Probe order controls replay: a cache miss writes and immediately replays one probe
+batch, then loads the matching build partition. Resident probes need no temporary record.
+Successive load passes select three fresh hash bits from the original batch, using the
+same eight-partition/eight-level constants as aggregation. Equal-key skew cannot split;
+exhausting eight passes refuses CS05067 with the join-specific repartitioning message.
+This demand-driven policy deliberately permits repeated batch reads when probes alternate
+partitions, trading I/O for the existing candidate/evaluation order. It does not reorder
+probes into a conventional whole-input grace-join pass.
+
+Stored hashes and insertion ordinals survive partition encoding. Collision chains retain
+reverse insertion order, exactly as the fitting table; probe rows retain their input order.
+The caller alone evaluates the original ON, WHERE and projections, at the same boundaries
+and once per original candidate/output. Existing hash planning already excludes application
+calls and throwing/lazy expressions from ON. Computed hash-key vectors, correlated/lateral
+inputs, any non-hash step, deferred collations, SQL/JSON, joined DML, application-binary
+cells and join-output DISTINCT retain their previous refusal/ownership. Fixed ordinal
+numeric, temporal, boolean, UUID and stored collated text keys remain eligible; encoded
+rows preserve decimal scale, NaN and signed-zero bits.
+
+FULL owns a flag for every resident build entry. ON success appends that entry's original
+ordinal to its batch's flag file, once per residency. NULL-key entries remain in build
+files and never probe. After probes finish, the exhausted outer buffer is released, and
+SQ-L2 externally merges build ordinals with per-batch flags. Flags precede their build row;
+duplicated flags need no retained set. An input-order unmatched run restores original build
+order after releasing the merge grant. LEFT and normalized RIGHT null extensions remain in
+the existing caller. A downstream FULL sort stores already evaluated output/key records
+until the unmatched merge releases its grant, then uses SQ-L2's ordinary external sorter.
+This staging changes neither expression calls nor final delivery ownership.
+
+The minimum spill grant is 262,144 B. The encoded record bound B is
+min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192), including a 32-byte
+allowance. After prefix handoff, writer pages and row-count-independent scratch charge
+max(69,632, 32,768 + 2B + 2D + F) bytes; F is 65,536 B for FULL's eight flag-writer
+pages and zero otherwise. D is the largest decoded build or
+probe row. Replay entries and rows pay the existing hash-table charges, with another 32 B
+per original-ordinal slot (including list growth). Staged readers additionally pay their
+page, record frame, two decoded-row overlaps and 256 B of reader objects. Shared staged
+inputs charge an 8,704 B writer until seal, after draining the prefix. FULL's merge
+and deferred downstream sort each reserve their remaining grant and release it before
+handing off a separately charged reader. The explicit uncharged, statement-wide handoff
+scratch allowance is 262,144 B for prefix partition writer pages, transient codec frames
+and bounded iteration/bookkeeping. No per-row map or match population is left uncharged.
+Deferred downstream sorting charges an 8,192 B writer page and reserves 32,768 + 4B
+bytes while encoding each already evaluated output record.
+Forced-GC checks at 6,000 and 12,000 rows sample cache replay, FULL flags/ordinal merging
+and unmatched readers, and reject a mutant retaining one small array per input row.
+
+Batch/pass and byte/run/merge counters use the existing EXPLAIN ANALYZE hash-spill fields.
+Batches count load/split attempts; passes records maximum repartitioning depth, as for aggregation.
+Join spilled_bytes retains the largest observed physical-byte snapshot after files close;
+spill_peak_bytes is the owner's exact high-water mark. Neither is cumulative I/O.
+Temporary quotas and the free-space floor remain shared and coded. Decoded build/probe
+records validate width, ordinal, stored hash, key families and NULL-key flags before replay.
+No durable write or flush boundary is added. The new temporary boundaries are prefix/batch
+append, partition seal, probe-batch seal, match-flag append, unmatched ordinal-run seal and
+deferred-sort input seal. Crash images at append, partition seal and unmatched-run seal
+reopen with identical durable rows and catalog; existing delete-on-close/startup sweeping
+covers process termination and leftover private runs.
+
+Reference boundaries were re-derived from the local PostgreSQL clone:
+`src/backend/executor/nodeHash.c:1055` (ExecHashIncreaseNumBatches),
+`src/backend/executor/nodeHashjoin.c:1279` (ExecHashJoinNewBatch) and
+`:1571` (ExecHashJoinSaveTuple). Probe-order replay is the deliberate departure
+required by this engine's existing evaluation and first-error contract.
+
 ## Plain hash aggregation and hash DISTINCT spilling (#1789, SQ-L3a)
 
 An explicitly permitted root GROUP BY or unordered SELECT DISTINCT hands off on the
@@ -206,7 +290,7 @@ between processes, so partition membership, batch/pass counts and EXPLAIN counte
 Near the eight-pass limit, a statement may succeed in one process and refuse in another;
 the equality-compatible hash and existing pass limit are unchanged.
 
-The commerce-shaped default-grant probe completes a 1.5-million-row annual repeat-customers slice with 250,000 groups. The 500,000-product category-rank CTE/window shape still reaches an existing nested/join memory refusal; its completion needs the SQ-L3b/SQ-L4 owners. The 800,000-row eager NOT IN vector also retains CS05067. These probes preserve those explicit scope boundaries.
+The commerce-shaped default-grant probe completes a 1.5-million-row annual repeat-customers slice with 250,000 groups. The 500,000-product category-rank CTE/window shape still refuses while creating aggregate states inside the revenues CTE, whose nested executor has no spill permission. The 800,000-row NOT IN child first refuses its materialized SELECT input, before completing the eager membership vector. Nested aggregation ownership and that subquery input/vector remain follow-ups for SQ-L4. These probes preserve those explicit scope boundaries.
 
 No durable write or flush boundary is added. Crash images captured at partition append
 and ordinal-merge completion, with the fault-injecting durable recorder armed, reopen
@@ -1821,8 +1905,8 @@ requires at least one mandatory hash equality between the children and proves th
 ON condition non-throwing with the existing hash-safety rules. CS05070 refuses other forms
 before reading either input, even when an input is empty. This includes inequality-only/OR
 conditions, unproven calls, arithmetic, subqueries, CHAR-only keys and derived text without
-a stored-codec Unicode guarantee. No merge executor, nested-loop FULL fallback or spill is
-introduced. Computed USING COALESCE and proven identity/widening casts can supply hash keys
+a stored-codec Unicode guarantee. No merge executor or nested-loop FULL fallback is introduced. Eligible root hash joins
+can spill as described under SQ-L3b above. Computed USING COALESCE and proven identity/widening casts can supply hash keys
 in later joins or grouped inner subtrees. PostgreSQL optimizer/path/joinrels.c:1157-1180
 likewise refuses FULL when it cannot produce a merge/hash path.
 
@@ -1849,8 +1933,8 @@ and separate unmatched/null-key drain; no code was copied.
 The statement grant charges the table object (104 bytes including new tracking/evaluator
 fields), bucket/entry arrays, the aligned tracking array header/payload and retained rows.
 Nested tables share the live grant. Success, budget refusal, evaluation failure and cancellation
-release every reservation. CS05067 is unchanged. Only hash-build state is bounded: existing
-outer/intermediate/result materialization retains its existing contract. The build side is
+release every reservation. CS05067 is unchanged. Fitting hash-build state retains these exact charges; eligible root outer/intermediate
+buffers can spill under SQ-L3b. Final materialization retains its existing contract. The build side is
 always the written right child, including when an index exists. EXPLAIN names FullHashJoin and
 unmatched=both in JoinStep detail; ANALYZE retains candidate-pair counts rather than emitted
 unmatched-row counts. Deterministic 64/640-row fixtures compare 4096/409600 loop candidates
@@ -8169,7 +8253,7 @@ Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
 LATERAL joins, UPDATE SET subqueries, `Serializable`
-isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash-join spill,
+isolation (rejected at begin), persisted statistics, standalone ANALYZE,
 and index-only result production (a seek always fetches the row).
 (Row-level MVCC visibility and secondary indexes — DDL, write-path maintenance, and planner seek
 adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC

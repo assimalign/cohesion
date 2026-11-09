@@ -23,8 +23,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal readonly struct SqlStatementContext
 {
     private readonly long _transactionStartTicks;
-    // Normal statements carry only their database name. Provisioning needs both names and
-    // uses a shared immutable pair, leaving room for the clock without growing normal contexts.
+    // Root execution can attach its session in the existing database-name identity slot.
+    // Provisioning still shares its name pair. Neither contexts nor name pairs grow;
+    // the session identity alone grants no nested executor permission to spill.
     private readonly object _names;
 
     internal SqlStatementContext(
@@ -176,7 +177,29 @@ internal readonly struct SqlStatementContext
     internal string? ProvisioningSchema => (_names as ProvisioningNames)?.Schema;
 
     /// <summary>Gets the current database's catalog identifier for metadata rows.</summary>
-    internal string DatabaseName => _names is string name ? name : ((ProvisioningNames)_names).Database;
+    internal string DatabaseName
+    {
+        get
+        {
+            if (_names is string name) { return name; }
+            if (_names is SqlDatabaseSession session) { return session.Database.Name.ToString(); }
+            object identity = ((ProvisioningNames)_names).Database;
+            return identity is SqlDatabaseSession owner ? owner.Database.Name.ToString() : (string)identity;
+        }
+    }
+
+    internal SqlDatabaseSession? Session => _names is ProvisioningNames names
+        ? names.Database as SqlDatabaseSession : _names as SqlDatabaseSession;
+
+    internal SqlStatementContext WithSession(SqlDatabaseSession session)
+    {
+        if (ReferenceEquals(Session, session)) { return this; }
+        if (_names is ProvisioningNames names) { names.AttachSession(session); return this; }
+        return new(this, session);
+    }
+
+    private SqlStatementContext(SqlStatementContext original, SqlDatabaseSession session)
+    { this = original; _names = session; }
 
     /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
     internal SqlCatalogSnapshot? CatalogSnapshot => Metrics.CatalogSnapshot;
@@ -196,7 +219,7 @@ internal readonly struct SqlStatementContext
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementContext.ProvisioningNames.DebugView))]
     private class ProvisioningNames
     {
-        internal ProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
+        internal ProvisioningNames(string? schema, object database, TimeSpan lockTimeout)
         {
             Schema = schema;
             Database = database;
@@ -204,7 +227,8 @@ internal readonly struct SqlStatementContext
         }
 
         internal string? Schema { get; }
-        internal string Database { get; }
+        internal object Database { get; private set; }
+        internal void AttachSession(SqlDatabaseSession session) => Database = session;
         internal TimeSpan LockTimeout { get; }
 
         private sealed class DebugView
@@ -227,7 +251,7 @@ internal readonly struct SqlStatementContext
         internal long UnflushedPages { get; set; }
         internal long PreparedPages { get; set; }
         internal long CheckpointBytes { get; set; } = SqlSchemaProvisioner.JointCopyCheckpointBytes;
-        internal JointProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
+        internal JointProvisioningNames(string? schema, object database, TimeSpan lockTimeout)
             : base(schema, database, lockTimeout)
         {
         }

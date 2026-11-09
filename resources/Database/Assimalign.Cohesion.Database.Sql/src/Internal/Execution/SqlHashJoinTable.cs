@@ -4,7 +4,7 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-/// <summary>A statement-owned chained hash table with explicit allocation reservations and no spill.</summary>
+/// <summary>A statement-owned chained hash table with explicit allocation reservations.</summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlHashJoinTable")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlHashJoinTable.DebugView))]
 internal sealed class SqlHashJoinTable : IDisposable
@@ -13,7 +13,9 @@ internal sealed class SqlHashJoinTable : IDisposable
     private readonly SqlStatementMetrics _metrics;
     private readonly long _budget;
     private readonly bool _trackUnmatched;
-    private readonly SqlExpressionEvaluator? _evaluator;
+    // The optional evaluator slot becomes the spill owner only after failed admission.
+    // Ordinary tables retain their original size, arrays and reservation boundaries.
+    private object? _state;
     private bool[] _matched = [];
     private int[] _buckets = [];
     private Entry[] _entries = [];
@@ -27,14 +29,20 @@ internal sealed class SqlHashJoinTable : IDisposable
         _metrics = metrics;
         _budget = budget;
         _trackUnmatched = trackUnmatched;
-        _evaluator = evaluator;
+        _state = evaluator;
         Reserve(104); // aligned object, including tracking/evaluator fields
     }
 
     internal void Add(object?[] row, CancellationToken cancellationToken)
     {
+        if (_state is SqlHashJoinSpill spill) { spill.Add(row, cancellationToken); return; }
         cancellationToken.ThrowIfCancellationRequested();
         bool hasKey = TryHash(row, _keys.InnerOrdinals, _keys.InnerExpressions, out int hash);
+        AddHashed(row, hasKey, hash, cancellationToken);
+    }
+
+    internal void AddHashed(object?[] row, bool hasKey, int hash, CancellationToken cancellationToken)
+    {
         if (!hasKey && !_trackUnmatched) { return; }
         if (_count == _entries.Length) { Grow(cancellationToken); }
         _metrics.DmlMemory(_budget)?.HashRow(row, adding: true);
@@ -52,6 +60,9 @@ internal sealed class SqlHashJoinTable : IDisposable
     }
 
     internal IEnumerable<object?[]> Probe(object?[] outer, CancellationToken cancellationToken)
+        => _state is SqlHashJoinSpill spill ? spill.ProbeRows(outer, cancellationToken) : ProbeMemory(outer, cancellationToken);
+
+    private IEnumerable<object?[]> ProbeMemory(object?[] outer, CancellationToken cancellationToken)
     {
         // Keep the ordinary flat-join row iterator allocation unchanged. FULL's caller
         // uses entry ordinals below so ON success can mark an individual duplicate.
@@ -66,11 +77,30 @@ internal sealed class SqlHashJoinTable : IDisposable
         }
     }
 
-    internal object?[] RowAt(int entry) => _entries[entry].Row;
+    internal object?[] RowAt(int entry) => _state is SqlHashJoinSpill spill ? spill.RowAt(entry) : _entries[entry].Row;
 
-    internal void MarkMatched(int entry) => _matched[entry] = true;
+    internal void MarkMatched(int entry)
+    { if (_state is SqlHashJoinSpill spill) { spill.MarkMatched(entry); } else { _matched[entry] = true; } }
+
+    internal bool IsMatched(int entry) => _matched[entry];
+
+    internal IEnumerable<int> ProbeHashEntries(int hash, CancellationToken cancellationToken)
+    {
+        if (_count == 0) { yield break; }
+        int at = _buckets[(int)((uint)hash % (uint)_buckets.Length)] - 1;
+        while (at >= 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var entry = _entries[at];
+            if (entry.Hash == hash) { yield return at; }
+            at = entry.Next;
+        }
+    }
 
     internal IEnumerable<object?[]> Unmatched(CancellationToken cancellationToken)
+        => _state is SqlHashJoinSpill spill ? spill.Unmatched(cancellationToken) : UnmatchedMemory(cancellationToken);
+
+    private IEnumerable<object?[]> UnmatchedMemory(CancellationToken cancellationToken)
     {
         for (int i = 0; i < _count; i++)
         {
@@ -80,6 +110,9 @@ internal sealed class SqlHashJoinTable : IDisposable
     }
 
     internal IEnumerable<int> ProbeEntries(object?[] outer, CancellationToken cancellationToken)
+        => _state is SqlHashJoinSpill spill ? spill.Probe(outer, cancellationToken) : ProbeMemoryEntries(outer, cancellationToken);
+
+    private IEnumerable<int> ProbeMemoryEntries(object?[] outer, CancellationToken cancellationToken)
     {
         if (_count == 0 || !TryHash(outer, _keys.OuterOrdinals, _keys.OuterExpressions, out int hash)) { yield break; }
         int at = _buckets[(int)((uint)hash % (uint)_buckets.Length)] - 1;
@@ -92,12 +125,12 @@ internal sealed class SqlHashJoinTable : IDisposable
         }
     }
 
-    private bool TryHash(object?[] row, int[] ordinals, SqlBoundExpression[]? expressions, out int result)
+    internal bool TryHash(object?[] row, int[] ordinals, SqlBoundExpression[]? expressions, out int result)
     {
         var hash = new HashCode();
         for (int i = 0; i < ordinals.Length; i++)
         {
-            if ((expressions is null ? row[ordinals[i]] : _evaluator!.Evaluate(expressions[i], row)) is not { } value) { result = 0; return false; }
+            if ((expressions is null ? row[ordinals[i]] : ((SqlExpressionEvaluator)_state!).Evaluate(expressions[i], row)) is not { } value) { result = 0; return false; }
             hash.Add(SqlValueComparer.GetHashCode(value, _keys.Collations[i]));
         }
         result = hash.ToHashCode();
@@ -162,6 +195,7 @@ internal sealed class SqlHashJoinTable : IDisposable
 
     public void Dispose()
     {
+        if (_state is SqlHashJoinSpill spill) { _state = null; spill.Dispose(); }
         _metrics.ReleaseHashMemory(_reserved);
         _reserved = 0;
         if (_count != 0 && _metrics.DmlMemory(_budget) is { } memory)
@@ -172,6 +206,100 @@ internal sealed class SqlHashJoinTable : IDisposable
         _buckets = [];
         _matched = [];
         _count = 0;
+    }
+
+    internal void Spill(SqlDatabaseSession owner, object?[] current, CancellationToken token)
+    {
+        if (_state is SqlHashJoinSpill) { throw SqlExecutionException.StatementMemoryBudget(_budget); }
+        var spill = new SqlHashJoinSpill(owner, _keys, _metrics, _budget, _trackUnmatched);
+        try
+        {
+            spill.AdoptBatchZero(this, token);
+            _state = spill;
+            spill.Add(current, token);
+        }
+        catch { spill.Dispose(); throw; }
+    }
+
+    internal int SpillCount => _count;
+    internal long SpillReserved => _reserved;
+    internal object?[] SpillRow(int entry) => _entries[entry].Row;
+    internal int SpillHash(int entry) => _entries[entry].Hash;
+    internal int SpillOrdinal(int entry) => _entries[entry].Next;
+    internal void SpillMatch(int entry) => _matched[entry] = true;
+
+    internal void ExportSpillPrefix(SqlHashJoinSpill spill, CancellationToken token)
+    {
+        int kept = 0, count = _count;
+        for (int i = 0; i < count; i++)
+        {
+            var entry = _entries[i];
+            if (spill.InitialRow(entry.Row, entry.Next != -2, entry.Hash, token))
+            { _entries[kept++] = entry with { Next = i }; }
+            else { ReleaseSpillRow(entry.Row); _entries[i] = default; }
+        }
+        Array.Clear(_entries, kept, count - kept); _count = kept;
+        ShrinkSpillEntries();
+    }
+
+    internal void RetainSpillZero(SqlHashJoinSpill spill, List<long>? ordinals, CancellationToken token)
+    {
+        int kept = 0, count = _count;
+        for (int i = 0; i < count; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            var entry = _entries[i];
+            long ordinal = ordinals is null ? entry.Next : ordinals[i];
+            if (spill.KeepZero(entry.Hash))
+            {
+                _entries[kept] = entry;
+                if (ordinals is not null) { ordinals[kept] = ordinal; }
+                kept++;
+            }
+            else
+            { spill.Store(entry.Row, true, entry.Hash, ordinal, token); ReleaseSpillRow(entry.Row); _entries[i] = default; }
+        }
+        Array.Clear(_entries, kept, count - kept); _count = kept;
+        if (ordinals is not null) { ordinals.RemoveRange(kept, count - kept); ordinals.TrimExcess(); }
+        ShrinkSpillEntries();
+    }
+
+    internal void RehashSpillEntries(CancellationToken token)
+    {
+        Array.Clear(_buckets);
+        for (int i = 0; i < _count; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            int bucket = (int)((uint)_entries[i].Hash % (uint)_buckets.Length);
+            _entries[i] = _entries[i] with { Next = _buckets[bucket] - 1 }; _buckets[bucket] = i + 1;
+        }
+    }
+
+    private void ReleaseSpillRow(object?[] row)
+    { long bytes = RowBytes(row); _reserved -= bytes; _metrics.ReleaseHashMemory(bytes); }
+
+    private void ShrinkSpillEntries()
+    {
+        int capacity = _count == 0 ? 0 : 16;
+        while (capacity < _count) { capacity = checked(capacity * 2); }
+        if (capacity >= _entries.Length) { return; }
+        long old = ArrayBytes(_entries.Length);
+        if (capacity == 0) { _entries = []; _buckets = []; _matched = []; }
+        else
+        {
+            Reserve(ArrayBytes(capacity));
+            var entries = new Entry[capacity]; Array.Copy(_entries, entries, _count);
+            _entries = entries; _buckets = new int[capacity]; _matched = _trackUnmatched ? new bool[capacity] : [];
+        }
+        _reserved -= old; _metrics.ReleaseHashMemory(old);
+    }
+
+    // A spill can reuse this table as its initial resident batch. Eviction must release
+    // the raw storage without recursively disposing the spill in the evaluator slot.
+    internal void ClearSpillEntries()
+    {
+        _metrics.ReleaseHashMemory(_reserved); _reserved = 0;
+        _entries = []; _buckets = []; _matched = []; _count = 0;
     }
 
     private readonly record struct Entry(int Hash, int Next, object?[] Row);

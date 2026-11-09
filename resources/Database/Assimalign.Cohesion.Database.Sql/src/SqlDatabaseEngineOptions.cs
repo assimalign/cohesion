@@ -60,7 +60,7 @@ public sealed class SqlDatabaseEngineOptions
     /// Plain ON DELETE CASCADE closures charge about 840 bytes per two-column row: the default
     /// 64 MiB grant caps such a closure at about 79,900 rows, less when other work retains memory.
     /// A 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget.
-    /// Budget exhaustion refuses the statement unless an eligible root plain SELECT ORDER BY or ordered DISTINCT, including a CTAS source root, hands off to configured temporary space.
+    /// Budget exhaustion refuses the statement unless an eligible root hash join, ORDER BY, DISTINCT or fixed-state GROUP BY, including a permitted CTAS source root, hands off to configured temporary space.
     /// Nested plans, window/recursive/DML sources, grouping sets and ordered sequence deferral retain their current memory policy.
     /// Spill requires fixed ordering collations, supported codecs and a remaining grant whose bound (grant - 32768) / 16 - 8192 holds each encoded record.
     /// CTAS publishes only after all copying succeeds.</remarks>
