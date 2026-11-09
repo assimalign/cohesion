@@ -21,6 +21,7 @@ public sealed class GraphTextIndexRecoveryTests
     [InlineData("commit-record")] [InlineData("committed")]
     [InlineData("drop-catalog")] [InlineData("drop-tree")] [InlineData("committed-drop")]
     [InlineData("build-root")] [InlineData("build-chunk")] [InlineData("build-published")]
+    [InlineData("build-chunk-two")] [InlineData("build-chunk-two", false)]
     [InlineData("update")] [InlineData("committed-update")] [InlineData("delete")]
     [InlineData("retire-registration")] [InlineData("reclaim-pages")] [InlineData("reclaim-registration")] [InlineData("reclaimed")]
     [InlineData("reclaim-batch")] [InlineData("reclaim-batch-large")]
@@ -38,9 +39,16 @@ public sealed class GraphTextIndexRecoveryTests
         var database = await engine.CreateDatabaseAsync("source", token);
         await using var session = await database.CreateSessionAsync(token);
         await session.ExecuteAsync("INSERT (:N {k:1,p:'oldabc'}),(:N {k:2,p:'abcXbcd'})", cancellationToken: token);
+        bool twoChunks = boundary == "build-chunk-two";
+        if (twoChunks)
+        {
+            await session.ExecuteAsync("FOR k IN [" + string.Join(',', Enumerable.Range(3, 128)) + "] INSERT (:N {k:k,p:'unrelated'})", cancellationToken: token);
+        }
         var initialOwners = GraphIndexReclamationReviewTests.IndexOwners(database).Keys.ToArray();
+        var initialPages = initialOwners.ToDictionary(id => id, id => database.DataStorage.GetOwnerIndexPages(id).ToArray());
         var initialRegistrations = GraphTextIndexTests.Registrations(database).Select(entry => entry.Id).ToArray();
         ulong imageTree = 0;
+        PageId[] imageTreePages = [];
         string build = text ? "CREATE TEXT INDEX text_p FOR (n:N) ON (n.p)" : "CREATE INDEX text_p FOR (n:N) ON (n.p)";
         bool reclamation = boundary.StartsWith("reclaim", StringComparison.Ordinal) || boundary == "retire-registration";
         bool drop = boundary.Contains("drop", StringComparison.Ordinal) || reclamation;
@@ -67,10 +75,15 @@ public sealed class GraphTextIndexRecoveryTests
         { await session.ExecuteAsync("DROP INDEX text_p", cancellationToken: token); }
         int captured = 0;
         bool buildPublished = false;
+        int committedChunks = 0;
         database.Store.AfterTextIndexMutation = stage =>
         {
             if (stage == "build-published") { buildPublished = true; }
-            if (stage != (boundary == "reclaim-batch-large" ? "reclaim-batch" : boundary)) { return; }
+            if (twoChunks)
+            {
+                if (stage != "build-chunk" || ++committedChunks != 2) { return; }
+            }
+            else if (stage != (boundary == "reclaim-batch-large" ? "reclaim-batch" : boundary)) { return; }
             if (boundary == "reclaim-batch-large")
             {
                 var remaining = database.DataStorage.GetOwnerIndexPages(largeTree);
@@ -99,9 +112,12 @@ public sealed class GraphTextIndexRecoveryTests
             }
             else if (boundary is "committed" or "committed-drop" or "committed-update")
             {
+                var dropPin = boundary == "committed-drop" ? await database.Coordinator.BeginSnapshotPinAsync(token) : null;
                 await session.ExecuteAsync(boundary == "committed" ? build
                     : boundary == "committed-drop" ? "DROP INDEX text_p" : "MATCH (n:N {k:1}) SET n.p='newxyz'", cancellationToken: token);
+                if (dropPin is not null) { database.DataStorage.GetOwnerIndexPageCount(imageTree).ShouldBeGreaterThan(0); }
                 Capture();
+                if (dropPin is not null) { await database.Coordinator.RollbackAsync(dropPin, token); }
             }
             else if (reclamation)
             {
@@ -132,6 +148,7 @@ public sealed class GraphTextIndexRecoveryTests
 
         // Assert: complete metadata and exact stored values survive; an abandoned writer never leaves false postings.
         captured.ShouldBe(1);
+        if (twoChunks) { committedChunks.ShouldBe(2); }
         for (int reopen = 0; reopen < 2; reopen++)
         {
             var recovered = await engine.OpenDatabaseAsync("image", token);
@@ -147,10 +164,12 @@ public sealed class GraphTextIndexRecoveryTests
             (await GraphTextIndexTests.RowsAsync(reader, GraphTextIndexTests.Query("CONTAINS"), "abcd")).ShouldBeEmpty();
             for (int pass = 0; pass < 16; pass++) { recovered.Coordinator.RunVersionPurgePass(token); }
             var registrations = GraphTextIndexTests.Registrations(recovered);
+            foreach (var owner in initialPages) { recovered.DataStorage.GetOwnerIndexPages(owner.Key).ShouldBe(owner.Value); }
             registrations.Select(entry => entry.Id).Order().ShouldBe(initialRegistrations.Concat(indexed ? [imageTree] : Array.Empty<ulong>()).Order());
             registrations.ShouldAllBe(entry => entry.Root > 0);
             if (indexed)
             {
+                recovered.DataStorage.GetOwnerIndexPages(imageTree).ShouldBe(imageTreePages);
                 string[] values = boundary == "committed-update" ? ["newxyz", "abcXbcd"] : ["oldabc", "abcXbcd"];
                 var expected = values.SelectMany(value => Internal.GraphTextTrigrams.Keys(value, token))
                     .GroupBy(key => Convert.ToHexString(key.Encoded.Span)).ToDictionary(group => group.Key, group => group.Count());
@@ -170,7 +189,7 @@ public sealed class GraphTextIndexRecoveryTests
         void CaptureIdentity()
         {
             ulong id = GraphIndexReclamationReviewTests.IndexOwners(database).Keys.Except(initialOwners).SingleOrDefault();
-            if (id != 0) { imageTree = id; }
+            if (id != 0) { imageTree = id; imageTreePages = database.DataStorage.GetOwnerIndexPages(id).ToArray(); }
         }
 
         void Capture()

@@ -138,9 +138,7 @@ added. Existing CG02009, CG05004, CG05020, CG06006 and CG06019 keep their condit
 
 ## Shared index substrate (#1808)
 
-Direct GraphStore builds use the existing 1,000,000-work-unit and 256 MiB defaults; session
-builds use their configured grants. Budget refusal precedes root allocation. Direct calls report
-GraphIndexBuildLimitException with the existing CG05004/CG05020 code; the model root preserves it.
+Direct GraphStore builds retain caller-owned accounting and impose no fixed work or memory cap. Session builds use their configured work and retained-memory grants; refusal precedes root allocation.
 
 Exact and text builds use IndexBuildLoop's 64-entry durable chunks after the existing work
 and memory preflight. The writer reservation and logical creator span the root bracket,
@@ -156,8 +154,8 @@ Graph catalog v4, record format 5 and B-tree format 3 remain current: these life
 introduce no new persisted discriminator. Start/stop events 16/17 carry database, physical
 objectId and succeeded on stop; PagesReclaimed (18, #1842) reports each committed owner-page
 batch. No indexed value is emitted and no diagnostic identity is added.
-With 8,176 identical postings and a 64 KiB checkpoint trigger, the controlled whole-bracket
-backfill measured 379,872 journal bytes versus 207,780 with 128 shared-loop chunks.
+With 8 nodes each contributing 1,022 distinct trigrams (8,176 postings) and a 64 KiB checkpoint trigger, the controlled whole-bracket
+backfill measured per-checkpoint journal peaks of 379,872 bytes versus 207,780 with 128 shared-loop chunks. These peaks include final publication metadata. Total journal volume can increase as chunks re-journal touched leaves.
 
 ## Journal admission backstop (#1283, EN-C2)
 
@@ -4502,3 +4500,7 @@ Every negotiated statement Ready now carries transaction I/T/E followed by a zer
 byte. This model retains no state requiring a family reset and declares no reset statement. Pool
 return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
 the former form without a compatibility reader; see Database.Protocol DESIGN.
+
+A short snapshot fence advances the coordinator's idle horizon beyond each reserved build owner before allocation. The older logical creator pins that owner for the entire build; after a failed creator ends, committed chunks can retire without waiting for another user transaction. Open-time detach commits and orphan-receipt inserts are explicit crash boundaries.
+
+For a file with at least 1 GiB of valid allocated pages under an unrelated owner, the minimum of three Release opens on the same ARM64 host was 4.875 s at d33f62363 and 2.758 s with bounded owner-directory discovery. This measures removal of the second page scan, rather than a document/node/value workload.

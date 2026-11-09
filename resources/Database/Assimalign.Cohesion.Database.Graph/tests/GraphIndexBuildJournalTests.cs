@@ -31,6 +31,7 @@ public sealed class GraphIndexBuildJournalTests
         // Arrange: compare the former one-bracket insertion shape with the shared loop.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         var options = GraphTextIndexTests.Quiet();
+        options.StorageStrategy = new FaultInjectingJournalStorageStrategy(durable: true);
         options.CheckpointJournalSize = 64 * 1024;
         await using var engine = GraphDatabaseEngine.Create("text-chunks", options);
         var database = await engine.CreateDatabaseAsync("graph", guard.Token);
@@ -97,10 +98,25 @@ public sealed class GraphIndexBuildJournalTests
         int baselineEvents = events.Events.Count;
         using var lifecycle = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Informational);
         int entries = 0, previous = 0, chunks = 0;
+        long chunkStart = 0, committedLength = 0;
+        bool inChunk = false;
+        var chunkCommits = new List<long>();
+        var deltas = new List<long>();
+        FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () =>
+        {
+            // Commit durability runs while the physical bracket is active.
+            // Gate-release checkpoint flushes run after it leaves the active set.
+            if (!inChunk || !database.DataStorage.HasActiveTransactions) { return; }
+            long length = database.DataStorage.JournalLength;
+            committedLength = Math.Max(committedLength, length);
+        };
         database.Store.AfterTextIndexMutation = stage =>
         {
+            if (stage == "build-chunk-start") { chunkStart = database.DataStorage.JournalLength; committedLength = chunkStart; inChunk = true; }
             if (stage == "build-entry") { entries++; }
             if (stage != "build-chunk") { return; }
+            inChunk = false;
+            chunkCommits.Add(committedLength); deltas.Add(committedLength - chunkStart);
             (entries - previous).ShouldBeInRange(1, 64);
             previous = entries;
             chunks++;
@@ -108,7 +124,7 @@ public sealed class GraphIndexBuildJournalTests
 
         // Act.
         try { await session.ExecuteAsync("CREATE TEXT INDEX t FOR (n:N) ON (n.p)", cancellationToken: guard.Token); }
-        finally { database.Store.AfterTextIndexMutation = null; }
+        finally { database.Store.AfterTextIndexMutation = null; FaultInjectingJournalStorageStrategy.BeforeCommitFlush = null; }
         database.Coordinator.Checkpoint(guard.Token);
 
         peaks[1] = Peak(baselineEvents);
@@ -118,9 +134,12 @@ public sealed class GraphIndexBuildJournalTests
         lifecycle.Events.Count(item => item.EventId == 17).ShouldBe(1);
         entries.ShouldBe(8 * 1022);
         chunks.ShouldBe((entries + 63) / 64);
+        chunkCommits.Count.ShouldBe(chunks);
+        foreach (var checkpoint in events.Events.Skip(baselineEvents).Where(item => item.EventId == 5 && Equals(item.Payload![0], database.DataStorage.Name.ToString())))
+        { ((long)checkpoint.Payload![2]!).ShouldBeLessThanOrEqualTo(options.CheckpointJournalSize + deltas.Max()); }
         peaks[0].ShouldBeGreaterThan(0);
         peaks[1].ShouldBeGreaterThan(0);
         peaks[1].ShouldBeLessThan(peaks[0]);
-        _output.WriteLine($"TEXT_BUILD_JOURNAL|entries={entries}|whole-bracket={peaks[0]}|chunked={peaks[1]}|chunks={chunks}");
+        _output.WriteLine($"TEXT_BUILD_JOURNAL|entries={entries}|whole-bracket={peaks[0]}|chunked={peaks[1]}|chunks={chunks}|largest-chunk-delta={deltas.Max()}|commits={string.Join(',', chunkCommits)}");
     }
 }

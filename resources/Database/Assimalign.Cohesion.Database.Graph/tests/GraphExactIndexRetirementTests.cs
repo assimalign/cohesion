@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Threading;
@@ -71,6 +72,32 @@ public sealed class GraphExactIndexRetirementTests
 
         // Act / Assert
         await writer.ExecuteAsync("DROP INDEX exact_p", cancellationToken: CancellationToken.None);
+        int reads = 0, passes = 0, overlaps = 0, reading = 0;
+        using var started = new ManualResetEventSlim();
+        var race = Stopwatch.StartNew();
+        var readTask = Task.Run(async () =>
+        {
+            Volatile.Write(ref reading, 1); started.Set();
+            do
+            {
+                (await GraphTextIndexTests.RowsAsync(old, "MATCH (n:N {p:'abc'}) RETURN n.p")).ShouldHaveSingleItem();
+                Interlocked.Increment(ref reads);
+            } while (race.Elapsed < TimeSpan.FromSeconds(1) || Volatile.Read(ref overlaps) == 0);
+            Volatile.Write(ref reading, 0);
+        }, guard.Token);
+        var reclaimTask = Task.Run(() =>
+        {
+            started.Wait(guard.Token);
+            do
+            {
+                guard.Token.ThrowIfCancellationRequested();
+                database.Coordinator.RunVersionPurgePass(guard.Token);
+                if (Volatile.Read(ref reading) != 0) { Interlocked.Increment(ref overlaps); }
+                Interlocked.Increment(ref passes);
+            } while (race.Elapsed < TimeSpan.FromSeconds(1) || Volatile.Read(ref reading) != 0);
+        }, guard.Token);
+        await Task.WhenAll(readTask, reclaimTask).WaitAsync(guard.Token);
+        reads.ShouldBeGreaterThan(0); passes.ShouldBeGreaterThan(0); overlaps.ShouldBeGreaterThan(0);
         database.Coordinator.RunVersionPurgePass(CancellationToken.None);
         database.DataStorage.GetOwnerIndexPages(id).Count.ShouldBe(pages);
         (await GraphTextIndexTests.RowsAsync(old, "MATCH (n:N {p:'abc'}) RETURN n.p")).ShouldHaveSingleItem();

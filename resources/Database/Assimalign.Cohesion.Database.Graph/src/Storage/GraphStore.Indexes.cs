@@ -70,21 +70,8 @@ public sealed partial class GraphStore
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
     /// <exception cref="GraphElementTooLargeException">The names exceed one graph record, or an existing node's value exceeds the index key.</exception>
-    /// <exception cref="GraphIndexBuildLimitException">The direct-store build exceeds 1,000,000 work units or 256 MiB of retained build memory.</exception>
     public ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
-    {
-        const long workLimit = 1_000_000;
-        long work = 0;
-        var memory = new IndexBuildBudget(256L * 1024 * 1024, cancellationToken, limit =>
-            new GraphIndexBuildLimitException("CG05020", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryMemoryBudgetExceeded, limit)));
-        void Visit()
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (++work > workLimit)
-            { throw new GraphIndexBuildLimitException("CG05004", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpansionLimitExceeded, work, 0, workLimit)); }
-        }
-        return CreateIndexAsync(label, propertyKey, context, Visit, memory.Charge, cancellationToken, false);
-    }
+        => CreateIndexAsync(label, propertyKey, context, null, null, cancellationToken, false);
 
     internal async ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context,
         Action? visit, Action<long>? reserve, CancellationToken cancellationToken, bool text = false)
@@ -127,6 +114,9 @@ public sealed partial class GraphStore
         bool buildSucceeded = false;
         try
         {
+            // The creator pins this later owner, while this short fence advances the
+            // manager's idle horizon so abandoned chunks retire without a new user write.
+            await AdvanceIndexOwnerHorizonAsync(cancellationToken).ConfigureAwait(false);
             var index = await ApplyIndexBuildAsync(context, async bracket =>
             {
                 var created = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
@@ -138,6 +128,7 @@ public sealed partial class GraphStore
             bool published = false;
             await IndexBuildLoop.RunAsync(entries, async (chunk, token) =>
             {
+                AfterTextIndexMutation?.Invoke("build-chunk-start");
                 await ApplyIndexBuildAsync(context, async bracket =>
                 {
                     foreach (var entry in chunk)
@@ -163,6 +154,12 @@ public sealed partial class GraphStore
             buildSucceeded = true;
         }
         finally { IndexBuildStopped?.Invoke(id, buildSucceeded); }
+    }
+
+    private async ValueTask AdvanceIndexOwnerHorizonAsync(CancellationToken cancellationToken)
+    {
+        var fence = await _coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
+        await _coordinator.RollbackAsync(fence, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>Drops a node-property index definition; older snapshots retain its tree.</summary>
@@ -374,9 +371,6 @@ public sealed partial class GraphStore
                 { throw new StorageCorruptionException(page, slot, ErrorMessages.RegistrationIdentityInvalid); }
                 if (registration.RootPageId > 0)
                 {
-                    using var root = _storage.PageManager.GetPage((PageId)registration.RootPageId);
-                    if (root.Page.OwnerId != registration.ObjectId)
-                    { throw new StorageCorruptionException(page, slot, ErrorMessages.RegistrationIdentityInvalid); }
                     registrations.Add(registration);
                 }
                 _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));

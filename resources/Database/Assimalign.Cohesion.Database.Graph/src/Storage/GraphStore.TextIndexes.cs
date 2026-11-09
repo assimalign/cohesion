@@ -62,23 +62,26 @@ public sealed partial class GraphStore
         // Open only, before admitting operations. Allocation survives bracket rollback, while
         // the registration may not. Recover only owners with no definition at all; fixed owners
         // and trees with a retained definition must follow their ordinary recovery contracts.
-        for (long page = 1; page < _storage.PageManager.PageCount; page++)
+        ulong afterOwner = 0;
+        while (true)
         {
-            if (!_storage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
-            using var handle = _storage.PageManager.GetPage((PageId)page);
-            ulong id = handle.Page.OwnerId;
-            if (handle.Page.Type != PageType.Index ||
-                id <= 2 || id == adjacencyId || id == labelsId || id == relationshipTypesId ||
-                _registrations.ContainsKey(id) || _records.ContainsKey((3, id))) { continue; }
-            var bytes = new byte[34];
-            bytes[16] = 4; bytes[17] = GraphRecordCodec.FormatVersion;
-            BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(18), id);
-            BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -page);
-            using var bracket = _storage.BeginTransaction();
-            var location = _storage.InsertOwned(bracket, 1, bytes);
-            bracket.Commit();
-            _registrations.Add(id, (location.PageId, location.SlotIndex, -page));
-            ScheduleIndexReclamation(id); // Reclamation still requires id below the safe bound.
+            var owners = _storage.GetIndexOwners(afterOwner);
+            if (owners.Count == 0) { break; }
+            foreach (var (id, page) in owners)
+            {
+                afterOwner = id;
+                if (id <= 2 || id == adjacencyId || id == labelsId || id == relationshipTypesId ||
+                    _registrations.ContainsKey(id) || _records.ContainsKey((3, id))) { continue; }
+                var bytes = new byte[34];
+                bytes[16] = 4; bytes[17] = GraphRecordCodec.FormatVersion;
+                BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(18), id);
+                BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -(long)page);
+                using var bracket = _storage.BeginTransaction();
+                var location = _storage.InsertOwned(bracket, 1, bytes);
+                bracket.Commit();
+                _registrations.Add(id, (location.PageId, location.SlotIndex, -(long)page));
+                ScheduleIndexReclamation(id); // Reclamation still requires id below the safe bound.
+            }
         }
     }
 
