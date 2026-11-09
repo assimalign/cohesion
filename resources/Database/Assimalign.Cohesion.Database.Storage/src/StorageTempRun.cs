@@ -47,6 +47,14 @@ public sealed class StorageTempRun : IDisposable
     /// <summary>Gets whether appending has finished.</summary>
     public bool IsSealed => _sealed;
 
+    /// <summary>Gets an opaque position for the next appended record.</summary>
+    /// <remarks>Save this value immediately before Append. A sealed run can open a reader
+    /// at a saved position, including a record crossing a page boundary. Positions belong
+    /// to this run only; callers must not perform arithmetic on them.</remarks>
+    /// <exception cref="ObjectDisposedException">The run or its statement is disposed.</exception>
+    public long Position { get { lock (Sync) { Check(); return _length; } } }
+    private long _length;
+
     /// <summary>Copies one record, including records spanning several pages.</summary>
     /// <param name="record">The record bytes, copied before returning.</param>
     /// <param name="cancellationToken">Observed before each page.</param>
@@ -68,6 +76,7 @@ public sealed class StorageTempRun : IDisposable
                 BinaryPrimitives.WriteInt32LittleEndian(length, record.Length);
                 Write(length, cancellationToken); Write(record, cancellationToken);
                 RecordCount++; MaximumRecordLength = Math.Max(MaximumRecordLength, record.Length);
+                _length += 4L + record.Length;
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             { DisposeAfterFailure(); throw StorageTempException.Unavailable(error); }
@@ -88,6 +97,7 @@ public sealed class StorageTempRun : IDisposable
                 Span<byte> length = stackalloc byte[4]; BinaryPrimitives.WriteInt32LittleEndian(length, size);
                 Write(length, token); Write(first, token); Write(second, token); Write(third, token);
                 RecordCount++; MaximumRecordLength = Math.Max(MaximumRecordLength, size);
+                _length += 4L + size;
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             { DisposeAfterFailure(); throw StorageTempException.Unavailable(error); }
@@ -160,6 +170,28 @@ public sealed class StorageTempRun : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(memoryGrant, StorageTempSpace.PageSize);
         return OpenReader(new byte[StorageTempSpace.PageSize]);
+    }
+
+    /// <summary>Opens an independent reader at a position saved before an append.</summary>
+    /// <param name="memoryGrant">At least one 8 KiB page; the destination is caller-owned.</param>
+    /// <param name="position">A Position saved from this run, or its end position.</param>
+    /// <returns>A reader whose next read returns the record at the saved position.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The grant is too small or the position is outside the run.</exception>
+    /// <exception cref="InvalidOperationException">The run is not sealed.</exception>
+    /// <exception cref="ObjectDisposedException">The run or statement is disposed.</exception>
+    /// <remarks>The reader validates every page it visits, including the first page after
+    /// seeking. An in-range value that was not saved at a record boundary is invalid input.</remarks>
+    public StorageTempRunReader OpenReader(long memoryGrant, long position)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(memoryGrant, StorageTempSpace.PageSize);
+        lock (Sync)
+        {
+            Check();
+            if (!_sealed) { throw new InvalidOperationException(ErrorMessages.TempRunUnsealed); }
+            ArgumentOutOfRangeException.ThrowIfNegative(position);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(position, _length);
+            return new StorageTempRunReader(this, new byte[StorageTempSpace.PageSize], position);
+        }
     }
     internal StorageTempRunReader OpenReader(Memory<byte> page)
     {

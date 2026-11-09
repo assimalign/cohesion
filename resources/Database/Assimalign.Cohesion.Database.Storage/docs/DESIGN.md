@@ -77,6 +77,13 @@ Reads check version, ordinal, run identity, used length, checksum, record bounda
 before publishing buffer positions. Any read exception after argument checks permanently fails
 the reader; later calls raise CK05004 with a previous-read-failed message and without I/O,
 damage events or damage counters, even after cancellation before consuming bytes.
+StorageTempRun.Position saves an opaque record boundary before Append. The authorized
+OpenReader(memoryGrant, position) overload starts there without scanning earlier records,
+including length headers or payloads spanning pages. Only saved positions from that run are
+valid; callers never calculate offsets. Seek readers validate each visited page's identity,
+ordinal, used length and checksum, plus the tail and EOF. A failed read permanently poisons
+the reader. Unsealed/disposed runs refuse, and out-of-range positions or insufficient
+grants fail argument validation. There is no durable or temporary format-version change.
 This disposable format is independent of durable storage format 4. No WAL, MVCC, recovery or
 StorageBufferPool participates, and no durable I/O counter moves.
 
