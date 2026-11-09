@@ -499,6 +499,16 @@ internal sealed partial class SqlPlanExecutor
             // The engine reserve survives both abandonment and publication, including
             // reclamation WAL and dirty pages written after this statement ends.
             int before = failures.Count;
+            if (unconfirmed)
+            {
+                // End the failed attempt without abandoning trees whose publication
+                // recovery must decide. A root failure may already have ended its id.
+                foreach (ulong owner in reservedTrees)
+                {
+                    try { _catalog.EndIndexBuild(owner, false); }
+                    catch (Exception cleanup) { failures.Add(cleanup); }
+                }
+            }
             if (published)
             {
                 try { stage("Cleanup"); await CheckMigrationAdmissionAsync(statement, cancellationToken).ConfigureAwait(false); }

@@ -6073,7 +6073,7 @@ Dropping that owner preserves the heap and a second index, whose 80,000 keys rem
 Crash boundaries include the owner-intent commit, root commit, each chunk before/after commit,
 registration/description publication, every reclamation page-batch commit and intent removal.
 PagesReclaimed (30) reports nonempty committed owner-page batches of at most 32 pages. IndexBuildBegan/IndexBuildEnded (28/29) report
-one build lifetime with engineName, database, physical index objectId and succeeded on end. These Informational events use no Start/Stop activity semantics; end fires once at publication (true) or failure/abandonment (false). Payloads never
+one build lifetime with engineName, database, physical index objectId and succeeded on end. These Informational events use no Start/Stop activity semantics; end fires once at publication (true) or failure/abandonment (false). An unconfirmed joint attempt ends with false without abandoning any tree or changing recovery state. Payloads never
 contain indexed values. No new diagnostic identity or wire format is introduced.
 
 ## Secondary indexes
