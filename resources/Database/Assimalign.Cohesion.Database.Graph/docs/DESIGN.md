@@ -103,7 +103,7 @@ reads, registration replacement and manager assignment one critical section. Loc
 apply gate, registry lock, then directory _sync; failure rebuilds never wait for apply admission
 while holding the registry lock. A reclamation failure is deferred until independent index
 pruning and relationship-type counts have run. Tree ids reserve past data owners
-0/1/2. At open, allocated Index-page headers also discover owners with neither a definition nor a
+0/1/2. At open, bounded batches from Storage's recovered index-owner directory discover owners with neither a definition nor a
 registration. These receive retirement receipts and follow the same id-below-bound check and
 bounded cleanup; fixed owners and owners with any retained definition are excluded. An
 abandoned build receipt names an owned page without assuming its root survived; no retired
@@ -140,8 +140,8 @@ added. Existing CG02009, CG05004, CG05020, CG06006 and CG06019 keep their condit
 
 Direct GraphStore builds retain caller-owned accounting and impose no fixed work or memory cap. Session builds use their configured work and retained-memory grants; refusal precedes root allocation.
 
-Exact and text builds use IndexBuildLoop's 64-entry durable chunks after the existing work
-and memory preflight. The writer reservation and logical creator span the root bracket,
+Exact and text builds use IndexBuildLoop's 64-entry durable chunks. Session builds retain
+their existing work and memory preflight. The writer reservation and logical creator span the root bracket,
 chunks and single final definition publication. A root/registration survives an abandoned
 build as an orphan; the existing receipt worker retires it below the safe horizon. Durable
 build brackets use a separate apply helper so ordinary writes retain their original helper
