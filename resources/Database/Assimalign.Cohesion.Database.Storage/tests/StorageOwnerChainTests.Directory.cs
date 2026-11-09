@@ -23,6 +23,8 @@ public sealed partial class StorageOwnerChainTests
             {
                 using var page = storage.AllocatePageForWrite(bracket, PageType.Index, ownerId: owner);
                 page.MarkDirty(); expected.Add(owner, page.Id);
+                using var later = storage.AllocatePageForWrite(bracket, PageType.Index, ownerId: owner);
+                later.MarkDirty();
             }
             bracket.Commit();
         }

@@ -2331,10 +2331,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
-    /// <summary>Copies a bounded, ordered snapshot of nonzero index owners from the recovered allocation directory.</summary>
+    /// <summary>Copies a bounded, ordered snapshot of nonzero index owners from the resident allocation directory.</summary>
     /// <param name="afterOwner">The exclusive lower owner identity; zero starts enumeration.</param>
     /// <param name="maximumOwners">The positive maximum number of owners to return.</param>
-    /// <returns>Owner identities and one allocated index page per owner, in ascending owner order.</returns>
+    /// <returns>Owner identities and each owner's lowest allocated index page, in ascending owner order.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumOwners"/> is not positive.</exception>
     /// <remarks>No page is read. Each call snapshots independently; concurrent directory mutations may
     /// change later batches. Open-time consumers enumerate before admitting sessions.</remarks>
@@ -2343,16 +2343,22 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumOwners);
         lock (_ownerLock)
         {
-            var result = new List<(ulong OwnerId, PageId Page)>();
+            var selected = new PriorityQueue<(ulong OwnerId, PageId Page), ulong>(
+                Comparer<ulong>.Create(static (left, right) => right.CompareTo(left)));
             foreach (var pair in _indexOwnerPages)
             {
                 if (pair.Key <= afterOwner || pair.Value.Count == 0) { continue; }
-                int at = 0;
-                while (at < result.Count && result[at].OwnerId < pair.Key) { at++; }
-                if (at == maximumOwners) { continue; }
-                if (result.Count == maximumOwners) { result.RemoveAt(result.Count - 1); }
-                result.Insert(at, (pair.Key, (PageId)pair.Value.Min));
+                if (selected.Count == maximumOwners)
+                {
+                    selected.TryPeek(out _, out ulong largest);
+                    if (pair.Key >= largest) { continue; }
+                    selected.Dequeue();
+                }
+                selected.Enqueue((pair.Key, (PageId)pair.Value.Min), pair.Key);
             }
+            var result = new List<(ulong OwnerId, PageId Page)>(selected.Count);
+            while (selected.TryDequeue(out var item, out _)) { result.Add(item); }
+            result.Sort(static (left, right) => left.OwnerId.CompareTo(right.OwnerId));
             return result;
         }
     }
