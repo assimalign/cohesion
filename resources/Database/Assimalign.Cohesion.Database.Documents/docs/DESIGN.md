@@ -2639,8 +2639,8 @@ B5). Engine sessions, statements, transactions and storage remain reported by th
 | 11 | `SessionsAborted` | Warning | engineName, sessions, drainTimeoutMilliseconds, suppressedCount |
 | 12 | `StatementParseFailed` | Error | sessionId, database, code, exceptionType, suppressedCount |
 | 13 | `StatementCleanupFailed` | Warning | database, exceptionType; snapshot cleanup failed after a successful automatic commit |
-| 15 | `IndexBuildStart` | Informational | `database`, `objectId` |
-| 16 | `IndexBuildStop` | Informational | `database`, `objectId`, `succeeded` |
+| 15 | `IndexBuildBegan` | Informational | `database`, `objectId` |
+| 16 | `IndexBuildEnded` | Informational | `database`, `objectId`, `succeeded` |
 | 17 | `PagesReclaimed` | Informational | `database`, `objectId`, `pages` |
 
 Every open of an existing database writes both around `DocumentCatalog.RecoverIndexesAsync`,
@@ -3798,4 +3798,10 @@ Forced-GC marginal retained-state checks use LiveHeap.Read at two populations fo
 
 For a file with at least 1 GiB of valid allocated pages under an unrelated owner, the minimum of three Release opens on the same ARM64 host was 4.871 s at d33f62363 and 2.732 s with bounded owner-directory discovery. This measures removal of the second page scan, rather than a document/node/value workload.
 
-JSON extraction reserves the pooled metadata and stack capacities used by .NET 10, including actual growth and trimming overlap. A large unindexed string does not imply one metadata row per byte or a growth buffer that parsing never allocates; 4 MiB and 20 MiB padding cases fit the default grant.
+JSON extraction reserves the pooled metadata and stack capacities used by .NET 10, including growth buffers retained by the pool and trimming overlap. Cold-pool LiveHeap measurements include those retained buffers. A large unindexed string does not imply one metadata row per byte or a growth buffer that parsing never allocates; 4 MiB and 20 MiB padding cases fit the default grant.
+
+IndexBuildBegan and IndexBuildEnded report build lifetimes without EventSource Start/Stop activity semantics. Every begun build emits one end event on success, failure or abandonment; end includes succeeded. PagesReclaimed reports only nonempty committed batches.
+
+Before direct open records a receipt for an unknown index owner, it loads every page of that owner through checksum verification. Ordinary registered owners incur no extra reads. A failed root bracket with no registration records its receipt during live retirement, so its allocated page does not wait for reopen.
+
+Index builds read immutable stored content with chain checksum verification and skip its write-time JSON validation pass. Extraction reserves its own DOM; measured wide-object cases include 100,000 and 700,000 distinct property names. UNIQUE validation additionally reserves its bounded cursor batch using the 64 largest built key lengths, with bounded charged bookkeeping and separate continuation/previous-key space. Non-scalar or oversized keys anywhere refuse before duplicate detection in the completed tree; the existing CD02021, CD02026 and CD03020 identities remain.

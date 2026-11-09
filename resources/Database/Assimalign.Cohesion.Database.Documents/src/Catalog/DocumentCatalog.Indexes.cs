@@ -130,7 +130,7 @@ public sealed partial class DocumentCatalog
     /// <exception cref="InvalidOperationException">The context is not active.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended before publication.</exception>
     /// <exception cref="OperationCanceledException">The build was canceled.</exception>
-    /// <exception cref="DatabaseException">Build workspace exceeds the configured statement memory budget (CD05018).</exception>
+    /// <exception cref="DocumentCatalogException">Build workspace exceeds the configured statement memory budget (CD05018).</exception>
     public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, IReadOnlyList<DocumentIndexKey> keys,
         bool isUnique, bool includeMissing, TransactionContext context, CancellationToken cancellationToken = default)
     {
@@ -182,10 +182,10 @@ public sealed partial class DocumentCatalog
         }
         Array.Sort(names, StringComparer.Ordinal);
         IndexBuildStateCaptured?.Invoke("names", names, 24L + 8L * names.Length);
-        IndexBuildStarted?.Invoke(metadata.ObjectId);
         bool buildSucceeded = false;
         try
         {
+            IndexBuildStarted?.Invoke(metadata.ObjectId);
             // Bring the coordinator's idle horizon past the externally reserved
             // owner. The older logical creator still pins it throughout the build;
             // after failure, retirement can progress without another user statement.
@@ -234,6 +234,16 @@ public sealed partial class DocumentCatalog
                 }
             }
             IndexBuildBudget.Reservation? chunkGrant = null;
+            // Keep only the largest possible cursor batch, including repeated keys.
+            // A single long key must not charge every slot as though it were long.
+            PriorityQueue<int, int>? cursorKeyLengths = null;
+            if (isUnique)
+            {
+                memory.Charge(640L);
+                cursorKeyLengths = new PriorityQueue<int, int>(64);
+            }
+            long cursorKeyBytes = 0;
+            int maximumKeyLength = 0;
             await IndexBuildLoop.RunAsync(Entries(), async (chunk, token) =>
             {
                 AfterIndexRetirementMutation?.Invoke("build-chunk-start");
@@ -254,6 +264,11 @@ public sealed partial class DocumentCatalog
             {
                 if (isUnique)
                 {
+                    // Cursor entries, owned batch keys, continuation, and the
+                    // previous key all coexist while the next batch is read.
+                    using var cursorGrant = memory.Reserve();
+                    cursorGrant.Charge(320L + 64L * 24L + cursorKeyBytes +
+                        32L * cursorKeyLengths!.Count + 2L * (32L + maximumKeyLength));
                     // The completed tree supplies key order. Retain just the previous
                     // key, rather than a collection-wide UNIQUE preflight hash set.
                     await using var cursor = index.OpenCursor(context.Snapshot, IndexKeyRange.All, cancellationToken: token);
@@ -289,7 +304,19 @@ public sealed partial class DocumentCatalog
                 // copy's slots per actual entry, before that copy can be allocated.
                 try { chunkGrant.Charge(80L + IndexBuildLoop.ChunkSize * 24L); return chunkGrant; }
                 catch { chunkGrant.Dispose(); throw; }
-            }, retain: entry => chunkGrant!.Charge(24L + 32L + entry.Key.Length)).ConfigureAwait(false);
+            }, retain: entry =>
+            {
+                chunkGrant!.Charge(24L + 32L + entry.Key.Length);
+                if (cursorKeyLengths is not null)
+                {
+                    int length = entry.Key.Length;
+                    maximumKeyLength = Math.Max(maximumKeyLength, length);
+                    if (cursorKeyLengths.Count < 64)
+                    { cursorKeyLengths.Enqueue(length, length); cursorKeyBytes += length; }
+                    else if (length > cursorKeyLengths.Peek())
+                    { cursorKeyBytes += length - cursorKeyLengths.DequeueEnqueue(length, length); }
+                }
+            }).ConfigureAwait(false);
             buildSucceeded = true;
         }
         finally { IndexBuildStopped?.Invoke(metadata.ObjectId, buildSucceeded); }
@@ -506,7 +533,8 @@ public sealed partial class DocumentCatalog
         cancellationToken.ThrowIfCancellationRequested();
         reserve?.Invoke(32L + document.Length);
         BeforeIndexKeysRead?.Invoke(Monitor.IsEntered(_sync));
-        return DocumentIndexKeys.Read(_storage.ReadContent(new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum)),
+        var reference = new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum);
+        return DocumentIndexKeys.Read(reserve is null ? _storage.ReadContent(reference) : _storage.ReadIndexBuildContent(reference),
             metadata, out distinct, cancellationToken, reserve);
     }
 

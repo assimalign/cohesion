@@ -936,6 +936,8 @@ PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, 
 
 CREATE INDEX uses durable brackets of at most 64 postings and one final definition publication (#1808). Beyond resident catalog state, it retains an exact-size snapshot of existing name references, a bounded source/posting chunk and one document's extracted keys. UNIQUE validation walks adjacent built keys and retains no collection-wide key set. All build reservations share StatementMemoryBudget and CD05018; a failed build abandons its owner. DROP INDEX retains old trees for pinned snapshots and reclaims their exact owners after the safe horizon.
 
+During CREATE UNIQUE INDEX, extraction validates every key before the completed tree is walked for duplicates. A non-scalar key (CD02021) or oversized key (CD02026) anywhere therefore refuses before a duplicate (CD03020); the offending row can differ from name-order duplicate checking.
+
 | Build state | First refusal |
 |---|---|
 | Name snapshot | 24 + 8 × name count, plus other live build state, exceeds the statement grant |

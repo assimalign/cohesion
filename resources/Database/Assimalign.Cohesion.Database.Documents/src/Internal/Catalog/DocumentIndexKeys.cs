@@ -20,7 +20,8 @@ internal static class DocumentIndexKeys
     // Each component begins with a Documents-owned collation byte. Scalar payloads
     // retain DatabaseKeyWriter's self-delimiting representation; no tag is 0xFF.
     internal static HashSet<IndexKey> Read(ReadOnlyMemory<byte> content, DocumentIndexMetadata metadata,
-        out bool distinct, System.Threading.CancellationToken cancellationToken = default, Action<long>? reserve = null)
+        out bool distinct, System.Threading.CancellationToken cancellationToken = default, Action<long>? reserve = null,
+        Action<object>? parsed = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (reserve is not null)
@@ -43,26 +44,29 @@ internal static class DocumentIndexKeys
             long initial = content.Length + 12L;
             if (initial is > 1024 * 1024 and <= 4 * 1024 * 1024) { initial = 1024 * 1024; }
             long metadataBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, initial));
-            long metadataPeak = metadataBytes;
+            long metadataLive = metadataBytes;
             long rows = tokens * 12L;
             while (metadataBytes < rows)
             {
                 long grown = metadataBytes * 2;
-                metadataPeak = Math.Max(metadataPeak, metadataBytes + grown);
+                // Returned growth buffers can remain resident in ArrayPool while
+                // parsing continues. Include those buffers in a cold-pool bound.
+                metadataLive += grown;
                 metadataBytes = grown;
             }
             if (rows <= metadataBytes / 2)
             {
                 long trimmed = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, rows));
-                metadataPeak = Math.Max(metadataPeak, metadataBytes + trimmed);
+                metadataLive += trimmed;
             }
             // JsonDocument starts with 64 eight-byte stack rows even for a shallow
             // document; include the old buffer while a deeper stack grows.
             long stackBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(512, depth * 8));
             long stackPeak = stackBytes == 512 ? stackBytes : stackBytes + stackBytes / 2;
-            reserve(320L + metadataPeak + stackPeak + pathCharacters * 80L);
+            reserve(320L + metadataLive + stackPeak + pathCharacters * 80L);
         }
         using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 128 });
+        parsed?.Invoke(document);
         var result = new HashSet<IndexKey>();
         var paths = new Dictionary<string, List<object>>(StringComparer.Ordinal);
         List<object> Path(string path)

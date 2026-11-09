@@ -85,7 +85,11 @@ public sealed class DocumentIndexRetirementTests
         database.IsOffline.ShouldBeFalse();
         events.Events.ShouldNotContain(item => item.EventId == 0);
         events.Events.Count(item => item.EventId == 15).ShouldBe(1);
+        events.Events.Single(item => item.EventId == 15).EventName.ShouldBe("IndexBuildBegan");
+        events.Events.Single(item => item.EventId == 15).Opcode.ShouldBe(EventOpcode.Info);
         events.Events.Count(item => item.EventId == 16).ShouldBe(1);
+        events.Events.Single(item => item.EventId == 16).EventName.ShouldBe("IndexBuildEnded");
+        events.Events.Single(item => item.EventId == 16).Opcode.ShouldBe(EventOpcode.Info);
         events.Events.Where(item => item.EventId == 17).Sum(item => (int)item.Payload![2]!).ShouldBe(pages.Length);
     }
 

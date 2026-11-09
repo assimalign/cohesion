@@ -11,6 +11,7 @@ using Xunit;
 using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Testing;
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
@@ -26,27 +27,19 @@ public sealed partial class DocumentCatalogTests
         // Arrange: preserve only real build-owned objects, then measure their release
         // after execution. Catalog and storage caches remain resident on both sides.
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        var populations = new List<Dictionary<string, (long Heap, long Charge)>>();
         foreach (int population in array ? new[] { 1000, 10000 } : new[] { 8, 16 })
         {
-            var minima = new Dictionary<string, (long Heap, long Charge)>();
-            for (int round = 0; round < 4; round++)
+            var rounds = new Dictionary<string, List<(long Heap, long Charge)>>();
+            for (int round = 0; round < 64; round++)
             {
                 await using var fixture = await Fixture.Create();
                 string json = array ? "{\"arr\":[" + string.Join(',', Enumerable.Range(0, population)) + "]}" : "{\"v\":1}";
                 for (int row = 0; row < (array ? 1 : population); row++)
                 { await fixture.Write(row.ToString("D10"), json); }
-                var states = new Dictionary<string, (object State, long Charge)>();
-                fixture.Catalog.IndexBuildStateCaptured = (phase, state, charge) => states.TryAdd(phase, (state, charge));
-
                 // Act.
-                var context = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
-                try
-                {
-                    await fixture.Catalog.CreateIndexAsync(fixture.Collection.Id, "measured",
-                        [array ? DocumentIndexKey.DistinctArray("arr") : DocumentIndexKey.Scalar("v")], false, false, context, guard.Token);
-                    await fixture.Coordinator.CommitAsync(context, guard.Token);
-                }
-                finally { fixture.Catalog.IndexBuildStateCaptured = null; }
+                var states = CaptureBuildState(fixture, array, guard.Token);
+                if (!array) { VerifyPartialChunk(states); }
 
                 // Assert: shared keys remain held until both chunk and extraction release.
                 foreach (string phase in new[] { "names", "documents", "chunk", "keys" })
@@ -57,18 +50,110 @@ public sealed partial class DocumentCatalogTests
                     // Unrelated runtime cleanup can mask a small release; require a
                     // positive sample instead of accepting zero as its upper bound.
                     if (live <= 0) { continue; }
-                    if (!minima.TryGetValue(phase, out var prior) || live < prior.Heap) { minima[phase] = (live, charged); }
+                    if (!rounds.TryGetValue(phase, out var samples)) { rounds.Add(phase, samples = []); }
+                    samples.Add((live, charged));
                 }
                 states.ShouldBeEmpty();
                 GC.KeepAlive(fixture);
+                if (rounds.Count == 4 && rounds.Values.All(samples => samples.Count >= 5)) { break; }
             }
-            minima.Keys.Order().ShouldBe(new[] { "chunk", "documents", "keys", "names" });
-            foreach (var sample in minima)
+            rounds.Values.ShouldAllBe(samples => samples.Count >= 5);
+            foreach (var phase in rounds)
+            { _output.WriteLine($"{phase.Key}: population={population}; positive samples={string.Join(',', phase.Value.Select(sample => sample.Heap))}"); }
+            var measured = rounds.ToDictionary(pair => pair.Key, pair => pair.Value.OrderBy(sample => sample.Heap).ElementAt(pair.Value.Count / 2));
+            measured.Keys.Order().ShouldBe(new[] { "chunk", "documents", "keys", "names" });
+            foreach (var sample in measured)
             {
-                _output.WriteLine($"{sample.Key}: population={population}; minimum positive marginal live={sample.Value.Heap}; charge={sample.Value.Charge}");
+                _output.WriteLine($"{sample.Key}: population={population}; median positive retained live={sample.Value.Heap}; charge={sample.Value.Charge}");
                 sample.Value.Heap.ShouldBeLessThanOrEqualTo(sample.Value.Charge);
             }
+            populations.Add(measured);
         }
+        foreach (string phase in populations[0].Keys)
+        {
+            long slope = populations[1][phase].Heap - populations[0][phase].Heap;
+            long chargedSlope = populations[1][phase].Charge - populations[0][phase].Charge;
+            _output.WriteLine($"{phase}: marginal population slope={slope}; charge slope={chargedSlope}");
+            slope.ShouldBeLessThanOrEqualTo(chargedSlope);
+        }
+    }
+
+    // Finish the build on this stack so Debug cannot retain its async frames
+    // in the measuring state machine.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Dictionary<string, (object State, long Charge)> CaptureBuildState(
+        Fixture fixture, bool array, CancellationToken token)
+    {
+        var states = new Dictionary<string, (object State, long Charge)>();
+        fixture.Catalog.IndexBuildStateCaptured = (phase, state, charge) => states.TryAdd(phase, (state, charge));
+        var context = fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, token).AsTask().GetAwaiter().GetResult();
+        try
+        {
+            fixture.Catalog.CreateIndexAsync(fixture.Collection.Id, "measured",
+                [array ? DocumentIndexKey.DistinctArray("arr") : DocumentIndexKey.Scalar("v")], false, false, context, token)
+                .AsTask().GetAwaiter().GetResult();
+            fixture.Coordinator.CommitAsync(context, token).AsTask().GetAwaiter().GetResult();
+            return states;
+        }
+        finally { fixture.Catalog.IndexBuildStateCaptured = null; }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void VerifyPartialChunk(Dictionary<string, (object State, long Charge)> states)
+    {
+        ((Array)states["chunk"].State).Length.ShouldBeLessThan(64);
+        states["chunk"].Charge.ShouldBeGreaterThanOrEqualTo(80L + 64L * 24L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Wide-object builds skip revalidation and the DOM fits its charge (#1808)")]
+    [InlineData(100000)]
+    [InlineData(700000)]
+    public async Task CreateIndexAsync_WideObject_ShouldKeepWorkspaceWithinGrant(int names)
+    {
+        // Arrange: caller-owned input remains resident across both heap samples.
+        using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        await using var fixture = await Fixture.Create();
+        string json = "{\"v\":1," + string.Join(',', Enumerable.Range(0, names).Select(i => $"\"k{i:D6}\":0")) + "}";
+        fixture.Catalog.IndexBuildMemoryBudget = 64L * 1024 * 1024;
+        int validations = 0;
+        fixture.Storage.BeforeContentValidation = () => validations++;
+        byte[] content = Encoding.UTF8.GetBytes(json);
+        var metadata = new DocumentIndexMetadata(fixture.Collection.Id, "dom", [DocumentIndexKey.Scalar("v")], false, false, 1000);
+        var (heap, charge, allocated) = CaptureDomState(content, metadata, guard.Token);
+        // Parsing is synchronous: its thread's allocations bound every new DOM
+        // byte, while process-wide LiveHeap can include concurrent runner growth.
+        long measured = Math.Min(heap, allocated);
+
+        // Act.
+        await fixture.Write("wide", json);
+        await fixture.CreateIndex("wide", "v");
+
+        // Assert.
+        _output.WriteLine($"Wide object: names={names}; DOM LiveHeap={measured}; raw heap delta={heap}; DOM charge={charge}; thread allocations={allocated}; content={content.Length}; grant={fixture.Catalog.IndexBuildMemoryBudget}");
+        validations.ShouldBe(0, "stored build content was validated when written");
+        allocated.ShouldBeLessThanOrEqualTo(charge);
+        measured.ShouldBeGreaterThan(content.Length);
+        measured.ShouldBeLessThanOrEqualTo(charge);
+        GC.KeepAlive(content);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (long Heap, long Charge, long Allocated) CaptureDomState(byte[] content, DocumentIndexMetadata metadata, CancellationToken token)
+    {
+        long before = 0, measured = 0, charge = 0, allocatedBefore = 0, allocated = 0;
+        Action<long> reserve = bytes => charge += bytes;
+        Action<object> observe = _ => { allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore; measured = LiveHeap.Read() - before; };
+        // Warm the parser, delegate and heap observer without renting the wide
+        // document's metadata buckets. Those buffers must remain cold for the sample.
+        byte[] warmup = Encoding.UTF8.GetBytes("{\"v\":1," + string.Join(',', Enumerable.Range(0, 1000).Select(i => $"\"k{i}\":0")) + "}");
+        for (int round = 0; round < 16; round++)
+        { DocumentIndexKeys.Read(warmup, metadata, out _, token, reserve, observe); }
+        charge = 0;
+        before = LiveHeap.Read();
+        allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        DocumentIndexKeys.Read(content, metadata, out _, token, reserve, observe);
+        GC.KeepAlive(warmup);
+        return (measured, charge, allocated);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -77,5 +162,29 @@ public sealed partial class DocumentCatalogTests
         var state = states[phase];
         states.Remove(phase);
         return state.Charge;
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - UNIQUE cursor charges actual bounded key sizes under a small grant (#1808)")]
+    [InlineData(1)]
+    [InlineData(64)]
+    public async Task CreateIndexAsync_OneLongUniqueKey_ShouldFitSmallGrant(int population)
+    {
+        // Arrange: one long key and otherwise NULL keys fit a bounded cursor batch.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var fixture = await Fixture.Create();
+        await fixture.Write("000", "{\"v\":\"" + new string('x', 200) + "\"}");
+        for (int row = 1; row < population; row++)
+        { await fixture.Write(row.ToString("D3"), "{\"v\":null}"); }
+        fixture.Catalog.IndexBuildMemoryBudget = 16 * 1024;
+        var context = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
+
+        // Act.
+        await fixture.Catalog.CreateIndexAsync(fixture.Collection.Id, "unique", ["v"], true, context, guard.Token);
+        await fixture.Coordinator.CommitAsync(context, guard.Token);
+
+        // Assert.
+        var reader = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
+        fixture.Catalog.GetIndexes(fixture.Collection.Id, reader.Snapshot).ShouldHaveSingleItem().IsUnique.ShouldBeTrue();
+        await fixture.Coordinator.CommitAsync(reader, guard.Token);
     }
 }

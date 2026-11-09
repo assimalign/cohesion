@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -7,7 +8,9 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
@@ -70,6 +73,7 @@ public sealed class DocumentIndexYieldTests
         var collection = await session.CreateCollectionAsync("items", guard.Token);
         for (int row = 0; row < 256; row++)
         { await collection.PutAsync(session, row.ToString(), Encoding.UTF8.GetBytes($"{{\"v\":{row}}}"), cancellationToken: guard.Token); }
+        using var lifecycle = new EventSourceRecorder(DocumentDatabaseEventSource.Log, EventLevel.Informational);
         using var buildCancellation = CancellationTokenSource.CreateLinkedTokenSource(guard.Token);
         int chunks = 0; ulong owner = 0;
         database.Catalog.AfterIndexRetirementMutation = stage =>
@@ -85,6 +89,11 @@ public sealed class DocumentIndexYieldTests
         for (int pass = 0; pass < 8; pass++) { database.Coordinator.RunVersionPurgePass(guard.Token); }
 
         // Assert.
+        lifecycle.Events.Where(item => item.EventId == 15).ShouldHaveSingleItem().Opcode.ShouldBe(EventOpcode.Info);
+        var ended = lifecycle.Events.Where(item => item.EventId == 16).ShouldHaveSingleItem();
+        ended.EventName.ShouldBe("IndexBuildEnded");
+        ended.Opcode.ShouldBe(EventOpcode.Info);
+        ended.Payload![2].ShouldBe(false);
         chunks.ShouldBe(2); owner.ShouldBeGreaterThan(1UL);
         database.DataStorage.GetOwnerIndexPages(owner).ShouldBeEmpty();
         using (var registrations = database.DataStorage.GetUnitIterator(1)) { registrations.MoveNext().ShouldBeFalse(); }

@@ -16,6 +16,7 @@ public sealed partial class DocumentStorage
 {
     // Owning-assembly tests inject a chunk failure without taking the journal offline.
     internal Action? BeforeContentChunkWrite { get; set; }
+    internal Action? BeforeContentValidation { get; set; }
 
     /// <summary>Validates one UTF-8 JSON value against the persisted document format.</summary>
     /// <param name="content">The complete JSON document.</param>
@@ -60,6 +61,14 @@ public sealed partial class DocumentStorage
     /// <returns>The exact originally supplied UTF-8 bytes.</returns>
     /// <exception cref="StorageCorruptionException">The chain length, checksum, or JSON format is invalid.</exception>
     public ReadOnlyMemory<byte> ReadContent(DocumentContentReference content)
+        => ReadContentCore(content, validate: true);
+
+    // Writes already validated this immutable content. Index extraction parses it
+    // again under its own DOM grant; the stream still verifies the content checksum.
+    internal ReadOnlyMemory<byte> ReadIndexBuildContent(DocumentContentReference content)
+        => ReadContentCore(content, validate: false);
+
+    private ReadOnlyMemory<byte> ReadContentCore(DocumentContentReference content, bool validate)
     {
         if (content.Length <= 0 || content.Length > int.MaxValue)
         {
@@ -68,8 +77,10 @@ public sealed partial class DocumentStorage
         using var stream = OpenRead(content);
         var result = new byte[(int)content.Length];
         stream.ReadExactly(result);
+        if (!validate) { return result; }
         try
         {
+            BeforeContentValidation?.Invoke();
             ValidateContent(result);
         }
         catch (JsonException error)

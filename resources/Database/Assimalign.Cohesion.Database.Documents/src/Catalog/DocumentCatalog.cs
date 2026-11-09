@@ -59,6 +59,7 @@ public sealed partial class DocumentCatalog
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="DocumentCatalogException">Persisted catalog metadata is malformed or unsupported.</exception>
     /// <exception cref="IndexFormatException">An index tree is in another B-tree page format.</exception>
+    /// <exception cref="StorageCorruptionException">A registration or unknown index-owner page fails integrity verification.</exception>
     public static DocumentCatalog Open(DocumentStorage storage, TransactionCoordinator coordinator)
     {
         ArgumentNullException.ThrowIfNull(storage);

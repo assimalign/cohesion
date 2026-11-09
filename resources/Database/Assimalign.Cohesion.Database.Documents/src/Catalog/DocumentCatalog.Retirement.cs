@@ -49,19 +49,30 @@ public sealed partial class DocumentCatalog
             {
                 afterOwner = owner;
                 if (owner <= 1 || _registrations.ContainsKey(owner) || _indexOwners.ContainsKey(owner)) { continue; }
-                using var stream = new MemoryStream();
-                using var writer = new BinaryWriter(stream, Encoding.UTF8, true);
-                writer.Write(0UL); writer.Write(0UL); writer.Write((byte)5); writer.Write(DocumentCatalogCodec.IndexRecordVersion);
-                writer.Write(owner); writer.Write(-(long)page);
-                DocumentCatalogCodec.WriteString(writer, "retired"); writer.Write(false);
-                using var bracket = _storage.BeginTransaction();
-                var location = _storage.InsertIndexRegistration(bracket, stream.ToArray());
-                bracket.Commit();
-                _registrations.Add(owner, (location.PageId, location.SlotIndex, -(long)page));
+                // Directory owner tags come from headers. Verify every unknown
+                // owner's page before trusting that tag in a durable receipt.
+                foreach (var unknown in _storage.GetOwnerIndexPages(owner))
+                { using var verified = _storage.PageManager.GetPage(unknown); }
+                RecordIndexRetirementReceipt(owner, page);
                 ScheduleIndexRetirement(owner);
             }
         }
         foreach (ulong owner in _indexOwners.Keys) { if (!_registrations.ContainsKey(owner)) { ScheduleIndexRetirement(owner); } }
+    }
+
+    private (PageId Page, int Slot, long Root) RecordIndexRetirementReceipt(ulong owner, PageId page)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8, true);
+        writer.Write(0UL); writer.Write(0UL); writer.Write((byte)5); writer.Write(DocumentCatalogCodec.IndexRecordVersion);
+        writer.Write(owner); writer.Write(-(long)page);
+        DocumentCatalogCodec.WriteString(writer, "retired"); writer.Write(false);
+        using var bracket = _storage.BeginTransaction();
+        var location = _storage.InsertIndexRegistration(bracket, stream.ToArray());
+        bracket.Commit();
+        var registration = (location.PageId, location.SlotIndex, -(long)page);
+        _registrations.Add(owner, registration);
+        return registration;
     }
 
     private void ScheduleIndexRetirement(ulong owner)
@@ -112,10 +123,13 @@ public sealed partial class DocumentCatalog
                     {
                         if (!_registrations.TryGetValue(owner, out var registration))
                         {
-                            if (IndexRetirementStatus(owner, bound, false) == 2)
-                            { lock (_sync) { _indexOwners.Remove(owner); } }
-                            finished = true;
-                            continue;
+                            int unregistered = IndexRetirementStatus(owner, bound, false);
+                            if (unregistered == 0) { finished = true; continue; }
+                            if (unregistered == 1) { continue; }
+                            var pages = _storage.GetOwnerIndexPages(owner);
+                            if (pages.Count == 0)
+                            { lock (_sync) { _indexOwners.Remove(owner); } finished = true; continue; }
+                            registration = RecordIndexRetirementReceipt(owner, pages[0]);
                         }
                         int status = IndexRetirementStatus(owner, bound, registration.Root < 0);
                         if (status == 0)
