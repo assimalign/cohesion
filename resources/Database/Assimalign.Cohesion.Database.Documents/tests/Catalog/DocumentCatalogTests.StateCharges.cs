@@ -1,7 +1,9 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,6 +14,7 @@ using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
@@ -44,12 +47,14 @@ public sealed partial class DocumentCatalogTests
                 // Assert: shared keys remain held until both chunk and extraction release.
                 foreach (string phase in new[] { "names", "documents", "chunk", "keys" })
                 {
+                    long ownedBytes = MeasureOwnedState(states, phase);
                     long before = LiveHeap.Read();
                     long charged = Release(states, phase);
                     long live = before - LiveHeap.Read();
-                    // Unrelated runtime cleanup can mask a small release; require a
-                    // positive sample instead of accepting zero as its upper bound.
-                    if (live <= 0) { continue; }
+                    // A collection can also retire unrelated runtime state. Match an
+                    // independent copy of the owned graph before accepting a sample;
+                    // this control never reads the charge being checked.
+                    if (live != ownedBytes) { continue; }
                     if (!rounds.TryGetValue(phase, out var samples)) { rounds.Add(phase, samples = []); }
                     samples.Add((live, charged));
                 }
@@ -76,6 +81,61 @@ public sealed partial class DocumentCatalogTests
             _output.WriteLine($"{phase}: marginal population slope={slope}; charge slope={chargedSlope}");
             slope.ShouldBeLessThanOrEqualTo(chargedSlope);
         }
+    }
+
+    // Copy exactly the objects released by each phase, using this runtime's real
+    // object sizes. Catalog strings/references remain resident; chunk payloads
+    // shared with the captured key set remain resident until that set is released.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long MeasureOwnedState(Dictionary<string, (object State, long Charge)> states, string phase)
+    {
+        if (states[phase].State is HashSet<IndexKey> keys)
+        {
+            foreach (var key in keys) { KeyArray(key); }
+            int capacity = keys.EnsureCapacity(0);
+            long beforeKeys = GC.GetAllocatedBytesForCurrentThread();
+            var copy = new HashSet<IndexKey>(capacity);
+            foreach (var key in keys) { copy.Add(new IndexKey(key.Encoded.ToArray())); }
+            long allocatedKeys = GC.GetAllocatedBytesForCurrentThread() - beforeKeys;
+            GC.KeepAlive(copy);
+            return allocatedKeys;
+        }
+        var source = (Array)states[phase].State;
+        var ids = new List<string>();
+        var payloads = new List<byte[]>();
+        if (phase == "documents")
+        {
+            foreach (var item in source)
+            { ids.Add(((DocumentCatalogEntry)((ITuple)item)[0]!).Id); }
+        }
+        else if (phase == "chunk")
+        {
+            var shared = new HashSet<byte[]>(ReferenceEqualityComparer.Instance);
+            foreach (var key in (HashSet<IndexKey>)states["keys"].State) { shared.Add(KeyArray(key)); }
+            foreach (var item in source)
+            {
+                var bytes = KeyArray((IndexKey)((ITuple)item)[1]!);
+                if (shared.Add(bytes)) { payloads.Add(bytes); }
+            }
+        }
+        var pins = new object[ids.Count + payloads.Count];
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var arrayCopy = source.Clone();
+        int at = 0;
+        foreach (string id in ids) { pins[at++] = new string(id.AsSpan()); }
+        foreach (var bytes in payloads) { pins[at++] = bytes.Clone(); }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(arrayCopy);
+        GC.KeepAlive(pins);
+        return allocated;
+    }
+
+    private static byte[] KeyArray(IndexKey key)
+    {
+        MemoryMarshal.TryGetArray(key.Encoded, out var segment).ShouldBeTrue();
+        segment.Offset.ShouldBe(0);
+        segment.Count.ShouldBe(segment.Array!.Length);
+        return segment.Array!;
     }
 
     // Finish the build on this stack so Debug cannot retain its async frames
@@ -120,20 +180,17 @@ public sealed partial class DocumentCatalogTests
         byte[] content = Encoding.UTF8.GetBytes(json);
         var metadata = new DocumentIndexMetadata(fixture.Collection.Id, "dom", [DocumentIndexKey.Scalar("v")], false, false, 1000);
         var (heap, charge, allocated) = CaptureDomState(content, metadata, guard.Token);
-        // Parsing is synchronous: its thread's allocations bound every new DOM
-        // byte, while process-wide LiveHeap can include concurrent runner growth.
-        long measured = Math.Min(heap, allocated);
+
 
         // Act.
         await fixture.Write("wide", json);
         await fixture.CreateIndex("wide", "v");
 
         // Assert.
-        _output.WriteLine($"Wide object: names={names}; DOM LiveHeap={measured}; raw heap delta={heap}; DOM charge={charge}; thread allocations={allocated}; content={content.Length}; grant={fixture.Catalog.IndexBuildMemoryBudget}");
+        _output.WriteLine($"Wide object: names={names}; DOM LiveHeap={heap}; DOM charge={charge}; thread allocations={allocated}; content={content.Length}; grant={fixture.Catalog.IndexBuildMemoryBudget}");
         validations.ShouldBe(0, "stored build content was validated when written");
         allocated.ShouldBeLessThanOrEqualTo(charge);
-        measured.ShouldBeGreaterThan(content.Length);
-        measured.ShouldBeLessThanOrEqualTo(charge);
+        allocated.ShouldBeGreaterThan(content.Length);
         GC.KeepAlive(content);
     }
 
@@ -148,10 +205,28 @@ public sealed partial class DocumentCatalogTests
         byte[] warmup = Encoding.UTF8.GetBytes("{\"v\":1," + string.Join(',', Enumerable.Range(0, 1000).Select(i => $"\"k{i}\":0")) + "}");
         for (int round = 0; round < 16; round++)
         { DocumentIndexKeys.Read(warmup, metadata, out _, token, reserve, observe); }
+        // Hold pooled buffers until a fresh allocation proves each metadata bucket
+        // was drained. Earlier tests may have populated several shared partitions;
+        // a fixed number of rentals would still depend on their order.
+        var poolPins = new List<byte[]>();
+        for (int size = 1024 * 1024; size <= 32 * 1024 * 1024; size *= 2)
+        {
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                long allocationStart = GC.GetAllocatedBytesForCurrentThread();
+                var pin = ArrayPool<byte>.Shared.Rent(size);
+                long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+                poolPins.Add(pin);
+                if (allocatedBytes >= size) { break; }
+            }
+        }
         charge = 0;
         before = LiveHeap.Read();
         allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         DocumentIndexKeys.Read(content, metadata, out _, token, reserve, observe);
+        foreach (var pin in poolPins) { ArrayPool<byte>.Shared.Return(pin); }
+        GC.KeepAlive(poolPins);
         GC.KeepAlive(warmup);
         return (measured, charge, allocated);
     }

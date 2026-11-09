@@ -23,6 +23,7 @@ namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
 public sealed partial class DocumentCatalog
 {
+    internal Action? BeforeIndexRegistrationInsert { get; set; }
     private readonly Dictionary<(Guid CollectionId, string Name), Versions> _indexDefinitions = new();
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
     private readonly Dictionary<ulong, bool> _uniqueIndexes = new();
@@ -190,6 +191,7 @@ public sealed partial class DocumentCatalog
             // owner. The older logical creator still pins it throughout the build;
             // after failure, retirement can progress without another user statement.
             await AdvanceIndexOwnerHorizonAsync(cancellationToken).ConfigureAwait(false);
+            ScheduleIndexRetirement(metadata.ObjectId);
             var index = await ApplyIndexBuildAsync(context, async bracket =>
             {
                 var created = await _indexes.CreateIndexAsync(context, metadata.ObjectId, new IndexDefinition(name), cancellationToken).ConfigureAwait(false);
@@ -534,8 +536,16 @@ public sealed partial class DocumentCatalog
         reserve?.Invoke(32L + document.Length);
         BeforeIndexKeysRead?.Invoke(Monitor.IsEntered(_sync));
         var reference = new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum);
-        return DocumentIndexKeys.Read(reserve is null ? _storage.ReadContent(reference) : _storage.ReadIndexBuildContent(reference),
-            metadata, out distinct, cancellationToken, reserve);
+        try
+        {
+            return DocumentIndexKeys.Read(reserve is null ? _storage.ReadContent(reference) : _storage.ReadIndexBuildContent(reference),
+                metadata, out distinct, cancellationToken, reserve);
+        }
+        catch (Exception error) when (error is System.Text.Json.JsonException or FormatException)
+        {
+            throw new StorageCorruptionException(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.DocumentStorageReadContentFailure2, error.Message));
+        }
     }
 
     private DocumentConstraintViolationException Duplicate(DocumentIndexMetadata metadata, TransactionSnapshot snapshot)
@@ -737,6 +747,7 @@ public sealed partial class DocumentCatalog
             }
             else
             {
+                BeforeIndexRegistrationInsert?.Invoke();
                 var location = _storage.InsertIndexRegistration(bracket, bytes);
                 _registrations[registration.ObjectId] = (location.PageId, location.SlotIndex, registration.RootPageId);
                 ScheduleIndexRetirement(registration.ObjectId);

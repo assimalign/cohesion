@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Assimalign.Cohesion.Database.Indexing;
@@ -19,7 +20,245 @@ internal static class DocumentIndexKeys
 
     // Each component begins with a Documents-owned collation byte. Scalar payloads
     // retain DatabaseKeyWriter's self-delimiting representation; no tag is 0xFF.
+    // Ordinary maintenance keeps its existing allocation path. Build extraction
+    // additionally admits workspace and checks raw lengths before materializing keys.
     internal static HashSet<IndexKey> Read(ReadOnlyMemory<byte> content, DocumentIndexMetadata metadata,
+        out bool distinct, System.Threading.CancellationToken cancellationToken = default, Action<long>? reserve = null,
+        Action<object>? parsed = null)
+        => reserve is null ? ReadStored(content, metadata, out distinct, cancellationToken, parsed: parsed)
+            : ReadBuild(content, metadata, out distinct, cancellationToken, reserve, parsed);
+    private static HashSet<IndexKey> ReadBuild(ReadOnlyMemory<byte> content, DocumentIndexMetadata metadata,
+        out bool distinct, System.Threading.CancellationToken cancellationToken = default, Action<long>? reserve = null,
+        Action<object>? parsed = null)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (reserve is not null)
+        {
+            long pathCharacters = 0;
+            foreach (var key in metadata.Keys) { pathCharacters += key.Path.Length + (key.ArraySource?.Length ?? 0); }
+            // Count without allocating. DOM metadata has 12-byte token rows and
+            // pooled arrays grow by powers of two; include the old growth buffer.
+            // Large unindexed strings must not be charged as millions of tokens.
+            long tokens = 0;
+            int depth = 0;
+            var reader = new Utf8JsonReader(content.Span, new JsonReaderOptions { MaxDepth = 128 });
+            while (reader.Read())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                tokens++;
+                if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+                { depth = Math.Max(depth, reader.CurrentDepth + 1); }
+            }
+            long initial = content.Length + 12L;
+            if (initial is > 1024 * 1024 and <= 4 * 1024 * 1024) { initial = 1024 * 1024; }
+            long metadataBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, initial));
+            long metadataLive = metadataBytes;
+            long rows = tokens * 12L;
+            while (metadataBytes < rows)
+            {
+                long grown = metadataBytes * 2;
+                // Returned growth buffers can remain resident in ArrayPool while
+                // parsing continues. Include those buffers in a cold-pool bound.
+                metadataLive += grown;
+                metadataBytes = grown;
+            }
+            if (rows <= metadataBytes / 2)
+            {
+                long trimmed = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, rows));
+                metadataLive += trimmed;
+            }
+            // JsonDocument starts with 64 eight-byte stack rows even for a shallow
+            // document; include the old buffer while a deeper stack grows.
+            long stackBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(512, depth * 8));
+            long stackPeak = stackBytes == 512 ? stackBytes : stackBytes + stackBytes / 2;
+            reserve(320L + metadataLive + stackPeak + pathCharacters * 80L);
+        }
+        using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 128 });
+        parsed?.Invoke(document);
+        var result = new HashSet<IndexKey>();
+        var paths = new Dictionary<string, List<object>>(StringComparer.Ordinal);
+        List<object> Path(string path)
+        {
+            if (!paths.TryGetValue(path, out var parts))
+            { paths.Add(path, parts = path.Length == 0 ? [] : ParsePath(path)); }
+            return parts;
+        }
+        long temporary = 0;
+        void ReserveTemporary(int length)
+        {
+            // Component arrays, the candidate composite, writer scratch and aligned
+            // headers coexist before a candidate enters the retained key set.
+            long bytes = 512L + 32L * metadata.Keys.Count + 3L * length;
+            if (bytes > temporary) { reserve?.Invoke(bytes - temporary); temporary = bytes; }
+        }
+        ReserveTemporary(0);
+        var components = new byte[metadata.Keys.Count][];
+        int scalarLength = 0;
+        int arrayIndex = -1;
+        bool unknown = false;
+        for (int i = 0; i < metadata.Keys.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var key = metadata.Keys[i];
+            if (key.ArraySource is not null) { arrayIndex = i; continue; }
+            var value = Navigate(document.RootElement, Path(key.Path));
+            if (i == 0 && value.ValueKind == JsonValueKind.Undefined && !metadata.IncludeMissing)
+            { distinct = false; return result; }
+            components[i] = Component(value, value.ValueKind, metadata, key.Path, ref unknown,
+                1024 - scalarLength, ReserveTemporary);
+            scalarLength += components[i].Length;
+        }
+        if (arrayIndex < 0) { Add(default, reserveKey: reserve); }
+        else
+        {
+            var key = metadata.Keys[arrayIndex];
+            var source = Navigate(document.RootElement, Path(key.ArraySource!));
+            if (source.ValueKind == JsonValueKind.Undefined) { Add(default, reserveKey: reserve); }
+            else if (source.ValueKind != JsonValueKind.Array)
+            {
+                // ARRAY over a present non-array produces NULL, matching #1728.
+                Add(default, JsonValueKind.Null, reserve);
+            }
+            else
+            {
+                foreach (var element in source.EnumerateArray())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (key.When is not null && Evaluate(key.When, element, Path) is not true) { continue; }
+                    var value = Navigate(element, Path(key.Path));
+                    // Comprehensions omit MISSING projections. This restricted index
+                    // stores scalar projections only, never lossy complex element tags.
+                    if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Array or JsonValueKind.Object) { continue; }
+                    Add(value, reserveKey: reserve);
+                }
+            }
+        }
+        distinct = unknown;
+        return result;
+
+        void Add(JsonElement element, JsonValueKind? forcedKind = null, Action<long>? reserveKey = null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (arrayIndex >= 0)
+            {
+                var kind = forcedKind ?? element.ValueKind;
+                if (arrayIndex == 0 && kind == JsonValueKind.Undefined && !metadata.IncludeMissing) { return; }
+                components[arrayIndex] = Component(element, kind, metadata, metadata.Keys[arrayIndex].Path, ref unknown, 1024 - scalarLength, ReserveTemporary);
+            }
+            int length = 0;
+            foreach (var component in components)
+            {
+                if (component.Length > 1024 - length) { throw new DocumentCatalogException("CD02026", ErrorMessages.IndexKeyTooLarge); }
+                length += component.Length;
+            }
+            ReserveTemporary(length);
+            var bytes = new byte[length];
+            int offset = 0;
+            foreach (var component in components) { component.CopyTo(bytes, offset); offset += component.Length; }
+            var encoded = new IndexKey(bytes);
+            if (reserveKey is null) { result.Add(encoded); return; }
+            if (!result.Contains(encoded))
+            {
+                // Key bytes plus aligned array/header and HashSet growth peaks.
+                reserveKey(128L + encoded.Length);
+                result.Add(encoded);
+            }
+        }
+    }
+
+    private static byte[] Component(JsonElement value, JsonValueKind kind, DocumentIndexMetadata metadata, string path, ref bool distinct, int remaining, Action<int> reserveTemporary)
+    {
+        if (remaining < 1) { throw new DocumentCatalogException("CD02026", ErrorMessages.IndexKeyTooLarge); }
+        reserveTemporary(1024 - remaining);
+        switch (kind)
+        {
+            case JsonValueKind.Undefined: distinct = true; return [0];
+            case JsonValueKind.Null: distinct = true; return [1];
+            case JsonValueKind.False: return [2];
+            case JsonValueKind.True: return [3];
+            case JsonValueKind.Number:
+                decimal number = value.GetDecimal();
+                int numberLength = NumberLength(number);
+                if (numberLength > remaining) { throw new DocumentCatalogException("CD02026", ErrorMessages.IndexKeyTooLarge); }
+                reserveTemporary(1024 - remaining + numberLength);
+                return Encode(number).Encoded.ToArray();
+            case JsonValueKind.String:
+                // The raw byte view borrows the DOM. Even all-escaped JSON needs
+                // at least one UTF-16 unit per six bytes; reject before decoding.
+                var raw = JsonMarshal.GetRawUtf8Value(value);
+                if ((raw.Length - 2L) / 6L * 2L + 4L > remaining)
+                { throw new DocumentCatalogException("CD02026", ErrorMessages.IndexKeyTooLarge); }
+                var reader = new Utf8JsonReader(raw);
+                reader.Read();
+                Span<char> characters = stackalloc char[raw.Length]; // At most 3,068 units.
+                int count = reader.CopyString(characters);
+                int length = 4;
+                foreach (char character in characters[..count])
+                { length += 2 + (character <= 255 ? 1 : 0) + ((character & 255) == 0 ? 1 : 0); }
+                if (length > remaining) { throw new DocumentCatalogException("CD02026", ErrorMessages.IndexKeyTooLarge); }
+                reserveTemporary(1024 - remaining + length);
+                var encoded = new byte[length];
+                encoded[0] = 5;
+                encoded[1] = (byte)DatabaseType.Binary;
+                int at = 2;
+                foreach (char character in characters[..count])
+                {
+                    byte high = (byte)(character >> 8), low = (byte)character;
+                    encoded[at++] = high;
+                    if (high == 0) { encoded[at++] = 255; }
+                    encoded[at++] = low;
+                    if (low == 0) { encoded[at++] = 255; }
+                }
+                // The zero-initialized final pair terminates the binary component.
+                return encoded;
+            default:
+                if (metadata.IsUnique) { throw DocumentConstraintViolationException.NonScalar(metadata.Name, path); }
+                return [(byte)(kind == JsonValueKind.Array ? 6 : 7)];
+        }
+    }
+
+    private static int NumberLength(decimal value)
+    {
+        if (value == 0) { return 3; }
+        Span<char> text = stackalloc char[64];
+        value.TryFormat(text, out int count, provider: CultureInfo.InvariantCulture);
+        int first = 0, last = count - 1;
+        while (!char.IsAsciiDigit(text[first]) || text[first] == '0') { first++; }
+        while (!char.IsAsciiDigit(text[last]) || text[last] == '0') { last--; }
+        int digits = 0;
+        for (int at = first; at <= last; at++) { if (char.IsAsciiDigit(text[at])) { digits++; } }
+        return 5 + digits;
+    }
+
+    private static JsonElement Navigate(JsonElement value, List<object> parts)
+    {
+        foreach (var segment in parts)
+        {
+            if (segment is int index)
+            {
+                if (value.ValueKind != JsonValueKind.Array || index >= value.GetArrayLength()) { return default; }
+                value = value[index];
+            }
+            else
+            {
+                if (value.ValueKind != JsonValueKind.Object) { return default; }
+                bool found = false;
+                JsonElement next = default;
+                foreach (var property in value.EnumerateObject())
+                {
+                    if (!property.NameEquals((string)segment)) { continue; }
+                    if (found) { throw new JsonException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DocumentStorageValidateJson, segment)); }
+                    found = true;
+                    next = property.Value;
+                }
+                if (!found) { return default; }
+                value = next;
+            }
+        }
+        return value;
+    }
+
+    private static HashSet<IndexKey> ReadStored(ReadOnlyMemory<byte> content, DocumentIndexMetadata metadata,
         out bool distinct, System.Threading.CancellationToken cancellationToken = default, Action<long>? reserve = null,
         Action<object>? parsed = null)
     {
@@ -83,16 +322,16 @@ internal static class DocumentIndexKeys
             cancellationToken.ThrowIfCancellationRequested();
             var key = metadata.Keys[i];
             if (key.ArraySource is not null) { arrayIndex = i; continue; }
-            var value = Navigate(document.RootElement, Path(key.Path));
+            var value = NavigateStored(document.RootElement, Path(key.Path));
             if (i == 0 && value.ValueKind == JsonValueKind.Undefined && !metadata.IncludeMissing)
             { distinct = false; return result; }
-            components[i] = Component(value, value.ValueKind, metadata, key.Path, ref unknown);
+            components[i] = ComponentStored(value, value.ValueKind, metadata, key.Path, ref unknown);
         }
         if (arrayIndex < 0) { Add(default, reserveKey: reserve); }
         else
         {
             var key = metadata.Keys[arrayIndex];
-            var source = Navigate(document.RootElement, Path(key.ArraySource!));
+            var source = NavigateStored(document.RootElement, Path(key.ArraySource!));
             if (source.ValueKind == JsonValueKind.Undefined) { Add(default, reserveKey: reserve); }
             else if (source.ValueKind != JsonValueKind.Array)
             {
@@ -105,7 +344,7 @@ internal static class DocumentIndexKeys
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (key.When is not null && Evaluate(key.When, element, Path) is not true) { continue; }
-                    var value = Navigate(element, Path(key.Path));
+                    var value = NavigateStored(element, Path(key.Path));
                     // Comprehensions omit MISSING projections. This restricted index
                     // stores scalar projections only, never lossy complex element tags.
                     if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Array or JsonValueKind.Object) { continue; }
@@ -123,7 +362,7 @@ internal static class DocumentIndexKeys
             {
                 var kind = forcedKind ?? element.ValueKind;
                 if (arrayIndex == 0 && kind == JsonValueKind.Undefined && !metadata.IncludeMissing) { return; }
-                components[arrayIndex] = Component(element, kind, metadata, metadata.Keys[arrayIndex].Path, ref unknown);
+                components[arrayIndex] = ComponentStored(element, kind, metadata, metadata.Keys[arrayIndex].Path, ref unknown);
             }
             var bytes = new List<byte>();
             foreach (var component in components)
@@ -142,7 +381,7 @@ internal static class DocumentIndexKeys
         }
     }
 
-    private static byte[] Component(JsonElement value, JsonValueKind kind, DocumentIndexMetadata metadata, string path, ref bool distinct)
+    private static byte[] ComponentStored(JsonElement value, JsonValueKind kind, DocumentIndexMetadata metadata, string path, ref bool distinct)
     {
         switch (kind)
         {
@@ -158,7 +397,7 @@ internal static class DocumentIndexKeys
         }
     }
 
-    private static JsonElement Navigate(JsonElement value, List<object> parts)
+    private static JsonElement NavigateStored(JsonElement value, List<object> parts)
     {
         foreach (var segment in parts)
         {
@@ -171,6 +410,7 @@ internal static class DocumentIndexKeys
         }
         return value;
     }
+
 
     // Only TRUE is observable by WHEN. Collapsing NULL and MISSING to unknown here
     // preserves that result for this closed AND/OR/NOT/comparison grammar.

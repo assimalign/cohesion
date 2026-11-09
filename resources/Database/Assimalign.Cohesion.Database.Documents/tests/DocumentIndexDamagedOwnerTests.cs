@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -65,23 +64,36 @@ public sealed class DocumentIndexDamagedOwnerTests
     [Fact(DisplayName = "Cohesion Test [Documents] - An allocated root without registration retires in the live process (#1808)")]
     public async Task ReclaimIndexes_RolledBackRootWithoutRegistration_ShouldRecordReceiptAndFree()
     {
-        // Arrange: allocation survives a failed root bracket, as in a canceled create.
+        // Arrange: refuse registration inside the real root bracket after allocation.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         await using var engine = DocumentDatabaseEngine.Create("failed-root", new()
         { MaintenanceInterval = TimeSpan.FromHours(1), CheckpointInterval = TimeSpan.FromHours(1) });
         var database = await engine.CreateDatabaseAsync("test", guard.Token);
-        ulong owner;
-        do { owner = (ulong)database.DataStorage.ReserveTransactionSequence(); } while (owner <= 2);
-        using (var bracket = database.DataStorage.BeginTransaction())
+        var collection = new Catalog.DocumentCollectionMetadata(Guid.NewGuid(), "items");
+        var seed = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
+        await database.Catalog.SaveCollectionAsync(collection, seed, guard.Token);
+        await database.Coordinator.CommitAsync(seed, guard.Token);
+        ulong owner = 0;
+        database.Catalog.IndexBuildStarted += id => owner = id;
+        int refusals = 0;
+        database.Catalog.BeforeIndexRegistrationInsert = () =>
         {
-            using var page = database.DataStorage.AllocatePageForWrite(bracket, PageType.Index, ownerId: owner);
-            page.MarkDirty();
+            database.DataStorage.GetOwnerIndexPages(owner).ShouldHaveSingleItem();
+            var status = typeof(Catalog.DocumentCatalog).GetMethod("IndexRetirementStatus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(database.Catalog, [owner, database.Coordinator.Manager.OldestActive, false]);
+            status.ShouldBe(1, "the creator must pin even an unregistered reserved owner");
+            refusals++;
+            throw new InvalidOperationException("injected registration refusal");
+        };
+        var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
+        try { await Should.ThrowAsync<InvalidOperationException>(async () => { await database.Catalog.CreateIndexAsync(collection.Id, "ix", "v", context, guard.Token); }); }
+        finally
+        {
+            database.Catalog.BeforeIndexRegistrationInsert = null;
+            await database.Coordinator.RollbackAsync(context, guard.Token);
         }
+        refusals.ShouldBe(1);
         database.DataStorage.GetOwnerIndexPages(owner).ShouldHaveSingleItem();
-        var horizon = await database.Coordinator.BeginSnapshotPinAsync(guard.Token);
-        await database.Coordinator.RollbackAsync(horizon, guard.Token);
-        ScheduleRetirement(database.Catalog, owner);
-
         // Act.
         for (int pass = 0; pass < 8; pass++) { database.Coordinator.RunVersionPurgePass(guard.Token); }
 
@@ -90,6 +102,4 @@ public sealed class DocumentIndexDamagedOwnerTests
         database.IsOffline.ShouldBeFalse();
     }
 
-    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ScheduleIndexRetirement")]
-    private static extern void ScheduleRetirement(Catalog.DocumentCatalog target, ulong owner);
 }
