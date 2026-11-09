@@ -53,15 +53,19 @@ public sealed partial class DocumentCatalogTests
                 {
                     long before = LiveHeap.Read();
                     long charged = Release(states, phase);
-                    long live = Math.Max(0, before - LiveHeap.Read());
+                    long live = before - LiveHeap.Read();
+                    // Unrelated runtime cleanup can mask a small release; require a
+                    // positive sample instead of accepting zero as its upper bound.
+                    if (live <= 0) { continue; }
                     if (!minima.TryGetValue(phase, out var prior) || live < prior.Heap) { minima[phase] = (live, charged); }
                 }
                 states.ShouldBeEmpty();
                 GC.KeepAlive(fixture);
             }
+            minima.Keys.Order().ShouldBe(new[] { "chunk", "documents", "keys", "names" });
             foreach (var sample in minima)
             {
-                _output.WriteLine($"{sample.Key}: population={population}; minimum marginal live={sample.Value.Heap}; charge={sample.Value.Charge}");
+                _output.WriteLine($"{sample.Key}: population={population}; minimum positive marginal live={sample.Value.Heap}; charge={sample.Value.Charge}");
                 sample.Value.Heap.ShouldBeLessThanOrEqualTo(sample.Value.Charge);
             }
         }
