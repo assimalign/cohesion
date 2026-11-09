@@ -970,8 +970,12 @@ OVER accepts an inline (PARTITION BY ... ORDER BY ...) specification, OVER name,
 parenthesized copy (name ...). WINDOW name AS (...) declarations follow GROUP BY, GROUP AS
 and HAVING and precede final ORDER BY/LIMIT/OFFSET. LETTING remains CK00001. Names preserve
 OQL's ordinal, case-sensitive identifier rules. The new window words remain usable as field,
-collection, alias and binding names in window-free statements. After a call, OVER starts a window only before a parenthesis or an
-identifier (quoted or unquoted, including function-name tokens); otherwise ordinary implicit aliases apply. WINDOW followed by
+collection, alias and binding names in window-free statements. After an ordinary call, OVER
+starts a window before a parenthesized specification or a name token that cannot begin a clause
+after an implicit alias. Otherwise the base implicit-alias rules apply. After any of the twelve
+window-only names listed below, OVER always introduces a window. A missing or invalid target
+receives CD00002 at that target, asking for a window name or parenthesized specification and
+explaining that clause-word names must be quoted. WINDOW followed by
 an identifier (including a function name) or quoted identifier, then AS, starts a declaration. RESPECT and IGNORE are modifiers only
 as RESPECT NULLS or IGNORE NULLS immediately after a call's closing parenthesis. Definitions may copy earlier definitions only;
 self/forward references fail CD01042. Duplicate or empty names fail CD01041. A copy cannot
@@ -991,6 +995,14 @@ Grouped expressions and ordinary aggregate results may supply window arguments a
 Window keys and arguments do not see projection aliases, including in final ORDER BY.
 A window named rows, range, groups, exclude or partition must be quoted in a parenthesized
 copy, for example OVER ("rows" ORDER BY x); frame vocabulary belongs to the later frame stage.
+After OVER, names spelled UNNEST, NEST, JOIN, LEFT, INNER, UNION, INTERSECT, EXCEPT, RETURNING,
+LETTING or WINDOW must be quoted, for example OVER "union". These words can introduce clauses
+after a base implicit alias; reserved clause keywords such as ORDER also require quoting.
+Function-name tokens otherwise follow the ordinary name rules.
+
+A non-window, non-aggregate function with OVER is never valid. For example, LOWER(x) OVER ()
+retains CK00001 in OQ-W1. A distinct diagnostic waits for OQ-W2, whose aggregate OVER support
+must distinguish valid aggregate windows from invalid scalar functions.
 
 Partitions use GROUP BY equality: MISSING and NULL are different partitions, numeric
 representations compare by value, strings use ordinal collation, and arrays/objects use the

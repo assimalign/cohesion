@@ -345,6 +345,15 @@ public sealed partial class OqlQueryParser
 
                 Expect(TokenType.RightParen, "')'");
                 var definition = OqlFunctions.Find(function);
+                // The capability pre-scan handles unquoted reserved calls. Quoted
+                // function names decode to the same names and follow the same OVER rule.
+                if (!Failed && function is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" or "RATIO_TO_REPORT")
+                {
+                    if (Is("OVER") && !IsWindowTarget(_position + 1))
+                    { Error("CD00002", ErrorMessages.WindowTargetExpected, _tokens[_position + 1]); }
+                    else { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(function, Profile.Language, Span(start, start))); }
+                    return new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous), quantifier);
+                }
                 if (!Failed && definition is null && !_allowUnregisteredFunctions)
                 {
                     Error("CD00008", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParsePrimaryVoid4, name), start);
@@ -365,10 +374,15 @@ public sealed partial class OqlQueryParser
                     return new OqlMetaExpression(arguments.AsReadOnly(), member, Span(start, Previous));
                 }
                 var call = new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous), quantifier);
-                if (!Failed && Is("OVER") && _position + 1 < _tokens.Count &&
-                    _tokens[_position + 1].Type is TokenType.LeftParen or TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function)
+                if (!Failed && Is("OVER") && (definition?.WindowKind is not (null or OqlWindowFunctionKind.None) ||
+                    IsWindowTarget(_position + 1)))
                 {
                     Advance();
+                    if (!IsWindowTarget(_position))
+                    {
+                        Error("CD00002", ErrorMessages.WindowTargetExpected, Current);
+                        return call;
+                    }
                     if (Take(TokenType.LeftParen))
                     {
                         var specification = ParseWindowSpecification(Previous);

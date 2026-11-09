@@ -112,6 +112,8 @@ public sealed class DocumentWindowTests
         aliases.Select(r => string.Join(",", r)).ShouldBe(new[] { "1,20,1,2", "2,10,2,1" });
         var named = await RowsAsync(session, "SELECT LAG(x,1,-9) OVER w AS v FROM [NULL,1,2] AS x WINDOW w AS (ORDER BY x) ORDER BY ROW_NUMBER() OVER w");
         named[0][0].ShouldBe(-9m); named[1][0].ShouldBeNull(); named[2][0].ShouldBe(1m);
+        var quoted = await RowsAsync(session, "SELECT RANK() OVER \"union\" AS r FROM [3,1,2] AS x WINDOW \"union\" AS (ORDER BY x) ORDER BY r");
+        quoted.Select(row => Number(row[0])).ShouldBe(new[] { 1m, 2m, 3m });
         var nested = await RowsAsync(session, "SELECT RAW q.n FROM (SELECT ROW_NUMBER() OVER () AS n FROM [1,2,3] AS x) AS q ORDER BY q.n DESC LIMIT 1");
         Number(nested.ShouldHaveSingleItem()[0]).ShouldBe(3m);
     }

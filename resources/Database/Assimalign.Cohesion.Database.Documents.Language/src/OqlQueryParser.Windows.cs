@@ -72,26 +72,52 @@ public sealed partial class OqlQueryParser
 
     private bool HasWindowSuffix()
     {
+        if (_callPairs.Length == 0) { return false; }
         for (int index = 1; index + 1 < _tokens.Count; index++)
         {
-            if (IsWord(_tokens[index], "OVER") && _tokens[index + 1].Type is
-                TokenType.LeftParen or TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && FollowsCall(index))
+            if (IsWord(_tokens[index], "OVER") && IsWindowTarget(index + 1) && FollowsCall(index))
             { return true; }
         }
         return false;
     }
 
-    private bool FollowsCall(int index)
+    private bool FollowsCall(int index) => index > 0 && index <= _callPairs.Length && _callPairs[index - 1] > 0;
+
+    private bool IsWindowOnlyCall(int index)
     {
-        if (index == 0 || _tokens[index - 1].Type != TokenType.RightParen) { return false; }
-        int depth = 1;
-        for (int previous = index - 2; previous > 0; previous--)
+        if (!FollowsCall(index)) { return false; }
+        var token = _tokens[_callPairs[index - 1] - 2];
+        string name = token.Type == TokenType.QuotedIdentifier ? token.Text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal) : token.Text;
+        return OqlFunctions.Find(name)?.WindowKind is not (null or OqlWindowFunctionKind.None) ||
+            name.ToUpperInvariant() is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" or "RATIO_TO_REPORT";
+    }
+
+    private bool IsWindowTarget(int index) => _tokens[index].Type == TokenType.LeftParen ||
+        _tokens[index].Type == TokenType.QuotedIdentifier ||
+        _tokens[index].Type is TokenType.Identifier or TokenType.Function && !IsWindowClauseWord(_tokens[index]);
+
+    // Derived from base's SELECT source-binding and GROUP BY alias continuations,
+    // query set operators, and INSERT/UPSERT RETURNING. WINDOW adds its declaration head.
+    private static bool IsWindowClauseWord(Lexeme token) => token.Text.ToUpperInvariant() is
+        "UNNEST" or "NEST" or "JOIN" or "LEFT" or "INNER" or "UNION" or "INTERSECT" or "EXCEPT" or
+        "RETURNING" or "LETTING" or "WINDOW";
+
+    private void FindCallPairs()
+    {
+        // Classify parentheses in one linear pass, including malformed inputs much
+        // deeper than the parser's limit. Both directions serve constant-time lookups.
+        _callPairs = new int[_tokens.Count];
+        var openings = new Stack<int>();
+        for (int index = 0; index < _tokens.Count; index++)
         {
-            if (_tokens[previous].Type == TokenType.RightParen) { depth++; }
-            else if (_tokens[previous].Type == TokenType.LeftParen && --depth == 0)
-            { return _tokens[previous - 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function; }
+            if (_tokens[index].Type == TokenType.LeftParen) { openings.Push(index); }
+            else if (_tokens[index].Type == TokenType.RightParen && openings.TryPop(out int opening) && opening > 0 &&
+                _tokens[opening - 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function)
+            {
+                _callPairs[index] = opening + 1;
+                _callPairs[opening] = index + 1;
+            }
         }
-        return false;
     }
 
     private bool IsWindowFrame() => Is("ROWS") || Is("RANGE") || Is("GROUPS") || Is("EXCLUDE");

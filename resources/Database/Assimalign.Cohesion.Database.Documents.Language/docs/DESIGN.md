@@ -401,8 +401,17 @@ DIALECT's Window stage records defaults, literal-only offsets/counts, lazy navig
 ordinal names, JSON peers and null ordering. The MERGE renderer's child and query walkers include
 all window metadata and the seeded 10,000-statement round trip generates varied window source
 queries through GROUP BY, HAVING and final ORDER BY. The runtime window-free corpus and identifier
-renames retain base acceptance and canonical rendering. DIALECT lists all twelve reserved window
-function names; RESPECT/IGNORE NULLS, OVER and WINDOW are recognized only at their construct heads.
+renames retain recorded base acceptance, exclude window nodes and check render/reparse/render
+stability without pinning base's renderer text. The compressed sampled corpus runs in Release;
+a generated name-site/follower matrix runs in both configurations. DIALECT lists all twelve reserved window
+function names. After an ordinary call, OVER takes a parenthesized specification or a name
+that cannot start a clause after a base implicit alias; window-only calls always take OVER
+as the keyword and report a malformed target with located CD00002. Clause-word window names
+must be quoted after OVER, as DIALECT records beside the copied-frame-word rule. WINDOW needs
+a name and AS; RESPECT/IGNORE NULLS need a call-closing parenthesis. A linear stack pass records
+call-closing parentheses before capability validation, including malformed/deep inputs; both
+null-modifier detection and window-suffix validation use constant-time pair lookups. The map
+is omitted when no relevant suffix follows a closing parenthesis, preserving ordinary guards.
 No shared SQL implementation or new assembly reference is introduced (T3-31).
 
 ## ORDER BY null placement (#1730)
