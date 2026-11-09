@@ -48,10 +48,10 @@ internal sealed partial class SqlPlanExecutor
         private readonly SqlStagedSortSource _source;
         private readonly IReadOnlyList<SqlProjection>? _projections;
         private readonly SqlExpressionEvaluator? _evaluator;
-        private bool _ownsStatement = true;
+        private bool _ownsStatement;
         internal HashGroupInput(IReadOnlyList<DatabaseColumn> columns, SqlStagedSortSource source,
             IReadOnlyList<SqlProjection>? projections = null, SqlExpressionEvaluator? evaluator = null)
-        { Columns = columns; _source = source; _projections = projections; _evaluator = evaluator; }
+        { Columns = columns; _source = source; _projections = projections; _evaluator = evaluator; _ownsStatement = !source.SharedStatement; }
         internal StorageTempStatement Statement => _source.Statement;
         internal void Relinquish() => _ownsStatement = false;
         internal Exception? Failure { get; set; }
@@ -288,7 +288,8 @@ internal sealed partial class SqlPlanExecutor
         SqlRowCollector.ObserveSpill?.Invoke("output-spool");
         SqlSortSpillMetrics.RecordOutput(_metrics!, spill.Statement);
         var result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns,
-            spill.Statement, output, offset, plan.Limit?.Count ?? -1, spill.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, maximumDecoded);
+            spill.Statement, output, offset, plan.Limit?.Count ?? -1, spill.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, maximumDecoded,
+            ownsStatement: !spill.SharedStatement);
         result.CaptureMetrics(_metrics); SqlHashSpillMetrics.Refresh(_metrics, spill.Statement); spill.Transfer();
         return result;
     }
@@ -329,11 +330,13 @@ internal sealed partial class SqlPlanExecutor
         private readonly long _budget;
         private readonly int _bound;
         private readonly StorageTempStatement _statement;
+        private readonly bool _sharedStatement;
         private readonly StorageTempPartitions _partitions;
         private readonly StorageTempRun _outputs;
         private bool _disposed;
         internal SqlDatabaseSession Owner { get; }
         internal StorageTempStatement Statement => _statement;
+        internal bool SharedStatement => _sharedStatement;
         internal void Transfer() => _disposed = true;
         internal long MaximumDecodedBytes { get; private set; }
         // Test-only deterministic observers; no process-global collection of rows.
@@ -358,13 +361,19 @@ internal sealed partial class SqlPlanExecutor
             _aggregateCollations = plan?.Aggregates.Select(a => a.Collation.Resolve(executor._subqueryValues)).ToArray() ?? [];
             SqlSpillLifetime.CheckCapacity(owner);
             _statement = shared ?? SqlHashSpillMetrics.For(executor._metrics!)?.JoinStatement ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
+            _sharedStatement = ReferenceEquals(_statement, SqlHashSpillMetrics.For(executor._metrics!)?.JoinStatement);
             try
             {
                 _partitions = StorageTempPartitions.Create(_statement, partitions, partitions * 8704L);
                 _outputs = _statement.CreateRun();
                 SqlHashSpillMetrics.Begin(executor._metrics!);
             }
-            catch (Exception failure) { SqlSpilledResultSet.ReleaseAfterFailure(_statement, failure); throw; }
+            catch (Exception failure)
+            {
+                if (!_sharedStatement) { SqlSpilledResultSet.ReleaseAfterFailure(_statement, failure); }
+                else { _ = DisposeHashTemp(_outputs, DisposeHashTemp(_partitions, failure)); }
+                throw;
+            }
         }
 
         internal void Validate(object?[] key)
@@ -625,7 +634,7 @@ internal sealed partial class SqlPlanExecutor
             var output = Complete(token);
             var columns = ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns;
             var result = new SqlSpilledResultSet(columns, _statement, output, offset?.Count ?? 0, limit?.Count ?? -1, Owner,
-                _budget - _executor._metrics!.HashMemoryBytes, MaximumDecodedBytes);
+                _budget - _executor._metrics!.HashMemoryBytes, MaximumDecodedBytes, ownsStatement: !_sharedStatement);
             result.CaptureMetrics(_executor._metrics);
             _disposed = true;
             return result;
@@ -635,7 +644,15 @@ internal sealed partial class SqlPlanExecutor
         internal void Dispose(Exception? initiatingFailure)
         {
             if (_disposed) { return; } _disposed = true;
-            try { _statement.Dispose(); }
+            try
+            {
+                if (!_sharedStatement) { _statement.Dispose(); }
+                else
+                {
+                    var cleanup = DisposeHashTemp(_outputs, DisposeHashTemp(_partitions, initiatingFailure));
+                    if (initiatingFailure is null && cleanup is not null) { throw cleanup; }
+                }
+            }
             catch (AggregateException cleanup)
             {
                 var failure = SqlSpilledResultSet.TranslateCleanup(cleanup);

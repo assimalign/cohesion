@@ -829,7 +829,8 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
                 scope.Metrics.BeginAnalysis();
                 return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken, sequenceUsage);
             }
-            var result = SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), request.Statement.Diagnostics);
+            var result = SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), request.Statement.Diagnostics,
+                allowHashSpill: _database.Engine.TempSpace is not null && _database.Definitions.StatementMemoryBudget >= 262144);
             return Task.FromResult<DatabaseResult>(result);
         }
         catch (SqlUnsupportedQueryException exception)
@@ -849,7 +850,8 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
             cancellationToken.ThrowIfCancellationRequested();
             for (int ordinal = 0; ordinal < row.FieldCount; ordinal++) { _ = row.GetValue(ordinal); }
         }
-        return SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), diagnostics, scope.Metrics);
+        return SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), diagnostics, scope.Metrics,
+            allowHashSpill: _database.Engine.TempSpace is not null && _database.Definitions.StatementMemoryBudget >= 262144);
     }
 
     private static async Task<DatabaseResult> PrepareExecutionResultAsync(Task<DatabaseResult> execution,

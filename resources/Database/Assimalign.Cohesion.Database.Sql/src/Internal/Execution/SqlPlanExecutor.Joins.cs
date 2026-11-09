@@ -246,6 +246,8 @@ internal sealed partial class SqlPlanExecutor
                         {
                             if (hashes[level] is null)
                             {
+                                if (statement.Metrics.IsAnalyzing)
+                                { statement.Metrics.RecordHashSpillPolicy(plan.Steps[level], _definitions.StatementMemoryBudget >= 262144 && CanSpillJoinRows(plan, spillOwner)); }
                                 // Publish before reading: cancellation, decode and budget failures all
                                 // release every reservation in the enclosing finally.
                                 var table = new SqlHashJoinTable(hashKeys, statement.Metrics, _definitions.StatementMemoryBudget);
@@ -256,6 +258,8 @@ internal sealed partial class SqlPlanExecutor
                                     catch (SqlExecutionException error) when (CanSpillJoinBuild(plan, hashKeys, spillOwner, error))
                                     { table.Spill(spillOwner!, item, cancellationToken, error); }
                                 }
+                                if (statement.Metrics.IsAnalyzing)
+                                { statement.Metrics.RecordHashSpillStatus(plan.Steps[level], table.IsSpilled); }
                             }
                             candidates = hashes[level]!.Probe(outer, cancellationToken);
                         }

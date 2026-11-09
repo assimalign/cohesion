@@ -22,6 +22,7 @@ internal sealed class SqlHashJoinTable : IDisposable
     private Entry[] _entries = [];
     private int _count;
     private long _reserved;
+    internal bool IsSpilled => _state is SqlHashJoinSpill;
 
     internal SqlHashJoinTable(SqlHashJoinPath keys, SqlStatementMetrics metrics, long budget,
         bool trackUnmatched = false, SqlExpressionEvaluator? evaluator = null)
@@ -216,7 +217,7 @@ internal sealed class SqlHashJoinTable : IDisposable
             if (cause is not null) { ExceptionDispatchInfo.Throw(cause); }
             throw SqlExecutionException.StatementMemoryBudget(_budget);
         }
-        var spill = new SqlHashJoinSpill(owner, _keys, _metrics, _budget, _trackUnmatched, _reserved);
+        var spill = new SqlHashJoinSpill(owner, _keys, _metrics, _budget, _trackUnmatched);
         try
         {
             spill.AdoptBuild(this, token);

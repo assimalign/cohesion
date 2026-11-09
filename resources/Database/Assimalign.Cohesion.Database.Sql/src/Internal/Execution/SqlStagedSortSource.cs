@@ -25,6 +25,7 @@ internal sealed class SqlStagedSortSource : IDisposable
     private long _writerBytes;
     private long _operatorBytes;
     internal StorageTempStatement Statement { get; }
+    internal bool SharedStatement => _sharedStatement;
     internal SqlDatabaseSession Owner { get; }
     internal long MaximumDecodedRowBytes { get; private set; }
     internal long ReadBufferBytes => StorageTempSpace.PageSize + (long)_run.MaximumRecordLength;

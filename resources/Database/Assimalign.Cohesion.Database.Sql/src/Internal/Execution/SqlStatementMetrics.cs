@@ -276,6 +276,20 @@ internal sealed class SqlStatementMetrics
         => (_accessPath as JoinWork)?.Operators?.Scope.Work is { } operators && operators.TryGetValue(operation, out var work)
             ? work.Candidates : null;
 
+    internal void RecordHashSpillPolicy(object operation, bool allowed)
+    { if (Analysis(operation) is { } work) { work.HashSpillAllowed |= allowed; } }
+
+    internal bool AllowsHashSpill(object operation)
+        => (_accessPath as JoinWork)?.Operators?.Scope.Work is { } operators
+            && operators.TryGetValue(operation, out var work) && work.HashSpillAllowed;
+
+    internal void RecordHashSpillStatus(object operation, bool spilled)
+    { if (Analysis(operation) is { } work) { work.HashSpilled |= spilled; } }
+
+    internal bool SpilledHash(object operation)
+        => (_accessPath as JoinWork)?.Operators?.Scope.Work is { } operators
+            && operators.TryGetValue(operation, out var work) && work.HashSpilled;
+
     // Cached view bodies can appear at several relation paths. Each path owns its own
     // plan counters, while repeated correlated invocations at that path accumulate.
     internal IDisposable? EnterRelationAnalysis(SqlDerivedRelation relation)

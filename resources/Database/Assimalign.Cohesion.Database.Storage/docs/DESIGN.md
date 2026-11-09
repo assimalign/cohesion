@@ -80,7 +80,8 @@ damage events or damage counters, even after cancellation before consuming bytes
 StorageTempRun.Position saves an opaque record boundary before Append. The authorized
 OpenReader(memoryGrant, position) overload starts there without scanning earlier records,
 including length headers or payloads spanning pages. Only saved positions from that run are
-valid; callers never calculate offsets. Seek readers validate each visited page's identity,
+valid; callers never calculate offsets. A position that is not a record start has undefined
+behavior: it can refuse as damage or return misframed records. Seek readers validate each visited page's identity,
 ordinal, used length and checksum, plus the tail and EOF. A failed read permanently poisons
 the reader. Unsealed/disposed runs refuse, and out-of-range positions or insufficient
 grants fail argument validation. There is no durable or temporary format-version change.

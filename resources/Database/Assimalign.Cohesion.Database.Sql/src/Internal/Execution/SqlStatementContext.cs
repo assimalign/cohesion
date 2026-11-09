@@ -198,7 +198,8 @@ internal readonly struct SqlStatementContext
         return new(this, session);
     }
 
-    internal SqlStatementContext WithoutSession() => new(this, DatabaseName);
+    internal SqlStatementContext WithoutSession() => Session is null ? this
+        : new(this, _names is ProvisioningNames names ? names.WithoutSession(DatabaseName) : DatabaseName);
 
     private SqlStatementContext(SqlStatementContext original, object names)
     { this = original; _names = names; }
@@ -231,6 +232,12 @@ internal readonly struct SqlStatementContext
         internal string? Schema { get; }
         internal object Database { get; private set; }
         internal void AttachSession(SqlDatabaseSession session) => Database = session;
+        internal ProvisioningNames WithoutSession(string database)
+        {
+            var copy = (ProvisioningNames)MemberwiseClone();
+            copy.Database = database;
+            return copy;
+        }
         internal TimeSpan LockTimeout { get; }
 
         private sealed class DebugView

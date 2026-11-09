@@ -65,6 +65,8 @@ internal sealed partial class SqlPlanExecutor
                 bool seek = indexes.TryGetValue(step, out var index);
                 if (next.Phase == 0)
                 {
+                    if (statement.Metrics.IsAnalyzing && step.Hash is not null)
+                    { statement.Metrics.RecordHashSpillPolicy(step, _definitions.StatementMemoryBudget >= 262144 && (mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session)); }
                     pending.Push((node, 1));
                     pending.Push((node.Left!, 0));
                     continue;
@@ -105,6 +107,8 @@ internal sealed partial class SqlPlanExecutor
                 {
                     builds.Remove(node, out hash);
                     sinks.Remove(node.Right!);
+                    if (statement.Metrics.IsAnalyzing && hash is not null)
+                    { statement.Metrics.RecordHashSpillStatus(step, hash.IsSpilled); }
                     foreach (var left in ReadRows(outer.Rows))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -193,7 +197,6 @@ internal sealed partial class SqlPlanExecutor
                 finally
                 {
                     hash?.Dispose();
-                    if (step.Kind == SqlJoinType.FullOuter) { SqlHashSpillMetrics.For(statement.Metrics)?.EndFullJoin(); }
                     ReleaseSelectRows(ref outer.Rows.Memory, outer.Rows);
                     // The iterator can hoist these lists beyond their dictionary entries.
                     // Drop consumed cells as soon as their charge is released.
@@ -254,7 +257,7 @@ internal sealed partial class SqlPlanExecutor
                 try { RetainSelectRow(ref buffer.Memory, row, includeWindow: true); buffer.Add(row); }
                 catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session, error))
                 {
-                    _ = SqlHashSpillMetrics.JoinTemp(statement.Metrics, statement.Session!, plan.Steps.Any(s => s.Kind == SqlJoinType.FullOuter));
+                    _ = SqlHashSpillMetrics.JoinTemp(statement.Metrics, statement.Session!);
                     SqlStagedSortSource.Add(buffer, row, ref buffer.Memory, statement.Metrics, _definitions.StatementMemoryBudget, statement.Session!, cancellationToken);
                 }
             }

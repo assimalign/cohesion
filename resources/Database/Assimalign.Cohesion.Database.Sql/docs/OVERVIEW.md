@@ -444,7 +444,7 @@ a hard-deadlock victim. Public APIs and wire messages are unchanged.
 ## Probe costing and hash joins (#1522)
 
 Access selection compares bounded snapshot-visible index probes without stored statistics.
-Broad safe equijoins can build a bounded hash table; eligible roots spill into batch files.
+Broad safe equijoins can build a bounded hash table; eligible roots use an indexed temporary build.
 Unique and small indexed probes retain
 nested loops. LEFT semantics, duplicate matches, SQL equality and full residual evaluation remain.
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live

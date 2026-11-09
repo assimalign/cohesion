@@ -61,6 +61,7 @@ internal sealed partial class SqlRowCollector
                 // evaluated keys/outputs in input order until that producer releases its grant.
                 state.Deferred = state.Statement.CreateRun(_cancellationToken);
                 state.DeferredBuffer = new byte[state.Bound];
+                ObserveSpill?.Invoke("deferred");
                 foreach (var encoded in Drain()) { AppendDeferred(state, encoded.Key.Span, encoded.Value.Span); }
                 Reserve(DeferredWriterBytes + DeferredBufferBytes(state.Bound));
                 _spills.Add(this, state); AppendSpilled(state, pending.Output, pending.Keys);
@@ -175,7 +176,8 @@ internal sealed partial class SqlRowCollector
             SqlSortSpillMetrics.Record(_metrics!, state.Statement, state.Sorter);
             state.Sorter.Dispose(); state.Sorter = null;
             Release(_memory.Bytes);
-            var result = new SqlSpilledResultSet(columns, state.Statement, reader, offset, limit, state.Owner, state.Grant, state.MaximumDecodedRowBytes);
+            var result = new SqlSpilledResultSet(columns, state.Statement, reader, offset, limit, state.Owner, state.Grant, state.MaximumDecodedRowBytes,
+                ownsStatement: !ReferenceEquals(state.Statement, SqlHashSpillMetrics.For(_metrics!)?.JoinStatement));
             _spills.Remove(this);
             return result;
         }

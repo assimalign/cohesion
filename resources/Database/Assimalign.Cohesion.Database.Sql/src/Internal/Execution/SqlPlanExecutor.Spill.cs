@@ -243,8 +243,9 @@ internal sealed partial class SqlPlanExecutor
         SqlSpilledResultSet result;
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
-            source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, grant, maximumDecodedRowBytes); }
-        catch (System.Exception exception) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); throw; }
+            source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, grant, maximumDecodedRowBytes,
+            ownsStatement: !source.SharedStatement); }
+        catch (System.Exception exception) { if (!source.SharedStatement) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); } throw; }
         try
         {
             if (deferProjection) { result.Transform(row => ProjectRow(row, projections, evaluator, token), _metrics, budget, bound, token); }
@@ -264,8 +265,9 @@ internal sealed partial class SqlPlanExecutor
         SqlSpilledResultSet result;
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
-            source.Statement, source.TransferOutput(), offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, source.MaximumDecodedRowBytes); }
-        catch (System.Exception exception) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); throw; }
+            source.Statement, source.TransferOutput(), offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, source.MaximumDecodedRowBytes,
+            ownsStatement: !source.SharedStatement); }
+        catch (System.Exception exception) { if (!source.SharedStatement) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); } throw; }
         try
         {
             if (distinct) { result.Deduplicate(new GroupKeyComparer(projections.Select(p => p.Collation.Resolve(evaluator.SubqueryValues)).ToArray()), _metrics!, _definitions.StatementMemoryBudget, token); }

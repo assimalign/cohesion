@@ -10,7 +10,10 @@ internal sealed partial class SqlPlanExecutor
 {
     private bool CanSpillJoinRows(SqlJoinPlan plan, SqlDatabaseSession? owner, SqlExecutionException error)
         => error.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
-            && owner?.Database.Engine.TempSpace is not null && CanPipelineSelectRetention()
+            && CanSpillJoinRows(plan, owner);
+
+    private bool CanSpillJoinRows(SqlJoinPlan plan, SqlDatabaseSession? owner)
+        => owner?.Database.Engine.TempSpace is not null && CanPipelineSelectRetention()
             && !plan.IsDistinct && plan.Bindings.All(b => b.Source.Derived is not { IsCorrelated: true })
             && plan.Steps.All(s => s.Hash is { InnerExpressions: null, OuterExpressions: null });
 
@@ -48,8 +51,7 @@ internal sealed partial class SqlPlanExecutor
             _ = DisposeHashTemp(statement, failure);
             throw failure.At(location);
         }
-        if (outcome is SqlSpilledResultSet delivered && delivered.OwnsStatement(statement)
-            || outcome is HashGroupInput input && ReferenceEquals(input.Statement, statement)) { return; }
+        if (outcome is SqlSpilledResultSet delivered && delivered.AdoptStatement(statement)) { return; }
         var cleanup = DisposeHashTemp(statement, null);
         if (cleanup is SqlExecutionException located) { throw located.At(location); }
         if (cleanup is not null) { throw cleanup; }

@@ -107,7 +107,8 @@ internal sealed partial class SqlPlanner
             _ => "",
         };
 
-    internal static DatabasePlanDescription Describe(SqlPlan plan, IEnumerable<Diagnostic>? diagnostics = null, SqlStatementMetrics? metrics = null)
+    internal static DatabasePlanDescription Describe(SqlPlan plan, IEnumerable<Diagnostic>? diagnostics = null,
+        SqlStatementMetrics? metrics = null, bool allowHashSpill = false)
     {
         var nodes = new List<DatabasePlanNode>();
         var spillPlan = plan;
@@ -116,6 +117,18 @@ internal sealed partial class SqlPlanner
         bool recursiveDemand = plan.ContainsRecursion || plan is SqlSequenceScopePlan { Input.ContainsRecursion: true };
         Visit(plan, null);
         return DatabasePlanDescription.Create(nodes, diagnostics);
+
+        string HashPolicy(SqlJoinPlan join, SqlJoinStep step)
+        {
+            if (step.Hash is null) { return ""; }
+            bool spilled = metrics?.SpilledHash(step) == true;
+            bool eligible = metrics is not null ? metrics.AllowsHashSpill(step)
+                : allowHashSpill && !recursiveDemand && !join.IsDistinct
+                && join.Bindings.All(binding => binding.Source.Derived is not { IsCorrelated: true })
+                && join.Steps.All(candidate => candidate.Hash is { InnerExpressions: null, OuterExpressions: null });
+            return "; hash_budget=" + (eligible || spilled ? metrics is null ? "spill_on_refusal_if_eligible" : "spill_on_refusal" : "no_spill")
+                + (metrics is null ? "" : "; hash_status=" + (spilled ? "spilled" : "fitting"));
+        }
 
         void Visit(SqlPlan current, int? parent)
         {
@@ -163,7 +176,7 @@ internal sealed partial class SqlPlanner
                 SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset) +
                     (p.Access is SqlOrderedIndexPath ? "; sort_removed=true; order_source=index" : ""),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
-                SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(recursiveDemand ? "demand-driven inputs" : step.Hash is not null ? "bounded in-memory hash" : step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
+                SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(recursiveDemand ? "demand-driven inputs" : step.Hash is not null ? "bounded hash" : step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
                     QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset) + JoinSearchDetail(p),
                 SqlGroupPlan p => $"keys={p.Keys.Count}; aggregates={p.Aggregates.Count}; having={p.Having is not null}; " +
                     (p is not SqlGroupingSetsPlan extended ? "" : GroupingSetsDetail(extended)) +
@@ -274,7 +287,7 @@ internal sealed partial class SqlPlanner
                                 : treeStep.Hash is not null ? "HashJoin" : treeStep.Access is not null ? "IndexNestedLoop" : "NestedLoop";
                             string normalization = treeStep.Kind == SqlJoinType.RightOuter ? "; normalized RIGHT to LEFT; physical=LeftOuter" : string.Empty;
                             Add("JoinStep", next.Parent, Target(join.Bindings[treeStep.Binding].Source),
-                                detail: $"{treeStep.Kind}; {algorithm}{normalization}; hash_budget=no_spill",
+                                detail: $"{treeStep.Kind}; {algorithm}{normalization}{HashPolicy(join, treeStep)}",
                                 actual: metrics?.ActualCandidates(treeStep));
                             if (treeStep.Access is not null)
                             {
@@ -302,7 +315,7 @@ internal sealed partial class SqlPlanner
                                 : outerCount.Count * innerCount.Count;
                         }
                         Add("JoinStep", id, Target(join.Bindings[step.Binding].Source),
-                            detail: $"{step.Kind}; {algorithm}; estimate_kind=heuristic; hash_budget=no_spill",
+                            detail: $"{step.Kind}; {algorithm}; estimate_kind=heuristic{HashPolicy(join, step)}",
                             estimated: estimated, actual: metrics?.ActualCandidates(step));
                         if (step.Access is { } seek)
                         {

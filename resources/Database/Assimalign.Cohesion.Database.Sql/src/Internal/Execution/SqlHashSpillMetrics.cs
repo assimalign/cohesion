@@ -19,21 +19,22 @@ internal sealed class SqlHashSpillMetrics
     internal long ProbeChunkReads { get; private set; }
     internal long ProbeBytesRead { get; set; }
     internal void ReadJoinChunk() => ProbeChunkReads++;
-    internal void EndFullJoin() => FullJoin = false;
+    internal void BeginFullJoin() => _fullJoinDebts++;
+    internal void EndFullJoin() => _fullJoinDebts--;
     internal bool JoinSpilled => _joinPhysicalBytes != 0;
     internal StorageTempStatement? JoinStatement { get; private set; }
-    internal bool FullJoin { get; private set; }
+    internal bool FullJoin => _fullJoinDebts != 0;
     internal Exception? JoinCleanupFailure { get; private set; }
     private long _joinPhysicalBytes;
+    private int _fullJoinDebts;
     internal static void JoinCleanup(SqlStatementMetrics metrics, Exception failure)
     { Begin(metrics); For(metrics)!.JoinCleanupFailure ??= failure; }
     internal static SqlHashSpillMetrics? For(SqlStatementMetrics metrics) => _values.TryGetValue(metrics, out var value) ? value : null;
     internal static void Begin(SqlStatementMetrics metrics) => _values.GetValue(metrics, _ => new());
-    internal static StorageTempStatement JoinTemp(SqlStatementMetrics metrics, SqlDatabaseSession owner, bool full = false)
+    internal static StorageTempStatement JoinTemp(SqlStatementMetrics metrics, SqlDatabaseSession owner)
     {
         Begin(metrics);
         var value = For(metrics)!;
-        value.FullJoin |= full;
         return value.JoinStatement ??= owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
     }
     internal static StorageTempStatement? DetachJoinTemp(SqlStatementMetrics metrics)

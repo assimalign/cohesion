@@ -180,7 +180,8 @@ public sealed class StorageTempRun : IDisposable
     /// <exception cref="InvalidOperationException">The run is not sealed.</exception>
     /// <exception cref="ObjectDisposedException">The run or statement is disposed.</exception>
     /// <remarks>The reader validates every page it visits, including the first page after
-    /// seeking. An in-range value that was not saved at a record boundary is invalid input.</remarks>
+    /// seeking. A position that is not a record start has undefined behavior: it can
+    /// refuse as damage or return misframed records. Callers pass positions saved from Position.</remarks>
     public StorageTempRunReader OpenReader(long memoryGrant, long position)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(memoryGrant, StorageTempSpace.PageSize);

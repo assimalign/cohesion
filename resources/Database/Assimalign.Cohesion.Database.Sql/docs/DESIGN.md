@@ -50,7 +50,7 @@ TempDirectory overrides must be dedicated descendants of RootPath; option checks
 first segment a database could take (a leading dot is safe) and link components below the root.
 A default RootPath is refused with its own message; an empty RootPath remains in-memory. An in-memory engine has no
 space unless TempDirectory is explicitly set. The options snapshot includes TempDirectory,
-TempSpaceQuota and StatementTempSpaceQuota. Root plain SELECT sorts, including CTAS source roots, and eligible plain hash aggregation/DISTINCT consume this substrate as described below; other operators retain their current memory policy.
+TempSpaceQuota and StatementTempSpaceQuota. Root plain SELECT sorts, including CTAS source roots, eligible plain hash aggregation/DISTINCT, hash joins and normalized join buffers consume this substrate as described below; other operators retain their current memory policy.
 
 TempSpaceQuota is nullable: an explicit nonnegative physical-byte cap, or min(10 GiB, 25% of
 available bytes) measured after startup sweeping. An unavailable probe uses zero until CreateRun
@@ -96,26 +96,34 @@ all ten fields, arrays and charges. The filtered RIGHT/FULL iterator and suspend
 state machine retain their base layouts. Explicit spill permission travels through the
 existing statement-context identity slot; nested bodies gain no permission. Fitting rows
 perform no join-spill sidecar lookup. One StorageTempStatement coordinates joins, staged
-sources, aggregation and collectors. A delivered result keeps that owner only when it
-owns that exact statement; otherwise root completion disposes it. Shared collectors close their own runs on failure
-and leave the statement to the root, so draining a producer preserves the first error.
+sources, aggregation and collectors. The statement root is its sole owner during execution.
+Shared group inputs, aggregation, collectors, staged sources and undelivered results close
+only their own runs. Root delivery transfers ownership to a result using that exact
+statement; every other root outcome disposes it. Draining a producer preserves the first error.
 Every failure releases
 its reservations and temporary owner.
 
-Every build record, including the resident prefix and FULL NULL keys, is appended exactly
-once in ordinal order to SQ-L2's external sorter. The sort key is the unsigned 32-bit
+Every build record, including the resident prefix and FULL NULL keys, enters SQ-L2's
+external sorter in ordinal order. The prefix first drains to an input run, releasing
+the retiring table before the arena is allocated. The sort key is the unsigned 32-bit
 composed hash followed by its 32-bit build ordinal, both big-endian. The sorter stores
 these only in its key. Indexed records use a 13-byte hash/ordinal/NULL/padding header and
 the exact SQ-L2 row codec; leading/trailing NULL slots are restored to the original width.
 A managed byte frame packs repeated four-byte patterns, escaping its marker and using raw
 bytes when packing would grow the record. Decode is bounded by B and validates commands
-before decoding the exact row codec. This reduces normalized boolean builds while sorter
-inputs coexist with the index under the unchanged four-grant physical quota.
+before decoding the exact row codec. Packing helps compressible frames. During Seal the
+sorter's runs and the index coexist: a spilled build needs up to about twice its packed
+size of temporary space, plus page framing and a small chunk-metadata run. With the default
+quota of four grants, an incompressible build larger than about two grants refuses located
+CK05002 at Seal. Probe-heavy joins use less temporary space than partitioned probe spooling;
+build-heavy incompressible joins have about half that former build capacity.
 Sorted output is written
 once to one indexed run. A charged directory records each chunk's first/last hash, opaque
 start position, sorted range and first/last ordinal. Chunks target 8,192 encoded bytes,
 also bounded by the decoded cache target. One large record occupies its own chunk.
-Directory growth pays for both old and new arrays.
+Chunk metadata saves positions from Position while writing the index. Its bounded writer
+uses the released sorter's overhead. The charged directory grows after the sorter and its
+final reader retire, paying for both old and new arrays.
 
 A probe never writes to temp. Binary search locates only chunks covering its hash. A
 charged LRU cache decodes those chunks. Groups spanning several chunks stream backwards,
@@ -125,12 +133,16 @@ candidate once, preserving streaming call interleaving and the first error. Hash
 already excludes volatile/throwing ON expressions. Joins have no repartitioning, depth
 limit or skew refusal; aggregation retains its eight-level limit.
 
-Decoded chunks validate width, ordinal range, non-decreasing unsigned hashes, increasing
+Decoded chunks validate that the width fits; omitted trailing cells restore as NULL.
+Page CRCs detect truncation. They also validate ordinal range, non-decreasing unsigned hashes, increasing
 ordinals within each hash, directory endpoints, key families, recomputed hash and NULL
 flag. Damage retains located CK05004. Quotas, the free-space floor and I/O retain CK0500x.
 Computed keys, correlated/lateral inputs, non-hash steps, deferred collations, SQL/JSON,
 joined DML, application binary build cells and join-output DISTINCT retain eligibility.
-Probe payloads need no codec admission because probes are never encoded.
+The probe operation itself never encodes payloads. Normalized RIGHT/FULL left inputs can
+stage separately when their retained input buffer refuses. This source applies SQ-L2's
+exact row codec and grant-derived record bound to every cell, including probe payloads;
+application-produced binary probe cells refuse CS05067 when staging is required.
 
 FULL uses an aligned byte-array bitmap indexed by build ordinal. After probes, an ordinal
 sort of unmatched records restores build insertion order, NULL keys included. This is the
@@ -138,21 +150,30 @@ chosen unmatched method; no second build spool is retained during probing. The e
 outer source is released first. The unmatched sort releases its grant before output.
 A downstream collector can stage already evaluated output/key records while FULL owns
 that grant. It sorts its top-N heap by Compare before draining, preserving ordinal ties.
-Deferred mode ends on the first output after FULL releases its grant, or at completion
-when no further output arrives. Neither sort calls an expression.
+Each spilled FULL increments one open unmatched debt and retires it exactly once when its
+unmatched grant is released or the join is disposed. Buffer spills never change this count.
+Deferred mode lasts while any debt remains, ending on the next append after the count reaches
+zero, or at completion when no further output arrives. Neither sort calls an expression.
 
 The minimum statement grant is 262,144 B. B is
 min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192), including framing.
-The build sorter grant is max(65,536, 32,768 + 2 * (8,192 + B), min(131,072, A/2)),
-where A is the remaining grant after crediting the retiring table, enough for fan-in two.
-Its arena uses the handoff allowance until the old table drains, then pays its grant.
+The sorter's minimum M = max(65,536, 32,768 + 2 * (8,192 + B)) supports a two-way merge.
+At handoff the minimum working set is the operator, keys, M and scratch for rows seen so far.
+Above that minimum the arena takes up to half the available grant A, with no fixed cap,
+leaving the actual scratch charged. The optional extra gives way to a later wider row:
+the old sorter consolidates to a run under its existing charge, then drains that run before
+allocating M. A row refuses only if the minimum plus its scratch cannot fit. Seal builds
+the directory after releasing the arena. FULL's unmatched phase uses its own minimum M,
+independent of the former arena grant. The build sorter's open-run limit is 32, including
+one merge-output slot; fan-in is derived from its workspace and B.
 Admission checks the complete original build row plus 48 B before NULL trimming or
-packing, preserving the existing B refusal boundary.
+packing. Admission also refuses CS05067 immediately if that decoded record plus its
+per-chunk overhead can never fit the largest possible cache G/4.
 Build codec scratch charges 32,768 + 2B + 2D; D bounds a decoded build row. Probe reader
 and decode overlap charge 8,704 + B + 2D. Decoded chunks, including LRU objects, target
-min(G/4, S + 24,064 + B), where S is the build sorter grant. This caps a chunk by the
-space released between build and probe phases when other operators hold the remaining
-grant. A larger single record occupies its own chunk; the FULL bitmap is charged separately.
+min(G/4, M + 24,064 + B). A larger admissible record occupies its own chunk. The FULL bitmap
+and old/new directory arrays also consume the available grant; the target alone does not
+guarantee that a chunk can be admitted after these charges. Their minimum working set must fit.
 The cache targets G/4, reduced by other operators'
 reservations, and must admit one decoded chunk with its LRU objects. Its reservation stays
 live through probes so downstream sorting leaves room for the next probe. Directory slots
@@ -166,7 +187,7 @@ B-byte frame buffer, charged after prefix drain and before later encodes. Its tr
 key/row codec arrays use the single allowance below, during both prefix and later encodes.
 
 There is one statement-wide uncharged allowance of 262,144 B, shared with SQ-L3a.
-It covers sequential prefix handoff arenas (at most 131,072 B), bounded codec frames,
+It covers sequential prefix handoff writers, bounded codec frames,
 one prefix writer page, iterator frames and temporary sorter file/handle/registry objects
 (32 open runs for a join build sorter; 64 for other sorters). Deferred encoding uses this same allowance for at most
 32,768 + 4B of transient codec scratch; its prefix writer and frame buffer use the
@@ -181,6 +202,14 @@ and unmatched scans). With separate sort metrics, hash owner byte/run/merge name
 hash_ prefix. Internal ProbeBytesRead counts encoded bytes and framing decoded by probes.
 Physical fields are not cumulative I/O. Joins never increment hash_spill_batches or
 hash_spill_passes; these keep aggregation's meanings when aggregation also spills.
+
+Under ANALYZE, JoinStep reports its executed hash_budget=spill_on_refusal or no_spill and
+hash_status=fitting or spilled for that build. Plain EXPLAIN describes configured spilling
+as spill_on_refusal_if_eligible. Near a refusal boundary the process hash
+seed can affect directory growth, admission against the actual largest cache chunk and
+FULL's unmatched sorter layout near CK05002. EXPLAIN's hash_join_probe_chunk_reads and
+FULL's spill_runs/spill_merge_passes can vary by process. Rows, order, JoinCandidatePairs,
+RecordsExamined, calls and the first evaluation error retain fitting semantics.
 
 No durable format or write boundary is added. PostgreSQL's batch alternative is at
 src/backend/executor/nodeHashjoin.c:1279 (ExecHashJoinNewBatch) and :1571

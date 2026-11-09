@@ -17,6 +17,7 @@ internal sealed class SqlHashJoinSpill : IDisposable
     internal const long OperatorBytes = 2048;
     internal const int DirectoryEntryBytes = 48;
     internal const long ReaderBytes = 8704;
+    private const int maximumOpenBuildRuns = 32;
     internal static long DirectoryBytes(int capacity) => 24 + (long)DirectoryEntryBytes * capacity;
     internal static long BitmapBytes(long count) => 24 + (((count + 7) / 8 + 7) & ~7L);
     internal static long CachedRecordBytes(object?[] row) => 32 + SqlTempRowCodec.DecodedBytes(row);
@@ -31,8 +32,9 @@ internal sealed class SqlHashJoinSpill : IDisposable
     private readonly byte[] _families;
     private readonly Action<string, long>? _observe;
     private readonly int _bound;
-    private readonly long _sorterGrant;
+    private long _sorterGrant;
     private StorageTempSorter? _sorter;
+    private StorageTempRun? _prefix;
     private StorageTempRun? _index;
     private Chunk[] _directory = [];
     private int _chunks;
@@ -49,32 +51,42 @@ internal sealed class SqlHashJoinSpill : IDisposable
     private bool _sealed;
     private bool _disposed;
     private bool _charged;
+    private bool _fullDebt;
 
     internal SqlHashJoinSpill(SqlDatabaseSession owner, SqlHashJoinPath keys,
-        SqlStatementMetrics metrics, long budget, bool trackUnmatched, long retiringBytes = 0)
+        SqlStatementMetrics metrics, long budget, bool trackUnmatched)
     {
         if (keys.InnerExpressions is not null || keys.OuterExpressions is not null || budget < 262144)
         { throw SqlExecutionException.StatementMemoryBudget(budget); }
         _keys = keys; _metrics = metrics; _budget = budget; _trackUnmatched = trackUnmatched;
         _bound = (int)Math.Min(16384, (Math.Min(int.MaxValue, budget) - 32768) / 16 - 8192);
-        long available = budget - metrics.HashMemoryBytes + retiringBytes;
-        _sorterGrant = Math.Max(BuildSorterGrant(_bound), Math.Min(131072, available / 2));
+        _sorterGrant = BuildSorterGrant(_bound);
         _families = new byte[keys.InnerOrdinals.Length];
         _observe = SqlPlanExecutor.ObserveHashSpill;
-        _statement = SqlHashSpillMetrics.JoinTemp(metrics, owner, trackUnmatched);
+        _statement = SqlHashSpillMetrics.JoinTemp(metrics, owner);
         _counters = SqlHashSpillMetrics.For(metrics)!;
-        // Prefix handoff's bounded arena is covered by the single statement allowance
-        // until the old table has drained. It is charged before accepting later input.
-        _sorter = StorageTempSorter.Create(_statement, _sorterGrant, _bound, 32);
+        // Drain the retiring table to a single writer before allocating an arena.
+        // Only this writer and bounded codec transients use the handoff allowance.
+        _prefix = _statement.CreateRun();
         _observe?.Invoke("join-handoff", 0);
+        if (trackUnmatched) { _counters.BeginFullJoin(); _fullDebt = true; }
     }
 
     internal void AdoptBuild(SqlHashJoinTable owner, CancellationToken token)
     {
         owner.ExportSpillPrefix(this, token);
         _scratch = 32768 + 2L * _bound + 2 * _maximumDecoded;
+        long available = _budget - _metrics.HashMemoryBytes;
+        long minimum = OperatorBytes + _families.Length + BuildSorterGrant(_bound) + _scratch;
+        if (available < minimum) { Refuse(); }
+        _sorterGrant = Math.Max(BuildSorterGrant(_bound), Math.Min(int.MaxValue,
+            Math.Min(available / 2, available - OperatorBytes - _families.Length - _scratch)));
         Reserve(OperatorBytes + _families.Length + SorterCharge(_sorterGrant) + _scratch);
         _charged = true;
+        _prefix!.Seal(token);
+        _sorter = StorageTempSorter.Create(_statement, _sorterGrant, _bound, maximumOpenBuildRuns);
+        foreach (var record in ReadPrefix(_prefix, token)) { _sorter.Append(record.Key.Span, record.Value.Span, token); }
+        _prefix.Dispose(); _prefix = null;
     }
 
     internal void Add(object?[] row, CancellationToken token)
@@ -92,12 +104,22 @@ internal sealed class SqlHashJoinSpill : IDisposable
         // Preserve the original build-record admission bound before private framing
         // removes NULL padding or packs bytes (the former metadata occupied 16 B).
         if (!SqlTempRowCodec.TryGetLength(row, out int originalLength) || originalLength + 48L > _bound) { Refuse(); }
+        if (CachedRecordBytes(row) + 152 > _budget / 4) { Refuse(); }
         long decoded = SqlTempRowCodec.DecodedBytes(row) + 24 + 8L * row.Length;
         _maximumDecoded = Math.Max(_maximumDecoded, decoded);
         if (_charged)
         {
             long scratch = 32768 + 2L * _bound + 2 * _maximumDecoded;
-            if (scratch > _scratch) { Reserve(scratch - _scratch); _scratch = scratch; }
+            if (scratch > _scratch)
+            {
+                long extra = _sorterGrant - BuildSorterGrant(_bound);
+                if (scratch - _scratch > _budget - _metrics.HashMemoryBytes && extra != 0)
+                {
+                    if (scratch - _scratch > _budget - _metrics.HashMemoryBytes + extra) { Refuse(); }
+                    ShrinkBuildSorter(token);
+                }
+                Reserve(scratch - _scratch); _scratch = scratch;
+            }
         }
         int start = 0, end = row.Length;
         while (start < end && row[start] is null) { start++; }
@@ -110,17 +132,52 @@ internal sealed class SqlHashJoinSpill : IDisposable
         Span<byte> key = stackalloc byte[8];
         BinaryPrimitives.WriteUInt32BigEndian(key, unchecked((uint)hash));
         BinaryPrimitives.WriteUInt32BigEndian(key[4..], (uint)_count++);
-        _sorter!.Append(key, bytes, token);
+        if (_charged) { _sorter!.Append(key, bytes, token); }
+        else { AppendIndexRecord(_prefix!, key, bytes, token); }
         _observe?.Invoke("join-input", _count);
+    }
+
+    private static void AppendIndexRecord(StorageTempRun run, ReadOnlySpan<byte> key, ReadOnlySpan<byte> value, CancellationToken token)
+    {
+        var bytes = new byte[key.Length + value.Length];
+        key.CopyTo(bytes); value.CopyTo(bytes.AsSpan(key.Length)); run.Append(bytes, token);
+    }
+
+    private static IEnumerable<(ReadOnlyMemory<byte> Key, ReadOnlyMemory<byte> Value)> ReadPrefix(StorageTempRun run, CancellationToken token)
+    {
+        using var reader = run.OpenReader(StorageTempSpace.PageSize);
+        var bytes = new byte[run.MaximumRecordLength];
+        while (reader.TryRead(bytes, out int size, token))
+        {
+            if (size < 8) { Damage(); }
+            yield return (bytes.AsMemory(0, 8), bytes.AsMemory(8, size - 8));
+        }
+    }
+
+    private void ShrinkBuildSorter(CancellationToken token)
+    {
+        // The optional arena gives way to a wider row. Consolidate under the old
+        // grant, then drain that run before allocating the minimum arena.
+        using var run = _statement.CreateRun(token);
+        using (var sorted = _sorter!.Complete(token))
+        {
+            SqlHashSpillMetrics.Sort(_metrics, _statement, _sorter);
+            while (sorted.MoveNext(token)) { AppendIndexRecord(run, sorted.Key.Span, sorted.Value.Span, token); }
+        }
+        _sorter.Dispose(); _sorter = null; run.Seal(token);
+        Release(SorterCharge(_sorterGrant)); _sorterGrant = BuildSorterGrant(_bound);
+        Reserve(SorterCharge(_sorterGrant));
+        _sorter = StorageTempSorter.CreateWithSortedPrefix(_statement, _sorterGrant, _bound,
+            ReadPrefix(run, token), maximumOpenBuildRuns, token);
+        _observe?.Invoke("join-sorter-minimum", _sorterGrant);
     }
 
     private void Seal(CancellationToken token)
     {
         if (_sealed) { return; }
-        // Other operators may own the rest of G. Releasing the build arena and
-        // scratch must leave enough room for one chunk after the probe reader.
-        long decodedTarget = Math.Min(_budget / 4, SorterCharge(_sorterGrant) + 32768 + _bound - ReaderBytes);
+        long decodedTarget = Math.Min(_budget / 4, BuildSorterGrant(_bound) + 32768 + _bound - ReaderBytes);
         _index = _statement.CreateRun(token);
+        using var directory = _statement.CreateRun(token);
         using (var sorted = _sorter!.Complete(token))
         {
             SqlHashSpillMetrics.Sort(_metrics, _statement, _sorter);
@@ -135,22 +192,20 @@ internal sealed class SqlHashJoinSpill : IDisposable
                 var record = Decode(encoded);
                 uint hash = unchecked((uint)record.Hash);
                 if (first + count != 0 && (hash < lastHash || hash == lastHash && record.Ordinal <= lastOrdinal)) { Damage(); }
-                if (BinaryPrimitives.ReadUInt32BigEndian(sorted.Key.Span) != hash ||
-                    BinaryPrimitives.ReadUInt32BigEndian(sorted.Key.Span[4..]) != record.Ordinal) { Damage(); }
                 long bytes = CachedRecordBytes(record.Row);
                 if (count != 0 && (size + encoded.Length + 4 > ChunkBytes || decoded + bytes + 128 > decodedTarget))
                 {
-                    AddChunk(new(firstHash, lastHash, position, first, count, firstOrdinal, lastOrdinal), decoded);
+                    WriteChunk(directory, new(firstHash, lastHash, position, first, count, firstOrdinal, lastOrdinal), decoded, token);
                     first += count; count = 0; size = 0; decoded = 24;
                 }
                 if (count == 0) { position = _index.Position; firstHash = hash; firstOrdinal = record.Ordinal; }
                 lastHash = hash; lastOrdinal = record.Ordinal; count++; size += encoded.Length + 4; decoded += bytes;
                 _index.Append(encoded, token);
             }
-            if (count != 0) { AddChunk(new(firstHash, lastHash, position, first, count, firstOrdinal, lastOrdinal), decoded); }
+            if (count != 0) { WriteChunk(directory, new(firstHash, lastHash, position, first, count, firstOrdinal, lastOrdinal), decoded, token); }
         }
         _sorter.Dispose(); _sorter = null;
-        _index.Seal(token);
+        _index.Seal(token); directory.Seal(token);
         Release(SorterCharge(_sorterGrant) + _scratch); _scratch = 0;
         if (_trackUnmatched)
         {
@@ -159,12 +214,43 @@ internal sealed class SqlHashJoinSpill : IDisposable
         }
         _scratch = ReaderBytes + _bound + 2 * _maximumDecoded;
         Reserve(_scratch);
+        // Directory growth happens after the arena and final merge readers retire.
+        // Its minimum therefore never depends on the optional build-sorter extra.
+        using (var reader = directory.OpenReader(StorageTempSpace.PageSize))
+        {
+            Span<byte> bytes = stackalloc byte[48];
+            int first = 0;
+            while (reader.TryRead(bytes, out int size, token))
+            {
+                if (size != 48) { Damage(); }
+                var chunk = new Chunk(BinaryPrimitives.ReadUInt32LittleEndian(bytes), BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]),
+                    BinaryPrimitives.ReadInt64LittleEndian(bytes[8..]), BinaryPrimitives.ReadInt32LittleEndian(bytes[16..]),
+                    BinaryPrimitives.ReadInt32LittleEndian(bytes[20..]), BinaryPrimitives.ReadInt64LittleEndian(bytes[24..]),
+                    BinaryPrimitives.ReadInt64LittleEndian(bytes[32..]));
+                long decoded = BinaryPrimitives.ReadInt64LittleEndian(bytes[40..]);
+                if (chunk.First != first || chunk.Count <= 0 || chunk.Count > _count - first || decoded < 24 || decoded > _budget / 4 - 128 ||
+                    chunk.FirstHash > chunk.LastHash || chunk.Position < 0 || chunk.Position >= _index.Position) { Damage(); }
+                AddChunk(chunk, decoded); first += chunk.Count;
+            }
+            if (first != _count) { Damage(); }
+        }
         _cacheGrant = Math.Min(_budget / 4, _budget - _metrics.HashMemoryBytes);
         if (_cacheGrant < _maximumChunk + 128) { Refuse(); }
         Reserve(_cacheGrant);
         _sealed = true;
         SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
+        _observe?.Invoke("join-index-chunks", _chunks);
         _observe?.Invoke("join-partitioned", _count);
+    }
+
+    private static void WriteChunk(StorageTempRun run, Chunk chunk, long decoded, CancellationToken token)
+    {
+        Span<byte> bytes = stackalloc byte[48];
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes, chunk.FirstHash); BinaryPrimitives.WriteUInt32LittleEndian(bytes[4..], chunk.LastHash);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes[8..], chunk.Position); BinaryPrimitives.WriteInt32LittleEndian(bytes[16..], chunk.First);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[20..], chunk.Count); BinaryPrimitives.WriteInt64LittleEndian(bytes[24..], chunk.FirstOrdinal);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes[32..], chunk.LastOrdinal); BinaryPrimitives.WriteInt64LittleEndian(bytes[40..], decoded);
+        run.Append(bytes, token);
     }
 
     private void AddChunk(Chunk chunk, long bytes)
@@ -271,7 +357,7 @@ internal sealed class SqlHashJoinSpill : IDisposable
         // An ordinal sort avoids retaining a second copy of the entire build on disk.
         long readerBytes = ReaderBytes + _bound + 2 * _maximumDecoded;
         long grant = Math.Min(int.MaxValue, _budget - _metrics.HashMemoryBytes - readerBytes);
-        if (grant < _sorterGrant) { Refuse(); }
+        if (grant < BuildSorterGrant(_bound)) { Refuse(); }
         Reserve(readerBytes + grant);
         try
         {
@@ -298,7 +384,7 @@ internal sealed class SqlHashJoinSpill : IDisposable
             Release(grant); grant = 0;
             // The FULL producer no longer needs a sort grant. Later collectors can use
             // the ordinary sorter; already deferred collectors finish on TakeSpilled.
-            _counters.EndFullJoin();
+            ReleaseFullDebt();
             SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
             _observe?.Invoke("join-ordered", output.RecordCount);
             using var outputReader = output.OpenReader(StorageTempSpace.PageSize);
@@ -433,6 +519,8 @@ internal sealed class SqlHashJoinSpill : IDisposable
     private void Reserve(long bytes) { _metrics.ReserveHashMemory(bytes, _budget); _reserved += bytes; }
     private void Release(long bytes) { _metrics.ReleaseHashMemory(bytes); _reserved -= bytes; }
     private void Refuse() => throw SqlExecutionException.StatementMemoryBudget(_budget);
+    private void ReleaseFullDebt()
+    { if (_fullDebt) { _fullDebt = false; _counters.EndFullJoin(); } }
     private static void Damage() => throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged);
     public void Dispose()
     {
@@ -441,9 +529,12 @@ internal sealed class SqlHashJoinSpill : IDisposable
         SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
         _cache.Clear(); _directory = []; _matched = [];
         _metrics.ReleaseHashMemory(_reserved); _reserved = 0;
+        ReleaseFullDebt();
         try { _sorter?.Dispose(); }
         catch (AggregateException error) { SqlHashSpillMetrics.JoinCleanup(_metrics, error); }
         try { _index?.Dispose(); }
+        catch (StorageTempException error) { SqlHashSpillMetrics.JoinCleanup(_metrics, error); }
+        try { _prefix?.Dispose(); }
         catch (StorageTempException error) { SqlHashSpillMetrics.JoinCleanup(_metrics, error); }
         SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
     }
