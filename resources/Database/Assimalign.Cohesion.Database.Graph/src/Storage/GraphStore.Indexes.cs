@@ -110,10 +110,10 @@ public sealed partial class GraphStore
         // before the first page allocation. Oversized keys retain their original error order.
         if (!text) { foreach (var entry in entries) { cancellationToken.ThrowIfCancellationRequested(); visit?.Invoke(); } }
         reserve?.Invoke(80L + IndexBuildLoop.ChunkSize * 96L);
-        IndexBuildStarted?.Invoke(id);
         bool buildSucceeded = false;
         try
         {
+            IndexBuildStarted?.Invoke(id);
             // The creator pins this later owner, while this short fence advances the
             // manager's idle horizon so abandoned chunks retire without a new user write.
             await AdvanceIndexOwnerHorizonAsync(cancellationToken).ConfigureAwait(false);

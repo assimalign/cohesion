@@ -3490,8 +3490,8 @@ four servers.
 | 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code` (first Error diagnostic, otherwise the first diagnostic; empty when absent), `exceptionType` |
 | 13 | `StatementCleanupFailed` | Warning | — | `database`, `exceptionType`; snapshot-pin cleanup failed after a successful autocommit |
 | 15 | `PathPhaseCompleted` | Verbose | `Sessions` | `sessionId`, `phase`, `durationMilliseconds` |
-| 16 | `IndexBuildStart` | Informational | — | `database`, `objectId` |
-| 17 | `IndexBuildStop` | Informational | — | `database`, `objectId`, `succeeded` |
+| 16 | `IndexBuildBegan` | Informational | — | `database`, `objectId` |
+| 17 | `IndexBuildEnded` | Informational | — | `database`, `objectId`, `succeeded` |
 | 18 | `PagesReclaimed` | Informational | — | `database`, `objectId`, `pages` |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
@@ -4504,3 +4504,9 @@ the former form without a compatibility reader; see Database.Protocol DESIGN.
 A short snapshot fence advances the coordinator's idle horizon beyond each reserved build owner before allocation. The older logical creator pins that owner for the entire build; after a failed creator ends, committed chunks can retire without waiting for another user transaction. Open-time detach commits and orphan-receipt inserts are explicit crash boundaries.
 
 For a file with at least 1 GiB of valid allocated pages under an unrelated owner, the minimum of three Release opens on the same ARM64 host was 4.875 s at d33f62363 and 2.758 s with bounded owner-directory discovery. This measures removal of the second page scan, rather than a document/node/value workload.
+
+IndexBuildBegan and IndexBuildEnded report build lifetimes without EventSource Start/Stop activity semantics. Every begun build emits one end event on success, failure or abandonment; end includes succeeded. PagesReclaimed reports only nonempty committed batches.
+
+Before direct open records a receipt for an unknown index owner, it loads every page of that owner through checksum verification. Ordinary registered owners incur no extra reads. A failed root bracket with no registration records its receipt during live retirement, so its allocated page does not wait for reopen.
+
+The journal bound is also checked with a 256 KiB trigger above the largest chunk delta, requiring a window that accumulates multiple chunks. The original 64 KiB comparison still measures the reduction from the former whole-build bracket.

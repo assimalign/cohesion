@@ -72,17 +72,28 @@ public sealed partial class GraphStore
                 afterOwner = id;
                 if (id <= 2 || id == adjacencyId || id == labelsId || id == relationshipTypesId ||
                     _registrations.ContainsKey(id) || _records.ContainsKey((3, id))) { continue; }
-                var bytes = new byte[34];
-                bytes[16] = 4; bytes[17] = GraphRecordCodec.FormatVersion;
-                BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(18), id);
-                BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -(long)page);
-                using var bracket = _storage.BeginTransaction();
-                var location = _storage.InsertOwned(bracket, 1, bytes);
-                bracket.Commit();
-                _registrations.Add(id, (location.PageId, location.SlotIndex, -(long)page));
+                // Ordinary registered owners need no extra reads. An unknown
+                // header tag must pass checksum verification before its receipt.
+                foreach (var unknown in _storage.GetOwnerIndexPages(id))
+                { using var verified = _storage.PageManager.GetPage(unknown); }
+                RecordIndexRetirementReceipt(id, page);
                 ScheduleIndexReclamation(id); // Reclamation still requires id below the safe bound.
             }
         }
+    }
+
+    private (PageId Page, int Slot, long Root) RecordIndexRetirementReceipt(ulong id, PageId page)
+    {
+        var bytes = new byte[34];
+        bytes[16] = 4; bytes[17] = GraphRecordCodec.FormatVersion;
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(18), id);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -(long)page);
+        using var bracket = _storage.BeginTransaction();
+        var location = _storage.InsertOwned(bracket, 1, bytes);
+        bracket.Commit();
+        var registration = (location.PageId, location.SlotIndex, -(long)page);
+        _registrations.Add(id, registration);
+        return registration;
     }
 
     private void ScheduleIndexReclamation(ulong id)
@@ -111,7 +122,15 @@ public sealed partial class GraphStore
                     bool finished = false;
                     try
                     {
-                        if (!_registrations.TryGetValue(id, out var registration)) { finished = true; continue; }
+                        if (!_registrations.TryGetValue(id, out var registration))
+                        {
+                            int unregistered = RetirementStatus(id, bound, receipt: false);
+                            if (unregistered == 0) { finished = true; continue; }
+                            if (unregistered == 1) { continue; }
+                            var pages = _storage.GetOwnerIndexPages(id);
+                            if (pages.Count == 0) { finished = true; continue; }
+                            registration = RecordIndexRetirementReceipt(id, pages[0]);
+                        }
                         int status = RetirementStatus(id, bound, receipt: registration.Root < 0);
                         if (status == 0)
                         {

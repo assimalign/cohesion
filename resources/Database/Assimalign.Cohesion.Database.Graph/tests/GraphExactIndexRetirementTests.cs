@@ -107,7 +107,11 @@ public sealed class GraphExactIndexRetirementTests
         database.DataStorage.GetOwnerIndexPages(id).ShouldBeEmpty();
         (database.Store.IndexOwnerPagesReclaimed - reclaimed).ShouldBe(pages);
         events.Events.Count(item => item.EventId == 16).ShouldBe(1);
+        events.Events.Single(item => item.EventId == 16).EventName.ShouldBe("IndexBuildBegan");
+        events.Events.Single(item => item.EventId == 16).Opcode.ShouldBe(EventOpcode.Info);
         events.Events.Count(item => item.EventId == 17).ShouldBe(1);
+        events.Events.Single(item => item.EventId == 17).EventName.ShouldBe("IndexBuildEnded");
+        events.Events.Single(item => item.EventId == 17).Opcode.ShouldBe(EventOpcode.Info);
         events.Events.Where(item => item.EventId == 18).Sum(item => (int)item.Payload![2]!).ShouldBe(pages);
         GraphTextIndexTests.Registrations(database).ShouldNotContain(entry => entry.Id == id);
         (await GraphTextIndexTests.RowsAsync(writer, "MATCH (n:N {p:'abc'}) RETURN n.p")).ShouldHaveSingleItem();

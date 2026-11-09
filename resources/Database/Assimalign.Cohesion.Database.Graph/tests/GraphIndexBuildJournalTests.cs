@@ -25,14 +25,16 @@ public sealed class GraphIndexBuildJournalTests
     private readonly ITestOutputHelper _output;
     public GraphIndexBuildJournalTests(ITestOutputHelper output) { _output = output; }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Text backfill journal peak is bounded by a chunk at a due checkpoint (#1808)")]
-    public async Task CreateIndexAsync_TextBackfill_ShouldReduceWholeBracketJournalPeak()
+    [Theory(DisplayName = "Cohesion Test [Graph] - Text backfill journal peak is bounded by a chunk at a due checkpoint (#1808)")]
+    [InlineData(64 * 1024)]
+    [InlineData(256 * 1024)]
+    public async Task CreateIndexAsync_TextBackfill_ShouldReduceWholeBracketJournalPeak(long trigger)
     {
         // Arrange: compare the former one-bracket insertion shape with the shared loop.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         var options = GraphTextIndexTests.Quiet();
         options.StorageStrategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        options.CheckpointJournalSize = 64 * 1024;
+        options.CheckpointJournalSize = trigger;
         await using var engine = GraphDatabaseEngine.Create("text-chunks", options);
         var database = await engine.CreateDatabaseAsync("graph", guard.Token);
         await using var session = await database.CreateSessionAsync(guard.Token);
@@ -139,7 +141,12 @@ public sealed class GraphIndexBuildJournalTests
         { ((long)checkpoint.Payload![2]!).ShouldBeLessThanOrEqualTo(options.CheckpointJournalSize + deltas.Max()); }
         peaks[0].ShouldBeGreaterThan(0);
         peaks[1].ShouldBeGreaterThan(0);
-        peaks[1].ShouldBeLessThan(peaks[0]);
+        if (trigger == 64 * 1024) { peaks[1].ShouldBeLessThan(peaks[0]); }
+        else
+        {
+            deltas.Max().ShouldBeLessThan(trigger);
+            chunkCommits.ShouldContain(length => length > deltas.Max(), "at least one checkpoint window must accumulate chunks");
+        }
         _output.WriteLine($"TEXT_BUILD_JOURNAL|entries={entries}|whole-bracket={peaks[0]}|chunked={peaks[1]}|chunks={chunks}|largest-chunk-delta={deltas.Max()}|commits={string.Join(',', chunkCommits)}");
     }
 }
