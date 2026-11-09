@@ -68,7 +68,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     private readonly BTreeIndexManager _indexManager;
     private readonly BTreeIndex _primaryIndex;
 
-    internal KeyValueDatabase(DatabaseName name, KeyValueDatabaseEngine engine, KeyValueStorage storage, KeyValueStorage catalogStorage, bool recover = false, KeyValueCatalog? catalog = null)
+    internal KeyValueDatabase(DatabaseName name, KeyValueDatabaseEngine engine, KeyValueStorage storage, KeyValueStorage catalogStorage, bool recover = false, KeyValueCatalog? catalog = null, CancellationToken cancellationToken = default)
         : base(name, engine)
     {
         _engine = engine;
@@ -115,6 +115,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
         try
         {
             ThrowIfFormatIsNotCurrent(name, _catalog);
+            EnsureIndexFormats(name, storage, _catalog);
         }
         catch
         {
@@ -169,31 +170,41 @@ public sealed class KeyValueDatabase : DatabaseInstance
             _coordinator.CompleteRecovery();
         }
 
-        ReclaimAbandonedIndexes();
-        _primaryIndex = EnsurePrimaryIndex();
+        try
+        {
+            ReclaimAbandonedIndexes(cancellationToken);
+            _primaryIndex = EnsurePrimaryIndex();
+        }
+        catch { _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); throw; }
     }
 
-    private void ReclaimAbandonedIndexes()
+    private void ReclaimAbandonedIndexes(CancellationToken cancellationToken)
     {
         // Open only, after recovery, before any session can hold a detached handle.
         var live = new HashSet<ulong>();
         foreach (var registration in _catalog.GetIndexRegistrations()) { live.Add(registration.ObjectId); }
-        var abandoned = new HashSet<ulong>();
-        for (long page = 1; page < _storage.PageManager.PageCount; page++)
+        ulong afterOwner = 0;
+        while (true)
         {
-            if (!_storage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
-            using var handle = _storage.PageManager.GetPage((PageId)page);
-            if (handle.Page.Type == PageType.Index && handle.Page.OwnerId > KeyValueOperationExecutor.KeySpaceObjectId &&
-                !live.Contains(handle.Page.OwnerId)) { abandoned.Add(handle.Page.OwnerId); }
-        }
-        foreach (ulong owner in abandoned)
-        {
-            while ((_storage.GetOwnerIndexPageCount(owner) != 0))
+            cancellationToken.ThrowIfCancellationRequested();
+            var owners = _storage.GetIndexOwners(afterOwner);
+            if (owners.Count == 0) { break; }
+            foreach (var (owner, _) in owners)
             {
-                if (IndexRetirement.MustYield(_storage)) { _coordinator.Checkpoint(); }
-                using var admission = TransactionCheckpointInterlock.ForStorage(_storage).Enter("IndexReclamation", unchecked((long)owner));
-                if (!IndexRetirement.TryFreePages(_storage, owner, IndexRetirement.PageBudget, CancellationToken.None, out int freed)) { continue; }
-                KeyValueDatabaseEventSource.Log.PagesReclaimed(_storage, owner, freed);
+                afterOwner = owner;
+                if (owner <= KeyValueOperationExecutor.KeySpaceObjectId || live.Contains(owner)) { continue; }
+                while ((_storage.GetOwnerIndexPageCount(owner) != 0))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (IndexRetirement.MustYield(_storage) || _engine.CheckpointNeededSignal.IsSet ||
+                        _storage.IsCheckpointDue(_engine.EngineOptions.CheckpointInterval))
+                    { _coordinator.Checkpoint(cancellationToken); }
+                    using var admission = TransactionCheckpointInterlock.ForStorage(_storage).Enter("IndexReclamation", unchecked((long)owner), cancellationToken);
+                    if (!IndexRetirement.TryFreePages(_storage, owner, IndexRetirement.PageBudget, cancellationToken, out int freed)) { continue; }
+                    KeyValueDatabaseEventSource.Log.PagesReclaimed(_storage, owner, freed);
+                    if (freed == 0 && _storage.GetOwnerIndexPageCount(owner) != 0)
+                    { throw new StorageCorruptionException(ErrorMessages.IndexReclamationNoProgress); }
+                }
             }
         }
     }

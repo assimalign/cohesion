@@ -1874,3 +1874,6 @@ a derived implementation can observe its borrowed context.
 
 Interleaved same-process Release comparisons preserve GET/EXISTS allocations. CALL admission
 uses session state so ordinary reads avoid taking a session operation hold.
+
+Every open validates primary registration shape and root ownership before attaching the primary tree or reclaiming any orphan, including clean opens that need no recovery probe. A mismatched catalog refuses with PrimaryIndexRegistrationInvalid and leaves both file sets unchanged. Orphan owners come from Storage.GetIndexOwners in bounded batches; no second allocated-page scan runs through the buffer pool. Open-time cleanup checks cancellation and size/interval checkpoint admission between batches and refuses corruption if allocated pages remain without reclamation progress.
+For a file with at least 1 GiB of valid allocated pages under an unrelated owner, the minimum of three Release opens on the same ARM64 host was 4.778 s at d33f62363 and 2.672 s with bounded owner-directory discovery. This measures removal of the second page scan, rather than a document/node/value workload.

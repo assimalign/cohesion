@@ -15,6 +15,7 @@ using Xunit;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
+using Assimalign.Cohesion.Database.Tests;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Testing;
@@ -61,8 +62,9 @@ public sealed class KeyValueDatabaseEventSourceTests
         stop.Payload![2].ShouldBe(true);
     }
 
-    [Fact(DisplayName = "Cohesion Test [KeyValuePair] - Every orphan reclamation commit converges without touching the registered primary tree (#1808)")]
-    public async Task OpenDatabaseAsync_OrphanCrashImages_ShouldReclaimExactOwnerAndKeepPrimary()
+    [Theory(DisplayName = "Cohesion Test [KeyValuePair] - Every orphan reclamation commit converges without touching the registered primary tree (#1808)")]
+    [InlineData(false, false)] [InlineData(true, false)] [InlineData(false, true)]
+    public async Task OpenDatabaseAsync_OrphanCrashImages_ShouldReclaimExactOwnerAndKeepPrimary(bool intervalCheckpoint, bool pendingCheckpoint)
     {
         // Arrange: an interrupted bootstrap can leave more than one batch of index pages.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -94,17 +96,44 @@ public sealed class KeyValueDatabaseEventSourceTests
         source.Coordinator.Checkpoint(guard.Token);
         strategy.CopyDatabase("source", "reclaim");
         int images = 0;
+        using var releaseCheckpoint = new ManualResetEventSlim();
+        var checkpointEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var checkpointPump = intervalCheckpoint || pendingCheckpoint ? WorkerPumpObservation.Create(engine.Workers.OfType<KeyValueCheckpointWorker>().Single(), _ => { },
+            _ => { checkpointEntered.TrySetResult(); releaseCheckpoint.Wait(guard.Token); }) : null;
+        if (intervalCheckpoint || pendingCheckpoint)
+        {
+            engine.CheckpointNeededSignal.Set();
+            await checkpointEntered.Task.WaitAsync(guard.Token);
+            if (intervalCheckpoint) { engine.EngineOptions.CheckpointInterval = TimeSpan.FromTicks(1); }
+            if (pendingCheckpoint) { engine.CheckpointNeededSignal.Set(); }
+        }
+        using var checkpoints = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Storage"), EventLevel.Informational);
         using var events = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Informational);
         FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () =>
             strategy.CopyDatabase("reclaim", "boundary" + images++);
 
         // Act: capture each durable boundary before the opened database is published.
         KeyValueDatabase current;
-        try { current = await engine.OpenDatabaseAsync("reclaim", guard.Token); }
-        finally { FaultInjectingJournalStorageStrategy.BeforeCommitFlush = null; }
+        int openCheckpointCount = 0;
+        try
+        {
+            current = await engine.OpenDatabaseAsync("reclaim", guard.Token);
+            openCheckpointCount = checkpoints.Events.Count(item => item.EventId == 5 && Equals(item.Payload![0], current.DataStorage.Name.ToString()));
+        }
+        finally
+        {
+            engine.EngineOptions.CheckpointInterval = TimeSpan.FromHours(1);
+            releaseCheckpoint.Set(); FaultInjectingJournalStorageStrategy.BeforeCommitFlush = null;
+        }
 
         // Assert: every captured prefix converges twice to exactly the original live tree.
         images.ShouldBeGreaterThanOrEqualTo(3);
+        if (intervalCheckpoint || pendingCheckpoint)
+        {
+            // The worker stayed paused until this count was captured. Two nonempty
+            // inter-batch journals require interval checkpoints; recovery may add one.
+            openCheckpointCount.ShouldBeGreaterThanOrEqualTo(2);
+        }
         current.DataStorage.GetOwnerIndexPages(orphan).ShouldBeEmpty();
         current.DataStorage.GetOwnerIndexPages(registration.ObjectId).ShouldBe(primaryPages);
         events.Events.Where(item => item.EventId == 15).Sum(item => (int)item.Payload![2]!).ShouldBe(130);
