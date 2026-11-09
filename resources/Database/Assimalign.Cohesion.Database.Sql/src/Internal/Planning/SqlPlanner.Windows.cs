@@ -138,6 +138,7 @@ internal sealed partial class SqlPlanner
         var names = NamedWindows(select);
         var groups = new List<SqlWindowGroup>();
         var frames = new Dictionary<SqlWindowFrame, SqlWindowFrameBinding>();
+        var argumentScope = scope.ForWindowArguments();
         foreach (var window in WindowExpressions(select).Distinct())
         {
             var keys = WindowKeysOf(window, names);
@@ -152,7 +153,7 @@ internal sealed partial class SqlPlanner
             if (window.NullTreatment != SqlWindowNullTreatment.Default && name is not ("LAG" or "LEAD" or "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE"))
             { throw new SqlPlanningException("CS05088", ErrorMessages.WindowNullTreatment, window.Location); }
             SqlGroupAggregate? aggregate = null;
-            if (_functions.Catalog.IsAggregate(name)) { aggregate = BindWindowAggregate(call, scope); }
+            if (_functions.Catalog.IsAggregate(name)) { aggregate = BindWindowAggregate(call, argumentScope); }
             else
             {
                 if (!IsWindowFunction(name))
@@ -161,10 +162,10 @@ internal sealed partial class SqlPlanner
                     call.Arguments.Any(argument => argument is SqlStarExpression) ||
                     (name is "LAG" or "LEAD" ? count < 1 || count > 3 : name is "NTILE" or "FIRST_VALUE" or "LAST_VALUE" ? count != 1 : name == "NTH_VALUE" ? count != 2 : count != 0))
                 { throw new SqlPlanningException("CS00011", ErrorMessages.WindowSignature, window.Location); }
-                foreach (var argument in call.Arguments) { ValidateExpression(argument, scope, _subqueryTypes); }
+                foreach (var argument in call.Arguments) { ValidateExpression(argument, argumentScope, _subqueryTypes); }
             }
             int integerArgument = name == "NTILE" ? 0 : name == "NTH_VALUE" || name is "LAG" or "LEAD" && count > 1 ? 1 : -1;
-            if (integerArgument >= 0 && scope.StaticTypeOf(window.Function.Arguments[integerArgument]) is not
+            if (integerArgument >= 0 && argumentScope.StaticTypeOf(window.Function.Arguments[integerArgument]) is not
                 (DatabaseType.Null or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
             { throw new SqlPlanningException(name == "NTH_VALUE" ? "CS02073" : "CS02068",
                 name == "NTH_VALUE" ? ErrorMessages.WindowNthInteger : ErrorMessages.WindowIntegerArgument, window.Location); }
@@ -178,8 +179,8 @@ internal sealed partial class SqlPlanner
             }
             int ordinal = start++;
             slots[window] = ordinal;
-            var type = scope.WindowType(window);
-            var arguments = aggregate?.Arguments ?? window.Function.Arguments.Select(scope.Bind).ToArray();
+            var type = argumentScope.WindowType(window);
+            var arguments = aggregate?.Arguments ?? window.Function.Arguments.Select(argumentScope.Bind).ToArray();
             if (name is "LAG" or "LEAD")
             {
                 Coerce(0);
@@ -189,7 +190,7 @@ internal sealed partial class SqlPlanner
 
             void Coerce(int index)
             {
-                var source = scope.StaticTypeOf(window.Function.Arguments[index]);
+                var source = argumentScope.StaticTypeOf(window.Function.Arguments[index]);
                 if (source == type || source == DatabaseType.Null) { return; }
                 var target = SqlType.ForStorage(new DatabaseTypeInfo(type));
                 var cast = new SqlBoundCast(arguments[index], target.Name, target, _functions.Types.ResolveCasts(null, target),

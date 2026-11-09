@@ -27,6 +27,7 @@ public sealed class SqlExecutionDiagnosticConformanceTests
             yield return [setup, "MERGE INTO target USING (SELECT 1 AS k) s ON target.k=s.k WHEN NOT MATCHED THEN INSERT(id,k) OVERRIDING USER VALUE VALUES(" + expression + ",1)", code];
         }
         yield return ["", "SELECT (SELECT id FROM t)", "CS02046"];
+        yield return ["", "SELECT COALESCE(1,TRUE)", "CS02080"];
         yield return ["", "INSERT INTO t VALUES (3, 'bad')", "CS02022"];
         yield return ["CREATE TABLE target (v DATE)", "INSERT INTO target VALUES ('bad')", "CS02047"];
         yield return ["CREATE TABLE target (v TIME)", "INSERT INTO target VALUES ('bad')", "CS02047"];

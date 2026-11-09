@@ -1104,4 +1104,5 @@
   <data name="NaturalSynthesizedName" xml:space="preserve">
     <value>NATURAL JOIN input column '{0}' has a synthesized name; give the column an explicit alias.</value>
   </data>
+  <data name="AlternativeTypeUnresolved" xml:space="preserve"><value>CASE/COALESCE cannot determine the type of a polymorphic result or unsupported parameter value.</value></data>
 </root>

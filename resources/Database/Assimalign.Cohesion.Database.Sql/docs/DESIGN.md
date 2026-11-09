@@ -8817,9 +8817,28 @@ All scalar positions share the existing CASE/COALESCE common-type resolver (#178
 unknown literals adopt declared alternatives, all-unknown sets become TEXT, and incompatible
 declared alternatives refuse with CS02080 before rows. Alternatives convert at each node,
 including analysis-time conversion of skipped unknown literals (CS02022 for invalid numeric
-or Boolean text, CS02002 for numeric overflow). Grouped output normalization, overload typing,
-CHAR/string padding removal and all-NULL metadata retain their established contracts, as do
-statistical transitions and JSON's conversions within grouped output. CHECK and SQL function creation fully bind
+or Boolean text, CS02002 for numeric overflow). Grouping keys and aggregate inputs use the
+scalar rule. A select-list, HAVING or ORDER BY node reading a key slot declares and returns
+the key's resolved source-scope type, including under ROLLUP, CUBE and GROUPING SETS.
+Aggregate result types follow their bound inputs and their existing transition contracts.
+CASE/COALESCE over grouped values (aggregate results, key slots, expressions over them or
+constants) retains Decimal-above-Double-above-Real normalization, CHAR/TEXT folding to TEXT
+with padding removed, grouped overload selection, Int64 integer literals and all-NULL
+metadata. Native grouped arguments retain base value families, including signed BIGINT
+literals. This is a recorded PostgreSQL departure. A SlotScope alone does not imply grouped
+output: only PlanPlainGroup and PlanGroupingSets set the flag; ForOrdering copies it.
+Plain window projections and ORDER BY use the scalar rule. Window arguments use a scalar
+scope even over completed grouping slots. Alternative types
+reuse the scope's existing type cache, avoiding cubic grouped nesting without enlarging it.
+Built-in implicit conversions handle declared alternatives; application and explicit-only
+casts are excluded. Unconstrained NUMERIC preserves its original box and constant alternative
+casts fold during binding. Unresolved polymorphic results and unsupported parameter values
+refuse with CS02080 before rows; NULL-valued parameters remain unknown.
+Completed grouping slots retain that source check, so repeating a key cannot hide an
+unresolved polymorphic result or unsupported parameter.
+Other Null-typed shapes, including native MIN/MAX Null-result slots, retain their existing behavior.
+Statistical transitions and JSON's grouped conversions
+retain their contracts. CHECK and SQL function creation fully bind
 before publication, as defaults, views and partial predicates already do. Accepted definitions
 round-trip through file reopen. This change ships with SQ-A7's format 38 in the same release;
 view columns are not migrated and this run adds no format bump or compatibility reader. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
@@ -8850,7 +8869,7 @@ admission now refuses malformed input; it does not rewrite existing row bytes.
 | CS01067 | Invalid JSON access or IS JSON signature (42883) |
 | CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
 | CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
-| CS02080 | Incompatible declared CASE/COALESCE alternatives (42804/42846) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives or unresolved polymorphic/unsupported parameter alternatives (42804/42846) |
 
 The extraction oracle performs 10,240 comparisons over generated nested values,
 negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.

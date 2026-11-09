@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
@@ -253,18 +254,5 @@ public sealed class SqlArithmeticWireTests
         row["single"].ShouldBeOfType<float>().ShouldBe(1.5f);
         row["wide"].ShouldBeOfType<double>().ShouldBe(2.25d);
         row["exact"].ShouldBeOfType<decimal>().ShouldBe(3.75m);
-    }
-    private sealed class MixedSortKeyFunction : SqlScalarFunction
-    {
-        internal MixedSortKeyFunction()
-            : base("mixed_sort_key", [SqlType.BigInt, SqlType.AnyElement], SqlType.AnyElement,
-                nullBehavior: SqlNullBehavior.CalledOnNullInput)
-        { }
-
-        protected override SqlValue InvokeCore(scoped in SqlArguments arguments)
-        {
-            long id = arguments.GetInt64(0);
-            return id == 1 ? SqlValue.FromString("a") : SqlValue.FromInt64(id);
-        }
     }
 }

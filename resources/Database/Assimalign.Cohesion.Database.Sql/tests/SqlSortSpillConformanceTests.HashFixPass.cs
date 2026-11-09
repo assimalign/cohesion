@@ -372,7 +372,7 @@ public sealed partial class SqlSortSpillConformanceTests
         const string input = "(SELECT id,unproved_result(id,CAST(NULL AS BIGINT)) AS v FROM t) q";
         await using (var sample = (DatabaseResultSet)await a.ExecuteAsync("SELECT v FROM " + input + " WHERE id=500"))
         { sample.Columns[0].Type.ShouldBe(DatabaseType.Int64); (await Rows(sample)).ShouldHaveSingleItem().Cells[0].ShouldBe(new string('x',100)); }
-        // SQ-CT1 now enforces the family at a COALESCE boundary, before grouping.
+        // SQ-CT1 refuses an unresolved polymorphic alternative while planning.
         // The proof stays conservative for the typed-NULL witness above.
         foreach (var session in new[] { a, b })
         {
@@ -382,7 +382,7 @@ public sealed partial class SqlSortSpillConformanceTests
                     "SELECT v FROM (SELECT id,COALESCE(unproved_result(id,NULL),0) AS v FROM t) q WHERE id=500");
                 await Rows(sample);
             });
-            conversion.Diagnostics[0].Code.ShouldBe("CS02022");
+            conversion.Diagnostics[0].Code.ShouldBe("CS02080");
         }
         string sql = "SELECT stamp(id)," + aggregate + "(v) FROM " + input + " GROUP BY stamp(id)";
 

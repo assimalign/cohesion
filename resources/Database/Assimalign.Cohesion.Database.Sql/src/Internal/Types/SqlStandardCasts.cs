@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -39,6 +40,19 @@ internal static class SqlStandardCasts
     /// <param name="cast">The cast.</param>
     /// <returns><see langword="true"/> for a standard cast.</returns>
     internal static bool Contains(SqlCast cast) => Array.IndexOf(_casts, cast) >= 0;
+
+    /// <summary>Built-in implicit casts at an alternative boundary; unknown literals use input casts too.</summary>
+    internal static SqlCast?[] AlternativeCasts(DatabaseType target, bool unknown)
+    {
+        var casts = new SqlCast?[(int)DatabaseType.Character + 1];
+        foreach (var cast in _casts)
+        {
+            if (cast.Target.Storage.Type == target && (cast.Context == SqlCastContext.Implicit
+                || unknown && cast.Source.Storage.Type == DatabaseType.String))
+            { casts[(int)cast.Source.Storage.Type] = cast; }
+        }
+        return casts;
+    }
 
     private static SqlCast[] Create() =>
     [

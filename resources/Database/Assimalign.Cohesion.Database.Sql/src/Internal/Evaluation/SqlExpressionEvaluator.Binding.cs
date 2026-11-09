@@ -214,6 +214,17 @@ internal sealed partial class SqlExpressionEvaluator
             }
             return new SqlBoundJsonAccess(operand, [step], source, binary.Operator == SqlBinaryOperator.JsonTextAccess);
         }
+        if (SqlBitwise.IsBinary(binary.Operator))
+        {
+            // The operator validates wrapped operands before alternative binding can
+            // refuse an unsupported parameter under the general common-type rule.
+            var leftType = ValidateBitwiseOperand(binary.Left, SqlBitwise.Text(binary.Operator));
+            var rightType = ValidateBitwiseOperand(binary.Right, SqlBitwise.Text(binary.Operator), SqlBitwise.IsShift(binary.Operator));
+            var first = Bind(binary.Left, out _, statisticsInput: statisticsInput);
+            var second = Bind(binary.Right, out _, statisticsInput: statisticsInput);
+            collation = default;
+            return new SqlBoundBitwise(binary.Operator, first, second, SqlBitwise.ResultType(binary.Operator, leftType, rightType), binary.Location);
+        }
         var left = Bind(binary.Left, out SqlCollationCandidate leftCollation, statisticsInput: statisticsInput);
         var right = Bind(binary.Right, out SqlCollationCandidate rightCollation, statisticsInput: statisticsInput);
         if (binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan
@@ -228,13 +239,6 @@ internal sealed partial class SqlExpressionEvaluator
             left = JsonBinaryToText(binary.Left, left);
             right = JsonBinaryToText(binary.Right, right);
         }
-        if (SqlBitwise.IsBinary(binary.Operator))
-        {
-            var leftType = ValidateBitwiseOperand(binary.Left, SqlBitwise.Text(binary.Operator));
-            var rightType = ValidateBitwiseOperand(binary.Right, SqlBitwise.Text(binary.Operator), SqlBitwise.IsShift(binary.Operator));
-            collation = default;
-            return new SqlBoundBitwise(binary.Operator, left, right, SqlBitwise.ResultType(binary.Operator, leftType, rightType), binary.Location);
-        }
         collation = CollationOf(binary, [leftCollation, rightCollation]);
         return new SqlBoundBinary(binary.Operator, left, right,
             SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation), binary.Location);
@@ -247,8 +251,6 @@ internal sealed partial class SqlExpressionEvaluator
     private DatabaseType ValidateBitwiseOperand(SqlExpression expression, string op, bool shiftCount = false)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        var type = StaticTypeOf(expression);
-        SqlBitwise.Validate(type, op, expression.Location, shiftCount);
         switch (expression)
         {
             case SqlParameterExpression parameter when TryGetParameterValue(parameter, out var value) && value is not null:
@@ -271,6 +273,8 @@ internal sealed partial class SqlExpressionEvaluator
                 ValidateBitwiseOperand(call.Arguments[0], op, shiftCount);
                 break;
         }
+        var type = StaticTypeOf(expression);
+        SqlBitwise.Validate(type, op, expression.Location, shiftCount);
         return type;
     }
 
@@ -595,13 +599,15 @@ internal sealed partial class SqlExpressionEvaluator
             return new SqlBoundConstant(long.MinValue);
         }
 
-        var operand = Bind(unary.Operand, out SqlCollationCandidate operandCollation, requireBoolean: unary.Operator == SqlUnaryOperator.Not, statisticsInput: statisticsInput);
-        collation = CollationOf(unary, [operandCollation]);
         if (unary.Operator == SqlUnaryOperator.BitwiseNot)
         {
             var type = ValidateBitwiseOperand(unary.Operand, "~");
-            return new SqlBoundBitwise(default, operand, null, type == DatabaseType.Null ? DatabaseType.Int32 : type, unary.Location);
+            var value = Bind(unary.Operand, out SqlCollationCandidate candidate, statisticsInput: statisticsInput);
+            collation = CollationOf(unary, [candidate]);
+            return new SqlBoundBitwise(default, value, null, type == DatabaseType.Null ? DatabaseType.Int32 : type, unary.Location);
         }
+        var operand = Bind(unary.Operand, out SqlCollationCandidate operandCollation, requireBoolean: unary.Operator == SqlUnaryOperator.Not, statisticsInput: statisticsInput);
+        collation = CollationOf(unary, [operandCollation]);
         var bound = new SqlBoundUnary(unary.Operator, operand, unary.Location);
 
         // A sign over a constant is a constant, as PostgreSQL's grammar reads "-5" as the constant
@@ -753,8 +759,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         // CASE conditions select a result; their collation does not describe that result.
-        var resultType = GroupedAlternativeBindingType(conditional, AlternativeResultType(conditional, types: alternativeTypes), jsonPosition);
-        bool textResult = !requireBoolean && resultType == DatabaseType.String;
+        var resultType = GroupedAlternativeBindingType(conditional, AlternativeResultType(conditional, types: alternativeTypes, jsonPosition: jsonPosition), jsonPosition);
         var clauses = conditional.WhenClauses;
         var whens = new SqlBoundWhen[clauses.Count];
         var results = new SqlCollationCandidate[clauses.Count + (conditional.ElseResult is null ? 0 : 1)];
@@ -767,7 +772,6 @@ internal sealed partial class SqlExpressionEvaluator
             }
             var result = BindAlternativeOperand(clauses[index].Result, out results[index], statisticsInput, alternativeTypes, jsonPosition);
             result = CoerceAlternative(clauses[index].Result, result, resultType, alternativeTypes, jsonPosition);
-            if (textResult) { result = CharacterToText(clauses[index].Result, result); }
             whens[index] = new SqlBoundWhen(condition, result,
                 input is null ? default : SqlBoundCollation.Of(inputCollation, conditionCollation, _defaultCollation), clauses[index].Condition.Location);
         }
@@ -777,7 +781,6 @@ internal sealed partial class SqlExpressionEvaluator
         {
             elseResult = BindAlternativeOperand(conditional.ElseResult, out results[^1], statisticsInput, alternativeTypes, jsonPosition);
             elseResult = CoerceAlternative(conditional.ElseResult, elseResult, resultType, alternativeTypes, jsonPosition);
-            if (textResult) { elseResult = CharacterToText(conditional.ElseResult, elseResult); }
         }
 
         collation = resultType is DatabaseType.String or DatabaseType.Character
@@ -863,15 +866,8 @@ internal sealed partial class SqlExpressionEvaluator
         collation = CollationOf(call, collations);
         if (coalesce)
         {
-            var resultType = GroupedAlternativeBindingType(call, AlternativeResultType(call, types: alternativeTypes), jsonPosition);
+            var resultType = GroupedAlternativeBindingType(call, AlternativeResultType(call, types: alternativeTypes, jsonPosition: jsonPosition), jsonPosition);
             for (int index = 0; index < arguments.Length; index++) { arguments[index] = CoerceAlternative(call.Arguments[index], arguments[index], resultType, alternativeTypes!, jsonPosition); }
-            if (!requireBoolean && resultType == DatabaseType.String)
-            {
-                for (int index = 0; index < arguments.Length; index++)
-                {
-                    arguments[index] = CharacterToText(call.Arguments[index], arguments[index]);
-                }
-            }
             if (resultType is not (DatabaseType.String or DatabaseType.Character)) { collation = default; }
             return new SqlBoundCoalesce(arguments, requireBoolean ? DatabaseType.Boolean : resultType);
         }

@@ -339,7 +339,7 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlSubqueryExpression:
                 return _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.Type : DatabaseType.Null;
             case SqlCaseExpression conditional:
-                return GroupedAlternativeBindingType(conditional, AlternativeResultType(conditional));
+                return StaticAlternativeType(conditional);
             case SqlNextValueExpression:
                 return DatabaseType.Int64;
             case SqlFunctionCallExpression call:
@@ -365,7 +365,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)) { return call.Arguments.Count > 0 ? StaticTypeOf(call.Arguments[0]) : DatabaseType.Null; }
         if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
-            return GroupedAlternativeBindingType(call, AlternativeResultType(call));
+            return StaticAlternativeType(call);
         }
 
         return ResolvedCallType(call, scalarOnly);
@@ -574,6 +574,8 @@ internal sealed partial class SqlExpressionEvaluator
     {
         private int _subquerySlots;
 
+        internal bool GroupedOutput { get; init; }
+
         internal Dictionary<SqlFunctionCallExpression, (string Identity, SqlFunction[] Functions)>? RecordedCalls { get; set; }
 
         internal SqlTypingMemory(SqlExpressionEvaluator? slotScope) => SlotScope = slotScope;
@@ -582,11 +584,11 @@ internal sealed partial class SqlExpressionEvaluator
         internal HashSet<int>? OuterDependencies { get; set; }
         internal List<SqlOuterReference>? OuterReferences { get; set; }
 
-        /// <summary>Gets the scope a grouping's slot expressions are typed in; null outside a grouping.</summary>
+        /// <summary>Gets the source scope of grouping or window slots; null when this scope has none.</summary>
         internal SqlExpressionEvaluator? SlotScope { get; }
 
-        /// <summary>Gets the typed calls; null until one is remembered.</summary>
-        internal Dictionary<SqlFunctionCallExpression, (SqlFunction? Function, DatabaseType Type)>? Calls { get; private set; }
+        /// <summary>Gets cached call and alternative types; null until one is remembered.</summary>
+        internal Dictionary<SqlExpression, (SqlFunction? Function, DatabaseType Type)>? Calls { get; private set; }
 
         /// <summary>Whether the remembered calls were typed with the scope's current subquery slots; forgets them otherwise.</summary>
         /// <param name="subquerySlots">The scope's number of subquery slots now.</param>
@@ -604,11 +606,11 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         /// <summary>Remembers one typed call.</summary>
-        internal void Remember(SqlFunctionCallExpression call, (SqlFunction? Function, DatabaseType Type) typed, int subquerySlots)
+        internal void Remember(SqlExpression call, (SqlFunction? Function, DatabaseType Type) typed, int subquerySlots)
         {
             if (Calls is null)
             {
-                Calls = new Dictionary<SqlFunctionCallExpression, (SqlFunction?, DatabaseType)>(ReferenceEqualityComparer.Instance);
+                Calls = new Dictionary<SqlExpression, (SqlFunction?, DatabaseType)>(ReferenceEqualityComparer.Instance);
                 _subquerySlots = subquerySlots;
             }
             else

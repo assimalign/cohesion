@@ -72,7 +72,8 @@ public sealed partial class SqlCommonTypeTests
             catch (DatabaseException failure)
             {
                 string code = failure.Diagnostics.First().Code!;
-                if (entry[6].Length == 0 || (entry[6] is "42804" or "42846") && code != "CS02080" || entry[6] == "22P02" && code != "CS02022")
+                if (entry[6].Length == 0 || (entry[6] is "42804" or "42846") && code != "CS02080" || entry[6] == "22P02" && code != "CS02022"
+                    || entry[6] == "22007" && code != "CS02047")
                 { differences.Add($"{entry[0]} {expression}: PG {entry[4]} {entry[6]}, actual {code}: {failure.Message}"); }
             }
             comparisons++;

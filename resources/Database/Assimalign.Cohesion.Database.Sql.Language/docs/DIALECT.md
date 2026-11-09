@@ -3197,13 +3197,23 @@ with midpoint ties rounded to even and up to 28 fractional digits. Thus integer
 inputs 2 and 5 have Decimal average 3.5; integer truncation is never used.
 Neither operation promises an arbitrary-precision result or fixed output scale.
 The in-process and wire result metadata use the same base types as these values.
-Numeric `CASE`/`COALESCE` alternatives in grouped projections use a common
-numeric result type; incompatible nonnumeric alternatives are planning errors. This grouped
-output normalization retains its existing numeric rank (Decimal above Double above Real),
-including Int64 integer-literal outputs. Existing grouped overload selection, CHAR/string
-padding removal and all-NULL output metadata are also preserved. Grouping keys and aggregate
-inputs use the scalar common-type conversions before grouping or accumulation. JSON operands
-within grouped output retain JSON's existing per-node conversions.
+Grouping keys and aggregate inputs use the scalar CASE/COALESCE common-type rule before
+grouping or accumulation. A select-list, HAVING or ORDER BY node that repeats a key reads
+the key's slot and declares the resolved type it had in the source scope; this applies to
+GROUP BY, ROLLUP, CUBE and GROUPING SETS. Aggregate result types come from their bound
+inputs' resolved types, subject to each transition's existing result contract (SUM/AVG
+return Decimal; statistical transitions keep the rules above). Thus GROUP BY and DISTINCT
+agree on a mixed key's rows and metadata. ARRAY_AGG remains unavailable (CS01016).
+A CASE/COALESCE in grouped output over aggregate results, key slots, expressions over them,
+or constants retains the existing grouped normalization: Decimal above Double above Real,
+CHAR/TEXT folded to TEXT with padding removed, grouped overload selection, Int64 integer
+literal outputs, native grouped argument value families (including signed BIGINT literals),
+and all-NULL output metadata, including nested all-NULL CASE/COALESCE values. This output normalization is a recorded
+departure from PostgreSQL's scalar rule. It does not retype a key slot or an aggregate's
+inputs. Plain window SELECT projections and ORDER BY use the scalar rule. Window arguments
+also use it when they read completed grouping slots;
+only PlanPlainGroup and PlanGroupingSets mark grouped output, and ForOrdering copies it.
+JSON positions within grouped output retain their existing per-node conversions.
 
 Aggregate expressions, output aliases (including inside scalar expressions),
 and select-list ordinals can be used as `ORDER BY` keys in grouped/aggregate
@@ -4159,11 +4169,31 @@ src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before mat
 Ordinary scalar CASE and COALESCE use the existing JSON-position resolver in every
 expression and persisted definition. CASE considers ELSE first; COALESCE considers its
 arguments left to right. Unknown string and NULL literals adopt the declared alternatives'
-type, and all-unknown sets resolve to TEXT. Compatible numeric alternatives widen through
+type, and all-unknown sets resolve to TEXT. A parameter whose value is NULL also stays
+unknown. Unresolved polymorphic result alternatives and parameters with unsupported CLR
+values refuse at planning with CS02080, rather than adopting a type and failing at a row.
+Reading a completed grouping slot does not bypass this check on its source.
+This includes COALESCE(ABS(NULL),0), whose ABS result remains unresolved here;
+PostgreSQL resolves ABS(NULL) as DOUBLE and returns zero.
+Other Null-typed shapes (NULLIF, unary signs, scalar subqueries, arithmetic, derived NULL
+columns, native MIN/MAX result slots and nested all-NULL grouped alternatives) keep their existing behavior. This preserves
+grouped all-NULL metadata. Their existing PostgreSQL departures remain: COALESCE((SELECT
+NULL),2), COALESCE(v,2) FROM (SELECT NULL AS v) q, and COALESCE(MAX(NULL),2) return 2
+here but PostgreSQL refuses with 42804; the grouped extrema form keeps Int64 metadata.
+COALESCE(-NULL,2) returns INTEGER 2 here versus PostgreSQL 42725; COALESCE(+NULL,2) has
+INTEGER metadata here versus PostgreSQL DOUBLE; COALESCE(NULL * TRUE,2) returns INTEGER
+2 here versus PostgreSQL 42883. These shapes are not new planning refusals in #1788.
+Declared alternatives use built-in implicit conversions only; explicit-only and
+application-registered casts do not participate. Unknown literals use built-in input
+conversion. Compatible numeric alternatives widen through
 the signed integer widths, Decimal, Real and Double, in that order; Real/Double therefore
 win over Decimal. Calendar alternatives widen to TIMESTAMP or TIMESTAMPTZ. Existing mixed
-CHAR/TEXT behavior remains TEXT in either order, a recorded departure from PostgreSQL's
-first-candidate bpchar choice. No new implicit conversion between categories is added.
+CHAR/TEXT and CHAR/VARCHAR behavior remains TEXT in either order, a recorded departure
+from PostgreSQL. Its string types cast implicitly to each other, so the first non-TEXT
+candidate wins (pg_cast.dat:314-325; parse_coerce.c:1428-1440, with CASE's ELSE first).
+Consequently COALESCE(c4,t) = 'a ' for CHAR(4) c4='a' and TEXT t is TRUE in PostgreSQL
+and FALSE here: bpchar comparison ignores trailing padding, while TEXT retains it.
+No new implicit conversion between categories is added.
 Incompatible declared alternatives, including INTEGER/TEXT and JSON/JSONB, refuse with
 CS02080 before any row is read (42804 for category mismatch; 42846 for unavailable implicit
 conversion). Unknown input conversion happens while binding,
@@ -5511,7 +5541,7 @@ quoted names to match uppercase vocabulary entries.
 | --- | --- | --- |
 | `CS01015` | Unknown column, including a DDL column reference | 42703 (`undefined_column`) |
 | `CS04021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
-| `CS02022` | A non-temporal CAST input or stored-column assignment has invalid text representation | 22P02 |
+| `CS02022` | A non-temporal CAST input, stored-column assignment, or unknown CASE/COALESCE alternative (including a skipped alternative) has invalid text representation | 22P02 |
 | `CS03024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
 | `CS03025` | An identity definition, explicit assignment, ALTER or backfill violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; allocator exhaustion retains CS02002 (22003) |
 | `CS01026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |

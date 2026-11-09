@@ -44,6 +44,8 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
         bool tcp = false,
         SqlDatabaseEngine? engine = null)
     {
+        if (engine is not null && configureEngine is not null)
+        { throw new ArgumentException(null, nameof(engine)); }
         var engineOptions = new SqlDatabaseEngineOptions();
         configureEngine?.Invoke(engineOptions);
         engine ??= SqlDatabaseEngine.Create("sql-typed-client-e2e", engineOptions);
