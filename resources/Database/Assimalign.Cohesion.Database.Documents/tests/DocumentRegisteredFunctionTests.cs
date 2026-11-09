@@ -157,7 +157,7 @@ public sealed partial class DocumentRegisteredFunctionTests
     public async Task Catalog_NativeFunctions_ShouldUseScalarAndAggregateContractsAsync()
     {
         await using var engine = DocumentDatabaseEngine.Create("native-functions", new());
-        var expected = OqlFunctions.All.Where(function => function.Name is not ("META" or "COALESCE" or "IFMISSING" or "IFNULL" or "IFMISSINGORNULL")).Select(function => function.Name).Order().ToArray();
+        var expected = OqlFunctions.All.Where(function => function.WindowKind == OqlWindowFunctionKind.None && function.Name is not ("META" or "COALESCE" or "IFMISSING" or "IFNULL" or "IFMISSINGORNULL")).Select(function => function.Name).Order().ToArray();
         engine.Functions.Select(function => function.Name.ToString()).Distinct(StringComparer.OrdinalIgnoreCase).Order().ShouldBe(expected);
         var upper = engine.Functions.GetOverloads("UPPER").ShouldHaveSingleItem().ShouldBeAssignableTo<DocumentScalarFunction>();
         var values = new[] { DocumentValue.FromString("native") };
@@ -179,6 +179,8 @@ public sealed partial class DocumentRegisteredFunctionTests
     [InlineData("META")]
     [InlineData("SELECT")]
     [InlineData("ARRAY_AGG")]
+    [InlineData("ROW_NUMBER")]
+    [InlineData("LAG")]
     [InlineData("REGEXP_LIKE")]
     public void Add_ReservedFunctionName_ShouldRefuse(string name)
     {

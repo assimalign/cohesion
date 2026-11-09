@@ -23,7 +23,8 @@ internal sealed partial class DocumentPlanner
             { if (HasSubquery(compound.OrderBy[index].Expression, cancellationToken)) { return true; } }
             return false;
         }
-        if (expression is OqlSubqueryExpression) { return true; }
+        // Windows use the budgeted async row pipeline even without expression subqueries.
+        if (expression is OqlSubqueryExpression or OqlWindowExpression) { return true; }
         if (expression is OqlMergeExpression merge)
         {
             foreach (var child in NestedChildren(merge)) { if (HasSubquery(child, cancellationToken)) { return true; } }
@@ -34,6 +35,7 @@ internal sealed partial class DocumentPlanner
             if (query.Source is not null || query.Bindings != query.Unnest) { return true; }
             for (int index = 0; index < query.Projections.Count; index++) { if (HasSubquery(query.Projections[index].Expression)) { return true; } }
             if (HasSubquery(query.Predicate) || HasSubquery(query.Having)) { return true; }
+            foreach (var definition in query.Windows) { if (HasSubquery(definition, cancellationToken)) { return true; } }
             for (int index = 0; index < query.GroupBy.Count; index++) { if (HasSubquery(query.GroupBy[index])) { return true; } }
             for (int index = 0; index < query.OrderBy.Count; index++) { if (HasSubquery(query.OrderBy[index].Expression)) { return true; } }
             for (int index = 0; index < query.Bindings.Count; index++) { if (HasSubquery(query.Bindings[index].Expression)) { return true; } }
@@ -41,6 +43,8 @@ internal sealed partial class DocumentPlanner
         }
         if (expression is OqlUnaryExpression unary) { return HasSubquery(unary.Operand); }
         if (expression is OqlBinaryExpression binary) { return HasSubquery(binary.Left) || HasSubquery(binary.Right); }
+        if (expression is OqlWindowDefinition or OqlWindowSpecification)
+        { foreach (var child in NestedChildren(expression)) { if (HasSubquery(child, cancellationToken)) { return true; } } return false; }
         if (expression is OqlCallExpression call)
         { for (int index = 0; index < call.Arguments.Count; index++) { if (HasSubquery(call.Arguments[index])) { return true; } } return false; }
         if (expression is OqlArrayExpression array)
@@ -218,6 +222,7 @@ internal sealed partial class DocumentPlanner
             if (select.GroupAs is string group) { grouped[group] = false; }
             foreach (var projection in select.Projections) { Visit(projection.Expression, "projection", grouped, outer, free); }
             Visit(select.Having, "HAVING", grouped, outer, free);
+            foreach (var window in select.Windows) { Visit(window.Specification, "WINDOW", grouped, outer, free); }
             VisitOrdering(select, grouped,
                 (scope, name) => new Dictionary<string, bool>(scope, StringComparer.Ordinal) { [name] = false },
                 (expression, scope, nested) => { Visit(expression, "ORDER BY", scope, outer, free, nested); return true; });
@@ -304,6 +309,15 @@ internal sealed partial class DocumentPlanner
     {
         switch (node)
         {
+            case OqlWindowExpression window:
+                foreach (var argument in window.Call.Arguments) { yield return argument; }
+                if (window.Specification is not null) { yield return window.Specification; }
+                break;
+            case OqlWindowSpecification specification:
+                foreach (var key in specification.PartitionBy) { yield return key; }
+                foreach (var order in specification.OrderBy) { yield return order.Expression; }
+                break;
+            case OqlWindowDefinition definition: yield return definition.Specification; break;
             case OqlMergeExpression merge:
                 if (merge.Source.Expression is not null) { yield return merge.Source.Expression; }
                 yield return merge.On;
@@ -345,6 +359,7 @@ internal sealed partial class DocumentPlanner
                 if (query.Predicate is not null) { yield return query.Predicate; }
                 foreach (var key in query.GroupBy) { yield return key; }
                 if (query.Having is not null) { yield return query.Having; }
+                foreach (var definition in query.Windows) { yield return definition; }
                 foreach (var order in query.OrderBy) { yield return order.Expression; }
                 foreach (var binding in query.Bindings) { yield return binding.Expression; }
                 break;
@@ -479,7 +494,14 @@ internal sealed partial class DocumentPlanner
         if (left.Collection != right.Collection || left.Alias != right.Alias || left.IsAliasImplicit != right.IsAliasImplicit || left.IsValue != right.IsValue ||
             left.IsDistinct != right.IsDistinct || left.GroupAs != right.GroupAs ||
             !left.GroupAliases.SequenceEqual(right.GroupAliases) || left.Projections.Count != right.Projections.Count ||
-            left.OrderBy.Count != right.OrderBy.Count || left.Bindings.Count != right.Bindings.Count) { return false; }
+            left.OrderBy.Count != right.OrderBy.Count || left.Bindings.Count != right.Bindings.Count || left.Windows.Count != right.Windows.Count) { return false; }
+        if (left.Windows.Count > 0)
+        {
+            var leftWindows = WindowDefinitions(left);
+            var rightWindows = WindowDefinitions(right);
+            foreach (var window in left.Windows)
+            { if (!rightWindows.TryGetValue(window.Name, out var specification) || !EquivalentWindowSpecifications(leftWindows[window.Name], specification, left)) { return false; } }
+        }
         for (int index = 0; index < left.Projections.Count; index++)
         { if (left.Projections[index].Alias != right.Projections[index].Alias) { return false; } }
         for (int index = 0; index < left.OrderBy.Count; index++)

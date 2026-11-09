@@ -195,7 +195,7 @@ public sealed class OqlMergeRegressionTests
             Should.NotThrow(() => Parse(text[..random.Next(text.Length)]).OqlExpression.ToString());
         }
         _output.WriteLine($"Seed={seed}; statements=10000; distinct node kinds={kinds.Count}: {string.Join(", ", kinds.Order())}");
-        kinds.Count.ShouldBe(25);
+        kinds.Count.ShouldBe(28);
         _output.WriteLine($"IN array operand kinds={arrayKinds.Count}: {string.Join(", ", arrayKinds.Order())}; list operand kinds={listKinds.Count}: {string.Join(", ", listKinds.Order())}");
         arrayKinds.Count.ShouldBe(15);
         listKinds.Count.ShouldBe(18);
@@ -217,11 +217,14 @@ public sealed class OqlMergeRegressionTests
 
         string Query(int depth)
         {
-            string left = "SELECT RAW " + Expression(depth) + " FROM " + names[random.Next(names.Length)] + " AS q";
+            bool window = random.Next(4) == 0;
+            string projection = window ? "[" + Expression(depth) + ", RANK() OVER w, LAG(q.a,0) OVER (base ORDER BY q.o DESC NULLS FIRST)]" : Expression(depth);
+            string left = "SELECT RAW " + projection + " FROM " + names[random.Next(names.Length)] + " AS q";
             if (random.Next(3) == 0)
             { left += (random.Next(2) == 0 ? " LEFT " : " INNER ") + (random.Next(2) == 0 ? "JOIN " : "NEST ") +
                 names[random.Next(names.Length)] + " AS j ON META(j).id = q.k"; }
             if (random.Next(3) == 0) { left += (random.Next(2) == 0 ? " LEFT UNNEST " : " UNNEST ") + "q.a AS u"; }
+            if (window) { left += " WINDOW base AS (PARTITION BY q.p), w AS (base ORDER BY q.o)"; return left; }
             if (random.Next(2) == 0)
             { return random.Next(3) == 0 ? left + " GROUP BY q.a AS g GROUP AS grouped HAVING TRUE ORDER BY g DESC NULLS LAST LIMIT +2 OFFSET -0" : left; }
             if (random.Next(3) == 0) { left = "(" + left + " LIMIT +1 OFFSET -0)"; }

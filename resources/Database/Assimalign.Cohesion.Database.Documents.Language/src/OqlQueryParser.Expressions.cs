@@ -364,7 +364,20 @@ public sealed partial class OqlQueryParser
                     string? member = Take(TokenType.Dot) ? Identifier(allowKeyword: true) : null;
                     return new OqlMetaExpression(arguments.AsReadOnly(), member, Span(start, Previous));
                 }
-                return new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous), quantifier);
+                var call = new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous), quantifier);
+                if (!Failed && Take("OVER"))
+                {
+                    if (Take(TokenType.LeftParen))
+                    {
+                        var specification = ParseWindowSpecification(Previous);
+                        return new OqlWindowExpression(call, specification, location: Span(start, Previous));
+                    }
+                    string windowName = Identifier();
+                    return new OqlWindowExpression(call, name: windowName, location: Span(start, Previous));
+                }
+                if (!Failed && definition?.WindowKind is not (null or OqlWindowFunctionKind.None))
+                { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("window function without OVER", Profile.Language, call.Location!)); }
+                return call;
             }
             var path = ParsePath(start, name);
             if (Take(TokenType.Dot))

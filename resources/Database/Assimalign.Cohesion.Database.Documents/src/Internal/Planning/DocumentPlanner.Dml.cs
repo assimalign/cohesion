@@ -210,6 +210,9 @@ internal sealed partial class DocumentPlanner
     {
         switch (expression)
         {
+            case OqlWindowExpression window:
+                foreach (var child in WindowChildren(window)) { ValidateMetadata(child, alias, storedSource, outerNames); }
+                break;
             case OqlComprehensionExpression comprehension:
                 ValidateMetadata(comprehension.Collection, alias, storedSource, outerNames);
                 ValidateMetadata(comprehension.Projection, comprehension.Variable == alias ? null : alias, storedSource, outerNames);

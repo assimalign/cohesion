@@ -153,6 +153,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `GROUP BY` | Yes | One or more grouping expressions, optionally aliased with or without AS |
 | `GROUP AS` | Yes | Array of input binding wrappers, including group-term aliases |
 | `HAVING` | Yes | Group filtering, including aggregate calls |
+| `OVER` / `WINDOW` | Yes | Ranking/navigation partitions, named windows and earlier-name copies; frames remain deferred |
 | `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC`, then `NULLS FIRST` or `LAST` |
 | `LIMIT` | Yes | Non-negative signed Int64 integer literal or parameter, applied after ordering |
 | `OFFSET` | Yes | Non-negative signed Int64 integer literal or parameter; either order with LIMIT |
@@ -166,7 +167,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `MERGE` | Plan/EXPLAIN | Couchbase lookup and key-equality ANSI forms; execution refuses with CD05022 until OQ-M2 (#1804) |
 
 `OqlFunctions.All` is the public, immutable standard-function metadata consumed by the
-standalone parser, profile and engine's native registrations. It classifies scalar versus aggregate
+standalone parser, profile and engine's native registrations. It classifies scalar, aggregate and window
 calls, argument counts and kinds, and static result types. Engine request parsing admits additional
 named calls for the executing engine's frozen catalog to bind. The profile derives its function tokens from this table; names remain usable as fields.
 In this table, **propagate** means MISSING wins over NULL; a wrong-kind stored value gives NULL,
@@ -183,6 +184,10 @@ argument. Aggregate placement and grouped scalar arguments are validated by the 
 | ARRAY_AGG | 1 | Json | Skip MISSING; include NULL; empty/all-MISSING gives NULL |
 | BOOL_AND, BOOL_OR, EVERY | 1 | Boolean | Skip NULL/MISSING and non-Booleans; empty gives NULL |
 | STDDEV, VARIANCE | 1 | Decimal | Skip NULL/MISSING and nonnumbers; empty gives NULL; singleton zero |
+| ROW_NUMBER, RANK, DENSE_RANK | 0 | Int64 | OVER required; peer rules in Window stage |
+| PERCENT_RANK, CUME_DIST | 0 | Decimal | OVER required; singleton and peer rules in Window stage |
+| NTILE | 1 | Int64 | Positive integer literal bucket count |
+| LAG, LEAD | 1..3 | Selected | Respect NULL/MISSING; default offset 1 and fallback NULL |
 | LOWER, UPPER | 1 | String | Propagate |
 | LENGTH | 1 | Int64 | Propagate |
 | SUBSTR | 2..3 | String | Propagate |
@@ -377,6 +382,20 @@ parser, in-process execution and both transports. No disk or frame format change
 Older clients can reject the successful completion after an autocommit write has committed,
 so retrying may repeat the write; disconnect rolls back explicit uncommitted work. The dialect
 states both outcomes beside the compatibility contract, and permanent wire probes cover them.
+
+## Window AST and grammar (#1805, OQ-W1)
+
+Sealed OqlWindowExpression, OqlWindowSpecification and OqlWindowDefinition nodes retain
+function calls, partition/order keys, direct names and copied references. OqlFunction.WindowKind
+classifies eight ranking/navigation functions separately from scalar/aggregate registrations.
+WINDOW metadata travels with the existing optional GroupBy wrapper, preserving ordinary SELECT
+instance layouts and allocation guards. Lists snapshot their declarations and keys.
+The parser refuses invalid placement/nesting and deferred frame/value forms with CK00001;
+the engine repeats context validation for hand-built ASTs. Named binding uses CD01041-43.
+DIALECT's Window stage records defaults, literal-only offsets/counts, lazy navigation defaults,
+ordinal names, JSON peers and null ordering. The MERGE renderer's child and query walkers include
+all window metadata and the seeded 10,000-statement round trip generates window source queries.
+No shared SQL implementation or new assembly reference is introduced (T3-31).
 
 ## ORDER BY null placement (#1730)
 

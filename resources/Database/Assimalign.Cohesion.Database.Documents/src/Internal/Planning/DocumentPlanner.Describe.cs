@@ -39,6 +39,9 @@ internal sealed partial class DocumentPlanner
         _ => throw new UnreachableException(),
     };
 
+    private static string WindowDetail(OqlSelectExpression query)
+        => "functions=" + string.Join(",", Windows(query).Select(w => w.Call.Name).Distinct()) + "; partitions=complete; spill=False";
+
     internal static DatabasePlanDescription Describe(DocumentStatementPlan plan, IEnumerable<Diagnostic>? diagnostics = null)
     {
         if (plan is DocumentNestedPlan nested) { return DescribeNested(nested, diagnostics); }
@@ -132,7 +135,7 @@ internal sealed partial class DocumentPlanner
         if (plan is DocumentFromPlan from)
         {
             int projection = nodes.Count;
-            Add(DescribeOperator(from.Logical), 0, detail: AggregateDetail(from.Logical));
+            projection = AddLogical(from.Logical, 0);
             Add(from.Input is null ? "ExpressionSource" : "DerivedSource", AddBindings(from.Logical, projection),
                 detail: "alias=" + from.Logical.Query.Alias + "; " + (from.Input is null ? "evaluate_once" : "streamed") + "; sort=outer");
         }
@@ -186,7 +189,7 @@ internal sealed partial class DocumentPlanner
                 sourceParent = distinctId;
             }
             int projectionId = nodes.Count;
-            Add(DescribeOperator(select.Logical), sourceParent, detail: AggregateDetail(select.Logical));
+            projectionId = AddLogical(select.Logical, sourceParent);
             projectionId = AddBindings(select.Logical, projectionId);
             AddAccess(select.Access, projectionId);
         }
@@ -199,10 +202,30 @@ internal sealed partial class DocumentPlanner
                 Add("Distinct", sourceParent);
             }
             int projectionId = nodes.Count;
-            Add(DescribeOperator(systemSelect.Logical), parent, detail: AggregateDetail(systemSelect.Logical));
+            projectionId = AddLogical(systemSelect.Logical, parent);
             Add("SystemCollectionScan", AddBindings(systemSelect.Logical, projectionId));
         }
+        if (systemSelect is not null && systemSelect.Logical.Query.Unnest.Count == 0 && HasWindows(systemSelect.Logical.Query))
+        { AddLogical(systemSelect.Logical, 0); }
         return nodes;
+
+        int AddLogical(DocumentLogicalPlan sourceLogical, int parent)
+        {
+            if (!HasWindows(sourceLogical.Query))
+            {
+                int id = nodes.Count;
+                Add(DescribeOperator(sourceLogical), parent, detail: AggregateDetail(sourceLogical));
+                return id;
+            }
+            int projection = nodes.Count;
+            Add(sourceLogical.Query.IsValue ? "ProjectValue" : "Project", parent);
+            int window = nodes.Count;
+            Add("WindowAggregate", projection, detail: WindowDetail(sourceLogical.Query));
+            if (!sourceLogical.IsGrouped) { return window; }
+            int group = nodes.Count;
+            Add("Group", window, detail: AggregateDetail(sourceLogical));
+            return group;
+        }
 
         int AddBindings(DocumentLogicalPlan sourceLogical, int parent)
         {

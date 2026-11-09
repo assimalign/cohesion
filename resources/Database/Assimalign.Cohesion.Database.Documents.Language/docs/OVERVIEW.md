@@ -6,7 +6,8 @@ expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `
 `OqlQueryExpression`, `OqlSelectExpression`, `OqlSetOperationExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access. GROUP BY terms accept aliases with or without AS; GROUP AS retains binding-wrapper arrays, including group-term aliases, for SELECT, HAVING and ORDER BY. LETTING remains unavailable.
-One immutable standard-function table declares META, eleven aggregates and 34 SQL++ scalars, with
+OVER and WINDOW execute eight ranking/navigation functions over complete partitions, including named references and copies. Sealed window AST nodes and WindowKind metadata retain the public syntax contract. Frames and aggregate/value windows remain deferred.
+One immutable standard-function table declares META, eleven aggregates, eight window functions and 34 SQL++ scalars, with
 ALL/DISTINCT aggregate metadata, native parse-time arity checks and static result types used by native registrations. The standalone
 parser default reports CD00008 for unknown calls; engine requests defer additional named calls to
 the executing engine's function catalog.

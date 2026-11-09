@@ -218,6 +218,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             expression = EmptyExpression();
         }
+        if (!Failed && _tokens.Exists(static token => IsWord(token, "OVER"))) { ValidateWindowPositions(expression); }
         expression.SetStatementText(_source);
         var statement = new OqlQueryStatement(expression);
         foreach (var (clause, token) in unsupported)
@@ -554,6 +555,7 @@ public sealed partial class OqlQueryParser : QueryParser
             var reported = token;
 
             result.Add((word.Construct, reported));
+            if (value is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" or "RATIO_TO_REPORT" or "RESPECT" or "IGNORE") { break; }
             if (value == "FETCH") { fetchHead = index; }
 
             // A statement that does not start as OQL is one unsupported construct; the rest of

@@ -116,6 +116,11 @@ public static class OqlClauses
     /// <summary>Expands an array while preserving empty or non-array inputs.</summary>
     public const string LeftUnnest = "LEFT UNNEST";
 
+    /// <summary>Evaluates ranking and navigation over partitions.</summary>
+    public const string Over = "OVER";
+    /// <summary>Declares query-local windows.</summary>
+    public const string Window = "WINDOW";
+
     /// <summary>Restricts values by a predicate.</summary>
     public const string Where = "WHERE";
 

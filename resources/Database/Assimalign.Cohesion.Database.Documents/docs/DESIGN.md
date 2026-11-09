@@ -1161,6 +1161,40 @@ static headers, cancellation and exact budget release. A controlled commit betwe
 proves one statement view under Snapshot and ReadCommitted. Conformance cases and InMemory/TCP wire
 probes exercise the same contract; the engine-linked NativeAOT consumer checks both transports.
 
+#### Window stage (#1805, OQ-W1)
+
+Documents ports the SQL window contract over JSON without referencing Database.Sql (T3-31).
+Window-bearing queries use the existing statement-local async execution context even without
+subqueries. After grouping/HAVING, the window path owns complete representative rows and groups,
+shares equal-specification sorts through EquivalentPath-aware scoped expression equivalence,
+computes peer ranks and navigation values, then projects, deduplicates, orders and pages.
+Ordinary row methods and instance layouts remain unchanged for allocation guards.
+
+Window row/result bindings, dictionaries, indexes, key payloads, navigation values and output
+reserve StatementMemoryBudget before retention (CD05018, no spill). Scratch unwinds at sort,
+partition and expression boundaries; output alone remains charged through result disposal.
+StatementWorkBudget covers expressions, partition/peer visits and sort comparisons (CD05020).
+Cancellation and coded comparer failures retain their identities. LiveHeap.Read plus weak-value
+checks prove completed statements release navigation objects at 256 and 2,048 rows.
+The dedicated window row method keeps ordinary pipeline closures unchanged; OQ-W2 can extend
+this path with frames without altering allocation-pinned window-free execution.
+
+DIALECT's Window stage records every default: ordinal names, MISSING/NULL partition separation,
+ORDER BY null placement, unspecified peer order, Int64 rankings/buckets, Decimal distributions,
+literal-only bucket counts/offsets, offset 1/fallback NULL, lazy per-row defaults and respected
+NULL/MISSING values. Frames, aggregate/value windows and null modifiers remain CK00001.
+WINDOW follows grouping/HAVING; LETTING remains unavailable. Named/copy failures are:
+
+| Code | Condition |
+| --- | --- |
+| CD01041 | Empty or duplicate WINDOW name |
+| CD01042 | Unknown, self or forward window reference |
+| CD01043 | Invalid copied partition/order clause or direct OVER shape |
+
+Generated brute-force ranking/navigation cases, placement refusals, complete-partition paging,
+EXPLAIN snapshots, InMemory/TCP wire and NativeAOT checks cover this stage. The MERGE source
+renderer round trip includes windows. No SQL internals, new references, disk or wire formats.
+
 #### Result paging (#1129)
 
 Both stored and system collections resolve LIMIT/OFFSET in planning, before collection lookup
@@ -1689,6 +1723,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | Operators | Meaning |
 | --- | --- |
 | `Select`, `Project`, `ProjectValue`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
+| `WindowAggregate` | Complete partition ranking/navigation after grouping/HAVING, before final projection, DISTINCT and paging |
 | `Union`, `UnionAll` | Set-operation parent with both complete operand trees, result shape, order-key count and resolved paging |
 | `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |

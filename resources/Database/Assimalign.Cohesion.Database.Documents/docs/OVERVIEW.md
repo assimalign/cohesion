@@ -14,6 +14,8 @@ Lookup and key-equality ANSI MERGE bind both source names, action scopes and ord
 EXPLAIN describes the complete source, key access and actions without reading documents. MERGE
 execution refuses with CD05022 until OQ-M2; no disk or wire format changes are introduced.
 
+OQL executes ranking and navigation through OVER and WINDOW with complete partitions, JSON peer semantics, named copies and statement memory/work accounting. Frames and aggregate windows remain deferred.
+
 OQL executes UNION/INTERSECT/EXCEPT [ALL] with independent operand scopes, parenthesized local pages,
 compound ordering/paging and statically chosen RAW/typed/document headers (T3-30). UNION ALL
 streams operands; distinct keys, sorts and output share statement memory and work budgets.

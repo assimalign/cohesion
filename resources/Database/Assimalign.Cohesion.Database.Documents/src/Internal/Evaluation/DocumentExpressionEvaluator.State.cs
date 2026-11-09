@@ -29,7 +29,7 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             frames.Clear();
             for (var frame = first; frame is not null && !ReferenceEquals(frame, stop); frame = frame.Parent) { frames.Push(frame); }
-            foreach (var frame in frames) { bindings = new DocumentVariableBinding(frame.Name, frame.Value, bindings); }
+            foreach (var frame in frames) { if (IsWindowBinding(frame)) { continue; } bindings = new DocumentVariableBinding(frame.Name, frame.Value, bindings); }
         }
     }
 

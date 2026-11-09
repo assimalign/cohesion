@@ -45,6 +45,17 @@ internal static class OqlUnsupportedVocabulary
         new("REGEXP_LIKE", "REGEXP_LIKE", OqlWordPosition.Function),
         new("REGEXP_REPLACE", "REGEXP_REPLACE", OqlWordPosition.Function),
         new("REGEXP_POSITION", "REGEXP_POSITION", OqlWordPosition.Function),
+        // Executable contextual window vocabulary; names remain ordinary identifiers.
+        new("OVER", OqlClauses.Over, OqlWordPosition.Clause),
+        new("WINDOW", OqlClauses.Window, OqlWordPosition.Clause),
+        new("PARTITION", OqlClauses.Over, OqlWordPosition.Clause),
+        // Deferred window value functions and null modifiers belong to OQ-W2.
+        new("FIRST_VALUE", "FIRST_VALUE", OqlWordPosition.Function),
+        new("LAST_VALUE", "LAST_VALUE", OqlWordPosition.Function),
+        new("NTH_VALUE", "NTH_VALUE", OqlWordPosition.Function),
+        new("RATIO_TO_REPORT", "RATIO_TO_REPORT", OqlWordPosition.Function),
+        new("RESPECT", "RESPECT", OqlWordPosition.Clause),
+        new("IGNORE", "IGNORE", OqlWordPosition.Clause),
         // CREATE and DROP outside supported collection and index DDL.
         new("CREATE", "CREATE", OqlWordPosition.Anywhere),
         new("DROP", "DROP", OqlWordPosition.Anywhere),

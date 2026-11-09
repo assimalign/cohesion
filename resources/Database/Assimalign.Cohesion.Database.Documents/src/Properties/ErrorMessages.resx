@@ -260,4 +260,10 @@
   <data name="QualifiedStarDeferred" xml:space="preserve"><value>Qualified star projections are not supported yet.</value></data>
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
   <data name="StatementTooComplex" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce its query and expression nesting, or run it on a thread with a larger stack.</value></data>
+  <data name="WindowPlacementInvalid" xml:space="preserve"><value>Window functions require OVER in a projection or ORDER BY and cannot be nested.</value></data>
+  <data name="WindowFunctionDeferred" xml:space="preserve"><value>This window function or modifier is not supported in OQ-W1.</value></data>
+  <data name="WindowIntegerDeferred" xml:space="preserve"><value>Window bucket counts require positive Int64 integer literals; navigation offsets require nonnegative Int64 integer literals.</value></data>
+  <data name="WindowNameDuplicate" xml:space="preserve"><value>A WINDOW name is empty or declared more than once.</value></data>
+  <data name="WindowReferenceUnknown" xml:space="preserve"><value>The named window is unknown, self-referencing or declared later.</value></data>
+  <data name="WindowSpecificationInvalid" xml:space="preserve"><value>A window must have one specification or name; a copy cannot add PARTITION BY or replace an existing ORDER BY.</value></data>
 </root>
