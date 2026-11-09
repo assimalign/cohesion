@@ -154,6 +154,7 @@ internal sealed partial class SqlPlanExecutor
             }
 
             if (input is HashGroupInput stagedInput) { stagedInput.Consumed(); }
+            ObserveHashSpill?.Invoke("groups-live", groups.Count);
             if (hashSpill is not null)
             {
                 hashSpill!.EmitGroups(groups, cancellationToken);
@@ -384,6 +385,7 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
 
+                ObserveHashSpill?.Invoke("groups-live", groups.Count);
                 if (hashSpill is not null)
                 {
                     hashSpill!.EmitGroups(groups, cancellationToken);
@@ -528,8 +530,11 @@ internal sealed partial class SqlPlanExecutor
         for (int index = 0; index < aggregates.Count; index++)
         {
             var aggregate = aggregates[index];
-            bytes += aggregate.Call.Quantifier == Language.SqlSetQuantifier.Distinct || aggregate.OrderBy.Count > 0
-                ? 320L + 128L * aggregate.OrderBy.Count + 32L * aggregate.ArgumentCollations.Count : 128L;
+            // Marginal live-heap tests include the wrapper, native accumulator, retained
+            // scalar box and array slot. Extrema also mirror their current value here.
+            bytes += aggregate.Function is SqlExtremumFunction ? 256L : aggregate.Function is SqlSumFunction ? 144L : 128L;
+            if (aggregate.Call.Quantifier == Language.SqlSetQuantifier.Distinct || aggregate.OrderBy.Count > 0)
+            { bytes += 192L + 128L * aggregate.OrderBy.Count + 32L * aggregate.ArgumentCollations.Count; }
         }
         return bytes;
     }

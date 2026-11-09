@@ -498,6 +498,9 @@
   <data name="HashSpillDepthExceeded" xml:space="preserve">
     <value>Hash aggregation or DISTINCT exceeded the {0}-pass repartitioning limit within the statement memory budget.</value>
   </data>
+  <data name="HashSpillOrdinalRecordTooLarge" xml:space="preserve">
+    <value>The hash ordinal sort record exceeds its bound after reserving the source reader workspace.</value>
+  </data>
   <data name="SpillRowDamaged" xml:space="preserve">
     <value>A temporary SQL result row is damaged.</value>
   </data>

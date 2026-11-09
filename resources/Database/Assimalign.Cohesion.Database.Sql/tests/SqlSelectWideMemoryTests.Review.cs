@@ -44,8 +44,8 @@ public sealed partial class SqlSelectWideMemoryTests
         success.Values.Count.ShouldBe(shape < 3 ? 1 : 2);
         foreach (var row in success.Values) { row[^1].ShouldBe(shape < 3 ? values.Max(StringComparer.Ordinal) : shape == 4 ? "z" : parameters[shape == 5 ? "a" : "b"]); }
         _output.WriteLine($"EXTREMA_REVIEW|base={forceBase}|shape={shape}|peak={success.Peak}|refused={refused.Peak}");
-        long[] peaks = forceBase ? [21040, 21040, 22848, 2400, 2184, 2880] : [8464, 8464, 12464, 1856, 1160, 1856];
-        long[] refusals = forceBase ? [16888, 16888, 16696, 2296, 1832, 2776] : [4312, 4312, 6312, 1752, 808, 1752];
+        long[] peaks = forceBase ? [21168, 21168, 22976, 2656, 2440, 3136] : [8592, 8592, 12592, 2112, 1416, 2112];
+        long[] refusals = forceBase ? [17016, 17016, 16824, 2552, 1984, 3032] : [4440, 4440, 6440, 2008, 960, 2008];
         success.Peak.ShouldBe(peaks[shape]);
         refused.Peak.ShouldBe(refusals[shape]);
     }
