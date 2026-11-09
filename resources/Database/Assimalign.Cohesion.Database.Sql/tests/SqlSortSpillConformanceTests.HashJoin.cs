@@ -20,7 +20,7 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData("RIGHT", 0)]
     [InlineData("FULL", 0)]
     [InlineData("FULL", 2470)]
-    public async Task ExecuteAsync_HashJoinBatches_ShouldPreserveOrderAndWork(string kind, int offset)
+    public async Task ExecuteAsync_HashJoinChunks_ShouldPreserveOrderAndWork(string kind, int offset)
     {
         // Arrange
         await using var reference = SqlDatabaseEngine.Create("join-reference", new());
@@ -47,7 +47,7 @@ public sealed partial class SqlSortSpillConformanceTests
         TempBytes(spilled.TempSpace!).ShouldBe(0); Statements(spilled.TempSpace!).ShouldBeEmpty(); Files(spilled).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Hash join reports written batches when every probe key is NULL (#1789)")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Hash join reports its indexed build when every probe key is NULL (#1789)")]
     public async Task ExecuteAsync_HashJoinNullProbes_ShouldReportSpilledBytes()
     {
         // Arrange
@@ -65,7 +65,7 @@ public sealed partial class SqlSortSpillConformanceTests
         TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Hash join temporary failures and cancellation release all batches and keep the session online (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Hash join temporary failures and cancellation release all runs and keep the session online (#1789)")]
     [InlineData("CK05004")]
     [InlineData("CK05005")]
     [InlineData("cancel")]

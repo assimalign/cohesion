@@ -17,6 +17,16 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - A fresh process samples one cold combined spill shape (#1789)")]
+    public async Task ExecuteAsync_JoinFix2ColdProcess_ShouldUseOneAllowance()
+    {
+        // Arrange: the evidence runner selects one shape before launching the process.
+        string shape = Environment.GetEnvironmentVariable("L3B_COLD_SHAPE") ?? "group";
+        shape.ShouldBeOneOf("group", "deferred", "ownership");
+        // Act / Assert
+        await ExecuteAsync_JoinFixCombinedHeap_ShouldUseOneAllowance(shape, cold: true);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Indexed join component charges bound two marginal live populations (#1789)")]
     [InlineData("directory")]
     [InlineData("cache")]
@@ -147,7 +157,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 }
                 else
                 {
-                    var spill = new SqlHashJoinSpill(owner, keys, spillMetrics[i], long.MaxValue, false);
+                    var spill = new SqlHashJoinSpill(owner, keys, spillMetrics[i], 262144, false);
                     spill.AdoptBuild(emptyTables[i], CancellationToken.None);
                     foreach (int unused in spill.Probe([1], CancellationToken.None)) { }
                     roots[i] = spill; cleanup.Add(spill); unit = SqlHashJoinSpill.OperatorBytes;
@@ -156,13 +166,19 @@ public sealed partial class SqlSortSpillConformanceTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Two spilling joins, GROUP BY and ORDER BY share one live allowance (#1789)")]
-    public async Task ExecuteAsync_JoinFixCombinedHeap_ShouldUseOneAllowance()
+    [Theory(DisplayName = "Cohesion Test [Sql] - FULL joins, groups and deferred collectors share one live allowance (#1789)")]
+    [InlineData("group", true)]
+    [InlineData("group", false)]
+    [InlineData("deferred", true)]
+    [InlineData("deferred", false)]
+    [InlineData("ownership", true)]
+    [InlineData("ownership", false)]
+    public async Task ExecuteAsync_JoinFixCombinedHeap_ShouldUseOneAllowance(string shape, bool cold)
     {
         // Arrange
         await using var engine = await Create("join-combined", 1048576);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
-        await SeedJoinFix(session, 3000);
+        await SeedJoinFix(session, shape == "ownership" ? 5000 : 3000);
         await session.ExecuteAsync("CREATE TABLE jt(id INT,payload TEXT)");
         for (int start = 1000; start < 4000; start += 100)
         {
@@ -170,10 +186,18 @@ public sealed partial class SqlSortSpillConformanceTests
             for (int i = start; i < start + 100; i++) { values.Add($"({i},'{new string('y', 512)}')"); }
             await session.ExecuteAsync("INSERT INTO jt VALUES" + string.Join(',', values));
         }
-        string sql = $"SELECT l.id,COUNT(t.id) c,CAST(l.id AS TEXT)||'{new string('z', 500)}' pad FROM jl l LEFT JOIN jr r ON l.id=r.id LEFT JOIN jt t ON r.id=t.id GROUP BY l.id ORDER BY c DESC,l.id";
-        var warm = (DatabaseResultSet)await session.ExecuteAsync(sql); await warm.DisposeAsync();
+        string sql = shape switch
+        {
+            "deferred" => "SELECT l.id,r.payload,t.id FROM jl l FULL JOIN jr r ON l.id=r.id FULL JOIN jt t ON r.id=t.id ORDER BY t.id IS NULL LIMIT 600",
+            "ownership" => $"SELECT l.id/4 g,BOOL_AND(r.payload IS NULL) b,CAST(l.id/4 AS TEXT)||'{new string('z', 1000)}' pad FROM jl l LEFT JOIN jr r ON l.id=r.id GROUP BY l.id/4 ORDER BY g",
+            _ => $"SELECT l.id,COUNT(t.id) c,CAST(l.id AS TEXT)||'{new string('z', 500)}' pad FROM jl l FULL JOIN jr r ON l.id=r.id FULL JOIN jt t ON r.id=t.id GROUP BY l.id ORDER BY c DESC,l.id",
+        };
+        if (!cold) { var warm = (DatabaseResultSet)await session.ExecuteAsync(sql); await DrainJoinHeap(warm); await warm.DisposeAsync(); }
         long baseline = LiveHeap.Read(), peak = 0; int joins = 0, groups = 0, sorts = 0;
         var phases = new HashSet<string>();
+        var peaks = new Dictionary<string, (long Live, long Charge)>();
+        SqlStatementMetrics? active = null; int deferred = 0;
+        SqlStatementMetrics.AfterMemoryReservation = (metrics, _) => active = metrics;
         int chunks = 0;
         SqlPlanExecutor.ObserveHashSpill = (phase, value) =>
         {
@@ -182,24 +206,53 @@ public sealed partial class SqlSortSpillConformanceTests
             if (phases.Add(phase) || phase is "join-handoff" or "join-partitioned" or "groups-live" or "batch-live"
                 || phase == "join-input" && value % 1000 == 0 || phase == "join-batch-live" && ++chunks % 64 == 0) { Sample(phase); }
         };
-        SqlRowCollector.ObserveSpill = phase => { if (phase == "arena") { sorts++; } if (phases.Add("sort-" + phase)) { Sample("sort-" + phase); } };
+        SqlRowCollector.ObserveSpill = phase =>
+        {
+            if (phase == "arena") { sorts++; }
+            if (phase == "deferred") { deferred++; }
+            if (phases.Add("sort-" + phase)) { Sample("sort-" + phase); }
+        };
         try
         {
             // Act
             var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
             Sample("delivered");
+            await DrainJoinHeap(result); Sample("delivery");
             await result.DisposeAsync();
             // Assert
-            joins.ShouldBe(2); groups.ShouldBeGreaterThan(0); sorts.ShouldBeGreaterThan(0);
+            joins.ShouldBe(shape == "ownership" ? 1 : 2);
+            if (shape != "deferred")
+            {
+                sorts.ShouldBeGreaterThan(0);
+                if (shape == "group") { groups.ShouldBeGreaterThan(0); }
+                else { phases.ShouldContain("groups-live"); }
+            }
+            else { deferred.ShouldBeGreaterThan(0); }
+            foreach (var phase in peaks)
+            { _output.WriteLine($"JOIN_COMBINED_PEAK|shape={shape}|cold={cold}|phase={phase.Key}|live={phase.Value.Live}|charged={phase.Value.Charge}|bound={1048576 + 262144}"); }
+            _output.WriteLine($"JOIN_COMBINED_RESIDUE|shape={shape}|cold={cold}|live={Math.Max(0, LiveHeap.Read() - baseline)}");
             peak.ShouldBeLessThanOrEqualTo(1048576 + 262144);
             Statements(engine.TempSpace!).ShouldBeEmpty();
         }
-        finally { SqlPlanExecutor.ObserveHashSpill = null; SqlRowCollector.ObserveSpill = null; }
+        finally { SqlPlanExecutor.ObserveHashSpill = null; SqlRowCollector.ObserveSpill = null; SqlStatementMetrics.AfterMemoryReservation = null; }
 
         void Sample(string phase)
         {
             long live = Math.Max(0, LiveHeap.Read() - baseline); peak = Math.Max(peak, live);
-            _output.WriteLine($"JOIN_COMBINED|phase={phase}|live={live}|charged={session.LastStatementMetrics?.HashMemoryBytes}");
+            string category = phase.StartsWith("sort-", StringComparison.Ordinal) ? "sort"
+                : phase is "join-match-sort-live" or "join-unmatched-live" or "join-ordered" ? "unmatched"
+                : phase is "join-batch-live" or "join-partitioned" or "join-index-chunks" ? "probe"
+                : phase.StartsWith("join-", StringComparison.Ordinal) ? "build"
+                : phase is "delivered" or "delivery" ? "delivery" : "group";
+            peaks.TryGetValue(category, out var previous);
+            peaks[category] = (Math.Max(previous.Live, live), Math.Max(previous.Charge, active?.HashMemoryBytes ?? 0));
+            _output.WriteLine($"JOIN_COMBINED|shape={shape}|cold={cold}|phase={phase}|live={live}|charged={active?.HashMemoryBytes}");
         }
+    }
+
+    private static async Task DrainJoinHeap(DatabaseResultSet result)
+    {
+        await foreach (var row in result.GetRowsAsync())
+        { for (int i = 0; i < row.FieldCount; i++) { _ = row.GetValue(i); } }
     }
 }

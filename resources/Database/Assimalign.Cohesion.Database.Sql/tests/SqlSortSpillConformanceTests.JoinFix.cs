@@ -86,13 +86,32 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var a = await (await reference.CreateDatabaseAsync("db")).CreateSessionAsync();
         await using var b = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await SeedJoinFix(a, 2500); await SeedJoinFix(b, 2500);
-        string sql = $"SELECT l.id, r.payload FROM jl l FULL JOIN jr r ON l.id = r.id ORDER BY r.id IS NULL LIMIT {limit}";
+        string sql = $"SELECT l.id, r.payload FROM jl l FULL JOIN jr r ON l.id = r.id ORDER BY r.id IS NULL LIMIT {limit} OFFSET 13";
         // Act
         await using var expected = (DatabaseResultSet)await a.ExecuteAsync(sql);
-        var actual = (DatabaseResultSet)await b.ExecuteAsync(sql);
-        try { (await Rows(actual)).ShouldBe(await Rows(expected)); }
-        finally { await actual.DisposeAsync(); }
+        bool deferred = false; int matches = 0; long held = 0;
+        SqlStatementMetrics? ledger = null;
+        SqlPlanExecutor.FullJoinProgress = (phase, metrics, _) =>
+        {
+            if (phase != "match") { return; }
+            if (++matches == 30)
+            { ledger = metrics; held = budget - metrics.HashMemoryBytes; metrics.ReserveHashMemory(held, budget); }
+            else if (held != 0) { metrics.ReleaseHashMemory(held); held = 0; }
+        };
+        SqlRowCollector.ObserveSpill = phase => { if (phase == "deferred") { deferred = true; } };
+        try
+        {
+            var actual = (DatabaseResultSet)await b.ExecuteAsync(sql);
+            try { (await Rows(actual)).ShouldBe(await Rows(expected)); }
+            finally { await actual.DisposeAsync(); }
+        }
+        finally
+        {
+            SqlPlanExecutor.FullJoinProgress = null; SqlRowCollector.ObserveSpill = null;
+            if (held != 0) { ledger!.ReleaseHashMemory(held); }
+        }
         // Assert
+        deferred.ShouldBeTrue(); SqlSortSpillMetrics.For(b.LastStatementMetrics!).ShouldNotBeNull();
         Statements(engine.TempSpace!).ShouldBeEmpty();
     }
 
@@ -217,7 +236,7 @@ public sealed partial class SqlSortSpillConformanceTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Hash groups spanning three chunks stream skew in every join type (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Hash groups spanning at least five chunks stream skew in every join type (#1789)")]
     [InlineData("INNER")]
     [InlineData("LEFT")]
     [InlineData("RIGHT")]
@@ -244,7 +263,11 @@ public sealed partial class SqlSortSpillConformanceTests
         string sql = $"SELECT {build}.original_id FROM jl l {kind} JOIN jr r ON l.id=r.id";
         // Act / Assert
         await using var expected = (DatabaseResultSet)await a.ExecuteAsync(sql);
-        var actual = (DatabaseResultSet)await b.ExecuteAsync(sql);
+        long span = 0;
+        SqlPlanExecutor.ObserveHashSpill = (phase, value) => { if (phase == "join-index-chunks") { span = value; } };
+        DatabaseResultSet actual;
+        try { actual = (DatabaseResultSet)await b.ExecuteAsync(sql); }
+        finally { SqlPlanExecutor.ObserveHashSpill = null; }
         try
         {
             var rows = await Rows(actual); rows.Length.ShouldBe(576);
@@ -255,7 +278,8 @@ public sealed partial class SqlSortSpillConformanceTests
         b.LastStatementMetrics.RecordsExamined.ShouldBe(a.LastStatementMetrics.RecordsExamined);
         var spill = SqlHashSpillMetrics.For(b.LastStatementMetrics).ShouldNotBeNull();
         var chunks = typeof(SqlHashSpillMetrics).GetProperty("ProbeChunkReads", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(spill);
-        chunks.ShouldNotBeNull(); ((long)chunks).ShouldBeGreaterThanOrEqualTo(3);
+        chunks.ShouldNotBeNull(); ((long)chunks).ShouldBeGreaterThanOrEqualTo(24 * 5);
+        span.ShouldBeGreaterThanOrEqualTo(5);
         Statements(engine.TempSpace!).ShouldBeEmpty();
     }
 
@@ -336,11 +360,10 @@ public sealed partial class SqlSortSpillConformanceTests
         Statements(engine.TempSpace!).ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Build-time skew no longer loses a repartitioning refusal in the build catch (#1789)")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Build-time skew returns real matches across indexed chunks (#1789)")]
     public async Task ExecuteAsync_JoinFixBuildSkew_ShouldComplete()
     {
-        // Arrange: the old build kept no prefix-zero rows at handoff. Later equal
-        // keys filled that prefix and exhausted its depth inside the build loop.
+        // Arrange: the later duplicate group matches jl's non-NULL key 1.
         await using var reference = SqlDatabaseEngine.Create("fix-build-skew-reference", new());
         await using var engine = await Create("fix-build-skew", 262144);
         await using var a = await (await reference.CreateDatabaseAsync("db")).CreateSessionAsync();
@@ -348,26 +371,19 @@ public sealed partial class SqlSortSpillConformanceTests
         foreach (var session in new[] { a, b })
         {
             await SeedJoinFix(session, 800);
-            await session.ExecuteAsync("UPDATE jr SET id=0 WHERE id>=1400");
+            await session.ExecuteAsync("UPDATE jr SET id=1 WHERE id>=1400");
         }
-        int zero = JoinFixHash(0L);
-        SqlPlanExecutor.HashSpillPartitionHash = hash => hash == zero ? 0 : 1;
+        // Act / Assert
+        const string sql = "SELECT l.id,r.id FROM jl l LEFT JOIN jr r ON l.id=r.id LIMIT 64";
+        await using var expected = (DatabaseResultSet)await a.ExecuteAsync(sql);
+        var actual = (DatabaseResultSet)await b.ExecuteAsync(sql);
         try
         {
-            // Act / Assert
-            const string sql = "SELECT l.id,r.id FROM jl l LEFT JOIN jr r ON l.id=r.id LIMIT 64";
-            await using var expected = (DatabaseResultSet)await a.ExecuteAsync(sql);
-            var actual = (DatabaseResultSet)await b.ExecuteAsync(sql);
-            try { (await Rows(actual)).ShouldBe(await Rows(expected)); }
-            finally { await actual.DisposeAsync(); }
-            Statements(engine.TempSpace!).ShouldBeEmpty();
+            var rows = await Rows(actual); rows.ShouldBe(await Rows(expected));
+            rows.ShouldContain(row => row.Cells[1] != null);
         }
-        catch (DatabaseException failure)
-        {
-            _output.WriteLine($"JOIN_BUILD_SKEW_REFUSAL|passes={SqlHashSpillMetrics.For(b.LastStatementMetrics!)?.Passes}|message={failure.Message}|inner={failure.InnerException?.StackTrace}");
-            throw;
-        }
-        finally { SqlPlanExecutor.HashSpillPartitionHash = null; }
+        finally { await actual.DisposeAsync(); }
+        Statements(engine.TempSpace!).ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Indexed chunks fit the working grant left by another operator (#1789)")]
