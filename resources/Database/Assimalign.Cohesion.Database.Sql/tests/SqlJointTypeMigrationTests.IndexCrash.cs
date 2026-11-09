@@ -108,6 +108,9 @@ public sealed partial class SqlJointTypeMigrationTests
         // Assert: the intent is discoverable after restart and no live tree is lost.
         image.ShouldNotBeNull();
         var stop = lifecycle.Events.Where(item => item.EventId == 29).ShouldHaveSingleItem();
+        stop.EventName.ShouldBe("IndexBuildEnded");
+        stop.Opcode.ShouldBe(EventOpcode.Info);
+        lifecycle.Events.Where(item => item.EventId == 28).ShouldHaveSingleItem().Opcode.ShouldBe(EventOpcode.Info);
         stop.PayloadNames.ShouldBe(["engineName", "database", "objectId", "succeeded"]);
         stop.Payload![0].ShouldBe(engine.Name.ToString());
         ((bool)stop.Payload[3]!).ShouldBe(boundary == "publication-after");

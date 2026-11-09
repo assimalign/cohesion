@@ -468,24 +468,24 @@ internal sealed class SqlDatabaseEventSource : EventSource
         => WriteEvent(27, engineName, database, objectId);
 
     [NonEvent]
-    internal void IndexBuildStart(string engineName, global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId)
+    internal void IndexBuildBegan(string engineName, global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
-        { IndexBuildStart(engineName, storage.Name.ToString(), unchecked((long)objectId)); }
+        { IndexBuildBegan(engineName, storage.Name.ToString(), unchecked((long)objectId)); }
     }
 
     [Event(28, Level = EventLevel.Informational, Message = "Database '{0}/{1}' started building index object {2}.")]
-    private void IndexBuildStart(string engineName, string database, long objectId) => WriteEvent(28, engineName, database, objectId);
+    private void IndexBuildBegan(string engineName, string database, long objectId) => WriteEvent(28, engineName, database, objectId);
 
     [NonEvent]
-    internal void IndexBuildStop(string engineName, global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, bool succeeded)
+    internal void IndexBuildEnded(string engineName, global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, bool succeeded)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
-        { IndexBuildStop(engineName, storage.Name.ToString(), unchecked((long)objectId), succeeded); }
+        { IndexBuildEnded(engineName, storage.Name.ToString(), unchecked((long)objectId), succeeded); }
     }
 
     [Event(29, Level = EventLevel.Informational, Message = "Database '{0}/{1}' stopped building index object {2}; succeeded: {3}.")]
-    private void IndexBuildStop(string engineName, string database, long objectId, bool succeeded) => WriteEvent(29, engineName, database, objectId, succeeded);
+    private void IndexBuildEnded(string engineName, string database, long objectId, bool succeeded) => WriteEvent(29, engineName, database, objectId, succeeded);
 
     [NonEvent]
     internal void PagesReclaimed(string engineName, global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, int pages)

@@ -253,7 +253,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
         TableReclamation = new SqlTableReclamation(this);
         _catalog.EngineName = engine.Name;
         _catalog.IndexReclamationRequested = TableReclamation.Request;
-        _catalog.IndexBuildFinished = (owner, succeeded) => SqlDatabaseEventSource.Log.IndexBuildStop(engine.Name, _storage, owner, succeeded);
+        _catalog.IndexBuildFinished = (owner, succeeded) => SqlDatabaseEventSource.Log.IndexBuildEnded(engine.Name, _storage, owner, succeeded);
         _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
         engine.BeforeProvisioning?.Invoke(this);
 

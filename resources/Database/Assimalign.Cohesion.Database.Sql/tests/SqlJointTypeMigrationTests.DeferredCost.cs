@@ -20,11 +20,12 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlJointTypeMigrationTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: same-name index replacement keeps the heap (#1808)")]
-    public async Task ApplyAsync_DeferredIndexReplacement_ShouldKeepHeapAndWriteOnlyTree()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: same-name index replacement keeps the heap (#1808)")]
+    [InlineData(8192)]
+    [InlineData(65536)]
+    public async Task ApplyAsync_DeferredIndexReplacement_ShouldKeepHeapAndWriteOnlyTree(int rows)
     {
         // Arrange: replacing ix(w) with ix(w,v) retains the heap and other physical trees.
-        const int rows = 8192;
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         SqlCompiledSchema Declare(bool target) => Compiled(new CompiledSchemaTable("items", "row",
             [new("v", DatabaseType.Int32, false), new("w", DatabaseType.Int32, true)], new("pk", ["v"]),
@@ -149,7 +150,7 @@ public sealed partial class SqlJointTypeMigrationTests
         }
     }
 
-    private static async Task<(long OldPages, long JointPages, long Rewritten, int Checkpoints, bool KeepsHeap, bool KeepsOwner, long Threshold, int ForcedCheckpoints)> MeasureDeferredCostAsync(
+    private async Task<(long OldPages, long JointPages, long Rewritten, int Checkpoints, bool KeepsHeap, bool KeepsOwner, long Threshold, int ForcedCheckpoints)> MeasureDeferredCostAsync(
         CrashCaptureSqlStorageStrategy storage, SqlCompiledSchema source, SqlCompiledSchema target, CancellationToken token)
     {
         var pages = new long[2];
@@ -167,6 +168,11 @@ public sealed partial class SqlJointTypeMigrationTests
             var database = await engine.OpenDatabaseAsync("typed", token);
             database.Coordinator.Checkpoint();
             database.CatalogStorage.Checkpoint();
+            var oldOwners = database.IndexManager.ExportRegistrations().Select(entry => database.IndexManager.PageOwner(entry)).ToHashSet();
+            long reclaimed = 0;
+            int batches = 0;
+            database.TableReclamation.AfterBatch = (owner, count) =>
+            { if (oldOwners.Contains(owner)) { Interlocked.Add(ref reclaimed, count); Interlocked.Increment(ref batches); } };
             long before = image.PageWrites("typed");
             ulong originalHeap = Table(database).ObjectId;
             using var checkpointEvents = new EventSourceRecorder(EventSource.GetSources().Single(source =>
@@ -208,9 +214,13 @@ public sealed partial class SqlJointTypeMigrationTests
                     observedCheckpoints = checkpointEvents.Events.Count(entry => entry.EventId == 5 &&
                         Equals(entry.Payload![0], database.DataStorage.Name.ToString()));
                 }
+                // Include the complete replacement cost in both modes, including
+                // freeing old trees, before either final checkpoint is sampled.
+                await DrainRequestedReclamationAsync(database, token);
                 database.Coordinator.Checkpoint();
                 database.CatalogStorage.Checkpoint();
                 pages[mode] = image.PageWrites("typed") - before;
+                _output.WriteLine($"Reclamation drained, mode={mode}: pages={pages[mode]}, reclaimed={reclaimed}, batches={batches}");
             }
             finally { SqlPlanExecutor.RewriteStage = null; }
         }

@@ -508,7 +508,7 @@ internal sealed partial class SqlPlanExecutor
             catch (Exception cleanup) { failures.Add(cleanup); }
             if (!published && !unconfirmed)
             {
-                _indexManager.DiscardPrepared();
+                _indexManager.DiscardPrepared(owner => _catalog.EndIndexBuild(owner, false));
                 try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared, reservedTrees, drain: true).ConfigureAwait(false); }
                 catch (Exception cleanup) { failures.Add(cleanup); }
                 finally { _catalog.AbandonStorageReplacement(prepared); _catalog.AbandonJointTreeOwners(reservedTrees); }

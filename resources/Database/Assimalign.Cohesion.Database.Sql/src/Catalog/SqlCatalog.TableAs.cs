@@ -30,7 +30,12 @@ public sealed partial class SqlCatalog
     // runs when storage is offline; it must not replace the original failure.
     internal void AbandonTableAs(ulong objectId)
     {
-        lock (_sync) { _preparedTruncateOwners.Remove(objectId); }
+        lock (_sync)
+        {
+            var retiring = _retiringIndexOwners.Add(objectId);
+            _preparedTruncateOwners.Remove(objectId);
+            System.Threading.Volatile.Write(ref _retiringIndexOwners, retiring);
+        }
         EndIndexBuild(objectId, false);
         IndexReclamationRequested?.Invoke();
     }

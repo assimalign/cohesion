@@ -733,7 +733,7 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
                 _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation,
-                request.Statement.SqlExpression is SqlAlterSequenceExpression or SqlDropSequenceExpression
+                IsSelfCommitting(request)
                     ? LockTimeout ?? _database.Engine.EngineOptions.LockTimeout : TimeSpan.Zero);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);

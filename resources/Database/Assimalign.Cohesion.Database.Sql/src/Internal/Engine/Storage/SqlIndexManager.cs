@@ -184,13 +184,16 @@ internal sealed class SqlIndexManager
         }
     }
 
-    internal void DiscardPrepared()
+    internal void DiscardPrepared(Action<ulong>? abandoned = null)
     {
+        ulong[] owners;
         lock (_sync)
         {
+            owners = _prepared.Values.Select(entry => _owners[entry.Registration.RootPageId]).ToArray();
             foreach (var entry in _prepared.Values) { _owners.Remove(entry.Registration.RootPageId); }
             _prepared.Clear();
         }
+        foreach (ulong owner in owners) { abandoned?.Invoke(owner); }
     }
 
     internal ValueTask DropIndexAsync(TransactionContext transaction, ulong table, string name, CancellationToken token = default)
@@ -257,7 +260,6 @@ internal sealed class SqlIndexManager
         long count = 0;
         foreach (var item in _maintenance)
         {
-            if (_retiringOwner(item.Owner) || _options.Storage.GetOwnerIndexPageCount(item.Owner) == 0) { continue; }
             count += await item.Manager.PurgeWritersAsync(bracket, writers, token).ConfigureAwait(false);
         }
         return count;

@@ -150,7 +150,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     await BuildDeferredIndexAsync(table, new IndexDefinition(metadata.Name, IndexKind.BTree, true),
                         metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray(), statement,
-                        () => created.Add(metadata.Name), cancellationToken).ConfigureAwait(false);
+                        () => created.Add(metadata.Name), cancellationToken, retryRootAdmission: created.Count > 0).ConfigureAwait(false);
                 }
             }
             await SelfCommitAsync(statement, (publication is null ? _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),

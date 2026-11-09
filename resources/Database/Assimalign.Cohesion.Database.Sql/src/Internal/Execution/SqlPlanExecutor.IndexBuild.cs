@@ -24,15 +24,15 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task BuildDeferredIndexAsync(SqlCatalogTable table, IndexDefinition definition,
         int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken, SqlCatalogIndex? metadata = null,
-        ulong physicalOwner = 0)
+        ulong physicalOwner = 0, bool retryRootAdmission = false)
     {
         ulong eventOwner = physicalOwner == 0 ? await WithCatalogMigrationAdmissionAsync(
             () => _catalog.ReserveIndexTreeOwner(table.ObjectId, cancellationToken), statement, cancellationToken).ConfigureAwait(false) : physicalOwner;
-        _catalog.BeginIndexBuild(eventOwner);
-        SqlDatabaseEventSource.Log.IndexBuildStart(_catalog.EngineName, _storage, eventOwner);
         bool buildSucceeded = false;
         try
         {
+            _catalog.BeginIndexBuild(eventOwner);
+            SqlDatabaseEventSource.Log.IndexBuildBegan(_catalog.EngineName, _storage, eventOwner);
             IndexBuildBoundary?.Invoke("owner-reserved", 0, _storage.JournalLength);
             // Only progress consumers need a second, counting scan.
             long total = 0;
@@ -61,7 +61,8 @@ internal sealed partial class SqlPlanExecutor
                     IndexBuildBoundary?.Invoke("root-before-commit", 0, _storage.JournalLength);
                     return createdIndex;
                 },
-                durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
+                durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken,
+                retryIndexAdmission: retryRootAdmission).ConfigureAwait(false);
             IndexBuildBoundary?.Invoke("root-committed", 0, _storage.JournalLength);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             // A root never moves on splits. Capture once, outside the row-bracket loop;
