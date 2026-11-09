@@ -1,5 +1,10 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+The #1788 execution corpus records PostgreSQL 17 column, multi-alternative, window, DISTINCT,
+grouping-key, HAVING and aggregate-input cases. DIALECT distinguishes scalar key/input typing
+from preserved grouped output normalization and records planning refusals for unresolved
+polymorphic and unsupported parameter alternatives. Grammar and persisted syntax are unchanged.
+
 ## Parser entry contract (#1264)
 
 SQL uses the shared non-virtual QueryParser.Parse template. The model supplies protected
