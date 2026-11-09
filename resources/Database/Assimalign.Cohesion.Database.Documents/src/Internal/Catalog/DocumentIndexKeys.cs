@@ -37,14 +37,30 @@ internal static class DocumentIndexKeys
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 tokens++;
-                depth = Math.Max(depth, reader.CurrentDepth + 1);
+                if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+                { depth = Math.Max(depth, reader.CurrentDepth + 1); }
             }
-            long metadataBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2(
-                (ulong)Math.Max(16L, Math.Max(content.Length + 12L, tokens * 12L)));
+            long initial = content.Length + 12L;
+            if (initial is > 1024 * 1024 and <= 4 * 1024 * 1024) { initial = 1024 * 1024; }
+            long metadataBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, initial));
+            long metadataPeak = metadataBytes;
+            long rows = tokens * 12L;
+            while (metadataBytes < rows)
+            {
+                long grown = metadataBytes * 2;
+                metadataPeak = Math.Max(metadataPeak, metadataBytes + grown);
+                metadataBytes = grown;
+            }
+            if (rows <= metadataBytes / 2)
+            {
+                long trimmed = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, rows));
+                metadataPeak = Math.Max(metadataPeak, metadataBytes + trimmed);
+            }
             // JsonDocument starts with 64 eight-byte stack rows even for a shallow
             // document; include the old buffer while a deeper stack grows.
             long stackBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(512, depth * 8));
-            reserve(320L + metadataBytes + metadataBytes / 2 + stackBytes + stackBytes / 2 + pathCharacters * 80L);
+            long stackPeak = stackBytes == 512 ? stackBytes : stackBytes + stackBytes / 2;
+            reserve(320L + metadataPeak + stackPeak + pathCharacters * 80L);
         }
         using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 128 });
         var result = new HashSet<IndexKey>();

@@ -3797,3 +3797,5 @@ A short snapshot fence advances the coordinator's idle horizon beyond each reser
 Forced-GC marginal retained-state checks use LiveHeap.Read at two populations for name references, resolved source chunks, posting chunks and extracted-key sets. Release fresh-process PUT/DELETE minima match d33f62363 on ARM64 and x64: 23,224/14,160 bytes without an index and 35,920/26,736 with one. Guards allow 128 bytes of runtime headroom and reject an injected 129-byte allocation.
 
 For a file with at least 1 GiB of valid allocated pages under an unrelated owner, the minimum of three Release opens on the same ARM64 host was 4.871 s at d33f62363 and 2.732 s with bounded owner-directory discovery. This measures removal of the second page scan, rather than a document/node/value workload.
+
+JSON extraction reserves the pooled metadata and stack capacities used by .NET 10, including actual growth and trimming overlap. A large unindexed string does not imply one metadata row per byte or a growth buffer that parsing never allocates; 4 MiB and 20 MiB padding cases fit the default grant.

@@ -47,8 +47,10 @@ public sealed class DocumentIndexBuildBudgetTests
         database.IsOffline.ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Unindexed JSON text is charged by payload and token metadata (#1808)")]
-    public async Task CreateIndexAsync_LargeUnindexedString_ShouldFitDefaultGrant()
+    [Theory(DisplayName = "Cohesion Test [Documents] - Unindexed JSON text is charged by payload and token metadata (#1808)")]
+    [InlineData(4 * 1024 * 1024)]
+    [InlineData(20 * 1024 * 1024)]
+    public async Task CreateIndexAsync_LargeUnindexedString_ShouldFitDefaultGrant(int paddingBytes)
     {
         // Arrange: text bytes do not have one DOM metadata row per byte.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -56,7 +58,7 @@ public sealed class DocumentIndexBuildBudgetTests
         var database = await engine.CreateDatabaseAsync("test", guard.Token);
         await using var session = await database.CreateSessionAsync(guard.Token);
         var collection = await session.CreateCollectionAsync("items", guard.Token);
-        await collection.PutAsync(session, "one", Encoding.UTF8.GetBytes("{\"v\":1,\"padding\":\"" + new string('x', 4 * 1024 * 1024) + "\"}"), cancellationToken: guard.Token);
+        await collection.PutAsync(session, "one", Encoding.UTF8.GetBytes("{\"v\":1,\"padding\":\"" + new string('x', paddingBytes) + "\"}"), cancellationToken: guard.Token);
 
         // Act.
         await session.ExecuteAsync("CREATE INDEX ix ON items(v)", cancellationToken: guard.Token);
