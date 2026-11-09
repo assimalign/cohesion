@@ -172,8 +172,12 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
             }
         }
 
-        return KeyValueStorage.Create(DataStream(files, key), JournalStream(files, key), new StorageStream(files.Backup), GetLabel(databaseName, catalog));
+        var storage = KeyValueStorage.Create(DataStream(files, key), JournalStream(files, key), new StorageStream(files.Backup), GetLabel(databaseName, catalog));
+        StorageCreated?.Invoke(catalog);
+        return storage;
     }
+
+    internal Action<bool>? StorageCreated { get; set; }
 
     internal Func<bool, Exception?>? OpenFailure { get; set; }
 

@@ -119,7 +119,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
         }
         catch
         {
-            _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            DisposeFailedCoordinator();
             throw;
         }
 
@@ -144,7 +144,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
         }
         catch (IndexFormatException exception)
         {
-            _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            DisposeFailedCoordinator();
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueDatabaseDatabase, name, exception.Message);
             throw new DatabaseException(message, [new Types.Diagnostic
             { Code = IndexFormatException.ErrorCode, Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
@@ -175,9 +175,18 @@ public sealed class KeyValueDatabase : DatabaseInstance
             ReclaimAbandonedIndexes(cancellationToken);
             _primaryIndex = EnsurePrimaryIndex();
         }
-        catch { _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); throw; }
+        catch
+        {
+            DisposeFailedCoordinator();
+            throw;
+        }
     }
 
+    private void DisposeFailedCoordinator()
+    {
+        try { _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+        catch { /* Cleanup must preserve the constructor's original failure. */ }
+    }
     private void ReclaimAbandonedIndexes(CancellationToken cancellationToken)
     {
         // Open only, after recovery, before any session can hold a detached handle.
@@ -186,7 +195,6 @@ public sealed class KeyValueDatabase : DatabaseInstance
         ulong afterOwner = 0;
         while (true)
         {
-            cancellationToken.ThrowIfCancellationRequested();
             var owners = _storage.GetIndexOwners(afterOwner);
             if (owners.Count == 0) { break; }
             foreach (var (owner, _) in owners)
@@ -234,7 +242,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
             .AsTask().GetAwaiter().GetResult();
 
         ulong owner = (ulong)_storage.ReserveTransactionSequence();
-        KeyValueDatabaseEventSource.Log.IndexBuildStart(_storage, owner);
+        KeyValueDatabaseEventSource.Log.IndexBuildBegan(_storage, owner);
         bool built = false;
         BTreeIndex index;
         try
@@ -273,7 +281,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
             built = true;
             return index;
         }
-        finally { KeyValueDatabaseEventSource.Log.IndexBuildStop(_storage, owner, built); }
+        finally { KeyValueDatabaseEventSource.Log.IndexBuildEnded(_storage, owner, built); }
     }
 
     internal static void EnsureIndexFormats(string name, KeyValueStorage storage, KeyValueCatalog catalog)

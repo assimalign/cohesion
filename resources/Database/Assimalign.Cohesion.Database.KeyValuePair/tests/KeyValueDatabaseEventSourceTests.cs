@@ -35,6 +35,35 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 [Collection(nameof(KeyValueDatabaseEventSourceCollection))]
 public sealed class KeyValueDatabaseEventSourceTests
 {
+    [Fact(DisplayName = "Cohesion Test [KeyValuePair] - A failed primary bootstrap emits one unsuccessful end (#1808)")]
+    public async Task CreateDatabaseAsync_FailedBootstrap_ShouldEndBuildOnce()
+    {
+        // Arrange: fail after the begin event, inside the first physical build commit.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var events = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Informational);
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = KeyValueDatabaseEngine.Create("failed-bootstrap-event", new() { StorageStrategy = strategy });
+        int failures = 0;
+        FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () =>
+        {
+            if (failures != 0 || !events.Events.Any(item => item.EventId == 13)) { return; }
+            failures++;
+            throw new IOException("injected primary root failure");
+        };
+
+        // Act.
+        try { await Should.ThrowAsync<Exception>(async () => await engine.CreateDatabaseAsync("failed", guard.Token)); }
+        finally { FaultInjectingJournalStorageStrategy.BeforeCommitFlush = null; }
+
+        // Assert.
+        failures.ShouldBe(1);
+        events.Events.Where(item => item.EventId == 13).ShouldHaveSingleItem().Opcode.ShouldBe(EventOpcode.Info);
+        var ended = events.Events.Where(item => item.EventId == 14).ShouldHaveSingleItem();
+        ended.EventName.ShouldBe("IndexBuildEnded");
+        ended.Opcode.ShouldBe(EventOpcode.Info);
+        ended.Payload![2].ShouldBe(false);
+    }
+
     [Fact(DisplayName = "Cohesion Test [KeyValuePair] - Primary bootstrap owns separate pages and reports one build activity (#1808)")]
     public async Task CreateDatabaseAsync_PrimaryTree_ShouldSeparateOwnerAndReportBuild()
     {
@@ -56,8 +85,12 @@ public sealed class KeyValueDatabaseEventSourceTests
         database.DataStorage.GetOwnerIndexPages(registration.ObjectId).ShouldHaveSingleItem();
         events.Events.ShouldNotContain(item => item.EventId == 0);
         var start = events.Events.Where(item => item.EventId == 13).ShouldHaveSingleItem();
+        start.EventName.ShouldBe("IndexBuildBegan");
+        start.Opcode.ShouldBe(EventOpcode.Info);
         start.PayloadNames.ShouldBe(["database", "objectId"]);
         var stop = events.Events.Where(item => item.EventId == 14).ShouldHaveSingleItem();
+        stop.EventName.ShouldBe("IndexBuildEnded");
+        stop.Opcode.ShouldBe(EventOpcode.Info);
         stop.PayloadNames.ShouldBe(["database", "objectId", "succeeded"]);
         stop.Payload![2].ShouldBe(true);
     }

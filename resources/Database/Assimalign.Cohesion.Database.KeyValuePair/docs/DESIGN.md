@@ -1325,8 +1325,8 @@ bounded peer-sent names) are in the area's
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |
 | 12 | TerminalDrainTimedOut | Warning | — | sessionId, drainTimeoutMilliseconds, suppressedCount |
-| 13 | `IndexBuildStart` | Informational | — | `database`, `objectId` |
-| 14 | `IndexBuildStop` | Informational | — | `database`, `objectId`, `succeeded` |
+| 13 | `IndexBuildBegan` | Informational | — | `database`, `objectId` |
+| 14 | `IndexBuildEnded` | Informational | — | `database`, `objectId`, `succeeded` |
 | 15 | `PagesReclaimed` | Informational | — | `database`, `objectId`, `pages` |
 | 1 | `SessionAccepted` | Verbose | `Sessions` | `engineName`, `sessionId`, `activeSessions` (this one included, as the accept loop counted them) |
 | 2 | `SessionRejected` | Warning | — | `engineName`, `reason` (`SessionLimit`), `activeSessions`, `maxSessions` |
@@ -1877,3 +1877,7 @@ uses session state so ordinary reads avoid taking a session operation hold.
 
 Every open validates primary registration shape and root ownership before attaching the primary tree or reclaiming any orphan, including clean opens that need no recovery probe. A mismatched catalog refuses with PrimaryIndexRegistrationInvalid and leaves both file sets unchanged. Orphan owners come from Storage.GetIndexOwners in bounded batches; no second allocated-page scan runs through the buffer pool. Open-time cleanup checks cancellation and size/interval checkpoint admission between batches and refuses corruption if allocated pages remain without reclamation progress.
 For a file with at least 1 GiB of valid allocated pages under an unrelated owner, the minimum of three Release opens on the same ARM64 host was 4.778 s at d33f62363 and 2.672 s with bounded owner-directory discovery. This measures removal of the second page scan, rather than a document/node/value workload.
+
+IndexBuildBegan and IndexBuildEnded report build lifetimes without EventSource Start/Stop activity semantics. Every begun build emits one end event on success, failure or abandonment; end includes succeeded. PagesReclaimed reports only nonempty committed batches.
+
+Constructor orphan cleanup observes cancellation only after an unknown owner supplies reclamation work. Cancellation after both new file sets exist therefore completes primary bootstrap, leaving a reopenable database. Cleanup disposal preserves an original constructor failure if disposal also fails.

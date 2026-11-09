@@ -328,24 +328,24 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
     }
 
     [NonEvent]
-    internal void IndexBuildStart(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId)
+    internal void IndexBuildBegan(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
-        { IndexBuildStart(storage.Name.ToString(), unchecked((long)objectId)); }
+        { IndexBuildBegan(storage.Name.ToString(), unchecked((long)objectId)); }
     }
 
     [Event(13, Level = EventLevel.Informational, Message = "Database '{0}' started building index object {1}.")]
-    private void IndexBuildStart(string database, long objectId) => WriteEvent(13, database, objectId);
+    private void IndexBuildBegan(string database, long objectId) => WriteEvent(13, database, objectId);
 
     [NonEvent]
-    internal void IndexBuildStop(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, bool succeeded)
+    internal void IndexBuildEnded(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, bool succeeded)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
-        { IndexBuildStop(storage.Name.ToString(), unchecked((long)objectId), succeeded); }
+        { IndexBuildEnded(storage.Name.ToString(), unchecked((long)objectId), succeeded); }
     }
 
     [Event(14, Level = EventLevel.Informational, Message = "Database '{0}' stopped building index object {1}; succeeded: {2}.")]
-    private void IndexBuildStop(string database, long objectId, bool succeeded) => WriteEvent(14, database, objectId, succeeded);
+    private void IndexBuildEnded(string database, long objectId, bool succeeded) => WriteEvent(14, database, objectId, succeeded);
 
     [NonEvent]
     internal void PagesReclaimed(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, int pages)
