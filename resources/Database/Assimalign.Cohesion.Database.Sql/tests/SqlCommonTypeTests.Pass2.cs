@@ -114,7 +114,6 @@ public sealed partial class SqlCommonTypeTests
     [InlineData("SELECT CASE WHEN TRUE THEN 0 ELSE unproved_result(id,NULL) END FROM t")]
     [InlineData("SELECT COALESCE(@p,0) FROM t")]
     [InlineData("SELECT CASE WHEN TRUE THEN 0 ELSE @p END FROM t")]
-    [InlineData("SELECT COALESCE(ABS(NULL),0) FROM t")]
     [InlineData("SELECT COALESCE(@p,0) FROM t GROUP BY @p")]
     [InlineData("SELECT CASE WHEN TRUE THEN 0 ELSE @p END FROM t GROUP BY @p")]
     [InlineData("SELECT COALESCE(unproved_result(id,NULL),0) FROM t GROUP BY unproved_result(id,NULL)")]

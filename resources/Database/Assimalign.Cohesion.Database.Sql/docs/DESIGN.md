@@ -8836,7 +8836,15 @@ casts fold during binding. Unresolved polymorphic results and unsupported parame
 refuse with CS02080 before rows; NULL-valued parameters remain unknown.
 Completed grouping slots retain that source check, so repeating a key cannot hide an
 unresolved polymorphic result or unsupported parameter.
+Only Declared pseudo results participate in the function refusal: application and SQL-defined
+functions use that rule. ABS uses NumericElement; pseudo-returning scalar built-ins use Builtin.
+Their overload declarations do not create an unresolved polymorphic source. Null-typed derived
+columns and ordering aliases can instead carry values and fail a common-type conversion at a row.
 Other Null-typed shapes, including native MIN/MAX Null-result slots, retain their existing behavior.
+Alternative coercion uses the same tree in IndexPredicate and Table contexts, preserving
+structural partial-index proofs for ON CONFLICT, SELECT and joins. It does not call the
+application-cast validation path. Signed literals fold only when binding produced a constant;
+a deferred failure stays deferred. Constant conversion retains parameter provenance.
 Statistical transitions and JSON's grouped conversions
 retain their contracts. CHECK and SQL function creation fully bind
 before publication, as defaults, views and partial predicates already do. Accepted definitions

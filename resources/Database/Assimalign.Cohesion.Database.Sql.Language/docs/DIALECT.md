@@ -3205,14 +3205,16 @@ inputs' resolved types, subject to each transition's existing result contract (S
 return Decimal; statistical transitions keep the rules above). Thus GROUP BY and DISTINCT
 agree on a mixed key's rows and metadata. ARRAY_AGG remains unavailable (CS01016).
 A CASE/COALESCE in grouped output over aggregate results, key slots, expressions over them,
-or constants retains the existing grouped normalization: Decimal above Double above Real,
-CHAR/TEXT folded to TEXT with padding removed, grouped overload selection, Int64 integer
-literal outputs, native grouped argument value families (including signed BIGINT literals),
+or constants retains the existing grouped normalization: Decimal above Double above Real.
+REAL and DOUBLE reach Decimal through the runtime conversion, retaining about 7 and 15
+significant digits respectively. Context corpus case 73 converts REAL 16777216 to Decimal
+16777220. The normalization also retains CHAR/TEXT folding to TEXT with padding removed,
+grouped overload selection, Int64 integer literal outputs, native grouped argument value
+families (including signed BIGINT literals),
 and all-NULL output metadata, including nested all-NULL CASE/COALESCE values. This output normalization is a recorded
 departure from PostgreSQL's scalar rule. It does not retype a key slot or an aggregate's
 inputs. Plain window SELECT projections and ORDER BY use the scalar rule. Window arguments
-also use it when they read completed grouping slots;
-only PlanPlainGroup and PlanGroupingSets mark grouped output, and ForOrdering copies it.
+also use it when they read completed grouping slots.
 JSON positions within grouped output retain their existing per-node conversions.
 
 Aggregate expressions, output aliases (including inside scalar expressions),
@@ -4170,11 +4172,14 @@ Ordinary scalar CASE and COALESCE use the existing JSON-position resolver in eve
 expression and persisted definition. CASE considers ELSE first; COALESCE considers its
 arguments left to right. Unknown string and NULL literals adopt the declared alternatives'
 type, and all-unknown sets resolve to TEXT. A parameter whose value is NULL also stays
-unknown. Unresolved polymorphic result alternatives and parameters with unsupported CLR
-values refuse at planning with CS02080, rather than adopting a type and failing at a row.
+unknown. Unresolved polymorphic result alternatives of application- or SQL-defined functions
+and parameters with unsupported CLR values refuse at planning with CS02080, rather than
+adopting a type and failing at a row.
 Reading a completed grouping slot does not bypass this check on its source.
-This includes COALESCE(ABS(NULL),0), whose ABS result remains unresolved here;
-PostgreSQL resolves ABS(NULL) as DOUBLE and returns zero.
+A Null-typed derived-table column or output alias carrying a non-NULL value instead adopts
+the common type and can fail at a row with CS02011 when that runtime family cannot convert
+implicitly. For example, a DOUBLE value in such a column cannot adopt INTEGER in
+COALESCE(v,0). These column shapes do not add a planning refusal source.
 Other Null-typed shapes (NULLIF, unary signs, scalar subqueries, arithmetic, derived NULL
 columns, native MIN/MAX result slots and nested all-NULL grouped alternatives) keep their existing behavior. This preserves
 grouped all-NULL metadata. Their existing PostgreSQL departures remain: COALESCE((SELECT
@@ -5082,7 +5087,9 @@ This departs from PostgreSQL's separate day/time components (DAY 0, HOUR 36).
 EPOCH always returns the full duration in seconds.
 DATE_TRUNC accepts year/quarter/month/week/day/hour/minute/second/millisecond/
 microsecond; TIME and INTERVAL admit day and finer units. Invalid field values
-fail with CS01006. There is no session time zone.
+fail with CS01006. There is no session time zone. Standalone DATE_TRUNC('day',NULL)
+returns NULL here; PostgreSQL refuses the ambiguous call with 42725. Its Null result,
+including with a NULL-valued parameter, stays unknown in CASE and COALESCE.
 
 The five bare CURRENT_*/LOCAL* forms require no parentheses: empty parentheses
 report CS00003. A precision argument on CURRENT_TIME, CURRENT_TIMESTAMP,

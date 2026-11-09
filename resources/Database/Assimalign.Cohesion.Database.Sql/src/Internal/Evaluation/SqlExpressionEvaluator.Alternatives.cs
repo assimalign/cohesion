@@ -94,7 +94,8 @@ internal sealed partial class SqlExpressionEvaluator
         }
         if (!jsonPosition && expression is SqlFunctionCallExpression function
             && !SqlStandardLibrary.IsEvaluatorForm(function.FunctionName)
-            && callScope.TypeCall(function).Function is { ReturnType.IsPseudo: true } resolved && resolved is not SqlExtremumFunction)
+            && callScope.TypeCall(function).Function is { ReturnType.IsPseudo: true, ResultRule: SqlResultRule.Declared } resolved
+            && resolved is not SqlExtremumFunction)
         { throw UnresolvedAlternative(expression); }
     }
 
@@ -175,7 +176,10 @@ internal sealed partial class SqlExpressionEvaluator
         { collation = default; return new SqlBoundConstant(index); }
         if (expression is SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.Negate,
             Operand: SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float } })
-        { return new SqlBoundConstant(Evaluate(Bind(expression, out collation), [])); }
+        {
+            var bound = Bind(expression, out collation, statisticsInput: statisticsInput);
+            return bound is SqlBoundConstant ? new SqlBoundConstant(Evaluate(bound, [])) : bound;
+        }
         return Bind(expression, out collation, statisticsInput: statisticsInput);
     }
 
@@ -198,7 +202,6 @@ internal sealed partial class SqlExpressionEvaluator
         // Grouped projections retain their established output normalization. Their
         // keys and aggregate inputs bind in the source scope and use per-node casts.
         if (!jsonPosition && _typing?.GroupedOutput == true && SqlFunctionResolver.IsNumeric(source) && SqlFunctionResolver.IsNumeric(type)) { return operand; }
-        if (_bindingContext == SqlBindingContext.IndexPredicate && source == type) { return operand; }
         if (source == type && !SqlFunctionResolver.IsNumeric(type) || operand is SqlBoundConstant { Value: null }) { return operand; }
         var target = SqlType.ForStorage(new DatabaseTypeInfo(type));
         // Declared alternatives use built-in implicit conversions only. Unknown
@@ -209,7 +212,11 @@ internal sealed partial class SqlExpressionEvaluator
             _functions.Database, _defaultCollation, syntax.Location, source);
         // Unknown literal input conversion belongs to analysis, including skipped branches.
         if (operand is not SqlBoundConstant) { return cast; }
-        try { return new SqlBoundConstant(Evaluate(cast, [])); }
+        try
+        {
+            var value = Evaluate(cast, []);
+            return operand is SqlBoundParameterConstant ? new SqlBoundParameterConstant(value) : new SqlBoundConstant(value);
+        }
         catch (SqlEvaluationException failure) when (syntax is SqlLiteralExpression { LiteralType: SqlLiteralType.String }
             && failure.Diagnostics[0].Code == SqlEvaluationException.CannotCastCode && type == DatabaseType.Boolean)
         {
