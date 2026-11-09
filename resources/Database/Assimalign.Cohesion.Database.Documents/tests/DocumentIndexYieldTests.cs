@@ -59,8 +59,8 @@ public sealed class DocumentIndexYieldTests
         finally { database.DataStorage.CheckpointJournalSize = 0; database.Catalog.ReclamationCheckpointDue = due; }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Abandoning the second committed chunk reclaims live without reopen (#1808)")]
-    public async Task CreateIndexAsync_SecondChunkFailure_ShouldReclaimLiveOwner()
+    [Fact(DisplayName = "Cohesion Test [Documents] - Cancelling after the second committed chunk reclaims live without reopen (#1808)")]
+    public async Task CreateIndexAsync_SecondChunkCancellation_ShouldReclaimLiveOwner()
     {
         // Arrange.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -70,16 +70,17 @@ public sealed class DocumentIndexYieldTests
         var collection = await session.CreateCollectionAsync("items", guard.Token);
         for (int row = 0; row < 256; row++)
         { await collection.PutAsync(session, row.ToString(), Encoding.UTF8.GetBytes($"{{\"v\":{row}}}"), cancellationToken: guard.Token); }
+        using var buildCancellation = CancellationTokenSource.CreateLinkedTokenSource(guard.Token);
         int chunks = 0; ulong owner = 0;
         database.Catalog.AfterIndexRetirementMutation = stage =>
         {
             if (stage != "build-chunk" || ++chunks != 2) { return; }
             owner = database.DataStorage.GetIndexOwners(0).Single().OwnerId;
-            throw new InvalidOperationException("injected second chunk");
+            buildCancellation.Cancel();
         };
 
         // Act.
-        try { await Should.ThrowAsync<InvalidOperationException>(async () => await session.ExecuteAsync("CREATE INDEX ix ON items(v)", cancellationToken: guard.Token)); }
+        try { await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("CREATE INDEX ix ON items(v)", cancellationToken: buildCancellation.Token)); }
         finally { database.Catalog.AfterIndexRetirementMutation = null; }
         for (int pass = 0; pass < 8; pass++) { database.Coordinator.RunVersionPurgePass(guard.Token); }
 

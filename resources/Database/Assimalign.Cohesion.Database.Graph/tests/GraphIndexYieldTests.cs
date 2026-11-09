@@ -57,9 +57,9 @@ public sealed class GraphIndexYieldTests
         finally { database.DataStorage.CheckpointJournalSize = 0; database.Store.ReclamationCheckpointDue = due; }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Exact and text builds abandoned at chunk two reclaim live without reopen (#1808)")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Exact and text builds cancelled at chunk two reclaim live without reopen (#1808)")]
     [InlineData(false)] [InlineData(true)]
-    public async Task CreateIndexAsync_SecondChunkFailure_ShouldReclaimLiveOwner(bool text)
+    public async Task CreateIndexAsync_SecondChunkCancellation_ShouldReclaimLiveOwner(bool text)
     {
         // Arrange.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -71,16 +71,17 @@ public sealed class GraphIndexYieldTests
         await session.ExecuteAsync("CREATE INDEX kept FOR (n:N) ON (n.q)", cancellationToken: guard.Token);
         var owners = database.DataStorage.GetIndexOwners(0).Select(item => item.OwnerId).ToArray();
         var registrations = GraphTextIndexTests.Registrations(database).ToArray();
+        using var buildCancellation = CancellationTokenSource.CreateLinkedTokenSource(guard.Token);
         int chunks = 0; ulong owner = 0;
         database.Store.AfterTextIndexMutation = stage =>
         {
             if (stage != "build-chunk" || ++chunks != 2) { return; }
             owner = database.DataStorage.GetIndexOwners(0).Select(item => item.OwnerId).Except(owners).Single();
-            throw new InvalidOperationException("injected second chunk");
+            buildCancellation.Cancel();
         };
 
         // Act.
-        try { await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"CREATE {(text ? "TEXT " : "")}INDEX lost FOR (n:N) ON (n.p)", cancellationToken: guard.Token)); }
+        try { await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync($"CREATE {(text ? "TEXT " : "")}INDEX lost FOR (n:N) ON (n.p)", cancellationToken: buildCancellation.Token)); }
         finally { database.Store.AfterTextIndexMutation = null; }
         for (int pass = 0; pass < 16; pass++) { database.Coordinator.RunVersionPurgePass(guard.Token); }
 

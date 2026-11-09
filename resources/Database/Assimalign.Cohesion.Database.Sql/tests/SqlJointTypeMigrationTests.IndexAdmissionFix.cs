@@ -301,7 +301,7 @@ public sealed partial class SqlJointTypeMigrationTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - An abandoned multi-chunk build reclaims without reopening (#1808)")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - A cancelled multi-chunk build reclaims without reopening (#1808)")]
     public async Task ExecuteAsync_AbandonedBuild_ShouldReclaimCommittedChunksLive()
     {
         // Arrange.
@@ -311,6 +311,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await using var writer = await database.CreateSessionAsync(guard.Token);
         await writer.ExecuteAsync("CREATE TABLE items(v INT)", cancellationToken: guard.Token);
         SeedRaw(database, [1], 256);
+        using var buildCancellation = CancellationTokenSource.CreateLinkedTokenSource(guard.Token);
         ulong owner = 0; int chunks = 0;
         SqlPlanExecutor.IndexBuildBoundary = (stage, _, _) =>
         {
@@ -326,11 +327,11 @@ public sealed partial class SqlJointTypeMigrationTests
             }
             if (chunks != 2) { return; }
             owner = database.IndexManager.PageOwner(database.IndexManager.ExportRegistrations().Single());
-            throw new InvalidOperationException("injected second chunk refusal");
+            buildCancellation.Cancel();
         };
 
         // Act.
-        try { await Should.ThrowAsync<InvalidOperationException>(async () => await writer.ExecuteAsync("CREATE INDEX ix ON items(v)", cancellationToken: guard.Token)); }
+        try { await Should.ThrowAsync<OperationCanceledException>(async () => await writer.ExecuteAsync("CREATE INDEX ix ON items(v)", cancellationToken: buildCancellation.Token)); }
         finally { SqlPlanExecutor.IndexBuildBoundary = null; }
         await DrainRequestedReclamationAsync(database, guard.Token);
 
