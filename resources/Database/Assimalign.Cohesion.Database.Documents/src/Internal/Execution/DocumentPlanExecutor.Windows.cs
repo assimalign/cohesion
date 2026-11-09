@@ -70,7 +70,7 @@ internal static partial class DocumentPlanExecutor
                     });
                 }
             }
-            catch (InvalidOperationException error) when (error.InnerException is DocumentPlanningException or OperationCanceledException)
+            catch (InvalidOperationException error) when (error.InnerException is DatabaseException or ObjectDisposedException or OperationCanceledException)
             { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error.InnerException).Throw(); throw; }
 
             int start = 0;

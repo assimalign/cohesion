@@ -113,10 +113,11 @@ public sealed class DocumentWindowBudgetTests
         var parameters = new Dictionary<string, object?> { ["rows"] = input.RootElement };
         // Act
         long control = await PeakAsync("SELECT x + 2 AS n FROM @rows AS x WHERE EXISTS (SELECT RAW 1 FROM [0] AS z) ORDER BY x LIMIT 1");
-        long window = await PeakAsync("SELECT ROW_NUMBER() OVER () + RANK() OVER () AS n FROM @rows AS x WHERE EXISTS (SELECT RAW 1 FROM [0] AS z) ORDER BY x LIMIT 1");
+        long window = await PeakAsync("SELECT ROW_NUMBER() OVER (ORDER BY x) + RANK() OVER (ORDER BY x) AS n FROM @rows AS x WHERE EXISTS (SELECT RAW 1 FROM [0] AS z) ORDER BY x LIMIT 1");
         // Assert: row staging + result maps + sort workspace must all be owned.
         _output.WriteLine($"Control peak={control}; window peak={window}; extra={window - control}");
-        (window - control).ShouldBeGreaterThanOrEqualTo(count * (192L + 288L + 128L));
+        long threshold = count * (192L + (192L + 96L * 2) + 128L);
+        (window - control).ShouldBeGreaterThanOrEqualTo(threshold);
 
         async Task<long> PeakAsync(string text)
         {
@@ -135,6 +136,44 @@ public sealed class DocumentWindowBudgetTests
                 return memory.PeakBytes;
             }, CancellationToken.None);
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - Windows: sort workspace and key payloads refuse before the last key (#1805)")]
+    public async Task Execute_WindowSortBudget_ShouldRefuseWhileRetainingKeysAsync()
+    {
+        // Arrange: the equal-projection control fits. The window grant reaches key
+        // evaluation, but cannot retain all keys while stage/results/sort coexist.
+        const int count = 64;
+        int keys = 0;
+        var builder = DocumentDatabaseEngine.CreateBuilder("window-sort-charge");
+        builder.Options.StatementMemoryBudget = 80_000;
+        builder.Functions.Add(DocumentScalarFunction.Create<decimal, decimal>("sort_probe", value => { keys++; return value; }));
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        using var input = JsonDocument.Parse("[" + string.Join(",", Enumerable.Range(0, count)) + "]");
+        var parameters = new Dictionary<string, object?> { ["rows"] = input.RootElement };
+        await using (var control = (DatabaseResultSet)await session.ExecuteAsync(
+            "SELECT x + 2 AS n FROM @rows AS x WHERE EXISTS (SELECT RAW 1 FROM [0] AS z) ORDER BY x LIMIT 1", parameters, CancellationToken.None))
+        {
+            int rows = 0;
+            await foreach (var row in control.GetRowsAsync(CancellationToken.None)) { rows++; }
+            rows.ShouldBe(1);
+        }
+        var request = DocumentQueryRequest.FromOql("SELECT ROW_NUMBER() OVER (ORDER BY sort_probe(x)) + RANK() OVER (ORDER BY sort_probe(x)) AS n FROM @rows AS x WHERE EXISTS (SELECT RAW 1 FROM [0] AS z) ORDER BY x LIMIT 1");
+        // Act / Assert: a later projection refusal cannot stand in for charging sort keys.
+        await database.RunAsync(session, async operation =>
+        {
+            var memory = operation.GetStatementMemory(CancellationToken.None);
+            var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+                await DocumentPlanExecutor.ExecuteAsync(database, operation, request.Statement, parameters, CancellationToken.None));
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05018");
+            memory.Bytes.ShouldBe(0);
+            return true;
+        }, CancellationToken.None);
+        _output.WriteLine($"Sort-key evaluations before refusal={keys}; input rows={count}");
+        keys.ShouldBeGreaterThan(0);
+        keys.ShouldBeLessThan(count);
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - Windows: key-free specifications skip comparison work (#1805)")]
@@ -173,6 +212,7 @@ public sealed class DocumentWindowBudgetTests
         // Assert: the value's 96 + 2*length reservation replaces a 96-byte rank value.
         // Allow a complete additional output cell, independently of the retained stage values.
         _output.WriteLine($"Rank peak={ranks}; navigation peak={navigation}; extra={navigation-ranks}");
+        (navigation - ranks).ShouldBeGreaterThanOrEqualTo(count * 2L * length);
         (navigation - ranks).ShouldBeLessThanOrEqualTo(count * (96L + 2L * length) + 2048L);
 
         async Task<long> PeakAsync(string call)

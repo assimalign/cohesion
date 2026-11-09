@@ -1212,6 +1212,10 @@ The dedicated window row pipeline intentionally duplicates grouping/HAVING, DIST
 ordering to protect ordinary allocation layouts. Consolidating it, including the inherited DISTINCT
 node accounting, remains a follow-up; changes to shared semantics must reach both pipelines.
 
+Window and set-operation sorting restore coded DatabaseException, ObjectDisposedException and
+OperationCanceledException failures from the comparer wrapper. Session disposal at the final
+retained sort key is covered directly; the set-operation wrapper gap predates the window stage.
+
 #### Result paging (#1129)
 
 Both stored and system collections resolve LIMIT/OFFSET in planning, before collection lookup
