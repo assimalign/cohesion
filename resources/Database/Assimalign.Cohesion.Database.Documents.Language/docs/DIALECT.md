@@ -440,6 +440,9 @@ before their alias; a path can supply its final named member implicitly. Collect
 same implicit names as SELECT, including the final segment of a reserved system source.
 Aliases are ordinal and must differ; duplicate implicit or explicit declarations give CD00010
 in text and CD01023 in a direct AST. A subquery requires an alias (CD00015 in text).
+Bare MERGE aliases cannot be keys, options, limit, offset or use, or a word starting a
+JOIN, NEST or UNNEST clause (including LEFT/INNER forms); use AS and a quoted identifier
+for those names. Generic expression aliases require AS even when a bare name is written.
 
 ON KEY binds only the source. ANSI ON sees both names and is restricted to the written
 META(target).id = expression shape; reversed equalities and general predicates receive one
@@ -454,8 +457,8 @@ rules are not established by the available references and receive CK00001. Outsi
 and RETURNING, value paths must
 name a visible source, target or local expression variable; unqualified field resolution remains
 CK00001. META requires an explicit visible binding; its unqualified form outside RETURNING stays
-CK00001. Expression and derived source metadata retain the existing NULL rule. An unavailable named
-binding or invalid META receiver gives CD01040. UPDATE destination paths keep existing target-
+CK00001. Expression and derived source metadata retain the existing NULL rule. An unavailable ON KEY
+target binding or invalid META receiver gives CD01040. UPDATE destination paths keep existing target-
 relative SET/UNSET rules, including CD02016 and CD01017; a source-prefixed destination is invalid.
 
 LIMIT, OFFSET, OPTIONS, USE INDEX, USE KEYS, join hints and source joins remain one CK00001.
@@ -467,6 +470,12 @@ while 127 left-associated binary terms fit. Long action lists stop at the first 
 ordering violation.
 
 OqlMergeExpression.ToString renders canonical syntax that reparses to the same tree shape.
+Array-form IN keeps its precedence-four operand distinct from an IN value list, including
+arithmetic, prefixes and IS tests. Only the two reserved system collection names render with
+qualification; a user name such as "COHESION_SCHEMA." remains one quoted identifier.
+The MERGE constructors reject null required members and null mutation-list elements and take
+read-only snapshots of the SET/UNSET lists. Parse recovery returns a renderable empty expression
+instead of an incomplete MERGE. The executable profile's Supports("MERGE") remains false.
 MERGE remains contextual: SELECT merge.x FROM c merge parses. A nested MERGE statement in an
 expression retains its single CK00001 refusal. EXPLAIN MERGE validates bindings and describes
 Merge, its source plan, KeyLookup or KeyJoin access, ordered MergeUpdate/MergeDelete/MergeInsert

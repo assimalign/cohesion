@@ -12,6 +12,14 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 public sealed class OqlMergeParserTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - MERGE: both forms and every action render and reparse canonically")]
+    [InlineData("MERGE INTO c USING d ON KEY d.k WHEN MATCHED THEN DELETE WHERE d.x IN d.a + d.b")]
+    [InlineData("MERGE INTO c USING d ON KEY d.k WHEN MATCHED THEN DELETE WHERE d.x IN d.a * 2")]
+    [InlineData("MERGE INTO c USING d ON KEY d.k WHEN MATCHED THEN DELETE WHERE d.x IN -d.a")]
+    [InlineData("MERGE INTO c USING d ON KEY d.k WHEN MATCHED THEN DELETE WHERE d.x IN NOT d.a")]
+    [InlineData("MERGE INTO c USING d ON KEY d.k WHEN MATCHED THEN DELETE WHERE d.x IN d.a IS NULL")]
+    [InlineData("MERGE INTO \"COHESION_SCHEMA.\" USING s ON KEY s.k WHEN MATCHED THEN DELETE")]
+    [InlineData("MERGE INTO c USING \"COHESION_SCHEMA.\" s ON KEY s.k WHEN MATCHED THEN DELETE")]
+    [InlineData("MERGE INTO c USING (SELECT RAW x FROM \"COHESION_SCHEMA.\" x) s ON KEY s.k WHEN MATCHED THEN DELETE")]
     [InlineData("MERGE INTO c t USING d s ON KEY s.k WHEN MATCHED THEN UPDATE SET t.a = s.a UNSET t.b WHERE s.ok WHEN MATCHED THEN DELETE WHERE t.gone WHEN NOT MATCHED THEN INSERT s WHERE s.ok RETURNING t.a AS a")]
     [InlineData("MERGE INTO c USING d ON PRIMARY KEY d.k WHEN NOT MATCHED THEN INSERT {a:d.a} RETURNING RAW c")]
     [InlineData("MERGE INTO c USING d ON META(c).id = d.k WHEN MATCHED THEN DELETE")]
@@ -67,6 +75,7 @@ public sealed class OqlMergeParserTests
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - MERGE: unsupported forms give one capability refusal")]
     [InlineData("MERGE INTO c t USING d s ON t.k = s.k WHEN MATCHED THEN DELETE")]
+    [InlineData("MERGE INTO c t USING d s ON s.k = META(t).id WHEN MATCHED THEN DELETE")]
     [InlineData("MERGE INTO c t USING d s ON META(t).id = s.k AND t.ok WHEN MATCHED THEN DELETE")]
     [InlineData("MERGE INTO c USING d ON KEYS d.k WHEN MATCHED THEN DELETE")]
     [InlineData("MERGE INTO c USING d ON KEY d.k WHEN MATCHED THEN DELETE LIMIT 1")]
@@ -187,12 +196,12 @@ public sealed class OqlMergeParserTests
     }
 
     // Include all semantic fields and child positions, deliberately excluding source text/spans.
-    private static string Shape(OqlExpression expression)
+    internal static string Shape(OqlExpression expression)
     {
         string data = expression switch
         {
             OqlMergeExpression m => $"{m.Collection}|{m.Alias}|{m.Source.Collection}|{m.Source.Alias}|{m.IsLookup}|{m.IsPrimary}|" +
-                $"{m.Update?.Assignments.Count}|{m.Update?.Unset.Count}|{m.Update?.Predicate is not null}|{m.Delete is not null}|{m.Delete?.Predicate is not null}|{m.Insert is not null}|{m.Insert?.Predicate is not null}",
+                $"{m.Source.Expression is not null}|{m.Update?.Assignments.Count}|{m.Update?.Unset.Count}|{m.Update?.Predicate is not null}|{m.Delete is not null}|{m.Delete?.Predicate is not null}|{m.Insert is not null}|{m.Insert?.Key is not null}|{m.Insert?.Predicate is not null}",
             OqlReturningExpression r => r.IsValue + ":" + string.Join("|", r.Projections.Select(p => p.Alias)),
             OqlSelectExpression s => $"{s.Collection}|{s.Alias}|{s.IsAliasImplicit}|{s.IsDistinct}|{s.IsValue}|{s.GroupAs}|" +
                 $"{s.Source is not null}|{s.Predicate is not null}|{s.GroupBy.Count}|{s.Having is not null}|" +
@@ -200,7 +209,7 @@ public sealed class OqlMergeParserTests
                     $"{((OqlUnnestExpression)b).Variable}:{((OqlUnnestExpression)b).Alias}:{b.IsLeft}")) + ":" +
                 string.Join("|", s.Projections.Select(p => p.Alias)) + ":" + string.Join("|", s.GroupAliases) + ":" + string.Join("|", s.OrderBy.Select(o => o.Descending + ":" + o.NullPlacement)),
             OqlSetOperationExpression s => s.Operation + ":" + s.IsAll,
-            OqlLiteralExpression l => l.Value is JsonElement json ? json.GetRawText() : l.Value?.ToString() ?? "NULL",
+            OqlLiteralExpression l => l.Value is JsonElement json ? json.ValueKind + ":" + json.GetRawText() : l.Value?.GetType().Name + ":" + l.Value,
             OqlParameterExpression p => p.Name,
             OqlPathExpression p => string.Join("/", p.Segments.Select(s => s.Name + ":" + s.Index)),
             OqlBinaryExpression b => b.Operator,
@@ -216,6 +225,8 @@ public sealed class OqlMergeParserTests
             OqlCaseExpression c => $"{c.Operand is not null}:{c.Branches.Count}:{c.Otherwise is not null}",
             _ => "",
         };
+        if (expression is OqlQueryExpression query)
+        { data += $"|order={string.Join(",", query.OrderBy.Select(o => o.Descending + ":" + o.NullPlacement))}|limit={query.Limit is not null}|offset={query.Offset is not null}"; }
         return expression.GetType().Name + "[" + data + "](" + string.Join(",", OqlMergeRenderer.Children(expression).Select(Shape)) + ")";
     }
 }

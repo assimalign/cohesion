@@ -549,7 +549,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             if (value is "JOIN" or "NEST")
-            { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + " in UPDATE or DELETE", Profile.Language, Span(token, token))); break; }
+            { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + (merge ? " in MERGE" : " in UPDATE or DELETE"), Profile.Language, Span(token, token))); break; }
 
             var reported = token;
 

@@ -32,7 +32,6 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.Update)]
     [InlineData(OqlClauses.Unset)]
     [InlineData(OqlClauses.Delete)]
-    [InlineData(OqlClauses.Merge)]
     [InlineData(OqlClauses.Returning)]
     [InlineData(OqlClauses.Values)]
     [InlineData(OqlClauses.Select)]
@@ -87,6 +86,7 @@ public class OqlLanguageProfileTests
 
     [Theory]
     [InlineData("ON KEYS")]
+    [InlineData(OqlClauses.Merge)]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {
         OqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();

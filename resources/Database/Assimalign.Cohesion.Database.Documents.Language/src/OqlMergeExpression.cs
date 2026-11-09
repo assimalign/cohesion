@@ -1,3 +1,5 @@
+using System;
+
 using Assimalign.Cohesion.Database.Documents.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
@@ -21,10 +23,14 @@ public sealed class OqlMergeExpression : OqlExpression
     /// <param name="insert">The optional unmatched INSERT action.</param>
     /// <param name="returning">The optional affected-image projection.</param>
     /// <param name="location">The source span.</param>
+    /// <exception cref="ArgumentNullException">A required collection, source or ON expression is null.</exception>
     public OqlMergeExpression(string collection, string? alias, OqlMergeSource source, OqlExpression on,
         bool isLookup, bool isPrimary = false, OqlMergeUpdateAction? update = null, OqlMergeDeleteAction? delete = null,
         OqlMergeInsertAction? insert = null, OqlReturningExpression? returning = null, Location? location = null) : base(location)
     {
+        ArgumentNullException.ThrowIfNull(collection);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(on);
         Collection = collection; Alias = alias; Source = source; On = on; IsLookup = isLookup; IsPrimary = isPrimary;
         Update = update; Delete = delete; Insert = insert; Returning = returning;
     }

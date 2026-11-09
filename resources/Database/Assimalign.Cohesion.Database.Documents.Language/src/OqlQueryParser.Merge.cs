@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 
 public sealed partial class OqlQueryParser
 {
-    private OqlMergeExpression ParseMerge()
+    private OqlExpression ParseMerge()
     {
         var start = Current;
         Advance();
@@ -21,7 +21,16 @@ public sealed partial class OqlQueryParser
             (_tokens[_position + 1].Type is not (TokenType.LeftParen or TokenType.LeftBracket or TokenType.Dot) || Is("COHESION_SCHEMA"));
         string sourceCollection = Failed || !keyspace ? string.Empty : CollectionName();
         OqlExpression? sourceExpression = Failed || keyspace ? null : ParseExpression();
+        var sourceImplicitNameToken = Previous;
+        if (sourceExpression is OqlPathExpression { Location: { } pathLocation })
+        {
+            int namePosition = _position - 1;
+            while (namePosition > 0 && _tokens[namePosition].End > pathLocation.End) { namePosition--; }
+            sourceImplicitNameToken = _tokens[namePosition].Type == TokenType.RightBracket && namePosition > 0
+                ? _tokens[namePosition - 1] : _tokens[namePosition];
+        }
         string? sourceAlias = Failed ? null : MergeAlias("ON", allowBare: keyspace || sourceExpression is OqlSubqueryExpression);
+        var sourceNameToken = sourceAlias is null ? sourceImplicitNameToken : Previous;
         if (!Failed && sourceExpression is OqlSubqueryExpression && sourceAlias is null)
         { Error("CD00015", ErrorMessages.DerivedSourceAliasRequired, sourceStart); }
         string sourceName = sourceAlias ?? (sourceExpression is OqlPathExpression { Segments.Count: > 0 } sourcePath
@@ -29,7 +38,7 @@ public sealed partial class OqlQueryParser
         if (!Failed && sourceName.Length == 0)
         { Error("CD00002", ErrorMessages.MergeSourceAliasRequired, sourceStart); }
         if (!Failed && sourceName == (alias ?? OqlSourceName.Implicit(collection)))
-        { Error("CD00010", ErrorMessages.BindingNameDuplicate, sourceStart); }
+        { Error("CD00010", ErrorMessages.BindingNameDuplicate, sourceNameToken); }
         RejectMergeSuffix();
         if (!Failed) { Expect("ON"); }
         var onToken = Previous;
@@ -106,10 +115,13 @@ public sealed partial class OqlQueryParser
         if (!Failed && lastAction == 0) { Error("CD00002", ErrorMessages.MergeActionsMissing, Current); }
         var returning = ParseReturning();
         RejectMergeSuffix();
+        // Recovery expressions can contain incomplete paths or exceed the rendering
+        // bound. Do not publish them as a MERGE tree (or pass missing members to it).
+        if (Failed) { return EmptyExpression(); }
         var merge = new OqlMergeExpression(collection, alias, new(sourceCollection, sourceAlias, sourceExpression), on, lookup, primary,
             update, delete, insert, returning, Span(start, Previous));
         if (!Failed && !OqlMergeRenderer.IsWithinStatementDepth(merge))
-        { Error("CD00005", ErrorMessages.OqlQueryParserParseExpressionVoid, start); }
+        { Error("CD00005", ErrorMessages.OqlQueryParserParseExpressionVoid, start); return EmptyExpression(); }
         return merge;
     }
 
@@ -128,7 +140,14 @@ public sealed partial class OqlQueryParser
 
     private void RejectMergeSuffix()
     {
-        if (!Failed && IsMergeSuffix()) { RefuseMerge("MERGE " + Current.Text.ToUpperInvariant()); }
+        if (Failed || !IsMergeSuffix()) { return; }
+        if (Current.Type == TokenType.Comma) { Advance(); }
+        string construct = Current.Text.ToUpperInvariant();
+        if ((Is("LEFT") || Is("INNER")) && _position + 1 < _tokens.Count && IsWord(_tokens[_position + 1], "UNNEST"))
+        { construct += " UNNEST"; }
+        else if (Is("LEFT") && _position + 2 < _tokens.Count && IsWord(_tokens[_position + 1], "OUTER") && IsWord(_tokens[_position + 2], "UNNEST"))
+        { construct += " OUTER UNNEST"; }
+        RefuseMerge("MERGE " + construct);
     }
 
     private void RefuseMerge(string construct)

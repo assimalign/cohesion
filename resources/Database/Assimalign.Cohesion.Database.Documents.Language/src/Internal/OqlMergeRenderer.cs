@@ -134,7 +134,7 @@ internal static class OqlMergeRenderer
     }
 
     private static string Name(string value) => "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
-    private static string Collection(string value) => value.StartsWith("COHESION_SCHEMA.", StringComparison.OrdinalIgnoreCase)
+    private static string Collection(string value) => !string.Equals(OqlSourceName.Implicit(value), value, StringComparison.Ordinal)
         ? value[.."COHESION_SCHEMA".Length] + "." + Name(value["COHESION_SCHEMA.".Length..]) : Name(value);
     private static string Alias(string? value) => value is null ? "" : " AS " + Name(value);
     private static string Where(OqlExpression? predicate) => predicate is null ? "" : " WHERE " + Expression(predicate);
@@ -181,7 +181,7 @@ internal static class OqlMergeRenderer
                 return (quantified.IsEvery ? "EVERY " : "ANY ") + Name(quantified.Variable) + " IN " + E(quantified.Collection) + " SATISFIES " + E(quantified.Predicate) + " END";
             case OqlInExpression membership:
                 return "(" + E(membership.Operand) + (membership.Negated ? " NOT IN " : " IN ") +
-                    (membership.Array is null ? "(" + List(membership.Values) + ")" : E(membership.Array)) + ")";
+                    (membership.Array is null ? "(" + List(membership.Values) + ")" : ArrayOperand(membership.Array, depth + 1)) + ")";
             case OqlBetweenExpression between:
                 return "(" + E(between.Operand) + (between.Negated ? " NOT BETWEEN " : " BETWEEN ") + E(between.Lower) + " AND " + E(between.Upper) + ")";
             case OqlLikeExpression like:
@@ -192,6 +192,46 @@ internal static class OqlMergeRenderer
                     (conditional.Otherwise is null ? "" : " ELSE " + E(conditional.Otherwise)) + " END";
             default: throw new InvalidOperationException(ErrorMessages.MergeRenderInvalid);
         }
+    }
+
+    // A leading '(' after IN selects list/query grammar, never the precedence-four
+    // array operand. Flatten only its left spine; grouped right operands keep every
+    // association. Prefix operands have their own parser binding powers.
+    private static string ArrayOperand(OqlExpression node, int depth, int leftPrecedence = 0)
+    {
+        if (depth > 256 || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        { throw new InvalidOperationException(ErrorMessages.MergeRenderInvalid); }
+        string E(OqlExpression value) => Expression(value, depth + 1);
+        if (node is OqlBinaryExpression binary)
+        {
+            int precedence = binary.Operator switch
+            {
+                "IS DISTINCT FROM" or "IS NOT DISTINCT FROM" => 4,
+                "+" or "-" => 6,
+                "*" or "/" or "%" => 7,
+                _ => 0,
+            };
+            if (precedence < 4 || precedence < leftPrecedence)
+            { throw new InvalidOperationException(ErrorMessages.MergeRenderInvalid); }
+            return ArrayOperand(binary.Left, depth + 1, precedence) + " " + binary.Operator + " " + E(binary.Right);
+        }
+        if (node is OqlUnaryExpression unary && unary.Operator != ".*")
+        {
+            if (unary.Operator.StartsWith("IS ", StringComparison.Ordinal))
+            {
+                // A postfix IS completes the accumulated left expression before a
+                // subsequent higher-precedence binary operator (a IS NULL + b).
+                return ArrayOperand(unary.Operand, depth + 1, 4) + " " + unary.Operator;
+            }
+            int precedence = unary.Operator switch { "+" or "-" => 8, "NOT" => 3, "EXISTS" => 4, _ => 0 };
+            if (precedence == 0 || leftPrecedence != 0 && precedence <= leftPrecedence)
+            { throw new InvalidOperationException(ErrorMessages.MergeRenderInvalid); }
+            return unary.Operator + " " + E(unary.Operand);
+        }
+        string text = Expression(node, depth);
+        if (text.StartsWith('(') && (node is not OqlSubqueryExpression || leftPrecedence != 0))
+        { throw new InvalidOperationException(ErrorMessages.MergeRenderInvalid); }
+        return text;
     }
 
     private static string Query(OqlQueryExpression query, int depth)

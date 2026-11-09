@@ -107,7 +107,7 @@ flowchart TD
 
 ## Supported-clause matrix
 
-The profile advertises parse-and-plan capabilities from `OqlClauses`; MERGE execution is separately gated until OQ-M2.
+The profile's supported set is deliberately the executable subset of `OqlClauses`.
 Lexical recognition preserves the established vocabulary so rejected constructs receive
 `CK00001`; recognizing a token does not make its operation supported.
 
@@ -336,12 +336,19 @@ canonical-parse cost bound protect parsing, planning and canonical reparsing. Pr
 costs two levels; 63 prefixes or 127 left-associated binary terms fit. A fourth or repeated/out-of-order
 action stops immediately with CD00002; overdeep trees receive CD00005.
 
+The four MERGE constructors with required members reject nulls with ArgumentNullException;
+UPDATE snapshots both lists and rejects null elements. Existing AST conventions are unchanged.
+Error recovery returns the ordinary empty expression instead of an incomplete MERGE, so every
+parser-returned tree can be rendered even when diagnostics are present. Array-form IN renders
+without leading grouping and preserves the parser's precedence-four operand tree. Collection
+qualification is emitted only for the two reserved system names; other names stay opaque.
+
 ON KEY sees only the source. ANSI ON binds both names but supports only META(target).id = expr,
 where expr can be computed before target lookup; target-dependent keys retain CK00001. Matched
 actions bind both names. INSERT binds the source and a MISSING target, including target metadata.
 Expression/derived source metadata retains the existing NULL rule.
 The engine validates direct AST declarations with CD01023 and form/action shape with CD01039;
-CD01040 identifies an unavailable MERGE binding or invalid metadata receiver. Unqualified value
+CD01040 identifies an unavailable ON KEY target binding, unnamed AST root or invalid metadata receiver. Unqualified value
 paths and ANSI INSERT KEY/VALUE omission rules remain CK00001 until their semantics are settled.
 RETURNING retains ordinary target-image scope; source references remain CK00001. Other MERGE
 expressions require explicit META receivers. UPDATE destination paths retain ordinary target-relative
@@ -453,7 +460,7 @@ a name:
   reserved; use quoted names or path segments such as d.limit. SELECT a AS limit still parses.
 - **Statement** (`DEFINE` and the enabled `UPSERT` coverage entry): only the first word of the
   statement. UPSERT bypasses refusal through OqlClauses.Upsert; its table entry retains contextual
-  keyword coverage. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
+  keyword coverage. Elsewhere they are names, so an AS-less alias such as `FROM c define` still parses,
   as it did before #1101.
 - **Trailing** (`RETURNING`): executable at the end of INSERT/UPSERT/UPDATE/DELETE;
   unsupported at the statement prefix or after SELECT. Other identifier positions retain
@@ -746,6 +753,13 @@ write-input  := '(' KEY ',' VALUE [refused-options] ')' VALUES '(' expression ',
 refused-options := ',' OPTIONS [expression]  -- recognized header element; rejected with one CK00001 at OPTIONS
 delete       := DELETE FROM collection [AS? identifier] [WHERE expression]
 update       := UPDATE collection [AS? identifier] (set [unset] | unset) [WHERE expression]
+merge        := MERGE INTO collection [AS? identifier] USING merge-source merge-on merge-actions [RETURNING select-kind]
+merge-source := collection [AS? identifier] | subquery [AS] identifier | expression [AS identifier]
+merge-on     := ON [PRIMARY] KEY expression | ON META(identifier).id '=' expression
+merge-actions := merge-update [merge-delete] [merge-insert] | merge-delete [merge-insert] | merge-insert
+merge-update := WHEN MATCHED THEN UPDATE (set [unset] | unset) [WHERE expression]
+merge-delete := WHEN MATCHED THEN DELETE [WHERE expression]
+merge-insert := WHEN NOT MATCHED THEN INSERT (expression | '(' KEY expression ',' VALUE expression ')') [WHERE expression]
 set          := SET assignment (',' assignment)*
 assignment   := path '=' expression
 unset        := UNSET path (',' path)*
@@ -904,7 +918,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD01033` | FROM expression requires an explicit alias or implicit field name |
 | `CD01039` | Direct MERGE AST has an invalid source, form or action shape |
 | `CD01034` | Unbound FROM expression variable; there is no implicit input-row scope |
-| `CD01040` | MERGE references an unavailable binding or invalid metadata receiver |
+| `CD01040` | MERGE references the unavailable ON KEY target, an unnamed AST root or an invalid metadata receiver |
 | `CD01037` | ORDER BY on a compound whose operands are all RAW/VALUE |
 | `CD01038` | Compound ORDER BY uses an unbound result member, source metadata or star |
 
