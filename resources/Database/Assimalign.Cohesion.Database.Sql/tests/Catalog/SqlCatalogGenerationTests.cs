@@ -45,7 +45,7 @@ public sealed class SqlCatalogGenerationTests
         catalog.DdlGeneration.ShouldBe(6UL);
         await catalog.DropConstraintAsync("dbo", "owned", "ck_id", CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(7UL);
-        var registration = new BTreeIndexRegistration(table.ObjectId, new IndexDefinition("ix_id"), 42);
+        var registration = await PreparedCatalogIndexes.CreateAsync(catalog, storage, table.ObjectId, new IndexDefinition("ix_id"));
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_id", ["id"], false,
             DatabaseObjectOwner.Schema, "App"), [registration], CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(8UL);
@@ -55,6 +55,7 @@ public sealed class SqlCatalogGenerationTests
         catalog.DdlGeneration.ShouldBe(10UL);
         await catalog.DropTableAsync("dbo", "adhoc", CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(11UL);
+        registration = await PreparedCatalogIndexes.CreateAsync(catalog, storage, table.ObjectId, new IndexDefinition("ix_id"));
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_id", ["id"], false), [registration], CancellationToken.None);
         catalog.DdlGeneration.ShouldBe(12UL);
         catalog.GetIndexRegistrations().ShouldBe([registration]);
@@ -223,7 +224,7 @@ public sealed class SqlCatalogGenerationTests
         var catalog = SqlCatalog.Open(storage);
         await catalog.SetRecordSpaceFormatVersionAsync(8, CancellationToken.None);
         var table = await catalog.CreateTableAsync("dbo", "t", [Column("id")], cancellationToken: CancellationToken.None);
-        var registration = new BTreeIndexRegistration(table.ObjectId, new IndexDefinition("ix"), 42);
+        var registration = await PreparedCatalogIndexes.CreateAsync(catalog, storage, table.ObjectId, new IndexDefinition("ix"));
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix", ["id"], false), [registration], CancellationToken.None);
         ulong generation = catalog.DdlGeneration;
 
