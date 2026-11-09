@@ -319,14 +319,20 @@ public sealed partial class DocumentCatalog
         return result.Values.OrderBy(document => document.Id, StringComparer.Ordinal).ToArray();
     }
 
+    private long _indexRangesCounted;
+    internal long IndexRangesCounted => System.Threading.Interlocked.Read(ref _indexRangesCounted);
+
     // Counts physical, snapshot-visible index entries without loading document content.
     // A completed count may still overestimate identities if catalog references are stale.
     internal BTreeRangeCount CountIndexRange(DocumentIndexMetadata definition, IReadOnlyList<object> equalityPrefix,
         object? lower, bool includeLower, object? upper, bool includeUpper, TransactionSnapshot snapshot,
         CancellationToken cancellationToken)
-        => ResolveIndex(definition).CountRange(snapshot,
+    {
+        System.Threading.Interlocked.Increment(ref _indexRangesCounted);
+        return ResolveIndex(definition).CountRange(snapshot,
             SeekRange(definition, equalityPrefix, lower, includeLower, upper, includeUpper),
             entryLimit: 512, pageLimit: 32, cancellationToken: cancellationToken);
+    }
 
     // An existence probe over the first varying component's lossy tags, without
     // reading document content. One visible match suffices; an invisible first entry

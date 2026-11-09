@@ -41,7 +41,7 @@
   <data name="MergeBindingInvalid" xml:space="preserve"><value>MERGE expressions require a visible source or target binding; META requires an explicit source or target binding.</value></data>
   <data name="MergeOnUnsupported" xml:space="preserve"><value>MERGE ANSI matching requires ON META(target).id = expression with a source-computable key.</value></data>
   <data name="MergeReturningSourceUnsupported" xml:space="preserve"><value>MERGE RETURNING currently binds only the target image; source references remain unsupported.</value></data>
-  <data name="MergeExecutionUnavailable" xml:space="preserve"><value>MERGE execution is unavailable until OQ-M2; EXPLAIN MERGE is supported.</value></data>
+  <data name="MergeExecutionUnavailable" xml:space="preserve"><value>MERGE execution is unavailable; EXPLAIN MERGE is supported.</value></data>
   <data name="UpdateTargetsMissing" xml:space="preserve"><value>UPDATE requires at least one SET assignment or UNSET path.</value></data>
   <data name="UpdateTargetInvalid" xml:space="preserve"><value>UPDATE targets must be non-root document paths; UNSET must end in a property name.</value></data>
   <data name="UpdateTargetsOverlap" xml:space="preserve"><value>UPDATE targets must not repeat or overlap, including across SET and UNSET.</value></data>

@@ -406,7 +406,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1731, OQ-Q2) | CD01033 | Binding/names — FROM expression has no explicit alias or implicit field name |
 | New (#1731, OQ-Q2) | CD01034 | Binding/names — unbound variable in a FROM expression without an input-row scope |
 | New (#1732) | CD01035 | Binding/names — unbound/self/forward key source reference or ambiguous/invalid joined META receiver |
-| New (#1804, OQ-M1) | CD01040 | Binding/names — MERGE references an unavailable binding or invalid metadata receiver |
+| New (#1804, OQ-M1) | CD01040 | Binding/names — MERGE references the unavailable ON KEY target, an unnamed AST root or an invalid metadata receiver |
 | New (#1767) | CD01036 | Binding/names — VALUES references its destination binding without a source row or local declaration |
 | New (#1803, OQ-S1) | CD01037 | Binding/names — ORDER BY over an all-RAW/VALUE compound has no named result members |
 | New (#1803, OQ-S1) | CD01038 | Binding/names — compound ORDER BY uses an unbound result member, source metadata or star |

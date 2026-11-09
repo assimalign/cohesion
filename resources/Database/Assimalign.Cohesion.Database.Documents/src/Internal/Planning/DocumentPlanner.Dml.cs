@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentPlanner
 {
-    private DocumentUpdatePlan PlanUpdate(OqlUpdateExpression update, IReadOnlySet<string>? outerNames = null)
+    private DocumentUpdatePlan PlanUpdate(OqlUpdateExpression update, IReadOnlySet<string>? outerNames = null, bool chooseAccess = true)
     {
         if (update.Alias is { Length: 0 })
         { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, update.Location); }
@@ -33,7 +33,7 @@ internal sealed partial class DocumentPlanner
             Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentUpdatePlan(collection, update, targets.AsReadOnly(),
-            ChooseAccess(update.Predicate, DocumentSourceName.Of(update.Collection, update.Alias), _catalog.GetIndexes(collection.Id, _snapshot)),
+            chooseAccess ? ChooseAccess(update.Predicate, DocumentSourceName.Of(update.Collection, update.Alias), _catalog.GetIndexes(collection.Id, _snapshot)) : new DocumentScanPath(),
             PlanReturning(update.Returning, update.Collection, update.Alias));
 
         void Add(OqlPathExpression path, OqlExpression? value)

@@ -649,7 +649,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD01033` | FROM expression has no explicit alias or implicit field name |
 | `CD01034` | Unbound variable in a FROM expression without an input-row scope |
 | `CD01035` | Invalid key-join binding scope or ambiguous/invalid joined META receiver |
-| `CD01040` | An unavailable MERGE binding or invalid metadata receiver |
+| `CD01040` | An unavailable ON KEY target binding, unnamed MERGE AST root or invalid metadata receiver |
 | `CD01036` | VALUES references its destination binding without a source row or local declaration |
 | `CD01037` | ORDER BY over an all-RAW/VALUE compound has no named result members |
 | `CD01038` | Compound ORDER BY references an unbound result member, metadata or star |
@@ -1654,9 +1654,11 @@ INSERT retains the target identity with TargetIsMissing=true. Nested queries cap
 lexical identities. ANSI keys must be computable before lookup; target-dependent keys retain
 CK00001. Unqualified value paths, omitted ANSI INSERT KEY/VALUE semantics and other unsettled
 forms stay CK00001. RETURNING retains target-image scope; source references remain CK00001. UPDATE paths reuse CD02016/CD01017. Duplicate direct aliases reuse CD01023;
-invalid direct form/action shape uses CD01039 and unavailable bindings/metadata use CD01040.
+invalid direct form/action shape uses CD01039; unavailable ON KEY target bindings, unnamed AST roots and invalid metadata receivers use CD01040.
 System targets retain CD04004. The language owns 128-level complete-tree and canonical-parse cost bounds in addition
 to its recursive expression bound; runtime direct AST stack exhaustion retains CD05021.
+Direct AST regressions cover all five recursive positions at the guarded input traversal's
+measured boundary on a one-MiB thread, including action conjunctions; stack refusals retain CD05021.
 
 EXPLAIN emits Merge with the complete source, KeyLookup/KeyJoin, ordered action nodes (including
 filters and the MISSING insert target) and RETURNING without reading documents or evaluating
@@ -1664,6 +1666,13 @@ callbacks, keys or action expressions. DocumentPlanExecutor refuses a planned ME
 located CD05022 before creating the nested execution context or reading its source. OQ-M2 owns
 snapshot staging, patch/delete/insert application, counts, RETURNING images and duplicate-write
 rules. No storage, catalog or wire contract changes occur in OQ-M1.
+
+MERGE action WHERE predicates are residual filters after key matching. Reused UPDATE target
+validation therefore uses a scan placeholder and skips target access-path selection and index-range
+counting, under both EXPLAIN and execution admission. Unbound named value roots consistently use
+CK00001 regardless of path length; unavailable ON KEY target bindings and invalid META receivers
+retain CD01040. The profile continues to advertise only executable clauses.
+Nested key, action and RETURNING subqueries are parented to the operator that owns them.
 
 The parser, planner and canonical round-trip corpora cover both forms, source shapes, scopes,
 refusals, action bounds and contextual names. InMemory/TCP and the NativeAOT consumer pin the
@@ -1683,6 +1692,9 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Union`, `UnionAll` | Set-operation parent with both complete operand trees, result shape, order-key count and resolved paging |
 | `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
+| `KeyJoin`, `LeftKeyJoin`, `KeyNest`, `LeftKeyNest` | Key-equality source lookup, including left and nested-image variants |
+| `Merge`, `KeyLookup` | Deferred MERGE statement and its source-key target access; ANSI access uses KeyJoin |
+| `MergeUpdate`, `MergeDelete`, `MergeInsert` | Ordered actions with residual filters and binding scopes; INSERT retains a MISSING target |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | Catalog index name, collection, inclusive/exclusive bounds and bounded index-entry estimate |
 | `IndexOrderCandidate` | Per-index ordering eligibility, reason, direction and equal-key bucket contract; consumed=True and sort=elided when selected |

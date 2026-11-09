@@ -60,7 +60,7 @@ internal sealed partial class DocumentPlanner
             foreach (var assignment in mutation.Assignments) { ValidateMergeExpression(assignment.Value, matched); }
             if (mutation.Predicate is not null) { ValidateMergeExpression(mutation.Predicate, matched); }
             update = PlanUpdate(new OqlUpdateExpression(merge.Collection, merge.Alias, mutation.Assignments, mutation.Unset, mutation.Predicate, merge.Location),
-                new HashSet<string>(StringComparer.Ordinal) { source });
+                new HashSet<string>(StringComparer.Ordinal) { source }, chooseAccess: false);
         }
         if (merge.Delete?.Predicate is { } deleted) { ValidateMergeExpression(deleted, matched); }
         if (merge.Insert is { } inserted)
@@ -157,7 +157,7 @@ internal sealed partial class DocumentPlanner
                 string? name = path.Segments.Count == 0 ? null : path.Segments[0].Name;
                 bool namedRoot = !string.IsNullOrEmpty(name) && path.Segments[0].Index is null;
                 if (!namedRoot || name != scope.SourceName && name != scope.TargetName && DocumentBindingScope.Resolve(local, name, out _) is null)
-                { throw new DocumentPlanningException(namedRoot && path.Segments.Count == 1 ? "CK00001" : "CD01040", ErrorMessages.MergeBindingInvalid, node.Location); }
+                { throw new DocumentPlanningException(namedRoot ? "CK00001" : "CD01040", ErrorMessages.MergeBindingInvalid, node.Location); }
                 return;
             }
             if (node is OqlComprehensionExpression comprehension)

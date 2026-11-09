@@ -366,6 +366,7 @@ internal sealed partial class DocumentPlanner
         void AddQuery(DocumentStatementPlan queryPlan, int? parent)
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (queryPlan is DocumentMergePlan mergePlan) { AddMerge(mergePlan, parent); return; }
             int offset = nodes.Count;
             foreach (var node in queryPlan is DocumentSetOperationPlan ? DescribeNodes(queryPlan).Take(1) : DescribeNodes(queryPlan))
             {
@@ -388,13 +389,6 @@ internal sealed partial class DocumentPlanner
                 DocumentUpsertPlan upsert => upsert.Statement,
                 _ => QueryLogical(queryPlan).Query,
             };
-            if (queryPlan is DocumentMergePlan mergePlan)
-            {
-                AddQuery(mergePlan.Source, offset);
-                foreach (var child in MergeActionExpressions(mergePlan.Statement).Prepend(mergePlan.Statement.On))
-                { AddExpressions(child, offset); }
-                return;
-            }
             var writeSource = queryPlan switch
             {
                 DocumentInsertSelectPlan insert => insert.Source is DocumentFromPlan or DocumentJoinPlan or DocumentSetOperationPlan ? insert.Source : null,
@@ -412,6 +406,38 @@ internal sealed partial class DocumentPlanner
                 else if (inputPlan is DocumentFromPlan { Input: null })
                 { AddExpressions(child, nodes.Skip(offset).First(node => node.Operator == "ExpressionSource").NodeId); }
             }
+        }
+
+        void AddMerge(DocumentMergePlan plan, int? parent)
+        {
+            int root = nodes.Count;
+            var merge = plan.Statement;
+            // Emit each owner's nested expressions before its next sibling, retaining
+            // the description contract's depth-first pre-order and contiguous ids.
+            foreach (var node in DescribeNodes(plan))
+            {
+                int id = nodes.Count;
+                nodes.Add(new DatabasePlanNode { NodeId = id, ParentId = node.ParentId is null ? parent : root,
+                    Operator = node.Operator, Target = node.Target, Index = node.Index, Detail = node.Detail,
+                    EstimatedRows = node.EstimatedRows });
+                switch (node.Operator)
+                {
+                    case "KeyLookup" or "KeyJoin": AddOwned(merge.On); break;
+                    case "MergeUpdate":
+                        foreach (var assignment in merge.Update!.Assignments) { AddOwned(assignment.Value); }
+                        AddOwned(merge.Update.Predicate);
+                        break;
+                    case "MergeDelete": AddOwned(merge.Delete!.Predicate); break;
+                    case "MergeInsert":
+                        AddOwned(merge.Insert!.Key); AddOwned(merge.Insert.Value); AddOwned(merge.Insert.Predicate);
+                        break;
+                    case "Returning" or "ReturningValue": AddOwned(merge.Returning); break;
+                }
+
+                void AddOwned(OqlExpression? expression)
+                { if (expression is not null) { AddExpressions(expression, id); } }
+            }
+            AddQuery(plan.Source, root);
         }
 
         void AddExpressions(OqlExpression node, int parent)
