@@ -943,6 +943,9 @@ During CREATE UNIQUE INDEX, extraction validates every key before the completed 
 | Name snapshot | 24 + 8 × name count, plus other live build state, exceeds the statement grant |
 | Chunk and one document's JSON/keys | Actual chunk slots, encoded key sizes and extraction workspace exceed the remaining grant |
 | Duplicate valued UNIQUE keys | CD03020 after the tree is built; NULL and MISSING remain distinct |
+| Oversized scalar component plus an empty or fully filtered array comprehension | No key is formed, so no CD02026; a formed key beyond 1024 bytes refuses CD02026, as on PUT. A later non-scalar UNIQUE component still refuses CD02021 first |
+| Default 64 MiB grant; one document with a 20 MiB ASCII name in variants; WHEN v.name = 'x' or != 'x' | Equality compares without decoding the name; ordered comparisons (<, <=, >, >=) reserve decoded string space first and refuse CD05018 before decoding |
+| Raw OpenWrite content with an accessed number that cannot round-trip exactly as Decimal | CK06003, including rounded or underflowed values; duplicates and numbers outside accessed paths are not validated by a build |
 | Default 64 MiB grant; one document `{"v":1,"a":[0,...]}` with 1,400,000 zeros; `CREATE INDEX ix ON items(v)` | CD05018: cumulative pooled DOM growth buffers plus content and other live build state exceed the grant, even though `a` is unindexed |
 | 64 KiB grant; one `one` document `{"arr":[0,...,N-1]}`; `CREATE INDEX ix ON items(DISTINCT ARRAY v FOR v IN arr END)` | N=336 succeeds; N=337 is the first CD05018, from extraction/key state alongside the current chunk |
 

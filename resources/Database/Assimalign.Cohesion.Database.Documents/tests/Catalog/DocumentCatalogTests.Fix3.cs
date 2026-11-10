@@ -62,6 +62,7 @@ public sealed partial class DocumentCatalogTests
     [InlineData("{\"v\":", "syntax")]
     [InlineData("{\"v\":1,\"v\":2}", "duplicate")]
     [InlineData("{\"v\":1e100}", "number")]
+    [InlineData("{\"v\":1.0000000000000000000000000000001}", "imprecise")]
     public async Task CreateIndexAsync_Fix3RawContent_ShouldReportCorruption(string json, string kind)
     {
         // Arrange: OpenWrite is public and deliberately does not validate JSON.
@@ -122,7 +123,7 @@ public sealed partial class DocumentCatalogTests
     }
     [Theory(DisplayName = "Cohesion Test [Documents] - Permitted keys just below the encoding limit fit their charge (#1808)")]
     [InlineData(false)] [InlineData(true)]
-    public void Read_Fix3PermittedKey_ShouldCoverMeasuredHeap(bool composite)
+    public void Read_Fix3PermittedKey_ShouldCoverMeasuredAllocations(bool composite)
     {
         // Arrange.
         string text = new('x', composite ? 337 : 339);
@@ -130,34 +131,46 @@ public sealed partial class DocumentCatalogTests
             ? [DocumentIndexKey.Scalar("w"), DocumentIndexKey.Scalar("v")] : [DocumentIndexKey.Scalar("v")], false, false, 1000);
         byte[] content = Encoding.UTF8.GetBytes("{\"w\":\"a\",\"v\":\"" + text + "\"}");
         for (int i = 0; i < 16; i++) { DocumentIndexKeys.Read(content, metadata, out _, reserve: _ => { }); }
-        var samples = new List<long>();
         var expected = composite ? DocumentIndexKeys.EncodePrefix(new object[] { "a", text }) : DocumentIndexKeys.Encode(text);
-        // Act / Assert: runner cleanup can mask a small release, so require five
-        // positive heap samples and check synchronous allocations independently.
-        for (int round = 0; round < 64 && samples.Count < 5; round++)
+        var insertion = new HashSet<IndexKey>();
+        long insertionStart = GC.GetAllocatedBytesForCurrentThread();
+        insertion.Add(expected);
+        long insertionBytes = GC.GetAllocatedBytesForCurrentThread() - insertionStart;
+        // Act / Assert: all newly owned heap is bounded by these synchronous
+        // allocations. Global live-heap deltas can also include runner activity;
+        // keep them as diagnostics rather than attributing them to this read.
+        for (int round = 0; round < 5; round++)
         {
-            var (keys, charge, live, allocated) = MeasurePermittedKey(content, metadata);
+            var (keys, charge, live, allocated, domAllocated, domCharge, afterAdmission) = MeasurePermittedKey(content, metadata);
             var key = keys.ShouldHaveSingleItem();
             key.Length.ShouldBe(composite ? 1022 : 1021);
             key.ShouldBe(expected);
-            allocated.ShouldBeLessThanOrEqualTo(charge);
-            if (live > 0) { live.ShouldBeLessThanOrEqualTo(charge); samples.Add(live); }
+            allocated.ShouldBeLessThanOrEqualTo(charge - (32 + content.Length));
+            // Parsing has its own admission, before key workspace exists. The
+            // final admission may leave only the measured set insertion to allocate.
+            domAllocated.ShouldBeLessThanOrEqualTo(domCharge);
+            afterAdmission.ShouldBeLessThanOrEqualTo(insertionBytes);
             _output.WriteLine($"PERMITTED_KEY|composite={composite}|length={key.Length}|charge={charge}|live={live}|allocated={allocated}");
             GC.KeepAlive(keys);
         }
-        samples.Count.ShouldBe(5);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (HashSet<IndexKey> Keys, long Charge, long Heap, long Allocated) MeasurePermittedKey(byte[] content, DocumentIndexMetadata metadata)
+    private static (HashSet<IndexKey> Keys, long Charge, long Heap, long Allocated, long DomAllocated, long DomCharge, long AfterAdmission) MeasurePermittedKey(byte[] content, DocumentIndexMetadata metadata)
     {
         long charge = 32 + content.Length;
-        Action<long> reserve = bytes => charge += bytes;
+        long allocationStart = 0, lastAdmission = 0, domAllocated = 0, domCharge = 0;
+        Action<long> reserve = bytes => { charge += bytes; lastAdmission = GC.GetAllocatedBytesForCurrentThread(); };
+        Action<object> parsed = _ =>
+        {
+            domAllocated = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+            domCharge = charge - (32 + content.Length);
+        };
         long before = LiveHeap.Read();
-        long allocationStart = GC.GetAllocatedBytesForCurrentThread();
-        var keys = DocumentIndexKeys.Read(content, metadata, out _, reserve: reserve);
+        allocationStart = GC.GetAllocatedBytesForCurrentThread();
+        var keys = DocumentIndexKeys.Read(content, metadata, out _, reserve: reserve, parsed: parsed);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
         long live = LiveHeap.Read() - before;
-        return (keys, charge, live, allocated);
+        return (keys, charge, live, allocated, domAllocated, domCharge, allocationStart + allocated - lastAdmission);
     }
 }
