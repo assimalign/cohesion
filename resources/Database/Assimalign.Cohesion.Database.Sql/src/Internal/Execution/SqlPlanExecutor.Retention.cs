@@ -335,23 +335,21 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private async IAsyncEnumerable<object?[]> EnumerateGroupInputAsync(SqlGroupPlan plan,
-        SqlStatementContext statement, [EnumeratorCancellation] CancellationToken cancellationToken)
+        SqlStatementContext statement, [EnumeratorCancellation] CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         // ExecuteAsync's JSON/recursive statement scopes already surround the group. Mirror its
         // per-plan setup and analysis frame for the pass-through child we no longer materialize.
-        var metrics = statement.Metrics;
-        var frame = metrics.IsAnalyzing ? metrics.BeginAnalysisFrame() : null;
+        var frame = statement.Metrics.IsAnalyzing ? statement.Metrics.BeginAnalysisFrame() : null;
         var input = plan.Input;
         try
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
             _containsLike |= plan.Input.ContainsLike;
-            _metrics = metrics;
+            _metrics = statement.Metrics;
             input = InitializeWindow(plan.Input, cancellationToken);
-            var projections = ((SqlRelationPlan)input).OutputProjections;
             if (input is SqlJoinPlan joined)
             {
-                await foreach (var row in EnumerateJoinGroupInputAsync(joined, projections, statement, cancellationToken).ConfigureAwait(false))
+                await foreach (var row in EnumerateJoinGroupInputAsync(joined, statement, cancellationToken, spillOwner).ConfigureAwait(false))
                 { yield return row; }
             }
             else
@@ -369,28 +367,28 @@ internal sealed partial class SqlPlanExecutor
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (!evaluator.Matches(where, source)) { continue; }
-                    yield return GroupInputRow(source, projections, evaluator, cancellationToken);
+                    yield return GroupInputRow(source, ((SqlRelationPlan)input).OutputProjections, evaluator, cancellationToken);
                 }
             }
             if (frame is not null)
             {
                 if (input is SqlSelectPlan)
-                { metrics.Analysis(input)!.Candidates += metrics.RecordsExamined - frame.StartRecords - frame.ChildRecords; }
+                { statement.Metrics.Analysis(input)!.Candidates += statement.Metrics.RecordsExamined - frame.StartRecords - frame.ChildRecords; }
                 else if (input is SqlJoinPlan { Steps.Count: > 0 })
-                { metrics.Analysis(input)!.Candidates += metrics.JoinCandidatePairs - frame.StartPairs - frame.ChildPairs; }
+                { statement.Metrics.Analysis(input)!.Candidates += statement.Metrics.JoinCandidatePairs - frame.StartPairs - frame.ChildPairs; }
             }
         }
         finally
         {
             _definitions.ObserveSelectRetention?.Invoke("group-input", true, 0);
-            if (frame is not null) { metrics.EndAnalysisFrame(frame); }
+            if (frame is not null) { statement.Metrics.EndAnalysisFrame(frame); }
         }
     }
 
     // Join-only reservation state must not enlarge every correlated scan iterator.
     private async IAsyncEnumerable<object?[]> EnumerateJoinGroupInputAsync(SqlJoinPlan joined,
-        IReadOnlyList<SqlProjection> projections, SqlStatementContext statement,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        SqlStatementContext statement,
+        [EnumeratorCancellation] CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
     {
         var (derived, derivedBytes) = await PrepareJoinInputsAsync(joined, statement, cancellationToken).ConfigureAwait(false);
         try
@@ -398,10 +396,10 @@ internal sealed partial class SqlPlanExecutor
             var shared = new bool[joined.Columns.Count];
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, shared);
             await foreach (var source in EnumerateRetentionJoinRowsAsync(joined, statement, shared, derived,
-                evaluator, cancellationToken).ConfigureAwait(false))
+                evaluator, cancellationToken, spillOwner).ConfigureAwait(false))
             {
                 if (joined.Tree is null && !evaluator.Matches(joined.Where, source)) { continue; }
-                yield return GroupInputRow(source, projections, evaluator, cancellationToken);
+                yield return GroupInputRow(source, joined.OutputProjections, evaluator, cancellationToken);
             }
         }
         finally { ReleaseSelectMemory(ref derivedBytes); }
@@ -495,10 +493,10 @@ internal sealed partial class SqlPlanExecutor
 
     private IAsyncEnumerable<object?[]> EnumerateRetentionJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
-        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
         => plan.Tree is not null && plan.Where is not null
-            ? EnumerateFilteredRetentionTreeAsync(plan, statement, sharedColumns, derived, evaluator, cancellationToken)
-            : EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derived, streamRoot: true);
+            ? EnumerateFilteredRetentionTreeAsync(plan, spillOwner is null ? statement.WithoutSession() : statement.WithSession(spillOwner), sharedColumns, derived, evaluator, cancellationToken)
+            : EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derived, streamRoot: true, spillOwner: spillOwner);
 
     private async IAsyncEnumerable<object?[]> EnumerateFilteredRetentionTreeAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derived,
@@ -506,7 +504,7 @@ internal sealed partial class SqlPlanExecutor
     {
         ExceptionDispatchInfo? whereFailure = null;
         await foreach (var source in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derived,
-            streamRoot: true).ConfigureAwait(false))
+            streamRoot: true, spillOwner: statement.Session).ConfigureAwait(false))
         {
             // Base completed the root's ON work before its first WHERE. A WHERE failure
             // stops further predicates, but must still drain every remaining ON candidate.
@@ -541,7 +539,7 @@ internal sealed partial class SqlPlanExecutor
             _definitions.ObserveSelectRetention?.Invoke("join-matches", true, 0);
             if (seen is not null) { _definitions.ObserveSelectRetention?.Invoke("distinct", true, 0); }
             await foreach (var source in EnumerateRetentionJoinRowsAsync(plan, statement, sharedColumns, derived,
-                evaluator, cancellationToken).ConfigureAwait(false))
+                evaluator, cancellationToken, spillOwner).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 // Drain every candidate and WHERE, even after LIMIT (including LIMIT 0).

@@ -32,8 +32,16 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     private readonly long _offset;
     private readonly long _limit;
     private bool _disposed;
+    private bool _ownsStatement;
     internal Location? Location { get; set; }
-    internal bool OwnsStatement(StorageTempStatement statement) => ReferenceEquals(_statement, statement);
+    internal bool AdoptStatement(StorageTempStatement statement)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !ReferenceEquals(_statement, statement)) { return false; }
+            _ownsStatement = true; return true;
+        }
+    }
     internal void CaptureMetrics(SqlStatementMetrics metrics)
     {
         // Transform consumes the owning merge first. Once evaluation ends, discard its
@@ -47,18 +55,22 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     }
 
     internal SqlSpilledResultSet(IReadOnlyList<DatabaseColumn> columns, StorageTempStatement statement,
-        StorageTempSortReader sorted, long offset, long limit, SqlDatabaseSession owner, long readerGrant, long maximumDecodedRowBytes)
+        StorageTempSortReader sorted, long offset, long limit, SqlDatabaseSession owner, long readerGrant, long maximumDecodedRowBytes,
+        bool ownsStatement = true)
     {
         _columns = columns; _statement = statement; _sorted = sorted; _offset = offset; _limit = limit; _owner = owner; _readerGrant = readerGrant;
         _maximumDecodedRowBytes = maximumDecodedRowBytes;
+        _ownsStatement = ownsStatement;
         try { ValidateFirstReader(); SqlSpillLifetime.Attach(owner, this); }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
     }
     internal SqlSpilledResultSet(IReadOnlyList<DatabaseColumn> columns, StorageTempStatement statement,
-        StorageTempRun run, long offset, long limit, SqlDatabaseSession owner, long readerGrant, long maximumDecodedRowBytes)
+        StorageTempRun run, long offset, long limit, SqlDatabaseSession owner, long readerGrant, long maximumDecodedRowBytes,
+        bool ownsStatement = true)
     {
         _columns = columns; _statement = statement; _distinct = run; _offset = offset; _limit = limit; _owner = owner; _readerGrant = readerGrant;
         _maximumDecodedRowBytes = maximumDecodedRowBytes;
+        _ownsStatement = ownsStatement;
         try { ValidateFirstReader(); SqlSpillLifetime.Attach(owner, this); }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
     }
@@ -241,7 +253,7 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
             }
             finally
             {
-                try { _statement.Dispose(); }
+                try { if (_ownsStatement) { _statement.Dispose(); } else { _distinct?.Dispose(); } }
                 finally { if (_owner is { } owner) { _owner = null; SqlSpillLifetime.Detach(owner, this); } _distinct = null; }
             }
         }

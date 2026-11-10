@@ -77,6 +77,14 @@ Reads check version, ordinal, run identity, used length, checksum, record bounda
 before publishing buffer positions. Any read exception after argument checks permanently fails
 the reader; later calls raise CK05004 with a previous-read-failed message and without I/O,
 damage events or damage counters, even after cancellation before consuming bytes.
+StorageTempRun.Position saves an opaque record boundary before Append. The authorized
+OpenReader(memoryGrant, position) overload starts there without scanning earlier records,
+including length headers or payloads spanning pages. Only saved positions from that run are
+valid; callers never calculate offsets. A position that is not a record start has undefined
+behavior: it can refuse as damage or return misframed records. Seek readers validate each visited page's identity,
+ordinal, used length and checksum, plus the tail and EOF. A failed read permanently poisons
+the reader. Unsealed/disposed runs refuse, and out-of-range positions or insufficient
+grants fail argument validation. There is no durable or temporary format-version change.
 This disposable format is independent of durable storage format 4. No WAL, MVCC, recovery or
 StorageBufferPool participates, and no durable I/O counter moves.
 
@@ -109,8 +117,10 @@ an unstarted owning final reader into independent nonowning cursors. Forking dis
 template workspace and prohibits starting that template; it remains the file owner until
 all consumers finish. A fork releases only its own buffers, so rewind/concurrent delivery
 never deletes another reader's input. BufferBytes states the required read workspace.
-StorageTempSortPrefixTests pins its two-run physical peak exactly at 212,992 bytes. Statement
-PhysicalBytes/PeakBytes expose live and peak reservations. RecordsWritten/KeyComparisons are internal test counters; two input sizes
+StorageTempSortPrefixTests pins its two-run physical peak exactly at 212,992 bytes.
+SQL's statement quota also includes any staged probe-side input when its sorted join build
+and index coexist at Seal. Statement PhysicalBytes/PeakBytes expose live and peak reservations.
+RecordsWritten/KeyComparisons are internal test counters; two input sizes
 bound merge depth and write growth, while differential cases cover several grants and levels.
 Hash partition instances require serialized use. Partitions are lazy files selected by hash
 modulo count; their grant covers an 8-KiB writer plus 512 bytes bookkeeping per partition.

@@ -444,13 +444,17 @@ a hard-deadlock victim. Public APIs and wire messages are unchanged.
 ## Probe costing and hash joins (#1522)
 
 Access selection compares bounded snapshot-visible index probes without stored statistics.
-Broad safe equijoins can build an in-memory hash table; unique and small indexed probes retain
+Broad safe equijoins can build a bounded hash table; eligible roots use an indexed temporary build.
+Retained normalized-tree buffers can stage after their original reservation refuses, including
+left inputs and intermediate outputs. Optional join arenas yield to other statement reservations.
+Sorts and staged GROUP BY inputs outside the join statement keep their original grant arithmetic.
+Unique and small indexed probes retain
 nested loops. LEFT semantics, duplicate matches, SQL equality and full residual evaluation remain.
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live
 hash builds, retained SELECT buffers and grouping-set aggregate states per statement.
 CTAS sources charge like any SELECT; CTAS itself admits only kept output after pagination.
 CS05067 (SQLSTATE 53200) refuses newly charged memory and stops input promptly unless an
-eligible root plain SELECT ORDER BY, ordered DISTINCT, fixed-state hash GROUP BY or
+eligible root hash join, plain SELECT ORDER BY, ordered DISTINCT, fixed-state hash GROUP BY or
 streamed scan/system-view hash DISTINCT, including a CTAS source root,
 hands off to configured temporary space. Its fully evaluated result decodes lazily and
 supports repeated or concurrent reads.

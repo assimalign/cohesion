@@ -60,9 +60,11 @@ public sealed class SqlDatabaseEngineOptions
     /// Plain ON DELETE CASCADE closures charge about 840 bytes per two-column row: the default
     /// 64 MiB grant caps such a closure at about 79,900 rows, less when other work retains memory.
     /// A 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget.
-    /// Budget exhaustion refuses the statement unless an eligible root plain SELECT ORDER BY or ordered DISTINCT, including a CTAS source root, hands off to configured temporary space.
+    /// Budget exhaustion refuses the statement unless an eligible root hash join, ORDER BY, DISTINCT or fixed-state GROUP BY, including a permitted CTAS source root, hands off to configured temporary space.
     /// Nested plans, window/recursive/DML sources, grouping sets and ordered sequence deferral retain their current memory policy.
     /// Spill requires fixed ordering collations, supported codecs and a remaining grant whose bound (grant - 32768) / 16 - 8192 holds each encoded record.
+    /// Hash joins require at least 262144 bytes; their original build row plus 48 bytes must fit
+    /// min(16384, (min(StatementMemoryBudget, Int32.MaxValue) - 32768) / 16 - 8192), and its decoded chunk must fit one quarter of the statement grant.
     /// CTAS publishes only after all copying succeeds.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
@@ -87,8 +89,10 @@ public sealed class SqlDatabaseEngineOptions
 
     /// <summary>Gets or sets the statement's physical temporary-byte quota. Null uses four times
     /// StatementMemoryBudget, saturating at Int64.MaxValue. Zero refuses growth. Must be nonnegative.
-    /// Eligible root SELECT and CTAS source-root sorts, plain fixed-state hash aggregation and unordered hash DISTINCT spill.
-    /// Their source, partition and sort files share this quota; other SQL buffers retain their existing memory-budget policy.</summary>
+    /// Eligible root SELECT and CTAS source-root sorts, plain fixed-state hash aggregation, unordered hash DISTINCT,
+    /// hash joins and retained normalized join buffers spill. Their source, partition, index and sort files share this quota.
+    /// At Seal a join's sorted build and index coexist, needing about twice the packed build size plus framing,
+    /// chunk metadata and any staged probe-side input of the statement; other SQL buffers retain their existing memory-budget policy.</summary>
     public long? StatementTempSpaceQuota { get; set; }
 
     /// <summary>

@@ -16,8 +16,60 @@ internal sealed class SqlHashSpillMetrics
     internal long Batches { get; private set; }
     internal int Passes { get; private set; }
     internal int MergePasses { get; private set; }
+    internal long ProbeChunkReads { get; private set; }
+    internal long ProbeBytesRead { get; set; }
+    internal void ReadJoinChunk() => ProbeChunkReads++;
+    internal void BeginFullJoin() => _fullJoinDebts++;
+    internal void EndFullJoin() => _fullJoinDebts--;
+    internal bool JoinSpilled => _joinPhysicalBytes != 0;
+    internal StorageTempStatement? JoinStatement { get; private set; }
+    internal bool FullJoin => _fullJoinDebts != 0;
+    internal Exception? JoinCleanupFailure { get; private set; }
+    private long _joinPhysicalBytes;
+    private int _fullJoinDebts;
+    private SqlHashJoinSpill? _optionalArenas;
+    private bool _yielding;
+    internal void AddOptionalArena(SqlHashJoinSpill arena)
+    { arena.NextOptionalArena = _optionalArenas; _optionalArenas = arena; }
+    internal void RemoveOptionalArena(SqlHashJoinSpill arena)
+    {
+        SqlHashJoinSpill? previous = null;
+        for (var current = _optionalArenas; current is not null; current = current.NextOptionalArena)
+        {
+            if (!ReferenceEquals(current, arena)) { previous = current; continue; }
+            if (previous is null) { _optionalArenas = current.NextOptionalArena; }
+            else { previous.NextOptionalArena = current.NextOptionalArena; }
+            current.NextOptionalArena = null; return;
+        }
+    }
+    internal static void YieldOptionalMemory(SqlStatementMetrics metrics, long bytes, long budget)
+    {
+        var state = For(metrics);
+        if (state is null || state._yielding) { return; }
+        state._yielding = true;
+        try
+        {
+            while (bytes > budget - metrics.HashMemoryBytes && state._optionalArenas is { } arena)
+            { arena.YieldOptionalArena(); }
+        }
+        finally { state._yielding = false; }
+    }
+    internal static void JoinCleanup(SqlStatementMetrics metrics, Exception failure)
+    { Begin(metrics); For(metrics)!.JoinCleanupFailure ??= failure; }
     internal static SqlHashSpillMetrics? For(SqlStatementMetrics metrics) => _values.TryGetValue(metrics, out var value) ? value : null;
     internal static void Begin(SqlStatementMetrics metrics) => _values.GetValue(metrics, _ => new());
+    internal static StorageTempStatement JoinTemp(SqlStatementMetrics metrics, SqlDatabaseSession owner)
+    {
+        Begin(metrics);
+        var value = For(metrics)!;
+        return value.JoinStatement ??= owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
+    }
+    internal static StorageTempStatement? DetachJoinTemp(SqlStatementMetrics metrics)
+    {
+        var value = For(metrics);
+        if (value is null) { return null; }
+        var statement = value.JoinStatement; value.JoinStatement = null; return statement;
+    }
     internal static void Batch(SqlStatementMetrics metrics, int pass)
     { var value = For(metrics)!; value.Batches++; value.Passes = Math.Max(value.Passes, pass); }
     internal static void Sort(SqlStatementMetrics metrics, StorageTempStatement statement, StorageTempSorter sorter)
@@ -27,5 +79,12 @@ internal sealed class SqlHashSpillMetrics
     }
     internal static void Refresh(SqlStatementMetrics metrics, StorageTempStatement statement)
     { var value = For(metrics)!; value.PhysicalBytes = statement.PhysicalBytes; value.PeakBytes = statement.PeakBytes; }
+    internal static void RefreshJoin(SqlStatementMetrics metrics, StorageTempStatement statement)
+    {
+        var value = For(metrics)!;
+        value._joinPhysicalBytes = Math.Max(value._joinPhysicalBytes, statement.PhysicalBytes);
+        value.PhysicalBytes = Math.Max(value.PhysicalBytes, value._joinPhysicalBytes);
+        value.PeakBytes = statement.PeakBytes;
+    }
     private sealed class DebugView { public DebugView(SqlHashSpillMetrics target) { } }
 }

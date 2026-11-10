@@ -48,22 +48,22 @@ public sealed partial class SqlSortSpillConformanceTests
         var aggregate = plan.Aggregates.Single();
         MeasureStates(aggregate, type); // warm the exact factory, transition and accessors
 
-        // Act: retain 1,024 then 4,096 states in the same preallocated root vector.
+        // Act: retain 4,096 then 16,384 states in the same preallocated root vector.
         long bytes = MeasureStates(aggregate, type);
         long charged = GroupStateBytes(null!, [aggregate]) - GroupStateBytes(null!, []);
 
         // Assert: no rounding tolerance; even one byte per state scales past a large grant.
-        _output.WriteLine($"STATE_CHARGE|{function}|{type}|bytes_per_state={bytes / 3072d}|charged={charged}");
-        (bytes + 3072 * 8L).ShouldBeLessThanOrEqualTo(3072 * charged);
+        _output.WriteLine($"STATE_CHARGE|{function}|{type}|bytes_per_state={bytes / 12288d}|charged={charged}");
+        (bytes + 12288 * 8L).ShouldBeLessThanOrEqualTo(12288 * charged);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static long MeasureStates(SqlGroupAggregate aggregate, string type)
     {
-        var roots = new object?[4096];
-        Fill(0, 1024);
+        var roots = new object?[16384];
+        Fill(0, 4096);
         long small = LiveHeap.Read();
-        Fill(1024, 4096);
+        Fill(4096, 16384);
         long bytes = LiveHeap.Read() - small;
         GC.KeepAlive(roots);
         return bytes;

@@ -1,5 +1,57 @@
 # The Declared SQL Dialect
 
+## Indexed hash join spilling (#1789, SQ-L3b)
+
+Eligible root INNER, LEFT, RIGHT and FULL hash joins spill on the existing memory refusal,
+including when another operator owns part of the grant. File engines use their temp space;
+in-memory engines need an explicit TempDirectory. The minimum grant is 256 KiB. Quotas,
+the free-space floor, damage and I/O retain located CK0500x. Unsupported shapes keep CS05067.
+
+The build is sorted once by unsigned composed hash and insertion ordinal into an indexed
+run. Probes read only their hash's chunks through a cache targeting one quarter of the
+grant. Probes never write temp records. Equal-hash groups stream across any number of
+chunks in descending ordinal order; joins have no repartitioning or skew depth limit.
+FULL uses an ordinal bitmap and sorts unmatched rows by build ordinal, NULL keys included.
+Results retain fitting order, NULL extensions, candidate counts, calls and the first error.
+Near a refusal boundary the process hash seed can affect directory growth at Seal, cache
+admission against the actual largest chunk, and FULL's unmatched sorter near CK05002.
+Probe chunk reads (hash_join_probe_chunk_reads), and spill_runs and spill_merge_passes for FULL
+and non-FULL builds in multi-join plans,
+can vary by process. Rows, order, JoinCandidatePairs, RecordsExamined, calls and the first
+evaluation error retain fitting semantics.
+ON, WHERE and projections remain in the caller. Computed keys, correlated/lateral inputs,
+non-hash steps, deferred collations, SQL/JSON, application binary build cells, joined DML
+and join-output DISTINCT keep their eligibility. Probing does not encode payloads;
+retained buffers of a normalized join tree (left inputs and intermediate outputs) can stage under SQ-L2's exact row codec and
+grant-derived record bound. This applies to probe payloads too: application-produced binary
+probe cells refuse CS05067 when that input must stage; fitting inputs keep their existing admission.
+Final result spooling, windows, recursion, set owners and NOT IN remain separate work.
+
+Sorting shares the exact temporary statement and physical quota. FULL can stage already
+evaluated output/key records until its unmatched sort releases the grant. Top-N ties keep
+input ordinal order; the collector then uses the ordinary sorter.
+A collector after a non-FULL spilled join receives only the remaining statement grant,
+including any staged reader's reservation. Near the minimum grant this can refuse CS05067.
+Deferral lasts while any spilled FULL still owes its unmatched grant; buffer spills never
+create that debt. During Seal a spilled build needs up to about twice its packed size of
+temporary space, plus page framing and any staged probe-side input of the statement. With the default quota of four grants, an incompressible
+build larger than about two grants refuses located CK05002 at Seal. Packing helps only
+compressible frames. Probe-heavy joins use less temp than partitioned probe spooling;
+build-heavy incompressible joins have about half its build capacity.
+
+EXPLAIN ANALYZE reports spilled_bytes (largest physical snapshot), spill_peak_bytes (owner
+high-water mark), spill_runs (sorter runs written, including a consolidated prefix after the arena gives way), spill_merge_passes (sum of merge depths)
+and hash_join_probe_chunk_reads (decoded cache misses during probing, excluding build and
+unmatched work). With separate sort metrics, hash owner byte/run/merge fields have a hash_
+prefix. Physical fields do not count cumulative I/O. Joins do not report batches or replay
+passes. Aggregation's hash_spill_batches and hash_spill_passes keep their meanings when an
+aggregation also spills. Fitting joins keep base representation, charges and allocations.
+Each analyzed hash build reports hash_budget=spill_on_refusal or no_spill from its executed
+permission, and hash_status=fitting or spilled. Plain EXPLAIN uses spill_on_refusal_if_eligible
+for configured spilling.
+An unbuilt hash step still reports its configured policy; zero-candidate hash actuals remain NULL.
+Non-hash steps keep hash_budget=no_spill. Fitting descriptions retain base text with the added hash_status field.
+
 ## Plain GROUP BY and hash DISTINCT spilling (#1789, SQ-L3a)
 
 An eligible root GROUP BY or streamed scan/system-view unordered SELECT DISTINCT spills on the existing statement
@@ -2449,7 +2501,7 @@ Unmatched rows from both sides receive NULL for all columns of the opposite subt
 WHERE filters after null extension. EXPLAIN JoinStep names FullHashJoin and unmatched=both;
 ANALYZE counts tested candidate pairs, excluding emitted unmatched rows. All retained hash
 rows and match flags share StatementMemoryBudget (default 64 MiB), including nested builds;
-CS05067 refuses exhaustion without spill. Reservations unwind on success, failure and
+Eligible root hash joins hand off to temp storage; other exhaustion retains CS05067. Reservations unwind on success, failure and
 cancellation. Joined DML also charges retained outer/intermediate inputs and associations as
 described in the statement-memory contract below. Plain SELECT result materialization also shares that grant, as described below.
 PostgreSQL anchors: optimizer/path/joinrels.c:1157-1180, executor/nodeHashjoin.c:578-592,634-679,729-756.
@@ -5729,8 +5781,8 @@ identities without taking transaction object locks. Unindexed equijoins can use 
 regardless of actual size: an unknown input estimate is 4096, including an empty or tiny input
 without a countable index. Full ON/WHERE residuals, duplicate keys, NULL and LEFT semantics remain.
 An ON condition referencing any derived String/Json/Character column retains nested loops to
-preserve deferred collation errors. Hash joins retain their existing memory refusal;
-eligible plain hash aggregation and DISTINCT spill as described above.
+preserve deferred collation errors. Eligible root hash joins, plain hash aggregation and
+DISTINCT spill as described above; other shapes retain their existing memory refusal.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
 It limits accounted concurrently live hash-build storage per statement. MERGE, UPDATE FROM and
@@ -5755,8 +5807,8 @@ keep that owner. An independent cache first materialized in a window remains cha
 the statement. When plain bytes fill the grant first, refusal reports CS05067, including statements whose
 earlier ledger would later refuse with CS05079 or CS05094. With no plain bytes live, window
 and SQL/JSON grant refusals retain their specific code. Statement memory refusal aborts input
-immediately, including input with a later error, except when an eligible root sort hands
-its retained rows to temporary storage and continues under the same grant. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
+immediately, including input with a later error, except when an eligible root sort, hash join, normalized join buffer,
+or plain hash aggregation/DISTINCT hands retained state to temp storage under the same grant. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
 buffer owner by reference identity, plus a fixed 64 B per distinct wide-cell map entry
 (#1776, SQ-L1c). Further references pay their array slots; smaller cells still pay per
 reference. Equal but separate objects, including binary clones, each pay. Output and ordering
