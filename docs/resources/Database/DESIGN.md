@@ -68,19 +68,42 @@ This document is the durable architecture record for the multi-model OLTP databa
 
 ### Provisioning state and Build cancellation (decision 49a)
 
-`DatabaseInstance.Provisioning` is an immutable, nullable `DatabaseProvisioningProgress` snapshot
-published by a model through a protected setter. Its vocabulary is operation, object name,
-position/total, running state, optional processed/total rows and failure code. It carries no SQL
-schema capability, executor, or interface. Hosting can report Degraded while an engine performs
-deferred provisioning through its own `DatabaseEngineWorkerKind.Provisioning` worker.
+`DatabaseInstance.Provisioning` is an immutable, nullable `DatabaseProvisioningProgress`
+snapshot published by a model through a protected setter. Its vocabulary is operation,
+object name, position/total, running state, optional processed/total rows, failure code
+and model-supplied detail. It carries no SQL executor or schema interface. Hosting can
+report Degraded during deferred provisioning.
+
+Current SQL format 39 retains never-evicted hash-only applied-schema history (kind 20), written
+atomically with every current kind-6 marker. Format 38 introduced the history during this batch and never shipped on its own. An applied declaration whose
+FirstAppliedGeneration precedes the stored schema's is a rollback; a later generation
+is a roll-forward under the declaration's normal opt-in rules.
+
+A rollback applies only Safe steps that neither re-create dropped objects nor validate
+existing data. One refused step holds the entire plan at the stored schema with
+CS03405, both hashes and refused steps. No migration step or declared script runs.
+Explicit ApplySchemaAsync uses the same history policy and throws CS03105 regardless
+of the earlier declaration's opt-in. Deliberately accepting loss requires a new
+declaration with its own opt-in. Never-seen destructive declarations without opt-in
+hold with CS03105; Verify remains strict with CS03103.
+
+The engine-lifetime declaration retains held progress across reopen, rewrite and
+explicit refusal while the stored hash remains unchanged. Restarting with the stored
+or successfully published newer declaration clears it. A held Build suspends owner
+decision 65's step-6 persisted function/domain validation; reads remain available and
+stored definitions govern writes. Script checksum validation still precedes planning.
+
+Provisioning.Detail retains full detail. Hosting event and health detail are capped at
+4,096 UTF-16 code units including ellipsis, without splitting surrogate pairs.
 
 Every SQL schema apply, including deferred work, `RunMigrationsInline`, empty-table Build and
 `ApplySchemaAsync`, publishes jointly in one catalog commit (#1778). A failure before publication
 leaves the database online at the old schema (`CS03402`) and discards the unpublished work. An
 unconfirmed publication reports `CS03403`; recovery decides old or new. Per-step application and
 compensation are gone and `CS03104` is retired. A migration that meets a journal admission pause
-(§3.6) waits outside its gates and resumes the same prepared work; session DDL refuses at once
-(`CK04014`). `StorageOfflineCause.ProvisioningFailure` identifies a post-commit
+(§3.6) waits outside its gates and resumes the same prepared work. Ordinary session catalog
+mutations refuse at once with CK04014; physical index-owner reservations release the catalog
+monitor, wait up to LockTimeout per refusal (zero is unlimited), and report CK04014 on expiry. `StorageOfflineCause.ProvisioningFailure` identifies a post-commit
 in-memory publication fault; `RecoveryInterrupted` fences a canceled recovery from shutdown writes.
 Storage-safety failures still take the database offline: a journal write or flush whose
 outcome is unknown, an unconfirmed commit wait, a durable data-flush failure, and the
@@ -172,7 +195,7 @@ Dependency direction is strictly downward. Model engines depend on kernel projec
 - **`Database`** — the public area root: the abstract bases of the concrete-first rule (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseExecutionSession<TRequest>`, `DatabaseLanguageSession<TRequest>`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`, `DatabaseEngineWorker`; added beside the interfaces in phase 3 of the concrete-types plan, #1259, which phase 6, #1262, deleted), the kept composition seams (`IDatabaseApplication`, `IDatabaseApplicationBuilder`, `IDatabaseApplicationContext`), `DatabaseException`, `DatabaseNotFoundException`, `DatabaseName`, lifecycle enums, and the `DatabaseObjectOwner`/`DatabaseObjectLockedException` ownership contract four model catalogs persist. It holds no schema type and `DatabaseInstance` has no capability member (owner decisions 50 and 51 of 2026-10-09). It rolls up the child roots so their common vocabulary arrives transitively. A shape that differs by model belongs in that model family, never here. A3 moved the former relational declaration/compiler/serializer/migration model into `Database.Sql.Schema`; that thin package is shared by SQL and SDK Tasks without referencing the SQL engine or Hosting.
 - **`Database.Storage`** — the physical layer: slotted pages, buffer pool with pin/evict, free-space map, journal (WAL) streams, backup/recovery seams. Owns `PageId`, `JournalRecord`, CRC integrity. The WAL contract is ARIES-shaped: append redo/undo records under an LSN discipline, checkpoint, replay on open. Durability policy (fsync cadence, group commit) is an engine-level option surfaced through storage. Data pages carry an owner tag driving **per-owner record chains** (2026-07-14): owner-scoped inserts, iteration, and transactional chain release, so a model's "scan one object" costs O(object) instead of O(storage) — the SQL engine keys chains by table object id.
 - **`Database.Transactions`** — the ACID heart (new): `TransactionManager` (begin/commit/rollback under an `IsolationLevel`; sealed, composed per database by `TransactionCoordinator`), `TransactionSnapshot` (MVCC visibility: xmin/xmax/active-set), `LockManager` (shared/update/exclusive + intent modes, deadlock detection), and an internal transaction log (the seam that binds transaction lifecycle to the WAL). Engines *use* the manager; sessions *expose* the resulting `DatabaseTransaction`.
-- **`Database.Indexing`** — shared index infrastructure: order-preserving byte-comparable `IndexKey` encoding, `BTreeIndex` (point/range search, insert/delete), `BTreeCursor` streaming iteration, B+Tree first and hash later, built on shared pages so index updates ride the same WAL/transaction path as data. Current B-tree page format 3 adds optional leaf payloads while preserving empty-payload packing; formats 1 and 2 refuse at open (#1809). **SQL was the first live consumer** (2026-07-14); Documents now uses the same package for OQL `CREATE INDEX`/`DROP INDEX`, transactional write-path maintenance, planner seeks, and recovery. Graph adjacency lookups and the KV primary structure follow the same seams.
+- **`Database.Indexing`** — shared index infrastructure: order-preserving byte-comparable `IndexKey` encoding, `BTreeIndex` (point/range search, insert/delete), `BTreeCursor` streaming iteration, B+Tree first and hash later, built on shared pages so index updates ride the same WAL/transaction path as data. Current B-tree page format 3 adds optional leaf payloads while preserving empty-payload packing; formats 1 and 2 refuse at open (#1809). Every SQL, Documents, Graph and KeyValuePair index has a separate physical page owner in Storage's resident structure directory (#1808). DROP INDEX reclaims exactly its owner after the last reader snapshot; bounded builds charge their workspace. Current model markers are SQL 39 (registration kind 21), Documents index 4 and KeyValuePair entry 3. **SQL was the first live consumer** (2026-07-14); Documents now uses the same package for OQL `CREATE INDEX`/`DROP INDEX`, transactional write-path maintenance, planner seeks, and recovery. Graph adjacency lookups and the KV primary structure follow the same seams.
 - **`Database.Types`** — the shared scalar type system: type identity, comparison/collation, binary encoding. Anything that ends up inside an `IndexKey` or a stored value goes through here so ordering is consistent across models.
 - **`Database.Execution`** — the model-agnostic request/result vocabulary: a memberless `DatabaseRequest`, the `DatabaseResult` family and result streaming. `DatabaseRow` owns the ordinal contract: an out-of-range ordinal throws from the base, and `IsMissing` checks its capability first. It references only `Database.Types`. Plans and operators stay in each model engine; the unused shared pipeline this project once carried was deleted with #1257.
 - **`Database.Language`** — shared lexer/parser infrastructure and diagnostic production for model languages; the diagnostic value types live in `Database.Types`.
@@ -395,8 +418,14 @@ rule: eligible root ORDER BY, bounded LIMIT/OFFSET sorts and ordered DISTINCT ca
 including a CTAS source root (#1789). Temporary files use engine and statement quotas;
 in-memory engines need an explicit temp directory. Delivery owns bounded readers and no
 database locks. Nested sorts, windows, grouping sets, unsupported codecs/collations,
-over-budget hash builds and DISTINCT seen sets still refuse; hash aggregation and general result spooling
-remain later work. The SQL project design records the precise eligibility and lifetime rules.
+over-budget hash joins and unsupported DISTINCT owners still refuse. Plain root hash aggregation
+and unordered hash DISTINCT spill into eight partitions at up to eight levels, preserving first-seen
+order. Only fixed-size native states qualify; growing, ordered, DISTINCT, statistical and application
+aggregates retain CS05067, as do unproved SUM/AVG bounds and unsupported key codecs. General result
+spooling remains later work. The SQL project design records the precise eligibility and lifetime rules.
+CASE/COALESCE use PostgreSQL common-type resolution, including persisted expressions (#1788).
+OQL ranking/navigation windows support OVER and named windows within memory/work grants (#1805).
+OQL MERGE parses, binds, plans and explains; execution refuses CD05022 until OQ-M2 (#1804).
 SQL target lists admit at most 1,664 entries after expansion (CS05097, #1792); a CTAS
 table's separate catalog-record size limit can refuse a narrower shape.
 
