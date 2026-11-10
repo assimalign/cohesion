@@ -28,52 +28,49 @@ internal static class DocumentIndexKeys
         => reserve is null ? ReadStored(content, metadata, out distinct, cancellationToken, parsed: parsed)
             : ReadBuild(content, metadata, out distinct, cancellationToken, reserve, parsed);
     private static HashSet<IndexKey> ReadBuild(ReadOnlyMemory<byte> content, DocumentIndexMetadata metadata,
-        out bool distinct, System.Threading.CancellationToken cancellationToken = default, Action<long>? reserve = null,
-        Action<object>? parsed = null)
+        out bool distinct, System.Threading.CancellationToken cancellationToken, Action<long> reserve,
+        Action<object>? parsed)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (reserve is not null)
+        long pathCharacters = 0;
+        foreach (var key in metadata.Keys)
+        { pathCharacters += key.Path.Length + (key.ArraySource?.Length ?? 0) + PredicatePathCharacters(key.When); }
+        // Count without allocating. DOM metadata has 12-byte token rows and
+        // pooled arrays grow by powers of two; include the old growth buffer.
+        // Large unindexed strings must not be charged as millions of tokens.
+        long tokens = 0;
+        int depth = 0;
+        var reader = new Utf8JsonReader(content.Span, new JsonReaderOptions { MaxDepth = 128 });
+        while (reader.Read())
         {
-            long pathCharacters = 0;
-            foreach (var key in metadata.Keys)
-            { pathCharacters += key.Path.Length + (key.ArraySource?.Length ?? 0) + PredicatePathCharacters(key.When); }
-            // Count without allocating. DOM metadata has 12-byte token rows and
-            // pooled arrays grow by powers of two; include the old growth buffer.
-            // Large unindexed strings must not be charged as millions of tokens.
-            long tokens = 0;
-            int depth = 0;
-            var reader = new Utf8JsonReader(content.Span, new JsonReaderOptions { MaxDepth = 128 });
-            while (reader.Read())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                tokens++;
-                if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
-                { depth = Math.Max(depth, reader.CurrentDepth + 1); }
-            }
-            long initial = content.Length + 12L;
-            if (initial is > 1024 * 1024 and <= 4 * 1024 * 1024) { initial = 1024 * 1024; }
-            long metadataBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, initial));
-            long metadataLive = metadataBytes;
-            long rows = tokens * 12L;
-            while (metadataBytes < rows)
-            {
-                long grown = metadataBytes * 2;
-                // Returned growth buffers can remain resident in ArrayPool while
-                // parsing continues. Include those buffers in a cold-pool bound.
-                metadataLive += grown;
-                metadataBytes = grown;
-            }
-            if (rows <= metadataBytes / 2)
-            {
-                long trimmed = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, rows));
-                metadataLive += trimmed;
-            }
-            // JsonDocument starts with 64 eight-byte stack rows even for a shallow
-            // document; include the old buffer while a deeper stack grows.
-            long stackBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(512, depth * 8));
-            long stackPeak = stackBytes == 512 ? stackBytes : stackBytes + stackBytes / 2;
-            reserve(320L + metadataLive + stackPeak + pathCharacters * 80L);
+            cancellationToken.ThrowIfCancellationRequested();
+            tokens++;
+            if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+            { depth = Math.Max(depth, reader.CurrentDepth + 1); }
         }
+        long initial = content.Length + 12L;
+        if (initial is > 1024 * 1024 and <= 4 * 1024 * 1024) { initial = 1024 * 1024; }
+        long metadataBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, initial));
+        long metadataLive = metadataBytes;
+        long rows = tokens * 12L;
+        while (metadataBytes < rows)
+        {
+            long grown = metadataBytes * 2;
+            // Returned growth buffers can remain resident in ArrayPool while
+            // parsing continues. Include those buffers in a cold-pool bound.
+            metadataLive += grown;
+            metadataBytes = grown;
+        }
+        if (rows <= metadataBytes / 2)
+        {
+            long trimmed = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(16L, rows));
+            metadataLive += trimmed;
+        }
+        // JsonDocument starts with 64 eight-byte stack rows even for a shallow
+        // document; include the old buffer while a deeper stack grows.
+        long stackBytes = (long)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(512, depth * 8));
+        long stackPeak = stackBytes == 512 ? stackBytes : stackBytes + stackBytes / 2;
+        reserve(320L + metadataLive + stackPeak + pathCharacters * 80L);
         using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 128 });
         parsed?.Invoke(document);
         var result = new HashSet<IndexKey>();
@@ -90,8 +87,16 @@ internal static class DocumentIndexKeys
             // Component arrays, the candidate composite, writer scratch and aligned
             // headers coexist before a candidate enters the retained key set.
             long bytes = 512L + 32L * metadata.Keys.Count + 3L * length;
-            if (bytes > temporary) { reserve?.Invoke(bytes - temporary); temporary = bytes; }
+            if (bytes > temporary) { reserve(bytes - temporary); temporary = bytes; }
         }
+        long comparisonScratch = 0;
+        void ReserveComparison(long bytes)
+        {
+            // Comparisons execute one at a time. Constant transcoding, unescaping
+            // and decoded ordering strings share one per-document high-water mark.
+            if (bytes > comparisonScratch) { reserve(bytes - comparisonScratch); comparisonScratch = bytes; }
+        }
+        Action<long> reserveComparison = ReserveComparison;
         ReserveTemporary(0);
         byte[]?[] components = new byte[metadata.Keys.Count][];
         int scalarLength = 0;
@@ -109,35 +114,35 @@ internal static class DocumentIndexKeys
                 1024 - scalarLength, ReserveTemporary);
             scalarLength = Math.Min(1025, scalarLength + (components[i]?.Length ?? 1025));
         }
-        if (arrayIndex < 0) { Add(default, reserveKey: reserve); }
+        if (arrayIndex < 0) { Add(default); }
         else
         {
             var key = metadata.Keys[arrayIndex];
             var source = Navigate(document.RootElement, Path(key.ArraySource!));
-            if (source.ValueKind == JsonValueKind.Undefined) { Add(default, reserveKey: reserve); }
+            if (source.ValueKind == JsonValueKind.Undefined) { Add(default); }
             else if (source.ValueKind != JsonValueKind.Array)
             {
                 // ARRAY over a present non-array produces NULL, matching #1728.
-                Add(default, JsonValueKind.Null, reserve);
+                Add(default, JsonValueKind.Null);
             }
             else
             {
                 foreach (var element in source.EnumerateArray())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (key.When is not null && Evaluate(key.When, element, Path, reserve) is not true) { continue; }
+                    if (key.When is not null && Evaluate(key.When, element, Path, reserveComparison) is not true) { continue; }
                     var value = Navigate(element, Path(key.Path));
                     // Comprehensions omit MISSING projections. This restricted index
                     // stores scalar projections only, never lossy complex element tags.
                     if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Array or JsonValueKind.Object) { continue; }
-                    Add(value, reserveKey: reserve);
+                    Add(value);
                 }
             }
         }
         distinct = unknown;
         return result;
 
-        void Add(JsonElement element, JsonValueKind? forcedKind = null, Action<long>? reserveKey = null)
+        void Add(JsonElement element, JsonValueKind? forcedKind = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (arrayIndex >= 0)
@@ -157,11 +162,10 @@ internal static class DocumentIndexKeys
             int offset = 0;
             foreach (var component in components) { var part = component!; part.CopyTo(bytes, offset); offset += part.Length; }
             var encoded = new IndexKey(bytes);
-            if (reserveKey is null) { result.Add(encoded); return; }
             if (!result.Contains(encoded))
             {
                 // Key bytes plus aligned array/header and HashSet growth peaks.
-                reserveKey(128L + encoded.Length);
+                reserve(128L + encoded.Length);
                 result.Add(encoded);
             }
         }
@@ -188,6 +192,7 @@ internal static class DocumentIndexKeys
                 // The raw byte view borrows the DOM. Even all-escaped JSON needs
                 // at least one UTF-16 unit per six bytes; reject before decoding.
                 var raw = JsonMarshal.GetRawUtf8Value(value);
+                ValidateString(raw);
                 if ((raw.Length - 2L) / 6L * 2L + 4L > remaining)
                 { return null; }
                 var reader = new Utf8JsonReader(raw);
@@ -413,6 +418,7 @@ internal static class DocumentIndexKeys
         if (reserve is not null)
         {
             var raw = JsonMarshal.GetRawUtf8Value(value);
+            ValidateString(raw);
             int length = raw.Length - 2;
             if (comparison is DocumentIndexComparison.Equal or DocumentIndexComparison.NotEqual)
             {
@@ -432,6 +438,39 @@ internal static class DocumentIndexKeys
             reserve(bytes);
         }
         return string.CompareOrdinal(value.GetString(), text);
+    }
+
+    // JsonDocument checks JSON escape syntax but permits invalid Unicode. Match
+    // GetString's refusal even when a length bound or ValueEquals skips decoding.
+    private static void ValidateString(ReadOnlySpan<byte> raw)
+    {
+        var text = raw[1..^1];
+        while (!text.IsEmpty)
+        {
+            int escape = text.IndexOf((byte)'\\');
+            var segment = escape < 0 ? text : text[..escape];
+            if (!System.Text.Unicode.Utf8.IsValid(segment))
+            { throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteJsonInvalid, "Stored")); }
+            if (escape < 0) { return; }
+            text = text[escape..];
+            if (text[1] != 'u') { text = text[2..]; continue; }
+            int code = CodeUnit(text[2..6]);
+            text = text[6..];
+            if (code is >= 0xDC00 and <= 0xDFFF)
+            { throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteJsonInvalid, "Stored")); }
+            if (code is < 0xD800 or > 0xDBFF) { continue; }
+            if (text.Length < 6 || text[0] != '\\' || text[1] != 'u' || CodeUnit(text[2..6]) is < 0xDC00 or > 0xDFFF)
+            { throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteJsonInvalid, "Stored")); }
+            text = text[6..];
+        }
+
+        static int CodeUnit(ReadOnlySpan<byte> hex)
+        {
+            int result = 0;
+            foreach (byte digit in hex)
+            { result = (result << 4) + (digit <= '9' ? digit - '0' : (digit | 0x20) - 'a' + 10); }
+            return result;
+        }
     }
 
     private static long PooledBytes(long length)

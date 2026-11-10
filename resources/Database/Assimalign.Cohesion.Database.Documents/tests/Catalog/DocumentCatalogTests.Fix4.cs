@@ -1,4 +1,6 @@
 using System;
+using System.Buffers;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -68,8 +70,9 @@ public sealed partial class DocumentCatalogTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Build WHEN strings stay within charged allocations (#1808)")]
-    [InlineData(false)] [InlineData(true)]
-    public async Task CreateIndexAsync_Fix4WhenString_ShouldBoundAllocations(bool ordering)
+    [InlineData(false, false)] [InlineData(true, false)]
+    [InlineData(false, true)] [InlineData(true, true)]
+    public async Task CreateIndexAsync_Fix4WhenString_ShouldBoundAllocations(bool ordering, bool cold)
     {
         // Arrange: the content and fixture exist before the build measurement.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -81,25 +84,57 @@ public sealed partial class DocumentCatalogTests
             DocumentIndexPredicate.Compare("name", ordering ? DocumentIndexComparison.LessThan : DocumentIndexComparison.Equal, "x")) };
         long extractionCharge = 0;
         fixture.Catalog.IndexBuildStateCaptured = (phase, _, bytes) => { if (phase == "keys") { extractionCharge = bytes; } };
+        // Observe the build's content/DOM admission without allocating the DOM.
+        long contentLength = Encoding.UTF8.GetByteCount(json);
+        long predecodeCharge = 32L + contentLength;
+        var stopped = new OperationCanceledException();
+        Should.Throw<OperationCanceledException>(() => DocumentIndexKeys.Read(Encoding.UTF8.GetBytes(json),
+            new DocumentIndexMetadata(Guid.NewGuid(), "ix", keys, false, false, 1000), out _, reserve: bytes =>
+            { predecodeCharge += bytes; throw stopped; })).ShouldBeSameAs(stopped);
         var context = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
+        var pins = new List<byte[]>();
         try
         {
             GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+            if (cold)
+            {
+                // Hold every available 32 MiB DOM rental until a fresh one proves
+                // this measuring thread's pool bucket is empty.
+                while (true)
+                {
+                    long rentStart = GC.GetAllocatedBytesForCurrentThread();
+                    byte[] pin = ArrayPool<byte>.Shared.Rent(32 * 1024 * 1024);
+                    long rentBytes = GC.GetAllocatedBytesForCurrentThread() - rentStart;
+                    pins.Add(pin);
+                    if (rentBytes >= pin.Length) { break; }
+                }
+            }
+            else
+            {
+                byte[] warm = ArrayPool<byte>.Shared.Rent(32 * 1024 * 1024);
+                ArrayPool<byte>.Shared.Return(warm);
+            }
             long before = GC.GetTotalAllocatedBytes(true);
             // Act.
             Exception? failure = null;
             try { await fixture.Catalog.CreateIndexAsync(fixture.Collection.Id, "ix", keys, false, false, context, guard.Token); }
             catch (DocumentCatalogException error) { failure = error; }
             long allocated = GC.GetTotalAllocatedBytes(true) - before;
-            // Assert: the content plus 32 MiB initial DOM reservation are charged
-            // before either comparison. One MiB covers fixed catalog/JIT work.
-            long predecodeCharge = 32L + Encoding.UTF8.GetByteCount(json) + 32L * 1024 * 1024;
-            _output.WriteLine($"WHEN_ALLOCATION|ordering={ordering}|allocated={allocated}|predecodeCharge={predecodeCharge}|extractionCharge={extractionCharge}");
-            allocated.ShouldBeLessThanOrEqualTo(predecodeCharge + 1024 * 1024);
+            // Assert: cold DOM rentals fit the observed admission. Storage also
+            // copies one content chunk at a time (total L); one MiB covers fixed
+            // catalog/JIT work. A decoded 20 MiB UTF-16 string exceeds this bound.
+            long ceiling = predecodeCharge + contentLength + 1024 * 1024;
+            _output.WriteLine($"WHEN_ALLOCATION|ordering={ordering}|cold={cold}|allocated={allocated}|predecodeCharge={predecodeCharge}|extractionCharge={extractionCharge}|ceiling={ceiling}");
+            allocated.ShouldBeLessThanOrEqualTo(ceiling);
             if (ordering) { failure.ShouldBeOfType<DocumentCatalogException>().Code.ShouldBe("CD05018"); }
             else { failure.ShouldBeNull(); extractionCharge.ShouldBeGreaterThanOrEqualTo(predecodeCharge); }
         }
-        finally { await fixture.Coordinator.RollbackAsync(context, guard.Token); GC.KeepAlive(json); }
+        finally
+        {
+            foreach (byte[] pin in pins) { ArrayPool<byte>.Shared.Return(pin); }
+            await fixture.Coordinator.RollbackAsync(context, guard.Token);
+            GC.KeepAlive(json);
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Oversized scalar components refuse only formed keys in builds and PUT (#1808)")]
