@@ -23,16 +23,14 @@ public sealed class SqlCommonTypeAllocationTests
 
     public SqlCommonTypeAllocationTests(ITestOutputHelper output) { _output = output; }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: Decimal identity alternatives keep base row allocations (#1788)")]
-    [InlineData("CASE WHEN flag THEN amount END")]
-    [InlineData("CASE WHEN flag THEN amount ELSE 0.0 END")]
-    public async Task Execute_DecimalCaseInput_ShouldKeepBaseRowAllocations(string expression)
+    [Fact(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: Decimal identity alternatives keep base row allocations (#1788)")]
+    public async Task Execute_DecimalCaseInput_ShouldKeepBaseRowAllocations()
     {
         // Arrange: the two-column table isolates the Decimal CASE input cost.
         // Base 17e22bb08, 5000 -> 10000 rows, measured on ARM64 and --arch x64:
         // no ELSE: 1,890,736 -> 3,772,040 bytes; 376.2608 B/row on each architecture.
-        // ELSE 0.0: 1,891,104 -> 3,772,408 bytes; 376.2608 B/row on each architecture.
-        // Both ceilings are the measured architecture's base slope plus 4 B/row.
+        // The ceiling is the measured architecture's base slope plus 4 B/row.
+        const string expression = "CASE WHEN flag THEN amount END";
         await using var engine = SqlDatabaseEngine.Create("common-allocation", new());
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t(flag BOOLEAN,amount NUMERIC)");

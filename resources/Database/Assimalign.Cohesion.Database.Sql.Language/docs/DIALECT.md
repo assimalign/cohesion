@@ -4172,22 +4172,31 @@ Ordinary scalar CASE and COALESCE use the existing JSON-position resolver in eve
 expression and persisted definition. CASE considers ELSE first; COALESCE considers its
 arguments left to right. Unknown string and NULL literals adopt the declared alternatives'
 type, and all-unknown sets resolve to TEXT. A parameter whose value is NULL also stays
-unknown. Unresolved polymorphic result alternatives of application- or SQL-defined functions
-and parameters with unsupported CLR values refuse at planning with CS02080, rather than
-adopting a type and failing at a row.
-Reading a completed grouping slot does not bypass this check on its source.
-A Null-typed derived-table column or output alias carrying a non-NULL value instead adopts
-the common type and can fail at a row with CS02011 when that runtime family cannot convert
-implicitly. For example, a DOUBLE value in such a column cannot adopt INTEGER in
-COALESCE(v,0). These column shapes do not add a planning refusal source.
-Other Null-typed shapes (NULLIF, unary signs, scalar subqueries, arithmetic, derived NULL
-columns, native MIN/MAX result slots and nested all-NULL grouped alternatives) keep their existing behavior. This preserves
+unknown. Parameters take their type from their value: a NULL-valued parameter is untyped,
+like PostgreSQL's unknown. An application polymorphic call whose result depends only on
+untyped parameters stays unresolved and refuses with CS02080. PostgreSQL refuses an untyped
+parameter in that position with 42804, regardless of its eventual value. CAST(@p AS BIGINT)
+types the parameter independently of its value and resolves the polymorphic result.
+Unresolved polymorphic result alternatives of application functions and parameters with
+unsupported CLR values refuse at planning with CS02080, rather than adopting a type and
+failing at a row. Within one expression, this source check looks through wrappers that
+return their argument's value in its type: COLLATE, NULLIF's first operand, nested CASE and
+COALESCE, unary + and -, ABS, DATE_TRUNC's temporal argument, and native MIN/MAX arguments.
+Reading a completed grouping slot or a window call does not bypass the source check.
+Scalar subqueries, derived-table/view/CTE columns and output aliases form query boundaries.
+A Null-typed value crossing one of these boundaries instead adopts the common type and can
+fail at a row with CS02011 when its runtime family cannot convert implicitly. For example,
+a DOUBLE value in such a column cannot adopt INTEGER in COALESCE(v,0). These boundaries do
+not add planning refusal sources; PostgreSQL refuses the unresolved inner polymorphic call
+with 42804.
+The NULL forms of these wrappers and query boundaries keep their existing behavior, including
+native MIN/MAX NULL result slots and nested all-NULL grouped alternatives. This preserves
 grouped all-NULL metadata. Their existing PostgreSQL departures remain: COALESCE((SELECT
 NULL),2), COALESCE(v,2) FROM (SELECT NULL AS v) q, and COALESCE(MAX(NULL),2) return 2
 here but PostgreSQL refuses with 42804; the grouped extrema form keeps Int64 metadata.
-COALESCE(-NULL,2) returns INTEGER 2 here versus PostgreSQL 42725; COALESCE(+NULL,2) has
-INTEGER metadata here versus PostgreSQL DOUBLE; COALESCE(NULL * TRUE,2) returns INTEGER
-2 here versus PostgreSQL 42883. These shapes are not new planning refusals in #1788.
+COALESCE(-NULL,2) returns INTEGER 2 here versus PostgreSQL 42725; COALESCE(+NULL,2) and
+COALESCE(ABS(NULL),2) have INTEGER metadata here versus PostgreSQL DOUBLE;
+COALESCE(NULL * TRUE,2) returns INTEGER 2 here versus PostgreSQL 42883.
 Declared alternatives use built-in implicit conversions only; explicit-only and
 application-registered casts do not participate. Unknown literals use built-in input
 conversion. Compatible numeric alternatives widen through

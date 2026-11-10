@@ -80,12 +80,30 @@ internal sealed partial class SqlExpressionEvaluator
         }
     }
 
-    // A completed key/aggregate slot must not hide either named unresolved source.
-    // Other Null-typed shapes and native extrema retain their established contracts.
+    // Within an expression, transparent value wrappers and completed slots must not
+    // hide either named unresolved source. Query boundaries retain their column types.
     private void ValidateAlternativeSource(SqlExpression expression, DatabaseType type, bool jsonPosition, SqlExpressionEvaluator callScope)
     {
         if (type != DatabaseType.Null) { return; }
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         while (expression is SqlCollateExpression collate) { expression = collate.Operand; }
+        if (expression is SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.Negate } unary)
+        {
+            callScope.ValidateAlternativeSource(unary.Operand, type, jsonPosition, callScope);
+            return;
+        }
+        if (expression is SqlWindowExpression window)
+        {
+            var windowScope = callScope.ForWindowArguments();
+            windowScope.ValidateAlternativeSource(window.Function, type, jsonPosition, windowScope);
+            return;
+        }
+        if (expression is SqlFunctionCallExpression nullIf && nullIf.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)
+            && nullIf.Arguments.Count > 0)
+        {
+            callScope.ValidateAlternativeSource(nullIf.Arguments[0], type, jsonPosition, callScope);
+            return;
+        }
         if (expression is SqlParameterExpression parameter && TryGetParameterValue(parameter, out var value)
             && value is not null && ValueTypeOf(value) == DatabaseType.Null)
         {
@@ -94,9 +112,18 @@ internal sealed partial class SqlExpressionEvaluator
         }
         if (!jsonPosition && expression is SqlFunctionCallExpression function
             && !SqlStandardLibrary.IsEvaluatorForm(function.FunctionName)
-            && callScope.TypeCall(function).Function is { ReturnType.IsPseudo: true, ResultRule: SqlResultRule.Declared } resolved
-            && resolved is not SqlExtremumFunction)
-        { throw UnresolvedAlternative(expression); }
+            && callScope.TypeCall(function).Function is { ReturnType.IsPseudo: true } resolved)
+        {
+            if (resolved.ResultRule == SqlResultRule.Declared && resolved is not SqlExtremumFunction)
+            { throw UnresolvedAlternative(expression); }
+            // Built-ins with unknown results pass through their ANYELEMENT value;
+            // native MIN/MAX additionally retain their unknown result-slot exemption.
+            for (int index = 0; index < resolved.ParameterTypes.Length; index++)
+            {
+                if (resolved.ParameterTypes[index] == SqlType.AnyElement)
+                { callScope.ValidateAlternativeSource(function.Arguments[index], type, jsonPosition, callScope); }
+            }
+        }
     }
 
     private static SqlPlanningException UnresolvedAlternative(SqlExpression expression)

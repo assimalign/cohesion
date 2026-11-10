@@ -32,6 +32,9 @@ public sealed class SqlCommonTypePass3Tests
         // Act / Assert: enumerate the entire family, including ROUND's second overload.
         functions.Select(function => function.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray()
             .ShouldBe(new[] { "ABS", "CEIL", "CEILING", "DATE_TRUNC", "FLOOR", "MOD", "POWER", "ROUND", "ROUND" });
+        SqlFunctionCatalog.Standard.Where(function => function.ReturnType.IsPseudo && function.ResultRule == SqlResultRule.Declared)
+            .Select(function => function.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray()
+            .ShouldBe(new[] { "MAX", "MIN" });
         foreach (var function in functions)
         {
             var inputs = new DatabaseType[function.ParameterTypes.Length];

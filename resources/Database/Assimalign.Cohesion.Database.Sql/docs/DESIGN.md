@@ -8833,14 +8833,20 @@ reuse the scope's existing type cache, avoiding cubic grouped nesting without en
 Built-in implicit conversions handle declared alternatives; application and explicit-only
 casts are excluded. Unconstrained NUMERIC preserves its original box and constant alternative
 casts fold during binding. Unresolved polymorphic results and unsupported parameter values
-refuse with CS02080 before rows; NULL-valued parameters remain unknown.
-Completed grouping slots retain that source check, so repeating a key cannot hide an
-unresolved polymorphic result or unsupported parameter.
-Only Declared pseudo results participate in the function refusal: application and SQL-defined
-functions use that rule. ABS uses NumericElement; pseudo-returning scalar built-ins use Builtin.
-Their overload declarations do not create an unresolved polymorphic source. Null-typed derived
-columns and ordering aliases can instead carry values and fail a common-type conversion at a row.
-Other Null-typed shapes, including native MIN/MAX Null-result slots, retain their existing behavior.
+refuse with CS02080 before rows. Parameter types come from their values: NULL is untyped,
+so an application polymorphic result depending only on NULL parameters remains unresolved.
+An explicit parameter CAST resolves its type independently of its value (PostgreSQL
+parse_coerce.c:2505-2514 refuses unknown polymorphic input with 42804).
+Only Declared pseudo results create function refusal sources: application functions use that
+rule. ABS uses NumericElement; pseudo-returning scalar built-ins use Builtin. For an unknown
+result, the source check follows their ANYELEMENT parameters, rather than their names, and
+native MIN/MAX arguments while retaining the native extrema result-slot exemption.
+COLLATE, NULLIF's first operand, unary signs, nested alternatives and completed grouping
+slots preserve the check within an expression. A window call checks its function in
+ForWindowArguments(), the same scalar scope WindowType uses even over grouped output.
+Scalar subqueries, derived-table/view/CTE columns and output aliases are query boundaries:
+their Null-typed values can instead adopt the common type and fail its conversion at a row.
+The NULL forms, including native MIN/MAX result slots, retain their existing behavior.
 Alternative coercion uses the same tree in IndexPredicate and Table contexts, preserving
 structural partial-index proofs for ON CONFLICT, SELECT and joins. It does not call the
 application-cast validation path. Signed literals fold only when binding produced a constant;
