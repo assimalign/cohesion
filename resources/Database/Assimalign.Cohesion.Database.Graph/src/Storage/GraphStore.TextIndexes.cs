@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -34,6 +35,8 @@ public sealed partial class GraphStore
 
     internal Action<string>? AfterTextIndexMutation { get; set; }
 
+    internal Func<bool>? ReclamationCheckpointDue { get; set; }
+
     internal long IndexOwnerPagesReclaimed { get; private set; }
 
     internal const int IndexReclaimPageLimit = 64;
@@ -42,27 +45,55 @@ public sealed partial class GraphStore
 
     private void CollectAbandonedIndexOwners()
     {
+        bool detached = false;
+        foreach (var pair in _registrations.ToArray())
+        {
+            ulong id = pair.Key;
+            if (pair.Value.Root < 0 || id >= _coordinator.PruneBound.Value || _records.ContainsKey((3, id)) ||
+                id <= 2 || id == adjacencyId || id == labelsId || id == relationshipTypesId) { continue; }
+            var bytes = _storage.ReadEntry(pair.Value.Page, pair.Value.Slot).ToArray();
+            BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -pair.Value.Root);
+            using var bracket = _storage.BeginTransaction();
+            _storage.UpdateEntry(bracket, pair.Value.Page, pair.Value.Slot, bytes);
+            bracket.Commit();
+            detached = true;
+        }
+        if (detached) { OpenIndexes(scheduleReclamation: false); }
         // Open only, before admitting operations. Allocation survives bracket rollback, while
         // the registration may not. Recover only owners with no definition at all; fixed owners
         // and trees with a retained definition must follow their ordinary recovery contracts.
-        for (long page = 1; page < _storage.PageManager.PageCount; page++)
+        ulong afterOwner = 0;
+        while (true)
         {
-            if (!_storage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
-            using var handle = _storage.PageManager.GetPage((PageId)page);
-            ulong id = handle.Page.OwnerId;
-            if (handle.Page.Type != PageType.Index ||
-                id <= 2 || id == adjacencyId || id == labelsId || id == relationshipTypesId ||
-                _registrations.ContainsKey(id) || _records.ContainsKey((3, id))) { continue; }
-            var bytes = new byte[34];
-            bytes[16] = 4; bytes[17] = GraphRecordCodec.FormatVersion;
-            BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(18), id);
-            BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -page);
-            using var bracket = _storage.BeginTransaction();
-            var location = _storage.InsertOwned(bracket, 1, bytes);
-            bracket.Commit();
-            _registrations.Add(id, (location.PageId, location.SlotIndex, -page));
-            ScheduleIndexReclamation(id); // Reclamation still requires id below the safe bound.
+            var owners = _storage.GetIndexOwners(afterOwner);
+            if (owners.Count == 0) { break; }
+            foreach (var (id, page) in owners)
+            {
+                afterOwner = id;
+                if (id <= 2 || id == adjacencyId || id == labelsId || id == relationshipTypesId ||
+                    _registrations.ContainsKey(id) || _records.ContainsKey((3, id))) { continue; }
+                // Ordinary registered owners need no extra reads. An unknown
+                // header tag must pass checksum verification before its receipt.
+                foreach (var unknown in _storage.GetOwnerIndexPages(id))
+                { using var verified = _storage.PageManager.GetPage(unknown); }
+                RecordIndexRetirementReceipt(id, page);
+                ScheduleIndexReclamation(id); // Reclamation still requires id below the safe bound.
+            }
         }
+    }
+
+    private (PageId Page, int Slot, long Root) RecordIndexRetirementReceipt(ulong id, PageId page)
+    {
+        var bytes = new byte[34];
+        bytes[16] = 4; bytes[17] = GraphRecordCodec.FormatVersion;
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(18), id);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(26), -(long)page);
+        using var bracket = _storage.BeginTransaction();
+        var location = _storage.InsertOwned(bracket, 1, bytes);
+        bracket.Commit();
+        var registration = (location.PageId, location.SlotIndex, -(long)page);
+        _registrations.Add(id, registration);
+        return registration;
     }
 
     private void ScheduleIndexReclamation(ulong id)
@@ -85,12 +116,21 @@ public sealed partial class GraphStore
                 for (int step = 0; step < checks && remaining > 0; step++)
                 {
                     token.ThrowIfCancellationRequested();
+                    if (IndexRetirement.MustYield(_storage) || ReclamationCheckpointDue?.Invoke() == true) { return; }
                     ulong id;
                     lock (_sync) { id = _retirementQueue.Dequeue(); }
                     bool finished = false;
                     try
                     {
-                        if (!_registrations.TryGetValue(id, out var registration)) { finished = true; continue; }
+                        if (!_registrations.TryGetValue(id, out var registration))
+                        {
+                            int unregistered = RetirementStatus(id, bound, receipt: false);
+                            if (unregistered == 0) { finished = true; continue; }
+                            if (unregistered == 1) { continue; }
+                            var pages = _storage.GetOwnerIndexPages(id);
+                            if (pages.Count == 0) { finished = true; continue; }
+                            registration = RecordIndexRetirementReceipt(id, pages[0]);
+                        }
                         int status = RetirementStatus(id, bound, receipt: registration.Root < 0);
                         if (status == 0)
                         {
@@ -115,18 +155,14 @@ public sealed partial class GraphStore
                             AfterTextIndexMutation?.Invoke("retire-registration");
                         }
                         if (id >= bound.Value) { continue; }
-                        int freed;
-                        using (var bracket = _storage.BeginTransaction())
-                        {
-                            freed = _storage.FreeOwnerPages(bracket, id, remaining);
-                            AfterTextIndexMutation?.Invoke("reclaim-pages");
-                            bracket.Commit();
-                        }
+                        if (!IndexRetirement.TryFreePages(_storage, id, remaining, token, out int freed,
+                            () => AfterTextIndexMutation?.Invoke("reclaim-pages"))) { return; }
                         IndexOwnerPagesReclaimed += freed;
+                        IndexPagesReclaimed?.Invoke(id, freed);
                         remaining -= freed;
                         if (freed != 0) { AfterTextIndexMutation?.Invoke("reclaim-batch"); }
                         // Directory removal is published at commit. A short batch is not proof of completion.
-                        if (_storage.GetOwnerIndexPages(id).Count == 0)
+                        if (_storage.GetOwnerIndexPageCount(id) == 0)
                         {
                             using (var bracket = _storage.BeginTransaction())
                             {

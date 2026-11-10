@@ -42,7 +42,7 @@ internal sealed partial class GraphPlanner
                     operand.OrderBy is null or { Count: > 0 } || operand.Offset is not null || operand.Limit is not null ||
                     !ReferenceEquals(operand, query) && operand.IsExplain)
                 { throw new GraphPlanningException("CG05001", ErrorMessages.UnionOperandMalformed, operand.Location); }
-                if (composite.Left is null || composite.Right is null || !Enum.IsDefined(composite.Operator))
+                if (composite.Left is null || composite.Right is null || !(composite.Operator is >= GqlCompositeOperator.Union and <= GqlCompositeOperator.Otherwise))
                 { throw new GraphPlanningException("CG05001", ErrorMessages.UnionOperandMalformed, operand.Location); }
                 homogeneousUnion &= composite.Operator == operation;
                 if (composite.Operator is GqlCompositeOperator.Union or GqlCompositeOperator.UnionAll)
@@ -166,7 +166,7 @@ internal sealed partial class GraphPlanner
             { throw new GraphPlanningException("CG05001", ErrorMessages.UnionOperandMalformed, query.Location); }
             if (operand.Composite is { } composite)
             {
-                if (composite.Left is null || composite.Right is null || !Enum.IsDefined(composite.Operator))
+                if (composite.Left is null || composite.Right is null || !(composite.Operator is >= GqlCompositeOperator.Union and <= GqlCompositeOperator.Otherwise))
                 { throw new GraphPlanningException("CG05001", ErrorMessages.UnionOperandMalformed, operand.Location); }
                 pending.Push(composite.Right); pending.Push(composite.Left);
             }

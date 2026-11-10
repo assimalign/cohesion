@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
 
 public sealed partial class DocumentCatalogTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - V3 descriptor decoding rejects malformed keys and bounded predicates (#1530)")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - V4 descriptor decoding rejects malformed keys and bounded predicates (#1530)")]
     [InlineData("key-kind")]
     [InlineData("predicate-kind")]
     [InlineData("required-child")]
@@ -28,10 +28,10 @@ public sealed partial class DocumentCatalogTests
     [InlineData("trailing")]
     public void Decode_MalformedArrayDescriptor_ShouldFailClosed(string damage)
     {
-        // Arrange: write v3 independently of the production encoder.
+        // Arrange: write v4 independently of the production encoder.
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, new UTF8Encoding(false, true), leaveOpen: true);
-        writer.Write(1UL); writer.Write(0UL); writer.Write((byte)4); writer.Write((byte)3);
+        writer.Write(1UL); writer.Write(0UL); writer.Write((byte)4); writer.Write((byte)4);
         writer.Write(Guid.NewGuid().ToByteArray());
         writer.Write(2); writer.Write("ix"u8);
         writer.Write(1); // One array key.

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -15,8 +16,43 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public sealed partial class SqlCatalog
 {
     internal Action? BeforeJointDiscard { get; set; }
+    internal Action? IndexReclamationRequested { get; set; }
+    internal Action<ulong>? IndexBuildStarted { get; set; }
+    internal Action<ulong, bool>? IndexBuildFinished { get; set; }
+    internal string EngineName { get; set; } = string.Empty;
+    private readonly HashSet<ulong> _buildingIndexes = new();
+    private ImmutableHashSet<ulong> _retiringIndexOwners = ImmutableHashSet<ulong>.Empty;
+    internal void BeginIndexBuild(ulong owner)
+    {
+        bool began;
+        lock (_sync) { began = _buildingIndexes.Add(owner); }
+        if (began) { IndexBuildStarted?.Invoke(owner); }
+    }
+    internal void EndIndexBuild(ulong owner, bool succeeded)
+    {
+        bool ended;
+        lock (_sync) { ended = _buildingIndexes.Remove(owner); }
+        if (ended) { IndexBuildFinished?.Invoke(owner, succeeded); }
+    }
     internal Func<BTreeIndexRegistration, ulong>? IndexPageOwner { get; set; }
+    internal Func<BTreeIndexRegistration, bool>? IndexOwnerKnown { get; set; }
+    private readonly Dictionary<long, ulong> _registrationOwners = new();
+    internal ulong PhysicalIndexOwner(BTreeIndexRegistration registration)
+    {
+        ulong live = IndexPageOwner?.Invoke(registration) ?? registration.ObjectId;
+        return live != registration.ObjectId ? live : _registrationOwners.GetValueOrDefault(registration.RootPageId, live);
+    }
     internal ulong NextReservedIdentity { get { lock (_sync) { return _nextObjectId; } } }
+    internal bool IsOwnerPrepared(ulong owner)
+    { lock (_sync) { return _preparedTruncateOwners.Contains(owner); } }
+    internal bool IsOwnerRetiring(ulong owner)
+        => Volatile.Read(ref _retiringIndexOwners).Contains(owner);
+
+    internal void WaitForIndexAdmission(CancellationToken token)
+    {
+        using var admission = TransactionCheckpointInterlock.ForStorage(_storage)
+            .Enter("SqlIndexBuild", cancellationToken: token);
+    }
     // Old snapshot descriptions can still read the same physical layout. Weak
     // keys avoid retaining one description per owner-keeping publication forever.
     private readonly ConditionalWeakTable<SqlCatalogTable, object> _keptReadVersions = new();
@@ -46,6 +82,18 @@ public sealed partial class SqlCatalog
                 _pendingReclamations.ContainsKey(table.ObjectId));
 
     internal ulong ReserveJointTreeOwner(SqlCatalogTable table, CancellationToken token)
+        => ReserveTreeOwner(table.Schema, table.Name, token);
+
+    internal ulong ReserveIndexTreeOwner(ulong tableId, CancellationToken token)
+    {
+        lock (_sync)
+        {
+            var table = FindTableByObjectId(tableId);
+            return ReserveTreeOwner(table?.Schema ?? "dbo", table?.Name ?? "index", token);
+        }
+    }
+
+    private ulong ReserveTreeOwner(string schema, string name, CancellationToken token)
     {
         lock (_sync)
         {
@@ -55,7 +103,7 @@ public sealed partial class SqlCatalog
             using var admission = TransactionCheckpointInterlock.ForStorage(_storage)
                 .Enter("SqlCatalog", unchecked((long)owner), token, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)owner));
-            var location = _storage.InsertRow(transaction, owner, SqlReclamationRecord.Encode(owner, table.Schema, table.Name));
+            var location = _storage.InsertRow(transaction, owner, SqlReclamationRecord.Encode(owner, schema, name));
             var counter = PersistCounter(transaction, checked(owner + 1), _ddlGeneration);
             var intent = new SqlReclamationIntent(location.PageId, location.SlotIndex);
             _pendingReclamations.EnsureCapacity(_pendingReclamations.Count + 1);
@@ -67,6 +115,28 @@ public sealed partial class SqlCatalog
             _nextObjectId = owner + 1;
             return owner;
         }
+    }
+
+    // Clear abandonment intents in the SAME durable publication as the registrations.
+    private Action StageTreePublications(StorageTransaction transaction, IReadOnlyList<BTreeIndexRegistration> registrations,
+        out ulong[] publishedOwners)
+    {
+        var owners = registrations.Select(registration => IndexPageOwner?.Invoke(registration) ?? registration.ObjectId)
+            .Where(owner => _preparedTruncateOwners.Contains(owner)).Distinct().ToArray();
+        publishedOwners = owners;
+        foreach (ulong owner in owners)
+        {
+            var intent = _pendingReclamations[owner];
+            _storage.DeleteRow(transaction, intent.PageId, intent.SlotIndex);
+        }
+        return () =>
+        {
+            foreach (ulong owner in owners)
+            {
+                _pendingReclamations.Remove(owner);
+                _preparedTruncateOwners.Remove(owner);
+            }
+        };
     }
 
     // Alternate tree owners use kind 14 unchanged. Stage retirement in exactly the
@@ -90,9 +160,11 @@ public sealed partial class SqlCatalog
             _truncateRetirementsPublishing.EnsureCapacity(_truncateRetirementsPublishing.Count + hidden.Length + additionalOwners);
             _indexRetirementsPublishing.EnsureCapacity(_indexRetirementsPublishing.Count + 1);
         }
+        var retiringOwners = _retiringIndexOwners.Union(intents.Select(item => item.Owner));
         return () =>
         {
             foreach (var item in intents) { _pendingReclamations.Add(item.Owner, item.Intent); }
+            Volatile.Write(ref _retiringIndexOwners, retiringOwners);
             if (hidden.Length != 0)
             {
                 foreach (ulong owner in hidden) { _truncateRetirementsPublishing.Add(owner); }
@@ -157,15 +229,28 @@ public sealed partial class SqlCatalog
                 { _preparedTruncateOwners.Remove(prepared[index].ObjectId); }
             }
             if (preparedTrees is not null)
-            { foreach (ulong owner in preparedTrees) { _preparedTruncateOwners.Remove(owner); } }
+            {
+                var retiring = _retiringIndexOwners.Union(preparedTrees);
+                foreach (ulong owner in preparedTrees) { _preparedTruncateOwners.Remove(owner); }
+                Volatile.Write(ref _retiringIndexOwners, retiring);
+            }
             _pendingMigrationLocations = [];
             _pendingMigration = null;
-            return default;
         }
+        if (preparedTrees is not null) { foreach (ulong owner in preparedTrees) { EndIndexBuild(owner, false); } }
+        IndexReclamationRequested?.Invoke();
+        return default;
     }
 
     internal void AbandonJointTreeOwners(IReadOnlyList<ulong> owners)
     {
-        lock (_sync) { foreach (ulong owner in owners) { _preparedTruncateOwners.Remove(owner); } }
+        lock (_sync)
+        {
+            var retiring = _retiringIndexOwners.Union(owners);
+            foreach (ulong owner in owners) { _preparedTruncateOwners.Remove(owner); }
+            Volatile.Write(ref _retiringIndexOwners, retiring);
+        }
+        foreach (ulong owner in owners) { EndIndexBuild(owner, false); }
+        IndexReclamationRequested?.Invoke();
     }
 }

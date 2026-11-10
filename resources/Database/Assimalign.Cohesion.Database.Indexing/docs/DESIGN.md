@@ -4,6 +4,58 @@
 
 Every model needs ordered lookups: SQL secondary indexes, document indexes, graph adjacency, the KV primary structure. Building four bespoke trees would quadruple the hardest code in the platform, so index structures live in the kernel and models bring only their key extraction. The SQL engine is the first real consumer (#912): CREATE/DROP INDEX, write-path maintenance, and planner seeks all compose this package's manager, trees, and cursors.
 
+## Structure directory (#1808)
+
+The internal IndexStructure NVI base is the maintenance boundary. Its leaves own format
+validation, writer purge, bounded pruning and retirement; public structures remain sealed.
+IndexStructureDirectory contains identities and base instances, with no B-tree casts or
+kind-specific maintenance loops. BTreeIndexManager supplies the B-tree adapter and preserves
+its public lookup/registration surface. A posting or HNSW implementation supplies another
+internal adapter when that structure ships. Format validation visits every adapter before
+attaching any tree. One call grants 64 leaf pages across the directory, preserving the
+B-tree round-robin position and empty-leaf behavior. Retirement removes an adapter with
+constant directory work and leaves detached handles valid under the model's reader horizon.
+The ordinary insert path gains no directory allocations or maintenance calls.
+
+## Retired trees (#1808)
+
+A model owns durable catalog publication and proves its reclamation horizon; Indexing owns
+physical structure maintenance. Each model assigns each physical tree a distinct page owner.
+DROP first unpublishes the definition durably, retaining the old physical tree for pinned
+snapshots and detached statement handles. SQL uses its existing kind-14 owner intents and
+transaction/statement-epoch fences; Graph and Documents use signed-root registration receipts.
+A receipt is committed before freeing the root and is excluded from attachment and pruning.
+Recovered liveness is checked before any write; a live definition cannot be overridden by a
+receipt. FreeOwnerPages commits bounded batches, and owner-directory emptiness, rather than a
+short batch, proves completion. Receipt/intent removal follows data durability. A restart can
+therefore repeat any stage without attaching a partly freed tree or freeing a live owner.
+SQL keeps its existing 32-page reclamation grant; Graph and Documents share a 64-page grant.
+Every pass yields to a due checkpoint, a pending model checkpoint signal and admission pause.
+Maintenance already holds its coordinator apply gate; it must not enter that gate recursively.
+
+## Bounded builds (#1808)
+
+The Build shared-source module supplies one IndexBuildLoop to SQL, Documents and
+Graph without a new public implementation bridge or shipped friend grant. It retains at most
+64 source entries per chunk, commits each model-supplied physical bracket durably, then invokes
+one publication callback. Source enumeration, memory charging and cancellation occur outside
+the apply gate; writer reservations and the logical creator remain held across chunks.
+The shared IndexBuildBudget meters model-owned reservations without depending on an engine.
+Model roots provide event callbacks; Catalog/Storage do not reference engine diagnostics.
+SQL charges chunk rows/arrays against its statement memory budget. Graph session builds retain their existing
+budgeted extraction/work preflight before root allocation. Documents charges name references and bounded metadata,
+adjacent-key validation, per-document extraction and chunk workspace against StatementMemoryBudget
+(256 MiB for a raw catalog unless the engine supplies its configured value). Existing budget
+refusals apply; no diagnostic identity is added. KeyValuePair only bootstraps an empty primary
+tree, so it has no row backfill loop.
+
+Durable boundaries are owner reservation/abandonment intent, root/registration creation, every
+64-entry chunk, final definition/catalog publication, logical commit, retirement receipt,
+page-batch retyping before commit, confirmed page-batch commit, and receipt/intent deletion.
+Crash images on both sides of these boundaries converge to exact owners and registrations;
+root pages remain fixed through splits. The storage size trigger can overshoot by the currently
+admitted chunk. Online builds, leaf merges and empty-leaf reclamation remain outside this work.
+
 ## Undo binding identity (#1726)
 
 `BTreeRecordVersionIndex` compares and hashes by logical tree: the shared latch identifies its
@@ -51,8 +103,7 @@ The storage owner directory for index pages is separate from its row directory. 
 table reclamation uses these tags to free complete retired trees, including abandoned allocations,
 after its reader horizon; no B-tree traversal or tree-wide latch is needed once that identity is
 unreachable. SQL format 11 requires this tagging, with no upgrade reader. The B-tree node format
-is unchanged. Standalone DROP INDEX still removes the directory registration; its tagged pages
-are reclaimable when the containing table is retired (index-only vacuum remains separate work).
+is unchanged. Standalone DROP INDEX removes the registration and reclaims its own physical owner after the model's reader horizon.
 
 `BTreeIndexManager.Create(options)` composes B+Trees over `PageType.Index` pages —
 one node per page, a sorted offset directory with entry data growing from the body
@@ -568,8 +619,8 @@ upgrades are #1152). How each model surfaces the refusal:
 
 | Model | Where its open checks | Error |
 |---|---|---|
-| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 38, #1779; format 37 required every deferred plan to publish jointly, #1778; format 36 changed default key order, #1787; format 35 separated tree ownership, #1777; format 32 introduced directed keys, #1631), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 38"; a marker that does not describe its trees, the attach check's `CK06101` |
-| Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. CK06101: …" |
+| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 39, #1808; format 37 required every deferred plan to publish jointly, #1778; format 36 changed default key order, #1787; format 35 separated tree ownership, #1777; format 32 introduced directed keys, #1631), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 39"; a marker that does not describe its trees, the attach check's `CK06101` |
+| Key-value | Its catalog's entry-space format marker, current version 3 with a separate primary-tree owner (#1808), before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 3"; a marker that does not describe its tree, "Database 'x' cannot be opened. CK06101: …" |
 | Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. CK06101: …" |
 | Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |
 
@@ -1039,7 +1090,7 @@ writes two or three pages; no event is written on a lookup, a cursor or an inser
 
 ## Non-goals
 
-- No full-text or spatial indexes in the MVP surface (future `IndexKind` members; the enum is the extension point).
+- Full-text, spatial and HNSW structures are separate implementations; this substrate supplies their maintenance directory, not those index algorithms.
 - No online index rebuild in the contract yet — DDL-blocking builds first.
 - No cost/statistics surface here — planners get statistics through their model catalogs.
 - No in-place upgrade of index pages from an older page format (#1152).
@@ -1150,3 +1201,7 @@ structured diagnostic carrier exists. Standard .NET guards retain their argument
 Index debugger views filter nonpublic traversal and page state. BTreeIndex exposes its existing Name, Kind and IsUnique values; IndexKey exposes Length. Cursor positioning guards, entry/key construction and pointer-backed node/search-key state are omitted. The ref-struct views retain no stack-only instance or span; internal-only views can be empty.
 
 Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.
+
+Owner enumeration uses Storage.GetIndexOwners in bounded independent batches from the recovered header directory; model open does not read every allocated page again. Directory adapters perform retirement in memory only, without I/O or model callbacks under the directory monitor. IndexRetirement.MustYield checks size and admission only; each caller adds its interval and pending engine checkpoint signal.
+
+Documents retains existing name references, a bounded source/posting workspace and one document's extracted keys. UNIQUE checks adjacent built keys. Failed or cancelled builds retain an unpublished owner until the safe horizon, and ordinary Documents writes use a separate non-durable apply helper with their original state-machine shape. Journal figures describe per-checkpoint peaks and are checked against the trigger plus the largest measured single-chunk delta. Documents and Graph include publication metadata in the same file; SQL measures its data journal, including creator lifecycle records, while catalog publication has a separate journal.

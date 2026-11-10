@@ -463,6 +463,7 @@ public sealed partial class SqlTableRewriteTests
                     finally { historyGate.Release(); }
                     await using var pinned = snapshot;
                     reads.Add(await ReadAsync(concurrent, captured, stop.Token));
+                    // In-memory DDL can complete synchronously; let the other stress actors acquire admission.
                     await Task.Yield();
                     reads.Add(await ReadAsync(concurrent, captured, stop.Token));
                     Interlocked.Increment(ref snapshots);
@@ -482,6 +483,8 @@ public sealed partial class SqlTableRewriteTests
                     added = !added;
                     Interlocked.Increment(ref ddl);
                     await ExecAsync(concurrent, "TRUNCATE t CASCADE", stop.Token);
+                    // In-memory DDL can complete synchronously; let the other stress actors acquire admission.
+                    await Task.Yield();
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
                 catch (DatabaseObjectLockedException) { await Task.Yield(); }
@@ -497,6 +500,9 @@ public sealed partial class SqlTableRewriteTests
                 try { await database.RewriteTableAsync(Table(database), timeout.Token); rewrites++; }
                 catch (DatabaseObjectLockedException) { await Task.Yield(); }
                 catch (DatabaseException error) when (Retryable(error)) { }
+                // Empty rewrites can finish synchronously; give the other actors a turn
+                // between admissions. Every minimum and progress counter still applies.
+                await Task.Yield();
             } while (elapsed.Elapsed < TimeSpan.FromSeconds(1) || rewrites < 20 || Volatile.Read(ref written) < 20 ||
                 Volatile.Read(ref snapshots) < 20 || Volatile.Read(ref ddl) < 20 || Volatile.Read(ref truncations) < 10 ||
                 Volatile.Read(ref maintenancePasses) < 20 || Volatile.Read(ref childWrites) < 20);
@@ -505,6 +511,7 @@ public sealed partial class SqlTableRewriteTests
         {
             stop.Cancel();
             await Task.WhenAll(writer, childWriter, reader, definitions);
+            _output.WriteLine($"rewrite stress cleanup: fault={corruption}; timeout={timeout.IsCancellationRequested}; rewrites={rewrites}; prepared={prepared}; writes={written}; snapshots={snapshots}; ddl={ddl}; truncations={truncations}; maintenance={maintenancePasses}; child commits={childCommits}; child writes={childWrites}");
             SqlPlanExecutor.RewriteStage = null;
             SqlPlanExecutor.TruncateReserved = null;
             SqlPlanExecutor.TruncatePublished = null;

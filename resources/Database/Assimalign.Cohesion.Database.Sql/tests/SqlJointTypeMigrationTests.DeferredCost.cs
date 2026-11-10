@@ -20,11 +20,12 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlJointTypeMigrationTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: heap-owned index replacement rewrites until #1808")]
-    public async Task ApplyAsync_DeferredFixHeapOwnedIndexUntil1808_ShouldMeasureWholeTableRewrite()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: same-name index replacement keeps the heap (#1808)")]
+    [InlineData(8192)]
+    [InlineData(65536)]
+    public async Task ApplyAsync_DeferredIndexReplacement_ShouldKeepHeapAndWriteOnlyTree(int rows)
     {
-        // Arrange: replacing ix(w) with ix(w,v) rewrites until #1808 gives every tree its own owner.
-        const int rows = 8192;
+        // Arrange: replacing ix(w) with ix(w,v) retains the heap and other physical trees.
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         SqlCompiledSchema Declare(bool target) => Compiled(new CompiledSchemaTable("items", "row",
             [new("v", DatabaseType.Int32, false), new("w", DatabaseType.Int32, true)], new("pk", ["v"]),
@@ -42,9 +43,15 @@ public sealed partial class SqlJointTypeMigrationTests
         }
         // Act
         var measured = await MeasureDeferredCostAsync(storage, Declare(false), Declare(true), guard.Token);
-        // Assert: pin the accepted temporary rewrite, without a ratio bound.
-        measured.Rewritten.ShouldBe(rows);
-        _output.WriteLine($"Heap-owned replacement ({rows} rows, until #1808): 49a={measured.OldPages}; joint={measured.JointPages}; ratio={(double)measured.JointPages / measured.OldPages:P2}");
+        // Assert: the shared build path replaces only the requested tree.
+        measured.Rewritten.ShouldBe(0);
+        measured.KeepsOwner.ShouldBeTrue();
+        measured.KeepsHeap.ShouldBeTrue();
+        _output.WriteLine($"Index replacement ({rows} rows): 49a={measured.OldPages}; joint={measured.JointPages}; ratio={(double)measured.JointPages / measured.OldPages:P2}");
+        measured.Reclaimed[0].ShouldBeGreaterThan(0);
+        measured.Reclaimed[1].ShouldBe(measured.Reclaimed[0]);
+        (measured.JointPages - measured.Reclaimed[1]).ShouldBeLessThanOrEqualTo((measured.OldPages - measured.Reclaimed[0]) * 110 / 100);
+        measured.JointPages.ShouldBeLessThanOrEqualTo(measured.OldPages * 110 / 100);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: nullable append inside another table's deferred plan keeps the heap")]
@@ -146,10 +153,11 @@ public sealed partial class SqlJointTypeMigrationTests
         }
     }
 
-    private static async Task<(long OldPages, long JointPages, long Rewritten, int Checkpoints, bool KeepsHeap, bool KeepsOwner, long Threshold, int ForcedCheckpoints)> MeasureDeferredCostAsync(
+    private async Task<(long OldPages, long JointPages, long Rewritten, int Checkpoints, bool KeepsHeap, bool KeepsOwner, long Threshold, int ForcedCheckpoints, long[] Reclaimed)> MeasureDeferredCostAsync(
         CrashCaptureSqlStorageStrategy storage, SqlCompiledSchema source, SqlCompiledSchema target, CancellationToken token)
     {
         var pages = new long[2];
+        var reclaimedByMode = new long[2];
         long rewritten = 0;
         int checkpoints = 0;
         int observedCheckpoints = 0;
@@ -164,6 +172,11 @@ public sealed partial class SqlJointTypeMigrationTests
             var database = await engine.OpenDatabaseAsync("typed", token);
             database.Coordinator.Checkpoint();
             database.CatalogStorage.Checkpoint();
+            var oldOwners = database.IndexManager.ExportRegistrations().Select(entry => database.IndexManager.PageOwner(entry)).ToHashSet();
+            long reclaimed = 0;
+            int batches = 0;
+            database.TableReclamation.AfterBatch = (owner, count) =>
+            { if (oldOwners.Contains(owner)) { Interlocked.Add(ref reclaimed, count); Interlocked.Increment(ref batches); } };
             long before = image.PageWrites("typed");
             ulong originalHeap = Table(database).ObjectId;
             using var checkpointEvents = new EventSourceRecorder(EventSource.GetSources().Single(source =>
@@ -194,7 +207,7 @@ public sealed partial class SqlJointTypeMigrationTests
                         if (phase != "IntentDurable") { return; }
                         keepsOwner = database.Catalog.PendingMigration!.Steps.Any(step => step.Kind == "Joint/KeepOwner" && step.Table == "items");
                         if (source.Tables[0].Indexes.Count == 0) { return; }
-                        database.Catalog.PendingMigration!.Steps.ShouldContain(step => step.Kind == "Joint/RewriteOwner" && step.Table == "items");
+                        database.Catalog.PendingMigration!.Steps.ShouldContain(step => step.Kind == "Joint/KeepOwner" && step.Table == "items");
                     };
                     await database.SchemaProvisioner.ApplyAsync(target, token, deferDataScalingSteps: true);
                     await WaitDoneAsync(database, token);
@@ -205,13 +218,18 @@ public sealed partial class SqlJointTypeMigrationTests
                     observedCheckpoints = checkpointEvents.Events.Count(entry => entry.EventId == 5 &&
                         Equals(entry.Payload![0], database.DataStorage.Name.ToString()));
                 }
+                // Include the complete replacement cost in both modes, including
+                // freeing old trees, before either final checkpoint is sampled.
+                await DrainRequestedReclamationAsync(database, token);
                 database.Coordinator.Checkpoint();
                 database.CatalogStorage.Checkpoint();
                 pages[mode] = image.PageWrites("typed") - before;
+                reclaimedByMode[mode] = reclaimed;
+                _output.WriteLine($"Reclamation drained, mode={mode}: pages={pages[mode]}, reclaimed={reclaimed}, batches={batches}");
             }
             finally { SqlPlanExecutor.RewriteStage = null; }
         }
-        return (pages[0], pages[1], rewritten, observedCheckpoints, keepsHeap, keepsOwner, threshold, checkpoints);
+        return (pages[0], pages[1], rewritten, observedCheckpoints, keepsHeap, keepsOwner, threshold, checkpoints, reclaimedByMode);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: kept-owner checkpoint threshold falls back on a small volume or disabled engine threshold")]

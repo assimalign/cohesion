@@ -902,6 +902,13 @@ boundaries are:
 These posting costs are an exception to the general 100,000-row envelope; row width, repeated
 trigrams and other retained state change the boundary. Build insertion work is charged before
 any index page allocation, so a work refusal leaves no abandoned build pages.
+Exact and text builds apply at most 64 postings in each durable bracket while retaining
+their logical writer reservation through final publication (#1808). Failed or cancelled
+builds retire committed chunks in the live process after their creator releases its pin.
+Retirement yields to size/interval checkpoints and pending checkpoint requests. These GQL
+build grants remain statement-owned; direct GraphStore callers retain caller-owned accounting.
+Exact-key workspace is reserved only by builds, through their high-water mark. No text index
+adds exact-key workspace charges to ordinary CREATE, SET or DELETE, including one on the same label and property.
 Catalog v4 admits this index kind and refuses v3 with CG06019 without changing files; graph
 entity layout remains format 5.
 

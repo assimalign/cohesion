@@ -1375,6 +1375,12 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `MERGE` | Ordered actions, BY SOURCE and RETURNING, ReadCommitted target rechecks and mixed-action final-state foreign keys | Existing constraint/action codes; CS04064 for Snapshot target conflicts |
 | `GRANT` | Not in the dialect | `CS00002` |
 
+CREATE INDEX and constraint backing builds retain the table lock and statement snapshot while
+committing at most 64 source rows per physical bracket (#1808). Metadata publishes once after
+all chunks succeed; a failed build leaves the previous schema available. Buffered build rows
+charge the existing statement memory grant. DROP INDEX retains pages for old snapshots and
+statement handles, then reclaims only that index's physical owner.
+
 ## Unique-build failure order (#1444)
 
 CREATE UNIQUE INDEX and UNIQUE/PRIMARY KEY constraint backing builds construct the whole
@@ -5783,3 +5789,5 @@ standard .NET argument guards retain their own contracts.
 ## Modifier diagnostic templates (#1470)
 
 Type-modifier refusal templates come from each consuming assembly's generated resources. Runtime, schema and SDK consumers share the same grammar and text. Diagnostic identities, SQLSTATEs, accepted declarations and canonical modifier spelling are unchanged.
+
+CREATE INDEX and constraint backfills retain the table writer lock across bounded durable chunks, wait for journal admission outside the apply gate between chunks, then publish once. A refused or cancelled build leaves no visible definition and its committed owner pages are reclaimed after the safe horizon. DROP INDEX requests reclamation immediately; readers with older snapshots retain the tree until their pins end (#1808).

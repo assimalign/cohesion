@@ -523,7 +523,7 @@ length plus 12 bytes per token), and preserved whole-image bytes once per repres
 this per-statement budget; exhaustion gives CD05018 at the clause span
 and rolls back the writes. Serialized rows are preflighted in the same transaction: the existing
 CD05016 covers the 16 MiB frame cap, and CD05019 covers values deeper than 256 levels including
-the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement;
+the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement.
 SELECT source and group staging share this counter; UPDATE, DELETE, INSERT and UPSERT pending buffers share it too (#1755). Pending-buffer exhaustion refuses with CD05018 before any write, including INSERT/UPSERT SELECT; all reservations release on every exit.
 An over-deep array/object constructor gives CD05015 naming RETURNING at its expression span;
 other serialization failures retain their own diagnostic identity.
@@ -1103,6 +1103,24 @@ carry structured diagnostics. OQL index DDL is autocommit-only; an explicit tran
 it with CD04105 before catalog access. After a failed autocommit statement the next can run immediately.
 PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, and IS_UNIQUE is real.
 
+CREATE INDEX uses durable brackets of at most 64 postings and one final definition publication (#1808). Beyond resident catalog state, it retains an exact-size snapshot of existing name references, a bounded source/posting chunk and one document's extracted keys. UNIQUE validation walks adjacent built keys and retains no collection-wide key set. All build reservations share StatementMemoryBudget and CD05018; a failed build abandons its owner. DROP INDEX retains old trees for pinned snapshots and reclaims their exact owners after the safe horizon.
+
+During CREATE UNIQUE INDEX, extraction validates every key before the completed tree is walked for duplicates. A non-scalar key (CD02021) or oversized key (CD02026) anywhere therefore refuses before a duplicate (CD03020); the offending row can differ from name-order duplicate checking.
+
+| Build state | First refusal |
+|---|---|
+| Name snapshot | 24 + 8 × name count, plus other live build state, exceeds the statement grant |
+| Chunk and one document's JSON/keys | Actual chunk slots, encoded key sizes and extraction workspace exceed the remaining grant |
+| Duplicate valued UNIQUE keys | CD03020 after the tree is built; NULL and MISSING remain distinct |
+| Oversized scalar component plus an empty or fully filtered array comprehension | No key is formed, so no CD02026; a formed key beyond 1024 bytes refuses CD02026, as on PUT. A later non-scalar UNIQUE component still refuses CD02021 first |
+| Default 64 MiB grant; one document with a 20 MiB ASCII name in variants; WHEN v.name = 'x' or != 'x' | = and != build, comparing without decoding the name; ordered comparisons (<, <=, >, >=) reserve decoded string space first and refuse CD05018 before decoding. Transient WHEN scratch is charged as a per-document high-water mark, so repeated comparisons retain only their largest single comparison |
+| Key components or WHEN string-comparison operands with invalid UTF-8 or unpaired surrogate escapes, including oversized and later components | InvalidOperationException, as in ordinary maintenance; validation allocates no decoded string |
+| Raw OpenWrite content with an accessed number that cannot round-trip exactly as Decimal | CK06003, including rounded or underflowed values; duplicates and numbers outside accessed paths are not validated by a build |
+| Default 64 MiB grant; one document `{"v":1,"a":[0,...]}` with 1,400,000 zeros; `CREATE INDEX ix ON items(v)` | CD05018: cumulative pooled DOM growth buffers plus content and other live build state exceed the grant, even though `a` is unindexed |
+| 64 KiB grant; one `one` document `{"arr":[0,...,N-1]}`; `CREATE INDEX ix ON items(DISTINCT ARRAY v FOR v IN arr END)` | N=336 succeeds; N=337 is the first CD05018, from extraction/key state alongside the current chunk |
+
+A one-document scalar build fits 64 KiB; 128 small documents build under 16 KiB. A default 64 MiB engine builds 250,000 small documents and one document with 10,000 array keys. These are measured examples, not fixed population limits.
+
 Leading MISSING omits the entry unless the leading scalar key has INCLUDE MISSING. Components sort MISSING, NULL, FALSE, TRUE, numbers, ordinal
 strings, arrays, objects; full predicates always filter seek candidates. UNIQUE keys containing
 any NULL or MISSING do not conflict (PostgreSQL NULLS DISTINCT, diverging from Cohesion SQL).
@@ -1112,7 +1130,7 @@ per row, so key swaps may fail. A failed explicit transaction requires RollbackA
 The wire uses ExecutionFailure (6) without a protocol change and keeps the connection usable.
 The path-count cap reports CD00009 at the 33rd key (CD03022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
 WHERE receive CD00002. ALL array keys get one CK00001 at ALL.
-The catalog uses v3 index records (#1530) and refuses v1/v2 indexes before recovery writes;
+The catalog uses v4 index records (#1808) and refuses v1/v2/v3 indexes before recovery writes;
 there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
 and one range on the next path. Bounded snapshot-visible probes rank candidate cost first;
 ties use prefix length, range, UNIQUE, then ordinal name. Comparable complete inputs may

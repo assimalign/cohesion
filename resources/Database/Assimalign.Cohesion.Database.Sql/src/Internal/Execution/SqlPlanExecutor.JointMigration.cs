@@ -166,12 +166,7 @@ internal sealed partial class SqlPlanExecutor
                     var column = table.FindColumn(previous.Name)!;
                     return !SqlMigrationScriptGenerator.RequiresTypeRewrite(previous.Type, previous.DomainName, column.Type, column.DomainName) &&
                         previous.Collation == column.Collation && previous.Identity == column.Identity;
-                }) &&
-                image.GetIndexes(old.ObjectId).Where(index => !SameJointIndex(index, tableIndexes)).All(index =>
-                    !tableIndexes.Any(replacement => replacement.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase)) ||
-                    !registrations.Any(registration => registration.ObjectId == old.ObjectId &&
-                        registration.Definition.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase) &&
-                        _indexManager.PageOwner(registration) == old.ObjectId));
+                });
             if (keepsOwner)
             {
                 var columns = table.Columns.Select(column =>
@@ -358,6 +353,15 @@ internal sealed partial class SqlPlanExecutor
                     index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls, index.KeyOrders))).ToArray();
             var roots = descriptions.Where(index => prepared.Any(table => table.ObjectId == index.TableObjectId)).ToArray();
             created.EnsureCapacity(roots.Length);
+            var rootOwners = new Dictionary<SqlCatalogIndex, ulong>();
+            foreach (var index in roots)
+            {
+                ulong owner = await WithCatalogMigrationAdmissionAsync(() =>
+                    _catalog.ReserveIndexTreeOwner(index.TableObjectId, cancellationToken), statement, cancellationToken).ConfigureAwait(false);
+                rootOwners.Add(index, owner);
+                reservedTrees.Add(owner);
+                _catalog.BeginIndexBuild(owner);
+            }
             foreach (var table in prepared)
             {
                 await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(table.ObjectId),
@@ -376,7 +380,7 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var index in roots)
                 {
                     await _indexManager.CreateIndexAsync(statement.Transaction, index.TableObjectId,
-                        new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken).ConfigureAwait(false);
+                        new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken, rootOwners[index]).ConfigureAwait(false);
                     created.Add(index);
                 }
                 statement.AddCopyAllocations(allocationStart);
@@ -496,6 +500,16 @@ internal sealed partial class SqlPlanExecutor
             // The engine reserve survives both abandonment and publication, including
             // reclamation WAL and dirty pages written after this statement ends.
             int before = failures.Count;
+            if (unconfirmed)
+            {
+                // End the failed attempt without abandoning trees whose publication
+                // recovery must decide. A root failure may already have ended its id.
+                foreach (ulong owner in reservedTrees)
+                {
+                    try { _catalog.EndIndexBuild(owner, false); }
+                    catch (Exception cleanup) { failures.Add(cleanup); }
+                }
+            }
             if (published)
             {
                 try { stage("Cleanup"); await CheckMigrationAdmissionAsync(statement, cancellationToken).ConfigureAwait(false); }
@@ -505,7 +519,8 @@ internal sealed partial class SqlPlanExecutor
             catch (Exception cleanup) { failures.Add(cleanup); }
             if (!published && !unconfirmed)
             {
-                _indexManager.DiscardPrepared();
+                try { _indexManager.DiscardPrepared(owner => _catalog.EndIndexBuild(owner, false)); }
+                catch (Exception cleanup) { failures.Add(cleanup); }
                 try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared, reservedTrees, drain: true).ConfigureAwait(false); }
                 catch (Exception cleanup) { failures.Add(cleanup); }
                 finally { _catalog.AbandonStorageReplacement(prepared); _catalog.AbandonJointTreeOwners(reservedTrees); }

@@ -17,6 +17,31 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// <summary>The execution-diagnostic corpus exercises both SQL execution boundaries (#1653).</summary>
 public sealed class SqlExecutionDiagnosticConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - CREATE INDEX refuses a chunk exceeding its statement grant and retains the table (#1808)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_IndexBuildExceedsGrant_ShouldRefuseWithoutPublication(bool unique)
+    {
+        // Arrange.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var engine = SqlDatabaseEngine.Create("index-budget", new() { StatementMemoryBudget = 4096 });
+        var database = await engine.CreateDatabaseAsync("app", guard.Token);
+        await using var session = await database.CreateSessionAsync(guard.Token);
+        await session.ExecuteAsync("CREATE TABLE items(v INT)", cancellationToken: guard.Token);
+        await session.ExecuteAsync("INSERT INTO items VALUES(1),(2)", cancellationToken: guard.Token);
+
+        // Act.
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            unique ? "CREATE UNIQUE INDEX ix ON items(v)" : "CREATE INDEX ix ON items(v)", cancellationToken: guard.Token));
+
+        // Assert.
+        failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
+        database.Catalog.GetIndexRegistrations().ShouldBeEmpty();
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        (await session.ExecuteAsync("SELECT COUNT(*) FROM items", cancellationToken: guard.Token)).Status.ShouldBe(DatabaseResultStatus.Success);
+        database.IsOffline.ShouldBeFalse();
+    }
+
     public static IEnumerable<object[]> Cases()
     {
         foreach (string expression in new[] { "CAST('abc' AS INT)", "ABS(-9223372036854775808)" })

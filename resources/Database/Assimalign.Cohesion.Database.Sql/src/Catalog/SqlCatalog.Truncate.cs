@@ -197,7 +197,8 @@ public sealed partial class SqlCatalog
             ValidateStorageReplacement(expectedKept ?? [], null);
             dropped ??= [];
             kept ??= [];
-            treeOwners ??= [];
+            treeOwners = (treeOwners ?? []).Concat(registrations.Select(registration => IndexPageOwner?.Invoke(registration) ?? registration.ObjectId)
+                .Where(owner => _preparedTruncateOwners.Contains(owner))).Distinct().ToArray();
             foreach (var table in kept)
             {
                 var previous = _tables[(table.Schema, table.Name)].Table;
@@ -388,7 +389,6 @@ public sealed partial class SqlCatalog
                 _registrationsLocation = registrationsLocation;
                 Volatile.Write(ref _storageBindingGeneration, bindingGeneration);
                 _snapshot = null;
-                return default;
             }
             catch (Exception failure) when (committed)
             {
@@ -408,6 +408,9 @@ public sealed partial class SqlCatalog
                 { foreach (var previous in addedReadVersions) { _keptReadVersions.Remove(previous); } }
             }
         }
+        foreach (ulong owner in treeOwners) { EndIndexBuild(owner, true); }
+        IndexReclamationRequested?.Invoke();
+        return default;
     }
 
     // Immutable owner descriptions and detached trees are usable only while reclamation

@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static class DocumentCatalogCodec
 {
-    internal const byte IndexRecordVersion = 3;
+    internal const byte IndexRecordVersion = 4;
     private static readonly UTF8Encoding _utf8 = new(false, true);
 
     internal static byte[] Encode(CatalogRecord record, TransactionSequence writer)

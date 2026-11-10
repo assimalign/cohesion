@@ -1040,7 +1040,7 @@ repeatedly. Expansion checks cancellation and transaction activity for every row
 and structural-equality loops also observe cancellation. The expansion method is internal for
 the owning test assembly to cancel from borrowed JSON reads and verify per-element checks.
 No reflection or runtime code generation is involved. No catalog, storage or wire layout
-changes, format bump or upgrade path are needed for these expressions; the current index record format is v3 (#1530).
+changes, format bump or upgrade path are needed for these expressions; the current index record format is v4 (#1808; v3 introduced array descriptors in #1530).
 
 #### ARRAY and FIRST comprehensions (#1728)
 
@@ -1502,7 +1502,7 @@ an absent value has `IsMissing(ordinal) == true`, `IsNull(ordinal) == false`, an
 `GetValue(ordinal) == null`. Explicit NULL has the reverse predicates. SELECT * keeps the
 whole source value. SQL, Graph and KeyValuePair leaves keep the default unsupported capability.
 The evaluator's sentinel remains internal to Documents; no catalog value or public sentinel
-type is introduced. Index definitions and physical registrations use v3 (#1530); collections,
+type is introduced. Index definitions and physical registrations use v4 (#1808); collections,
 documents and content retain their current versions. Leading MISSING omits a sparse index entry; the typed catalog IncludeMissing mode retains it;
 trailing MISSING and NULL have distinct component tags. See the catalog's key-layout contract.
 Unary NULL/MISSING/VALUED tests never select an index seek.
@@ -1778,7 +1778,7 @@ is recorded for owner review; P8 (#1264) later absorbs the description into its 
 
 ## Index planning and writes
 
-Index definition and physical registration records use catalog v3 (#1530); other record kinds
+Index definition and physical registration records use catalog v4 (#1808); other record kinds
 retain their current versions. Startup validates metadata and tree formats before the recovery
 scrub. V1/v2 index catalogs are refused with a recreate remedy; no legacy reader or upgrade exists.
 The engine-level preflight refusal names the database before constructing its coordinator and leaves
@@ -2734,6 +2734,9 @@ B5). Engine sessions, statements, transactions and storage remain reported by th
 | 11 | `SessionsAborted` | Warning | engineName, sessions, drainTimeoutMilliseconds, suppressedCount |
 | 12 | `StatementParseFailed` | Error | sessionId, database, code, exceptionType, suppressedCount |
 | 13 | `StatementCleanupFailed` | Warning | database, exceptionType; snapshot cleanup failed after a successful automatic commit |
+| 15 | `IndexBuildBegan` | Informational | `database`, `objectId` |
+| 16 | `IndexBuildEnded` | Informational | `database`, `objectId`, `succeeded` |
+| 17 | `PagesReclaimed` | Informational | `database`, `objectId`, `pages` |
 
 Every open of an existing database writes both around `DocumentCatalog.RecoverIndexesAsync`,
 from the constructor that recovers it; a create writes neither. The stop is written from a
@@ -2939,13 +2942,13 @@ The fields below appear consecutively beginning at offset 18. No trailing fields
 | --- | --- | --- |
 | 1 collection | 0 | GUID collection identity; string name; byte owner; nullable string owning schema |
 | 2 document | 0 | GUID collection identity; string document identity; UInt64 version; UInt64 head; Int64 byte length; UInt32 IEEE CRC-32 |
-| 4 index definition (v3) | 0 | GUID collection identity; string index name; Int32 key count (1..32); ordered key descriptors; byte flags (bit 0 UNIQUE, bit 1 INCLUDE MISSING); UInt64 physical generation identity |
-| 5 physical registration (v3) | 1 | UInt64 physical generation identity; Int64 root page; string index name; byte unique flag (0 or 1) |
+| 4 index definition (v4) | 0 | GUID collection identity; string index name; Int32 key count (1..32); ordered key descriptors; byte flags (bit 0 UNIQUE, bit 1 INCLUDE MISSING); UInt64 physical generation identity |
+| 5 physical registration (v4) | 1 | UInt64 physical generation identity; Int64 root page; string index name; byte unique flag (0 or 1) |
 
-Kinds 1 and 2 remain v1. Every index uses v3, including scalar-only definitions and physical
-registrations. V1 and v2 index records are refused at the pre-recovery fence with CD06105,
+Kinds 1 and 2 remain v1. Every index uses v4, including scalar-only definitions and physical
+registrations. V1, v2 and v3 index records are refused at the pre-recovery fence with CD06105,
 found/supported versions and a recreate remedy. There is no upgrade path or legacy reader.
-The v2 reader likewise refuses v3 at its fence. The shared storage and B-tree page formats
+Earlier readers refuse v4 at their fences. The shared storage and B-tree page formats
 are unchanged. Engines predating the fence must never open these files.
 
 Each key descriptor is a byte kind (0 scalar path, 1 DISTINCT array), then a string path.
@@ -2994,7 +2997,7 @@ Each index has 1..32 ordered keys and immutable UNIQUE and IncludeMissing flags.
 matches PostgreSQL `src/include/pg_config_manual.h:79` (INDEX_MAX_KEYS). Paths retain the
 lossless dotted/bracket-string encoding: `customer.address.zip`, `items[0].price`, and
 `['root.name']`. Wildcards and sort directions remain unsupported. The typed catalog API additionally admits one DISTINCT array key (#1530).
-The single-path catalog overload remains a convenience for a nonunique, sparse definition; it writes v3.
+The single-path catalog overload remains a convenience for a nonunique, sparse definition; it writes v4.
 
 A scalar-only document index emits one entry when the leading path is not MISSING, or when IncludeMissing is true. Absent members, incompatible
 shapes, navigation through NULL and out-of-range subscripts yield MISSING; reading a NULL
@@ -3144,6 +3147,34 @@ costs. Only scalar UNIQUE builds retain a collection-wide key set for preflight 
 Each inserted posting preserves its source document's writer stamp. The new index definition is invisible to snapshots predating its
 creation; those snapshots use scans.
 
+#### Catalog: Retired trees and bounded builds (#1808)
+
+Index definitions and registrations now use version 4; earlier versions are refused by the
+recovered read-only fence before any write. The layout adds signed-root semantics: a positive
+root attaches a tree; a negative root is a committed retirement receipt and is never opened.
+A receipt with a recovered live definition, including an abandoned DROP deleter, is damage
+(CD06105). The gate checks this liveness using read-only lifecycle analysis, then attachment
+checks it again after logical scrub. A physical generation is its own page owner, disjoint
+from metadata/registration owners 0 and 1. Root-owner disagreement is refused.
+
+DROP's definition tombstone is the durable retirement intent. Once every retained definition
+version and the owner id are below the coordinator's safe prune bound, maintenance commits a
+negative-root receipt, frees at most 64 owner pages per pass, then deletes the receipt after
+owner-directory emptiness. The registry monitor serializes failure rebuilds and reclamation;
+lock order is apply gate, registry, catalog monitor. A failed pass preserves its queued owner
+and rebuilds attachment once. Due checkpoints, pending checkpoint signals and admission pauses
+stop further retirement brackets. Open collects allocated index owners without a registration
+or retained definition into receipts after all format/liveness checks pass.
+
+Builds use the shared 64-posting loop with a durable root/registration bracket, durable chunks
+and one final definition publication. The logical transaction and writer reservation span all
+chunks. An exact-size array snapshots references to existing catalog names (24 + 8 bytes per name), preserving ordinal validation order. Visible versions resolve briefly under the catalog monitor once per source chunk. The build retains only a bounded chunk and one document's extracted keys, charged by actual entries and encoded sizes. UNIQUE validation walks adjacent built keys without a collection-wide set. Build state shares the configured statement memory budget; direct raw catalogs default to 256 MiB. Duplicate refusal keeps CD03020 and still names the same index and collection.
+The existing CD05018 retained-memory refusal applies. Start/stop events 15/16 carry database,
+physical objectId and succeeded on stop; event 17 reports committed pages reclaimed. No values
+are emitted and no new diagnostic identity or wire layout is added. Crash boundaries are root
+commit, every chunk commit, definition/logical publication, negative receipt, page retyping
+before commit, committed page batch, and receipt deletion before/after commit.
+
 #### Catalog: Mutation, rollback, and recovery
 
 Saving a document prepares deduplicated old and new composite-key sets and checks unique constraints, then one shared physical statement bracket
@@ -3181,9 +3212,7 @@ tree instead of holding a stale manager object. Current B+Tree erase/purge remov
 without merging nodes or collapsing roots, so undo does not change the persisted root.
 
 Dropping an index tombstones its definition and keeps the physical tree for readers with older
-snapshots. Recreating the name allocates a new physical generation. Tree reclamation for dropped
-or rolled-back definitions is deferred; the shared index manager has no tree-page vacuum yet.
-This costs disk space, but never rebuilds a live index or exposes a dropped definition.
+snapshots. Recreating the name allocates a new physical generation. Dropped and rolled-back generations retire through the bounded receipt path above; pinned snapshots retain their trees.
 
 Recovery order is physical storage redo, coordinator `AnalyzeAndScrub` over stamped records,
 catalog open (including physical registrations), `RecoverIndexesAsync` using the same abandoned
@@ -3856,3 +3885,20 @@ Every negotiated statement Ready now carries transaction I/T/E followed by a zer
 byte. This model retains no state requiring a family reset and declares no reset statement. Pool
 return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
 the former form without a compatibility reader; see Database.Protocol DESIGN.
+
+Open discovers orphan owners through bounded Storage.GetIndexOwners batches rather than reading every allocated page again. Its detach brackets and orphan-receipt inserts are durable crash boundaries, before operations are admitted. DROP schedules its owner for retirement; a confirmed live candidate leaves the queue and is scheduled again only by a later DROP. A retired definition whose receipt was already deleted releases its owner-directory reference on the next pass. Ordinary writes keep the original apply helper; only build chunks use the durable helper. Per-checkpoint journal peaks include final publication metadata and must fit the configured trigger plus the largest measured chunk delta.
+A short snapshot fence advances the coordinator's idle horizon beyond each reserved build owner before allocation. The older logical creator pins that owner for the entire build; after a failed creator ends, committed chunks can retire without waiting for another user transaction. Open-time detach commits and orphan-receipt inserts are explicit crash boundaries.
+
+Forced-GC marginal retained-state checks use LiveHeap.Read at two populations for name references, resolved source chunks, posting chunks and extracted-key sets. Release fresh-process PUT/DELETE minima match d33f62363 on ARM64 and x64: 23,224/14,160 bytes without an index and 35,920/26,736 with one. Guards allow 128 bytes of runtime headroom and reject an injected 129-byte allocation.
+
+For a file with at least 1 GiB of valid allocated pages under an unrelated owner, the minimum of three Release opens on the same ARM64 host was 4.871 s at d33f62363 and 2.732 s with bounded owner-directory discovery. This measures removal of the second page scan, rather than a document/node/value workload.
+
+JSON extraction reserves the pooled metadata and stack capacities used by .NET 10, including growth buffers retained by the pool and trimming overlap. Cold-pool LiveHeap measurements include those retained buffers. A large unindexed string does not imply one metadata row per byte or a growth buffer that parsing never allocates; 4 MiB and 20 MiB padding cases fit the default grant.
+
+IndexBuildBegan and IndexBuildEnded report build lifetimes without EventSource Start/Stop activity semantics. Every begun build emits one end event on success, failure or abandonment; end includes succeeded. PagesReclaimed reports only nonempty committed batches.
+
+Before direct open records a receipt for an unknown index owner, it loads every page of that owner through checksum verification. Ordinary registered owners incur no extra reads. The reserved owner enters the retirement queue before the root bracket. Its active creator pins the retirement horizon, so early purge passes only requeue it. A failed root bracket with no registration records its receipt during live retirement after the creator ends, so its allocated page does not wait for reopen.
+
+Index builds read immutable stored content with chain checksum verification and skip its write-time JSON validation pass. Extraction reserves its own DOM; measured wide-object cases include 100,000 and 700,000 distinct property names. UNIQUE validation additionally reserves its bounded cursor batch using the 64 largest built key lengths, with bounded charged bookkeeping and separate continuation/previous-key space. Non-scalar or oversized keys anywhere refuse before duplicate detection in the completed tree; the existing CD02021, CD02026 and CD03020 identities remain.
+
+During a build, extraction bounds scalar and composite encodings from borrowed JSON bytes before decoding strings or allocating key buffers. An oversized scalar encoding is recorded without allocating its key bytes; CD02026 is raised only when a key is formed, so an empty or filtered array can produce no postings. Scalar validation still reaches a later non-scalar UNIQUE component first (CD02021). Permitted component and composite workspace is reserved before allocation. Bounded scalar string decoding uses stack UTF-8 and UTF-16 buffers, so escaped keys do not rent an uncharged unescaping buffer. WHEN string equality and inequality compare borrowed JSON bytes with ValueEquals, including escapes; ordered comparisons reserve an upper bound for the decoded UTF-16 string and any pooled unescaping buffer before GetString. Transient WHEN scratch is charged through a per-document high-water mark: constant transcoding, pooled unescaping and the ordered comparison's decoded string contribute only the largest single comparison, rather than accumulating per array element. Predicate paths are charged once per document. Every accessed key or WHEN string that the stored extractor decodes is validated without heap decoding, including oversized components and components after an oversized one; invalid UTF-8 or unpaired surrogate escapes retain the stored extractor's InvalidOperationException refusal. Ordinary writes use the existing stored-content extractor and early-stopping TryGetProperty walk to retain their allocation floors. Raw OpenWrite content receives CK06003 for malformed JSON, a duplicate of an accessed property, or an accessed number that fails the exact decimal round-trip rule of ValidateContent. Number validation uses borrowed UTF-8 and fixed stack space. Duplicates and numbers off the accessed path are no longer refused at build time. Duplicate detection walks only the accessed object and uses no property-name set. The cumulative DOM growth charge intentionally refuses a document with about 1.4 million small tokens under the default 64 MiB grant; the former peak-only estimate admitted that case.

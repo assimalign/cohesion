@@ -355,7 +355,7 @@ public sealed class DocumentEngineTests
             var failure = Should.Throw<DatabaseException>(() => new DocumentDatabase("legacy", engine, openedStorage, recover: true));
 
             // Assert: the manager's disposed guard must fire, even though storage has also closed.
-            failure.Message.ShouldStartWith($"Database 'legacy' cannot be opened. Document catalog kind {kind} format: found {version}, supported 3.", Case.Sensitive);
+            failure.Message.ShouldStartWith($"Database 'legacy' cannot be opened. Document catalog kind {kind} format: found {version}, supported 4.", Case.Sensitive);
             failure.Message.ShouldContain("Recreate the database", Case.Sensitive);
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06105");
             var refused = failure.InnerException.ShouldBeOfType<DocumentCatalogException>();

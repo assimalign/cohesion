@@ -16,8 +16,8 @@ AnalyzeAndScrub can append to the journal. Exact and text indexes on one pair ha
 
 CREATE TEXT INDEX and DROP INDEX wait for journal admission outside catalog/directory monitors;
 metadata and data reads remain available (#1283). A backfill already admitted when J/2 is crossed
-drains its one physical bracket and mandatory logical commit. That bracket can exceed J by its
-entire bounded build; J is not a per-bracket byte cap. No further physical bracket is admitted
+drains its current 64-entry physical chunk. Later chunks wait outside the apply gate until
+a checkpoint completes. The admitted chunk can exceed J by its bounded work; J is not a per-bracket byte cap. No further physical bracket is admitted
 during the pause. Ordinary posting maintenance waits and resumes once; a held-checkpoint
 reclamation pass yields through the coordinator's non-waiting IndexPrune admission.
 
@@ -103,7 +103,7 @@ reads, registration replacement and manager assignment one critical section. Loc
 apply gate, registry lock, then directory _sync; failure rebuilds never wait for apply admission
 while holding the registry lock. A reclamation failure is deferred until independent index
 pruning and relationship-type counts have run. Tree ids reserve past data owners
-0/1/2. At open, allocated Index-page headers also discover owners with neither a definition nor a
+0/1/2. At open, bounded batches from Storage's recovered index-owner directory discover owners with neither a definition nor a
 registration. These receive retirement receipts and follow the same id-below-bound check and
 bounded cleanup; fixed owners and owners with any retained definition are excluded. An
 abandoned build receipt names an owned page without assuming its root survived; no retired
@@ -113,8 +113,7 @@ retirement path; fixed label/type/adjacency trees are excluded. Tests assert eac
 and the exact total reclaimed owner-page count. IndexOwnerPagesReclaimed counts both exact and text owner pages, separately from
 the existing version-purge event's version count. No Indexing API or B-tree format assumption is added.
 
-Crash boundaries are label discovery, kind-4 catalog publication, property discovery, atomic
-backfill/tree-definition/registration publication, node/posting replacement or deletion,
+Crash boundaries are label discovery, kind-4 catalog publication, property discovery, durable root/registration creation, every durable 64-entry backfill chunk, final tree-definition publication, node/posting replacement or deletion,
 logical commit record before flush confirmation and confirmed commit; drop has catalog and
 physical-definition tombstones plus logical commit. Reclamation boundaries are the committed
 negative-root receipt, owner-page retyping before commit, confirmed page-batch commit,
@@ -136,6 +135,27 @@ TrigramIndexReader.java:65-67 requires the store filter. Cohesion deliberately s
 patterns as specified by the owner. The new internal helpers keep Storage's dependency
 boundary and the concrete-first Database rule; no public interface or assembly reference is
 added. Existing CG02009, CG05004, CG05020, CG06006 and CG06019 keep their conditions.
+
+## Shared index substrate (#1808)
+
+Direct GraphStore builds retain caller-owned accounting and impose no fixed work or memory cap. Session builds use their configured work and retained-memory grants; refusal precedes root allocation.
+
+Exact and text builds use IndexBuildLoop's 64-entry durable chunks. Session builds retain
+their existing work and memory preflight. The writer reservation and logical creator span the root bracket,
+chunks and single final definition publication. A root/registration survives an abandoned
+build as an orphan; the existing receipt worker retires it below the safe horizon. Durable
+build brackets use a separate apply helper so ordinary writes retain their original helper
+signature and state machine, including their allocation guards. Reclamation
+now yields before each candidate/page batch to size/interval checkpoints, pending checkpoint
+signals and admission pauses. Maintenance owns the coordinator apply gate already; the shared
+physical freeing helper does not recursively acquire it. The registry/rebuild lock order,
+read-only discriminator/liveness preflight and receipt validation remain unchanged.
+Graph catalog v4, record format 5 and B-tree format 3 remain current: these lifecycle changes
+introduce no new persisted discriminator. Start/stop events 16/17 carry database, physical
+objectId and succeeded on stop; PagesReclaimed (18, #1842) reports each committed owner-page
+batch. No indexed value is emitted and no diagnostic identity is added.
+With 8 nodes each contributing 1,022 distinct trigrams (8,176 postings) and a 64 KiB checkpoint trigger, the controlled whole-bracket
+backfill measured per-checkpoint journal peaks of 379,872 bytes versus 207,780 with 128 shared-loop chunks. These peaks include final publication metadata. Total journal volume can increase as chunks re-journal touched leaves.
 
 ## Journal admission backstop (#1283, EN-C2)
 
@@ -3470,6 +3490,9 @@ four servers.
 | 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code` (first Error diagnostic, otherwise the first diagnostic; empty when absent), `exceptionType` |
 | 13 | `StatementCleanupFailed` | Warning | — | `database`, `exceptionType`; snapshot-pin cleanup failed after a successful autocommit |
 | 15 | `PathPhaseCompleted` | Verbose | `Sessions` | `sessionId`, `phase`, `durationMilliseconds` |
+| 16 | `IndexBuildBegan` | Informational | — | `database`, `objectId` |
+| 17 | `IndexBuildEnded` | Informational | — | `database`, `objectId`, `succeeded` |
+| 18 | `PagesReclaimed` | Informational | — | `database`, `objectId`, `pages` |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
@@ -4477,3 +4500,15 @@ Every negotiated statement Ready now carries transaction I/T/E followed by a zer
 byte. This model retains no state requiring a family reset and declares no reset statement. Pool
 return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
 the former form without a compatibility reader; see Database.Protocol DESIGN.
+
+A short snapshot fence advances the coordinator's idle horizon beyond each reserved build owner before allocation. The older logical creator pins that owner for the entire build; after a failed creator ends, committed chunks can retire without waiting for another user transaction. Open-time detach commits and orphan-receipt inserts are explicit crash boundaries.
+
+For a file with at least 1 GiB of valid allocated pages under an unrelated owner, the minimum of three Release opens on the same ARM64 host was 4.875 s at d33f62363 and 2.758 s with bounded owner-directory discovery. This measures removal of the second page scan, rather than a document/node/value workload.
+
+IndexBuildBegan and IndexBuildEnded report build lifetimes without EventSource Start/Stop activity semantics. Every begun build emits one end event on success, failure or abandonment; end includes succeeded. PagesReclaimed reports only nonempty committed batches.
+
+Before direct open records a receipt for an unknown index owner, it loads every page of that owner through checksum verification. Ordinary registered owners incur no extra reads. The reserved owner enters the retirement queue before the root bracket. Its active creator pins the retirement horizon, so early purge passes only requeue it. A failed root bracket with no registration records its receipt during live retirement after the creator ends, so its allocated page does not wait for reopen.
+
+The journal bound is also checked with a 256 KiB trigger above the largest chunk delta, requiring a window that accumulates multiple chunks. The original 64 KiB comparison still measures the reduction from the former whole-build bracket.
+
+Exact property keys count UTF-16BE bytes and zero escapes before encoding, and builds reserve their temporary prefix and composite buffers before allocation through a high-water mark. Ordinary CREATE, SET and DELETE do not reserve exact-key workspace, with any text index, including one on the same label and property. Text extraction already walks the original string and reserves each fixed nine-byte trigram before yielding it. Planner enum validation uses allocation-free comparisons; GC eviction of reflection enum caches must not alter ordinary-write allocation floors or ceilings.

@@ -192,7 +192,7 @@ commit the caller's transaction. The engine takes the logical database's exclusi
 rejects write conflicts and stale index definitions, and enforces schema ownership before calling
 the catalog.
 
-`CreateIndexAsync` builds scalar-path indexes or typed DISTINCT array descriptors immediately. The typed overload also persists `IncludeMissing`; OQL array-index syntax and planning follow in OQ-I2. Index definitions and registrations use v3, and the pre-recovery fence refuses v1/v2 with CD06105 and a recreate remedy. `SaveDocumentAsync` and
+`CreateIndexAsync` builds scalar-path indexes or typed DISTINCT array descriptors immediately. The typed overload also persists `IncludeMissing`; OQL array-index syntax and planning follow in OQ-I2. Index definitions and registrations use v4, and the pre-recovery fence refuses v1/v2/v3 with CD06105 and a recreate remedy. `SaveDocumentAsync` and
 `DeleteDocumentAsync` maintain every visible index alongside metadata writes; queries do not
 rebuild indexes. The Documents engine reaches index creation and deletion through planned OQL
 `CREATE INDEX` and `DROP INDEX` statements; these catalog methods remain lower-level transactional
@@ -238,7 +238,7 @@ Deadline-dependent peers and busy test drivers use the linked Storage test helpe
 
 ## Index history reclamation (#1195)
 
-The shared coordinator's purge pass reclaims safe dead B-tree entries in bounded batches;
+The shared coordinator's purge pass reclaims safe dead B-tree entries and retired index owners in bounded batches;
 unique inserts also prune their key's history while reusing a single descent. Old snapshot
 views remain valid. Empty-leaf reclamation remains deferred, with no format, wire or language
 change. The callback follows the current manager after catalog/store reattachment.
@@ -364,3 +364,5 @@ derive from scalar/aggregate bases with protected cores. Function context suppli
 statement cancellation and transaction clock. Callback faults carry CD05017 with their original
 cause; native arithmetic codes, query planning, rollback, formats and wire layouts are preserved.
 See [DESIGN.md](DESIGN.md#engine-registered-document-functions) for contracts and reference anchors.
+
+Index backfill retains existing name references, a bounded chunk and one document's extracted keys under StatementMemoryBudget. UNIQUE validation walks the completed tree. DROP schedules exact owner reclamation after old snapshots end; open discovers orphan owners from the recovered storage directory without another full-page scan.

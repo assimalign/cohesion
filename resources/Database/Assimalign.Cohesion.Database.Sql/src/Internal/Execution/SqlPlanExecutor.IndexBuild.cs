@@ -5,7 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Internal;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -17,85 +19,121 @@ internal sealed partial class SqlPlanExecutor
 
     // Test seam: sample retained workspace while the validation cursor is still walking.
     internal static Action? UniqueIndexEntryValidated { get; set; }
+    internal static Action<string, int, long>? IndexBuildBoundary { get; set; }
+    internal static Action<StorageTransaction>? IndexBuildBracketOpened { get; set; }
 
     private async Task BuildDeferredIndexAsync(SqlCatalogTable table, IndexDefinition definition,
         int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken, SqlCatalogIndex? metadata = null,
-        ulong physicalOwner = 0)
+        ulong physicalOwner = 0, bool retryRootAdmission = false)
     {
-        // Counting is worker work too. Build only checks owner allocation metadata.
-        long total = 0;
-        foreach (var row in ScanVersions(table, cancellationToken))
+        ulong eventOwner = physicalOwner == 0 ? await WithCatalogMigrationAdmissionAsync(
+            () => _catalog.ReserveIndexTreeOwner(table.ObjectId, cancellationToken), statement, cancellationToken).ConfigureAwait(false) : physicalOwner;
+        bool buildSucceeded = false;
+        try
         {
-            total++;
-        }
-        statement.ProvisioningProgress?.Invoke(0, total);
-        statement.ObserveCopyJournalStart(_storage.JournalLength);
-        statement.CheckCopySpace(1);
-        long journalStart = 0;
-        var index = await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction,
-            async bracket =>
+            _catalog.BeginIndexBuild(eventOwner);
+            IndexBuildBoundary?.Invoke("owner-reserved", 0, _storage.JournalLength);
+            // Only progress consumers need a second, counting scan.
+            long total = 0;
+            if (statement.ProvisioningProgress is not null)
             {
-                statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
-                statement.CheckCopySpace(1);
-                long allocationStart = statement.CaptureCopyAllocations();
-                journalStart = _storage.JournalLength - 38;
-                var createdIndex = physicalOwner == 0
-                    ? await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId, definition, cancellationToken).ConfigureAwait(false)
-                    : await _indexManager.CreatePreparedAsync(statement.Transaction, table.ObjectId, physicalOwner, definition, cancellationToken).ConfigureAwait(false);
-                // Track registration before the bracket's durable end can fail.
-                created();
-                statement.AddCopyAllocations(allocationStart);
-                return createdIndex;
-            },
-            durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
-        await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
-        // A root never moves on splits. Capture once, outside the row-bracket loop;
-        // per-bracket costing must not walk/allocate the whole database directory.
-        long root = statement.CheckpointCopy ? _indexManager.ExportRegistrations(includePrepared: true)
-            .Single(value => value.ObjectId == table.ObjectId && value.Definition.Name == definition.Name).RootPageId : 0;
-        long processed = 0;
-        int maximumKey = 0;
-
-        // Each bracket is bounded; no table-sized storage gate prevents another table
-        // from committing. The table lock and snapshot pin outlive every bracket.
-        foreach (var batch in ScanVersions(table, cancellationToken).Chunk(64))
-        {
-            var included = metadata?.Predicate is null ? batch : batch.Where(version => MatchesIndex(table, metadata, version.Values, cancellationToken: cancellationToken, record: false)).ToArray();
-            long touches = 0, allocations = 0;
-            if (statement.CheckpointCopy)
-            {
-                foreach (var version in included)
-                { maximumKey = Math.Max(maximumKey, BuildIndexKey(table, ordinals, version.Values, metadata?.KeyOrders).Length); }
-                int height = SqlSchemaProvisioner.JointTreeHeight(_storage, root, physicalOwner == 0 ? table.ObjectId : physicalOwner, out int free);
-                int entryBytes = maximumKey + 28;
-                if (free < included.Length * entryBytes) { height += SqlSchemaProvisioner.JointTreeGrowth(included.Length, entryBytes); }
-                touches = included.Length * (4L * height + 3);
-                allocations = included.Length * 2L * height;
-                statement.ObserveCopyJournalStart(_storage.JournalLength);
-                statement.CheckCopySpace(touches, allocations);
+                foreach (var row in ScanVersions(table, cancellationToken)) { total++; }
             }
-            await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
-            {
-                statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
-                statement.CheckCopySpace(touches, allocations);
-                long allocationStart = statement.CaptureCopyAllocations();
-                journalStart = _storage.JournalLength - 38;
-                foreach (var version in included)
+            statement.ProvisioningProgress?.Invoke(0, total);
+            statement.ObserveCopyJournalStart(_storage.JournalLength);
+            statement.CheckCopySpace(1);
+            long journalStart = 0;
+            var index = await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction,
+                async bracket =>
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var key = BuildIndexKey(table, ordinals, version.Values, metadata?.KeyOrders);
-                    await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
-                        version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
-                }
-                statement.AddCopyAllocations(allocationStart);
-                return true;
-            }, durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken).ConfigureAwait(false);
+                    IndexBuildBracketOpened?.Invoke(bracket);
+                    statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
+                    statement.CheckCopySpace(1);
+                    long allocationStart = statement.CaptureCopyAllocations();
+                    journalStart = _storage.JournalLength - 38;
+                    var createdIndex = physicalOwner == 0
+                        ? await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId, definition, cancellationToken, eventOwner).ConfigureAwait(false)
+                        : await _indexManager.CreatePreparedAsync(statement.Transaction, table.ObjectId, physicalOwner, definition, cancellationToken).ConfigureAwait(false);
+                    // Track registration before the bracket's durable end can fail.
+                    created();
+                    statement.AddCopyAllocations(allocationStart);
+                    IndexBuildBoundary?.Invoke("root-before-commit", 0, _storage.JournalLength);
+                    return createdIndex;
+                },
+                durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken,
+                retryIndexAdmission: retryRootAdmission).ConfigureAwait(false);
+            IndexBuildBoundary?.Invoke("root-committed", 0, _storage.JournalLength);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
-            processed += batch.Length;
-            statement.ProvisioningProgress?.Invoke(processed, Math.Max(processed, total));
+            // A root never moves on splits. Capture once, outside the row-bracket loop;
+            // per-bracket costing must not walk/allocate the whole database directory.
+            var registration = _indexManager.ExportRegistrations(includePrepared: true)
+                .Single(value => value.ObjectId == table.ObjectId && value.Definition.Name == definition.Name);
+            long root = registration.RootPageId;
+            ulong owner = _indexManager.PageOwner(registration);
+            long processed = 0;
+            int maximumKey = 0;
+
+            // Each bracket is bounded; no table-sized storage gate prevents another table
+            // from committing. The table lock and snapshot pin outlive every bracket.
+            SqlDmlMemory? memory = null;
+            await IndexBuildLoop.RunAsync(ScanVersions(table, cancellationToken), async (batch, token) =>
+            {
+                var included = metadata?.Predicate is null ? batch : batch.Where(version => MatchesIndex(table, metadata, version.Values, cancellationToken: cancellationToken, record: false)).ToArray();
+                long touches = 0, allocations = 0;
+                if (statement.CheckpointCopy)
+                {
+                    foreach (var version in included)
+                    { maximumKey = Math.Max(maximumKey, BuildIndexKey(table, ordinals, version.Values, metadata?.KeyOrders).Length); }
+                    int height = SqlSchemaProvisioner.JointTreeHeight(_storage, root, owner, out int free);
+                    int entryBytes = maximumKey + 28;
+                    if (free < included.Length * entryBytes) { height += SqlSchemaProvisioner.JointTreeGrowth(included.Length, entryBytes); }
+                    touches = included.Length * (4L * height + 3);
+                    allocations = included.Length * 2L * height;
+                    statement.ObserveCopyJournalStart(_storage.JournalLength);
+                    statement.CheckCopySpace(touches, allocations);
+                }
+                IndexBuildBoundary?.Invoke("chunk-start", batch.Length, _storage.JournalLength);
+                await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
+                {
+                    IndexBuildBracketOpened?.Invoke(bracket);
+                    statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
+                    statement.CheckCopySpace(touches, allocations);
+                    long allocationStart = statement.CaptureCopyAllocations();
+                    journalStart = _storage.JournalLength - 38;
+                    foreach (var version in included)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var key = BuildIndexKey(table, ordinals, version.Values, metadata?.KeyOrders);
+                        await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
+                            version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
+                    }
+                    statement.AddCopyAllocations(allocationStart);
+                    IndexBuildBoundary?.Invoke("chunk-before-commit", included.Length, _storage.JournalLength);
+                    return true;
+                }, durable: true, cancellationToken, waitForAdmission: false), false, statement, cancellationToken,
+                    retryIndexAdmission: true).ConfigureAwait(false);
+                IndexBuildBoundary?.Invoke("chunk-committed", batch.Length, _storage.JournalLength);
+                await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
+                processed += batch.Length;
+                statement.ProvisioningProgress?.Invoke(processed, Math.Max(processed, total));
+            }, _ => default, cancellationToken,
+                beginChunk: () =>
+                {
+                    memory = new SqlDmlMemory(statement.Metrics, _definitions.StatementMemoryBudget);
+                    try { memory.Reserve(80L + IndexBuildLoop.ChunkSize * 96L); return memory; }
+                    catch { memory.Dispose(); throw; }
+                }, retain: version => memory!.Retain(version.Values)).ConfigureAwait(false);
+            await ValidateBuiltUniqueIndexAsync(table, index, statement, cancellationToken,
+                metadata is not null && (metadata.Predicate is not null || statement.ProvisioningProgress is null) ? ordinals : null,
+                metadata?.Predicate is not null).ConfigureAwait(false);
+            statement.ProvisioningProgress?.Invoke(processed, processed);
+            buildSucceeded = true;
         }
-        await ValidateBuiltUniqueIndexAsync(table, index, statement, cancellationToken, metadata?.Predicate is null ? null : ordinals, metadata?.Predicate is not null).ConfigureAwait(false);
-        statement.ProvisioningProgress?.Invoke(processed, processed);
+        finally
+        {
+            if (!buildSucceeded) { _catalog.EndIndexBuild(eventOwner, false); }
+            if (!buildSucceeded && physicalOwner == 0) { _catalog.AbandonTableAs(eventOwner); }
+        }
     }
 
     private async ValueTask ValidateBuiltUniqueIndexAsync(SqlCatalogTable table, BTreeIndex index,
