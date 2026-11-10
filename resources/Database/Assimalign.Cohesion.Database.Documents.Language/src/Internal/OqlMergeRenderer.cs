@@ -62,6 +62,9 @@ internal static class OqlMergeRenderer
                 }
                 if (merge.Returning is not null) { yield return merge.Returning; }
                 break;
+            case OqlWindowExpression or OqlWindowSpecification or OqlWindowDefinition:
+                foreach (var child in WindowNodeChildren(node)) { yield return child; }
+                break;
             case OqlReturningExpression returning: foreach (var projection in returning.Projections) { yield return projection.Expression; } break;
             case OqlSubqueryExpression subquery: yield return subquery.Query; break;
             case OqlSetOperationExpression compound: yield return compound.Left; yield return compound.Right; break;
@@ -72,6 +75,7 @@ internal static class OqlMergeRenderer
                 if (select.Predicate is not null) { yield return select.Predicate; }
                 foreach (var group in select.GroupBy) { yield return group; }
                 if (select.Having is not null) { yield return select.Having; }
+                foreach (var window in (IEnumerable<OqlExpression>)select.Windows) { yield return window; }
                 break;
             case OqlUnaryExpression unary: yield return unary.Operand; break;
             case OqlBinaryExpression binary: yield return binary.Left; yield return binary.Right; break;
@@ -105,6 +109,22 @@ internal static class OqlMergeRenderer
             foreach (var order in query.OrderBy) { yield return order.Expression; }
             if (query.Limit is not null) { yield return query.Limit; }
             if (query.Offset is not null) { yield return query.Offset; }
+        }
+    }
+
+    private static IEnumerable<OqlExpression> WindowNodeChildren(OqlExpression node)
+    {
+        switch (node)
+        {
+            case OqlWindowExpression window:
+                yield return window.Call;
+                if (window.Specification is not null) { yield return window.Specification; }
+                break;
+            case OqlWindowDefinition definition: yield return definition.Specification; break;
+            case OqlWindowSpecification specification:
+                foreach (var key in specification.PartitionBy) { yield return key; }
+                foreach (var order in specification.OrderBy) { yield return order.Expression; }
+                break;
         }
     }
 
@@ -170,6 +190,10 @@ internal static class OqlMergeRenderer
                 { return "(" + E(unary.Operand) + " " + unary.Operator + ")"; }
                 if (unary.Operator is not ("+" or "-" or "NOT" or "EXISTS")) { throw new InvalidOperationException(ErrorMessages.MergeRenderInvalid); }
                 return "(" + unary.Operator + " " + E(unary.Operand) + ")";
+            case OqlWindowExpression window:
+                if ((window.Specification is null) == (window.Name is null))
+                { throw new InvalidOperationException(ErrorMessages.MergeRenderInvalid); }
+                return E(window.Call) + " OVER " + (window.Specification is null ? WindowName(window.Name!) : Specification(window.Specification, depth + 1));
             case OqlCallExpression call: return Name(call.Name) + "(" + (call.Quantifier == OqlAggregateQuantifier.None ? "" : call.Quantifier.ToString().ToUpperInvariant() + " ") + List(call.Arguments) + ")";
             case OqlArrayExpression array: return "[" + List(array.Elements) + "]";
             case OqlObjectExpression obj: return "{" + string.Join(", ", obj.Members.Select(m => Literal(m.Key) + ": " + E(m.Value))) + "}";
@@ -273,6 +297,8 @@ internal static class OqlMergeRenderer
             { text += " GROUP BY " + string.Join(", ", select.GroupBy.Select((g, i) => E(g) + Alias(select.GroupAliases.Count > i ? select.GroupAliases[i] : null))); }
             if (select.GroupAs is not null) { text += " GROUP AS " + Name(select.GroupAs); }
             if (select.Having is not null) { text += " HAVING " + E(select.Having); }
+            if (select.Windows.Count > 0)
+            { text += " WINDOW " + string.Join(", ", select.Windows.Select(w => WindowName(w.Name) + " AS " + Specification(w.Specification, depth + 1))); }
         }
         if (query.OrderBy.Count > 0)
         { text += " ORDER BY " + string.Join(", ", query.OrderBy.Select(o => E(o.Expression) + (o.Descending ? " DESC" : " ASC") +
@@ -283,6 +309,20 @@ internal static class OqlMergeRenderer
 
         string Count(OqlExpression value) => value is OqlUnaryExpression { Operator: "+" or "-" } sign
             ? sign.Operator + " " + E(sign.Operand) : E(value);
+    }
+
+    private static string WindowName(string name) => name.Length == 0
+        ? throw new InvalidOperationException(ErrorMessages.MergeRenderInvalid) : Name(name);
+
+    private static string Specification(OqlWindowSpecification specification, int depth)
+    {
+        string E(OqlExpression expression) => Expression(expression, depth + 1);
+        string text = specification.Reference is null ? "" : WindowName(specification.Reference);
+        if (specification.PartitionBy.Count > 0) { text += " PARTITION BY " + string.Join(", ", specification.PartitionBy.Select(E)); }
+        if (specification.OrderBy.Count > 0)
+        { text += " ORDER BY " + string.Join(", ", specification.OrderBy.Select(o => E(o.Expression) + (o.Descending ? " DESC" : " ASC") +
+            (o.NullPlacement == OqlNullPlacement.Default ? "" : o.NullPlacement == OqlNullPlacement.First ? " NULLS FIRST" : " NULLS LAST"))); }
+        return "(" + text.TrimStart() + ")";
     }
 
     private static string Literal(object? value) => value switch

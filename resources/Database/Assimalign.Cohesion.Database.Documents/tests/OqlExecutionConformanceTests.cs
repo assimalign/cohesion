@@ -104,6 +104,8 @@ public sealed class OqlExecutionConformanceTests
             [
                 InsertCase(),
             ],
+            [OqlClauses.Over] = [new("SELECT ROW_NUMBER() OVER (ORDER BY name) AS n FROM items ORDER BY n", [[1L], [2L], [3L], [4L]])],
+            [OqlClauses.Window] = [new("SELECT RANK() OVER w AS n FROM items WINDOW w AS ()", [[1L], [1L], [1L], [1L]])],
             [OqlClauses.Union] =
             [
                 new("SELECT 1 AS n FROM items UNION SELECT 1 AS n FROM items", [[1m]]),
@@ -527,6 +529,14 @@ public sealed class OqlExecutionConformanceTests
         new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
         {
             ["META"] = new("META().id", [["a"], ["b"], ["c"], ["d"]]),
+            ["ROW_NUMBER"] = new("ROW_NUMBER() OVER (ORDER BY META().id)", [[1L], [2L], [3L], [4L]]),
+            ["RANK"] = ScalarCase("RANK() OVER ()", 1L),
+            ["DENSE_RANK"] = ScalarCase("DENSE_RANK() OVER ()", 1L),
+            ["PERCENT_RANK"] = ScalarCase("PERCENT_RANK() OVER ()", 0m),
+            ["CUME_DIST"] = ScalarCase("CUME_DIST() OVER ()", 1m),
+            ["NTILE"] = new("NTILE(9) OVER (ORDER BY META().id)", [[1L], [2L], [3L], [4L]]),
+            ["LAG"] = new("LAG(name,1,'before') OVER (ORDER BY META().id)", [["before"], ["alpha"], ["beta"], ["gamma"]]),
+            ["LEAD"] = new("LEAD(name,1,'after') OVER (ORDER BY META().id)", [["beta"], ["gamma"], ["delta"], ["after"]]),
             ["LOWER"] = ScalarCase("LOWER('AbC')", "abc"),
             ["UPPER"] = ScalarCase("UPPER('AbC')", "ABC"),
             ["LENGTH"] = ScalarCase("LENGTH('😀a')", 2L),
@@ -702,6 +712,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.GroupBy => expression is OqlSelectExpression { GroupBy.Count: > 0 },
         OqlClauses.GroupAs => expression is OqlSelectExpression { GroupAs: not null },
         OqlClauses.Having => expression is OqlSelectExpression { Having: not null },
+        OqlClauses.Over => expression is OqlSelectExpression windows && Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.HasWindows(windows),
+        OqlClauses.Window => expression is OqlSelectExpression { Windows.Count: > 0 },
         OqlClauses.OrderBy => expression is OqlSelectExpression { OrderBy.Count: > 0 },
         OqlClauses.Limit => expression is OqlSelectExpression { Limit: not null },
         OqlClauses.Offset => expression is OqlSelectExpression { Offset: not null },

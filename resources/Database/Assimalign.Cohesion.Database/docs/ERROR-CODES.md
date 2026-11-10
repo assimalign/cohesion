@@ -407,6 +407,11 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1731, OQ-Q2) | CD01034 | Binding/names — unbound variable in a FROM expression without an input-row scope |
 | New (#1732) | CD01035 | Binding/names — unbound/self/forward key source reference or ambiguous/invalid joined META receiver |
 | New (#1804, OQ-M1) | CD01040 | Binding/names — MERGE references the unavailable ON KEY target, an unnamed AST root or an invalid metadata receiver |
+| New (#1805, OQ-W1) | CD01041 | Binding/names — empty or duplicate WINDOW name |
+| New (#1805, OQ-W1) | CD01042 | Binding/names — unknown, self or forward window reference |
+| New (#1805, OQ-W1) | CD01043 | Binding/names — copied window overrides PARTITION/ORDER BY or direct OVER has neither/both a name and specification |
+| New (#1805, OQ-W1) | CD01044 | Binding/names — window in an invalid position or a window-only function without OVER |
+| New (#1805, OQ-W1) | CD01045 | Binding/names — window nested in another window's argument or key |
 | New (#1767) | CD01036 | Binding/names — VALUES references its destination binding without a source row or local declaration |
 | New (#1803, OQ-S1) | CD01037 | Binding/names — ORDER BY over an all-RAW/VALUE compound has no named result members |
 | New (#1803, OQ-S1) | CD01038 | Binding/names — compound ORDER BY uses an unbound result member, source metadata or star |
@@ -611,9 +616,9 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
-| CD05018 | Retained SELECT sources/groups, compound equality/multiset/sort/output state, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
+| CD05018 | Retained SELECT sources/groups, window partitions/keys/navigation/results, compound equality/multiset/sort/output state, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
-| CD05020 | Shared expression/lookup/set-operation work budget exhausted across a statement's subqueries, expression sources, key joins and compounds (#1731, #1732) | — |
+| CD05020 | Shared expression/lookup/set-operation/window work budget exhausted across a statement's subqueries, expression sources, key joins and compounds (#1731, #1732) | — |
 | CD05021 | Statement planning, EXPLAIN or evaluation needs more execution stack than the executing thread has left; the statement fails and the session stays open (#1803) | — |
 | CD05022 | MERGE execution is unavailable until OQ-M2; EXPLAIN MERGE remains available (#1804) | — |
 | CD07001 | Session belongs to another database | — |

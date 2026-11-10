@@ -73,6 +73,8 @@ internal sealed partial class DocumentPlanner
             ValidateGroupArrayInput(quantified.Collection, query, scopes, functions, aggregateInput, local);
             ValidateGroupArrayInput(quantified.Predicate, query, scopes, functions, aggregateInput, scopes.Enter(quantified, quantified.Variable, local));
         }
+        else if (expression is OqlWindowExpression window)
+        { foreach (var child in WindowChildren(window)) { ValidateGroupArrayInput(child, query, scopes, functions, aggregateInput, local); } }
         else if (expression is OqlCallExpression call)
         {
             foreach (var argument in call.Arguments) { ValidateGroupArrayInput(argument, query, scopes, functions, aggregateInput || functions.IsAggregate(call.Name), local); }

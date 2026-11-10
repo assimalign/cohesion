@@ -66,6 +66,8 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.GroupBy)]
     [InlineData(OqlClauses.GroupAs)]
     [InlineData(OqlClauses.Having)]
+    [InlineData(OqlClauses.Over)]
+    [InlineData(OqlClauses.Window)]
     [InlineData(OqlClauses.OrderBy)]
     [InlineData(OqlClauses.Limit)]
     [InlineData(OqlClauses.Offset)]

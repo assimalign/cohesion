@@ -964,6 +964,106 @@ typed-column trial pins the surviving left and right representatives through Jso
 scale (3.00 and 4.50). The same generator runs 288 cases over TCP; the wider conformance corpus
 checks equality, budgets and both transports.
 
+## Window stage (#1805, OQ-W1)
+
+OVER accepts an inline (PARTITION BY ... ORDER BY ...) specification, OVER name, or a
+parenthesized copy (name ...). WINDOW name AS (...) declarations follow GROUP BY, GROUP AS
+and HAVING and precede final ORDER BY/LIMIT/OFFSET. LETTING remains CK00001. Names preserve
+OQL's ordinal, case-sensitive identifier rules. The new window words remain usable as field,
+collection, alias and binding names in window-free statements, including inside call arguments.
+Only a call's closing parenthesis can introduce its OVER suffix. After an ordinary call, OVER
+starts a window before a parenthesized specification or a name token that cannot begin a clause
+after an implicit alias. Otherwise the base implicit-alias rules apply. After any of the twelve
+window-only names listed below, OVER is always the window keyword; FIRST_VALUE, LAST_VALUE,
+NTH_VALUE and RATIO_TO_REPORT with a valid target remain unsupported (CK00001). A missing or invalid target
+receives CD00002 at that target, asking for a window name or parenthesized specification and
+explaining that clause-word names must be quoted. WINDOW followed by
+an identifier (including a function name) or quoted identifier, then AS, starts a declaration. RESPECT and IGNORE are modifiers only
+as RESPECT NULLS or IGNORE NULLS immediately after a call's closing parenthesis. Definitions may copy earlier definitions only;
+self/forward references fail CD01042. Duplicate or empty names fail CD01041. A copy cannot
+supply PARTITION BY, even when its base has none, or replace an existing ORDER BY (CD01043).
+A direct AST with neither or both a name and specification also fails CD01043.
+
+ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE, LAG and LEAD require OVER.
+They execute after WHERE, grouping and HAVING, before projection, DISTINCT, final ordering and
+paging. SELECT projections and SELECT ORDER BY are their only positions at each query level.
+Aggregate arguments, SATISFIES and comprehension bodies, WHERE, GROUP BY, HAVING,
+DML values/actions and RETURNING refuse with one located CD01044.
+A window-only function without OVER also fails CD01044. A window in another window's arguments
+or keys, including a named definition's keys, fails CD01045.
+An independent subquery, including a MERGE source, owns its own window scope and placements.
+A compound's result-only ORDER BY fails CD01044 for window calls; wrap the compound in SELECT.
+Grouped expressions and ordinary aggregate results may supply window arguments and keys.
+Window keys and arguments do not see projection aliases, including in final ORDER BY.
+A window named rows, range, groups, exclude or partition must be quoted in a parenthesized
+copy, for example OVER ("rows" ORDER BY x); frame vocabulary belongs to the later frame stage.
+After OVER, names spelled UNNEST, NEST, JOIN, LEFT, INNER, UNION, INTERSECT, EXCEPT, RETURNING,
+LETTING or WINDOW must be quoted, for example OVER "union". These words can introduce clauses
+after a base implicit alias; reserved clause keywords such as ORDER also require quoting.
+Function-name tokens otherwise follow the ordinary name rules.
+
+A non-window, non-aggregate function with OVER is never valid. For example, LOWER(x) OVER ()
+retains CK00001 in OQ-W1. A distinct diagnostic waits for OQ-W2, whose aggregate OVER support
+must distinguish valid aggregate windows from invalid scalar functions.
+
+Partitions use GROUP BY equality: MISSING and NULL are different partitions, numeric
+representations compare by value, strings use ordinal collation, and arrays/objects use the
+existing structural order. Window ORDER BY uses the direction/NULLS table below; ASC is the
+omitted direction, with NULLS FIRST for ASC and NULLS LAST for DESC. Peers have equal ordering
+keys. Without ORDER BY the entire partition is one peer group. Peer order and unordered
+ROW_NUMBER/navigation order are unspecified; execution uses stable stage-input order, which
+is document identity for a plain collection and source iteration order for expression sources.
+A final ORDER BY controls result order independently of the window ordering.
+
+An unaliased window projection uses the lowercase function name, as ordinary calls do.
+ROW_NUMBER and ranks are one-based Int64; RANK leaves gaps and DENSE_RANK counts peer groups.
+PERCENT_RANK is (rank-1)/(partition rows-1), or Decimal zero for a singleton; CUME_DIST is the
+last peer's position divided by partition rows, also Decimal. NTILE returns Int64 bucket numbers:
+larger buckets precede smaller ones, with trailing buckets empty when buckets exceed rows.
+W1 accepts positive Int64 integer literal bucket counts and nonnegative Int64 integer literal
+navigation offsets, optionally unary plus. Zero navigation offsets read the current row.
+Parameters, noninteger, NULL/MISSING, negative and row-dependent counts/offsets retain CK00001,
+including on empty input. LAG/LEAD default to offset 1 and fallback NULL, respect both NULL and
+MISSING, and use the current row's explicit default only for an out-of-partition target.
+Value expressions evaluate only at selected target rows; an out-of-partition target never
+evaluates the value expression. Constant offsets visit each target at most once per call. This
+rule follows SQL's documented contract and PostgreSQL utils/adt/windowfuncs.c:558-574;
+no SQL common-type coercion is introduced over JSON values.
+
+Every partition sees the complete input. LIMIT/OFFSET and index-order shortcuts cannot truncate
+it; LIMIT 0 retains eager validation and skips execution. Equal specifications share a sort and
+key evaluation using scoped expression equivalence, including implicit aliases. Independent
+specifications evaluate keys independently. Window row storage, result bindings, sort indexes,
+key payloads, navigation values and output charge StatementMemoryBudget (CD05018); there is
+no spill. Work shares StatementWorkBudget (CD05020), including sort comparisons. Reservations
+release on success, error and cancellation. EXPLAIN includes WindowAggregate without reading
+input values; its detail names partition/order keys and groups that share a sort. Window-only
+children have separate iterators; the shared planner and MERGE child iterators retain their base
+instance layouts (21 and 28 fields respectively). Exact JOIN-plan and MERGE-parse allocation
+guards pin the window-free paths on ARM64 and x64, including an OVER field name.
+Using OVER as an identifier does not start the post-parse window walk. Deferred value-function names
+also remain usable as collection and header-alias names before a parenthesized key/value list.
+Adding OVER selects the nested execution path for the entire statement: scan predicates and
+projections also consume StatementWorkBudget and can refuse with CD05020.
+
+Frames (ROWS/RANGE/GROUPS/EXCLUDE), aggregate OVER, FIRST_VALUE/LAST_VALUE/NTH_VALUE,
+RATIO_TO_REPORT and RESPECT/IGNORE NULLS remain located CK00001 for OQ-W2/OQ-W3.
+Function registration reserves all twelve window names: ROW_NUMBER, RANK, DENSE_RANK,
+PERCENT_RANK, CUME_DIST, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE and RATIO_TO_REPORT.
+This changes base (`b5602544d`), which allowed application scalar functions with these names.
+Registering one now throws ArgumentException for the function parameter before engine build.
+The four deferred value/ratio names follow the existing REGEXP_* reservation policy.
+No implicit frame is evaluated by these ranking/navigation functions. No storage or wire
+version changes. The sealed window AST and OqlFunction.WindowKind are public metadata;
+MERGE's canonical renderer traverses declarations, keys and arguments within its 128-level bound.
+
+OqlWindowParserTests, DocumentWindowTests and DocumentWindowBudgetTests are the parser,
+generated brute-force and lifetime corpus. The seeded 10,000-statement MERGE round trip
+includes window-bearing source subqueries. Wire and NativeAOT checks run on InMemory and TCP.
+The generated oracle covers both directions, all null placements, ties, NULL/MISSING partitions,
+mixed numeric representations, ordinal strings, empty/singleton inputs, oversized NTILE buckets,
+and zero/out-of-partition navigation. It derives permitted peer permutations from ROW_NUMBER.
+
 ## ORDER BY null placement (#1730)
 
 Each term accepts `expr [ASC | DESC] [NULLS FIRST | LAST]`, including projection aliases,

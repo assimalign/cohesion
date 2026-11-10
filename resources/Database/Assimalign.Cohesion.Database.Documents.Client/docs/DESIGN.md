@@ -44,6 +44,14 @@ deletion that survived transaction end. Leading array definitions keep IncludeMi
 These are catalog checks;
 the client API and wire contract do not change. OQL array-index DDL and planning follow in OQ-I2.
 
+## Window wire conformance (#1805, OQ-W1)
+
+Ranking/navigation use existing OQL text, Int64/Decimal headers and JSON cells on InMemory
+and TCP. Named-window copies, peers, MISSING/NULL partitions, complete-partition paging,
+WindowAggregate EXPLAIN, located CK00001 and CD05018 refusal/reuse have permanent tests.
+The NativeAOT consumer executes all eight functions and EXPLAIN on both transports.
+No API, capability, frame, codec or protocol version changes.
+
 ## Aggregate wire conformance (#1729, OQ-G1)
 
 ALL/DISTINCT arguments and ARRAY_AGG, BOOL_AND, BOOL_OR, aggregate EVERY, STDDEV and VARIANCE
