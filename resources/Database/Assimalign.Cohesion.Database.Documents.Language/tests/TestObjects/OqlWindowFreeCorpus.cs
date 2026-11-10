@@ -17,24 +17,7 @@ internal static class OqlWindowFreeCorpus
     internal static IEnumerable<string> Candidates(string text)
     {
         yield return text;
-        var lexer = new TokenLexer(text, OqlLanguageProfile.Instance.ToLexerOptions());
-        var tokens = new List<(TokenType Type, string Text, int Start)>();
-        while (lexer.MoveNext())
-        {
-            var token = lexer.Current;
-            if (token.Type != TokenType.Comment) { tokens.Add((token.Type, token.Value.ToString(), token.Position)); }
-        }
-        int statement = tokens.Count > 0 && tokens[0].Text.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
-        bool indexDdl = tokens.Count > statement + 2 && tokens[statement].Text.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
-            (tokens[statement + 1].Text.Equals("INDEX", StringComparison.OrdinalIgnoreCase) ||
-             tokens[statement + 1].Text.Equals("UNIQUE", StringComparison.OrdinalIgnoreCase) && tokens[statement + 2].Text.Equals("INDEX", StringComparison.OrdinalIgnoreCase));
-        // Classify and group replacement spans once. Each rename then visits only
-        // its own spans, preserving the recorded ordinal spelling/word order.
-        var positions = Enumerable.Range(0, tokens.Count).Where(IsName)
-            .GroupBy(index => tokens[index].Text, StringComparer.Ordinal).OrderBy(group => group.Key, StringComparer.Ordinal)
-            .Select(group => group.ToArray()).ToArray();
-        IEnumerable<int[]> groups = text.Length > 100_000 ?
-            [positions.SelectMany(group => group).Order().ToArray()] : positions;
+        var (tokens, groups) = ReplacementGroups(text);
         foreach (var group in groups)
         {
             foreach (string word in Words)
@@ -52,6 +35,31 @@ internal static class OqlWindowFreeCorpus
                 yield return builder.ToString();
             }
         }
+    }
+
+    internal static int CandidateCount(string text) => 1 + Words.Length * ReplacementGroups(text).Groups.Length;
+
+    private static (List<(TokenType Type, string Text, int Start)> Tokens, int[][] Groups) ReplacementGroups(string text)
+    {
+        var lexer = new TokenLexer(text, OqlLanguageProfile.Instance.ToLexerOptions());
+        var tokens = new List<(TokenType Type, string Text, int Start)>();
+        while (lexer.MoveNext())
+        {
+            var token = lexer.Current;
+            if (token.Type != TokenType.Comment) { tokens.Add((token.Type, token.Value.ToString(), token.Position)); }
+        }
+        int statement = tokens.Count > 0 && tokens[0].Text.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        bool indexDdl = tokens.Count > statement + 2 && tokens[statement].Text.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
+            (tokens[statement + 1].Text.Equals("INDEX", StringComparison.OrdinalIgnoreCase) ||
+             tokens[statement + 1].Text.Equals("UNIQUE", StringComparison.OrdinalIgnoreCase) && tokens[statement + 2].Text.Equals("INDEX", StringComparison.OrdinalIgnoreCase));
+        // Classify and group replacement spans once. Each rename then visits only
+        // its own spans, preserving the recorded ordinal spelling/word order.
+        var positions = Enumerable.Range(0, tokens.Count).Where(IsName)
+            .GroupBy(index => tokens[index].Text, StringComparer.Ordinal).OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => group.ToArray()).ToArray();
+        int[][] groups = text.Length > 100_000 ?
+            [positions.SelectMany(group => group).Order().ToArray()] : positions;
+        return (tokens, groups);
 
         bool IsName(int index)
         {

@@ -50,13 +50,18 @@ internal static class OqlWindowAcceptanceRecorder
 
     // Copy this helper and the generators into the reference commit's test project, then
     // invoke from a temporary Fact. No reference to window AST types is needed at base.
-    internal static (int Candidates, int Accepted) Record(IEnumerable<string> statements, string destination)
+    internal static (int Candidates, int Accepted, int Excluded) Record(IEnumerable<string> statements, string destination,
+        string? reservedCallsDestination = null)
     {
         var parser = new OqlQueryParser(true);
         var flags = new List<byte>();
-        int candidates = 0, accepted = 0;
+        var reservedOrdinals = new List<int>();
+        int candidates = 0, accepted = 0, ordinal = 0;
         foreach (string text in statements)
         {
+            int current = ordinal++;
+            if (reservedCallsDestination is not null && OqlWindowFreeCorpus.HasReservedCall(text))
+            { reservedOrdinals.Add(current); continue; }
             if (candidates % 8 == 0) { flags.Add(0); }
             if (!parser.Parse(text).Diagnostics.Any())
             {
@@ -67,6 +72,8 @@ internal static class OqlWindowAcceptanceRecorder
         }
         using var output = new GZipStream(File.Create(destination), CompressionLevel.SmallestSize);
         output.Write(flags.ToArray());
-        return (candidates, accepted);
+        if (reservedCallsDestination is not null)
+        { File.WriteAllText(reservedCallsDestination, "[" + string.Join(",", reservedOrdinals) + "]"); }
+        return (candidates, accepted, reservedOrdinals.Count);
     }
 }

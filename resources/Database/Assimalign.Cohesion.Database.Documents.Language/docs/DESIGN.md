@@ -402,7 +402,10 @@ ordinal names, JSON peers and null ordering. The MERGE renderer's child and quer
 all window metadata and the seeded 10,000-statement round trip generates varied window source
 queries through GROUP BY, HAVING and final ORDER BY. The runtime window-free corpus and identifier
 renames retain recorded base acceptance, exclude window nodes and check render/reparse/render
-stability without pinning base's renderer text. The compressed sampled corpus runs in Release;
+stability without pinning base's renderer text. Its iterative walk includes EXPLAIN and every
+INSERT/UPSERT source, value and RETURNING expression, UPDATE value/predicate/RETURNING and
+DELETE predicate/RETURNING. The compressed sampled corpus runs in Release over contiguous
+source-range theory cases, counting candidates as one original plus 21 per rename group;
 a generated name-site/follower matrix runs in both configurations. DIALECT lists all twelve reserved window
 function names. After an ordinary call, OVER takes a parenthesized specification or a name
 that cannot start a clause after a base implicit alias; window-only calls always take OVER
