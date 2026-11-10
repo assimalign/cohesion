@@ -4184,19 +4184,22 @@ return their argument's value in its type: COLLATE, NULLIF's first operand, nest
 COALESCE, unary + and -, ABS, DATE_TRUNC's temporal argument, and native MIN/MAX arguments.
 Reading a completed grouping slot or a window call does not bypass the source check.
 Scalar subqueries, derived-table/view/CTE columns and output aliases form query boundaries.
-A Null-typed value crossing one of these boundaries instead adopts the common type and can
+A Null-typed value crossing one of these boundaries adopts the common type and can
 fail at a row with CS02011 when its runtime family cannot convert implicitly. For example,
 a DOUBLE value in such a column cannot adopt INTEGER in COALESCE(v,0). These boundaries do
 not add planning refusal sources; PostgreSQL refuses the unresolved inner polymorphic call
 with 42804.
+Integer arithmetic and ROUND, FLOOR, CEIL, CEILING, POWER and MOD type an unresolved
+application polymorphic operand by their own rules, so its value can fail the common-type
+conversion at a row with CS02011; PostgreSQL refuses the inner call with 42804.
+COALESCE(NULL * TRUE,2) returns INTEGER 2 here versus PostgreSQL 42883.
 The NULL forms of these wrappers and query boundaries keep their existing behavior, including
 native MIN/MAX NULL result slots and nested all-NULL grouped alternatives. This preserves
 grouped all-NULL metadata. Their existing PostgreSQL departures remain: COALESCE((SELECT
 NULL),2), COALESCE(v,2) FROM (SELECT NULL AS v) q, and COALESCE(MAX(NULL),2) return 2
 here but PostgreSQL refuses with 42804; the grouped extrema form keeps Int64 metadata.
 COALESCE(-NULL,2) returns INTEGER 2 here versus PostgreSQL 42725; COALESCE(+NULL,2) and
-COALESCE(ABS(NULL),2) have INTEGER metadata here versus PostgreSQL DOUBLE;
-COALESCE(NULL * TRUE,2) returns INTEGER 2 here versus PostgreSQL 42883.
+COALESCE(ABS(NULL),2) have INTEGER metadata here versus PostgreSQL DOUBLE.
 Declared alternatives use built-in implicit conversions only; explicit-only and
 application-registered casts do not participate. Unknown literals use built-in input
 conversion. Compatible numeric alternatives widen through

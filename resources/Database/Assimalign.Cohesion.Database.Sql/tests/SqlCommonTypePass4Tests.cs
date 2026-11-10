@@ -43,6 +43,7 @@ public sealed class SqlCommonTypePass4Tests
                     "SELECT CASE WHEN TRUE THEN 0 ELSE ABS(-unproved_result(id,NULL)) END FROM t",
                     "SELECT COALESCE(ABS(unproved_result(id,NULL)),0) FROM t GROUP BY ABS(unproved_result(id,NULL))",
                     "SELECT COALESCE(ABS(NULLIF(unproved_result(id,NULL),1)),0) FROM t",
+                    "SELECT COALESCE(NULLIF(unproved_result(id,NULL),1),0) FROM t GROUP BY NULLIF(unproved_result(id,NULL),1)",
                 }) { yield return [sql, populated, tcp]; }
             }
         }
@@ -64,23 +65,43 @@ public sealed class SqlCommonTypePass4Tests
             code.ShouldBe("CS02080");
         });
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: ABS retains unsupported-parameter planning refusals (#1788)")]
-    [InlineData("SELECT COALESCE(ABS(@p),0)", false)]
-    [InlineData("SELECT COALESCE(ABS(@p),0) FROM t", false)]
-    [InlineData("SELECT COALESCE(ABS(@p),0) FROM t", true)]
-    public Task Plan_UnsupportedParameterUnderAbs_ShouldRefuseBeforeRows(string sql, bool populated)
-        => RunAsync(false, async (session, connection, token) =>
+    public static IEnumerable<object[]> UnsupportedParameters()
+    {
+        foreach (bool tcp in new[] { false, true })
+        {
+            foreach (bool populated in new[] { false, true })
+            {
+                foreach (string sql in new[]
+                {
+                    "SELECT COALESCE(ABS(@p),0)",
+                    "SELECT COALESCE(ABS(@p),0) FROM t",
+                    "SELECT COALESCE(MAX(@p),0) FROM t",
+                    "SELECT COALESCE(DATE_TRUNC('day',@p),TIMESTAMP '2001-01-01')",
+                    "SELECT COALESCE(DATE_TRUNC('day',@p),TIMESTAMP '2001-01-01') FROM t",
+                }) { yield return [sql, populated, tcp]; }
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: unsupported CLR parameters refuse before rows (#1788)")]
+    [MemberData(nameof(UnsupportedParameters))]
+    public Task Execute_UnsupportedParameterUnderWrapper_ShouldRefuseBeforeRows(string sql, bool populated, bool tcp)
+        => RunAsync(tcp, async (session, connection, token) =>
         {
             // Arrange: an unsupported CLR object has no wire representation.
             await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: token);
             if (populated) { await session.ExecuteAsync("INSERT INTO t VALUES(1)", cancellationToken: token); }
             var parameters = new Dictionary<string, object?> { ["p"] = new object() };
 
-            // Act
-            string code = await PlanningFailureAsync(session, connection, sql, parameters, token);
-
-            // Assert
-            code.ShouldBe("CS02080");
+            // Act / Assert: in-process planning refuses; TCP encoding refuses before sending SQL.
+            if (connection is null)
+            {
+                (await PlanningFailureAsync(session, connection, sql, parameters, token)).ShouldBe("CS02080");
+            }
+            else
+            {
+                await Should.ThrowAsync<DatabaseTypeException>(() => connection.QueryAsync(sql, parameters, token).AsTask());
+            }
         });
 
     [Theory(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: NULL parameter values are untyped until CAST (#1788)")]
@@ -171,6 +192,63 @@ public sealed class SqlCommonTypePass4Tests
                 var failure = await Should.ThrowAsync<SqlClientException>(() => ReadAsync(session, connection, sql, null, token));
                 failure.Diagnostics[0].Code.ShouldBe("CS02011");
             }
+        });
+
+    public static IEnumerable<object[]> ComputedSources()
+    {
+        foreach (bool tcp in new[] { false, true })
+        {
+            foreach (string expression in new[]
+            {
+                "unproved_result(id,NULL) + 1", "ROUND(unproved_result(id,NULL))",
+                "POWER(unproved_result(id,NULL),2)", "MOD(unproved_result(id,NULL),2)",
+                "FLOOR(unproved_result(id,NULL))", "CEIL(unproved_result(id,NULL))",
+                "CEILING(unproved_result(id,NULL))", "unproved_result(id,NULL) + unproved_result(id,NULL)",
+            }) { yield return [expression, tcp]; }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: computed application values plan but fail common-type conversion at id 1 (#1788)")]
+    [MemberData(nameof(ComputedSources))]
+    public Task Execute_ComputedApplicationValue_ShouldFailAtFirstRow(string expression, bool tcp)
+        => RunAsync(tcp, async (session, connection, token) =>
+        {
+            // Arrange: empty input proves these computed nodes plan without refusing the inner call.
+            await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: token);
+            string sql = $"SELECT COALESCE({expression},0) FROM t";
+            (await ReadAsync(session, connection, sql, null, token)).ShouldBeEmpty();
+            await session.ExecuteAsync("INSERT INTO t VALUES(1)", cancellationToken: token);
+
+            // Act / Assert: the unresolved DOUBLE value cannot convert implicitly to the computed common type.
+            if (connection is null)
+            {
+                var failure = await Should.ThrowAsync<DatabaseException>(() => ReadAsync(session, connection, sql, null, token));
+                failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02011");
+            }
+            else
+            {
+                var failure = await Should.ThrowAsync<SqlClientException>(() => ReadAsync(session, connection, sql, null, token));
+                failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02011");
+            }
+        });
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: decimal arithmetic over an unresolved application value returns 2.0 (#1788)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task Execute_ComputedDecimalControl_ShouldReturnValue(bool tcp)
+        => RunAsync(tcp, async (session, connection, token) =>
+        {
+            // Arrange
+            await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: token);
+            const string sql = "SELECT COALESCE(unproved_result(id,NULL) + 1.0,0) FROM t";
+            (await ReadAsync(session, connection, sql, null, token)).ShouldBeEmpty();
+            await session.ExecuteAsync("INSERT INTO t VALUES(1)", cancellationToken: token);
+
+            // Act
+            var rows = await ReadAsync(session, connection, sql, null, token);
+
+            // Assert
+            rows.ShouldBe(new object?[][] { [2.0m] });
         });
 
     [Fact(DisplayName = "Cohesion Test [Sql] - CASE/COALESCE: Decimal ELSE identity conversion folds to a constant (#1788)")]

@@ -8842,10 +8842,14 @@ rule. ABS uses NumericElement; pseudo-returning scalar built-ins use Builtin. Fo
 result, the source check follows their ANYELEMENT parameters, rather than their names, and
 native MIN/MAX arguments while retaining the native extrema result-slot exemption.
 COLLATE, NULLIF's first operand, unary signs, nested alternatives and completed grouping
-slots preserve the check within an expression. A window call checks its function in
-ForWindowArguments(), the same scalar scope WindowType uses even over grouped output.
+slots preserve the check within an expression. A window call checks its function in its
+slot scope's window-argument scope, which types it as WindowType does; over grouped output
+this is the source scope.
 Scalar subqueries, derived-table/view/CTE columns and output aliases are query boundaries:
-their Null-typed values can instead adopt the common type and fail its conversion at a row.
+their Null-typed values can adopt the common type and fail its conversion at a row.
+Integer arithmetic and ROUND, FLOOR, CEIL, CEILING, POWER and MOD type an unresolved
+application polymorphic operand by their own rules, so its value can fail the common-type
+conversion at a row with CS02011; PostgreSQL refuses the inner call with 42804.
 The NULL forms, including native MIN/MAX result slots, retain their existing behavior.
 Alternative coercion uses the same tree in IndexPredicate and Table contexts, preserving
 structural partial-index proofs for ON CONFLICT, SELECT and joins. It does not call the
