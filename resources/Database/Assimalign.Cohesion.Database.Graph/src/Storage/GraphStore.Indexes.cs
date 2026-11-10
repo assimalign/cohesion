@@ -38,6 +38,20 @@ public sealed partial class GraphStore
     internal Action? AfterIndexPrune { get; set; }
     internal Action? AfterRelationshipTypeCountRefresh { get; set; }
 
+    // Only backfills reserve exact-key workspace, through their high-water mark.
+    private static IEnumerable<IndexKey> BuildExactKeys(object? value, ulong node, Action<long> reserve)
+    {
+        long length = GraphRecordCodec.KeyLength(value);
+        if (length > GraphRecordCodec.MaximumKeyPrefix)
+        { throw new GraphElementTooLargeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphRecordCodecKeyFailure, length, GraphRecordCodec.MaximumKeyPrefix)); }
+        // Non-text scalars need the 32-byte writer, its aligned 64-byte
+        // buffer, and aligned prefix/suffix arrays. Strings also grow the
+        // writer and allocate their UTF-16 bytes before the prefix is copied.
+        long workspace = value is string ? 256L + 8L * length : 176L + 2L * ((length + 7L) & ~7L);
+        reserve(workspace);
+        yield return Composite(GraphRecordCodec.Key(value), node);
+    }
+
     /// <summary>Tests whether an exact property index is visible.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="snapshot">Visibility snapshot.</param><returns>True when an index is visible.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
@@ -100,7 +114,8 @@ public sealed partial class GraphStore
         {
             if (!node.Properties.TryGetValue(propertyKey, out var value)) { continue; }
             var reference = Find(1, node.Id, latest)!.Value.Reference;
-            foreach (var key in PropertyKeys(record, value, node.Id, cancellationToken, text ? reserve : ReserveKeyWorkspace, visit))
+            foreach (var key in text ? PropertyKeys(record, value, node.Id, cancellationToken, reserve, visit)
+                : BuildExactKeys(value, node.Id, ReserveKeyWorkspace))
             {
                 if (entries.Count == entries.Capacity)
                 {

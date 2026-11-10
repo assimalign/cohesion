@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
 internal static class GraphWriteAllocations
 {
-    internal static long[] Measure(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false)
+    internal static long[] Measure(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false, bool textIndexed = false)
     {
         var engine = GraphDatabaseEngine.Create("allocation", new()
         {
@@ -30,6 +30,7 @@ internal static class GraphWriteAllocations
                 session.ExecuteAsync("CREATE INDEX counter_c FOR (n:Counter) ON (n.c)", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
                 session.ExecuteAsync("CREATE INDEX temporary_id FOR (n:Temporary) ON (n.id)", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
             }
+            if (textIndexed) { session.ExecuteAsync("CREATE TEXT INDEX other_body FOR (n:Other) ON (n.body)", cancellationToken: CancellationToken.None).GetAwaiter().GetResult(); }
             session.ExecuteAsync("CREATE (:Counter {c:0})", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
             string[] queries = ["CREATE (:Temporary {id:1})", "MATCH (n:Counter) SET n.c=n.c+1", "MATCH (n:Temporary) DELETE n"];
             var minima = new[] { long.MaxValue, long.MaxValue, long.MaxValue };

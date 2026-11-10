@@ -21,19 +21,7 @@ public sealed partial class GraphStore
     private static IEnumerable<IndexKey> PropertyKeys(GraphRecord definition, object? value, ulong node,
         CancellationToken token, Action<long>? reserve = null, Action? visit = null)
     {
-        if (definition.Revision == 0)
-        {
-            long length = GraphRecordCodec.KeyLength(value);
-            if (length > GraphRecordCodec.MaximumKeyPrefix)
-            { throw new GraphElementTooLargeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphRecordCodecKeyFailure, length, GraphRecordCodec.MaximumKeyPrefix)); }
-            // Non-text scalars need the 32-byte writer, its aligned 64-byte
-            // buffer, and aligned prefix/suffix arrays. Strings also grow the
-            // writer and allocate their UTF-16 bytes before the prefix is copied.
-            long workspace = value is string ? 256L + 8L * length : 176L + 2L * ((length + 7L) & ~7L);
-            reserve?.Invoke(workspace);
-            yield return Composite(GraphRecordCodec.Key(value), node);
-            yield break;
-        }
+        if (definition.Revision == 0) { yield return Composite(GraphRecordCodec.Key(value), node); yield break; }
         if (value is not string text) { yield break; }
         foreach (var key in GraphTextTrigrams.Keys(text, token, reserve, visit)) { yield return Composite(key, node); }
     }

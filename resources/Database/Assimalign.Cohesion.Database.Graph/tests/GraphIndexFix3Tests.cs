@@ -60,20 +60,24 @@ public sealed class GraphIndexFix3Tests
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Exact numeric extraction reserves every temporary encoding buffer (#1808)")]
-    public void PropertyKeys_Fix3NumericWorkspace_ShouldCoverAllocatedBuffers()
+    public void BuildExactKeys_Fix3NumericWorkspace_ShouldCoverAllocatedBuffers()
     {
         // Arrange: resolve the private generator before measuring its execution.
         for (int i = 0; i < 16; i++) { GraphRecordCodec.Key(1L); }
         long charge = 0;
         Action<long> reserve = bytes => charge += bytes;
-        var factory = typeof(GraphStore).GetMethod("PropertyKeys", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+        // The regression copies use the formerly shared extraction generator.
+        var factory = typeof(GraphStore).GetMethod("BuildExactKeys", flags) ?? typeof(GraphStore).GetMethod("PropertyKeys", flags)!;
+        object?[] arguments = factory.Name == "BuildExactKeys" ? [1L, 1UL, reserve]
+            : [new GraphRecord(3, 1000), 1L, 1UL, CancellationToken.None, reserve, null];
         for (int i = 0; i < 8; i++)
         {
-            var warm = (IEnumerable<IndexKey>)factory.Invoke(null, [new GraphRecord(3, 1000), 1L, 1UL, CancellationToken.None, reserve, null])!;
+            var warm = (IEnumerable<IndexKey>)factory.Invoke(null, arguments)!;
             foreach (var key in warm) { GC.KeepAlive(key); }
         }
         charge = 0;
-        var sequence = (IEnumerable<IndexKey>)factory.Invoke(null, [new GraphRecord(3, 1000), 1L, 1UL, CancellationToken.None, reserve, null])!;
+        var sequence = (IEnumerable<IndexKey>)factory.Invoke(null, arguments)!;
         using var iterator = sequence.GetEnumerator();
         long before = GC.GetAllocatedBytesForCurrentThread();
         // Act.

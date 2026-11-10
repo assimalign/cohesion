@@ -106,6 +106,18 @@ public sealed class GraphOrdinaryWriteAllocationTests
         else { CheckIndexedCeilings(minima); }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Graph] - Unrelated text indexes preserve measured exact-index allocation minima (#1808)")]
+    public async Task Execute_Fix4TextIndexedWrites_ShouldKeepAllocations()
+    {
+        // Arrange / Act.
+        var minima = await MeasureAsync(-1, indexed: true, textIndexed: true);
+        // Assert: ceilings are pinned to measurements at ffa322e6e plus 128 B.
+        _output.WriteLine($"text-indexed writes bytes/statement: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
+        minima[0].ShouldBeLessThanOrEqualTo(43_784 + 128);
+        minima[1].ShouldBeLessThanOrEqualTo(73_320 + 128);
+        minima[2].ShouldBeLessThanOrEqualTo(54_384 + 128);
+    }
+
     private static void CheckIndexedCeilings(long[] minima)
     {
         minima[0].ShouldBeLessThanOrEqualTo(42_256 + 128);
@@ -113,7 +125,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
         minima[2].ShouldBeLessThanOrEqualTo(53_264 + 128);
     }
 
-    private static async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false)
+    private static async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false, bool textIndexed = false)
     {
         string fixture = Path.Combine(AppContext.BaseDirectory, "GraphRecoveryFixture", "Assimalign.Cohesion.Database.Graph.RecoveryFixture.dll");
         // PATH can select arm64 even when --arch x64 runs an x64 testhost.
@@ -126,7 +138,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
         // preserve 128 B headroom and injected 129 B/1 KiB controls; ordinary execution keeps its defaults.
         start.Environment["DOTNET_TieredCompilation"] = "0";
         start.ArgumentList.Add(fixture);
-        start.ArgumentList.Add(indexed ? "indexed-allocations" : typed ? "typed-allocations" : "allocations");
+        start.ArgumentList.Add(textIndexed ? "text-indexed-allocations" : indexed ? "indexed-allocations" : typed ? "typed-allocations" : "allocations");
         start.ArgumentList.Add(injectedKind.ToString(CultureInfo.InvariantCulture));
         start.ArgumentList.Add(injectedBytes.ToString(CultureInfo.InvariantCulture));
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start graph allocation fixture.");
