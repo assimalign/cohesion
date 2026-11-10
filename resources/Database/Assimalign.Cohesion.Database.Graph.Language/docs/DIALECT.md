@@ -907,8 +907,8 @@ their logical writer reservation through final publication (#1808). Failed or ca
 builds retire committed chunks in the live process after their creator releases its pin.
 Retirement yields to size/interval checkpoints and pending checkpoint requests. These GQL
 build grants remain statement-owned; direct GraphStore callers retain caller-owned accounting.
-Exact-key workspace is reserved only by builds, through their high-water mark. An unrelated
-text index does not add exact-key workspace charges to ordinary CREATE, SET or DELETE.
+Exact-key workspace is reserved only by builds, through their high-water mark. No text index
+adds exact-key workspace charges to ordinary CREATE, SET or DELETE, including one on the same label and property.
 Catalog v4 admits this index kind and refuses v3 with CG06019 without changing files; graph
 entity layout remains format 5.
 

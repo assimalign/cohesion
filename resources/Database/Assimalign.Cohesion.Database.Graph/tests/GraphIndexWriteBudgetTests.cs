@@ -26,6 +26,13 @@ public sealed class GraphIndexWriteBudgetTests
         // Assert: each CREATE, the bulk SET and the bulk DELETE have the same charge.
         _output.WriteLine($"WRITE_CHARGES|without={string.Join(',', without)}|with={string.Join(',', with)}");
         with.ShouldBe(without);
+        // A 200-character exact key needs 5,080 bytes of build workspace. Even an
+        // unconditional ordinary-write charge must trip this guard.
+        for (int i = 0; i < 32; i++)
+        {
+            without[i].ShouldBeLessThan(5_080);
+            with[i].ShouldBeLessThan(5_080);
+        }
     }
 
     private static async Task<long[]> MeasureAsync(bool text)

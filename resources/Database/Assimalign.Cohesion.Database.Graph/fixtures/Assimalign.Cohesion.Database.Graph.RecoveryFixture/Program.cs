@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 using Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
 if (args.Length != 2 && !(args.Length == 3 && args[0] is "allocations" or "typed-allocations" or "indexed-allocations" or "text-indexed-allocations"))
-{ throw new ArgumentException("Usage: seed|verify directory; allocations injectedKind [injectedBytes]; typed-allocations|indexed-allocations injectedKind [injectedBytes]"); }
+{ throw new ArgumentException("Usage: seed|verify directory; allocations injectedKind [injectedBytes]; typed-allocations|indexed-allocations|text-indexed-allocations injectedKind [injectedBytes]"); }
 if (args[0] is "allocations" or "typed-allocations" or "indexed-allocations" or "text-indexed-allocations")
 {
     int injectedKind = int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);

@@ -106,16 +106,24 @@ public sealed class GraphOrdinaryWriteAllocationTests
         else { CheckIndexedCeilings(minima); }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Unrelated text indexes preserve measured exact-index allocation minima (#1808)")]
-    public async Task Execute_Fix4TextIndexedWrites_ShouldKeepAllocations()
+    [Theory(DisplayName = "Cohesion Test [Graph] - Unrelated text indexes preserve measured exact-index allocation minima (#1808)")]
+    [InlineData(-1)] [InlineData(1)] [InlineData(2)]
+    public async Task Execute_Fix4TextIndexedWrites_ShouldKeepAllocations(int injectedKind)
     {
         // Arrange / Act.
-        var minima = await MeasureAsync(-1, indexed: true, textIndexed: true);
-        // Assert: ceilings are pinned to measurements at ffa322e6e plus 128 B.
+        var minima = await MeasureAsync(injectedKind, 129, indexed: true, textIndexed: true);
+        // Assert: the enum checks lowered DELETE's measured floor by 248 B from
+        // ffa322e6e. Keep only 128 B headroom, with the same injected controls.
         _output.WriteLine($"text-indexed writes bytes/statement: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
+        if (injectedKind >= 0) { Should.Throw<ShouldAssertException>(() => CheckTextIndexedCeilings(minima)); }
+        else { CheckTextIndexedCeilings(minima); }
+    }
+
+    private static void CheckTextIndexedCeilings(long[] minima)
+    {
         minima[0].ShouldBeLessThanOrEqualTo(43_784 + 128);
         minima[1].ShouldBeLessThanOrEqualTo(73_320 + 128);
-        minima[2].ShouldBeLessThanOrEqualTo(54_384 + 128);
+        minima[2].ShouldBeLessThanOrEqualTo(54_136 + 128);
     }
 
     private static void CheckIndexedCeilings(long[] minima)
