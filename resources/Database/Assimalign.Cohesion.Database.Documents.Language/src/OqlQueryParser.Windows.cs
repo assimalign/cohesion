@@ -81,7 +81,8 @@ public sealed partial class OqlQueryParser
         return false;
     }
 
-    private bool FollowsCall(int index) => index > 0 && index <= _callPairs.Length && _callPairs[index - 1] > 0;
+    private bool FollowsCall(int index) => index > 0 && index <= _callPairs.Length &&
+        _tokens[index - 1].Type == TokenType.RightParen && _callPairs[index - 1] > 0;
 
     private bool IsWindowOnlyCall(int index)
     {

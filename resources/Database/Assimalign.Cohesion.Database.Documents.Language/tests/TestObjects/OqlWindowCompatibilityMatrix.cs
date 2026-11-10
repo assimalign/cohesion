@@ -21,7 +21,7 @@ internal static class OqlWindowCompatibilityMatrix
     {
         foreach (string word in OqlWindowFreeCorpus.Words)
         {
-            for (int site = 0; site < 19; site++)
+            for (int site = 0; site < 24; site++)
             {
                 foreach (string follower in _followers)
                 {
@@ -46,7 +46,12 @@ internal static class OqlWindowCompatibilityMatrix
                         15 => $"INSERT INTO target (KEY k) SELECT 'k' AS k FROM c UNNEST COALESCE(c.a, []) {word} {tail}",
                         16 => $"UPSERT INTO target (KEY k) SELECT 'k' AS k FROM c UNNEST COALESCE(c.a, []) {word} {tail}",
                         17 => $"INSERT INTO target (KEY k) SELECT 'k' AS k FROM c GROUP BY LOWER(c.name) {word} {tail}",
-                        _ => $"UPSERT INTO target (KEY k) SELECT 'k' AS k FROM c GROUP BY LOWER(c.name) {word} {tail}",
+                        18 => $"UPSERT INTO target (KEY k) SELECT 'k' AS k FROM c GROUP BY LOWER(c.name) {word} {tail}",
+                        19 => $"SELECT MAX({word}.rank) AS m FROM c UNNEST COALESCE(c.a, []) {word} {tail}",
+                        20 => $"SELECT * FROM c NEST {word} ON META({word}).id = c.k {tail}",
+                        21 => $"SELECT * FROM c NEST d {word} ON META({word}).id = c.k {tail}",
+                        22 => $"SELECT * FROM c JOIN d {word} ON META({word}).id = c.k {tail}",
+                        _ => $"SELECT ARRAY {word}.k FOR {word} IN c.a END FROM c {tail}",
                     };
                     yield return follower == ")" ? $"SELECT * FROM ({text}) AS enclosed" : text;
                 }

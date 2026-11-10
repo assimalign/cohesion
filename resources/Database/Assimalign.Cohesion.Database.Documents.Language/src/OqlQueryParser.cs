@@ -549,7 +549,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 (IsWord(_tokens[index - 1], "INTO") || IsWord(_tokens[index - 1], "AS") ||
                  IsWord(_tokens[index - 1], "ON") && IsIndexStatement("CREATE"))) { continue; }
             if (value is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" or "RATIO_TO_REPORT" &&
-                index + 1 < _callPairs.Length)
+                index + 1 < _callPairs.Length && _tokens[index + 1].Type == TokenType.LeftParen)
             {
                 int windowCallEnd = _callPairs[index + 1];
                 if (windowCallEnd > 0 && windowCallEnd + 1 < _tokens.Count && IsWord(_tokens[windowCallEnd], "OVER") &&

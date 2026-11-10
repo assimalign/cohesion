@@ -409,8 +409,10 @@ that cannot start a clause after a base implicit alias; window-only calls always
 as the keyword and report a malformed target with located CD00002. Clause-word window names
 must be quoted after OVER, as DIALECT records beside the copied-frame-word rule. WINDOW needs
 a name and AS; RESPECT/IGNORE NULLS need a call-closing parenthesis. A linear stack pass records
-call-closing parentheses before capability validation, including malformed/deep inputs; both
-null-modifier detection and window-suffix validation use constant-time pair lookups. The map
+both opening-to-closing and closing-to-opening call pairs before capability validation, including
+malformed/deep inputs. Null-modifier detection and window-suffix validation check the preceding
+closing parenthesis; reserved-call lookahead checks the name's own opening parenthesis. These
+direction-checked lookups are constant-time and leave call-argument names unchanged. The map
 is omitted when no relevant suffix follows a closing parenthesis, preserving ordinary guards.
 No shared SQL implementation or new assembly reference is introduced (T3-31).
 

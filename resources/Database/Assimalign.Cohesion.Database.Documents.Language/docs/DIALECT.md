@@ -970,10 +970,12 @@ OVER accepts an inline (PARTITION BY ... ORDER BY ...) specification, OVER name,
 parenthesized copy (name ...). WINDOW name AS (...) declarations follow GROUP BY, GROUP AS
 and HAVING and precede final ORDER BY/LIMIT/OFFSET. LETTING remains CK00001. Names preserve
 OQL's ordinal, case-sensitive identifier rules. The new window words remain usable as field,
-collection, alias and binding names in window-free statements. After an ordinary call, OVER
+collection, alias and binding names in window-free statements, including inside call arguments.
+Only a call's closing parenthesis can introduce its OVER suffix. After an ordinary call, OVER
 starts a window before a parenthesized specification or a name token that cannot begin a clause
 after an implicit alias. Otherwise the base implicit-alias rules apply. After any of the twelve
-window-only names listed below, OVER always introduces a window. A missing or invalid target
+window-only names listed below, OVER is always the window keyword; FIRST_VALUE, LAST_VALUE,
+NTH_VALUE and RATIO_TO_REPORT with a valid target remain unsupported (CK00001). A missing or invalid target
 receives CD00002 at that target, asking for a window name or parenthesized specification and
 explaining that clause-word names must be quoted. WINDOW followed by
 an identifier (including a function name) or quoted identifier, then AS, starts a declaration. RESPECT and IGNORE are modifiers only
@@ -1048,6 +1050,8 @@ Frames (ROWS/RANGE/GROUPS/EXCLUDE), aggregate OVER, FIRST_VALUE/LAST_VALUE/NTH_V
 RATIO_TO_REPORT and RESPECT/IGNORE NULLS remain located CK00001 for OQ-W2/OQ-W3.
 Function registration reserves all twelve window names: ROW_NUMBER, RANK, DENSE_RANK,
 PERCENT_RANK, CUME_DIST, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE and RATIO_TO_REPORT.
+This changes base (`b5602544d`), which allowed application scalar functions with these names.
+Registering one now throws ArgumentException for the function parameter before engine build.
 The four deferred value/ratio names follow the existing REGEXP_* reservation policy.
 No implicit frame is evaluated by these ranking/navigation functions. No storage or wire
 version changes. The sealed window AST and OqlFunction.WindowKind are public metadata;
