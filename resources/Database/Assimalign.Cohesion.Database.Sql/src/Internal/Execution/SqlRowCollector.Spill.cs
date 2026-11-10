@@ -36,17 +36,19 @@ internal sealed partial class SqlRowCollector
         if (owner?.Database.Engine.TempSpace is not { } space || _orderBy.Count == 0) { return false; }
         foreach (var order in _orderBy) { if (!order.Collation.IsFixed) { return false; } }
         bool deferred = SqlHashSpillMetrics.For(_metrics!)?.FullJoin == true;
+        var joinStatement = SqlHashSpillMetrics.For(_metrics!)?.JoinStatement;
+        var statement = _sharedStatements.TryGetValue(this, out var shared) ? shared : joinStatement;
+        bool chargeResidue = deferred || joinStatement is not null && ReferenceEquals(statement, joinStatement);
         long grant = Math.Min(int.MaxValue, deferred ? _budget : _budget - (_metrics!.HashMemoryBytes - _memory.Bytes));
         long bound = (grant - 32768) / 16 - 8192;
         if (deferred) { bound = Math.Min(16384, bound); }
-        grant -= SpillObjectCharge(_orderBy.Count);
+        if (chargeResidue) { grant -= SpillObjectCharge(_orderBy.Count); }
         if (grant < 65536 || bound < 16) { return false; }
         var columns = new SqlTempSortKeyCodec.Column[_orderBy.Count];
         for (int i = 0; i < columns.Length; i++)
         { columns[i] = new(_orderBy[i].IsDescending, _orderBy[i].NullsFirst, _collations[i]); }
         SqlSpillLifetime.CheckCapacity(owner);
-        var state = new Spill(owner, space, columns, (int)bound, grant,
-            _sharedStatements.TryGetValue(this, out var shared) ? shared : SqlHashSpillMetrics.For(_metrics!)?.JoinStatement);
+        var state = new Spill(owner, space, columns, (int)bound, grant, statement);
         try
         {
             // Validate buffered rows as well as the refused row, before comparison or handoff.
@@ -97,7 +99,7 @@ internal sealed partial class SqlRowCollector
             }
             _ordered.Clear(); _ordered.Capacity = 0;
             _memory.Clear();
-            Reserve(SpillObjectCharge(state.Columns.Length));
+            if (chargeResidue) { Reserve(SpillObjectCharge(state.Columns.Length)); }
             ObserveSpill?.Invoke("drained");
         }
     }

@@ -180,8 +180,11 @@ The cache targets G/4, reduced by other operators'
 reservations, and must admit one decoded chunk with its LRU objects. Its reservation stays
 live through probes so downstream sorting leaves room for the next probe. Directory slots
 charge 48 B (actual struct 40 B), plus array headers. Per-operator objects, small arrays,
-file and owner residue are charged separately; the original table keeps its 104 B charge. Staged sources charge 1,280 B of fixed
-objects; collectors charge 1,280 B plus their actual ordering-column and family arrays.
+file and owner residue are charged separately; the original table keeps its 104 B charge. Staged sources sharing the join statement charge 1,280 B of fixed
+objects; collectors using that statement or deferring charge 1,280 B plus their actual ordering-column and family arrays.
+Staged sources (including GROUP BY inputs) outside the join statement, and non-deferred
+collectors outside that statement, retain base's exact grant arithmetic; their residue uses
+the single statement allowance.
 The FULL bitmap pays its aligned real size. Shared staged readers pay their complete page,
 frame, 256 B objects and 2D overlap; the consuming sorter subtracts that entire reservation.
 Shared staged and deferred writers pay 8,704 B. Deferred encoding retains one aligned

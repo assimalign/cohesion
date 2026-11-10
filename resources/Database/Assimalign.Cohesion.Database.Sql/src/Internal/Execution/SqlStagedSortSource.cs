@@ -84,9 +84,10 @@ internal sealed class SqlStagedSortSource : IDisposable
     }
     internal void ReserveWriter()
     {
+        if (!_sharedStatement) { return; }
         if (_operatorBytes == 0)
         { _metrics.ReservePlainSelectMemory(OperatorBytes, _budget); _operatorBytes = OperatorBytes; }
-        if (!_sharedStatement || _writerBytes != 0) { return; }
+        if (_writerBytes != 0) { return; }
         _metrics.ReservePlainSelectMemory(WriterBytes, _budget);
         _writerBytes = WriterBytes;
     }
