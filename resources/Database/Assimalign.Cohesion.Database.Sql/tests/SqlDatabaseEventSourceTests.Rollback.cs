@@ -50,6 +50,31 @@ public sealed partial class SqlDatabaseEventSourceTests
         recorder.Events.Count(entry => entry.EventId == 13).ShouldBe(1);
         recorder.Events.ShouldNotContain(entry => entry.EventId == 0 || entry.EventId == 15 || entry.EventId == 18 || entry.EventId == 19 || entry.EventId == 20 || entry.EventId == 21);
         (await held.OpenDatabaseAsync("held", timeout.Token)).Provisioning!.FailureCode.ShouldBe("CS03405");
+
+        // Act: an unrelated physical owner build and DROP share this recording with Held.
+        var physicalDatabase = await held.OpenDatabaseAsync("held", timeout.Token);
+        await using var session = await physicalDatabase.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE physical(v INT)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO physical VALUES(1)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("CREATE INDEX ix ON physical(v)", cancellationToken: timeout.Token);
+        ulong owner = physicalDatabase.IndexManager.PageOwner(physicalDatabase.IndexManager.ExportRegistrations().Single(index => index.Definition.Name == "ix"));
+        long pages = physicalDatabase.DataStorage.GetOwnerIndexPageCount(owner);
+        await session.ExecuteAsync("DROP INDEX ix ON physical", cancellationToken: timeout.Token);
+        while (physicalDatabase.TableReclamation.HasWork) { await Task.Delay(1, timeout.Token); }
+
+        // Assert: the owner lifecycle uses Info events; it cannot close the Held activity.
+        var began = recorder.Events.Where(e => e.EventId == 28 && Equals(e.Payload![2], (long)owner)).ShouldHaveSingleItem();
+        var ended = recorder.Events.Where(e => e.EventId == 29 && Equals(e.Payload![2], (long)owner)).ShouldHaveSingleItem();
+        began.EventName.ShouldBe("IndexBuildBegan");
+        ended.EventName.ShouldBe("IndexBuildEnded");
+        began.Opcode.ShouldBe(EventOpcode.Info);
+        ended.Opcode.ShouldBe(EventOpcode.Info);
+        ended.Payload!.Take(3).ShouldBe(began.Payload);
+        ended.Payload![3].ShouldBe(true);
+        recorder.Events.Where(e => e.EventId == 30 && Equals(e.Payload![2], (long)owner)).Sum(e => (long)(int)e.Payload![3]!).ShouldBe(pages);
+        recorder.Events.Count(e => e.EventId == 13).ShouldBe(1);
+        recorder.Events.Count(e => e.EventId == 14).ShouldBe(1);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
     private sealed record HeldTraceRow(int Id, int? Added);
