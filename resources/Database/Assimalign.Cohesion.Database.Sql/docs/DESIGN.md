@@ -125,8 +125,10 @@ Null-typed columns/casts/calls, floating values, unconstrained NUMERIC, paramete
 expressions have no proof and retain CS05067 on refusal. No bound is inferred from a
 pseudo-type's Null storage marker. A derived Null-typed column can hold values: a
 CALLED ON NULL INPUT ANYELEMENT function can return a value when all polymorphic arguments
-are NULL. Even concrete derived metadata is insufficient: COALESCE over that call can
-declare BIGINT while holding text. SUM/AVG bounds and MIN/MAX families accept a column only
+are NULL. Even concrete derived metadata is insufficient: a typed NULL argument can
+give that call BIGINT metadata while it returns text. CASE/COALESCE now enforce their
+resolved numeric value family at each source node (#1788), but spill eligibility remains
+unchanged. SUM/AVG bounds and MIN/MAX families accept a column only
 from checked table storage; an explicit outer cast can establish a checked type. The
 differential corpus exercises these cases and unchecked declared NUMERIC modifiers. Expression errors still occur at input; refusing spill preserves the original
 CS05067 boundary at the same budget, rather than promising that an unsupported small grant
@@ -3339,7 +3341,8 @@ flowchart LR
   numeric common type before its enclosing expression, DISTINCT and transition calls. This
   preserves intermediate REAL rounding through nesting, NULLIF, casts and arithmetic; NULLIF
   inherits its normalized first operand's type. The binding flag follows only the statistical
-  argument's expression tree; ordinary alternative typing and child query scopes are unchanged.
+  argument's expression tree; ordinary alternatives also use per-node common-type conversion
+  (#1788), while statistical overloads and transitions retain this contract.
   Exact transitions retain scale-28 BigInteger sums and sums of squares; final division/root
   rounds once into the engine's 96-bit Decimal domain, with midpoint ties
   away from zero. A root is rounded from the exact rational variance, including sub-Decimal
@@ -8818,10 +8821,53 @@ predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refu
 The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
 ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
 including grouping, windows, correlation, persisted equivalence and definition checks.
-JSON positions share a scoped CASE/COALESCE common-type resolver: unknown literals adopt
-declared alternatives, all-unknown sets become TEXT, and incompatible declared alternatives
-refuse before rows. The ordinary binder has no equivalent resolver; its rules outside these
-positions remain unchanged. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
+All scalar positions share the existing CASE/COALESCE common-type resolver (#1788):
+unknown literals adopt declared alternatives, all-unknown sets become TEXT, and incompatible
+declared alternatives refuse with CS02080 before rows. Alternatives convert at each node,
+including analysis-time conversion of skipped unknown literals (CS02022 for invalid numeric
+or Boolean text, CS02002 for numeric overflow). Grouping keys and aggregate inputs use the
+scalar rule. A select-list, HAVING or ORDER BY node reading a key slot declares and returns
+the key's resolved source-scope type, including under ROLLUP, CUBE and GROUPING SETS.
+Aggregate result types follow their bound inputs and their existing transition contracts.
+CASE/COALESCE over grouped values (aggregate results, key slots, expressions over them or
+constants) retains Decimal-above-Double-above-Real normalization, CHAR/TEXT folding to TEXT
+with padding removed, grouped overload selection, Int64 integer literals and all-NULL
+metadata. Native grouped arguments retain base value families, including signed BIGINT
+literals. This is a recorded PostgreSQL departure. A SlotScope alone does not imply grouped
+output: only PlanPlainGroup and PlanGroupingSets set the flag; ForOrdering copies it.
+Plain window projections and ORDER BY use the scalar rule. Window arguments use a scalar
+scope even over completed grouping slots. Alternative types
+reuse the scope's existing type cache, avoiding cubic grouped nesting without enlarging it.
+Built-in implicit conversions handle declared alternatives; application and explicit-only
+casts are excluded. Unconstrained NUMERIC preserves its original box and constant alternative
+casts fold during binding. Unresolved polymorphic results and unsupported parameter values
+refuse with CS02080 before rows. Parameter types come from their values: NULL is untyped,
+so an application polymorphic result depending only on NULL parameters remains unresolved.
+An explicit parameter CAST resolves its type independently of its value (PostgreSQL
+parse_coerce.c:2505-2514 refuses unknown polymorphic input with 42804).
+Only Declared pseudo results create function refusal sources: application functions use that
+rule. ABS uses NumericElement; pseudo-returning scalar built-ins use Builtin. For an unknown
+result, the source check follows their ANYELEMENT parameters, rather than their names, and
+native MIN/MAX arguments while retaining the native extrema result-slot exemption.
+COLLATE, NULLIF's first operand, unary signs, nested alternatives and completed grouping
+slots preserve the check within an expression. A window call checks its function in its
+slot scope's window-argument scope, which types it as WindowType does; over grouped output
+this is the source scope.
+Scalar subqueries, derived-table/view/CTE columns and output aliases are query boundaries:
+their Null-typed values can adopt the common type and fail its conversion at a row.
+Integer arithmetic and ROUND, FLOOR, CEIL, CEILING, POWER and MOD type an unresolved
+application polymorphic operand by their own rules, so its value can fail the common-type
+conversion at a row with CS02011; PostgreSQL refuses the inner call with 42804.
+The NULL forms, including native MIN/MAX result slots, retain their existing behavior.
+Alternative coercion uses the same tree in IndexPredicate and Table contexts, preserving
+structural partial-index proofs for ON CONFLICT, SELECT and joins. It does not call the
+application-cast validation path. Signed literals fold only when binding produced a constant;
+a deferred failure stays deferred. Constant conversion retains parameter provenance.
+Statistical transitions and JSON's grouped conversions
+retain their contracts. CHECK and SQL function creation fully bind
+before publication, as defaults, views and partial predicates already do. Accepted definitions
+round-trip through file reopen. This change ships with SQ-A7's format 38 in the same release;
+view columns are not migrated and this run adds no format bump or compatibility reader. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
 parse_coerce.c:1357-1456. Bound selectors retain their SQL type and member/index overload;
 evaluation converts alternatives to that type before access.
 Adjacent arrows fold only in the bound tree into ordered selectors over one owned, validated
@@ -8849,7 +8895,7 @@ admission now refuses malformed input; it does not rewrite existing row bytes.
 | CS01067 | Invalid JSON access or IS JSON signature (42883) |
 | CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
 | CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
-| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives or unresolved polymorphic/unsupported parameter alternatives (42804/42846) |
 
 The extraction oracle performs 10,240 comparisons over generated nested values,
 negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.

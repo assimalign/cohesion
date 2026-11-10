@@ -621,7 +621,7 @@ executor/nodeWindowAgg.c:734-770,3674-3697,3860-3935. No live PostgreSQL compari
 | CS02077 | Bitwise operand outside SMALLINT/INTEGER/BIGINT (42804) |
 | CS02078 | Invalid JSON access/assignment input, encoding, Unicode conversion or depth (22032) |
 | CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
-| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives (42804/42846) |
 | CS05086 | Offset RANGE requires exactly one ordering key (42P20) |
 | CS05087 | GROUPS requires ORDER BY (42P20) |
 | CS05088 | NULL treatment on an incompatible function (42601) |
@@ -1348,7 +1348,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `DROP SCHEMA` | Supported subset, measured | `DROP SCHEMA [IF EXISTS] name [RESTRICT \| CASCADE]`; omission means RESTRICT. CASCADE removes contained tables/indexes and incoming foreign keys atomically, retaining external child tables. Compiled ownership blocks the operation. `dbo` cannot be dropped. |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [ASC | DESC] [NULLS FIRST | LAST] [, ...])` — column keys accept per-column `ASC`/`DESC` and `NULLS FIRST`/`LAST`; expressions and `INCLUDE` remain excluded |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
-| `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
+| `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; alternatives resolve one common type, with ELSE considered first. Incompatible declared alternatives refuse with CS02080 (42804/42846), including skipped branches; see the common-type contract below (#1788). |
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST and derived-table output ordering execute; GROUP BY ordinals report `CK00001`. See the ordering contract below (#1024). |
 | `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` | Supported accessor subset, measured (+3 clauses) | Lax/strict paths, RETURNING, wrappers, quotes, empty/error behavior and statement budgets; see SQL/JSON path functions below. |
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
@@ -3113,8 +3113,8 @@ An untyped NULL statistical argument resolves to Double. Other argument types fa
 CS01006. Each CASE/COALESCE node within a statistical input converts to its own numeric
 common type before its enclosing expression, DISTINCT and accumulation, including REAL
 rounding before an outer widening to Double. This also applies through NULLIF, casts and
-arithmetic; NULLIF takes its normalized first operand's type. Ordinary scalar expressions
-retain their existing alternative typing. Integer/Decimal
+arithmetic; NULLIF takes its normalized first operand's type. Ordinary scalar alternatives
+also convert at each boundary (#1788). Integer/Decimal
 transitions accumulate exact scaled sums and squares, avoiding
 intermediate overflow and double rounding even near BIGINT and Decimal limits. The final
 result uses the engine's existing 96-bit Decimal domain, choosing up to 28 fractional digits
@@ -3197,8 +3197,25 @@ with midpoint ties rounded to even and up to 28 fractional digits. Thus integer
 inputs 2 and 5 have Decimal average 3.5; integer truncation is never used.
 Neither operation promises an arbitrary-precision result or fixed output scale.
 The in-process and wire result metadata use the same base types as these values.
-Numeric `CASE`/`COALESCE` alternatives in grouped projections use a common
-numeric result type; incompatible nonnumeric alternatives are planning errors.
+Grouping keys and aggregate inputs use the scalar CASE/COALESCE common-type rule before
+grouping or accumulation. A select-list, HAVING or ORDER BY node that repeats a key reads
+the key's slot and declares the resolved type it had in the source scope; this applies to
+GROUP BY, ROLLUP, CUBE and GROUPING SETS. Aggregate result types come from their bound
+inputs' resolved types, subject to each transition's existing result contract (SUM/AVG
+return Decimal; statistical transitions keep the rules above). Thus GROUP BY and DISTINCT
+agree on a mixed key's rows and metadata. ARRAY_AGG remains unavailable (CS01016).
+A CASE/COALESCE in grouped output over aggregate results, key slots, expressions over them,
+or constants retains the existing grouped normalization: Decimal above Double above Real.
+REAL and DOUBLE reach Decimal through the runtime conversion, retaining about 7 and 15
+significant digits respectively. Context corpus case 73 converts REAL 16777216 to Decimal
+16777220. The normalization also retains CHAR/TEXT folding to TEXT with padding removed,
+grouped overload selection, Int64 integer literal outputs, native grouped argument value
+families (including signed BIGINT literals),
+and all-NULL output metadata, including nested all-NULL CASE/COALESCE values. This output normalization is a recorded
+departure from PostgreSQL's scalar rule. It does not retype a key slot or an aggregate's
+inputs. Plain window SELECT projections and ORDER BY use the scalar rule. Window arguments
+also use it when they read completed grouping slots.
+JSON positions within grouped output retain their existing per-node conversions.
 
 Aggregate expressions, output aliases (including inside scalar expressions),
 and select-list ordinals can be used as `ORDER BY` keys in grouped/aggregate
@@ -3381,12 +3398,16 @@ three-valued logic; CAST(NULL AS INT) is a non-Boolean typed expression and is r
 Only TRUE admits a row or selects a searched CASE arm. Boolean AND/OR keep their
 short-circuit order; simple CASE compares values and does not require Boolean WHEN values.
 
-Every CASE result and COALESCE alternative in a Boolean position must be Boolean, NULL,
-or a valid Boolean input string literal, even when short-circuiting skips it. Boolean
-string literals accept `t`, `true`, `f`, `false`, `yes`, `no`, `on`, `off`, `1`, `0`, `y`
+CASE and COALESCE resolve their result before Boolean admission. An all-unknown set
+of string/NULL alternatives resolves to TEXT and is refused in a Boolean position (CS02003),
+even when every string spells a Boolean. With a declared Boolean alternative, unknown
+Boolean strings convert during binding; invalid strings refuse with CS02022.
+Boolean input string literals accept `t`, `true`, `f`, `false`, `yes`, `no`, `on`, `off`, `1`, `0`, `y`
 and `n`, case-insensitively (PostgreSQL src/backend/utils/adt/bool.c:37-109). Other strings
-fail with CS02003; text columns and text parameters do not acquire this literal coercion.
-Table CHECK and domain CHECK use CS02003 / 42804 for every non-Boolean position.
+in a direct Boolean position fail with CS02003; text columns and text parameters do not
+acquire this literal coercion. Invalid unknown alternatives use CS02022 as described above.
+Table CHECK and domain CHECK use CS02003 / 42804 for non-Boolean positions; an
+incompatible CASE/COALESCE result first reports CS02080 / 42804.
 
 Opening a database binds stored SQL function bodies without reapplying declaration-only
 Boolean-position validation. An invalid legacy operand or an application function whose
@@ -4145,6 +4166,79 @@ compiled-schema format. Regex and SIMILAR TO remain deferred; SQ-O2 delivers bit
 PostgreSQL references: src/backend/parser/gram.y:904-914 and
 src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before matching).
 
+## CASE and COALESCE common types (#1788, SQ-CT1)
+
+Ordinary scalar CASE and COALESCE use the existing JSON-position resolver in every
+expression and persisted definition. CASE considers ELSE first; COALESCE considers its
+arguments left to right. Unknown string and NULL literals adopt the declared alternatives'
+type, and all-unknown sets resolve to TEXT. A parameter whose value is NULL also stays
+unknown. Parameters take their type from their value: a NULL-valued parameter is untyped,
+like PostgreSQL's unknown. An application polymorphic call whose result depends only on
+untyped parameters stays unresolved and refuses with CS02080. PostgreSQL refuses an untyped
+parameter in that position with 42804, regardless of its eventual value. CAST(@p AS BIGINT)
+types the parameter independently of its value and resolves the polymorphic result.
+Unresolved polymorphic result alternatives of application functions and parameters with
+unsupported CLR values refuse at planning with CS02080, rather than adopting a type and
+failing at a row. Within one expression, this source check looks through wrappers that
+return their argument's value in its type: COLLATE, NULLIF's first operand, nested CASE and
+COALESCE, unary + and -, ABS, DATE_TRUNC's temporal argument, and native MIN/MAX arguments.
+Reading a completed grouping slot or a window call does not bypass the source check.
+Scalar subqueries, derived-table/view/CTE columns and output aliases form query boundaries.
+A Null-typed value crossing one of these boundaries adopts the common type and can
+fail at a row with CS02011 when its runtime family cannot convert implicitly. For example,
+a DOUBLE value in such a column cannot adopt INTEGER in COALESCE(v,0). These boundaries do
+not add planning refusal sources; PostgreSQL refuses the unresolved inner polymorphic call
+with 42804.
+Integer arithmetic and ROUND, FLOOR, CEIL, CEILING, POWER and MOD type an unresolved
+application polymorphic operand by their own rules, so its value can fail the common-type
+conversion at a row with CS02011; PostgreSQL refuses the inner call with 42804.
+COALESCE(NULL * TRUE,2) returns INTEGER 2 here versus PostgreSQL 42883.
+The NULL forms of these wrappers and query boundaries keep their existing behavior, including
+native MIN/MAX NULL result slots and nested all-NULL grouped alternatives. This preserves
+grouped all-NULL metadata. Their existing PostgreSQL departures remain: COALESCE((SELECT
+NULL),2), COALESCE(v,2) FROM (SELECT NULL AS v) q, and COALESCE(MAX(NULL),2) return 2
+here but PostgreSQL refuses with 42804; the grouped extrema form keeps Int64 metadata.
+COALESCE(-NULL,2) returns INTEGER 2 here versus PostgreSQL 42725; COALESCE(+NULL,2) and
+COALESCE(ABS(NULL),2) have INTEGER metadata here versus PostgreSQL DOUBLE.
+Declared alternatives use built-in implicit conversions only; explicit-only and
+application-registered casts do not participate. Unknown literals use built-in input
+conversion. Compatible numeric alternatives widen through
+the signed integer widths, Decimal, Real and Double, in that order; Real/Double therefore
+win over Decimal. Calendar alternatives widen to TIMESTAMP or TIMESTAMPTZ. Existing mixed
+CHAR/TEXT and CHAR/VARCHAR behavior remains TEXT in either order, a recorded departure
+from PostgreSQL. Its string types cast implicitly to each other, so the first non-TEXT
+candidate wins (pg_cast.dat:314-325; parse_coerce.c:1428-1440, with CASE's ELSE first).
+Consequently COALESCE(c4,t) = 'a ' for CHAR(4) c4='a' and TEXT t is TRUE in PostgreSQL
+and FALSE here: bpchar comparison ignores trailing padding, while TEXT retains it.
+No new implicit conversion between categories is added.
+Incompatible declared alternatives, including INTEGER/TEXT and JSON/JSONB, refuse with
+CS02080 before any row is read (42804 for category mismatch; 42846 for unavailable implicit
+conversion). Unknown input conversion happens while binding,
+including skipped alternatives: invalid numeric/Boolean text is CS02022 (22P02), and a
+numeric value outside the selected type is CS02002 (22003). Each alternative converts at
+its own node before an enclosing cast, function, comparison, grouping key or ordering key.
+Result metadata and cells agree in-process and over InMemory/TCP. Statistical transitions
+and grouped output normalization retain their existing contracts above.
+
+Creation binds column DEFAULTs, table/domain CHECKs, view bodies, SQL function bodies and
+partial-index predicates before publication. Thus CREATE TABLE defaulted
+(n INT DEFAULT (COALESCE(1, 'x'))) and CHECK (COALESCE(n, 'x') > 0) refuse with CS02022;
+PostgreSQL 17 observes 22P02 for both. Domain DEFAULTs remain literal-only (CS03301);
+ALTER DOMAIN, function replacement, expression indexes and generated columns retain
+their existing refusals. ALTER COLUMN TYPE rebinds affected CHECKs/defaults, dependency
+checks refuse dropping a called function, and view replacement preserves existing column
+signatures. Valid mixed alternatives retain values, metadata and constraint refusals across
+file reopen. Persisted view columns are not migrated: this change ships with SQ-A7's format
+38 gate in the same release, and this run adds no format bump or compatibility reader.
+
+Reference: PostgreSQL src/backend/parser/parse_coerce.c:1346-1456 and
+parse_expr.c:1735-1768,2244-2257. The executed PostgreSQL 17.11 corpus covers 1,936 ordered
+pairs and branch selections, including NULL/unknown alternatives; eight CHAR/TEXT cases
+follow the recorded departure above and the remaining 1,928 match values/types or refusals.
+The refused pairs include 1,232 PostgreSQL 42804 and 72 PostgreSQL 42846 outcomes; both
+use the single CS02080 alternative-type refusal. The issue named JSON/JSONB as 42804,
+but PostgreSQL 17.11 observes 42846 for that pair.
+
 ## JSON access (#1722, SQ-N1)
 
 JSON and JSONB support left-associative member/element extraction at PostgreSQL's
@@ -4171,10 +4265,11 @@ The left operand must be declared JSON/JSONB (use CAST for character or polymorp
 An unresolved NULL left operand cannot choose between those signatures and is CS01067;
 CAST(NULL AS JSON/JSONB) propagates SQL NULL. Untyped NULL result alternatives adopt
 a surrounding CASE/COALESCE JSON result type.
-In JSON operands and selectors (including IS JSON), CASE/COALESCE resolve one common SQL
-type before selecting an arrow overload. Untyped string and NULL literals adopt declared
+CASE/COALESCE in every scalar position share one common SQL type resolver (#1788);
+JSON operands and selectors (including IS JSON) use it before selecting an arrow overload. Untyped string and NULL literals adopt declared
 alternatives; all-unknown sets resolve to TEXT. Declared INTEGER and TEXT alternatives, or
-JSON and JSONB alternatives, refuse with CS02080 (42804) before reading input rows.
+JSON and JSONB alternatives, refuse with CS02080 before reading input rows. PostgreSQL reports
+42804 for different categories and 42846 for JSON/JSONB and other uncoercible user-type pairs.
 Unknown literals undergo input conversion during binding, including skipped alternatives;
 invalid text retains CS02022. The resolved type, rather than the selected runtime value,
 chooses member lookup or indexing. PostgreSQL parse_expr.c:1742-1763,2244-2255 and
@@ -5004,7 +5099,9 @@ This departs from PostgreSQL's separate day/time components (DAY 0, HOUR 36).
 EPOCH always returns the full duration in seconds.
 DATE_TRUNC accepts year/quarter/month/week/day/hour/minute/second/millisecond/
 microsecond; TIME and INTERVAL admit day and finer units. Invalid field values
-fail with CS01006. There is no session time zone.
+fail with CS01006. There is no session time zone. Standalone DATE_TRUNC('day',NULL)
+returns NULL here; PostgreSQL refuses the ambiguous call with 42725. Its Null result,
+including with a NULL-valued parameter, stays unknown in CASE and COALESCE.
 
 The five bare CURRENT_*/LOCAL* forms require no parentheses: empty parentheses
 report CS00003. A precision argument on CURRENT_TIME, CURRENT_TIMESTAMP,
@@ -5463,7 +5560,7 @@ quoted names to match uppercase vocabulary entries.
 | --- | --- | --- |
 | `CS01015` | Unknown column, including a DDL column reference | 42703 (`undefined_column`) |
 | `CS04021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
-| `CS02022` | A non-temporal CAST input or stored-column assignment has invalid text representation | 22P02 |
+| `CS02022` | A non-temporal CAST input, stored-column assignment, or unknown CASE/COALESCE alternative (including a skipped alternative) has invalid text representation | 22P02 |
 | `CS03024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
 | `CS03025` | An identity definition, explicit assignment, ALTER or backfill violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; allocator exhaustion retains CS02002 (22003) |
 | `CS01026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |

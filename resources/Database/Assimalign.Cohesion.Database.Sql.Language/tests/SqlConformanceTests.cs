@@ -21,6 +21,24 @@ public class SqlConformanceTests
 
     // ── The supported-statement corpus ─────────────────────────────────
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: common alternatives parse and defer type refusals to binding (#1788)")]
+    [InlineData("SELECT CASE WHEN c THEN 1 ELSE 2.5 END, COALESCE(n, '3') FROM t;")]
+    [InlineData("SELECT COALESCE(n, s), CASE WHEN c THEN n ELSE s END FROM t;")]
+    [InlineData("SELECT COALESCE(n, 'x') FROM t WHERE FALSE;")]
+    [InlineData("CREATE TABLE defaulted (n INT DEFAULT (COALESCE(1, 'x')));")]
+    [InlineData("CREATE TABLE checked (n INT, CHECK (COALESCE(n, 'x') > 0));")]
+    [InlineData("CREATE DOMAIN d AS INT CHECK(COALESCE(VALUE, 'x') > 0);")]
+    [InlineData("CREATE VIEW v AS SELECT CASE WHEN c THEN 1 ELSE 2.5 END AS n FROM t;")]
+    [InlineData("CREATE INDEX ix ON t(n) WHERE COALESCE(n, 'x') > 0;")]
+    public void Parse_CommonAlternativeCorpus_ShouldLeaveTypeCheckingToEngine(string sql)
+    {
+        // Arrange / Act: the engine corpus pins CS02080 (42804) and CS02022 (22P02).
+        var statement = Parse(sql);
+
+        // Assert
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: binding-only DML sources preserve contextual identifiers (#1714)")]
     [InlineData("WITH \"recursive\" AS (SELECT id FROM s) DELETE FROM t USING recursive WHERE t.id=recursive.id;")]
     [InlineData("UPDATE t SET id=s.id FROM s RETURNING \"old\".id;")]

@@ -18,11 +18,14 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed class SqlPartialIndexFixTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - Partial indexes: every CASE cast alternative must be immutable (#1630)")]
-    [InlineData("CASE WHEN active THEN 1 ELSE TRUE END")]
-    [InlineData("CASE WHEN TRUE THEN 1 ELSE TRUE END")]
-    [InlineData("COALESCE(k, TRUE)")]
-    [InlineData("NULLIF(k, TRUE)")]
-    public async Task ExecuteAsync_MutableAlternativeCast_ShouldRefuseBeforeCallback(string operand)
+    [InlineData("CASE WHEN active THEN 1 ELSE TRUE END", "CS02080")]
+    [InlineData("CASE WHEN TRUE THEN 1 ELSE TRUE END", "CS02080")]
+    [InlineData("COALESCE(k, TRUE)", "CS02080")]
+    [InlineData("CASE WHEN active THEN 1 ELSE CAST(TRUE AS INT) END", "CS05091")]
+    [InlineData("CASE WHEN TRUE THEN 1 ELSE CAST(TRUE AS INT) END", "CS05091")]
+    [InlineData("COALESCE(k, CAST(TRUE AS INT))", "CS05091")]
+    [InlineData("NULLIF(k, TRUE)", "CS05091")]
+    public async Task ExecuteAsync_MutableAlternativeCast_ShouldRefuseBeforeCallback(string operand, string code)
     {
         // Arrange
         int calls = 0, result = 1;
@@ -36,7 +39,7 @@ public sealed class SqlPartialIndexFixTests
         await SqlPartialIndexTests.Execute(session, "INSERT INTO t VALUES(NULL,FALSE)");
 
         // Act / Assert
-        await SqlPartialIndexTests.Refuses(session, $"CREATE INDEX ix ON t(k) WHERE CAST({operand} AS INT)>0", "CS05091");
+        await SqlPartialIndexTests.Refuses(session, $"CREATE INDEX ix ON t(k) WHERE CAST({operand} AS INT)>0", code);
         result = 0;
         calls.ShouldBe(0);
         database.IndexManager.ExportRegistrations().ShouldBeEmpty();

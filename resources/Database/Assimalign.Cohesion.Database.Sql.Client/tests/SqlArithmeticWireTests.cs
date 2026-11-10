@@ -3,6 +3,8 @@ using System.Linq;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
@@ -115,21 +117,29 @@ public sealed class SqlArithmeticWireTests
     public async Task QueryAsync_IncomparableOrderByKeys_ShouldKeepConnection()
     {
         // Arrange
-        await using var harness = await SqlClientTestHarness.StartAsync();
-        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        var builder = SqlDatabaseEngine.CreateBuilder("arithmetic-wire");
+        builder.Functions.Add(new MixedSortKeyFunction());
+        await using var harness = await SqlClientTestHarness.StartAsync(engine: await builder.BuildAsync());
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout(30));
 
-        // Act
-        SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.QueryAsync("SELECT id FROM users ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END",
-                cancellationToken: SqlClientTestHarness.Timeout()));
+        foreach (var (key, code) in new[] {
+            ("CASE WHEN id = 1 THEN 'a' ELSE id END", "CS02022"),
+            ("mixed_sort_key(id, NULL)", "CS02055") })
+        {
+            // Act: CASE now refuses at binding; a native polymorphic call still reaches the comparer.
+            SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
+                await connection.QueryAsync("SELECT id FROM users ORDER BY " + key,
+                    cancellationToken: SqlClientTestHarness.Timeout(30)));
 
-        // Assert
-        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        failure.ConnectionUsable.ShouldBeTrue();
-        failure.Message.ShouldStartWith("CS02055: Cannot compare values of types", Case.Sensitive);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02055");
-        (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
-            .ShouldHaveSingleItem()["total"].ShouldBe(2L);
+            // Assert
+            failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+            failure.ConnectionUsable.ShouldBeTrue();
+            failure.Message.ShouldStartWith(code + ": ", Case.Sensitive);
+            if (code == "CS02055") { failure.Message.ShouldContain("Cannot compare values of types", Case.Sensitive); }
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+            (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout(30)))
+                .ShouldHaveSingleItem()["total"].ShouldBe(2L);
+        }
     }
 
     /// <summary>A guarded divisor does not fault: AND stops once its left operand is FALSE.</summary>

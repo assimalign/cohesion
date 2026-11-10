@@ -133,8 +133,8 @@ internal sealed partial class SqlPlanExecutor
     {
         if (expression is SqlBoundColumn column)
         {
-            // Derived metadata is not a runtime value contract: a polymorphic NULL-input
-            // function inside COALESCE can even leave text in a BIGINT-typed column.
+            // Derived metadata is not a runtime value contract: a polymorphic call
+            // with a typed NULL argument can leave text in a BIGINT-typed column.
             if (!HasStoredHashColumn(plan, column)) { bound = 0; return false; }
             var type = plan.SourceColumns[column.Ordinal].Type;
             return Bound(type.Type, type.Precision, type.Scale, out bound);

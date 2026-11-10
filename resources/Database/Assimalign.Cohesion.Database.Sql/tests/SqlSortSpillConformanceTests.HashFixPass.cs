@@ -353,8 +353,8 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData("MAX")]
     public async Task ExecuteAsync_HashDerivedConcreteMetadata_ShouldRefuseUnprovedFamily(string aggregate)
     {
-        // Arrange: COALESCE resolves BIGINT metadata, but a polymorphic NULL-input
-        // function can still supply text. The spill proof must not trust that metadata.
+        // Arrange: a typed NULL gives a polymorphic call BIGINT metadata while its
+        // NULL-input contract still permits text. Derived metadata supplies no proof.
         var logs = new[] { new List<long>(), new List<long>() };
         var builders = new[] { SqlDatabaseEngine.CreateBuilder("family-original"), SqlDatabaseEngine.CreateBuilder("family-spill") };
         builders[1].Options.TempDirectory = Path.Combine(_root, ".derived-family");
@@ -369,9 +369,21 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var a = await (await reference.CreateDatabaseAsync("db")).CreateSessionAsync();
         await using var b = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await Seed(a, 800); await Seed(b, 800);
-        const string input = "(SELECT id,COALESCE(unproved_result(id,NULL),0) AS v FROM t) q";
+        const string input = "(SELECT id,unproved_result(id,CAST(NULL AS BIGINT)) AS v FROM t) q";
         await using (var sample = (DatabaseResultSet)await a.ExecuteAsync("SELECT v FROM " + input + " WHERE id=500"))
         { sample.Columns[0].Type.ShouldBe(DatabaseType.Int64); (await Rows(sample)).ShouldHaveSingleItem().Cells[0].ShouldBe(new string('x',100)); }
+        // SQ-CT1 refuses an unresolved polymorphic alternative while planning.
+        // The proof stays conservative for the typed-NULL witness above.
+        foreach (var session in new[] { a, b })
+        {
+            var conversion = await Should.ThrowAsync<DatabaseException>(async () =>
+            {
+                await using var sample = (DatabaseResultSet)await session.ExecuteAsync(
+                    "SELECT v FROM (SELECT id,COALESCE(unproved_result(id,NULL),0) AS v FROM t) q WHERE id=500");
+                await Rows(sample);
+            });
+            conversion.Diagnostics[0].Code.ShouldBe("CS02080");
+        }
         string sql = "SELECT stamp(id)," + aggregate + "(v) FROM " + input + " GROUP BY stamp(id)";
 
         // Act
@@ -381,6 +393,7 @@ public sealed partial class SqlSortSpillConformanceTests
         // Assert
         right.Diagnostics[0].Code.ShouldBe(left.Diagnostics[0].Code); right.Diagnostics[0].Code.ShouldBe("CS05067");
         logs[1].ShouldBe(logs[0]); SqlHashSpillMetrics.For(b.LastStatementMetrics!).ShouldBeNull();
+        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Unordered hash pagination keeps zero-limit calls and empty-result temp lifetime (#1789)")]

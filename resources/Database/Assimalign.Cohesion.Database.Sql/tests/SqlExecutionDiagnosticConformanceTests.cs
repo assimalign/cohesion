@@ -27,6 +27,7 @@ public sealed class SqlExecutionDiagnosticConformanceTests
             yield return [setup, "MERGE INTO target USING (SELECT 1 AS k) s ON target.k=s.k WHEN NOT MATCHED THEN INSERT(id,k) OVERRIDING USER VALUE VALUES(" + expression + ",1)", code];
         }
         yield return ["", "SELECT (SELECT id FROM t)", "CS02046"];
+        yield return ["", "SELECT COALESCE(1,TRUE)", "CS02080"];
         yield return ["", "INSERT INTO t VALUES (3, 'bad')", "CS02022"];
         yield return ["CREATE TABLE target (v DATE)", "INSERT INTO target VALUES ('bad')", "CS02047"];
         yield return ["CREATE TABLE target (v TIME)", "INSERT INTO target VALUES ('bad')", "CS02047"];
@@ -54,7 +55,7 @@ public sealed class SqlExecutionDiagnosticConformanceTests
         yield return ["", "DROP FUNCTION missing(INT)", "CS01009"];
         yield return ["CREATE TABLE target (v UUID)", "INSERT INTO target VALUES ('bad')", "CS02022"];
         yield return ["CREATE TABLE target (v BYTEA)", "INSERT INTO target VALUES ('bad')", "CS02055"];
-        yield return ["", "SELECT id FROM t ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END", "CS02055"];
+        yield return ["", "SELECT id FROM t ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END", "CS02022"];
         yield return ["", "CREATE TABLE t (id INT)", "CS03049"];
         yield return ["", "CREATE INDEX uq_t ON t(v)", "CS03049"];
         yield return ["", "ALTER TABLE t ADD CONSTRAINT uq_t CHECK(id > 0)", "CS03050"];
