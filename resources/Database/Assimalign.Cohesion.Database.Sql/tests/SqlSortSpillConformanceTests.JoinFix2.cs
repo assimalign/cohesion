@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -13,6 +14,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -21,6 +23,41 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed partial class SqlSortSpillConformanceTests
 {
 #if !L3B_BASE
+    [Fact(DisplayName = "Cohesion Test [Sql] - A closed delivered borrower leaves ownership with the statement root (#1789)")]
+    public async Task CloseJoinTemp_JoinFix2ClosedResult_ShouldKeepRootOwnership()
+    {
+        // Arrange: session disposal can run after attachment and before root delivery.
+        await using var engine = await Create("closed-borrower", 262144);
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        await using var columns = (DatabaseResultSet)await session.ExecuteAsync("SELECT 1 AS id");
+        var metrics = new SqlStatementMetrics();
+        var statement = SqlHashSpillMetrics.JoinTemp(metrics, session);
+        try
+        {
+            var run = statement.CreateRun();
+            object?[] row = [1L];
+            SqlTempRowCodec.TryEncode(row, out var bytes).ShouldBeTrue();
+            run.Append(bytes, CancellationToken.None); run.Seal(CancellationToken.None);
+            // The reviewed product owned this statement from construction; this pass
+            // lends it until root delivery. Reflection keeps the ordering probe portable.
+            var constructor = typeof(SqlSpilledResultSet).GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+                .Single(candidate => candidate.GetParameters()[2].ParameterType == typeof(StorageTempRun));
+            var arguments = new List<object?> { columns.Columns, statement, run, 0L, -1L, session, 262144L, SqlTempRowCodec.DecodedBytes(row) };
+            if (constructor.GetParameters().Length == 9) { arguments.Add(false); }
+            var result = (SqlSpilledResultSet)constructor.Invoke(arguments.ToArray());
+            // Act
+            await session.DisposeAsync();
+            if (Statements(engine.TempSpace!).Count != 0)
+            {
+                typeof(SqlPlanExecutor).GetMethod("CloseJoinTemp", BindingFlags.Static | BindingFlags.NonPublic)
+                    .ShouldNotBeNull().Invoke(null, [metrics, result, null]);
+            }
+            // Assert
+            Statements(engine.TempSpace!).ShouldBeEmpty();
+        }
+        finally { SqlHashSpillMetrics.DetachJoinTemp(metrics); statement.Dispose(); }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - ANALYZE reports actual hash spill permission (#1789)")]
     [InlineData("INNER", false, 262144)]
     [InlineData("LEFT", false, 262144)]

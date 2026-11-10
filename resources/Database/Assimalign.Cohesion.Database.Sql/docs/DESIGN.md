@@ -98,8 +98,10 @@ existing statement-context identity slot; nested bodies gain no permission. Fitt
 perform no join-spill sidecar lookup. One StorageTempStatement coordinates joins, staged
 sources, aggregation and collectors. The statement root is its sole owner during execution.
 Shared group inputs, aggregation, collectors, staged sources and undelivered results close
-only their own runs. Root delivery transfers ownership to a result using that exact
-statement; every other root outcome disposes it. Draining a producer preserves the first error.
+only their own runs. Root delivery transfers ownership to a live result using that exact
+statement, under the result's disposal gate. If session disposal closes the result first,
+adoption fails and the root disposes the statement. Every other root outcome also disposes
+it. Draining a producer preserves the first error.
 Every failure releases
 its reservations and temporary owner.
 

@@ -36,8 +36,11 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     internal Location? Location { get; set; }
     internal bool AdoptStatement(StorageTempStatement statement)
     {
-        if (!ReferenceEquals(_statement, statement)) { return false; }
-        _ownsStatement = true; return true;
+        lock (_gate)
+        {
+            if (_disposed || !ReferenceEquals(_statement, statement)) { return false; }
+            _ownsStatement = true; return true;
+        }
     }
     internal void CaptureMetrics(SqlStatementMetrics metrics)
     {
