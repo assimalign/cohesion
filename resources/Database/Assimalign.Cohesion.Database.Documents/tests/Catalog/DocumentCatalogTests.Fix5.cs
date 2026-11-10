@@ -21,7 +21,7 @@ public sealed partial class DocumentCatalogTests
     public async Task CreateIndexAsync_Fix5RepeatedWhen_ShouldFitGrant(bool escapedOrdering)
     {
         // Arrange: equality has 100,000 23-byte elements and a 544-byte constant
-        // buffer; ordering has 1,000 1,822-byte elements and 5,680-byte scratch.
+        // buffer; ordering has 1,000 1,822-byte elements and 5,712-byte scratch.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         await using var fixture = await Fixture.Create();
         fixture.Catalog.IndexBuildMemoryBudget = escapedOrdering ? 4L * 1024 * 1024 : 64L * 1024 * 1024;
@@ -50,6 +50,7 @@ public sealed partial class DocumentCatalogTests
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Build shortcuts refuse invalid strings accepted by PUT (#1808)")]
     [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)]
+    [InlineData(4)] [InlineData(5)] [InlineData(6)] [InlineData(7)]
     public async Task CreateIndexAsync_Fix5InvalidPutString_ShouldMatchStored(int shape)
     {
         // Arrange: these JSON strings contain literal six-character escapes.
@@ -62,6 +63,10 @@ public sealed partial class DocumentCatalogTests
             0 => "{\"variants\":[{\"name\":\"\\uD800\",\"price\":1}]}",
             1 => "{\"variants\":[{\"name\":\"a\\uD800\",\"price\":1}]}",
             2 => "{\"category\":\"" + new string('x', 3100) + "\\uD800\",\"variants\":[]}",
+            4 => "{\"variants\":[{\"name\":\"\\uD800\\uD800\",\"price\":1}]}",
+            5 => "{\"variants\":[{\"name\":\"\\uD800a\",\"price\":1}]}",
+            6 => "{\"variants\":[{\"name\":\"\\uD800\\n\",\"price\":1}]}",
+            7 => "{\"variants\":[{\"name\":\"\\uD800\\\\uDC00\",\"price\":1}]}",
             _ => "{\"category\":\"" + new string('x', 3100) + "\",\"later\":\"\\uDC00\",\"variants\":[]}"
         };
         await collection.PutAsync(session, "one", Encoding.UTF8.GetBytes(json), cancellationToken: CancellationToken.None);
@@ -70,6 +75,7 @@ public sealed partial class DocumentCatalogTests
             0 => "DISTINCT ARRAY v.price FOR v IN variants WHEN v.name != '' END",
             1 => "DISTINCT ARRAY v.price FOR v IN variants WHEN v.name = 'b' END",
             2 => "category, DISTINCT ARRAY v.price FOR v IN variants END",
+            >= 4 => "DISTINCT ARRAY v.price FOR v IN variants WHEN v.name != '' END",
             _ => "category, later, DISTINCT ARRAY v.price FOR v IN variants END"
         };
         // Act / Assert: the unmapped GetString exception is the stored-write contract.

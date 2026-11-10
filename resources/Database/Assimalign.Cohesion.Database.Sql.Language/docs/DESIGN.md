@@ -73,7 +73,7 @@ covers default ORDER BY against default indexes on primary keys and filtered nul
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
-The current record-space format is 38; index predicates are persisted by Sql, independently
+The current record-space format is 39; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -201,7 +201,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 38's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 39's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL

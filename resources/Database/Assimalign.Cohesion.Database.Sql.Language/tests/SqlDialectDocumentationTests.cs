@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 
 using Shouldly;
 using Xunit;
@@ -9,6 +10,20 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Current SQL format claims exclude superseded batch markers (#1779, #1808)")]
+    public void Documentation_CurrentFormatClaims_ShouldExcludeSupersededMarkers()
+    {
+        // Arrange.
+        string[] documents = [ReadDialect(), ReadDocumentation("Sql.Language", "DESIGN.md"), ReadDocumentation("Sql", "DESIGN.md")];
+
+        // Act / Assert: historical introductions of 37/38 remain valid prose.
+        foreach (string document in documents)
+        {
+            Regex.IsMatch(document, @"(?i)\bcurrent[^\r\n.;]*\bformat(?: is)?\s+(?:37|38)\b").ShouldBeFalse();
+            document.ShouldNotContain("any format but 38", Case.Insensitive);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Rollback docs: Build holds at stored schema and Verify remains strict (#1779)")]
     public void Documentation_SchemaRollback_ShouldDescribeHoldAndStrictPipeline()
     {
@@ -19,7 +34,7 @@ public sealed class SqlDialectDocumentationTests
         // Act / Assert
         dialect.ShouldContain("Degraded with CS03405 and both hashes plus refused steps", Case.Sensitive);
         dialect.ShouldContain("Verify (CS03103)", Case.Sensitive);
-        dialect.ShouldContain("all earlier formats, including 34 and 37", Case.Sensitive);
+        dialect.ShouldContain("all earlier formats, including 37 and 38", Case.Sensitive);
         design.ShouldContain("86,320 bytes across 32 chunks", Case.Sensitive);
         design.ShouldContain("the very same StorageTransaction", Case.Sensitive);
         foreach (string documentation in new[] { design, dialect })
@@ -145,6 +160,9 @@ public sealed class SqlDialectDocumentationTests
     [InlineData("Sql.Language", "DIALECT.md", "Format 36 introduced ASC NULLS FIRST as the default key order (#1787). Current")]
     [InlineData("Sql.Language", "DIALECT.md", "Format 37 introduced mandatory joint publication for every deferred")]
     [InlineData("Sql", "DESIGN.md", "current format 39 and mandatory index")]
+    [InlineData("Sql", "DESIGN.md", "format 38 never shipped on its own")]
+    [InlineData("Sql.Language", "DIALECT.md", "Current format 39")]
+    [InlineData("Sql.Language", "DIALECT.md", "never shipped on its own")]
     [InlineData("Sql", "DESIGN.md", "Current format 39 also requires extension 8's OnUpdate byte")]
     [InlineData("Indexing", "DESIGN.md", "B-tree page format 2, but this engine supports only format 3")]
     [InlineData("Graph", "DESIGN.md", "catalog v3 and B-tree page format 2 therefore reports only CK06101")]

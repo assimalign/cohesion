@@ -198,8 +198,8 @@ internal static class Program
         if (model == "Sql")
         {
             var catalog = SqlStorage.Open(Open("catalog", ".dat"), Open("catalog", ".log"), Open("catalog", ".bak"), checkpointOnOpen: false);
-            if (legacy || mode is "format34-owner" or "format35" or "format36")
-            { await SqlCatalog.Open(catalog).SetRecordSpaceFormatVersionAsync(mode == "format34-owner" ? 34 : mode == "format35" ? 35 : mode == "format36" ? 36 : 33, CancellationToken.None); }
+            if (legacy || mode is "format34-owner" or "format35" or "format36" or "format37-index2" or "format38-index2")
+            { await SqlCatalog.Open(catalog).SetRecordSpaceFormatVersionAsync(mode == "format34-owner" ? 34 : mode == "format35" ? 35 : mode == "format36" ? 36 : mode == "format37-index2" ? 37 : mode == "format38-index2" ? 38 : 33, CancellationToken.None); }
             LeaveUncommitted(catalog, "catalog");
             dataSet = "sql";
             storage = SqlStorage.Open(Open(dataSet, ".dat"), Open(dataSet, ".log"), Open(dataSet, ".bak"), checkpointOnOpen: false);
@@ -215,7 +215,7 @@ internal static class Program
         else if (model == "KeyValuePair")
         {
             var catalog = KeyValueStorage.Open(Open("catalog", ".dat"), Open("catalog", ".log"), Open("catalog", ".bak"), checkpointOnOpen: false);
-            if (legacy) { await KeyValueCatalog.Open(catalog).SetEntrySpaceFormatVersionAsync(1, CancellationToken.None); }
+            if (legacy || mode == "entry2-index2") { await KeyValueCatalog.Open(catalog).SetEntrySpaceFormatVersionAsync(legacy ? 1 : 2, CancellationToken.None); }
             LeaveUncommitted(catalog, "catalog");
             dataSet = "keyvalue";
             storage = KeyValueStorage.Open(Open(dataSet, ".dat"), Open(dataSet, ".log"), Open(dataSet, ".bak"), checkpointOnOpen: false);
@@ -259,7 +259,7 @@ internal static class Program
                 using var read = storage.PageManager.GetPage((PageId)id);
                 if (read.Page.Type != PageType.Index) { continue; }
                 using var write = storage.OpenPageForWrite(bracket, (PageId)id);
-                if (mode is "index" or "index2" or "legacy-index2") { write.Page.AsBodySpan()[2] = mode == "index" ? (byte)1 : (byte)2; }
+                if (mode is "index" or "index2" or "legacy-index2" or "format37-index2" or "format38-index2" or "index3-index2" or "entry2-index2") { write.Page.AsBodySpan()[2] = mode == "index" ? (byte)1 : (byte)2; }
                 write.MarkDirty();
             }
             bracket.Commit();
@@ -294,9 +294,9 @@ internal static class Program
         {
             using var stream = new MemoryStream();
             using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-            if (model == "Documents" && legacy)
+            if (model == "Documents" && (legacy || mode == "index3-index2"))
             {
-                writer.Write(0UL); writer.Write(0UL); writer.Write((byte)4); writer.Write((byte)2);
+                writer.Write(0UL); writer.Write(0UL); writer.Write((byte)4); writer.Write(legacy ? (byte)2 : (byte)3);
                 writer.Write(Guid.NewGuid().ToByteArray()); writer.Write(2); writer.Write("ix"u8);
                 writer.Write(1); writer.Write(5); writer.Write("value"u8); writer.Write(false); writer.Write(1UL);
                 return stream.ToArray();

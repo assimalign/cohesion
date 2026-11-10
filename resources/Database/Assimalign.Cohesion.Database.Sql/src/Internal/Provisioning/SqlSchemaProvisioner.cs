@@ -914,7 +914,7 @@ internal sealed partial class SqlSchemaProvisioner
         SqlSequenceExecution.RefusePersisted(expression);
         if (!SqlPersistedExpression.IsDefaultLiteral(expression))
         {
-            throw new DatabaseException(ErrorMessages.ProvisionerCanonicalDefaultDatabase);
+            throw new SqlExecutionException(SqlProvisioningCodes.PolicyRefused, ErrorMessages.ProvisionerCanonicalDefaultDatabase);
         }
 
         return expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null }

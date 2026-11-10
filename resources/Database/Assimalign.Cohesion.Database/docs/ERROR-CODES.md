@@ -262,7 +262,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
 | COHSQLP004 | CS03104 | Retired (#1778): every schema apply uses joint publication and CS03402/CS03403 |
-| COHSQLP005 | CS03105 | Schema/constraints |
+| COHSQLP005 | CS03105 | Compiled-schema policy refusal, including explicit apply of an earlier first-applied declaration with non-Safe steps, dropped-table/column re-creation or existing-data validation; rollback ignores destructive opt-in (#1779) |
 | New (#1447, SQ-A3) | CS03402 | Joint preparation/space admission failed or unpublished target/route discarded; old schema retained, unsafe-storage latches still apply |
 | New (#1447, SQ-A3 fix) | CS03403 | Joint publication commit unconfirmed; recovery determines old/new schema |
 | New (#1447, SQ-A3 fix) | CS03404 | Session relation creation or table rename names an unpublished table reserved by a pending joint plan |
@@ -308,7 +308,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); plain SELECT join buffers, matches, groups, aggregate inputs, sorting/top-N, output/DISTINCT, retained results, relation/subquery caches and set state share the grant; SQL spilled-result reader workspace, retained decoded rows and decoding overlap share the result grant; application-produced binary rows/keys and an undeliverable first reader refuse spilling and a session caps undisposed spilled results at eight; CTAS admits kept rows, independent of capacity (#1776, #1762) |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); plain SELECT join buffers, matches, groups, aggregate inputs, sorting/top-N, output/DISTINCT, retained results, relation/subquery caches and set state share the grant; SQL spilled-result reader workspace, retained decoded rows and decoding overlap share the result grant; application-produced binary rows/keys and an undeliverable first reader refuse spilling and a session caps undisposed spilled results at eight; CTAS admits kept rows, independent of capacity (#1776, #1762); plain hash aggregation/DISTINCT spill eligibility, key/record codec limits, an over-budget single group and eight-pass repartition exhaustion retain this code (#1789) |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
@@ -338,7 +338,7 @@ structured-carrier messages remain unprefixed.
 | New (#1724, SQ-C1) | CS05095 | A streaming COPY consumer was given another statement kind |
 | New (#1724, SQ-C1) | CS05096 | COPY TO requires its SQL outbound-stream capability and consumer API |
 | New (#1792, SQ-J3 fix) | CS05097 | Syntactic or expanded target list exceeds 1,664 entries (54011); reports limit and attempted count |
-| COHSQLE041 | CS06041 | Storage/durability |
+| COHSQLE041 | CS06041 | SQL storage/durability failure, including refusal of earlier record-space formats before any file write; current format 39 retains applied-schema history and per-index owners (#1779, #1808) |
 | COHSQLE058 | CS06058 | Storage/durability |
 
 SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md); the Cohesion identities changed, not ISO/PostgreSQL SQLSTATE values.
@@ -618,7 +618,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD05016 | Result byte/frame limit exceeded | — |
 | CD05018 | Retained SELECT sources/groups, window partitions/keys/navigation/results, compound equality/multiset/sort/output state, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers, RETURNING results or index-build workspace exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755, #1805, #1808) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
-| CD05020 | Shared expression/lookup/set-operation/window work budget exhausted across a statement's subqueries, expression sources, key joins and compounds (#1731, #1732) | — |
+| CD05020 | Shared expression/lookup/set-operation/window work budget exhausted across a statement's subqueries, expression sources, key joins and compounds (#1731, #1732, #1805) | — |
 | CD05021 | Statement planning, EXPLAIN or evaluation needs more execution stack than the executing thread has left; the statement fails and the session stays open (#1803) | — |
 | CD05022 | MERGE execution is unavailable until OQ-M2; EXPLAIN MERGE remains available (#1804) | — |
 | CD07001 | Session belongs to another database | — |

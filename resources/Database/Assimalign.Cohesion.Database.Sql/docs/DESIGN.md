@@ -2029,7 +2029,7 @@ canonical body. FROM-less correlated projections also retain provenance when the
 display name differs from the referenced column, or that column was already synthesized.
 An authored view name identical to a synthesized name is also expressed
 as a derived column list in that body; different catalog names already prove an explicit
-list supplied them. Star expansion avoids inventing aliases for synthesized names. That change retained SQL format 37; format 38 added applied-schema history; current format 39 records physical index owners.
+list supplied them. Star expansion avoids inventing aliases for synthesized names. That change retained SQL format 37; format 38 added applied-schema history and never shipped on its own; current format 39 records physical index owners.
 An older frozen star's same-name AS alias is indistinguishable from an authored re-alias;
 stored-body binding conservatively retains synthesized provenance for that shape (CS01015).
 New fully named same-name re-alias views persist an explicit output list. A mixed view can
@@ -4176,6 +4176,10 @@ lengths keep their existing rejection rule; explicit character truncation does n
 binary values. Stored row bytes and canonical DEFAULT text retain their existing formats.
 
 ## Compiled-schema provisioning
+
+Compiled expression DEFAULTs remain outside the literal-only declaration contract. Their
+pre-publication policy refusal carries CS03105, including through the migration exception,
+instead of leaking the generic CS05060 diagnostic. SQL DDL expression DEFAULTs are unchanged.
 
 Joint space admission charges sparse dirty buffer pools only when the job allocates pages.
 A zero-operation marker refresh (including an empty Build) admits on the declaration-derived
@@ -9049,7 +9053,7 @@ a deferred failure stays deferred. Constant conversion retains parameter provena
 Statistical transitions and JSON's grouped conversions
 retain their contracts. CHECK and SQL function creation fully bind
 before publication, as defaults, views and partial predicates already do. Accepted definitions
-round-trip through file reopen. This change ships with SQ-A7's format 38 in the same release;
+round-trip through file reopen. This change ships in current format 39 with SQ-A7 history and IX-S1 owners; format 38 never shipped on its own;
 view columns are not migrated and this run adds no format bump or compatibility reader. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
 parse_coerce.c:1357-1456. Bound selectors retain their SQL type and member/index overload;
 evaluation converts alternatives to that type before access.
@@ -10326,7 +10330,7 @@ The #1443 review kept record-space format 11 unchanged. #1437 advances it to 12 
 
 #### Catalog: Applied-schema history and held declarations (#1779, SQ-A7)
 
-SQL record-space format 38 adds catalog kind 20, distinct from the current kind-6 state.
+SQL record-space format 38 introduced catalog kind 20, distinct from the current kind-6 state; format 38 never shipped on its own. Current format 39 retains that history and adds physical per-index owners.
 Each hash-only history entry stores ContentHash, FirstAppliedGeneration and LastAppliedGeneration.
 Entries are never evicted: forgetting one could let an old opted-in declaration delete newer data.
 A chunk holds at most 32 entries. With 64-character SHA-256 hashes each entry is 86 encoded bytes;
