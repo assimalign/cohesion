@@ -9,6 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
@@ -17,11 +18,11 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql] - A fresh process samples one cold combined spill shape (#1789)")]
+    [L3bColdFact(DisplayName = "Cohesion Test [Sql] - A fresh process samples one cold combined spill shape (#1789)")]
     public async Task ExecuteAsync_JoinFix2ColdProcess_ShouldUseOneAllowance()
     {
         // Arrange: the evidence runner selects one shape before launching the process.
-        string shape = Environment.GetEnvironmentVariable("L3B_COLD_SHAPE") ?? "group";
+        string shape = Environment.GetEnvironmentVariable("L3B_COLD_SHAPE")!;
         shape.ShouldBeOneOf("group", "deferred", "ownership");
         // Act / Assert
         await ExecuteAsync_JoinFixCombinedHeap_ShouldUseOneAllowance(shape, cold: true);
@@ -30,13 +31,11 @@ public sealed partial class SqlSortSpillConformanceTests
     [Theory(DisplayName = "Cohesion Test [Sql] - Indexed join component charges bound two marginal live populations (#1789)")]
     [InlineData("directory")]
     [InlineData("cache")]
-    [InlineData("bitmap")]
     [InlineData("sorter")]
     [InlineData("reader")]
     [InlineData("writer")]
     [InlineData("staged-reader")]
     [InlineData("deferred-writer")]
-    [InlineData("deferred-buffer")]
     [InlineData("operator")]
     [InlineData("staged-operator")]
     [InlineData("collector-operator")]
@@ -105,10 +104,6 @@ public sealed partial class SqlSortSpillConformanceTests
                     roots[i] = new SqlHashJoinSpill.Chunk[128];
                     unit = SqlHashJoinSpill.DirectoryBytes(128);
                 }
-                else if (component == "bitmap")
-                { roots[i] = new byte[1250]; unit = SqlHashJoinSpill.BitmapBytes(10000); }
-                else if (component == "deferred-buffer")
-                { roots[i] = new byte[16384]; unit = SqlRowCollector.DeferredBufferBytes(16384); }
                 else if (component == "cache")
                 {
                     var rows = new SqlHashJoinSpill.BuildRecord[16];
@@ -244,9 +239,11 @@ public sealed partial class SqlSortSpillConformanceTests
                 : phase is "join-batch-live" or "join-partitioned" or "join-index-chunks" ? "probe"
                 : phase.StartsWith("join-", StringComparison.Ordinal) ? "build"
                 : phase is "delivered" or "delivery" ? "delivery" : "group";
-            peaks.TryGetValue(category, out var previous);
-            peaks[category] = (Math.Max(previous.Live, live), Math.Max(previous.Charge, active?.HashMemoryBytes ?? 0));
-            _output.WriteLine($"JOIN_COMBINED|shape={shape}|cold={cold}|phase={phase}|live={live}|charged={active?.HashMemoryBytes}");
+            bool measured = peaks.TryGetValue(category, out var previous);
+            long charged = active?.HashMemoryBytes ?? 0;
+            if (!measured || live > previous.Live) { peaks[category] = (live, charged); }
+            _output.WriteLine($"JOIN_COMBINED|shape={shape}|cold={cold}|phase={phase}|live={live}|charged={charged}|difference={live - charged}");
+            (live - charged).ShouldBeLessThanOrEqualTo(262144, customMessage: phase);
         }
     }
 

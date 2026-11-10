@@ -115,7 +115,7 @@ A managed byte frame packs repeated four-byte patterns, escaping its marker and 
 bytes when packing would grow the record. Decode is bounded by B and validates commands
 before decoding the exact row codec. Packing helps compressible frames. During Seal the
 sorter's runs and the index coexist: a spilled build needs up to about twice its packed
-size of temporary space, plus page framing and a small chunk-metadata run. With the default
+size of temporary space, plus page framing, a small chunk-metadata run and any staged probe-side input of the statement. With the default
 quota of four grants, an incompressible build larger than about two grants refuses located
 CK05002 at Seal. Probe-heavy joins use less temporary space than partitioned probe spooling;
 build-heavy incompressible joins have about half that former build capacity.
@@ -136,13 +136,14 @@ already excludes volatile/throwing ON expressions. Joins have no repartitioning,
 limit or skew refusal; aggregation retains its eight-level limit.
 
 Decoded chunks validate that the width fits; omitted trailing cells restore as NULL.
-Page CRCs detect truncation. They also validate ordinal range, non-decreasing unsigned hashes, increasing
+Page CRCs detect truncation. A statement-held hash of all 48-byte directory entries is compared before probing,
+including ranges for chunks no probe loads. The readers also validate ordinal range, non-decreasing unsigned hashes, increasing
 ordinals within each hash, directory endpoints, key families, recomputed hash and NULL
 flag. Damage retains located CK05004. Quotas, the free-space floor and I/O retain CK0500x.
 Computed keys, correlated/lateral inputs, non-hash steps, deferred collations, SQL/JSON,
 joined DML, application binary build cells and join-output DISTINCT retain eligibility.
-The probe operation itself never encodes payloads. Normalized RIGHT/FULL left inputs can
-stage separately when their retained input buffer refuses. This source applies SQ-L2's
+The probe operation itself never encodes payloads. Retained buffers of a normalized join tree,
+including left inputs and intermediate outputs, can stage when their original reservation refuses. This source applies SQ-L2's
 exact row codec and grant-derived record bound to every cell, including probe payloads;
 application-produced binary probe cells refuse CS05067 when staging is required.
 
@@ -162,7 +163,8 @@ min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192), including framing.
 The sorter's minimum M = max(65,536, 32,768 + 2 * (8,192 + B)) supports a two-way merge.
 At handoff the minimum working set is the operator, keys, M and scratch for rows seen so far.
 Above that minimum the arena takes up to half the available grant A, with no fixed cap,
-leaving the actual scratch charged. The optional extra gives way to a later wider row:
+leaving the actual scratch charged. Before any statement reservation refuses, registered optional
+join arenas give way and admission retries. This includes staged readers and nested FULL unmatched sorts:
 the old sorter consolidates to a run under its existing charge, then drains that run before
 allocating M. A row refuses only if the minimum plus its scratch cannot fit. Seal builds
 the directory after releasing the arena. FULL's unmatched phase uses its own minimum M,
@@ -201,19 +203,22 @@ operator count. Persistent join objects, directories, bitmaps, caches and reader
 are charged. Combined joins, GROUP BY and ORDER BY use G plus this single allowance.
 
 EXPLAIN ANALYZE reports spilled_bytes (largest physical snapshot), spill_peak_bytes (owner
-high-water mark), spill_runs (initial sorter runs), spill_merge_passes (sum of sorter merge
+high-water mark), spill_runs (sorter runs written, including a consolidated prefix after the arena gives way), spill_merge_passes (sum of sorter merge
 depths) and hash_join_probe_chunk_reads (decoded cache misses during probes, excluding build
 and unmatched scans). With separate sort metrics, hash owner byte/run/merge names have a
 hash_ prefix. Internal ProbeBytesRead counts encoded bytes and framing decoded by probes.
 Physical fields are not cumulative I/O. Joins never increment hash_spill_batches or
 hash_spill_passes; these keep aggregation's meanings when aggregation also spills.
 
-Under ANALYZE, JoinStep reports its executed hash_budget=spill_on_refusal or no_spill and
-hash_status=fitting or spilled for that build. Plain EXPLAIN describes configured spilling
+Under ANALYZE, JoinStep reports its configured hash_budget=spill_on_refusal or no_spill and
+hash_status=fitting or spilled for that build. Policy is recorded when a plan starts, separately
+from candidate work, so an unbuilt step has its real policy and zero-candidate actuals remain NULL.
+Non-hash steps retain hash_budget=no_spill. Fitting text keeps the base description plus hash_status.
+Plain EXPLAIN describes configured spilling
 as spill_on_refusal_if_eligible. Near a refusal boundary the process hash
 seed can affect directory growth, admission against the actual largest cache chunk and
 FULL's unmatched sorter layout near CK05002. EXPLAIN's hash_join_probe_chunk_reads and
-FULL's spill_runs/spill_merge_passes can vary by process. Rows, order, JoinCandidatePairs,
+spill_runs/spill_merge_passes for FULL and for non-FULL builds in multi-join plans can vary by process. Rows, order, JoinCandidatePairs,
 RecordsExamined, calls and the first evaluation error retain fitting semantics.
 
 No durable format or write boundary is added. PostgreSQL's batch alternative is at

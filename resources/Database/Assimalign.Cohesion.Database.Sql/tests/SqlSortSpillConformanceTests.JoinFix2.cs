@@ -100,8 +100,16 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         const string sql = "SELECT l.id,l.payload FROM (jl l FULL JOIN jr r ON l.id=r.id) JOIN (jc c JOIN jd d ON c.id=d.id) ON l.id=c.id ORDER BY l.id LIMIT 600";
         await using var expected = (DatabaseResultSet)await a.ExecuteAsync(sql);
-        bool ordinary = false, deferred = false;
-        SqlRowCollector.ObserveSpill = phase => { ordinary |= phase == "handoff"; deferred |= phase == "deferred"; };
+        bool ordinary = false, deferred = false, full = false; int sequence = 0, handoff = -1, staged = -1;
+        SqlStatementMetrics? active = null;
+        SqlStatementMetrics.AfterMemoryReservation = (metrics, _) => active = metrics;
+        SqlPlanExecutor.ObserveHashSpill = (phase, _) =>
+        {
+            if (phase == "join-handoff" && !full) { handoff = ++sequence; }
+            if (phase == "join-input" && handoff >= 0 && SqlHashSpillMetrics.For(active!)?.FullJoin == true) { full = true; }
+        };
+        SqlRowCollector.ObserveSpill = phase =>
+        { ordinary |= phase == "handoff"; deferred |= phase == "deferred"; if (phase == "staged-drained" && full) { staged = ++sequence; } };
         try
         {
             // Act
@@ -109,10 +117,10 @@ public sealed partial class SqlSortSpillConformanceTests
             try { (await Rows(actual)).ShouldBe(await Rows(expected)); }
             finally { await actual.DisposeAsync(); }
             // Assert
-            ordinary.ShouldBeTrue(); deferred.ShouldBeFalse();
+            ordinary.ShouldBeTrue(); deferred.ShouldBeFalse(); full.ShouldBeTrue(); staged.ShouldBeGreaterThan(handoff);
             Statements(engine.TempSpace!).ShouldBeEmpty();
         }
-        finally { SqlRowCollector.ObserveSpill = null; }
+        finally { SqlRowCollector.ObserveSpill = null; SqlPlanExecutor.ObserveHashSpill = null; SqlStatementMetrics.AfterMemoryReservation = null; }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Indexed builds complete beyond the open-run limit (#1789)")]
@@ -222,7 +230,9 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         var reservations = new SortedDictionary<long, int>();
         bool live = false;
-        SqlPlanExecutor.ObserveHashSpill = (phase, _) => { if (phase == "join-handoff") { live = true; } };
+        long unmatchedGrant = -1;
+        SqlPlanExecutor.ObserveHashSpill = (phase, value) =>
+        { if (phase == "join-handoff") { live = true; } if (phase == "join-match-sort-live") { unmatchedGrant = value; } };
         SqlStatementMetrics.AfterMemoryReservation = (_, bytes) =>
         { if (live) { reservations[bytes] = reservations.GetValueOrDefault(bytes) + 1; } };
         string sql = shape switch
@@ -238,13 +248,14 @@ public sealed partial class SqlSortSpillConformanceTests
             await Rows(result); await result.DisposeAsync();
             // Assert: the values come from successful product reservations, not formulas.
             string trace = string.Join(',', reservations.Select(p => $"{p.Key}:{p.Value}"));
-            _output.WriteLine($"FIX2_RESERVATIONS|{shape}|peak={session.LastStatementMetrics!.PeakHashMemoryBytes}|{trace}");
+            _output.WriteLine($"FIX2_RESERVATIONS|{shape}|peak={session.LastStatementMetrics!.PeakHashMemoryBytes}|unmatched_grant={unmatchedGrant}|{trace}");
             trace.ShouldBe(shape switch
             {
                 "FULL" => "32:1,136:1,400:1,792:1,37737:1,38832:1,65536:1,196717:1,259823:1",
                 "staged" => "792:1,840:901,1280:1,8704:1,10121:1,25208:1,25920:1,262144:1,592653:1,1037175:1",
                 _ => "40:1,400:1,792:1,1352:2,15856:41,16056:1,16382:1,25112:1,47737:1,57072:1,262144:1,618413:1,1019919:1,1030842:1",
             });
+            if (shape == "FULL") { unmatchedGrant.ShouldBe(220991); }
             Statements(engine.TempSpace!).ShouldBeEmpty();
         }
         finally { SqlPlanExecutor.ObserveHashSpill = null; SqlStatementMetrics.AfterMemoryReservation = null; }
@@ -328,7 +339,7 @@ public sealed partial class SqlSortSpillConformanceTests
         // Assert
         text.ShouldContain("hash_budget=spill_on_refusal", Case.Sensitive);
         text.ShouldContain(count == 24 ? "hash_status=fitting" : "hash_status=spilled", Case.Sensitive);
-        text.ShouldNotContain("bounded in-memory hash", Case.Sensitive);
+        text.Contains("bounded in-memory hash", StringComparison.Ordinal).ShouldBe(count == 24);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Build handoff uses the minimum when a greedy grant cannot fit (#1789)")]
@@ -495,7 +506,7 @@ public sealed partial class SqlSortSpillConformanceTests
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Materialized group inputs never dispose delivered shared runs (#1789)")]
     [InlineData("BOOL_AND")]
-    [InlineData("exact")]
+    [InlineData("exact-control")]
     [InlineData("BOOL_OR")]
     [InlineData("EVERY")]
     [InlineData("key")]
@@ -513,10 +524,10 @@ public sealed partial class SqlSortSpillConformanceTests
         { await SeedFix2(a, 10000, 0); await SeedFix2(b, 10000, 0); }
         else { await SeedFix2Owner(a, 5000); await SeedFix2Owner(b, 5000); }
         string group = shape == "key" ? "stamp(l.id / 4)" : "l.id / 4";
-        string aggregate = shape == "argument" ? "BOOL_AND(stamp(l.id) IS NULL)" : $"{(shape is "key" or "exact" ? "BOOL_AND" : shape)}(r.payload IS NULL)";
+        string aggregate = shape == "argument" ? "BOOL_AND(stamp(l.id) IS NULL)" : $"{(shape is "key" or "exact-control" ? "BOOL_AND" : shape)}(r.payload IS NULL)";
         string sql = shape == "collector"
             ? $"SELECT stamp(l.id) AS k,CAST(l.id AS TEXT)||'{new string('x', 1000)}' pad FROM jl l LEFT JOIN jr r ON l.id=r.id WHERE l.id<600 ORDER BY k"
-            : $"SELECT {group} AS g,{aggregate} AS b,{(shape == "exact" ? "" : $"CAST({group} AS TEXT)||")}'{new string('x', 1000)}' AS pad FROM jl l LEFT JOIN jr r ON l.id=r.id GROUP BY {group} ORDER BY g";
+            : $"SELECT {group} AS g,{aggregate} AS b,{(shape == "exact-control" ? "" : $"CAST({group} AS TEXT)||")}'{new string('x', 1000)}' AS pad FROM jl l LEFT JOIN jr r ON l.id=r.id GROUP BY {group} ORDER BY g";
         await using var expected = (DatabaseResultSet)await a.ExecuteAsync(sql);
         var rows = await Rows(expected);
         long pairs = a.LastStatementMetrics!.JoinCandidatePairs, records = a.LastStatementMetrics.RecordsExamined;
@@ -542,6 +553,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 b.LastStatementMetrics.HashMemoryBytes.ShouldBe(0); b.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
                 Statements(engine.TempSpace!).ShouldBeEmpty();
                 if (shape == "collector") { joined.ShouldBeTrue(); collected.ShouldBeTrue(); staged.ShouldBeFalse(); }
+                else if (shape != "exact-control") { (joined && staged && collected).ShouldBeTrue(); }
             }
         }
         finally { SqlRowCollector.ObserveSpill = null; SqlPlanExecutor.ObserveHashSpill = null; }
@@ -560,7 +572,16 @@ public sealed partial class SqlSortSpillConformanceTests
         // Act / Assert
         if (refuses)
         {
-            var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql));
+            long inputs = 0; bool partitioned = false; int sealWrites = 0;
+            SqlPlanExecutor.ObserveHashSpill = (phase, value) => { if (phase == "join-input") { inputs = value; } partitioned |= phase == "join-partitioned"; };
+            BeforeWrite(engine.TempSpace!, () =>
+            {
+                if (inputs == 1200 && new System.Diagnostics.StackTrace().ToString().Contains("SqlHashJoinSpill.Seal(", StringComparison.Ordinal)) { sealWrites++; }
+            });
+            DatabaseException error;
+            try { error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql)); }
+            finally { SqlPlanExecutor.ObserveHashSpill = null; BeforeWrite(engine.TempSpace!, null); }
+            inputs.ShouldBe(1200); partitioned.ShouldBeFalse(); sealWrites.ShouldBeGreaterThan(0);
             error.Diagnostics[0].Code.ShouldBe("CK05002"); error.Diagnostics[0].Location.ShouldNotBeNull();
             _output.WriteLine($"FIX2_QUOTA|{error.Diagnostics[0]}|{error.StackTrace}");
         }

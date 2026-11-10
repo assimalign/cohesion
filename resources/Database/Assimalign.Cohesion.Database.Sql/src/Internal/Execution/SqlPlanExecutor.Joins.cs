@@ -22,6 +22,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
+        RecordJoinSpillPolicies(plan, statement.Metrics, spillOwner);
         SqlSelectMemory matchBytes = default;
         long derivedBytes = 0;
         List<object?[]>? matches = null;
@@ -99,6 +100,7 @@ internal sealed partial class SqlPlanExecutor
     private async ValueTask<DatabaseResult> ExecutePipelinedJoinAsync(SqlJoinPlan plan,
         SqlStatementContext statement, CancellationToken cancellationToken, int? retainRows = null, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
+        RecordJoinSpillPolicies(plan, statement.Metrics, spillOwner);
         var (derivedRows, derivedBytes) = await PrepareJoinInputsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -107,6 +109,14 @@ internal sealed partial class SqlPlanExecutor
             return await ProjectJoinRowsAsync(plan, statement, sharedColumns, derivedRows, evaluator, cancellationToken, retainRows, spillOwner, hashInput).ConfigureAwait(false);
         }
         finally { ReleaseSelectMemory(ref derivedBytes); }
+    }
+
+    private void RecordJoinSpillPolicies(SqlJoinPlan plan, SqlStatementMetrics metrics, SqlDatabaseSession? spillOwner)
+    {
+        if (!metrics.IsAnalyzing) { return; }
+        bool allowed = _definitions.StatementMemoryBudget >= 262144 && CanSpillJoinRows(plan, spillOwner);
+        foreach (var step in plan.Steps)
+        { if (step.Hash is not null) { metrics.RecordHashSpillPolicy(step, allowed); } }
     }
 
     // Shared with group input: retain derived materialization, lock, definition and snapshot order.
@@ -187,6 +197,7 @@ internal sealed partial class SqlPlanExecutor
         var accesses = new SqlJoinIndexPath?[plan.Steps.Count];
         var indexes = new BTreeIndex?[plan.Steps.Count];
         var paths = new string[plan.Steps.Count];
+        RecordJoinSpillPolicies(plan, statement.Metrics, spillOwner);
         for (int i = 0; i < plan.Steps.Count; i++)
         {
             var access = plan.Steps[i].Access;
@@ -246,8 +257,6 @@ internal sealed partial class SqlPlanExecutor
                         {
                             if (hashes[level] is null)
                             {
-                                if (statement.Metrics.IsAnalyzing)
-                                { statement.Metrics.RecordHashSpillPolicy(plan.Steps[level], _definitions.StatementMemoryBudget >= 262144 && CanSpillJoinRows(plan, spillOwner)); }
                                 // Publish before reading: cancellation, decode and budget failures all
                                 // release every reservation in the enclosing finally.
                                 var table = new SqlHashJoinTable(hashKeys, statement.Metrics, _definitions.StatementMemoryBudget);

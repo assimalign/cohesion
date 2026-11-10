@@ -445,6 +445,9 @@ a hard-deadlock victim. Public APIs and wire messages are unchanged.
 
 Access selection compares bounded snapshot-visible index probes without stored statistics.
 Broad safe equijoins can build a bounded hash table; eligible roots use an indexed temporary build.
+Retained normalized-tree buffers can stage after their original reservation refuses, including
+left inputs and intermediate outputs. Optional join arenas yield to other statement reservations.
+Sorts and staged GROUP BY inputs outside the join statement keep their original grant arithmetic.
 Unique and small indexed probes retain
 nested loops. LEFT semantics, duplicate matches, SQL equality and full residual evaluation remain.
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live

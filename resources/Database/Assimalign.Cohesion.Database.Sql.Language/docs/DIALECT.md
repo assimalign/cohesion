@@ -15,13 +15,14 @@ FULL uses an ordinal bitmap and sorts unmatched rows by build ordinal, NULL keys
 Results retain fitting order, NULL extensions, candidate counts, calls and the first error.
 Near a refusal boundary the process hash seed can affect directory growth at Seal, cache
 admission against the actual largest chunk, and FULL's unmatched sorter near CK05002.
-Probe chunk reads (hash_join_probe_chunk_reads), and FULL's spill_runs and spill_merge_passes,
+Probe chunk reads (hash_join_probe_chunk_reads), and spill_runs and spill_merge_passes for FULL
+and non-FULL builds in multi-join plans,
 can vary by process. Rows, order, JoinCandidatePairs, RecordsExamined, calls and the first
 evaluation error retain fitting semantics.
 ON, WHERE and projections remain in the caller. Computed keys, correlated/lateral inputs,
 non-hash steps, deferred collations, SQL/JSON, application binary build cells, joined DML
 and join-output DISTINCT keep their eligibility. Probing does not encode payloads;
-normalized RIGHT/FULL left inputs can stage separately under SQ-L2's exact row codec and
+retained buffers of a normalized join tree (left inputs and intermediate outputs) can stage under SQ-L2's exact row codec and
 grant-derived record bound. This applies to probe payloads too: application-produced binary
 probe cells refuse CS05067 when that input must stage; fitting inputs keep their existing admission.
 Final result spooling, windows, recursion, set owners and NOT IN remain separate work.
@@ -29,15 +30,17 @@ Final result spooling, windows, recursion, set owners and NOT IN remain separate
 Sorting shares the exact temporary statement and physical quota. FULL can stage already
 evaluated output/key records until its unmatched sort releases the grant. Top-N ties keep
 input ordinal order; the collector then uses the ordinary sorter.
+A collector after a non-FULL spilled join receives only the remaining statement grant,
+including any staged reader's reservation. Near the minimum grant this can refuse CS05067.
 Deferral lasts while any spilled FULL still owes its unmatched grant; buffer spills never
 create that debt. During Seal a spilled build needs up to about twice its packed size of
-temporary space, plus page framing. With the default quota of four grants, an incompressible
+temporary space, plus page framing and any staged probe-side input of the statement. With the default quota of four grants, an incompressible
 build larger than about two grants refuses located CK05002 at Seal. Packing helps only
 compressible frames. Probe-heavy joins use less temp than partitioned probe spooling;
 build-heavy incompressible joins have about half its build capacity.
 
 EXPLAIN ANALYZE reports spilled_bytes (largest physical snapshot), spill_peak_bytes (owner
-high-water mark), spill_runs (initial sorter runs), spill_merge_passes (sum of merge depths)
+high-water mark), spill_runs (sorter runs written, including a consolidated prefix after the arena gives way), spill_merge_passes (sum of merge depths)
 and hash_join_probe_chunk_reads (decoded cache misses during probing, excluding build and
 unmatched work). With separate sort metrics, hash owner byte/run/merge fields have a hash_
 prefix. Physical fields do not count cumulative I/O. Joins do not report batches or replay
@@ -46,6 +49,8 @@ aggregation also spills. Fitting joins keep base representation, charges and all
 Each analyzed hash build reports hash_budget=spill_on_refusal or no_spill from its executed
 permission, and hash_status=fitting or spilled. Plain EXPLAIN uses spill_on_refusal_if_eligible
 for configured spilling.
+An unbuilt hash step still reports its configured policy; zero-candidate hash actuals remain NULL.
+Non-hash steps keep hash_budget=no_spill. Fitting descriptions retain base text with the added hash_status field.
 
 ## Plain GROUP BY and hash DISTINCT spilling (#1789, SQ-L3a)
 

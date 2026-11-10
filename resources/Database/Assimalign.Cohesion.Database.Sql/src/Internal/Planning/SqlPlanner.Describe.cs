@@ -120,7 +120,7 @@ internal sealed partial class SqlPlanner
 
         string HashPolicy(SqlJoinPlan join, SqlJoinStep step)
         {
-            if (step.Hash is null) { return ""; }
+            if (step.Hash is null) { return "; hash_budget=no_spill"; }
             bool spilled = metrics?.SpilledHash(step) == true;
             bool eligible = metrics is not null ? metrics.AllowsHashSpill(step)
                 : allowHashSpill && !recursiveDemand && !join.IsDistinct
@@ -176,7 +176,7 @@ internal sealed partial class SqlPlanner
                 SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset) +
                     (p.Access is SqlOrderedIndexPath ? "; sort_removed=true; order_source=index" : ""),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
-                SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(recursiveDemand ? "demand-driven inputs" : step.Hash is not null ? "bounded hash" : step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
+                SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(recursiveDemand ? "demand-driven inputs" : step.Hash is not null ? metrics?.SpilledHash(step) == true ? "bounded hash" : "bounded in-memory hash" : step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
                     QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset) + JoinSearchDetail(p),
                 SqlGroupPlan p => $"keys={p.Keys.Count}; aggregates={p.Aggregates.Count}; having={p.Having is not null}; " +
                     (p is not SqlGroupingSetsPlan extended ? "" : GroupingSetsDetail(extended)) +

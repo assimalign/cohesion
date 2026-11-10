@@ -277,18 +277,26 @@ internal sealed class SqlStatementMetrics
             ? work.Candidates : null;
 
     internal void RecordHashSpillPolicy(object operation, bool allowed)
-    { if (Analysis(operation) is { } work) { work.HashSpillAllowed |= allowed; } }
+    {
+        if ((_accessPath as JoinWork)?.Operators?.Scope.HashPolicies is not { } policies) { return; }
+        policies.TryGetValue(operation, out var policy);
+        policies[operation] = (policy.Allowed || allowed, policy.Spilled);
+    }
 
     internal bool AllowsHashSpill(object operation)
-        => (_accessPath as JoinWork)?.Operators?.Scope.Work is { } operators
-            && operators.TryGetValue(operation, out var work) && work.HashSpillAllowed;
+        => (_accessPath as JoinWork)?.Operators?.Scope.HashPolicies is { } policies
+            && policies.TryGetValue(operation, out var policy) && policy.Allowed;
 
     internal void RecordHashSpillStatus(object operation, bool spilled)
-    { if (Analysis(operation) is { } work) { work.HashSpilled |= spilled; } }
+    {
+        if ((_accessPath as JoinWork)?.Operators?.Scope.HashPolicies is not { } policies) { return; }
+        policies.TryGetValue(operation, out var policy);
+        policies[operation] = (policy.Allowed, policy.Spilled || spilled);
+    }
 
     internal bool SpilledHash(object operation)
-        => (_accessPath as JoinWork)?.Operators?.Scope.Work is { } operators
-            && operators.TryGetValue(operation, out var work) && work.HashSpilled;
+        => (_accessPath as JoinWork)?.Operators?.Scope.HashPolicies is { } policies
+            && policies.TryGetValue(operation, out var policy) && policy.Spilled;
 
     // Cached view bodies can appear at several relation paths. Each path owns its own
     // plan counters, while repeated correlated invocations at that path accumulate.
@@ -324,6 +332,7 @@ internal sealed class SqlStatementMetrics
 
     internal void ReserveHashMemory(long bytes, long budget)
     {
+        if (bytes > budget - _memoryBytes) { SqlHashSpillMetrics.YieldOptionalMemory(this, bytes, budget); }
         if (bytes > budget - _memoryBytes)
         {
             throw SqlExecutionException.StatementMemoryBudget(budget);
@@ -332,6 +341,12 @@ internal sealed class SqlStatementMetrics
         _peakMemoryBytes = Math.Max(_peakMemoryBytes, _memoryBytes);
         try { AfterMemoryReservation?.Invoke(this, bytes); }
         catch { _memoryBytes -= bytes; throw; }
+    }
+
+    internal long RemainingHashMemory(long budget, long minimum)
+    {
+        if (minimum > budget - _memoryBytes) { SqlHashSpillMetrics.YieldOptionalMemory(this, minimum, budget); }
+        return budget - _memoryBytes;
     }
 
     internal void ReservePlainSelectMemory(long bytes, long budget)
@@ -471,6 +486,7 @@ internal sealed class SqlStatementMetrics
     private sealed class AnalysisScope
     {
         internal readonly Dictionary<object, SqlOperatorWork> Work = new(ReferenceEqualityComparer.Instance);
+        internal readonly Dictionary<object, (bool Allowed, bool Spilled)> HashPolicies = new(ReferenceEqualityComparer.Instance);
         internal readonly Dictionary<SqlDerivedRelation, AnalysisScope> Relations = new(ReferenceEqualityComparer.Instance);
 
         private sealed class DebugView

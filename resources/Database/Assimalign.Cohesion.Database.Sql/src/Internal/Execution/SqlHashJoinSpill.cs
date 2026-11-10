@@ -52,6 +52,9 @@ internal sealed class SqlHashJoinSpill : IDisposable
     private bool _disposed;
     private bool _charged;
     private bool _fullDebt;
+    private ulong _directoryHash = 14695981039346656037UL;
+    private CancellationToken _buildToken;
+    internal SqlHashJoinSpill? NextOptionalArena;
 
     internal SqlHashJoinSpill(SqlDatabaseSession owner, SqlHashJoinPath keys,
         SqlStatementMetrics metrics, long budget, bool trackUnmatched)
@@ -76,8 +79,8 @@ internal sealed class SqlHashJoinSpill : IDisposable
     {
         owner.ExportSpillPrefix(this, token);
         _scratch = 32768 + 2L * _bound + 2 * _maximumDecoded;
-        long available = _budget - _metrics.HashMemoryBytes;
         long minimum = OperatorBytes + _families.Length + BuildSorterGrant(_bound) + _scratch;
+        long available = _metrics.RemainingHashMemory(_budget, minimum);
         if (available < minimum) { Refuse(); }
         _sorterGrant = Math.Max(BuildSorterGrant(_bound), Math.Min(int.MaxValue,
             Math.Min(available / 2, available - OperatorBytes - _families.Length - _scratch)));
@@ -87,6 +90,8 @@ internal sealed class SqlHashJoinSpill : IDisposable
         _sorter = StorageTempSorter.Create(_statement, _sorterGrant, _bound, maximumOpenBuildRuns);
         foreach (var record in ReadPrefix(_prefix, token)) { _sorter.Append(record.Key.Span, record.Value.Span, token); }
         _prefix.Dispose(); _prefix = null;
+        _buildToken = token;
+        if (_sorterGrant > BuildSorterGrant(_bound)) { _counters.AddOptionalArena(this); }
     }
 
     internal void Add(object?[] row, CancellationToken token)
@@ -112,12 +117,6 @@ internal sealed class SqlHashJoinSpill : IDisposable
             long scratch = 32768 + 2L * _bound + 2 * _maximumDecoded;
             if (scratch > _scratch)
             {
-                long extra = _sorterGrant - BuildSorterGrant(_bound);
-                if (scratch - _scratch > _budget - _metrics.HashMemoryBytes && extra != 0)
-                {
-                    if (scratch - _scratch > _budget - _metrics.HashMemoryBytes + extra) { Refuse(); }
-                    ShrinkBuildSorter(token);
-                }
                 Reserve(scratch - _scratch); _scratch = scratch;
             }
         }
@@ -156,7 +155,8 @@ internal sealed class SqlHashJoinSpill : IDisposable
 
     private void ShrinkBuildSorter(CancellationToken token)
     {
-        // The optional arena gives way to a wider row. Consolidate under the old
+        _counters.RemoveOptionalArena(this);
+        // The optional arena gives way to any statement reservation. Consolidate under the old
         // grant, then drain that run before allocating the minimum arena.
         using var run = _statement.CreateRun(token);
         using (var sorted = _sorter!.Complete(token))
@@ -172,9 +172,12 @@ internal sealed class SqlHashJoinSpill : IDisposable
         _observe?.Invoke("join-sorter-minimum", _sorterGrant);
     }
 
+    internal void YieldOptionalArena() => ShrinkBuildSorter(_buildToken);
+
     private void Seal(CancellationToken token)
     {
         if (_sealed) { return; }
+        _counters.RemoveOptionalArena(this);
         long decodedTarget = Math.Min(_budget / 4, BuildSorterGrant(_bound) + 32768 + _bound - ReaderBytes);
         _index = _statement.CreateRun(token);
         using var directory = _statement.CreateRun(token);
@@ -220,9 +223,11 @@ internal sealed class SqlHashJoinSpill : IDisposable
         {
             Span<byte> bytes = stackalloc byte[48];
             int first = 0;
+            ulong directoryHash = 14695981039346656037UL;
             while (reader.TryRead(bytes, out int size, token))
             {
                 if (size != 48) { Damage(); }
+                directoryHash = HashDirectoryEntry(directoryHash, bytes);
                 var chunk = new Chunk(BinaryPrimitives.ReadUInt32LittleEndian(bytes), BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]),
                     BinaryPrimitives.ReadInt64LittleEndian(bytes[8..]), BinaryPrimitives.ReadInt32LittleEndian(bytes[16..]),
                     BinaryPrimitives.ReadInt32LittleEndian(bytes[20..]), BinaryPrimitives.ReadInt64LittleEndian(bytes[24..]),
@@ -232,9 +237,9 @@ internal sealed class SqlHashJoinSpill : IDisposable
                     chunk.FirstHash > chunk.LastHash || chunk.Position < 0 || chunk.Position >= _index.Position) { Damage(); }
                 AddChunk(chunk, decoded); first += chunk.Count;
             }
-            if (first != _count) { Damage(); }
+            if (first != _count || directoryHash != _directoryHash) { Damage(); }
         }
-        _cacheGrant = Math.Min(_budget / 4, _budget - _metrics.HashMemoryBytes);
+        _cacheGrant = Math.Min(_budget / 4, _metrics.RemainingHashMemory(_budget, _maximumChunk + 128));
         if (_cacheGrant < _maximumChunk + 128) { Refuse(); }
         Reserve(_cacheGrant);
         _sealed = true;
@@ -243,14 +248,21 @@ internal sealed class SqlHashJoinSpill : IDisposable
         _observe?.Invoke("join-partitioned", _count);
     }
 
-    private static void WriteChunk(StorageTempRun run, Chunk chunk, long decoded, CancellationToken token)
+    private void WriteChunk(StorageTempRun run, Chunk chunk, long decoded, CancellationToken token)
     {
         Span<byte> bytes = stackalloc byte[48];
         BinaryPrimitives.WriteUInt32LittleEndian(bytes, chunk.FirstHash); BinaryPrimitives.WriteUInt32LittleEndian(bytes[4..], chunk.LastHash);
         BinaryPrimitives.WriteInt64LittleEndian(bytes[8..], chunk.Position); BinaryPrimitives.WriteInt32LittleEndian(bytes[16..], chunk.First);
         BinaryPrimitives.WriteInt32LittleEndian(bytes[20..], chunk.Count); BinaryPrimitives.WriteInt64LittleEndian(bytes[24..], chunk.FirstOrdinal);
         BinaryPrimitives.WriteInt64LittleEndian(bytes[32..], chunk.LastOrdinal); BinaryPrimitives.WriteInt64LittleEndian(bytes[40..], decoded);
+        _directoryHash = HashDirectoryEntry(_directoryHash, bytes);
         run.Append(bytes, token);
+    }
+
+    private static ulong HashDirectoryEntry(ulong hash, ReadOnlySpan<byte> bytes)
+    {
+        foreach (byte value in bytes) { hash = unchecked((hash ^ value) * 1099511628211UL); }
+        return hash;
     }
 
     private void AddChunk(Chunk chunk, long bytes)
@@ -356,13 +368,13 @@ internal sealed class SqlHashJoinSpill : IDisposable
         if (_directory.Length != 0) { Release(DirectoryBytes(_directory.Length)); _directory = []; _chunks = 0; }
         // An ordinal sort avoids retaining a second copy of the entire build on disk.
         long readerBytes = ReaderBytes + _bound + 2 * _maximumDecoded;
-        long grant = Math.Min(int.MaxValue, _budget - _metrics.HashMemoryBytes - readerBytes);
+        long grant = Math.Min(int.MaxValue, _metrics.RemainingHashMemory(_budget, readerBytes + BuildSorterGrant(_bound)) - readerBytes);
         if (grant < BuildSorterGrant(_bound)) { Refuse(); }
         Reserve(readerBytes + grant);
         try
         {
             using var sorter = StorageTempSorter.Create(_statement, grant, _bound, 64);
-            _observe?.Invoke("join-match-sort-live", 0);
+            _observe?.Invoke("join-match-sort-live", grant);
             using (var reader = _index!.OpenReader(StorageTempSpace.PageSize))
             {
                 var buffer = new byte[_index.MaximumRecordLength];
@@ -526,6 +538,7 @@ internal sealed class SqlHashJoinSpill : IDisposable
     {
         if (_disposed) { return; }
         _disposed = true;
+        _counters.RemoveOptionalArena(this);
         SqlHashSpillMetrics.RefreshJoin(_metrics, _statement);
         _cache.Clear(); _directory = []; _matched = [];
         _metrics.ReleaseHashMemory(_reserved); _reserved = 0;

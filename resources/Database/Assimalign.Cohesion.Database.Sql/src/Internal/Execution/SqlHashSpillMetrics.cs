@@ -27,6 +27,33 @@ internal sealed class SqlHashSpillMetrics
     internal Exception? JoinCleanupFailure { get; private set; }
     private long _joinPhysicalBytes;
     private int _fullJoinDebts;
+    private SqlHashJoinSpill? _optionalArenas;
+    private bool _yielding;
+    internal void AddOptionalArena(SqlHashJoinSpill arena)
+    { arena.NextOptionalArena = _optionalArenas; _optionalArenas = arena; }
+    internal void RemoveOptionalArena(SqlHashJoinSpill arena)
+    {
+        SqlHashJoinSpill? previous = null;
+        for (var current = _optionalArenas; current is not null; current = current.NextOptionalArena)
+        {
+            if (!ReferenceEquals(current, arena)) { previous = current; continue; }
+            if (previous is null) { _optionalArenas = current.NextOptionalArena; }
+            else { previous.NextOptionalArena = current.NextOptionalArena; }
+            current.NextOptionalArena = null; return;
+        }
+    }
+    internal static void YieldOptionalMemory(SqlStatementMetrics metrics, long bytes, long budget)
+    {
+        var state = For(metrics);
+        if (state is null || state._yielding) { return; }
+        state._yielding = true;
+        try
+        {
+            while (bytes > budget - metrics.HashMemoryBytes && state._optionalArenas is { } arena)
+            { arena.YieldOptionalArena(); }
+        }
+        finally { state._yielding = false; }
+    }
     internal static void JoinCleanup(SqlStatementMetrics metrics, Exception failure)
     { Begin(metrics); For(metrics)!.JoinCleanupFailure ??= failure; }
     internal static SqlHashSpillMetrics? For(SqlStatementMetrics metrics) => _values.TryGetValue(metrics, out var value) ? value : null;
