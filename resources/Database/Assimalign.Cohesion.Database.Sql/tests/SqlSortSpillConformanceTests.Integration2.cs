@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,10 +16,10 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Foreign-yield shapes expand only batch-4 memory refusals at the same grant and quota (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Spilled join shapes complete with fitting rows at G and Q (#1789)")]
     [InlineData(false, 262144, 1048576)]
     [InlineData(true, 1048576, 134217728)]
-    public async Task ExecuteAsync_ForeignYieldCapability_ShouldMatchFittingRows(bool nested, long budget, long quota)
+    public async Task ExecuteAsync_JoinShapes_ShouldCompleteWithFittingRowsAtGrantAndQuota(bool nested, long budget, long quota)
     {
         // Arrange: the matching batch-4 probes run these exact statements at G and Q.
         await using var engine = await CreateFix2("yield-capability", budget, quota: quota);
@@ -31,7 +32,12 @@ public sealed partial class SqlSortSpillConformanceTests
             : "SELECT jl.id,jr.id FROM jl FULL JOIN jr ON jl.id=jr.id";
         await using var expected = (DatabaseResultSet)await fitting.ExecuteAsync(sql);
         int handoffs = 0;
-        SqlPlanExecutor.ObserveHashSpill = (phase, _) => { if (phase == "join-handoff") { handoffs++; } };
+        bool minimum = false;
+        SqlPlanExecutor.ObserveHashSpill = (phase, _) =>
+        {
+            if (phase == "join-handoff") { handoffs++; }
+            minimum |= phase == "join-sorter-minimum";
+        };
         try
         {
             // Act / Assert
@@ -40,6 +46,40 @@ public sealed partial class SqlSortSpillConformanceTests
             actual.Columns.Select(column => (column.Ordinal, column.Name, column.Type, column.MaxLength, column.IsNullable))
                 .ShouldBe(expected.Columns.Select(column => (column.Ordinal, column.Name, column.Type, column.MaxLength, column.IsNullable)));
             handoffs.ShouldBeGreaterThan(0);
+            if (nested)
+            {
+                // Repeat under recorded foreign pressure to exercise the child's yield trigger.
+                // The unpressured run above separately proves the same-G/Q capability claim.
+                SqlStatementMetrics? active = null;
+                long held = 0;
+                bool starved = false;
+                int partitioned = 0;
+                SqlStatementMetrics.AfterMemoryReservation = (metrics, bytes) =>
+                {
+                    active = metrics;
+                    if (starved || bytes != SqlHashJoinSpill.DirectoryBytes(16)) { return; }
+                    starved = true; held = budget - metrics.HashMemoryBytes - 45000;
+                    metrics.ReserveHashMemory(held, budget);
+                };
+                SqlPlanExecutor.ObserveHashSpill = (phase, _) =>
+                {
+                    if (phase == "join-partitioned" && ++partitioned == 1)
+                    {
+                        active!.ReleaseHashMemory(held); held = budget - active.HashMemoryBytes - 300000;
+                        active.ReserveHashMemory(held, budget);
+                    }
+                    minimum |= phase == "join-sorter-minimum";
+                    if (phase == "join-ordered" && held != 0) { active!.ReleaseHashMemory(held); held = 0; }
+                };
+                try
+                {
+                    await using var pressured = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                    (await Rows(pressured)).ShouldBe(rows);
+                    starved.ShouldBeTrue();
+                }
+                finally { active?.ReleaseHashMemory(held); SqlStatementMetrics.AfterMemoryReservation = null; }
+            }
+            minimum.ShouldBeTrue();
             session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(budget);
             _output.WriteLine($"YIELD_CAPABILITY|nested={nested}|grant={budget}|quota={quota}|rows={rows.Length}|handoffs={handoffs}|digest={Fix2Fingerprint(rows)}");
         }
@@ -63,6 +103,7 @@ public sealed partial class SqlSortSpillConformanceTests
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         bool armed = false, injected = false, starved = false, staged = false;
         int handoffs = 0, partitioned = 0;
+        var phases = new List<string>();
         long held = 0;
         SqlStatementMetrics? active = null;
         SqlStatementMetrics.AfterMemoryReservation = (metrics, bytes) =>
@@ -72,9 +113,10 @@ public sealed partial class SqlSortSpillConformanceTests
             starved = true; held = budget - metrics.HashMemoryBytes - 45000;
             metrics.ReserveHashMemory(held, budget);
         };
-        SqlRowCollector.ObserveSpill = phase => staged |= phase == "staged-drained";
+        SqlRowCollector.ObserveSpill = phase => { phases.Add(phase); staged |= phase == "staged-drained"; };
         SqlPlanExecutor.ObserveHashSpill = (phase, _) =>
         {
+            phases.Add(phase);
             if (phase == "join-handoff") { handoffs++; }
             if (nested && phase == "join-partitioned" && ++partitioned == 1)
             {
@@ -105,8 +147,21 @@ public sealed partial class SqlSortSpillConformanceTests
                 failure.Diagnostics[0].Start.ShouldNotBeNull(); failure.Diagnostics[0].End.ShouldNotBeNull();
             }
             armed.ShouldBeTrue(); injected.ShouldBeTrue(); handoffs.ShouldBe(nested ? 2 : 1);
-            if (nested) { starved.ShouldBeTrue(); partitioned.ShouldBe(1); }
-            else { staged.ShouldBeTrue(); }
+            int yield = phases.IndexOf("join-sorter-yield");
+            yield.ShouldBeGreaterThanOrEqualTo(0);
+            if (nested)
+            {
+                starved.ShouldBeTrue(); partitioned.ShouldBe(1);
+                phases.IndexOf("join-seal").ShouldBeGreaterThanOrEqualTo(0);
+                phases.IndexOf("join-seal").ShouldBeLessThan(yield);
+                phases.ShouldNotContain("join-match-sort-live"); // failure prevents unmatched admission
+            }
+            else
+            {
+                staged.ShouldBeTrue();
+                phases.IndexOf("staged-drained").ShouldBeGreaterThanOrEqualTo(0);
+                phases.IndexOf("staged-drained").ShouldBeLessThan(yield);
+            }
         }
         finally
         {
@@ -143,11 +198,24 @@ public sealed partial class SqlSortSpillConformanceTests
             }
             SqlHashSpillMetrics.For(metrics).ShouldNotBeNull().HasOptionalArenas.ShouldBeTrue();
             BeforeWrite(engine.TempSpace!, () => writes++);
-            // Act / Assert: even all of G cannot cover G+1, regardless of arena sizing.
+            long free = budget - metrics.HashMemoryBytes;
+            var arena = RegisteredOptionalArena(SqlHashSpillMetrics.For(metrics)!).ShouldNotBeNull();
+            long extra = OptionalArenaExtra(arena);
+            extra.ShouldBeGreaterThan(0); // S != M; summing S instead of S - M must fail.
+
+            // Act / Assert: the exact recoverable boundary, then the global impossibility.
+            Should.Throw<SqlExecutionException>(() => metrics.ReserveHashMemory(free + extra + 1, budget)).Diagnostics[0].Code.ShouldBe("CS05067");
+            writes.ShouldBe(0); yields.ShouldBe(0);
             Should.Throw<SqlExecutionException>(() => metrics.ReserveHashMemory(budget + 1, budget)).Diagnostics[0].Code.ShouldBe("CS05067");
+            writes.ShouldBe(0); yields.ShouldBe(0);
+            metrics.ReserveHashMemory(free + extra, budget);
+            try
+            {
+                yields.ShouldBe(1); writes.ShouldBeGreaterThan(0);
+                metrics.HashMemoryBytes.ShouldBe(budget);
+            }
+            finally { metrics.ReleaseHashMemory(free + extra); }
             spilled.ShouldBeTrue();
-            writes.ShouldBe(0);
-            yields.ShouldBe(0);
         }
         finally
         {
@@ -156,6 +224,12 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         metrics.HashMemoryBytes.ShouldBe(0);
     }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_optionalArenas")]
+    private static extern ref SqlHashJoinSpill? RegisteredOptionalArena(SqlHashSpillMetrics metrics);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_OptionalArenaBytes")]
+    private static extern long OptionalArenaExtra(SqlHashJoinSpill arena);
 
     private static async Task SeedYieldJoin(SqlDatabaseSession session, bool nested = false)
     {

@@ -109,6 +109,7 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var expected = (DatabaseResultSet)await a.ExecuteAsync(sql);
         SqlStatementMetrics? active = null; long held = 0; bool starved = false, parent = false, yielded = false;
         int partitioned = 0;
+        var phases = new List<string>();
         SqlStatementMetrics.AfterMemoryReservation = (metrics, bytes) =>
         {
             active = metrics;
@@ -118,6 +119,7 @@ public sealed partial class SqlSortSpillConformanceTests
         };
         SqlPlanExecutor.ObserveHashSpill = (phase, value) =>
         {
+            phases.Add(phase);
             if (phase == "join-partitioned" && ++partitioned == 1)
             {
                 active!.ReleaseHashMemory(held); held = budget - active.HashMemoryBytes - 300000;
@@ -141,6 +143,11 @@ public sealed partial class SqlSortSpillConformanceTests
             finally { await actual.DisposeAsync(); }
             // Assert
             starved.ShouldBeTrue(); parent.ShouldBeTrue(); yielded.ShouldBeTrue();
+            phases.IndexOf("join-seal").ShouldBeGreaterThanOrEqualTo(0);
+            phases.IndexOf("join-seal").ShouldBeLessThan(phases.IndexOf("join-sorter-yield"));
+            phases.IndexOf("join-partitioned").ShouldBeLessThan(phases.IndexOf("join-sorter-yield"));
+            phases.IndexOf("join-sorter-yield").ShouldBeLessThan(phases.IndexOf("join-sorter-minimum"));
+            phases.IndexOf("join-sorter-minimum").ShouldBeLessThan(phases.IndexOf("join-match-sort-live"));
         }
         finally
         {
@@ -171,7 +178,8 @@ public sealed partial class SqlSortSpillConformanceTests
         string text = string.Join('\n', rows.Select(row => row.ToString()));
         _output.WriteLine("FIX3_UNBUILT|" + text);
         // Assert
-        text.ShouldContain("hash_budget=spill_on_refusal; hash_status=fitting", Case.Sensitive);
+        text.ShouldContain(groupedTree ? "hash_budget=spill_on_refusal;" : "hash_budget=spill_on_refusal; hash_status=fitting", Case.Sensitive);
+        rows.Count(row => Equals(row.Cells[2], "JoinStep")).ShouldBe(groupedTree ? 2 : 1);
         foreach (var step in rows.Where(row => Equals(row.Cells[2], "JoinStep")))
         {
             step.Cells[5]!.ToString()!.ShouldContain("hash_budget=spill_on_refusal", Case.Sensitive);
@@ -199,7 +207,7 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         const string sql = "SELECT jl.id,jr.id FROM jl FULL JOIN jr ON jl.id=jr.id";
         await using var expected = (DatabaseResultSet)await a.ExecuteAsync(sql);
-        var phases = new HashSet<string>();
+        var phases = new List<string>();
         SqlPlanExecutor.ObserveHashSpill = (phase, _) => phases.Add(phase);
         SqlRowCollector.ObserveSpill = phase => phases.Add(phase);
         // Act
@@ -212,7 +220,11 @@ public sealed partial class SqlSortSpillConformanceTests
             _output.WriteLine($"FIX3_OPTIONAL|digest={Fix2Fingerprint(rows)}|rows={rows.Length}|pairs={b.LastStatementMetrics.JoinCandidatePairs}|examined={b.LastStatementMetrics.RecordsExamined}");
         }
         finally { await actual.DisposeAsync(); SqlPlanExecutor.ObserveHashSpill = null; SqlRowCollector.ObserveSpill = null; }
-        phases.ShouldContain("join-handoff"); phases.ShouldContain("staged-drained"); phases.ShouldContain("join-sorter-minimum");
+        phases.ShouldContain("join-handoff");
+        phases.IndexOf("staged-drained").ShouldBeGreaterThanOrEqualTo(0);
+        phases.IndexOf("staged-drained").ShouldBeLessThan(phases.IndexOf("join-sorter-yield"));
+        phases.IndexOf("join-handoff").ShouldBeLessThan(phases.IndexOf("join-sorter-yield"));
+        phases.IndexOf("join-sorter-yield").ShouldBeLessThan(phases.IndexOf("join-sorter-minimum"));
     }
 
 

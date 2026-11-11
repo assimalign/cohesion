@@ -92,7 +92,11 @@ internal sealed class SqlHashJoinSpill : IDisposable
         foreach (var record in ReadPrefix(_prefix, token)) { _sorter.Append(record.Key.Span, record.Value.Span, token); }
         _prefix.Dispose(); _prefix = null;
         _buildToken = token;
-        if (_sorterGrant > BuildSorterGrant(_bound)) { _counters.AddOptionalArena(this); }
+        if (_sorterGrant > BuildSorterGrant(_bound))
+        {
+            System.Diagnostics.Debug.Assert(!_counters.HasOptionalArenas);
+            _counters.AddOptionalArena(this);
+        }
     }
 
     internal void Add(object?[] row, CancellationToken token)
@@ -158,7 +162,8 @@ internal sealed class SqlHashJoinSpill : IDisposable
     {
         _counters.RemoveOptionalArena(this);
         _observe?.Invoke("join-sorter-yield", _sorterGrant);
-        // The optional arena gives way to any statement reservation. Consolidate under the old
+        // The optional arena gives way to a reservation that free memory plus registered extras can satisfy.
+        // Consolidate under the old
         // grant, then drain that run before allocating the minimum arena.
         using var run = _statement.CreateRun(token);
         using (var sorted = _sorter!.Complete(token))

@@ -118,7 +118,7 @@ sorter's runs and the index coexist: a spilled build needs up to about twice its
 size of temporary space, plus page framing, a small chunk-metadata run and any staged probe-side input of the statement. With the default
 quota of four grants, an incompressible build larger than about two grants refuses located
 CK05002 at Seal. Probe-heavy joins use less temporary space than partitioned probe spooling.
-A yield's consolidation can also raise CK05002 and, in nested FULL trees, can be the statement's temp peak. A yield temporarily retains old build runs, the consolidated run and the child index. Build-heavy incompressible joins have about half that former build capacity.
+A yield's consolidation can also raise CK05002. In a nested FULL tree the yield temporarily retains the parent's old build runs, its consolidated run, the child's index and any staged left inputs; that yield can be the statement's temp peak. Build-heavy incompressible joins have about half that former build capacity.
 Sorted output is written
 once to one indexed run. A charged directory records each chunk's first/last hash, opaque
 start position, sorted range and first/last ordinal. Chunks target 8,192 encoded bytes,
@@ -163,8 +163,9 @@ min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192), including framing.
 The sorter's minimum M = max(65,536, 32,768 + 2 * (8,192 + B)) supports a two-way merge.
 At handoff the minimum working set is the operator, keys, M and scratch for rows seen so far.
 Above that minimum the arena takes up to half the available grant A, with no fixed cap,
-leaving the actual scratch charged. Before a statement reservation refuses, registered optional
-join arenas give way only if free memory plus their total S - M can satisfy the request;
+leaving the actual scratch charged. When a request exceeds currently free memory, registered optional
+join arenas give way only if at least one has S > M and free memory plus the sum of their
+extras (S - M) is at least the requested reservation;
 hopeless requests refuse CS05067 without temp writes. Staged readers and nested FULL unmatched sorts can trigger this yield:
 the old sorter consolidates to a run under its existing charge, then drains that run before
 allocating M. A row refuses only if the minimum plus its scratch cannot fit. Seal builds

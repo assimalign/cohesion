@@ -246,9 +246,17 @@ public sealed partial class SqlSortSpillConformanceTests
             // Act
             var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
             await Rows(result); await result.DisposeAsync();
-            // Assert: the values come from successful product reservations, not formulas.
+            // Assert: formula lookups below bind named product charges; the golden snapshot
+            // also detects added, omitted or resized reservations.
             string trace = string.Join(',', reservations.Select(p => $"{p.Key}:{p.Value}"));
             _output.WriteLine($"FIX2_RESERVATIONS|{shape}|peak={session.LastStatementMetrics!.PeakHashMemoryBytes}|unmatched_grant={unmatchedGrant}|{trace}");
+            // golden reservation trace, regenerate deliberately when an accounting change is intended.
+            trace.ShouldBe(shape switch
+            {
+                "FULL" => "32:1,136:1,400:1,792:1,37737:1,38832:1,65536:1,196717:1,259823:1",
+                "staged" => "792:1,840:901,1280:1,8704:1,10121:1,25208:1,25920:1,262144:1,592653:1,1037175:1",
+                _ => "40:1,400:1,792:1,1352:2,15856:41,16056:1,16382:1,25112:1,47737:1,57072:1,262144:1,618413:1,1019919:1,1030842:1",
+            });
             reservations[SqlHashJoinSpill.DirectoryBytes(16)].ShouldBe(1);
             if (shape == "FULL")
             {

@@ -38,7 +38,7 @@ create that debt. During Seal a spilled build needs up to about twice its packed
 temporary space, plus page framing and any staged probe-side input of the statement. With the default quota of four grants, an incompressible
 build larger than about two grants refuses located CK05002 at Seal. Packing helps only
 compressible frames. Probe-heavy joins use less temp than partitioned probe spooling.
-A yield's consolidation can also raise CK05002 and, in nested FULL trees, can be the statement's temp peak. A yield temporarily retains old build runs, the consolidated run and the child index. Build-heavy incompressible joins have about half its build capacity.
+A yield's consolidation can also raise CK05002. In a nested FULL tree the yield temporarily retains the parent's old build runs, its consolidated run, the child's index and any staged left inputs; that yield can be the statement's temp peak. Build-heavy incompressible joins have about half its build capacity.
 
 EXPLAIN ANALYZE reports spilled_bytes (largest physical snapshot), spill_peak_bytes (owner
 high-water mark), spill_runs (sorter runs written, including a consolidated prefix after the arena gives way), spill_merge_passes (sum of merge depths)

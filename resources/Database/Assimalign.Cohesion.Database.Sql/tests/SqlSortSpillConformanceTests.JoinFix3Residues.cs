@@ -8,6 +8,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -58,7 +59,8 @@ public sealed partial class SqlSortSpillConformanceTests
     {
         // Arrange
         var calls = new List<long>();
-        await using var engine = await CreateFix2("fix3-group", 262144, calls, quota: 67108864);
+        const long budget = 262144;
+        await using var engine = await CreateFix2("fix3-group", budget, calls, quota: 67108864);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t(id INT,note TEXT)");
         for (int start = 0; start < groups * 2; start += 100)
@@ -80,7 +82,7 @@ public sealed partial class SqlSortSpillConformanceTests
         (SqlHashSpillMetrics.For(metrics)?.Batches ?? 0).ShouldBe(0);
         staged.ShouldBeTrue();
         SqlTempRowCodec.TryGetLength([0, new string('x', 512)], out int recordBytes).ShouldBeTrue();
-        admission.ShouldBe(262144 - 8192 - recordBytes);
+        admission.ShouldBe(budget - StorageTempSpace.PageSize - recordBytes);
         calls.ShouldBe(Enumerable.Range(0, 2 * groups).Select(i => (long)(i / 2)));
         metrics.RecordsExamined.ShouldBe(2 * groups); metrics.JoinCandidatePairs.ShouldBe(0);
     }
@@ -90,7 +92,8 @@ public sealed partial class SqlSortSpillConformanceTests
     public async Task ExecuteAsync_JoinFix3Collector_ShouldKeepBaseReaderAdmission(int cells)
     {
         // Arrange: distinct boxed booleans on decode make the delivered row wider than its frame.
-        await using var engine = await CreateFix2("fix3-collector", 262144, quota: 67108864);
+        const long budget = 262144;
+        await using var engine = await CreateFix2("fix3-collector", budget, quota: 67108864);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t(id INT)");
         await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 600).Select(i => $"({i})")));
@@ -100,7 +103,7 @@ public sealed partial class SqlSortSpillConformanceTests
         try
         {
             _output.WriteLine("FIX3_READER|" + string.Join(",", typeof(SqlSpilledResultSet).GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Where(f => f.FieldType == typeof(long)).Select(f => f.Name + "=" + f.GetValue(result))));
-            typeof(SqlSpilledResultSet).GetField("_readerGrant", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(result).ShouldBe(262144L);
+            typeof(SqlSpilledResultSet).GetField("_readerGrant", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(result).ShouldBe(budget);
             await using var first = result.GetRowsAsync().GetAsyncEnumerator();
             await using var second = result.GetRowsAsync().GetAsyncEnumerator();
             (await first.MoveNextAsync()).ShouldBeTrue(); (await second.MoveNextAsync()).ShouldBeTrue();

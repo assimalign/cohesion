@@ -12,10 +12,10 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlCommonTypeBatch05Tests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Grouped polymorphic alternatives pin the remaining concrete-metadata mismatch (#1788, #1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - KNOWN DEFECT: grouped polymorphic alternatives pass text under Int64 metadata (#1788, #1789)")]
     [InlineData("COALESCE(unproved_result(id,CAST(NULL AS BIGINT)),0)")]
     [InlineData("CASE WHEN TRUE THEN unproved_result(id,CAST(NULL AS BIGINT)) ELSE 0 END")]
-    public async Task ExecuteAsync_GroupedTypedNullPolymorphicResult_ShouldRetainExistingMetadataMismatch(string expression)
+    public async Task ExecuteAsync_GroupedTypedNullPolymorphicResult_KnownDefect_PassesTextUnderInt64Metadata(string expression)
     {
         // Arrange: typed NULL resolves ANYELEMENT's metadata but its call can return text.
         var builder = SqlDatabaseEngine.CreateBuilder("grouped-polymorphic-followup");
@@ -25,13 +25,13 @@ public sealed class SqlCommonTypeBatch05Tests
         await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO t VALUES(500)", cancellationToken: CancellationToken.None);
 
-        // Act: KNOWN DEFECT witness in SqlPlanExecutor.Grouping.cs normalization:
+        // Act: KNOWN DEFECT witness in NormalizeGroupValue:
         // grouped CASE/COALESCE passes text under Int64 metadata. Invert these
         // assertions when the normalization follow-up lands.
         await using var result = (DatabaseResultSet)await session.ExecuteAsync(
             $"SELECT {expression},COUNT(*) FROM t GROUP BY id", cancellationToken: CancellationToken.None);
 
-        // Assert: unresolved alternatives separately refuse CS02080.
+        // Assert: pin the grouped normalization defect.
         result.Columns[0].Type.ShouldBe(DatabaseType.Int64);
         int count = 0;
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
