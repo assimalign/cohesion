@@ -335,7 +335,8 @@ scale and the decimal scalar domain. The existing 128-level parser limit also co
 ### MERGE grammar and planning (#1804, OQ-M1)
 
 OqlMergeExpression is a sealed statement leaf with sealed UPDATE, DELETE and INSERT action
-records and an OqlMergeSource record. Its canonical ToString renders both Couchbase forms,
+records and an OqlMergeSource record. Each action and source record uses an explicit constructor
+with get-only properties, including DELETE's optional Predicate. Its canonical ToString renders both Couchbase forms,
 including keyspace, aliased subquery and expression sources and RETURNING. MERGE is a contextual
 statement prefix, absent from the unsupported table and lexer keywords; FROM c merge still parses.
 The ordinary nested-expression limit, a complete 128-level MERGE tree bound and a 128-level

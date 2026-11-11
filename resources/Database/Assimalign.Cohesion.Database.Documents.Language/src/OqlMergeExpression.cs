@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>A Couchbase lookup or key-equality ANSI MERGE statement.</summary>
-/// <remarks>Actions occur in UPDATE, DELETE, INSERT order. Execution is deferred to OQ-M2; EXPLAIN is available.</remarks>
+/// <remarks>Actions occur in UPDATE, DELETE, INSERT order. Execution is deferred to a later release; EXPLAIN is available.</remarks>
 [System.Diagnostics.DebuggerDisplay("OqlMergeExpression")]
 [System.Diagnostics.DebuggerTypeProxy(typeof(OqlMergeExpression.DebugView))]
 public sealed class OqlMergeExpression : OqlExpression

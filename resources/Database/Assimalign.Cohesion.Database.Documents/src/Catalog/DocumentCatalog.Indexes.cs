@@ -78,10 +78,10 @@ public sealed partial class DocumentCatalog
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="DocumentCatalogException">
     /// The collection is absent, the index already exists, or an existing document's indexed scalar
-    /// encodes beyond the index key limit, or the encoded definition exceeds 8,092 bytes (CD03026).
+    /// encodes beyond the index key limit, the encoded definition exceeds 8,092 bytes (CD03026),
+    /// or build workspace exceeds the configured statement memory budget (CD05018).
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the build applied.</exception>
-    /// <exception cref="DocumentCatalogException">Build workspace exceeds the configured statement memory budget (CD05018).</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the build was applied.</exception>
     public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, string path,
         TransactionContext context, CancellationToken cancellationToken = default)
@@ -126,12 +126,12 @@ public sealed partial class DocumentCatalog
     /// <exception cref="ArgumentException">The name is invalid.</exception>
     /// <exception cref="DatabaseException">The key count is outside 1..32 (CD03022).</exception>
     /// <exception cref="DocumentCatalogException">The array definition is unsupported (CD03025), a key exceeds
-    /// 1024 bytes, the encoded definition exceeds 8,092 bytes (CD03026), the collection is absent, or the name exists.</exception>
+    /// 1024 bytes, the encoded definition exceeds 8,092 bytes (CD03026), the collection is absent, the name exists,
+    /// or build workspace exceeds the configured statement memory budget (CD05018).</exception>
     /// <exception cref="DocumentConstraintViolationException">A UNIQUE key is duplicate or non-scalar.</exception>
     /// <exception cref="InvalidOperationException">The context is not active.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended before publication.</exception>
     /// <exception cref="OperationCanceledException">The build was canceled.</exception>
-    /// <exception cref="DocumentCatalogException">Build workspace exceeds the configured statement memory budget (CD05018).</exception>
     public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, IReadOnlyList<DocumentIndexKey> keys,
         bool isUnique, bool includeMissing, TransactionContext context, CancellationToken cancellationToken = default)
     {
