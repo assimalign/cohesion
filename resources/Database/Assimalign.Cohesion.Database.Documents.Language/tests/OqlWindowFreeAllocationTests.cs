@@ -12,6 +12,21 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public sealed class OqlWindowFreeAllocationTests
 {
+    [Fact(DisplayName = "Cohesion Test [OQL] - Function lookup scans its immutable backing array without allocation (#1805)")]
+    public void Find_NativeAndNullNames_ShouldAllocateNothing()
+    {
+        // Arrange
+        OqlFunctions.Find(null!).ShouldBeNull();
+        for (int i = 0; i < 1000; i++) { GC.KeepAlive(OqlFunctions.Find("upper")); }
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++) { GC.KeepAlive(OqlFunctions.Find("upper")); }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Assert
+        allocated.ShouldBe(0);
+        OqlFunctions.Find("upper").ShouldNotBeNull().Name.ShouldBe("UPPER");
+    }
+
     private readonly ITestOutputHelper _output;
     public OqlWindowFreeAllocationTests(ITestOutputHelper output) { _output = output; }
 

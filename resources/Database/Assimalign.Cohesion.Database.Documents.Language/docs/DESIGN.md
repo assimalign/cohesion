@@ -170,6 +170,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 standalone parser, profile and engine's native registrations. It classifies scalar, aggregate and window
 calls, argument counts and kinds, and static result types. Engine request parsing admits additional
 named calls for the executing engine's frozen catalog to bind. The profile derives its function tokens from this table; names remain usable as fields.
+Name lookup iterates the immutable backing array without allocating an enumerator; a null name
+returns no match. Planner validation retains its existing refusal precedence (#1805).
 In this table, **propagate** means MISSING wins over NULL; a wrong-kind stored value gives NULL,
 while an incompatible literal kind fails planning before document access. **Selected** means the
 result has the selected argument's type. Conditional functions evaluate only through the selected

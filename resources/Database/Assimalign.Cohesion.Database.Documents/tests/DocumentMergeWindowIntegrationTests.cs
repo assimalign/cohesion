@@ -22,9 +22,14 @@ public sealed class DocumentMergeWindowIntegrationTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE COLLECTION targets", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE COLLECTION sources", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO targets (KEY, VALUE) VALUES ('a', {n:1})", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO sources (KEY, VALUE) VALUES ('a', {k:'a',p:1,n:2})", cancellationToken: CancellationToken.None);
         string sql = $"MERGE INTO targets t USING (SELECT s.k AS k,{expression} AS n FROM sources s{window}) q ON KEY q.k WHEN MATCHED THEN UPDATE SET t.n=q.n";
         var parsed = DocumentQueryRequest.FromOql(sql).Statement.OqlExpression.ShouldBeOfType<OqlMergeExpression>();
         string canonical = parsed.ToString();
+        string expectedExpression = window.Length == 0 ? "\"ROW_NUMBER\"() OVER (PARTITION BY \"s\".\"p\" ORDER BY \"s\".\"n\" ASC)" : "\"ROW_NUMBER\"() OVER \"w\"";
+        string expectedWindow = window.Length == 0 ? "" : " WINDOW \"w\" AS (PARTITION BY \"s\".\"p\" ORDER BY \"s\".\"n\" ASC)";
+        canonical.ShouldBe($"MERGE INTO \"targets\" AS \"t\" USING (SELECT \"s\".\"k\" AS \"k\", {expectedExpression} AS \"n\" FROM \"sources\" AS \"s\"{expectedWindow}) AS \"q\" ON KEY \"q\".\"k\" WHEN MATCHED THEN UPDATE SET \"t\".\"n\" = \"q\".\"n\"");
 
         // Act.
         DocumentQueryRequest.FromOql(canonical).Statement.OqlExpression.ToString().ShouldBe(canonical);
@@ -34,6 +39,10 @@ public sealed class DocumentMergeWindowIntegrationTests
         plan.ShouldContain(row => row.GetString(2) == "Merge");
         plan.ShouldContain(row => row.GetString(2) == "WindowAggregate");
         plan.Single(row => row.GetString(2) == "WindowAggregate").GetString(5).ShouldNotBeNull().ShouldContain("functions=ROW_NUMBER", Case.Sensitive);
+        string detail = plan.Single(row => row.GetString(2) == "WindowAggregate").GetString(5)!;
+        // WindowKeyDetail uses the same canonical identifier quoting as MERGE.
+        detail.ShouldContain("partition=[\"s\".\"p\"]", Case.Sensitive);
+        detail.ShouldContain("order=[\"s\".\"n\" ASC NULLS FIRST]", Case.Sensitive);
         session.LastQueryDocumentsRead.ShouldBe(0);
         var failure = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(canonical, cancellationToken: CancellationToken.None));
