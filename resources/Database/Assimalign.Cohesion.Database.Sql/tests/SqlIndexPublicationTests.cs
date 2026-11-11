@@ -164,27 +164,40 @@ public sealed class SqlIndexPublicationTests
         await session.ExecuteAsync("INSERT INTO a VALUES (10, 20)", cancellationToken: timeout.Token);
         await session.ExecuteAsync("CREATE UNIQUE INDEX W ON a (OldValue)", cancellationToken: timeout.Token);
         var stale = database.IndexManager.ExportRegistrations();
-        await session.ExecuteAsync("DROP INDEX W ON a", cancellationToken: timeout.Token);
         database.Catalog.TryGetTable("dbo", "a", out var table).ShouldBeTrue();
         var replacement = new SqlCatalogIndex(table.ObjectId, "W", ["NewValue"], true);
-        var transaction = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
-        await database.Coordinator.ApplyStatementAsync(transaction, async bracket =>
+        ulong retiredOwner = database.IndexManager.PageOwner(stale.Single());
+        BTreeIndexRegistration[] current;
+        // Keep the predecessor live until both trees exist: reclamation may otherwise
+        // return its page to the allocator before the replacement reserves a root.
+        var pin = await database.Coordinator.BeginSnapshotPinAsync(timeout.Token);
+        try
         {
-            var tree = await database.IndexManager.CreateIndexAsync(transaction, table.ObjectId,
-                new IndexDefinition("W", IndexKind.BTree, IsUnique: true), timeout.Token);
-            using var rows = database.DataStorage.GetUnitIterator(table.ObjectId);
-            rows.MoveNext().ShouldBeTrue();
-            var row = rows.Current;
-            var stamps = SqlRowCodec.ReadStamps(row.Data.Span);
-            await tree.InsertVersionAsync(bracket, IndexKey.From(new DatabaseKeyWriter().AppendInt32(20)),
-                SqlRecordLocation.Pack(row.PageId, row.SlotIndex), stamps.Writer, stamps.Deleter, timeout.Token);
-            rows.MoveNext().ShouldBeFalse();
-            return true;
-        }, durable: true, timeout.Token);
-        await database.Coordinator.CommitAsync(transaction, timeout.Token);
-        var current = database.IndexManager.ExportRegistrations();
-        stale.Single().RootPageId.ShouldBeGreaterThan(0);
-        current.Single().RootPageId.ShouldNotBe(stale.Single().RootPageId);
+            await session.ExecuteAsync("DROP INDEX W ON a", cancellationToken: timeout.Token);
+            database.TableReclamation.RunBatch(timeout.Token);
+            database.DataStorage.GetOwnerIndexPageCount(retiredOwner).ShouldBeGreaterThan(0);
+            var transaction = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            await database.Coordinator.ApplyStatementAsync(transaction, async bracket =>
+            {
+                var tree = await database.IndexManager.CreateIndexAsync(transaction, table.ObjectId,
+                    new IndexDefinition("W", IndexKind.BTree, IsUnique: true), timeout.Token);
+                using var rows = database.DataStorage.GetUnitIterator(table.ObjectId);
+                rows.MoveNext().ShouldBeTrue();
+                var row = rows.Current;
+                var stamps = SqlRowCodec.ReadStamps(row.Data.Span);
+                await tree.InsertVersionAsync(bracket, IndexKey.From(new DatabaseKeyWriter().AppendInt32(20)),
+                    SqlRecordLocation.Pack(row.PageId, row.SlotIndex), stamps.Writer, stamps.Deleter, timeout.Token);
+                rows.MoveNext().ShouldBeFalse();
+                return true;
+            }, durable: true, timeout.Token);
+            await database.Coordinator.CommitAsync(transaction, timeout.Token);
+            current = database.IndexManager.ExportRegistrations().ToArray();
+            stale.Single().RootPageId.ShouldBeGreaterThan(0);
+            current.Single().RootPageId.ShouldNotBe(stale.Single().RootPageId);
+            database.IndexManager.PageOwner(current.Single()).ShouldNotBe(retiredOwner);
+            database.DataStorage.GetOwnerIndexPageCount(retiredOwner).ShouldBeGreaterThan(0);
+        }
+        finally { await database.Coordinator.RollbackAsync(pin, timeout.Token); }
 
         // Act: description-first publication must fail before it can expose the replacement.
         ulong generation = database.Catalog.DdlGeneration;

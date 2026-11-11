@@ -34,4 +34,26 @@ public sealed class SqlCompiledDefaultPolicyTests
     }
 
     private sealed record DefaultRow(decimal? Amount);
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Compiled expression DEFAULT keeps Build phase and script cause diagnostics (#1779, #1788)")]
+    public async Task Generate_CommonExpressionDefault_ShouldPreservePolicyDiagnostic()
+    {
+        // Arrange
+        var schema = SqlSchema.Create("typed", declaration => declaration.Table<DefaultRow>("items", table =>
+            table.DefaultSql(row => row.Amount, "COALESCE(NULL::INT,1.5)")));
+        var compiled = schema.Compile();
+        var builder = SqlDatabaseEngine.CreateBuilder("compiled-default-build-policy");
+        builder.AddDatabase(schema);
+
+        // Act
+        var build = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync(CancellationToken.None));
+        var script = Should.Throw<SqlSchemaMigrationException>(() =>
+            SqlMigrationScriptGenerator.Generate(SqlSchemaMigrationPlanner.Plan(null, compiled)));
+
+        // Assert: Build names the phase; the cause retains the policy identity.
+        build.Message.ShouldStartWith("CS03101:", Case.Sensitive);
+        build.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03105");
+        script.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03105");
+        script.Message.ShouldContain("Only literal DEFAULT values are supported", Case.Sensitive);
+    }
 }

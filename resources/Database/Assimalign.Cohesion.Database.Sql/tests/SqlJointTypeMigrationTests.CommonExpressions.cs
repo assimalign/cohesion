@@ -22,6 +22,7 @@ public sealed partial class SqlJointTypeMigrationTests
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         var storage = new CrashCaptureSqlStorageStrategy();
         string? defaultText = null;
+        string? checkText = null, predicateText = null;
         for (int pass = 0; pass < 2; pass++)
         {
             await using var engine = await Builder(storage).BuildAsync(guard.Token);
@@ -29,9 +30,11 @@ public sealed partial class SqlJointTypeMigrationTests
             await using var session = await database.CreateSessionAsync(guard.Token);
             if (pass == 0)
             {
-                await session.ExecuteAsync("CREATE TABLE items(Id INT,n INT,amount DECIMAL DEFAULT(COALESCE(NULL::INT,1.5)),CHECK(COALESCE(n,1.5)>0))", cancellationToken: guard.Token);
-                await session.ExecuteAsync("CREATE INDEX partial ON items(n) WHERE CASE WHEN n IS NULL THEN 1.5 ELSE n END>0", cancellationToken: guard.Token);
+                await session.ExecuteAsync("CREATE TABLE items(Id INT,n INT,amount DECIMAL DEFAULT(COALESCE(NULL::INT,1.5)),CHECK(COALESCE(n,0.4)>0))", cancellationToken: guard.Token);
+                await session.ExecuteAsync("CREATE INDEX partial ON items(n) WHERE CASE WHEN n IS NULL THEN 0.4 ELSE n END>0", cancellationToken: guard.Token);
                 defaultText = Table(database).FindColumn("amount")!.DefaultLiteral!;
+                checkText = (string)(await RowsAsync(session, "SELECT CHECK_CLAUSE FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS", guard.Token)).Single()[0]!;
+                predicateText = (string)(await RowsAsync(session, "SELECT PREDICATE FROM COHESION_SCHEMA.INDEXES WHERE INDEX_NAME='partial'", guard.Token)).Single()[0]!;
             }
 
             // Act: reopened defaults and constraints are bound before use.
@@ -39,6 +42,8 @@ public sealed partial class SqlJointTypeMigrationTests
 
             // Assert.
             Table(database).FindColumn("amount")!.DefaultLiteral.ShouldBe(defaultText);
+            (await RowsAsync(session, "SELECT CHECK_CLAUSE FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS", guard.Token)).Single()[0].ShouldBe(checkText);
+            (await RowsAsync(session, "SELECT PREDICATE FROM COHESION_SCHEMA.INDEXES WHERE INDEX_NAME='partial'", guard.Token)).Single()[0].ShouldBe(predicateText);
             await using (var result = (DatabaseResultSet)await session.ExecuteAsync(
                 "SELECT amount,COALESCE(n,1.5),CASE WHEN n IS NULL THEN 1.5 ELSE n END FROM items", cancellationToken: guard.Token))
             {
@@ -54,7 +59,7 @@ public sealed partial class SqlJointTypeMigrationTests
             var check = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync("INSERT INTO items(Id,n) VALUES(9,-1)", cancellationToken: guard.Token));
             check.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03038");
-            (await RowsAsync(session, "SELECT Id FROM items WHERE n=2 AND CASE WHEN n IS NULL THEN 1.5 ELSE n END>0", guard.Token)).ShouldBeEmpty();
+            (await RowsAsync(session, "SELECT COUNT(*) FROM items WHERE CASE WHEN n IS NULL THEN 0.4 ELSE n END>0", guard.Token)).Single()[0].ShouldBe((long)pass + 1);
             storage = storage.CaptureDurableImages();
         }
     }
@@ -101,6 +106,7 @@ public sealed partial class SqlJointTypeMigrationTests
         finally { await database.Coordinator.RollbackAsync(pin, guard.Token); }
         await DrainReclamationAsync(database, guard.Token);
         database.DataStorage.GetOwnerIndexPages(owner).ShouldBeEmpty();
+        foreach (var page in pages) { database.DataStorage.FreeSpaceMap.IsAllocated(page).ShouldBeFalse(); }
         database.DataStorage.GetOwnerIndexPages(survivorOwner).ShouldBe(survivorPages);
         database.DataStorage.GetOwnerPages(Table(database).ObjectId).ShouldBe(heapPages);
         (await RowsAsync(session, "SELECT COUNT(*) FROM items", guard.Token)).Single()[0].ShouldBe(514L);

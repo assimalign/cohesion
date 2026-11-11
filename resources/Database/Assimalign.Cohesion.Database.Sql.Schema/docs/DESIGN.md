@@ -11,7 +11,7 @@ application casts that this assembly cannot inspect. Metadata-only changes keep 
 The planner retains its destructive opt-in refusal. Runtime Build additionally classifies
 applied-schema history: an earlier FirstAppliedGeneration identifies a rollback, while a later
 one identifies a roll-forward under new-schema opt-in rules. A rollback holds with CS03405 on
-non-Safe steps, dropped-object re-creation or existing-data validation (including unique indexes).
+non-Safe steps, dropped-table/column re-creation or existing-data validation (including unique indexes). A rollback can rebuild a dropped non-unique, non-partial index whose keys are provably at most 1,024 B; that build is budgeted and can fail with CS03402.
 A never-seen destructive declaration without opt-in holds with CS03105. Explicit apply uses the
 same rollback rule and throws CS03105 regardless of the old opt-in. No held step runs (#1779).
 The engine's DESIGN and SQL DIALECT carry the complete step classification.

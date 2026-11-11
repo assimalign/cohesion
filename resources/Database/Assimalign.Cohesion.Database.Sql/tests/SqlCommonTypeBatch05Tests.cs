@@ -25,11 +25,13 @@ public sealed class SqlCommonTypeBatch05Tests
         await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO t VALUES(500)", cancellationToken: CancellationToken.None);
 
-        // Act: grouped output retains its legacy normalization after common-type binding.
+        // Act: KNOWN DEFECT witness in SqlPlanExecutor.Grouping.cs normalization:
+        // grouped CASE/COALESCE passes text under Int64 metadata. Invert these
+        // assertions when the normalization follow-up lands.
         await using var result = (DatabaseResultSet)await session.ExecuteAsync(
             $"SELECT {expression},COUNT(*) FROM t GROUP BY id", cancellationToken: CancellationToken.None);
 
-        // Assert: this follow-up remains; unresolved alternatives separately refuse CS02080.
+        // Assert: unresolved alternatives separately refuse CS02080.
         result.Columns[0].Type.ShouldBe(DatabaseType.Int64);
         int count = 0;
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
@@ -39,5 +41,10 @@ public sealed class SqlCommonTypeBatch05Tests
             count++;
         }
         count.ShouldBe(1);
+
+        // Act / Assert: the ungrouped counterpart enforces the resolved numeric family.
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync($"SELECT {expression} FROM t", cancellationToken: CancellationToken.None));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02011");
     }
 }

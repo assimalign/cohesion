@@ -22,6 +22,7 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Storage.FormatProbeFixture;
 
@@ -29,6 +30,62 @@ internal static class Program
 {
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_TempSpace")]
     private static extern StorageTempSpace? TempSpace(SqlDatabaseEngine engine);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Coordinator")]
+    private static extern TransactionCoordinator Coordinator(SqlDatabase database);
+
+    private static async Task SqlJoinOwnerStopAsync(string root, bool building)
+    {
+        using var entered = new ManualResetEventSlim();
+        using var stop = new ManualResetEventSlim();
+        bool armed = false;
+        var builder = SqlDatabaseEngine.CreateBuilder("join-owner-stop");
+        builder.Options.RootPath = root; builder.Options.StatementMemoryBudget = 262144;
+        builder.Options.StatementTempSpaceQuota = 67108864; builder.Options.CheckpointJournalSize = 65536;
+        builder.Functions.Add(SqlScalarFunction.Create("wait_index", (long value) =>
+        {
+            if (armed) { entered.Set(); stop.Wait(); }
+            return value;
+        }, volatility: SqlFunctionVolatility.Immutable));
+        var engine = await builder.BuildAsync();
+        var database = await engine.CreateDatabaseAsync("db");
+        var session = await database.CreateSessionAsync();
+        foreach (string table in new[] { "jl", "jr" })
+        {
+            await session.ExecuteAsync($"CREATE TABLE {table}(id INT,payload TEXT)");
+            for (int first = 0; first < 2500; first += 100)
+            { await session.ExecuteAsync($"INSERT INTO {table} VALUES" + string.Join(',', Enumerable.Range(first, 100).Select(i => $"({i},'{new string('x', 512)}')"))); }
+        }
+        await session.ExecuteAsync("CREATE TABLE stable(id INT PRIMARY KEY,v INT)");
+        await session.ExecuteAsync("INSERT INTO stable VALUES" + string.Join(',', Enumerable.Range(0, 512).Select(i => $"({i},{i})")));
+        await session.ExecuteAsync("CREATE INDEX retiring ON stable(v)");
+        var pin = await Coordinator(database).BeginSnapshotPinAsync();
+        Task? build = null;
+        if (building)
+        {
+            armed = true;
+            build = Task.Run(async () =>
+            {
+                var writer = await database.CreateSessionAsync();
+                await writer.ExecuteAsync("CREATE INDEX building ON stable(v) WHERE wait_index(v)>=0");
+                GC.KeepAlive(writer);
+            });
+            var waiting = Task.Run(entered.Wait);
+            if (await Task.WhenAny(waiting, build) == build)
+            {
+                await build;
+                throw new InvalidOperationException("index build completed before its pause");
+            }
+            await waiting;
+        }
+        else { await session.ExecuteAsync("DROP INDEX retiring ON stable"); }
+        var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT l.id,r.payload FROM jl l FULL JOIN jr r ON l.id=r.id ORDER BY l.id");
+        await using var reader = result.GetRowsAsync().GetAsyncEnumerator();
+        if (!await reader.MoveNextAsync()) { throw new InvalidOperationException("missing join result"); }
+        Console.WriteLine("SQL_JOIN_OWNER_READY"); Console.Out.Flush();
+        await Task.Delay(Timeout.InfiniteTimeSpan);
+        GC.KeepAlive(build); GC.KeepAlive(pin); GC.KeepAlive(result); GC.KeepAlive(session); GC.KeepAlive(engine);
+    }
 
     private static async Task TempLeaseProbeAsync(string root)
     {
@@ -120,6 +177,7 @@ internal static class Program
     private static async Task Main(string[] args)
     {
         if (args[0] == "sql-spill-stop") { await SqlSpillStopAsync(args[1]); return; }
+        if (args[0] == "sql-join-owner-stop") { await SqlJoinOwnerStopAsync(args[1], args[2] == "build"); return; }
         if (args[0] == "sql-ctas-sort-stop" || args[0] == "sql-ctas-copy-stop")
         { await SqlTableAsStopAsync(args[1], args[0] == "sql-ctas-copy-stop"); return; }
         if (args[0] == "temp-lease-probe") { await TempLeaseProbeAsync(args[1]); return; }

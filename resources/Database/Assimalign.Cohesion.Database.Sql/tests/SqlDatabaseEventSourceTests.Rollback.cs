@@ -63,15 +63,15 @@ public sealed partial class SqlDatabaseEventSourceTests
         while (physicalDatabase.TableReclamation.HasWork) { await Task.Delay(1, timeout.Token); }
 
         // Assert: the owner lifecycle uses Info events; it cannot close the Held activity.
-        var began = recorder.Events.Where(e => e.EventId == 28 && Equals(e.Payload![2], (long)owner)).ShouldHaveSingleItem();
-        var ended = recorder.Events.Where(e => e.EventId == 29 && Equals(e.Payload![2], (long)owner)).ShouldHaveSingleItem();
+        var began = recorder.Events.Where(e => e.EventId == 28 && Equals(e.Payload![0], rollback.Name.ToString()) && Equals(e.Payload![2], (long)owner)).ShouldHaveSingleItem();
+        var ended = recorder.Events.Where(e => e.EventId == 29 && Equals(e.Payload![0], rollback.Name.ToString()) && Equals(e.Payload![2], (long)owner)).ShouldHaveSingleItem();
         began.EventName.ShouldBe("IndexBuildBegan");
         ended.EventName.ShouldBe("IndexBuildEnded");
         began.Opcode.ShouldBe(EventOpcode.Info);
         ended.Opcode.ShouldBe(EventOpcode.Info);
         ended.Payload!.Take(3).ShouldBe(began.Payload);
         ended.Payload![3].ShouldBe(true);
-        recorder.Events.Where(e => e.EventId == 30 && Equals(e.Payload![2], (long)owner)).Sum(e => (long)(int)e.Payload![3]!).ShouldBe(pages);
+        recorder.Events.Where(e => e.EventId == 30 && Equals(e.Payload![0], rollback.Name.ToString()) && Equals(e.Payload![2], (long)owner)).Sum(e => (long)(int)e.Payload![3]!).ShouldBe(pages);
         recorder.Events.Count(e => e.EventId == 13).ShouldBe(1);
         recorder.Events.Count(e => e.EventId == 14).ShouldBe(1);
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
