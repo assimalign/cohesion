@@ -20,7 +20,7 @@ public sealed class SqlHashFittingAllocationTests
     private readonly ITestOutputHelper _output;
     public SqlHashFittingAllocationTests(ITestOutputHelper output) { _output = output; }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Fitting hash paths: original allocations and corrected state charges with and without temp space (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Fitting hash paths: file and memory engines keep original charges and allocations (#1789)")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ExecuteAsync_FittingHashPaths_ShouldKeepBaseAllocations(bool temp)
@@ -46,7 +46,7 @@ public sealed class SqlHashFittingAllocationTests
                 "SELECT DISTINCT a FROM t",
             ];
             long[] originalBytes = [12128000, 11648000, 11216000, 5168000];
-            long[] correctedPeaks = [1472, 1384, 1384, 448];
+            long[] originalPeaks = [1440, 1384, 1384, 448];
             for (int index = 0; index < sql.Length; index++)
             {
                 string statement = sql[index];
@@ -54,9 +54,9 @@ public sealed class SqlHashFittingAllocationTests
                 // Act
                 long minimum = long.MaxValue;
                 for (int round = 0; round < 3; round++) { minimum = Math.Min(minimum, Measure(1000)); }
-                // Assert: c150bee5a allocations, .NET 10.0.13, ARM64 and x64, with both temp configurations.
+                // Assert: c150bee5a, .NET 10.0.13, ARM64 and x64, with both temp configurations.
                 minimum.ShouldBe(originalBytes[index]);
-                session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(correctedPeaks[index]);
+                session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(originalPeaks[index]);
                 _output.WriteLine($"FITTING_ALLOC|temp={temp}|sql={statement}|bytes={minimum}|peak={session.LastStatementMetrics!.PeakHashMemoryBytes}");
                 session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
 

@@ -61,11 +61,13 @@ public sealed partial class SqlSortSpillConformanceTests
         var phases = new HashSet<string>();
         string? previousPhase = null;
         long depth = 0, population = 0;
-        void Sample() { live = Math.Max(live, LiveHeap.Read() - baseline); }
+        bool replay = false;
+        void Sample() { if (replay) { live = Math.Max(live, LiveHeap.Read() - baseline); } }
         if (sample)
         {
             SqlPlanExecutor.ObserveHashSpill = (phase, value) =>
             {
+                replay |= phase is "batch" or "partitioned";
                 bool selected = everyTransition ? phase != previousPhase :
                     phase == "input" && phases.Add(phase) || phase == "batch" && value > depth ||
                     phase == "batch-live" && value > population || phase is "partitioned" or "ordered" or "groups-live";
@@ -100,18 +102,20 @@ public sealed partial class SqlSortSpillConformanceTests
     }
     private static bool CorpusEqual(CorpusOutcome a, CorpusOutcome b) => a.Error == b.Error && a.Rows.SequenceEqual(b.Rows) && a.Rows.Zip(b.Rows).All(pair => pair.First.Cells.Zip(pair.Second.Cells).All(cell => cell.First is not DateTimeOffset time || time.EqualsExact((DateTimeOffset)cell.Second!))) && a.Visits == b.Visits && a.Calls.SequenceEqual(b.Calls);
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Seeded hash corpus: phase samples stay within each grant plus 256 KiB (#1789)")]
-    public async Task ExecuteAsync_SeededHashHeapCorpus_ShouldMatchWithinGrant()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Seeded hash corpus: replay samples stay within each grant plus 256 KiB (#1789)")]
+    [InlineData(1048576L)]
+    [InlineData(4194304L)]
+    public async Task ExecuteAsync_SeededHashHeapCorpus_ShouldMatchWithinGrant(long grant)
     {
         // Arrange: the review's recorded seed and generation order. The larger run is opt-in.
         const int corpusSeed = 17890507;
         int statements = int.TryParse(Environment.GetEnvironmentVariable("SQL_HASH_CORPUS_STATEMENTS"), out int requested) ? requested : 256;
-        long[] grants = statements > 256 ? [1048576, 4194304, 16777216] : [1048576, 4194304];
+        long[] grants = grant == 4194304 && statements > 256 ? [grant, 16777216] : [grant];
         var random = new Random(corpusSeed);
         await using var unlimited = await CreateCorpusEngineAsync(67108864, false);
         await using var original = await CreateCorpusEngineAsync(67108864, false, force: true);
         var spilled = new List<CorpusRun>();
-        foreach (long grant in grants) { spilled.Add(await CreateCorpusEngineAsync(grant, true)); }
+        foreach (long selectedGrant in grants) { spilled.Add(await CreateCorpusEngineAsync(selectedGrant, true)); }
         long[] excesses = grants.Select(_ => long.MinValue).ToArray();
         int spills = 0, matches = 0;
         try
@@ -156,7 +160,10 @@ public sealed partial class SqlSortSpillConformanceTests
             }
         }
         finally { foreach (var run in spilled) { await run.DisposeAsync(); } }
-        spills.ShouldBeGreaterThan(0);
+        // The combined corpus required a spill across both grants. Original state charges
+        // make this corpus fit at 4 MiB; keep a positive spill witness at 1 MiB.
+        if (grant == 1048576) { spills.ShouldBeGreaterThan(0); }
+        else { spills.ShouldBe(0); }
         for (int index = 0; index < grants.Length; index++)
         { _output.WriteLine($"HASH_CORPUS_HEAP|seed={corpusSeed}|statements={statements}|grant={grants[index]}|largest_excess={excesses[index]}|matches={matches}|spills={spills}"); }
     }

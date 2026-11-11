@@ -426,10 +426,14 @@ aggregates retain CS05067, as do unproved SUM/AVG bounds and unsupported key cod
 spooling remains later work. The SQL project design records the precise eligibility and lifetime rules.
 Eligible root INNER, LEFT, RIGHT and FULL hash joins hand off only after their original statement-grant
 reservation refuses. All spilled joins and their staged buffers share one join temp reservation and
-statement quota. Optional build arenas yield down to their minimum M when their extra can satisfy
+statement quota. Optional build arenas yield down to their minimum M when free memory plus their extra can satisfy
 another reservation; probe caches target G/4 within the remaining grant. Temp consolidation and Seal
-can refuse CK05002. Every statement that completes at the prior grant and quota retains its rows,
-CLR types and metadata; statements without a join retain their original memory arithmetic (#1789).
+can refuse CK05002. Spilling only adds capability: a statement that completes at the prior statement grant and temp
+quota still completes there, with the same rows, CLR types and metadata; statements without a
+join keep their original memory arithmetic (#1789). Index builds are the exception: they charge
+their build workspace (#1808), so a build whose chunk does not fit the grant refuses CS05067.
+Result corrections are recorded under their own issue, including ungrouped typed-NULL
+CASE/COALESCE refusing CS02011 instead of returning text under Int64 metadata (#1788).
 CASE/COALESCE follow PostgreSQL common-type resolution with the recorded numeric and CHAR departures, including persisted expressions (#1788).
 OQL ranking/navigation windows support OVER and named windows within memory/work grants (#1805).
 OQL MERGE parses, binds, plans and explains; execution refuses CD05022 until OQ-M2 (#1804).

@@ -17,7 +17,8 @@ internal sealed partial class SqlPlanExecutor
     // Reader, iterator and the two byte-array headers; measured by the marginal cursor test.
     private const long hashReaderObjectBytes = 256;
     internal static Action<string, long>? ObserveHashSpill { get => HashSpill.Observe; set => HashSpill.Observe = value; }
-    internal static Action<long>? ObserveHashReplay { get; set; }
+    private static readonly AsyncLocal<Action<long>?> _observeHashReplay = new();
+    internal static Action<long>? ObserveHashReplay { get => _observeHashReplay.Value; set => _observeHashReplay.Value = value; }
     private static readonly AsyncLocal<Func<int, int>?> _hashSpillPartitionHash = new();
     internal static Func<int, int>? HashSpillPartitionHash { get => _hashSpillPartitionHash.Value; set => _hashSpillPartitionHash.Value = value; }
 
@@ -502,7 +503,7 @@ internal sealed partial class SqlPlanExecutor
                         var key = row[1..(1 + _families.Length)];
                         if (!groups.TryGetValue(key, out var entry))
                         {
-                            long bytes = memory.RowBytes(key, out bool wide) + (_plan is null ? 64 : PlainGroupStateBytes(_plan.Aggregates) + 32);
+                            long bytes = memory.RowBytes(key, out bool wide) + (_plan is null ? 64 : HashGroupStateBytes(_plan.Aggregates) + 32);
                             if (next is null && bytes <= _budget - _executor._metrics!.HashMemoryBytes)
                             {
                                 _executor._metrics.ReservePlainSelectMemory(bytes, _budget); statesBytes += bytes;

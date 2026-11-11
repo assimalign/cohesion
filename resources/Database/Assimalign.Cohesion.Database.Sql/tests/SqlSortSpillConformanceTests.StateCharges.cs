@@ -34,7 +34,7 @@ public sealed partial class SqlSortSpillConformanceTests
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Hash state charges bound measured marginal live bytes for every native kind and family (#1789)")]
     [MemberData(nameof(SpillStateFamilies))]
-    public async Task PlainGroupStateBytes_NativeFamilies_ShouldBoundRetainedStates(string function, string type)
+    public async Task HashGroupStateBytes_ReplayNativeFamilies_ShouldBoundRetainedStates(string function, string type)
     {
         // Arrange: use the actual executor wrappers and accumulator, without plan/table costs.
         await using var engine = await Create("state-charge", 67108864);
@@ -109,6 +109,6 @@ public sealed partial class SqlSortSpillConformanceTests
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "Value")]
     private static extern ref SqlValue MirroredExtreme([UnsafeAccessorType(extremumStateType)] object state);
 
-    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "PlainGroupStateBytes")]
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "HashGroupStateBytes")]
     private static extern long GroupStateBytes(SqlPlanExecutor executor, IReadOnlyList<SqlGroupAggregate> aggregates);
 }

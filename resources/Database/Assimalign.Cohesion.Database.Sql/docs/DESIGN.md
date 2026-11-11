@@ -279,12 +279,15 @@ differential corpus exercises these cases and unchecked declared NUMERIC modifie
 CS05067 boundary at the same budget, rather than promising that an unsupported small grant
 reaches the error observed with a fitting large grant.
 
-The capacity contract is by live row and state shape:
+The capacity contract is by live row and state shape. The in-memory phase retains the original
+accounting: live heap per aggregate is SUM/AVG 136 B, MIN/MAX 224–232 B and COUNT 112 B,
+against 128 B charged, exactly as at batch 4. This known under-charge preserves fitting capability;
+the live ≤ G + 262,144 bound holds from the handoff onward, when measured replay charges apply:
 
 | Shape | Admission and spill capacity |
 | --- | --- |
 | One scalar group key, COUNT(*) | 96 B key + 128 B group + 128 B accumulator = 352 B per live group; 8,000 groups are 2,816,000 B, over ten 262,144 B grants |
-| K fixed scalar keys, A ordinary native aggregates | 56 + 40K B key and 128 B group overhead plus 256 B per MIN/MAX, 144 B per SUM/AVG and 128 B per other plain aggregate, before variable payloads; a replay entry adds 32 B |
+| K fixed scalar keys, A ordinary native aggregates | 56 + 40K B key and 128 B group overhead plus 128 B per plain aggregate in memory, before variable payloads; replay alone charges 256 B per MIN/MAX, 144 B per SUM/AVG and 128 B per other plain aggregate, plus a 32 B replay entry |
 | COUNT, bounded SUM/AVG, fixed-width MIN/MAX, native BOOL_AND/BOOL_OR/EVERY | Fixed native state; MIN/MAX admit only numeric, temporal, boolean and UUID families (or constant NULL). Text/CHAR and binary extrema keep CS05067. COUNT(x) partitions only a NULL/non-NULL flag after evaluating/coercing x at input |
 | Streamed scan/system-view unordered hash DISTINCT | Original seen entry and output row each pay their existing charge; the first row/spelling survives. Replayed keys pay their key plus a 64 B entry allowance. Join-output DISTINCT retains its existing refusal |
 | Rows in partitions or ordinal spool | Private SQ-L2 row encoding, at most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; each phase's G is its remaining grant after active reader buffers and must admit SQ-L2's sorter |
@@ -334,14 +337,15 @@ is live for only one active repartitioning level at a time. The live-heap test s
 batch entry, populated replay batches and ordered output at 12,000 and 24,000 rows with
 128-character keys. Both peaks must fit a 1 MiB grant plus that allowance, and the larger
 minus smaller peak must be at most 131,072 B (128 KiB). A mutant retaining 1,024 B per
-input row must fail. Fitting representation and allocations are retained. Shared state charges
+input row must fail. Fitting representation and allocations are retained. Replay state charges
 include the executor wrapper, accumulator, retained scalar box and group-array slot; MIN/MAX
 also retain the executor's mirrored value. SqlFunctionContext is a ref struct and is not retained.
 Marginal forced-GC tests at two populations bound every spillable native kind and value family,
 key rows and identity maps, replay entries, DISTINCT representatives and ordinal source readers.
 The seeded corpus samples phase changes under two grants in CI; the extended run uses 2,000
-statements at 1, 4 and 16 MiB. Near-budget MIN/MAX and SUM/AVG shapes can therefore spill or
-retain CS05067 when ineligible. Decoded hash records validate their ordinal, key families,
+statements at 1, 4 and 16 MiB. Near-budget aggregates complete wherever batch 4 completed
+at the same grant and quota. Only replay charges the measured state; an input handoff occurs
+only at the original refusal boundary. Decoded hash records validate their ordinal, key families,
 acceptance flags and state types before use; mismatched tags retain located CK05004.
 
 EXPLAIN ANALYZE reports hash_spill_batches and hash_spill_passes, and the existing
