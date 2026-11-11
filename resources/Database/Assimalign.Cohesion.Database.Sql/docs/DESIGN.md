@@ -336,7 +336,7 @@ frame of at most 16,360 B, and an 8,192 B final-run writer page account for at m
 objects use the remainder. Partition writer pages are released at Seal, so a fresh set
 is live for only one active repartitioning level at a time. The live-heap test samples input,
 batch entry, populated replay batches and ordered output at 12,000 and 24,000 rows with
-128-character keys. Both peaks must fit a 1 MiB grant plus that allowance, and the larger
+128-character keys. Both populations force one first-level partition and must repartition, so both fill a replay batch. The lower before/after quiescent baseline counts ambient reclamation conservatively. Both peaks must fit a 1 MiB grant plus that allowance, and the larger
 minus smaller peak must be at most 131,072 B (128 KiB). A mutant retaining 1,024 B per
 input row must fail. Fitting representation and allocations are retained. Replay state charges
 include the executor wrapper, accumulator, retained scalar box and group-array slot; MIN/MAX

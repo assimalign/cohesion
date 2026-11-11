@@ -103,14 +103,17 @@ public sealed partial class SqlSortSpillConformanceTests
     private static bool CorpusEqual(CorpusOutcome a, CorpusOutcome b) => a.Error == b.Error && a.Rows.SequenceEqual(b.Rows) && a.Rows.Zip(b.Rows).All(pair => pair.First.Cells.Zip(pair.Second.Cells).All(cell => cell.First is not DateTimeOffset time || time.EqualsExact((DateTimeOffset)cell.Second!))) && a.Visits == b.Visits && a.Calls.SequenceEqual(b.Calls);
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Seeded hash corpus: replay samples stay within each grant plus 256 KiB (#1789)")]
-    [InlineData(1048576L)]
-    [InlineData(4194304L)]
-    public async Task ExecuteAsync_SeededHashHeapCorpus_ShouldMatchWithinGrant(long grant)
+    [InlineData(1048576L, 0, 2)]
+    [InlineData(1048576L, 1, 2)]
+    [InlineData(4194304L, 0, 1)]
+    public async Task ExecuteAsync_SeededHashHeapCorpus_ShouldMatchWithinGrant(long grant, int shard, int shards)
     {
         // Arrange: the review's recorded seed and generation order. The larger run is opt-in.
         const int corpusSeed = 17890507;
         int statements = int.TryParse(Environment.GetEnvironmentVariable("SQL_HASH_CORPUS_STATEMENTS"), out int requested) ? requested : 256;
         long[] grants = grant == 4194304 && statements > 256 ? [grant, 16777216] : [grant];
+        int first = (int)((long)statements * shard / shards);
+        int last = (int)((long)statements * (shard + 1) / shards);
         var random = new Random(corpusSeed);
         await using var unlimited = await CreateCorpusEngineAsync(67108864, false);
         await using var original = await CreateCorpusEngineAsync(67108864, false, force: true);
@@ -139,6 +142,8 @@ public sealed partial class SqlSortSpillConformanceTests
                 if (test % 4 == 0) { sql += distinct ? " ORDER BY 1" : " ORDER BY COUNT(*)"; }
                 if (test % 6 == 0) { sql += $" LIMIT {random.Next(1, 300)} OFFSET {random.Next(30)}"; }
                 long fail = test % 31 == 0 ? 1201 : -1;
+                // Generate the complete sequence before selecting this range, preserving every SQL shape.
+                if (test < first || test >= last) { continue; }
                 var expected = await ExecuteCorpusAsync(unlimited, sql, fail);
                 CorpusEqual(expected, await ExecuteCorpusAsync(original, sql, fail)).ShouldBeTrue(customMessage: sql);
                 for (int index = 0; index < grants.Length; index++)
@@ -165,6 +170,6 @@ public sealed partial class SqlSortSpillConformanceTests
         if (grant == 1048576) { spills.ShouldBeGreaterThan(0); }
         else { spills.ShouldBe(0); }
         for (int index = 0; index < grants.Length; index++)
-        { _output.WriteLine($"HASH_CORPUS_HEAP|seed={corpusSeed}|statements={statements}|grant={grants[index]}|largest_excess={excesses[index]}|matches={matches}|spills={spills}"); }
+        { _output.WriteLine($"HASH_CORPUS_HEAP|seed={corpusSeed}|statements={statements}|range=[{first},{last})|grant={grants[index]}|largest_excess={excesses[index]}|matches={matches}|spills={spills}"); }
     }
 }
