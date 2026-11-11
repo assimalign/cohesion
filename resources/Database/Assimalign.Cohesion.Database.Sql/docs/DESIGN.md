@@ -117,8 +117,8 @@ before decoding the exact row codec. Packing helps compressible frames. During S
 sorter's runs and the index coexist: a spilled build needs up to about twice its packed
 size of temporary space, plus page framing, a small chunk-metadata run and any staged probe-side input of the statement. With the default
 quota of four grants, an incompressible build larger than about two grants refuses located
-CK05002 at Seal. Probe-heavy joins use less temporary space than partitioned probe spooling;
-build-heavy incompressible joins have about half that former build capacity.
+CK05002 at Seal. Probe-heavy joins use less temporary space than partitioned probe spooling.
+A yield's consolidation can also raise CK05002 and, in nested FULL trees, can be the statement's temp peak. A yield temporarily retains old build runs, the consolidated run and the child index. Build-heavy incompressible joins have about half that former build capacity.
 Sorted output is written
 once to one indexed run. A charged directory records each chunk's first/last hash, opaque
 start position, sorted range and first/last ordinal. Chunks target 8,192 encoded bytes,
@@ -136,12 +136,12 @@ already excludes volatile/throwing ON expressions. Joins have no repartitioning,
 limit or skew refusal; aggregation retains its eight-level limit.
 
 Decoded chunks validate that the width fits; omitted trailing cells restore as NULL.
-Page CRCs detect truncation. A statement-held hash of all 48-byte directory entries is compared before probing,
+Page CRCs detect truncation. An operator-held hash of all 48-byte directory entries is compared before probing,
 including ranges for chunks no probe loads. The readers also validate ordinal range, non-decreasing unsigned hashes, increasing
 ordinals within each hash, directory endpoints, key families, recomputed hash and NULL
 flag. Damage retains located CK05004. Quotas, the free-space floor and I/O retain CK0500x.
 Computed keys, correlated/lateral inputs, non-hash steps, deferred collations, SQL/JSON,
-joined DML, application binary build cells and join-output DISTINCT retain eligibility.
+joined DML, application binary build cells and join-output DISTINCT receive no join-spill permission.
 The probe operation itself never encodes payloads. Retained buffers of a normalized join tree,
 including left inputs and intermediate outputs, can stage when their original reservation refuses. This source applies SQ-L2's
 exact row codec and grant-derived record bound to every cell, including probe payloads;
@@ -163,13 +163,18 @@ min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192), including framing.
 The sorter's minimum M = max(65,536, 32,768 + 2 * (8,192 + B)) supports a two-way merge.
 At handoff the minimum working set is the operator, keys, M and scratch for rows seen so far.
 Above that minimum the arena takes up to half the available grant A, with no fixed cap,
-leaving the actual scratch charged. Before any statement reservation refuses, registered optional
-join arenas give way and admission retries. This includes staged readers and nested FULL unmatched sorts:
+leaving the actual scratch charged. Before a statement reservation refuses, registered optional
+join arenas give way only if free memory plus their total S - M can satisfy the request;
+hopeless requests refuse CS05067 without temp writes. Staged readers and nested FULL unmatched sorts can trigger this yield:
 the old sorter consolidates to a run under its existing charge, then drains that run before
 allocating M. A row refuses only if the minimum plus its scratch cannot fit. Seal builds
 the directory after releasing the arena. FULL's unmatched phase uses its own minimum M,
 independent of the former arena grant. The build sorter's open-run limit is 32, including
 one merge-output slot; fan-in is derived from its workspace and B.
+Remainder-derived staged-source, collector, deferred-sort, root-sort and group-output-sort
+admissions run only when no optional arena is registered. Current plans have at most one
+registered arena, between handoff and Seal; AdoptBuild and Seal reservations therefore
+cannot trigger a yield, and arena ordering is immaterial.
 Admission checks the complete original build row plus 48 B before NULL trimming or
 packing. Admission also refuses CS05067 immediately if that decoded record plus its
 per-chunk overhead can never fit the largest possible cache G/4.
@@ -210,10 +215,12 @@ hash_ prefix. Internal ProbeBytesRead counts encoded bytes and framing decoded b
 Physical fields are not cumulative I/O. Joins never increment hash_spill_batches or
 hash_spill_passes; these keep aggregation's meanings when aggregation also spills.
 
-Under ANALYZE, JoinStep reports its configured hash_budget=spill_on_refusal or no_spill and
+Under ANALYZE, JoinStep reports its executed permission as hash_budget=spill_on_refusal or no_spill and
 hash_status=fitting or spilled for that build. Policy is recorded when a plan starts, separately
 from candidate work, so an unbuilt step has its real policy and zero-candidate actuals remain NULL.
-Non-hash steps retain hash_budget=no_spill. Fitting text keeps the base description plus hash_status.
+The policy dictionary is allocated only when a hash step records permission or status;
+join-free analysis scopes retain only the optional field, without an eager dictionary.
+Non-hash steps retain hash_budget=no_spill. Fitting descriptions keep base text apart from the hash_budget value, which reports the step's permission, and the added hash_status field. A spilled JoinPlan uses "bounded hash" in place of "bounded in-memory hash".
 Plain EXPLAIN describes configured spilling
 as spill_on_refusal_if_eligible. Near a refusal boundary the process hash
 seed can affect directory growth, admission against the actual largest cache chunk and
@@ -236,7 +243,7 @@ durable format or event. PostgreSQL's design is followed at
 inputs that would create new groups go to eight lazy hash partitions. Each replay
 uses another three hash bits, keeps its new groups in memory and partitions its new
 keys again. Eight partition levels is the limit. Exhaustion retains CS05067 with the
-specific eight-pass repartitioning message; an individual group that grows past its
+specific eight-level repartitioning message; an individual group that grows past its
 live grant also retains CS05067. One repeated key creates one group and never spills.
 
 Keys, FILTER and accepted aggregate arguments execute once, at their original input
@@ -265,7 +272,7 @@ pseudo-type's Null storage marker. A derived Null-typed column can hold values: 
 CALLED ON NULL INPUT ANYELEMENT function can return a value when all polymorphic arguments
 are NULL. Even concrete derived metadata is insufficient: a typed NULL argument can
 give that call BIGINT metadata while it returns text. CASE/COALESCE now enforce their
-resolved numeric value family at each source node (#1788), but spill eligibility remains
+resolved numeric value family at each source node (#1788), except the known grouped typed-NULL polymorphic application-result defect in SqlPlanExecutor.Grouping.cs normalization, which can pass text under numeric metadata. Ungrouped evaluation enforces the numeric family. Spill eligibility remains
 unchanged. SUM/AVG bounds and MIN/MAX families accept a column only
 from checked table storage; an explicit outer cast can establish a checked type. The
 differential corpus exercises these cases and unchecked declared NUMERIC modifiers. Expression errors still occur at input; refusing spill preserves the original
@@ -343,7 +350,7 @@ sort also spills, its ordinary fields describe the shared final owner and hash-p
 byte/run fields describe the hash phase. Counters reflect actual partitions and ordinal
 sort runs; tests never use durations to decide correctness. System.HashCode seeds vary
 between processes, so partition membership, batch/pass counts and EXPLAIN counters vary too.
-Near the eight-pass limit, a statement may succeed in one process and refuse in another;
+Near the eight-level limit, a statement may succeed in one process and refuse in another;
 the equality-compatible hash and existing pass limit are unchanged.
 
 The commerce-shaped default-grant probe completes a 1.5-million-row annual repeat-customers slice with 250,000 groups. The 500,000-product category-rank CTE/window shape still refuses while creating aggregate states inside the revenues CTE, whose nested executor has no spill permission. The 800,000-row NOT IN child first refuses its materialized SELECT input, before completing the eager membership vector. Nested aggregation ownership and that subquery input/vector remain follow-ups for SQ-L4. These probes preserve those explicit scope boundaries.
@@ -4178,8 +4185,9 @@ binary values. Stored row bytes and canonical DEFAULT text retain their existing
 ## Compiled-schema provisioning
 
 Compiled expression DEFAULTs remain outside the literal-only declaration contract. Their
-pre-publication policy refusal carries CS03105, including through the migration exception,
-instead of leaking the generic CS05060 diagnostic. SQL DDL expression DEFAULTs are unchanged.
+pre-publication policy refusal carries CS03105 through imperative apply and script generation.
+Build phase 3 leads its message with CS03101 and retains CS03105 in Diagnostics.
+Validation before the catalog opens leaves Provisioning unset. SQL DDL expression DEFAULTs are unchanged.
 
 Joint space admission charges sparse dirty buffer pools only when the job allocates pages.
 A zero-operation marker refresh (including an empty Build) admits on the declaration-derived
@@ -9645,8 +9653,7 @@ Implicit CREATE TABLE / ADD COLUMN identity-sequence candidates skip pending joi
 including suffixed candidates. PostgreSQL similarly checks its shared relation
 namespace before creation (src/backend/catalog/heap.c:1191-1198) and rename
 (src/backend/commands/tablecmds.c:4362-4367); SQL retains its own table/view/sequence namespace.
-Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 through both the thrown
-diagnostic and Provisioning before an intent is saved. A reservation timeout throws CS03402 with its lock-manager cause. Imperative interruption clears
+Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 in the thrown diagnostic before an intent is saved. Refusals after the catalog opens also report Provisioning; ValidateSupportedSchema refusals before catalog open leave it unset. A reservation timeout throws CS03402 with its lock-manager cause. Imperative interruption clears
 Provisioning; a deferred job's failure remains sticky.
 
 Space admission uses the boundary after database open/recovery and object reservations, before the kind-9 write.

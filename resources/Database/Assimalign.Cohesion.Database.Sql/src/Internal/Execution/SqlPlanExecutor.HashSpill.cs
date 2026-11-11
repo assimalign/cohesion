@@ -17,6 +17,7 @@ internal sealed partial class SqlPlanExecutor
     // Reader, iterator and the two byte-array headers; measured by the marginal cursor test.
     private const long hashReaderObjectBytes = 256;
     internal static Action<string, long>? ObserveHashSpill { get => HashSpill.Observe; set => HashSpill.Observe = value; }
+    internal static Action<long>? ObserveHashReplay { get; set; }
     private static readonly AsyncLocal<Func<int, int>?> _hashSpillPartitionHash = new();
     internal static Func<int, int>? HashSpillPartitionHash { get => _hashSpillPartitionHash.Value; set => _hashSpillPartitionHash.Value = value; }
 
@@ -33,6 +34,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var row in rows) { source.Append(row, token); }
             rows.Clear(); rows.Capacity = 0; ReleaseSelectMemory(ref memory);
             source.ReserveWriter();
+            SqlRowCollector.ObserveSpill?.Invoke("staged-drained");
             source.Append(current, token);
             while (remaining.MoveNext()) { source.Append(ProjectRow(remaining.Current, projections, evaluator, token), token); }
             source.Seal(token);
@@ -436,6 +438,7 @@ internal sealed partial class SqlPlanExecutor
             _outputs.Seal(token);
             Observe?.Invoke("partitioned", _outputs.RecordCount);
             long scratch = hashReaderObjectBytes + StorageTempSpace.PageSize + _outputs.MaximumRecordLength + 2 * MaximumDecodedBytes;
+            System.Diagnostics.Debug.Assert(SqlHashSpillMetrics.For(_executor._metrics!)?.HasOptionalArenas != true);
             long grant = Math.Min(int.MaxValue, _budget - _executor._metrics!.HashMemoryBytes - scratch);
             int bound = (int)((grant - 32768) / 16 - 8192);
             if (grant < 65536 || bound < 16) { throw SqlExecutionException.StatementMemoryBudget(_budget); }
@@ -495,6 +498,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         if (row[0] is not long ordinal)
                         { throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged); }
+                        ObserveHashReplay?.Invoke(ordinal);
                         var key = row[1..(1 + _families.Length)];
                         if (!groups.TryGetValue(key, out var entry))
                         {

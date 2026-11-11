@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,7 +30,7 @@ public sealed partial class SqlSortSpillConformanceTests
             for (int first = 0; first < 8000; first += 200)
             {
                 string values = string.Join(',', Enumerable.Range(first, 200).Select(i =>
-                    $"({i},{(i % 2 == 0 ? i.ToString(System.Globalization.CultureInfo.InvariantCulture) : "NULL")},{i},{(i == 0 ? "NULL" : i == 1 ? "'x'" : i == 2 ? "'q'" : $"'{i:D4}'")})"));
+                    $"({i},{(i % 2 == 0 ? i.ToString(System.Globalization.CultureInfo.InvariantCulture) : "NULL")},{i},{(i == 7997 ? "NULL" : i == 7998 ? "'x'" : i == 7999 ? "'q'" : $"'{i:D4}'")})"));
                 await session.ExecuteAsync("INSERT INTO choices VALUES" + values, cancellationToken: CancellationToken.None);
             }
         }
@@ -37,7 +38,17 @@ public sealed partial class SqlSortSpillConformanceTests
 
         // Act.
         await using var left = (DatabaseResultSet)await a.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-        await using var right = (DatabaseResultSet)await b.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+        var tail = new Queue<long>();
+        var replayed = new HashSet<long>();
+        SqlPlanExecutor.ObserveHashSpill = (phase, ordinal) =>
+        {
+            if (phase == "input") { tail.Enqueue(ordinal); if (tail.Count > 3) { tail.Dequeue(); } }
+        };
+        SqlPlanExecutor.ObserveHashReplay = ordinal => { replayed.Add(ordinal); };
+        DatabaseResultSet spilledResult;
+        try { spilledResult = (DatabaseResultSet)await b.ExecuteAsync(sql, cancellationToken: CancellationToken.None); }
+        finally { SqlPlanExecutor.ObserveHashSpill = null; SqlPlanExecutor.ObserveHashReplay = null; }
+        await using var right = spilledResult;
         var expected = await Rows(left);
         var actual = await Rows(right);
 
@@ -53,5 +64,9 @@ public sealed partial class SqlSortSpillConformanceTests
             left.Columns.Select(c => (c.Ordinal, c.Name, c.Type, c.MaxLength, c.IsNullable)));
         SqlHashSpillMetrics.For(a.LastStatementMetrics!).ShouldBeNull();
         SqlHashSpillMetrics.For(b.LastStatementMetrics!).ShouldNotBeNull().Batches.ShouldBeGreaterThan(0);
+        // The last three appended inputs are exactly ids 7997..7999, including both
+        // padding-equivalent x members. All must be observed inside partition replay.
+        tail.Count.ShouldBe(3);
+        foreach (long ordinal in tail) { replayed.ShouldContain(ordinal); }
     }
 }

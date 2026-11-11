@@ -82,6 +82,7 @@ internal sealed partial class SqlPlanExecutor
             await foreach (var source in input.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (groups.Count == 0) { ObserveHashSpill?.Invoke("group-admission", _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes); }
                 var row = new object?[source.FieldCount];
                 for (int i = 0; i < row.Length; i++)
                 {

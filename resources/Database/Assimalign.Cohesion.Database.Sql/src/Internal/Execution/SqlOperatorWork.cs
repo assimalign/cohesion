@@ -10,8 +10,8 @@ internal sealed class SqlOperatorWork
     internal long WindowInverseTransitions;
     internal long WindowBoundaryVisits;
 
-    // Each entry describes one operator family. Recursive unions reuse
-    // unused window slots so ANALYZE retains its allocation size.
+    // Each entry describes one operator family. Recursive unions reuse otherwise
+    // unused window slots so non-recursive ANALYZE retains its allocation size.
     internal long RecursiveIterations { get => WindowTransitions; set => WindowTransitions = value; }
     internal long RecursiveRows { get => WindowInverseTransitions; set => WindowInverseTransitions = value; }
 

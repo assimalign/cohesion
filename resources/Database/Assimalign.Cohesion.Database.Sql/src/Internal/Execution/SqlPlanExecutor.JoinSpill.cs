@@ -13,9 +13,14 @@ internal sealed partial class SqlPlanExecutor
             && CanSpillJoinRows(plan, owner);
 
     private bool CanSpillJoinRows(SqlJoinPlan plan, SqlDatabaseSession? owner)
-        => owner?.Database.Engine.TempSpace is not null && CanPipelineSelectRetention()
-            && !plan.IsDistinct && plan.Bindings.All(b => b.Source.Derived is not { IsCorrelated: true })
-            && plan.Steps.All(s => s.Hash is { InnerExpressions: null, OuterExpressions: null });
+    {
+        if (owner?.Database.Engine.TempSpace is null || !CanPipelineSelectRetention() || plan.IsDistinct) { return false; }
+        for (int i = 0; i < plan.Bindings.Count; i++)
+        { if (plan.Bindings[i].Source.Derived is { IsCorrelated: true }) { return false; } }
+        for (int i = 0; i < plan.Steps.Count; i++)
+        { if (plan.Steps[i].Hash is not { InnerExpressions: null, OuterExpressions: null }) { return false; } }
+        return true;
+    }
 
     private bool CanSpillJoinBuild(SqlJoinPlan plan, SqlHashJoinPath? keys,
         SqlDatabaseSession? owner, SqlExecutionException error)

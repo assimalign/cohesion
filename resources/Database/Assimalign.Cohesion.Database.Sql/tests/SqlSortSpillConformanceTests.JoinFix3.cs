@@ -112,7 +112,7 @@ public sealed partial class SqlSortSpillConformanceTests
         SqlStatementMetrics.AfterMemoryReservation = (metrics, bytes) =>
         {
             active = metrics;
-            if (starved || bytes != 792) { return; }
+            if (starved || bytes != SqlHashJoinSpill.DirectoryBytes(16)) { return; }
             starved = true; held = budget - metrics.HashMemoryBytes - 45000;
             metrics.ReserveHashMemory(held, budget);
         };
@@ -148,26 +148,35 @@ public sealed partial class SqlSortSpillConformanceTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Zero-candidate flat hash steps keep their policy and NULL actuals (#1789)")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task ExecuteAsync_JoinFix3UnbuiltPolicy_ShouldKeepNullActuals(bool outerRow, bool zeroLimit)
+    [Theory(DisplayName = "Cohesion Test [Sql] - Zero-candidate hash steps keep their policy and NULL actuals (#1789)")]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    public async Task ExecuteAsync_JoinFix3UnbuiltPolicy_ShouldKeepNullActuals(bool outerRow, bool zeroLimit, bool groupedTree)
     {
         // Arrange
         await using var engine = await CreateFix2("fix3-unbuilt", 262144);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE jl(id INT)"); await session.ExecuteAsync("CREATE TABLE jr(id INT)");
         await session.ExecuteAsync("INSERT INTO jr VALUES(1)");
+        await session.ExecuteAsync("CREATE TABLE jt(id INT)");
         if (outerRow) { await session.ExecuteAsync("INSERT INTO jl VALUES(2)"); }
         // Act
-        await using var result = (DatabaseResultSet)await session.ExecuteAsync("EXPLAIN ANALYZE SELECT jl.id,jr.id FROM jl LEFT JOIN jr ON jl.id=jr.id" + (zeroLimit ? " LIMIT 0" : ""));
+        string sql = groupedTree
+            ? "SELECT jl.id,COUNT(*) FROM jl LEFT JOIN (jr JOIN jt ON jr.id=jt.id) ON jl.id=jr.id GROUP BY jl.id"
+            : "SELECT jl.id,jr.id FROM jl LEFT JOIN jr ON jl.id=jr.id" + (zeroLimit ? " LIMIT 0" : "");
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync("EXPLAIN ANALYZE " + sql);
         var rows = await Rows(result);
         string text = string.Join('\n', rows.Select(row => row.ToString()));
         _output.WriteLine("FIX3_UNBUILT|" + text);
         // Assert
         text.ShouldContain("hash_budget=spill_on_refusal; hash_status=fitting", Case.Sensitive);
-        rows.Single(row => Equals(row.Cells[2], "JoinStep")).Cells[7].ShouldBeNull();
+        foreach (var step in rows.Where(row => Equals(row.Cells[2], "JoinStep")))
+        {
+            step.Cells[5]!.ToString()!.ShouldContain("hash_budget=spill_on_refusal", Case.Sensitive);
+            step.Cells[7].ShouldBeNull();
+        }
     }
 #endif
 
@@ -190,6 +199,9 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         const string sql = "SELECT jl.id,jr.id FROM jl FULL JOIN jr ON jl.id=jr.id";
         await using var expected = (DatabaseResultSet)await a.ExecuteAsync(sql);
+        var phases = new HashSet<string>();
+        SqlPlanExecutor.ObserveHashSpill = (phase, _) => phases.Add(phase);
+        SqlRowCollector.ObserveSpill = phase => phases.Add(phase);
         // Act
         var actual = (DatabaseResultSet)await b.ExecuteAsync(sql);
         try
@@ -199,7 +211,8 @@ public sealed partial class SqlSortSpillConformanceTests
             b.LastStatementMetrics.RecordsExamined.ShouldBe(a.LastStatementMetrics.RecordsExamined);
             _output.WriteLine($"FIX3_OPTIONAL|digest={Fix2Fingerprint(rows)}|rows={rows.Length}|pairs={b.LastStatementMetrics.JoinCandidatePairs}|examined={b.LastStatementMetrics.RecordsExamined}");
         }
-        finally { await actual.DisposeAsync(); }
+        finally { await actual.DisposeAsync(); SqlPlanExecutor.ObserveHashSpill = null; SqlRowCollector.ObserveSpill = null; }
+        phases.ShouldContain("join-handoff"); phases.ShouldContain("staged-drained"); phases.ShouldContain("join-sorter-minimum");
     }
 
 
@@ -215,6 +228,8 @@ public sealed partial class SqlSortSpillConformanceTests
         using var child = new SqlHashJoinTable(keys, metrics, budget, trackUnmatched: true);
         using var parent = new SqlHashJoinTable(keys, metrics, budget, trackUnmatched: true);
         long held = 0; bool starved = false, childSpilled = false, parentSpilled = false;
+        bool yielded = false;
+        SqlPlanExecutor.ObserveHashSpill = (phase, _) => { if (phase == "join-sorter-minimum") { yielded = true; } };
         try
         {
             var random = new Random(178910);
@@ -227,7 +242,7 @@ public sealed partial class SqlSortSpillConformanceTests
             }
             SqlStatementMetrics.AfterMemoryReservation = (owner, bytes) =>
             {
-                if (!ReferenceEquals(owner, metrics) || bytes != 792 || starved) { return; }
+                if (!ReferenceEquals(owner, metrics) || bytes != SqlHashJoinSpill.DirectoryBytes(16) || starved) { return; }
                 starved = true; held = budget - metrics.HashMemoryBytes - 21000;
                 metrics.ReserveHashMemory(held, budget);
             };
@@ -245,10 +260,11 @@ public sealed partial class SqlSortSpillConformanceTests
             child.Unmatched(CancellationToken.None).Count().ShouldBe(400);
             parent.Probe([1L], CancellationToken.None).Count().ShouldBe(20);
             starved.ShouldBeTrue(); childSpilled.ShouldBeTrue(); parentSpilled.ShouldBeTrue();
+            yielded.ShouldBeTrue();
         }
         finally
         {
-            SqlStatementMetrics.AfterMemoryReservation = null; metrics.ReleaseHashMemory(held);
+            SqlStatementMetrics.AfterMemoryReservation = null; SqlPlanExecutor.ObserveHashSpill = null; metrics.ReleaseHashMemory(held);
             parent.Dispose(); child.Dispose(); SqlHashSpillMetrics.DetachJoinTemp(metrics)?.Dispose();
         }
         metrics.HashMemoryBytes.ShouldBe(0);
@@ -307,13 +323,15 @@ public sealed partial class SqlSortSpillConformanceTests
     {
         // Arrange
         long budget = shape == "shrink" ? 1048576 : 262144;
+        int bound = (int)Math.Min(16384, (Math.Min(budget, int.MaxValue) - 32768) / 16 - 8192);
+        long minimumGrant = SqlHashJoinSpill.BuildSorterGrant(bound);
         await using var engine = await CreateFix2("fix3-reservations", budget, quota: 67108864);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         var metrics = new SqlStatementMetrics();
         using var table = new SqlHashJoinTable(new([0], [0], [Collation.Binary]), metrics, budget);
         var reservations = new List<long>(); bool minimum = false, spilled = false;
         SqlStatementMetrics.AfterMemoryReservation = (owner, bytes) => { if (ReferenceEquals(metrics, owner)) { reservations.Add(bytes); } };
-        SqlPlanExecutor.ObserveHashSpill = (phase, value) => { minimum |= phase == "join-sorter-minimum" && value == 81920; };
+        SqlPlanExecutor.ObserveHashSpill = (phase, value) => { minimum |= phase == "join-sorter-minimum" && value == minimumGrant; };
         long held = 0;
         try
         {
@@ -336,11 +354,11 @@ public sealed partial class SqlSortSpillConformanceTests
             table.Probe([1L], CancellationToken.None).Count().ShouldBe(shape == "shrink" ? 1101 : 5000);
             // Assert
             _output.WriteLine($"FIX3_RESERVATIONS|{shape}|" + string.Join(',', reservations));
-            if (shape == "shrink") { minimum.ShouldBeTrue(); reservations.Count(value => value == 81920).ShouldBe(1); }
+            if (shape == "shrink") { minimum.ShouldBeTrue(); reservations.Count(value => value == SqlHashJoinSpill.SorterCharge(minimumGrant)).ShouldBe(1); }
             else
             {
-                foreach (long bytes in new long[] { 792, 1560, 3096, 6168, 12312, 24600 })
-                { reservations.Count(value => value == bytes).ShouldBe(1); }
+                foreach (int capacity in new[] { 16, 32, 64, 128, 256, 512 })
+                { reservations.Count(value => value == SqlHashJoinSpill.DirectoryBytes(capacity)).ShouldBe(1); }
             }
         }
         finally

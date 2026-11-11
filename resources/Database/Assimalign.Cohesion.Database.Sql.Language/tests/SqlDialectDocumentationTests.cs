@@ -14,12 +14,13 @@ public sealed class SqlDialectDocumentationTests
     public void Documentation_CurrentFormatClaims_ShouldExcludeSupersededMarkers()
     {
         // Arrange.
-        string[] documents = [ReadDialect(), ReadDocumentation("Sql.Language", "DESIGN.md"), ReadDocumentation("Sql", "DESIGN.md")];
+        string[] documents = [ReadDialect(), ReadDocumentation("Sql.Language", "DESIGN.md"), ReadDocumentation("Sql", "DESIGN.md"),
+            ReadDocumentation("Sql", "OVERVIEW.md"), ReadDocumentation("Indexing", "DESIGN.md"), ReadAreaDesign()];
 
         // Act / Assert: historical introductions of 37/38 remain valid prose.
         foreach (string document in documents)
         {
-            Regex.IsMatch(document, @"(?i)\bcurrent[^\r\n.;]*\bformat(?: is)?\s+(?:37|38)\b").ShouldBeFalse();
+            Regex.IsMatch(Regex.Replace(document, @"\s+", " "), @"(?i)\bcurrent[^.;]*\bformat(?: is)?\s+(?:37|38)\b").ShouldBeFalse();
             document.ShouldNotContain("any format but 38", Case.Insensitive);
         }
     }
@@ -197,6 +198,18 @@ public sealed class SqlDialectDocumentationTests
 
     private static string ReadDialect([CallerFilePath] string source = "")
         => File.ReadAllText(Path.Combine(Path.GetDirectoryName(source)!, "..", "docs", "DIALECT.md"));
+
+    private static string ReadAreaDesign([CallerFilePath] string source = "")
+        => File.ReadAllText(Path.Combine(Path.GetDirectoryName(source)!, "..", "..", "..", "..", "docs", "resources", "Database", "DESIGN.md"));
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Index admission documents owner waits and chunk retry bounds (#1808)")]
+    public void Documentation_IndexAdmission_ShouldDistinguishWaitBoundaries()
+    {
+        // Arrange
+        string dialect = Regex.Replace(ReadDialect(), @"\s+", " ");
+        // Act / Assert
+        dialect.ShouldContain("Session catalog mutations keep the immediate CK04014 refusal. Index-owner reservations (CREATE INDEX and index-backed constraints) release the catalog monitor and wait, per refusal, up to the session or engine LockTimeout (no limit at 0), then report CK04014. An ordinary build's first data-allocation refusal stays immediate. Later roots and chunk retries wait outside the apply gate, bounded only by StatementTimeout and cancellation.", Case.Sensitive);
+    }
 
     private static string ReadDocumentation(string project, string file, [CallerFilePath] string source = "")
         => File.ReadAllText(Path.Combine(Path.GetDirectoryName(source)!, "..", "..", $"Assimalign.Cohesion.Database.{project}", "docs", file));
