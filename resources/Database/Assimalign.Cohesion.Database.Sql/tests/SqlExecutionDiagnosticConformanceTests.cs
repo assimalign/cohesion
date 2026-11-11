@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -22,7 +23,8 @@ public sealed class SqlExecutionDiagnosticConformanceTests
     [InlineData(true)]
     public async Task ExecuteAsync_IndexBuildExceedsGrant_ShouldRefuseWithoutPublication(bool unique)
     {
-        // Arrange.
+        // Arrange: IX-S1 deliberately adds CS05067 at G=4,096 B, no temp quota.
+        // Batch 4 (1eefed274) completed this build without charging its workspace (#1808).
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await using var engine = SqlDatabaseEngine.Create("index-budget", new() { StatementMemoryBudget = 4096 });
         var database = await engine.CreateDatabaseAsync("app", guard.Token);
@@ -39,6 +41,38 @@ public sealed class SqlExecutionDiagnosticConformanceTests
         database.Catalog.GetIndexRegistrations().ShouldBeEmpty();
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         (await session.ExecuteAsync("SELECT COUNT(*) FROM items", cancellationToken: guard.Token)).Status.ShouldBe(DatabaseResultStatus.Success);
+        database.IsOffline.ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - IX-S1 pins its deliberate chunk-workspace refusal boundaries (#1808)")]
+    [InlineData(1, 0, 4096L, false)]
+    [InlineData(1, 0, 6927L, false)]
+    [InlineData(1, 0, 6928L, true)]
+    [InlineData(64, 4000, 262144L, false)]
+    [InlineData(64, 4000, 555408L, true)]
+    public async Task ExecuteAsync_IndexChunkBoundary_ShouldEnforceBuildBudget(int count, int width, long grant, bool completes)
+    {
+        // Arrange: no temp space/quota. Batch 4 (1eefed274) completed every build here.
+        await using var engine = SqlDatabaseEngine.Create("index-chunk-boundary", new() { StatementMemoryBudget = grant });
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE items(v INT" + (width == 0 ? ")" : ",note TEXT)"));
+        await session.ExecuteAsync("INSERT INTO items VALUES" + string.Join(',', Enumerable.Range(0, count).Select(i => width == 0 ? $"({i})" : $"({i},'{new string('x', width)}')")));
+
+        // Act / Assert
+        if (completes)
+        {
+            (await session.ExecuteAsync("CREATE INDEX ix ON items(v)")).Status.ShouldBe(DatabaseResultStatus.Success);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(grant);
+            database.Catalog.GetIndexRegistrations().ShouldHaveSingleItem();
+        }
+        else
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE INDEX ix ON items(v)"));
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
+            database.Catalog.GetIndexRegistrations().ShouldBeEmpty();
+        }
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         database.IsOffline.ShouldBeFalse();
     }
 

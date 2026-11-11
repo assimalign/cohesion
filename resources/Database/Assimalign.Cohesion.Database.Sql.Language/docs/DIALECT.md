@@ -4223,8 +4223,8 @@ postfix cast follows, keeping +1 and ORDER BY +1 unchanged. Both `+1::TEXT` and
 `+ 1::TEXT` apply unary plus to CAST(1 AS TEXT) and fail with CS02003, just like the
 minus forms; +1::INT is 1. Other types require contiguous ::; the previously accepted
 REGCLASS separated-colon spelling remains available. ILIKE remains contextual; ordinary
-identifiers and stored canonical text are unchanged; there is no SQL or
-compiled-schema format. Regex and SIMILAR TO remain deferred; SQ-O2 delivers bitwise execution below.
+identifiers and stored canonical text are unchanged, so neither the SQL nor the
+compiled-schema format changes. Regex and SIMILAR TO remain deferred; SQ-O2 delivers bitwise execution below.
 PostgreSQL references: src/backend/parser/gram.y:904-914 and
 src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before matching).
 
@@ -4279,7 +4279,7 @@ conversion). Unknown input conversion happens while binding,
 including skipped alternatives: invalid numeric/Boolean text is CS02022 (22P02), and a
 numeric value outside the selected type is CS02002 (22003). Each alternative converts at
 its own node before an enclosing cast, function, comparison, grouping key or ordering key.
-Result metadata and cells agree in-process and over InMemory/TCP, except the known grouped typed-NULL polymorphic application-result defect: SqlPlanExecutor.Grouping.cs normalization can pass text under numeric metadata; ungrouped evaluation enforces the numeric family. Statistical transitions
+Result metadata and cells agree in-process and over InMemory/TCP, except a known defect: a grouped CASE/COALESCE over a typed-NULL polymorphic application result can return text under Int64 metadata; ungrouped evaluation refuses CS02011. Statistical transitions
 and grouped output normalization retain their existing contracts above.
 
 Creation binds column DEFAULTs, table/domain CHECKs, view bodies, SQL function bodies and
@@ -5796,7 +5796,9 @@ including normalized buffers and referential writes. These conservative reservat
 statement exit; shared payload already charged by a hash build is not charged again for an alias.
 An exhausted joined statement refuses before any write and releases memory on success, failure or
 cancellation. CTAS also charges its retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
-`CS05067` (53200, out_of_memory). Plain SELECT also charges nested-loop inners, normalized
+`CS05067` (53200, out_of_memory). Index builds (CREATE [UNIQUE] INDEX, UNIQUE/PRIMARY KEY
+constraints and migration/rollback rebuilds) also refuse CS05067 when their charged chunk
+workspace exceeds the grant (#1808). Plain SELECT also charges nested-loop inners, normalized
 join child buffers, staged matches, group keys and aggregate state, aggregate DISTINCT tuples
 and ordered inputs, full sorts and bounded top-N heaps, output rows and DISTINCT sets,
 materialized results retained by consumers, derived/view/CTE caches, independent subquery

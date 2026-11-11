@@ -208,6 +208,7 @@ public sealed class SqlDialectDocumentationTests
         // Arrange
         string dialect = Regex.Replace(ReadDialect(), @"\s+", " ");
         // Act / Assert
+        dialect.ShouldNotContain("Session DDL keeps its immediate CK04014 refusal", Case.Sensitive);
         dialect.ShouldContain("Session catalog mutations keep the immediate CK04014 refusal. Index-owner reservations (CREATE INDEX and index-backed constraints) release the catalog monitor and wait, per refusal, up to the session or engine LockTimeout (no limit at 0), then report CK04014. An ordinary build's first data-allocation refusal stays immediate. Later roots and chunk retries wait outside the apply gate, bounded only by StatementTimeout and cancellation.", Case.Sensitive);
     }
 

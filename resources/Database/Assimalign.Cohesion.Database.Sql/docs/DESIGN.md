@@ -4192,7 +4192,7 @@ binary values. Stored row bytes and canonical DEFAULT text retain their existing
 Compiled expression DEFAULTs remain outside the literal-only declaration contract. Their
 pre-publication policy refusal carries CS03105 through imperative apply and script generation.
 Build phase 3 leads its message with CS03101 and retains CS03105 in Diagnostics.
-Validation before the catalog opens leaves Provisioning unset. SQL DDL expression DEFAULTs are unchanged.
+Because that refusal already carries CS03105, imperative apply leaves Provisioning unset. SQL DDL expression DEFAULTs are unchanged.
 
 Joint space admission charges sparse dirty buffer pools only when the job allocates pages.
 A zero-operation marker refresh (including an empty Build) admits on the declaration-derived
@@ -6226,7 +6226,14 @@ No directory snapshot or page I/O occurs under the manager directory monitor.
 
 Inline, constraint and deferred builds share IndexBuildLoop: 64 retained rows per durable
 bracket, bounded statement-memory charging, preserved source MVCC stamps, cursor-based unique
-validation, and one catalog publication. Checkpoint admission occurs between chunks, while the
+validation, and one catalog publication. IX-S1 deliberately changes refusals against batch 4
+(1eefed274), which charged no build workspace: each chunk reserves 320 + 80 + 64 × 96 =
+6,544 B before its first row, plus the charge for each retained row. CREATE [UNIQUE] INDEX,
+UNIQUE/PRIMARY KEY constraints, joint-migration builds and rollback rebuilds all share this loop.
+With no temp space, two INT rows at G=4,096 B refuse CS05067; even one INT row refuses at
+G=4,096–6,927 B. A chunk of 64 (INT, 4,000-character TEXT) rows at G=262,144 B refuses
+because it needs 555,408 B. Each of these builds completed at those grants with no temp quota
+at 1eefed274. This deliberate build-budget exception (#1808) retains the bounded bracket. Checkpoint admission occurs between chunks, while the
 table X reservation and creator/reader pins span the entire build. Same-name replacement now
 keeps the heap, reports Joint/KeepOwner, and rewrites zero rows when the remaining layout permits
 keeping it. The heap-owned collision refusal is removed. Rollback's encoder/predicate and
@@ -9066,8 +9073,8 @@ a deferred failure stays deferred. Constant conversion retains parameter provena
 Statistical transitions and JSON's grouped conversions
 retain their contracts. CHECK and SQL function creation fully bind
 before publication, as defaults, views and partial predicates already do. Accepted definitions
-round-trip through file reopen. This change ships in current format 39 with SQ-A7 history and IX-S1 owners; format 38 never shipped on its own;
-view columns are not migrated and this run adds no format bump or compatibility reader. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
+round-trip through file reopen. SQL format 39 includes applied-schema history and index owners. View columns are not migrated;
+common-type resolution changes neither format nor compatibility policy. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
 parse_coerce.c:1357-1456. Bound selectors retain their SQL type and member/index overload;
 evaluation converts alternatives to that type before access.
 Adjacent arrows fold only in the bound tree into ordered selectors over one owned, validated
@@ -9658,7 +9665,7 @@ Implicit CREATE TABLE / ADD COLUMN identity-sequence candidates skip pending joi
 including suffixed candidates. PostgreSQL similarly checks its shared relation
 namespace before creation (src/backend/catalog/heap.c:1191-1198) and rename
 (src/backend/commands/tablecmds.c:4362-4367); SQL retains its own table/view/sequence namespace.
-Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 in the thrown diagnostic before an intent is saved. Refusals after the catalog opens also report Provisioning; ValidateSupportedSchema refusals before catalog open leave it unset. A reservation timeout throws CS03402 with its lock-manager cause. Imperative interruption clears
+Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 in the thrown diagnostic before an intent is saved. Refusals that reach the planning boundary without a diagnostic (schema name and unsupported shapes, catalog ownership, planner policy) and script-generation refusals are re-coded CS03105 and also report Provisioning; refusals that already carry a diagnostic (declared binding failures such as a non-literal compiled DEFAULT, and the explicit-apply rollback refusal) leave Provisioning unset. A reservation timeout throws CS03402 with its lock-manager cause. Imperative interruption clears
 Provisioning; a deferred job's failure remains sticky.
 
 Space admission uses the boundary after database open/recovery and object reservations, before the kind-9 write.

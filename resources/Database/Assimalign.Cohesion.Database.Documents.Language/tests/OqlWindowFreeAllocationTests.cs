@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
+using System.Runtime.CompilerServices;
 
 using Shouldly;
 using Xunit;
@@ -10,22 +11,32 @@ using Xunit.Abstractions;
 
 namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
+[Collection("OqlWindowCompatibility")]
 public sealed class OqlWindowFreeAllocationTests
 {
     [Fact(DisplayName = "Cohesion Test [OQL] - Function lookup scans its immutable backing array without allocation (#1805)")]
     public void Find_NativeAndNullNames_ShouldAllocateNothing()
     {
         // Arrange
-        OqlFunctions.Find(null!).ShouldBeNull();
-        for (int i = 0; i < 1000; i++) { GC.KeepAlive(OqlFunctions.Find("upper")); }
+        // A poisoned first slot makes scanning observable: without the NULL fast path,
+        // lookup would dereference it. This collection disables parallelization.
+        var functions = LookupFunctions(null!);
+        var first = functions[0];
+        try { functions[0] = null!; OqlFunctions.Find(null!).ShouldBeNull(); }
+        finally { functions[0] = first; }
+        for (int i = 0; i < 1000; i++) { GC.KeepAlive(OqlFunctions.Find("upper")); GC.KeepAlive(OqlFunctions.Find(null!)); }
         // Act
         long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++) { GC.KeepAlive(OqlFunctions.Find("upper")); }
+        for (int i = 0; i < 1000; i++) { GC.KeepAlive(OqlFunctions.Find("upper")); GC.KeepAlive(OqlFunctions.Find(null!)); }
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         // Assert
         allocated.ShouldBe(0);
         OqlFunctions.Find("upper").ShouldNotBeNull().Name.ShouldBe("UPPER");
     }
+
+    [UnsafeAccessor(UnsafeAccessorKind.StaticField, Name = "_functions")]
+    private static extern ref OqlFunction[] LookupFunctions(
+        [UnsafeAccessorType("Assimalign.Cohesion.Database.Documents.Language.OqlFunctions, Assimalign.Cohesion.Database.Documents.Language")] object? owner);
 
     private readonly ITestOutputHelper _output;
     public OqlWindowFreeAllocationTests(ITestOutputHelper output) { _output = output; }

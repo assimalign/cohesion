@@ -59,6 +59,10 @@ public sealed partial class SqlJointTypeMigrationTests
             var check = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync("INSERT INTO items(Id,n) VALUES(9,-1)", cancellationToken: guard.Token));
             check.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03038");
+            var plan = await RowsAsync(session, "EXPLAIN SELECT COUNT(*) FROM items WHERE CASE WHEN n IS NULL THEN 0.4 ELSE n END>0", guard.Token);
+            string description = string.Join('|', plan.SelectMany(row => row));
+            description.ShouldContain("partial", Case.Sensitive);
+            description.ShouldContain("partial_predicate=", Case.Sensitive);
             (await RowsAsync(session, "SELECT COUNT(*) FROM items WHERE CASE WHEN n IS NULL THEN 0.4 ELSE n END>0", guard.Token)).Single()[0].ShouldBe((long)pass + 1);
             storage = storage.CaptureDurableImages();
         }

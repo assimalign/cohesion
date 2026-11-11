@@ -28,7 +28,27 @@ public sealed class SqlCompiledDefaultPolicyTests
         // Assert: supporting rollback of this declaration needs a separate policy decision.
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03105");
         failure.Message.ShouldContain("Only literal DEFAULT values are supported", Case.Sensitive);
+        database.Provisioning.ShouldBeNull();
         database.CatalogStorage.JournalLength.ShouldBe(journal);
+        database.Catalog.Tables.ShouldBeEmpty();
+        database.Catalog.AppliedSchemaHistory.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - A foreign schema name reports the planning refusal through Provisioning (#1779)")]
+    public async Task ApplySchemaAsync_ForeignSchemaName_ShouldReportProvisioning()
+    {
+        // Arrange
+        var declaration = SqlSchema.Compile("another", schema => schema.Table<DefaultRow>("items", table => table.Column(row => row.Amount)));
+        await using var engine = SqlDatabaseEngine.Create("schema-name-policy", new());
+        var database = await engine.CreateDatabaseAsync("typed", CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
+            await database.ApplySchemaAsync(declaration, CancellationToken.None));
+
+        // Assert: an uncoded planning refusal is re-coded and reported.
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03105");
+        database.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("CS03105");
         database.Catalog.Tables.ShouldBeEmpty();
         database.Catalog.AppliedSchemaHistory.ShouldBeEmpty();
     }
