@@ -202,7 +202,7 @@ internal sealed partial class SqlPlanner
             {
                 detail = (string.IsNullOrEmpty(detail) ? "" : detail + "; ") + $"spilled_bytes={spill.PhysicalBytes}; spill_peak_bytes={spill.PeakBytes}; spill_runs={spill.Runs}; spill_merge_passes={spill.MergePasses}";
             }
-            if (ReferenceEquals(current, spillPlan) && metrics is not null && SqlHashSpillMetrics.For(metrics) is { } hashSpill)
+            if (ReferenceEquals(current, spillPlan) && metrics is not null && SqlHashSpillMetrics.For(metrics) is { HasOperatorSpill: true } hashSpill)
             {
                 string prefix = SqlSortSpillMetrics.For(metrics) is null ? "" : "hash_";
                 detail = (string.IsNullOrEmpty(detail) ? "" : detail + "; ") + $"{prefix}spilled_bytes={hashSpill.PhysicalBytes}; {prefix}spill_peak_bytes={hashSpill.PeakBytes}; {prefix}spill_runs={hashSpill.Runs}; {prefix}spill_merge_passes={hashSpill.MergePasses}";

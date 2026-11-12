@@ -1,5 +1,64 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Retained SELECT output spooling (#1789, SQ-L4a; #1838)
+
+Unordered root SELECT output, primary-key ordered scans, unordered CTAS sources and
+plain GROUP BY output hand off at their existing CS05067 row-admission boundary.
+SqlOutputSpool drains the evaluated prefix in encounter order, drops its row and
+wide-cell references, then appends subsequent evaluated rows to one checksummed run.
+No expression, predicate, sequence call or storage visit repeats. A fitting statement
+keeps its list/collector representation, allocation shape and charged bytes. The
+12,000-group unordered MIN output can spill even when all aggregate states fit, closing
+the larger-grant output-refusal band. This follows PostgreSQL
+src/backend/utils/sort/tuplestore.c:798-882 (switch to a temporary file and dump retained
+tuples); Cohesion's grant remains per statement rather than per operator.
+
+An independent nested SELECT inherits the explicitly permitted statement session.
+Derived/view/CTE caches retain an already spilled result directly; a fitting result whose
+cache copy refuses is drained once to a run. ReadRelation decodes that cache in order,
+charging its reader, four decoded-row allowances for CHAR/binary conversion and consumer
+overlap, and 64 B per column to the outer statement. Cached runs
+join the existing temporary statement owner, so later operators share its physical quota.
+Root completion, error and cancellation close cached runs. Correlated/deferred frames,
+window stages, recursive owners, set operations, NOT IN and joined DML keep their existing
+operator paths. INSERT SELECT still bypasses SELECT charging under _isDml (#1828).
+The context's unused UTC-tick sign bit suppresses inherited permission for excluded
+owners without enlarging the context or cloning a provisioning name pair. Reading the
+transaction timestamp masks that bit; schema, database identity and lock timeout survive
+permission changes. A result-only shared temp owner does not report a hash spill.
+
+Sequential output records are capped at 16,384 encoded bytes. For a row of encoded length
+L and decoded cost D, 9,984 + L + 24 + 2D must fit the grant before writing. The writer's
+9,984 B and one capped encoding (at most 16,408 B) are charged when the live grant permits;
+when resident producer states fill the grant, these fixed I/O buffers use a maximum
+26,392 B allowance beyond it. They never retain a second row collection. Delivery's first
+reader and decoded overlap must fit the full grant, after the producing operator releases
+its state; nested readers additionally reserve on the live outer ledger. Output runs use
+the existing private row format, quotas, reserve floor and located CK05 diagnostics.
+EXPLAIN ANALYZE reports an output run through the existing spill byte/run fields.
+
+Delivery uses SqlSpilledResultSet's lazy, rewindable cursors. Closing an enumeration frees
+its cursor; disposing the result releases its runs. Session/engine close and server
+delivery exits dispose the result too, including early client disconnects. Cancellation
+preserves the initiating error and releases statement-owned files. No page latch spans
+a temporary call. Startup sweeping removes leftovers after an abrupt stop.
+
+CTAS first attempts its original source/batch reservations. Only on copy refusal does it
+clear consumed source cells and release their payload charges, retaining and charging
+the source arrays through enumeration. Subsequent rows transfer ownership as they are
+encoded. For null/fixed-width sources that cannot release enough cell payload, the existing
+64-record batch uses its fixed 520,472 B allowance beyond the grant; successful reservations
+remain charged. This closes #1838 without changing a fitting copy's charges or introducing a
+write bracket. The durable boundaries remain table reservation, each existing 64-row
+copy bracket, builder commit and catalog publication; fault-injected write/flush/length
+images cover unordered spooling and consumed-source credit as well as ordered spooling.
+Each recovered image converges to an absent/reclaimed or complete destination.
+
+The conformance corpus sweeps grants against the batch-base binary, comparing successful
+rows and observed order, volatile calls, sequence values and RecordsExamined point by
+point. Forced-GC checks use LiveHeap.Read at two populations; retaining one output object
+per row fails the same live-object bound. No persistent format or diagnostic identity changes.
+
 ## Journal admission backstop (#1283, EN-C2)
 
 At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
@@ -94,7 +153,7 @@ An eligible root hash build hands off on its original CS05067 reservation bounda
 including exhaustion of the grant remaining after other operators. Fitting tables retain
 all ten fields, arrays and charges. The filtered RIGHT/FULL iterator and suspending root
 state machine retain their base layouts. Explicit spill permission travels through the
-existing statement-context identity slot; nested bodies gain no permission. Fitting rows
+existing statement-context identity slot; independent nested SELECT bodies inherit statement permission. Fitting rows
 perform no join-spill sidecar lookup. One StorageTempStatement coordinates joins, staged
 sources, aggregation and collectors. The statement root is its sole owner during execution.
 Shared group inputs, aggregation, collectors, staged sources and undelivered results close
@@ -294,7 +353,7 @@ the live ≤ G + 262,144 bound holds from the handoff onward, when measured repl
 | Rows in partitions or ordinal spool | Private SQ-L2 row encoding, at most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; each phase's G is its remaining grant after active reader buffers and must admit SQ-L2's sorter |
 | Input-order source/output spool | Existing SQ-L2 grant-derived record bound (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192 B, without the hash partition's 16,384 B cap; output projection rows reserve their codec/page/decoded overlap from the same ledger |
 | STRING_AGG, ARRAY_AGG, DISTINCT/ordered aggregates, statistical or application accumulators | Existing CS05067 refusal; no spill permission |
-| Grouping sets, direct window-over-group owners, correlated/deferred frames, SQL/JSON, DML, nested relation bodies | Existing ownership and refusal; no inherited hash spill permission |
+| Grouping sets, direct window-over-group owners, correlated/deferred frames, SQL/JSON, DML | Existing ownership and refusal; independent nested relation bodies inherit SELECT permission under SQ-L4a |
 | Subquery-bearing group inputs/expressions or unproved MIN/MAX argument families | Existing refusal; hash eligibility remains conservative |
 | Deferred collation, second key family, application-binary cells, unsupported or oversized encoded cells | CS05067; no approximate key, state or result |
 
@@ -355,7 +414,7 @@ between processes, so partition membership, batch/pass counts and EXPLAIN counte
 Near the eight-level limit, a statement may succeed in one process and refuse in another;
 the equality-compatible hash and existing pass limit are unchanged.
 
-The commerce-shaped default-grant probe completes a 1.5-million-row annual repeat-customers slice with 250,000 groups. The 500,000-product category-rank CTE/window shape still refuses while creating aggregate states inside the revenues CTE, whose nested executor has no spill permission. The 800,000-row NOT IN child first refuses its materialized SELECT input, before completing the eager membership vector. Nested aggregation ownership and that subquery input/vector remain follow-ups for SQ-L4. These probes preserve those explicit scope boundaries.
+The commerce-shaped default-grant probe completes a 1.5-million-row annual repeat-customers slice with 250,000 groups. The 500,000-product category-rank CTE/window shape inherits nested aggregation spill permission under SQ-L4a; its window remains SQ-L4b work. The 800,000-row NOT IN child first refuses its materialized SELECT input, before completing the eager membership vector. The eager NOT IN input/vector remains SQ-L4c work. These probes preserve those explicit scope boundaries.
 
 No durable write or flush boundary is added. Crash images captured at partition append
 and ordinal-merge completion, with the fault-injecting durable recorder armed, reopen
@@ -370,12 +429,10 @@ as exception data.
 
 A root plain SELECT may spill ORDER BY, its bounded OFFSET + LIMIT heap, and ordered
 DISTINCT when the existing reservation refuses CS05067. A fitting collector keeps its existing representation; application-binary provenance
-accounting is described below. Permission is an explicit root argument; nested
-ExecuteAsync calls never inherit it. Subqueries, derived/CTE bodies, correlated frames,
-recursion, windows and grouping sets retain their existing refusals. CTAS grants permission only to its source root as described below. DML sources
+accounting is described below. Permission starts with an explicit root argument and independent nested SELECT bodies inherit it. Correlated/deferred frames, recursion, windows and grouping sets retain their existing operator paths. CTAS grants permission to its source as described below. DML sources
 gain no spill permission and keep their existing policy: INSERT SELECT sort/output
 buffers bypass SELECT charging under _isDml; that budgeting gap belongs to #1828.
-An ordered index scan does not introduce a sort or a new result-spooling permission.
+An ordered index scan omits sorting and can spool its output under SQ-L4a.
 Its DISTINCT uses the incremental seen set over the ordered stream. Ordered aggregate
 inputs keep CS05067 and never enable a root spill that would starve a later group sort.
 Ordered sequence deferral stays in memory. A staged volatile input or join writes its
@@ -467,12 +524,11 @@ session as its spill owner and is disposed by the CTAS statement before builder 
 publication. It holds no result slot after the statement ends; no new session or lifetime
 registry is allocated for fitting sources. The existing eight-result session admission also
 applies while a CTAS source is live. WITH NO DATA still binds without executing the source.
-Nested sources and every root exclusion above retain their existing memory refusal. Inferred
+Independent nested SELECT sources inherit permission; excluded operator owners retain their existing memory policy. Inferred
 SQL/JSON domain checks also conservatively exclude source spill. Assignment uses a private
 SqlJsonPathExecution.ForExpression scope; it does not share the source statement owner.
 
-A fitting source retains ReserveMemory, TableAsSourceAdmitted and the existing batch/buffer
-charges exactly. With fresh metrics for every execution, fitting projection/collector and
+A source whose complete copy fits retains ReserveMemory, TableAsSourceAdmitted and the existing batch/buffer charges exactly. On copy refusal SQ-L4a transfers consumed source-cell ownership as described above. With fresh metrics for every execution, fitting projection/collector and
 Release dispatch allocations are equal; Debug dispatch allocations are only lower. Debug uses
 smaller dispatcher frames; WITH executes inline to avoid an extra Task.
 A separate whole-CTAS allocation bound includes source execution, copy and publication;
@@ -2358,8 +2414,8 @@ On success these pipelines never stop evaluation early: joins drain all candidat
 at LIMIT 0 or after the output window fills; bounded subquery bodies run every projection that
 the original body ran, and scalar cardinality is checked afterwards. Existing stored-scan early
 stops remain unchanged. Every retained plain SELECT buffer now reserves statement memory before adding an entry
-(#1776, SQ-L1b). Newly charged buffers refuse with CS05067 unless the root sort handoff above applies. CTAS sources use the same
-pipelines and charge like any SELECT; eligible CTAS source root sorts can spill. CTAS itself admits only materialized rows kept after pagination,
+(#1776, SQ-L1b). Newly charged buffers refuse with CS05067 unless their sort, hash or output handoff applies. CTAS sources use the same
+pipelines and charge like any SELECT; eligible sorted and unordered source output can spill. CTAS itself admits only materialized rows kept after pagination,
 independent of list capacity (#1762). Per-database internal test seams
 force the original collectors, observe operator entry and count retained DISTINCT/subquery rows.
 The separate forced-GC regression proves streamed group/join inputs retain no growing list.
@@ -11633,7 +11689,7 @@ can consume input much larger than the budget on the pipelined path.
 Every exit releases reservations, including cancellation, failed decoding and budget refusal.
 CS05067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
 message and one diagnostic code. Root sort, eligible hash joins and normalized join buffers,
-and plain hash aggregation/DISTINCT spill as described above; other retained buffers do not spill yet.
+and plain hash aggregation/DISTINCT spill as described above; retained SELECT output and independent relation caches also spool under SQ-L4a; other operator owners retain their existing paths.
 Standalone ANALYZE remains later work.
 
 Joined UPDATE FROM, DELETE USING and MERGE also reserve retained decoded target identities,

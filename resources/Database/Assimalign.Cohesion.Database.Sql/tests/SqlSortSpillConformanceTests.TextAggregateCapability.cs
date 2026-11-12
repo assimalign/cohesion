@@ -66,7 +66,8 @@ public sealed partial class SqlSortSpillConformanceTests
             string sql = wide ? $"SELECT k,{function}(@p{(ordered ? " ORDER BY k" : "")}) FROM t GROUP BY k" : $"SELECT {function}(note) FROM a";
             var parameters = wide ? new Dictionary<string, object?> { ["p"] = new string('x', 2048) } : null;
             // Act / Assert
-            if (grant < boundary)
+            bool outputSpills = grant < boundary && wide && !ordered && temp;
+            if (grant < boundary && !outputSpills)
             {
                 var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, parameters));
                 failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
@@ -77,12 +78,20 @@ public sealed partial class SqlSortSpillConformanceTests
                 var rows = await Rows(result);
                 if (grant == 67108864) { expected = rows; metadata = result; }
                 else { rows.ShouldBe(expected); AssertColumnMetadata(result, metadata!); }
-                session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(boundary);
-                SqlHashSpillMetrics.For(session.LastStatementMetrics).ShouldBeNull();
+                if (outputSpills)
+                {
+                    session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(grant);
+                    SqlSortSpillMetrics.For(session.LastStatementMetrics)!.Runs.ShouldBeGreaterThan(0);
+                }
+                else
+                {
+                    session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(boundary);
+                    SqlHashSpillMetrics.For(session.LastStatementMetrics).ShouldBeNull();
+                }
             }
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
             if (temp) { TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0); }
-            _output.WriteLine($"TEXT_AGGREGATE_BOUNDARY|sql={sql}|grant={grant}|quota={(temp ? "67108864" : "none")}|completes={grant >= boundary}|boundary={boundary}");
+            _output.WriteLine($"TEXT_AGGREGATE_BOUNDARY|sql={sql}|grant={grant}|quota={(temp ? "67108864" : "none")}|completes={grant >= boundary || outputSpills}|boundary={boundary}");
         }
     }
 }

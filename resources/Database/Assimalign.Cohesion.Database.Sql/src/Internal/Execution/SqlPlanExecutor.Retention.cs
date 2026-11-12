@@ -572,7 +572,17 @@ internal sealed partial class SqlPlanExecutor
                         if (skip > 0) { skip--; continue; }
                         if (retainRows is null || rows.Count < retainRows)
                         {
-                            if (hashInput is null) { RetainSelectRow(ref retainedBytes, output); rows.Add(output); }
+                            if (hashInput is null)
+                            {
+                                if (spillOwner is not null && SqlOutputSpool.For(rows) is { } retainedOutput) { retainedOutput.Append(output, cancellationToken); }
+                                else
+                                {
+                                    try { RetainSelectRow(ref retainedBytes, output); rows.Add(output); }
+                                    catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                                        && spillOwner?.Database.Engine.TempSpace is not null && retainRows is null)
+                                    { SqlOutputSpool.Add(rows, output, ref retainedBytes, statement.Metrics, _definitions.StatementMemoryBudget, spillOwner, cancellationToken); }
+                                }
+                            }
                             else if (RetainStagedSortSource(rows, output, ref retainedBytes, [], spillOwner, cancellationToken, hashInput: hashInput))
                             { rows.Add(output); }
                         }
@@ -616,6 +626,8 @@ internal sealed partial class SqlPlanExecutor
                 rows = ApplyRowWindow(rows, plan.Limit, plan.Offset);
             }
             if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, rows.Count); }
+            if (SqlOutputSpool.For(rows) is { } outputSpool)
+            { return outputSpool.Take(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns, cancellationToken); }
             if (hashInput is not null && SqlStagedSortSource.For(rows) is { } spooled)
             {
                 spooled.Seal(cancellationToken);
@@ -624,7 +636,11 @@ internal sealed partial class SqlPlanExecutor
             }
             return MaterializeProjected(plan.Projections, rows);
         }
-        catch (Exception failure) { if (hashInput is not null) { SqlStagedSortSource.ReleaseAfterFailure(rows, failure); } throw; }
-        finally { if (hashInput is not null) { SqlStagedSortSource.Release(rows); } ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
+        catch (Exception failure) { SqlOutputSpool.Release(rows, failure); if (hashInput is not null) { SqlStagedSortSource.ReleaseAfterFailure(rows, failure); } throw; }
+        finally
+        {
+            try { SqlOutputSpool.Release(rows); if (hashInput is not null) { SqlStagedSortSource.Release(rows); } }
+            finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
+        }
     }
 }

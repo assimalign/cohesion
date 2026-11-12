@@ -138,8 +138,6 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
     [Theory(DisplayName = "Cohesion Test [Sql] - Spill admission: missing directory, small grants and nested roots keep CS05067 (#1789)")]
     [InlineData(0)]
     [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
     [InlineData(4)]
     [InlineData(6)]
     [InlineData(7)]

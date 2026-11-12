@@ -21,7 +21,8 @@ internal sealed partial class SqlPlanExecutor
     private Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken, SqlGroupPlan retentionPlan, SqlDatabaseSession? spillOwner = null)
     {
-        if (spillOwner is not null && plan.Aggregates.Any(aggregate => aggregate.OrderBy.Count > 0)) { spillOwner = null; }
+        if (spillOwner is not null && plan.Aggregates.Any(aggregate => aggregate.OrderBy.Count > 0))
+        { spillOwner = null; statement = statement.WithoutSession(); }
         return plan is SqlGroupingSetsPlan grouped ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
             : ExecutePlainGroupAsync(plan, statement, cancellationToken, retentionPlan, spillOwner);
     }
@@ -252,6 +253,12 @@ internal sealed partial class SqlPlanExecutor
                 return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
                     plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
             }
+            if (collected.HasSpilled)
+            {
+                groups.Clear(); groups.TrimExcess();
+                if (input is SqlMaterializedResultSet consumed) { consumed.ClearRows(); ReleaseSelectMemory(ref inputBytes); }
+                ReleaseSelectMemory(ref keyBytes); ReleaseGroupMemory(aggregateMemory, ref retainedBytes); aggregateMemory = null;
+            }
             return FinishCollected(collected, plan.Projections, plan.Limit, plan.Offset,
                 plan.IsDistinct, evaluator, cancellationToken, projectionCollations);
 
@@ -481,6 +488,11 @@ internal sealed partial class SqlPlanExecutor
                     }).ToArray();
                     return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
                         plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
+                }
+                if (collected.HasSpilled)
+                {
+                    groups.Clear(); groups.TrimExcess();
+                    ReleaseSelectMemory(ref keyBytes); ReleaseGroupMemory(aggregateMemory, ref retainedBytes); aggregateMemory = null;
                 }
                 return FinishCollected(collected, plan.Projections, plan.Limit, plan.Offset,
                     plan.IsDistinct, evaluator, cancellationToken, projectionCollations);

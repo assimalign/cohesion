@@ -25,7 +25,7 @@ internal readonly struct SqlStatementContext
     private readonly long _transactionStartTicks;
     // Root execution can attach its session in the existing database-name identity slot.
     // Provisioning still shares its name pair. Neither contexts nor name pairs grow;
-    // the session identity alone grants no nested executor permission to spill.
+    // explicitly permitted nested SELECTs inherit that identity.
     private readonly object _names;
 
     internal SqlStatementContext(
@@ -64,7 +64,7 @@ internal readonly struct SqlStatementContext
     /// </summary>
     internal TransactionContext Transaction { get; }
 
-    internal DateTimeOffset TransactionStart => new(_transactionStartTicks, TimeSpan.Zero);
+    internal DateTimeOffset TransactionStart => new(_transactionStartTicks & long.MaxValue, TimeSpan.Zero);
 
     // Joint jobs retain reservations through publication/discard. Ordinary session DDL
     // uses its transaction owner; tests may supply a retained owner across statements.
@@ -188,21 +188,26 @@ internal readonly struct SqlStatementContext
         }
     }
 
-    internal SqlDatabaseSession? Session => _names is ProvisioningNames names
+    // UTC ticks are nonnegative. Their unused sign bit suppresses inherited spill
+    // permission without growing this struct or cloning a provisioning name pair.
+    internal SqlDatabaseSession? Session => _transactionStartTicks < 0 ? null : _names is ProvisioningNames names
         ? names.Database as SqlDatabaseSession : _names as SqlDatabaseSession;
 
     internal SqlStatementContext WithSession(SqlDatabaseSession session)
     {
         if (ReferenceEquals(Session, session)) { return this; }
-        if (_names is ProvisioningNames names) { names.AttachSession(session); return this; }
+        if (_names is ProvisioningNames names) { names.AttachSession(session); return new(this, names); }
         return new(this, session);
     }
 
     internal SqlStatementContext WithoutSession() => Session is null ? this
-        : new(this, _names is ProvisioningNames names ? names.WithoutSession(DatabaseName) : DatabaseName);
+        : new(this, _names, canSpill: false);
 
-    private SqlStatementContext(SqlStatementContext original, object names)
-    { this = original; _names = names; }
+    private SqlStatementContext(SqlStatementContext original, object names, bool canSpill = true)
+    {
+        this = original; _names = names;
+        _transactionStartTicks = canSpill ? original._transactionStartTicks & long.MaxValue : original._transactionStartTicks | long.MinValue;
+    }
 
     /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
     internal SqlCatalogSnapshot? CatalogSnapshot => Metrics.CatalogSnapshot;
@@ -232,12 +237,6 @@ internal readonly struct SqlStatementContext
         internal string? Schema { get; }
         internal object Database { get; private set; }
         internal void AttachSession(SqlDatabaseSession session) => Database = session;
-        internal ProvisioningNames WithoutSession(string database)
-        {
-            var copy = (ProvisioningNames)MemberwiseClone();
-            copy.Database = database;
-            return copy;
-        }
         internal TimeSpan LockTimeout { get; }
 
         private sealed class DebugView
