@@ -77,9 +77,7 @@ public sealed partial class DocumentCatalog
     /// <exception cref="ArgumentException"><paramref name="name"/> is null or white space, or <paramref name="path"/> is not a document field path.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="DocumentCatalogException">
-    /// The collection is absent, the index already exists, or an existing document's indexed scalar
-    /// encodes beyond the index key limit, the encoded definition exceeds 8,092 bytes (CD03026),
-    /// or build workspace exceeds the configured statement memory budget (CD05018).
+    /// The collection is absent, the index already exists, an existing document's indexed scalar encodes beyond the index key limit, the encoded definition exceeds 8,092 bytes (CD03026), or build workspace exceeds the configured statement memory budget (CD05018).
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the build applied.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the build was applied.</exception>

@@ -5796,9 +5796,7 @@ including normalized buffers and referential writes. These conservative reservat
 statement exit; shared payload already charged by a hash build is not charged again for an alias.
 An exhausted joined statement refuses before any write and releases memory on success, failure or
 cancellation. CTAS also charges its retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
-`CS05067` (53200, out_of_memory). Index builds (CREATE [UNIQUE] INDEX, UNIQUE/PRIMARY KEY
-constraints and migration/rollback rebuilds) also refuse CS05067 when their charged chunk
-workspace exceeds the grant (#1808). Plain SELECT also charges nested-loop inners, normalized
+`CS05067` (53200, out_of_memory). Index builds also refuse CS05067 when their charged chunk workspace exceeds the grant (#1808): CREATE [UNIQUE] INDEX and UNIQUE/PRIMARY KEY constraints report it directly; schema-apply migration and rollback rebuilds report CS03402 with that CS05067 refusal as the cause. Plain SELECT also charges nested-loop inners, normalized
 join child buffers, staged matches, group keys and aggregate state, aggregate DISTINCT tuples
 and ordered inputs, full sorts and bounded top-N heaps, output rows and DISTINCT sets,
 materialized results retained by consumers, derived/view/CTE caches, independent subquery

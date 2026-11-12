@@ -6226,14 +6226,14 @@ No directory snapshot or page I/O occurs under the manager directory monitor.
 
 Inline, constraint and deferred builds share IndexBuildLoop: 64 retained rows per durable
 bracket, bounded statement-memory charging, preserved source MVCC stamps, cursor-based unique
-validation, and one catalog publication. IX-S1 deliberately changes refusals against batch 4
-(1eefed274), which charged no build workspace: each chunk reserves 320 + 80 + 64 × 96 =
+validation, and one catalog publication. IX-S1 deliberately adds build-budget refusals relative to
+1eefed274, which charged no build workspace: each chunk reserves 320 + 80 + 64 × 96 =
 6,544 B before its first row, plus the charge for each retained row. CREATE [UNIQUE] INDEX,
 UNIQUE/PRIMARY KEY constraints, joint-migration builds and rollback rebuilds all share this loop.
-With no temp space, two INT rows at G=4,096 B refuse CS05067; even one INT row refuses at
+With no temp space, the loop refuses CS05067 for two INT rows at G=4,096 B; even one INT row refuses at
 G=4,096–6,927 B. A chunk of 64 (INT, 4,000-character TEXT) rows at G=262,144 B refuses
 because it needs 555,408 B. Each of these builds completed at those grants with no temp quota
-at 1eefed274. This deliberate build-budget exception (#1808) retains the bounded bracket. Checkpoint admission occurs between chunks, while the
+at 1eefed274. This deliberate build-budget exception (#1808) retains the bounded bracket. Schema-apply migration and rollback rebuilds report CS03402 with CS05067 as the cause. Checkpoint admission occurs between chunks, while the
 table X reservation and creator/reader pins span the entire build. Same-name replacement now
 keeps the heap, reports Joint/KeepOwner, and rewrites zero rows when the remaining layout permits
 keeping it. The heap-owned collision refusal is removed. Rollback's encoder/predicate and
