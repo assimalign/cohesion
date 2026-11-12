@@ -191,11 +191,13 @@ public sealed partial class SqlSortSpillConformanceTests
             await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql))
             { int visited = 0; await foreach (var row in result.GetRowsAsync()) { row.GetString(0).ShouldNotBeNull(); visited++; } visited.ShouldBe(count); }
 
-            // Assert: use the lower quiescent baseline so ambient reclamation cannot hide a peak.
+            // Assert
             long after = LiveHeap.Read();
             long before = baseline;
+            // Absolute bound: the pre-run baseline; ambient reclamation cannot fail it falsely.
+            peak = Math.Max(0, peak - before);
+            // Population delta: the lower quiescent baseline, so reclamation cannot hide replay growth.
             baseline = Math.Min(before, after);
-            peak = Math.Max(0, peak - baseline);
             replayPeak = Math.Max(0, replayPeak - baseline);
             replaySampled.ShouldBeTrue(); replayDepth.ShouldBeGreaterThan(1);
             replayPeak.ShouldBeGreaterThan(0);

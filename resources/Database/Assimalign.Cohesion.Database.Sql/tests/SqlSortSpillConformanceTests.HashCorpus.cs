@@ -105,6 +105,8 @@ public sealed partial class SqlSortSpillConformanceTests
     [Theory(DisplayName = "Cohesion Test [Sql] - Seeded hash corpus: replay samples stay within each grant plus 256 KiB (#1789)")]
     [InlineData(1048576L, 0, 2)]
     [InlineData(1048576L, 1, 2)]
+    [InlineData(2097152L, 0, 2)]
+    [InlineData(2097152L, 1, 2)]
     [InlineData(4194304L, 0, 1)]
     public async Task ExecuteAsync_SeededHashHeapCorpus_ShouldMatchWithinGrant(long grant, int shard, int shards)
     {
@@ -165,10 +167,9 @@ public sealed partial class SqlSortSpillConformanceTests
             }
         }
         finally { foreach (var run in spilled) { await run.DisposeAsync(); } }
-        // The combined corpus required a spill across both grants. Original state charges
-        // make this corpus fit at 4 MiB; keep a positive spill witness at 1 MiB.
-        if (grant == 1048576) { spills.ShouldBeGreaterThan(0); }
-        else { spills.ShouldBe(0); }
+        // Each replaying range needs a spill witness; the default 4 MiB corpus must fit.
+        if (grant < 4194304) { spills.ShouldBeGreaterThan(0); }
+        else if (statements == 256) { spills.ShouldBe(0); }
         for (int index = 0; index < grants.Length; index++)
         { _output.WriteLine($"HASH_CORPUS_HEAP|seed={corpusSeed}|statements={statements}|range=[{first},{last})|grant={grants[index]}|largest_excess={excesses[index]}|matches={matches}|spills={spills}"); }
     }

@@ -145,6 +145,7 @@ public sealed partial class SqlSortSpillConformanceTests
             starved.ShouldBeTrue(); parent.ShouldBeTrue(); yielded.ShouldBeTrue();
             phases.IndexOf("join-seal").ShouldBeGreaterThanOrEqualTo(0);
             phases.IndexOf("join-seal").ShouldBeLessThan(phases.IndexOf("join-sorter-yield"));
+            phases.ShouldContain("join-partitioned");
             phases.IndexOf("join-partitioned").ShouldBeLessThan(phases.IndexOf("join-sorter-yield"));
             phases.IndexOf("join-sorter-yield").ShouldBeLessThan(phases.IndexOf("join-sorter-minimum"));
             phases.IndexOf("join-sorter-minimum").ShouldBeLessThan(phases.IndexOf("join-match-sort-live"));
@@ -183,6 +184,7 @@ public sealed partial class SqlSortSpillConformanceTests
         foreach (var step in rows.Where(row => Equals(row.Cells[2], "JoinStep")))
         {
             step.Cells[5]!.ToString()!.ShouldContain("hash_budget=spill_on_refusal", Case.Sensitive);
+            step.Cells[5]!.ToString()!.ShouldNotContain("spill_on_refusal_if_eligible", Case.Sensitive);
             step.Cells[7].ShouldBeNull();
         }
     }
