@@ -190,11 +190,11 @@ public sealed partial class SqlSortSpillConformanceTests
                         phasePeaks[phase] = Math.Max(phasePeaks.GetValueOrDefault(phase), live);
                     }
                     if (phase == "ordered") { weak.Count.ShouldBe(200); weak.Count(w => w.IsAlive).ShouldBe(0); }
-                        };
+                };
                 // Act: every execution has its own quiescent readings in this warmed engine.
                 await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql))
                 { int visited = 0; await foreach (var row in result.GetRowsAsync()) { row.GetString(0).ShouldNotBeNull(); visited++; } visited.ShouldBe(count); }
-    
+
                 // Assert
                 long after = LiveHeap.Read();
                 // Absolute bound: the pre-run baseline; ambient reclamation cannot fail it falsely.
@@ -209,7 +209,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 peak.ShouldBeGreaterThan(0); peak.ShouldBeLessThanOrEqualTo(grant + allowance);
                 minimumReplay = Math.Min(minimumReplay, replayPeak);
                 SqlPlanExecutor.ObserveHashSpill = null; observe = false;
-                }
+            }
             weak.Clear();
             long mutantBaseline = LiveHeap.Read(), mutantPeak = 0;
             mutant = true;
