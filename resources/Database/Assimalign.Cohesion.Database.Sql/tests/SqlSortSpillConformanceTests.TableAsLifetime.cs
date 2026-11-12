@@ -184,22 +184,28 @@ public sealed partial class SqlSortSpillConformanceTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - CTAS spill crash images converge to absent or complete at every existing durable boundary (#1789)")]
-    public async Task OpenDatabaseAsync_TableAsSpilledCrashImages_ShouldConvergeExactly()
+    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS ordered, unordered and copy-credit crash images converge exactly at every durable boundary (#1789, #1838)")]
+    [InlineData("ORDER BY id DESC", 180, 1100, 262144)]
+    [InlineData("", 180, 1100, 262144)]
+    [InlineData("", 180, 0, 18720)]
+    [InlineData("WHERE id<100 ORDER BY id DESC", 100, 1100, 262144)]
+    public async Task OpenDatabaseAsync_TableAsSpilledCrashImages_ShouldConvergeExactly(string suffix, int count, int width, long grant)
     {
         // Arrange: 180 wide rows force a sort spill but only three copy brackets.
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(4));
         var strategy = new CrashCaptureSqlStorageStrategy();
         string temp = Path.Combine(_root, "ctas-crash-temp");
+        string query = "CREATE TABLE archive AS SELECT * FROM t " + suffix;
         CrashCaptureSqlStorageStrategy.CrashPointRecorder recorder;
         CrashCaptureSqlStorageStrategy? sorting = null; ulong owner = 0; int copied = 0;
-        await using (var engine = SqlDatabaseEngine.Create("ctas-crash", new() { StorageStrategy = strategy, TempDirectory = temp, StatementMemoryBudget = 262144, CheckpointJournalSize = 0 }))
+        await using (var engine = SqlDatabaseEngine.Create("ctas-crash", new() { StorageStrategy = strategy, TempDirectory = temp, StatementMemoryBudget = grant, CheckpointJournalSize = 0 }))
         {
             var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
             await session.ExecuteAsync("CREATE TABLE t(id INT,note TEXT)");
-            await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 180).Select(i => $"({i},'{new string('x', 1100)}')")));
-            SqlRowCollector.ObserveSpill = phase => { if (phase == "arena") { sorting = strategy.CaptureDurableImages(); } };
+            await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 180).Select(i => $"({i},{(width == 0 ? "NULL" : "'" + new string('x', width) + "'")})")));
+            SqlRowCollector.ObserveSpill = phase => { if (phase is "arena" or "output-drained") { sorting = strategy.CaptureDurableImages(); } };
+            SqlPlanExecutor.TableAsSourceAdmitted = _ => sorting ??= strategy.CaptureDurableImages();
             SqlPlanExecutor.TableAsStage = (phase, id) =>
             {
                 owner = id;
@@ -210,14 +216,14 @@ public sealed partial class SqlSortSpillConformanceTests
             {
                 // Act
                 using (recorder = strategy.RecordCrashPoints())
-                { (await session.ExecuteAsync("CREATE TABLE archive AS SELECT * FROM t ORDER BY id DESC", cancellationToken: guard.Token)).AffectedCount.ShouldBe(180); }
+                { (await session.ExecuteAsync(query, cancellationToken: guard.Token)).AffectedCount.ShouldBe(count); }
             }
-            finally { SqlRowCollector.ObserveSpill = null; SqlPlanExecutor.TableAsStage = null; }
+            finally { SqlRowCollector.ObserveSpill = null; SqlPlanExecutor.TableAsStage = null; SqlPlanExecutor.TableAsSourceAdmitted = null; }
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
         // Assert: the sort adds no durable state. Every write/flush/length image of the
         // existing reservation, copy, builder commit and publication is replayed below.
-        sorting.ShouldNotBeNull(); copied.ShouldBe(3); int absent = 0, complete = 0;
+        sorting.ShouldNotBeNull(); copied.ShouldBe((count + 63) / 64); int absent = 0, complete = 0;
         for (int point = -1; point < recorder.Count; point++)
         {
             await using var reopened = SqlDatabaseEngine.Create("ctas-crash-reopen", new() { StorageStrategy = point < 0 ? sorting : recorder.Open(point) });
@@ -229,18 +235,18 @@ public sealed partial class SqlSortSpillConformanceTests
                 database.Catalog.GetPendingTableReclamations().ShouldNotContain(item => item == owner);
                 await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,note FROM archive", cancellationToken: guard.Token);
                 var rows = await Rows(result, guard.Token);
-                rows.Select(row => row.Cells[0]).ShouldBe(Enumerable.Range(0, 180).Reverse().Cast<object?>());
-                rows.ShouldAllBe(row => Equals(row.Cells[1], new string('x', 1100)));
+                rows.Select(row => row.Cells[0]).ShouldBe((suffix.Length == 0 ? Enumerable.Range(0, count) : Enumerable.Range(0, count).Reverse()).Cast<object?>());
+                rows.ShouldAllBe(row => Equals(row.Cells[1], width == 0 ? null : new string('x', width)));
             }
             else
             {
                 absent++; await ReclaimTableAsAsync(database, guard.Token); database.DataStorage.HasOwnerPages(owner).ShouldBeFalse();
                 await using (var source = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) FROM t", cancellationToken: guard.Token))
                 { (await Rows(source, guard.Token)).ShouldHaveSingleItem().Cells[0].ShouldBe(180L); }
-                (await session.ExecuteAsync("CREATE TABLE archive AS SELECT * FROM t ORDER BY id DESC", cancellationToken: guard.Token)).AffectedCount.ShouldBe(180);
+                (await session.ExecuteAsync(query, cancellationToken: guard.Token)).AffectedCount.ShouldBe(count);
             }
             database.IsOffline.ShouldBeFalse();
-            Directory.GetFiles(temp, "*.ctmp").ShouldBeEmpty();
+            if (Directory.Exists(temp)) { Directory.GetFiles(temp, "*.ctmp").ShouldBeEmpty(); }
         }
         absent.ShouldBeGreaterThan(0); complete.ShouldBeGreaterThan(0);
         _output.WriteLine($"CTAS_CRASH|images={recorder.Count + 1}|absent={absent}|complete={complete}|brackets={copied}");

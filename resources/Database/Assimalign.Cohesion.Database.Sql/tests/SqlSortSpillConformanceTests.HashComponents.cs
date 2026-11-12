@@ -91,11 +91,11 @@ public sealed partial class SqlSortSpillConformanceTests
 
         // Assert: +32 is the replay entry itself. RowBytes adds 32 for its container;
         // plain groups also charge 128 for their dictionary and state-array header.
+        _output.WriteLine($"ENTRY_CHARGE|entry={entry / 3072d}|replay={replay / 3072d}|distinct={fitting / 3072d}|bound=32/96/64");
         entry.ShouldBeLessThanOrEqualTo(32L * 3072);
         (replay - entry).ShouldBeLessThanOrEqualTo(64L * 3072);
         replay.ShouldBeLessThanOrEqualTo((32L + 64) * 3072);
         fitting.ShouldBeLessThanOrEqualTo(64L * 3072);
-        _output.WriteLine($"ENTRY_CHARGE|entry={entry / 3072d}|replay={replay / 3072d}|distinct={fitting / 3072d}|bound=32/96/64");
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
