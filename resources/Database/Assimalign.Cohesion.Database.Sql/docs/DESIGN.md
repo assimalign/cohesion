@@ -4669,6 +4669,8 @@ a plan with any worker work retain their reservation for that whole job as well.
 | Same-name heap-owned index replacement | Per-step drop/build | Worker replacement; R/W wait | Per-step X; R free | Full replacement; R/W wait |
 | TYPE rewrite or another required physical replacement | TYPE joint | Worker for every populated replacement unless RunMigrationsInline | Joint; R already waits | R/W wait through copy/publication/cleanup |
 
+IX-S1 (#1808) gives every index its own page owner, so the heap-owned rows describe earlier formats: DROP INDEX, and DROP COLUMN with its declared index, retire the index's owner, and reclamation frees exactly its pages after the last snapshot that could read them.
+
 ### Provisioning wait inventory (B2 second review, #1355)
 
 The provisioner's semaphore and the coordinator's physical statement gate have different
