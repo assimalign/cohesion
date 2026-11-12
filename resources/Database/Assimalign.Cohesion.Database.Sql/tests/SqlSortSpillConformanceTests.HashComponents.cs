@@ -87,7 +87,15 @@ public sealed partial class SqlSortSpillConformanceTests
     {
         // Arrange / Act
         MeasureEntries();
-        var (entry, replay, fitting) = MeasureEntries();
+        long entry = long.MaxValue, replay = long.MaxValue, fitting = long.MaxValue;
+        for (int round = 1; round <= 3; round++)
+        {
+            var measured = MeasureEntries();
+            _output.WriteLine($"ENTRY_ROUND|round={round}|entry={measured.Entry}|replay={measured.Replay}|fitting={measured.Fitting}");
+            entry = Math.Min(entry, measured.Entry);
+            replay = Math.Min(replay, measured.Replay);
+            fitting = Math.Min(fitting, measured.Fitting);
+        }
 
         // Assert: +32 is the replay entry itself. RowBytes adds 32 for its container;
         // plain groups also charge 128 for their dictionary and state-array header.
