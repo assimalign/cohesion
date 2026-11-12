@@ -10,6 +10,6 @@ public sealed record OqlMergeDeleteAction
         Predicate = predicate;
     }
 
-    /// <summary>Gets the optional action WHERE expression.</summary>
+    /// <summary>Gets the optional action filter.</summary>
     public OqlExpression? Predicate { get; }
 }
