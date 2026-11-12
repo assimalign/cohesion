@@ -27,6 +27,7 @@
              must ship), and indexing (a kernel consumer of the root). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Types" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Text" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Language" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Storage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Transactions" />
@@ -121,5 +122,11 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+    </ItemGroup>
+    <ItemGroup>
+        <!-- Text's Snowball notice accompanies binary-only framework delivery too.
+             The Refs producer imports this file and retains the same notice. -->
+        <None Include="$(MSBuildThisFileDirectory)..\Assimalign.Cohesion.Database.Text\src\Properties\SNOWBALL-LICENSE.txt"
+              Pack="true" PackagePath="licenses/Database.Text/" />
     </ItemGroup>
 </Project>

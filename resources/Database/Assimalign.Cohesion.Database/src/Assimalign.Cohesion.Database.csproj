@@ -19,6 +19,7 @@
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Protocol" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Security" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Storage" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Text" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Transactions" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
