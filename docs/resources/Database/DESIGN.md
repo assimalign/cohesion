@@ -69,7 +69,7 @@ This document is the durable architecture record for the multi-model OLTP databa
 ### Provisioning state and Build cancellation (decision 49a)
 
 `DatabaseInstance.Provisioning` is an immutable, nullable `DatabaseProvisioningProgress`
-snapshot published by a model through a protected setter. Its vocabulary is operation,
+snapshot that a model publishes through the protected `SetProvisioningProgress` method. Its vocabulary is operation,
 object name, position/total, running state, optional processed/total rows, failure code
 and model-supplied detail. It carries no SQL executor or schema interface. Hosting can
 report Degraded during deferred provisioning.
