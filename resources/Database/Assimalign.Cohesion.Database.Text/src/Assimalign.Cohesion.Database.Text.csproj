@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Text</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Update="Properties/SNOWBALL-LICENSE.txt" Pack="true" PackagePath="" />
+	</ItemGroup>
+</Project>

@@ -1,0 +1,2 @@
+# Empty expected TSV cells (stop words and empty vectors) retain their delimiters.
+tests/TestObjects/*.tsv whitespace=-blank-at-eol

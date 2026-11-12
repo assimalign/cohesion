@@ -1,0 +1,15 @@
+plain	The QUICK brown foxes jumped 42 times	'42':6 'brown':3 'foxes':4 'jumped':5 'quick':2 'the':1 'times':7	'42':6 'brown':3 'fox':4 'jump':5 'quick':2 'time':7	'42':6 'brown':3 'foxes':4 'jumped':5 'quick':2 'the':1 'times':7	'42':6 'brown':3 'fox':4 'jump':5 'quick':2 'time':7
+url	https://example.com/a?q=1	'/a?q=1':3 'example.com':2 'example.com/a?q=1':1	'/a?q=1':3 'example.com':2 'example.com/a?q=1':1	'1':6 'a':4 'com':3 'example':2 'https':1 'q':5	'1':6 'com':3 'exampl':2 'https':1 'q':5
+email	User.Name@example.com	'user.name@example.com':1	'user.name@example.com':1	'com':4 'example':3 'name':2 'user':1	'com':4 'exampl':3 'name':2 'user':1
+host	www.example.com	'www.example.com':1	'www.example.com':1	'com':3 'example':2 'www':1	'com':3 'exampl':2 'www':1
+path	/usr/local/bin	'/usr/local/bin':1	'/usr/local/bin':1	'bin':3 'local':2 'usr':1	'bin':3 'local':2 'usr':1
+hyphen	state-of-the-art	'art':5 'of':3 'state':2 'state-of-the-art':1 'the':4	'art':5 'state':2 'state-of-the-art':1	'art':4 'of':2 'state':1 'the':3	'art':4 'state':1
+numbers	-12 +3 4.50 1e3	'+3':2 '-12':1 '1e3':4 '4.50':3	'+3':2 '-12':1 '1e3':4 '4.50':3	'12':1 '1e3':5 '3':2 '4':3 '50':4	'12':1 '1e3':5 '3':2 '4':3 '50':4
+apostrophe	can't dog's O'Reilly	'can':1 'dog':3 'o':5 'reilly':6 's':4 't':2	'dog':3 'o':5 'reilli':6	'can':1 'dog':3 'o':5 'reilly':6 's':4 't':2	'dog':3 'o':5 'reilli':6
+xml	<title>Blue</title> &amp; red	'blue':1 'red':2	'blue':1 'red':2	'amp':4 'blue':2 'red':5 'title':1,3	'amp':4 'blue':2 'red':5 'titl':1,3
+nonlatin	中文 日本語 한국어 Привет κόσμος مرحبا	'κόσμος':5 'привет':4 'مرحبا':6 '中文':1 '日本語':2 '한국어':3	'κόσμος':5 'привет':4 'مرحبا':6 '中文':1 '日本語':2 '한국어':3	'κόσμοσ':5 'привет':4 'مرحبا':6 '中文':1 '日本語':2 '한국어':3	'κόσμοσ':5 'привет':4 'مرحبا':6 '中文':1 '日本語':2 '한국어':3
+marks	café naïve İSTANBUL Σ ς ẞ 𐐀	'café':1 'istanbul':3 'naïve':2 'ß':6 'ς':5 'σ':4 '𐐨':7	'café':1 'istanbul':3 'naïv':2 'ß':6 'ς':5 'σ':4 '𐐨':7	'cafe':1 'naïve':2 'ß':6 'İstanbul':3 'σ':4,5 '𐐨':7	'cafe':1 'naïv':2 'ß':6 'İstanbul':3 'σ':4,5 '𐐨':7
+digits	abc123 ١٢٣ １２３	'abc123':1 '١٢٣':2 '１２３':3	'abc123':1 '١٢٣':2 '１２３':3	'abc123':1 '١٢٣':2 '１２３':3	'abc123':1 '١٢٣':2 '１２３':3
+separators	hello_world foo/bar foo.bar	'foo.bar':4 'foo/bar':3 'hello':1 'world':2	'foo.bar':4 'foo/bar':3 'hello':1 'world':2	'bar':4,6 'foo':3,5 'hello':1 'world':2	'bar':4,6 'foo':3,5 'hello':1 'world':2
+empty					
+stopwords	the and a running foxes jumped	'a':3 'and':2 'foxes':5 'jumped':6 'running':4 'the':1	'fox':5 'jump':6 'run':4	'a':3 'and':2 'foxes':5 'jumped':6 'running':4 'the':1	'fox':5 'jump':6 'run':4

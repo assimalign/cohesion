@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Text.AotSample</RootNamespace>
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+		<PublishAot>true</PublishAot>
+		<PublishTrimmed>true</PublishTrimmed>
+		<InvariantGlobalization>true</InvariantGlobalization>
+		<!-- The pinned SDK selects vulnerable 10.0.12 packs; this new guard uses
+		     the patched compiler/runtime without changing the repository SDK. -->
+		<RuntimeFrameworkVersion>10.0.14</RuntimeFrameworkVersion>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Text" />
+	</ItemGroup>
+	<ItemGroup>
+		<KnownILCompilerPack Update="Microsoft.DotNet.ILCompiler" ILCompilerPackVersion="10.0.14" />
+	</ItemGroup>
+</Project>
