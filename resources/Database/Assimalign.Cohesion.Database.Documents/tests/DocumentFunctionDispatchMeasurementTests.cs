@@ -59,10 +59,10 @@ public sealed class DocumentFunctionDispatchMeasurementTests
             elapsedMicrosecondsPerQuery[sample] = (stopped - started) * 1_000_000d / Stopwatch.Frequency / queriesPerSample;
         }
 
-        // Assert: results, not elapsed time or allocation, decide this measurement test.
-        // Report medians and the share within 10% of each median across all twelve samples;
-        // these are descriptive measurements, never a timing ratio or budget assertion.
+        // Assert: the Release cap catches one enumerator per native function lookup (#1805).
+        // Elapsed samples remain descriptive; every query also validates its results.
         double medianAllocated = Median(allocatedBytesPerQuery);
+        medianAllocated.ShouldBeLessThanOrEqualTo(16288d);
         double medianElapsed = Median(elapsedMicrosecondsPerQuery);
         int allocatedNearMedian = allocatedBytesPerQuery.Count(value => value <= medianAllocated * 1.10);
         int elapsedNearMedian = elapsedMicrosecondsPerQuery.Count(value => value <= medianElapsed * 1.10);

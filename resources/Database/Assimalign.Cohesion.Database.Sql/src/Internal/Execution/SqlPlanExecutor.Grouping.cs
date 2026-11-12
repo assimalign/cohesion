@@ -79,9 +79,15 @@ internal sealed partial class SqlPlanExecutor
                 // The implicit global group exists even on empty input.
                 groups.Add([], CreateStates());
             }
+            bool observedAdmission = false;
             await foreach (var source in input.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (!observedAdmission && groups.Count == 0)
+                {
+                    observedAdmission = true;
+                    ObserveHashSpill?.Invoke("group-admission", _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes);
+                }
                 var row = new object?[source.FieldCount];
                 for (int i = 0; i < row.Length; i++)
                 {
@@ -525,6 +531,19 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static long PlainGroupStateBytes(IReadOnlyList<SqlGroupAggregate> aggregates)
+    {
+        long bytes = 128;
+        for (int index = 0; index < aggregates.Count; index++)
+        {
+            var aggregate = aggregates[index];
+            bytes += aggregate.Call.Quantifier == Language.SqlSetQuantifier.Distinct || aggregate.OrderBy.Count > 0
+                ? 320L + 128L * aggregate.OrderBy.Count + 32L * aggregate.ArgumentCollations.Count : 128L;
+        }
+        return bytes;
+    }
+
+    // Replay alone charges the measured native state; input retains the original admission boundary.
+    private static long HashGroupStateBytes(IReadOnlyList<SqlGroupAggregate> aggregates)
     {
         long bytes = 128;
         for (int index = 0; index < aggregates.Count; index++)

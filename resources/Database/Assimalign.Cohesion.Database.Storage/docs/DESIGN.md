@@ -85,7 +85,7 @@ behavior: it can refuse as damage or return misframed records. Seek readers vali
 ordinal, used length and checksum, plus the tail and EOF. A failed read permanently poisons
 the reader. Unsealed/disposed runs refuse, and out-of-range positions or insufficient
 grants fail argument validation. There is no durable or temporary format-version change.
-This disposable format is independent of durable storage format 4. No WAL, MVCC, recovery or
+This disposable format is independent of durable storage format 4 and its physical index-owner directory. Temp runs allocate separate files, never owner pages or free-space-map entries; owner retirement never sees or reclaims temp runs, and temp cleanup never changes the owner directory. No WAL, MVCC, recovery or
 StorageBufferPool participates, and no durable I/O counter moves.
 
 Keys encode direction, collation and NULL placement; a unique Int64 input ordinal breaks ties.
@@ -95,7 +95,7 @@ directory fit the rest; one directory slot is reserved for merge output.
 FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2.
 Create and CreateWithSortedPrefix overloads accept maximumOpenRuns (at least FanIn + 1),
 reducing the directory and merging sooner; the ordinary overloads keep 64 * FanIn. SQL
-uses 64 including a merge-output slot. The ceiling is exercised by a counted 20,000-row
+uses 64, or 32 for a hash join build sorter, including a merge-output slot. The ceiling is exercised by a counted 20,000-row
 test; concurrent sorts/results still add up across the process. Runs accumulate during
 generation until the directory is full apart from that output slot, then the FanIn smallest merge
 repeatedly until the directory is at most half full.

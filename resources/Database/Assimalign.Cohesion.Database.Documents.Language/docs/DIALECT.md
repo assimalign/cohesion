@@ -915,7 +915,7 @@ enclosing binding has that name.
 Wildcard document operands leave their member names open. Scalar expressions and existing null
 placement rules apply; ties preserve concatenation order. CD01038 rejects an unbound result member,
 META or star in this result-only scope. CD01037 refuses ORDER BY on an all-RAW/VALUE compound,
-which has no named result members. Subqueries within compound ORDER BY remain CK00001 in this run.
+which has no named result members. Subqueries within compound ORDER BY retain CK00001.
 
 UNION ALL pulls one operand row at a time without retaining operand results. An operand's own
 GROUP BY, DISTINCT or ORDER BY still owns its necessary blocking stages. Distinct keys,
@@ -1050,8 +1050,8 @@ Frames (ROWS/RANGE/GROUPS/EXCLUDE), aggregate OVER, FIRST_VALUE/LAST_VALUE/NTH_V
 RATIO_TO_REPORT and RESPECT/IGNORE NULLS remain located CK00001 for OQ-W2/OQ-W3.
 Function registration reserves all twelve window names: ROW_NUMBER, RANK, DENSE_RANK,
 PERCENT_RANK, CUME_DIST, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE and RATIO_TO_REPORT.
-This changes base (`b5602544d`), which allowed application functions (scalar or aggregate) with these names.
-Registering one now throws ArgumentException for the function parameter before engine build.
+Application functions (scalar or aggregate) with these names are refused at registration.
+Registering one throws ArgumentException for the function parameter before engine build.
 The four deferred value/ratio names follow the existing REGEXP_* reservation policy.
 No implicit frame is evaluated by these ranking/navigation functions. No storage or wire
 version changes. The sealed window AST and OqlFunction.WindowKind are public metadata;
@@ -1105,11 +1105,11 @@ PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, 
 
 CREATE INDEX uses durable brackets of at most 64 postings and one final definition publication (#1808). Beyond resident catalog state, it retains an exact-size snapshot of existing name references, a bounded source/posting chunk and one document's extracted keys. UNIQUE validation walks adjacent built keys and retains no collection-wide key set. All build reservations share StatementMemoryBudget and CD05018; a failed build abandons its owner. DROP INDEX retains old trees for pinned snapshots and reclaims their exact owners after the safe horizon.
 
-Within one document, a build fails at the first bad value in navigation order. Base validated
-the whole document first: raw `{"a":"\uD800","b":1.0000000000000000000000000000001}`
-under `(a,b)` therefore gave CK06003 at base and gives InvalidOperationException now.
+Within one document, a build fails at the first bad value in navigation order. Raw
+`{"a":"\uD800","b":1.0000000000000000000000000000001}` under `(a,b)` raises
+InvalidOperationException for the invalid string.
 Invalid property names, which only raw writes can store, are admitted by a build; later PUT
-and DELETE of that document throw. These two differences from base have applied since IX-S1 fix-2.
+and DELETE of that document throw.
 
 During CREATE UNIQUE INDEX, extraction validates every key before the completed tree is walked for duplicates. A non-scalar key (CD02021) or oversized key (CD02026) anywhere therefore refuses before a duplicate (CD03020); the offending row can differ from name-order duplicate checking.
 

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,6 +12,7 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -57,32 +59,72 @@ public sealed partial class SqlJointTypeMigrationTests
         int publications = 0;
         current.SchemaProvisioner.JointStage = phase => { if (phase == "Publishing") { publications++; } };
         bool fits = budget == 1048576;
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Informational);
+        var deferredFailure = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+        current.SchemaProvisioner.DeferredFailed = failure => deferredFailure.TrySetResult(failure);
+        ulong rebuiltOwner = 0;
+        Assimalign.Cohesion.Database.Storage.PageId[] rebuiltPages = [];
+        SqlPlanExecutor.IndexBuildBoundary = (phase, _, _) =>
+        {
+            if (phase != "root-committed") { return; }
+            var registration = current.IndexManager.ExportRegistrations(includePrepared: true).Single(index => index.Definition.Name == "restored");
+            rebuiltOwner = current.IndexManager.PageOwner(registration);
+            rebuiltPages = current.DataStorage.GetOwnerIndexPages(rebuiltOwner).ToArray();
+        };
 
         // Act.
-        if (deferred)
+        try
         {
-            await current.SchemaProvisioner.ApplyAsync(first, guard.Token, deferDataScalingSteps: true);
-            await WaitDoneAsync(current, guard.Token);
-            if (!fits) { current.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("CS03402"); }
-        }
-        else if (fits) { await current.ApplySchemaAsync(first, guard.Token); }
-        else
-        {
-            var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await current.ApplySchemaAsync(first, guard.Token));
-            _output.WriteLine(failure.ToString());
-            failure.Diagnostics.ShouldContain(d => d.Code == "CS03402");
-            Exception? cause = failure;
-            bool memoryRefused = false;
-            while (cause is not null)
+            if (deferred)
             {
-                if (cause is DatabaseException coded) { memoryRefused |= coded.Diagnostics.Any(d => d.Code == "CS05067"); }
-                cause = cause.InnerException;
+                await current.SchemaProvisioner.ApplyAsync(first, guard.Token, deferDataScalingSteps: true);
+                await WaitDoneAsync(current, guard.Token);
+                if (!fits)
+                {
+                    current.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("CS03402");
+                    Exception? cause = await deferredFailure.Task.WaitAsync(guard.Token);
+                    bool memoryRefused = false;
+                    while (cause is not null)
+                    {
+                        if (cause is DatabaseException coded) { memoryRefused |= coded.Diagnostics.Any(d => d.Code == "CS05067"); }
+                        cause = cause.InnerException;
+                    }
+                    memoryRefused.ShouldBeTrue();
+                    var failureEvent = recorder.Events.Where(entry => entry.EventId == 21 && Equals(entry.Payload![0], engine.Name.ToString())).ShouldHaveSingleItem();
+                    failureEvent.Payload![9].ShouldBe("CS03402");
+                    failureEvent.Payload[10].ShouldBe(typeof(SqlExecutionException).FullName);
+                }
             }
-            memoryRefused.ShouldBeTrue();
+            else if (fits) { await current.ApplySchemaAsync(first, guard.Token); }
+            else
+            {
+                var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await current.ApplySchemaAsync(first, guard.Token));
+                _output.WriteLine(failure.ToString());
+                failure.Diagnostics.ShouldContain(d => d.Code == "CS03402");
+                Exception? cause = failure;
+                bool memoryRefused = false;
+                while (cause is not null)
+                {
+                    if (cause is DatabaseException coded) { memoryRefused |= coded.Diagnostics.Any(d => d.Code == "CS05067"); }
+                    cause = cause.InnerException;
+                }
+                memoryRefused.ShouldBeTrue();
+            }
         }
+        finally { SqlPlanExecutor.IndexBuildBoundary = null; current.SchemaProvisioner.DeferredFailed = null; }
 
         // Assert: both routes keep the heap and clean every abandoned owner.
         await DrainReclamationAsync(current, guard.Token);
+        rebuiltOwner.ShouldNotBe(0UL);
+        var ownerEvents = recorder.Events.Where(entry => Equals(entry.Payload?[0], engine.Name.ToString()) && Equals(entry.Payload?[2], (long)rebuiltOwner)).ToArray();
+        ownerEvents.Where(entry => entry.EventId == 28).ShouldHaveSingleItem();
+        ownerEvents.Where(entry => entry.EventId == 29).ShouldHaveSingleItem().Payload![3].ShouldBe(fits);
+        if (!fits)
+        {
+            rebuiltPages.ShouldNotBeEmpty();
+            ownerEvents.Where(entry => entry.EventId == 30).Sum(entry => (int)entry.Payload![3]!).ShouldBe(rebuiltPages.Length);
+            foreach (var page in rebuiltPages) { current.DataStorage.FreeSpaceMap.IsAllocated(page).ShouldBeFalse(); }
+        }
         current.IsOffline.ShouldBeFalse();
         Table(current).ObjectId.ShouldBe(oldTable.ObjectId);
         current.DataStorage.GetOwnerPages(oldTable.ObjectId).ShouldBe(heapPages);

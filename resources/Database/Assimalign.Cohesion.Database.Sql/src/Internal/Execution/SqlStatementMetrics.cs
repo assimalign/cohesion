@@ -278,7 +278,8 @@ internal sealed class SqlStatementMetrics
 
     internal void RecordHashSpillPolicy(object operation, bool allowed)
     {
-        if ((_accessPath as JoinWork)?.Operators?.Scope.HashPolicies is not { } policies) { return; }
+        if ((_accessPath as JoinWork)?.Operators?.Scope is not { } scope) { return; }
+        var policies = scope.HashPolicies ??= new(ReferenceEqualityComparer.Instance);
         policies.TryGetValue(operation, out var policy);
         policies[operation] = (policy.Allowed || allowed, policy.Spilled);
     }
@@ -289,7 +290,8 @@ internal sealed class SqlStatementMetrics
 
     internal void RecordHashSpillStatus(object operation, bool spilled)
     {
-        if ((_accessPath as JoinWork)?.Operators?.Scope.HashPolicies is not { } policies) { return; }
+        if ((_accessPath as JoinWork)?.Operators?.Scope is not { } scope) { return; }
+        var policies = scope.HashPolicies ??= new(ReferenceEqualityComparer.Instance);
         policies.TryGetValue(operation, out var policy);
         policies[operation] = (policy.Allowed, policy.Spilled || spilled);
     }
@@ -486,7 +488,7 @@ internal sealed class SqlStatementMetrics
     private sealed class AnalysisScope
     {
         internal readonly Dictionary<object, SqlOperatorWork> Work = new(ReferenceEqualityComparer.Instance);
-        internal readonly Dictionary<object, (bool Allowed, bool Spilled)> HashPolicies = new(ReferenceEqualityComparer.Instance);
+        internal Dictionary<object, (bool Allowed, bool Spilled)>? HashPolicies;
         internal readonly Dictionary<SqlDerivedRelation, AnalysisScope> Relations = new(ReferenceEqualityComparer.Instance);
 
         private sealed class DebugView

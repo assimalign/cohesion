@@ -71,7 +71,7 @@ public sealed partial class SqlSequenceSecondPassTests
             rows.Length.ShouldBe(filtered ? 3 : 10);
             _output.WriteLine($"input=4096; filtered={filtered}; peak retained={peak}; charged peak={session.LastStatementMetrics!.PeakHashMemoryBytes}");
             peak.ShouldBe(filtered ? 3 : 10);
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(filtered ? 992 : 2504);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(filtered ? 864 : 2376);
             session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
         }
         finally { SqlPlanExecutor.SequenceCandidatesRetained = null; }
@@ -93,7 +93,7 @@ public sealed partial class SqlSequenceSecondPassTests
         await Exec(session, "INSERT INTO t VALUES (1,'" + new string('x', 1024) + "')");
         var ordinary = await Rows(session, "SELECT CAST(k AS BIGINT),(SELECT max(v) FROM u WHERE u.k=t.k) FROM t ORDER BY k LIMIT 1");
         ordinary.ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, null });
-        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(448);
+        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(320);
         const string query = "SELECT nextval('s'), (SELECT max(v) FROM u WHERE u.k=t.k) FROM t ORDER BY k LIMIT 1";
 
         // Act / Assert
@@ -107,7 +107,7 @@ public sealed partial class SqlSequenceSecondPassTests
         else
         {
             (await Rows(session, query)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, null });
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(2704);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(2576);
         }
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);

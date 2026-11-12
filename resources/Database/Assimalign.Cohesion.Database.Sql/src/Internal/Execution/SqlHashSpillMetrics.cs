@@ -29,6 +29,7 @@ internal sealed class SqlHashSpillMetrics
     private int _fullJoinDebts;
     private SqlHashJoinSpill? _optionalArenas;
     private bool _yielding;
+    internal bool HasOptionalArenas => _optionalArenas is not null;
     internal void AddOptionalArena(SqlHashJoinSpill arena)
     { arena.NextOptionalArena = _optionalArenas; _optionalArenas = arena; }
     internal void RemoveOptionalArena(SqlHashJoinSpill arena)
@@ -46,6 +47,10 @@ internal sealed class SqlHashSpillMetrics
     {
         var state = For(metrics);
         if (state is null || state._yielding) { return; }
+        long available = budget - metrics.HashMemoryBytes;
+        for (var arena = state._optionalArenas; arena is not null; arena = arena.NextOptionalArena)
+        { available += arena.OptionalArenaBytes; }
+        if (bytes > available) { return; }
         state._yielding = true;
         try
         {

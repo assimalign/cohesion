@@ -55,6 +55,7 @@ internal sealed class SqlHashJoinSpill : IDisposable
     private ulong _directoryHash = 14695981039346656037UL;
     private CancellationToken _buildToken;
     internal SqlHashJoinSpill? NextOptionalArena;
+    internal long OptionalArenaBytes => _sorterGrant - BuildSorterGrant(_bound);
 
     internal SqlHashJoinSpill(SqlDatabaseSession owner, SqlHashJoinPath keys,
         SqlStatementMetrics metrics, long budget, bool trackUnmatched)
@@ -91,7 +92,11 @@ internal sealed class SqlHashJoinSpill : IDisposable
         foreach (var record in ReadPrefix(_prefix, token)) { _sorter.Append(record.Key.Span, record.Value.Span, token); }
         _prefix.Dispose(); _prefix = null;
         _buildToken = token;
-        if (_sorterGrant > BuildSorterGrant(_bound)) { _counters.AddOptionalArena(this); }
+        if (_sorterGrant > BuildSorterGrant(_bound))
+        {
+            System.Diagnostics.Debug.Assert(!_counters.HasOptionalArenas);
+            _counters.AddOptionalArena(this);
+        }
     }
 
     internal void Add(object?[] row, CancellationToken token)
@@ -156,7 +161,9 @@ internal sealed class SqlHashJoinSpill : IDisposable
     private void ShrinkBuildSorter(CancellationToken token)
     {
         _counters.RemoveOptionalArena(this);
-        // The optional arena gives way to any statement reservation. Consolidate under the old
+        _observe?.Invoke("join-sorter-yield", _sorterGrant);
+        // The optional arena gives way to a reservation that free memory plus registered extras can satisfy.
+        // Consolidate under the old
         // grant, then drain that run before allocating the minimum arena.
         using var run = _statement.CreateRun(token);
         using (var sorted = _sorter!.Complete(token))
@@ -177,6 +184,7 @@ internal sealed class SqlHashJoinSpill : IDisposable
     private void Seal(CancellationToken token)
     {
         if (_sealed) { return; }
+        _observe?.Invoke("join-seal", _sorterGrant);
         _counters.RemoveOptionalArena(this);
         long decodedTarget = Math.Min(_budget / 4, BuildSorterGrant(_bound) + 32768 + _bound - ReaderBytes);
         _index = _statement.CreateRun(token);
@@ -217,6 +225,7 @@ internal sealed class SqlHashJoinSpill : IDisposable
         }
         _scratch = ReaderBytes + _bound + 2 * _maximumDecoded;
         Reserve(_scratch);
+        _observe?.Invoke("join-seal-scratch", _scratch);
         // Directory growth happens after the arena and final merge readers retire.
         // Its minimum therefore never depends on the optional build-sorter extra.
         using (var reader = directory.OpenReader(StorageTempSpace.PageSize))

@@ -63,8 +63,8 @@ public sealed class SqlDatabaseEngineOptions
     /// Budget exhaustion refuses the statement unless an eligible root hash join, ORDER BY, DISTINCT or fixed-state GROUP BY, including a permitted CTAS source root, hands off to configured temporary space.
     /// Nested plans, window/recursive/DML sources, grouping sets and ordered sequence deferral retain their current memory policy.
     /// Spill requires fixed ordering collations, supported codecs and a remaining grant whose bound (grant - 32768) / 16 - 8192 holds each encoded record.
-    /// Hash joins require at least 262144 bytes; their original build row plus 48 bytes must fit
-    /// min(16384, (min(StatementMemoryBudget, Int32.MaxValue) - 32768) / 16 - 8192), and its decoded chunk must fit one quarter of the statement grant.
+    /// Hash joins require at least 262144 bytes; each original build row plus 48 bytes must fit
+    /// min(16384, (min(StatementMemoryBudget, Int32.MaxValue) - 32768) / 16 - 8192), and each build row's decoded record plus 152 B of chunk overhead must fit one quarter of the grant.
     /// CTAS publishes only after all copying succeeds.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
@@ -93,6 +93,9 @@ public sealed class SqlDatabaseEngineOptions
     /// hash joins and retained normalized join buffers spill. Their source, partition, index and sort files share this quota.
     /// At Seal a join's sorted build and index coexist, needing about twice the packed build size plus framing,
     /// chunk metadata and any staged probe-side input of the statement; other SQL buffers retain their existing memory-budget policy.</summary>
+    /// <remarks>A yield's consolidation can raise CK05002 and, in nested FULL trees, can be the statement's temp peak:
+    /// the old build runs, consolidated run and child index coexist. Optional arenas yield only if their total extra
+    /// plus free memory can satisfy the reservation; hopeless requests retain CS05067 without temp writes.</remarks>
     public long? StatementTempSpaceQuota { get; set; }
 
     /// <summary>

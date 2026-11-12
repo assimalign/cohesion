@@ -230,11 +230,11 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         var reservations = new SortedDictionary<long, int>();
         bool live = false;
-        long unmatchedGrant = -1;
+        long unmatchedGrant = -1, sealScratch = -1, unmatchedReservation = -1;
         SqlPlanExecutor.ObserveHashSpill = (phase, value) =>
-        { if (phase == "join-handoff") { live = true; } if (phase == "join-match-sort-live") { unmatchedGrant = value; } };
+        { if (phase == "join-handoff") { live = true; } if (phase == "join-match-sort-live") { unmatchedGrant = value; } if (phase == "join-seal-scratch") { sealScratch = value; } };
         SqlStatementMetrics.AfterMemoryReservation = (_, bytes) =>
-        { if (live) { reservations[bytes] = reservations.GetValueOrDefault(bytes) + 1; } };
+        { if (live) { reservations[bytes] = reservations.GetValueOrDefault(bytes) + 1; if (unmatchedGrant < 0) { unmatchedReservation = bytes; } } };
         string sql = shape switch
         {
             "FULL" => "SELECT l.id,r.id FROM jl l FULL JOIN jr r ON l.id=r.id LIMIT 1",
@@ -246,16 +246,36 @@ public sealed partial class SqlSortSpillConformanceTests
             // Act
             var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
             await Rows(result); await result.DisposeAsync();
-            // Assert: the values come from successful product reservations, not formulas.
+            // Assert: formula lookups below bind named product charges; the golden snapshot
+            // also detects added, omitted or resized reservations.
             string trace = string.Join(',', reservations.Select(p => $"{p.Key}:{p.Value}"));
             _output.WriteLine($"FIX2_RESERVATIONS|{shape}|peak={session.LastStatementMetrics!.PeakHashMemoryBytes}|unmatched_grant={unmatchedGrant}|{trace}");
+            // golden reservation trace, regenerate deliberately when an accounting change is intended.
             trace.ShouldBe(shape switch
             {
                 "FULL" => "32:1,136:1,400:1,792:1,37737:1,38832:1,65536:1,196717:1,259823:1",
                 "staged" => "792:1,840:901,1280:1,8704:1,10121:1,25208:1,25920:1,262144:1,592653:1,1037175:1",
                 _ => "40:1,400:1,792:1,1352:2,15856:41,16056:1,16382:1,25112:1,47737:1,57072:1,262144:1,618413:1,1019919:1,1030842:1",
             });
-            if (shape == "FULL") { unmatchedGrant.ShouldBe(220991); }
+            reservations[SqlHashJoinSpill.DirectoryBytes(16)].ShouldBe(1);
+            if (shape == "FULL")
+            {
+                reservations[SqlHashJoinSpill.BitmapBytes(24)].ShouldBe(1);
+                sealScratch.ShouldBeGreaterThan(0);
+                (unmatchedGrant + sealScratch).ShouldBe(unmatchedReservation);
+            }
+            else if (shape == "staged")
+            {
+                reservations[SqlStagedSortSource.OperatorBytes].ShouldBe(1);
+                reservations[SqlStagedSortSource.WriterBytes].ShouldBe(1);
+            }
+            else
+            {
+                reservations[SqlRowCollector.SpillObjectCharge(1)].ShouldBe(2);
+                reservations[SqlRowCollector.DeferredWriterBytes + SqlRowCollector.DeferredBufferBytes(16384)].ShouldBe(1);
+            }
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(budget);
+            session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
             Statements(engine.TempSpace!).ShouldBeEmpty();
         }
         finally { SqlPlanExecutor.ObserveHashSpill = null; SqlStatementMetrics.AfterMemoryReservation = null; }
@@ -572,11 +592,11 @@ public sealed partial class SqlSortSpillConformanceTests
         // Act / Assert
         if (refuses)
         {
-            long inputs = 0; bool partitioned = false; int sealWrites = 0;
-            SqlPlanExecutor.ObserveHashSpill = (phase, value) => { if (phase == "join-input") { inputs = value; } partitioned |= phase == "join-partitioned"; };
+            long inputs = 0; bool partitioned = false, sealing = false; int sealWrites = 0;
+            SqlPlanExecutor.ObserveHashSpill = (phase, value) => { if (phase == "join-input") { inputs = value; } partitioned |= phase == "join-partitioned"; sealing |= phase == "join-seal"; };
             BeforeWrite(engine.TempSpace!, () =>
             {
-                if (inputs == 1200 && new System.Diagnostics.StackTrace().ToString().Contains("SqlHashJoinSpill.Seal(", StringComparison.Ordinal)) { sealWrites++; }
+                if (inputs == count && sealing) { sealWrites++; }
             });
             DatabaseException error;
             try { error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql)); }

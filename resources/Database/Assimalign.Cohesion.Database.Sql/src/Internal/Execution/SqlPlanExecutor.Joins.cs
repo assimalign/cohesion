@@ -174,6 +174,7 @@ internal sealed partial class SqlPlanExecutor
             if (plan.Inputs[i].Access is SqlIndexSeekPath seek &&
                 TryResolveSeekTree(plan.Bindings[i].Source.Table!, seek.Index, out var tree)) { inputIndexes[i] = tree; }
         }
+        RecordJoinSpillPolicies(plan, statement.Metrics, spillOwner);
         if (plan.Tree is not null)
         {
             // All tree inputs may be reused by a parent; delivery detaches selected cells.
@@ -197,7 +198,6 @@ internal sealed partial class SqlPlanExecutor
         var accesses = new SqlJoinIndexPath?[plan.Steps.Count];
         var indexes = new BTreeIndex?[plan.Steps.Count];
         var paths = new string[plan.Steps.Count];
-        RecordJoinSpillPolicies(plan, statement.Metrics, spillOwner);
         for (int i = 0; i < plan.Steps.Count; i++)
         {
             var access = plan.Steps[i].Access;

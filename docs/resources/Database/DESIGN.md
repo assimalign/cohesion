@@ -75,12 +75,13 @@ and model-supplied detail. It carries no SQL executor or schema interface. Hosti
 report Degraded during deferred provisioning.
 
 Current SQL format 39 retains never-evicted hash-only applied-schema history (kind 20), written
-atomically with every current kind-6 marker. Format 38 introduced the history during this batch and never shipped on its own. An applied declaration whose
+atomically with every current kind-6 marker. Format 38 introduced the history and was never released on its own. An applied declaration whose
 FirstAppliedGeneration precedes the stored schema's is a rollback; a later generation
 is a roll-forward under the declaration's normal opt-in rules.
 
-A rollback applies only Safe steps that neither re-create dropped objects nor validate
-existing data. One refused step holds the entire plan at the stored schema with
+A rollback applies only Safe steps that neither re-create dropped tables or columns nor validate
+existing data. It can rebuild a dropped non-unique, non-partial index whose keys are provably
+at most 1,024 B; that build is budgeted and can fail with CS03402. One refused step holds the entire plan at the stored schema with
 CS03405, both hashes and refused steps. No migration step or declared script runs.
 Explicit ApplySchemaAsync uses the same history policy and throws CS03105 regardless
 of the earlier declaration's opt-in. Deliberately accepting loss requires a new
@@ -195,7 +196,7 @@ Dependency direction is strictly downward. Model engines depend on kernel projec
 - **`Database`** — the public area root: the abstract bases of the concrete-first rule (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseExecutionSession<TRequest>`, `DatabaseLanguageSession<TRequest>`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`, `DatabaseEngineWorker`; added beside the interfaces in phase 3 of the concrete-types plan, #1259, which phase 6, #1262, deleted), the kept composition seams (`IDatabaseApplication`, `IDatabaseApplicationBuilder`, `IDatabaseApplicationContext`), `DatabaseException`, `DatabaseNotFoundException`, `DatabaseName`, lifecycle enums, and the `DatabaseObjectOwner`/`DatabaseObjectLockedException` ownership contract four model catalogs persist. It holds no schema type and `DatabaseInstance` has no capability member (owner decisions 50 and 51 of 2026-10-09). It rolls up the child roots so their common vocabulary arrives transitively. A shape that differs by model belongs in that model family, never here. A3 moved the former relational declaration/compiler/serializer/migration model into `Database.Sql.Schema`; that thin package is shared by SQL and SDK Tasks without referencing the SQL engine or Hosting.
 - **`Database.Storage`** — the physical layer: slotted pages, buffer pool with pin/evict, free-space map, journal (WAL) streams, backup/recovery seams. Owns `PageId`, `JournalRecord`, CRC integrity. The WAL contract is ARIES-shaped: append redo/undo records under an LSN discipline, checkpoint, replay on open. Durability policy (fsync cadence, group commit) is an engine-level option surfaced through storage. Data pages carry an owner tag driving **per-owner record chains** (2026-07-14): owner-scoped inserts, iteration, and transactional chain release, so a model's "scan one object" costs O(object) instead of O(storage) — the SQL engine keys chains by table object id.
 - **`Database.Transactions`** — the ACID heart (new): `TransactionManager` (begin/commit/rollback under an `IsolationLevel`; sealed, composed per database by `TransactionCoordinator`), `TransactionSnapshot` (MVCC visibility: xmin/xmax/active-set), `LockManager` (shared/update/exclusive + intent modes, deadlock detection), and an internal transaction log (the seam that binds transaction lifecycle to the WAL). Engines *use* the manager; sessions *expose* the resulting `DatabaseTransaction`.
-- **`Database.Indexing`** — shared index infrastructure: order-preserving byte-comparable `IndexKey` encoding, `BTreeIndex` (point/range search, insert/delete), `BTreeCursor` streaming iteration, B+Tree first and hash later, built on shared pages so index updates ride the same WAL/transaction path as data. Current B-tree page format 3 adds optional leaf payloads while preserving empty-payload packing; formats 1 and 2 refuse at open (#1809). Every SQL, Documents, Graph and KeyValuePair index has a separate physical page owner in Storage's resident structure directory (#1808). DROP INDEX reclaims exactly its owner after the last reader snapshot; bounded builds charge their workspace. Current model markers are SQL 39 (registration kind 21), Documents index 4 and KeyValuePair entry 3. **SQL was the first live consumer** (2026-07-14); Documents now uses the same package for OQL `CREATE INDEX`/`DROP INDEX`, transactional write-path maintenance, planner seeks, and recovery. Graph adjacency lookups and the KV primary structure follow the same seams.
+- **`Database.Indexing`** — shared index infrastructure: order-preserving byte-comparable `IndexKey` encoding, `BTreeIndex` (point/range search, insert/delete), `BTreeCursor` streaming iteration, B+Tree first and hash later, built on shared pages so index updates ride the same WAL/transaction path as data. Current B-tree page format 3 adds optional leaf payloads while preserving empty-payload packing; formats 1 and 2 refuse at open (#1809). Every SQL, Documents, Graph and KeyValuePair index has a separate physical page owner in Storage's resident structure directory (#1808). SQL, Documents and Graph DROP INDEX reclaim exactly their owner after the last reader snapshot; bounded builds charge their workspace. Current model markers are SQL 39 (registration kind 21), Documents index 4 and KeyValuePair entry 3. **SQL was the first live consumer** (2026-07-14); Documents now uses the same package for OQL `CREATE INDEX`/`DROP INDEX`, transactional write-path maintenance, planner seeks, and recovery. Graph adjacency lookups and the KV primary structure follow the same seams.
 - **`Database.Types`** — the shared scalar type system: type identity, comparison/collation, binary encoding. Anything that ends up inside an `IndexKey` or a stored value goes through here so ordering is consistent across models.
 - **`Database.Execution`** — the model-agnostic request/result vocabulary: a memberless `DatabaseRequest`, the `DatabaseResult` family and result streaming. `DatabaseRow` owns the ordinal contract: an out-of-range ordinal throws from the base, and `IsMissing` checks its capability first. It references only `Database.Types`. Plans and operators stay in each model engine; the unused shared pipeline this project once carried was deleted with #1257.
 - **`Database.Language`** — shared lexer/parser infrastructure and diagnostic production for model languages; the diagnostic value types live in `Database.Types`.
@@ -418,12 +419,22 @@ rule: eligible root ORDER BY, bounded LIMIT/OFFSET sorts and ordered DISTINCT ca
 including a CTAS source root (#1789). Temporary files use engine and statement quotas;
 in-memory engines need an explicit temp directory. Delivery owns bounded readers and no
 database locks. Nested sorts, windows, grouping sets, unsupported codecs/collations,
-over-budget hash joins and unsupported DISTINCT owners still refuse. Plain root hash aggregation
+ineligible hash joins and unsupported DISTINCT owners still refuse. Plain root hash aggregation
 and unordered hash DISTINCT spill into eight partitions at up to eight levels, preserving first-seen
 order. Only fixed-size native states qualify; growing, ordered, DISTINCT, statistical and application
 aggregates retain CS05067, as do unproved SUM/AVG bounds and unsupported key codecs. General result
 spooling remains later work. The SQL project design records the precise eligibility and lifetime rules.
-CASE/COALESCE use PostgreSQL common-type resolution, including persisted expressions (#1788).
+Eligible root INNER, LEFT, RIGHT and FULL hash joins hand off only after their original statement-grant
+reservation refuses. All spilled joins and their staged buffers share one join temp reservation and
+statement quota. Optional build arenas yield down to their minimum M when free memory plus their extra can satisfy
+another reservation; probe caches target G/4 within the remaining grant. Temp consolidation and Seal
+can refuse CK05002. Spilling only adds capability: a statement that completes at the prior statement grant and temp
+quota still completes there, with the same rows, CLR types and metadata; statements without a
+join keep their original memory arithmetic (#1789). EXPLAIN output differs only in the hash_budget value and the added hash_status field. Index builds are the exception: they charge
+their build workspace (#1808), so a build whose chunk does not fit the grant refuses CS05067 (schema apply reports CS03402 with that cause).
+Result corrections are recorded under their own issue, including ungrouped typed-NULL
+CASE/COALESCE refusing CS02011 instead of returning text under Int64 metadata (#1788).
+CASE/COALESCE follow PostgreSQL common-type resolution with the recorded numeric and CHAR departures, including persisted expressions (#1788).
 OQL ranking/navigation windows support OVER and named windows within memory/work grants (#1805).
 OQL MERGE parses, binds, plans and explains; execution refuses CD05022 until OQ-M2 (#1804).
 SQL target lists admit at most 1,664 entries after expansion (CS05097, #1792); a CTAS

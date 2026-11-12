@@ -63,7 +63,7 @@ error and has no production diagnostic code.
 | New (#1789, EN-X1) | CK05001 | Engine temporary physical-byte quota exceeded |
 | New (#1789, EN-X1) | CK05002 | Statement temporary physical-byte quota exceeded |
 | New (#1789, EN-X1) | CK05003 | Temporary page would cross the engine free-space reserve |
-| New (#1789, EN-X1) | CK05004 | Temporary page/record integrity failure or retry of a failed reader; retries raise no damage event/counter (no durable-storage fence) |
+| New (#1789, EN-X1) | CK05004 | Temporary page/record integrity failure, including a join directory hash mismatch, or retry of a failed reader; retries raise no damage event/counter (no durable-storage fence) |
 | New (#1789, EN-X1) | CK05005 | Temporary space unavailable: probe, lease, sweep, create, read, write or close I/O failure |
 | New (#1789, EN-X1) | CK05006 | Encoded sort record exceeds its declared maximum |
 | COHDBS001 | CK06001 | Storage format refusal |
@@ -262,7 +262,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
 | COHSQLP004 | CS03104 | Retired (#1778): every schema apply uses joint publication and CS03402/CS03403 |
-| COHSQLP005 | CS03105 | Compiled-schema policy refusal, including explicit apply of an earlier first-applied declaration with non-Safe steps, dropped-table/column re-creation or existing-data validation; rollback ignores destructive opt-in (#1779) |
+| COHSQLP005 | CS03105 | Compiled-schema policy refusal, including explicit apply of an earlier first-applied declaration with non-Safe steps, dropped-table/column re-creation or existing-data validation; rollback ignores destructive opt-in; non-literal compiled DEFAULT (imperative apply and script generation; Build phase 3 leads its message with CS03101) (#1779, #1788) |
 | New (#1447, SQ-A3) | CS03402 | Joint preparation/space admission failed or unpublished target/route discarded; old schema retained, unsafe-storage latches still apply |
 | New (#1447, SQ-A3 fix) | CS03403 | Joint publication commit unconfirmed; recovery determines old/new schema |
 | New (#1447, SQ-A3 fix) | CS03404 | Session relation creation or table rename names an unpublished table reserved by a pending joint plan |
@@ -308,7 +308,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); plain SELECT join buffers, matches, groups, aggregate inputs, sorting/top-N, output/DISTINCT, retained results, relation/subquery caches and set state share the grant; SQL spilled-result reader workspace, retained decoded rows and decoding overlap share the result grant; application-produced binary rows/keys and an undeliverable first reader refuse spilling and a session caps undisposed spilled results at eight; CTAS admits kept rows, independent of capacity (#1776, #1762); plain hash aggregation/DISTINCT spill eligibility, key/record codec limits, an over-budget single group and eight-pass repartition exhaustion retain this code (#1789) |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, index-build chunk workspace (CREATE [UNIQUE] INDEX, UNIQUE/PRIMARY KEY constraints and migration/rollback rebuilds; #1808), rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); plain SELECT join buffers, matches, groups, aggregate inputs, sorting/top-N, output/DISTINCT, retained results, relation/subquery caches and set state share the grant; SQL spilled-result reader workspace, retained decoded rows and decoding overlap share the result grant; application-produced binary rows/keys and an undeliverable first reader refuse spilling and a session caps undisposed spilled results at eight; CTAS admits kept rows, independent of capacity (#1776, #1762); plain hash aggregation/DISTINCT spill eligibility, key/record codec limits, an over-budget single group and eight-level repartition exhaustion retain this code; hash joins retain it for ineligible or oversized build records, decoded records that cannot fit G/4, insufficient minimum working sets, and reservations that optional arenas cannot satisfy (#1789) |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |

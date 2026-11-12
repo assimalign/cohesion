@@ -187,6 +187,7 @@ internal sealed partial class SqlPlanExecutor
         if (!deferProjection && !distinct && limit?.Count == 0) { return MaterializeProjected(projections, []); }
         source.Seal(token);
         long budget = _definitions.StatementMemoryBudget;
+        System.Diagnostics.Debug.Assert(SqlHashSpillMetrics.For(_metrics!)?.HasOptionalArenas != true);
         long grant = System.Math.Min(int.MaxValue, budget - _metrics!.HashMemoryBytes - source.ReadReservation);
         int bound = (int)((grant - 32768) / 16 - 8192);
         if (grant < 65536 || bound < 16) { throw SqlExecutionException.StatementMemoryBudget(budget); }

@@ -170,6 +170,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 standalone parser, profile and engine's native registrations. It classifies scalar, aggregate and window
 calls, argument counts and kinds, and static result types. Engine request parsing admits additional
 named calls for the executing engine's frozen catalog to bind. The profile derives its function tokens from this table; names remain usable as fields.
+Name lookup iterates the immutable backing array without allocating an enumerator; a null name
+returns no match. Planner validation retains its existing refusal precedence (#1805).
 In this table, **propagate** means MISSING wins over NULL; a wrong-kind stored value gives NULL,
 while an incompatible literal kind fails planning before document access. **Selected** means the
 result has the selected argument's type. Conditional functions evaluate only through the selected
@@ -333,7 +335,8 @@ scale and the decimal scalar domain. The existing 128-level parser limit also co
 ### MERGE grammar and planning (#1804, OQ-M1)
 
 OqlMergeExpression is a sealed statement leaf with sealed UPDATE, DELETE and INSERT action
-records and an OqlMergeSource record. Its canonical ToString renders both Couchbase forms,
+records and an OqlMergeSource record. Each action and source record uses an explicit constructor
+with get-only properties, including DELETE's optional Predicate. Its canonical ToString renders both Couchbase forms,
 including keyspace, aliased subquery and expression sources and RETURNING. MERGE is a contextual
 statement prefix, absent from the unsupported table and lexer keywords; FROM c merge still parses.
 The ordinary nested-expression limit, a complete 128-level MERGE tree bound and a 128-level

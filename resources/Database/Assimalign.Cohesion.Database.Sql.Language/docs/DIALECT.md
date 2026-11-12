@@ -21,7 +21,7 @@ can vary by process. Rows, order, JoinCandidatePairs, RecordsExamined, calls and
 evaluation error retain fitting semantics.
 ON, WHERE and projections remain in the caller. Computed keys, correlated/lateral inputs,
 non-hash steps, deferred collations, SQL/JSON, application binary build cells, joined DML
-and join-output DISTINCT keep their eligibility. Probing does not encode payloads;
+and join-output DISTINCT receive no join-spill permission. Probing does not encode payloads;
 retained buffers of a normalized join tree (left inputs and intermediate outputs) can stage under SQ-L2's exact row codec and
 grant-derived record bound. This applies to probe payloads too: application-produced binary
 probe cells refuse CS05067 when that input must stage; fitting inputs keep their existing admission.
@@ -30,14 +30,15 @@ Final result spooling, windows, recursion, set owners and NOT IN remain separate
 Sorting shares the exact temporary statement and physical quota. FULL can stage already
 evaluated output/key records until its unmatched sort releases the grant. Top-N ties keep
 input ordinal order; the collector then uses the ordinary sorter.
-A collector after a non-FULL spilled join receives only the remaining statement grant,
-including any staged reader's reservation. Near the minimum grant this can refuse CS05067.
+Once no spilled FULL owes its unmatched grant, a collector receives only the grant left after
+other operators' reservations: the spilled join's cache, probe scratch and any staged reader.
+Near the minimum grant this refuses CS05067.
 Deferral lasts while any spilled FULL still owes its unmatched grant; buffer spills never
 create that debt. During Seal a spilled build needs up to about twice its packed size of
 temporary space, plus page framing and any staged probe-side input of the statement. With the default quota of four grants, an incompressible
 build larger than about two grants refuses located CK05002 at Seal. Packing helps only
-compressible frames. Probe-heavy joins use less temp than partitioned probe spooling;
-build-heavy incompressible joins have about half its build capacity.
+compressible frames. Probe-heavy joins use less temp than partitioned probe spooling.
+A yield's consolidation can also raise CK05002. In a nested FULL tree the yield temporarily retains the parent's old build runs, its consolidated run, the child's index and any staged left inputs; that yield can be the statement's temp peak. Build-heavy incompressible joins have about half its build capacity.
 
 EXPLAIN ANALYZE reports spilled_bytes (largest physical snapshot), spill_peak_bytes (owner
 high-water mark), spill_runs (sorter runs written, including a consolidated prefix after the arena gives way), spill_merge_passes (sum of merge depths)
@@ -49,8 +50,8 @@ aggregation also spills. Fitting joins keep base representation, charges and all
 Each analyzed hash build reports hash_budget=spill_on_refusal or no_spill from its executed
 permission, and hash_status=fitting or spilled. Plain EXPLAIN uses spill_on_refusal_if_eligible
 for configured spilling.
-An unbuilt hash step still reports its configured policy; zero-candidate hash actuals remain NULL.
-Non-hash steps keep hash_budget=no_spill. Fitting descriptions retain base text with the added hash_status field.
+An unbuilt analyzed hash step still reports its executed permission; zero-candidate hash actuals remain NULL.
+Non-hash steps keep hash_budget=no_spill. Fitting descriptions keep base text apart from the hash_budget value, which reports the step's permission, and the added hash_status field. A spilled JoinPlan uses "bounded hash" in place of "bounded in-memory hash".
 
 ## Plain GROUP BY and hash DISTINCT spilling (#1789, SQ-L3a)
 
@@ -86,7 +87,7 @@ error and cancellation release the files through the existing result/session lif
 startup sweeping handles leftovers after an abrupt stop. EXPLAIN ANALYZE adds
 hash_spill_batches and hash_spill_passes and the existing byte/run/merge fields. When both
 hash and downstream sorting spill, hash-prefixed byte/run fields describe the hash phase.
-Hash batches/passes vary between processes with the hash seed; a statement near the eight-pass
+Hash batches/passes vary between processes with the hash seed; a statement near the eight-level
 limit may complete in one process and retain CS05067 in another. Hash keys require equality
 families and the row codec, with no index-backed collation requirement.
 
@@ -2464,7 +2465,7 @@ is not a departure. NATURAL is risky in an ad-hoc
 query under schema change (PostgreSQL doc/src/sgml/queries.sgml:391-405); views avoid that risk.
 The canonical audit of columns named natural and lateral retains the same quoting.
 That change retained SQL format 37 and the wire contract; format 38 introduced applied-schema
-history during this batch and never shipped on its own; current format 39 also records per-index
+history and never shipped on its own; current format 39 also records per-index
 owners. SqlNaturalJoinTests records independent,
 hand-derived PostgreSQL-oracle rows, with the documented dialect departures.
 
@@ -4222,8 +4223,8 @@ postfix cast follows, keeping +1 and ORDER BY +1 unchanged. Both `+1::TEXT` and
 `+ 1::TEXT` apply unary plus to CAST(1 AS TEXT) and fail with CS02003, just like the
 minus forms; +1::INT is 1. Other types require contiguous ::; the previously accepted
 REGCLASS separated-colon spelling remains available. ILIKE remains contextual; ordinary
-identifiers and stored canonical text are unchanged, so this run changes no SQL or
-compiled-schema format. Regex and SIMILAR TO remain deferred; SQ-O2 delivers bitwise execution below.
+identifiers and stored canonical text are unchanged, so neither the SQL nor the
+compiled-schema format changes. Regex and SIMILAR TO remain deferred; SQ-O2 delivers bitwise execution below.
 PostgreSQL references: src/backend/parser/gram.y:904-914 and
 src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before matching).
 
@@ -4278,7 +4279,7 @@ conversion). Unknown input conversion happens while binding,
 including skipped alternatives: invalid numeric/Boolean text is CS02022 (22P02), and a
 numeric value outside the selected type is CS02002 (22003). Each alternative converts at
 its own node before an enclosing cast, function, comparison, grouping key or ordering key.
-Result metadata and cells agree in-process and over InMemory/TCP. Statistical transitions
+Result metadata and cells agree in-process and over InMemory/TCP, except a known defect: a grouped CASE/COALESCE over a typed-NULL polymorphic application result can return text under Int64 metadata; ungrouped evaluation refuses CS02011. Statistical transitions
 and grouped output normalization retain their existing contracts above.
 
 Creation binds column DEFAULTs, table/domain CHECKs, view bodies, SQL function bodies and
@@ -4290,7 +4291,7 @@ their existing refusals. ALTER COLUMN TYPE rebinds affected CHECKs/defaults, dep
 checks refuse dropping a called function, and view replacement preserves existing column
 signatures. Valid mixed alternatives retain values, metadata and constraint refusals across
 file reopen. Persisted view columns are not migrated: this change ships in current format 39,
-with SQ-A7 history and IX-S1 owners. Format 38 never shipped on its own; this run adds no
+with SQ-A7 history and IX-S1 owners. Format 38 never shipped on its own; common-type resolution adds no
 format bump or compatibility reader.
 
 Reference: PostgreSQL src/backend/parser/parse_coerce.c:1346-1456 and
@@ -5392,7 +5393,7 @@ keeps its cancellation meaning. Metadata operations that cannot release their ga
 admission immediately with CK04014. An explicit transaction and TCP session remain usable.
 Reads retain ordinary snapshot and locking behavior.
 Paused engines report Degraded health with CK06006; a pending pause alone leaves the database online.
-Session DDL keeps its immediate CK04014 refusal; a client can retry the statement.
+Session catalog mutations keep the immediate CK04014 refusal. Index-owner reservations (CREATE INDEX and index-backed constraints) release the catalog monitor and wait, per refusal, up to the session or engine LockTimeout (no limit at 0), then report CK04014. An ordinary build's first data-allocation refusal stays immediate. Later roots and chunk retries wait outside the apply gate, bounded only by StatementTimeout and cancellation.
 Code-first migrations instead wait outside the physical and publication gates and resume the
 same prepared job, preserving completed copy/index work. ApplySchemaAsync, inline Build and
 deferred Build retain cancellation and lock timeouts, with coded admission failures.
@@ -5795,7 +5796,7 @@ including normalized buffers and referential writes. These conservative reservat
 statement exit; shared payload already charged by a hash build is not charged again for an alias.
 An exhausted joined statement refuses before any write and releases memory on success, failure or
 cancellation. CTAS also charges its retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
-`CS05067` (53200, out_of_memory). Plain SELECT also charges nested-loop inners, normalized
+`CS05067` (53200, out_of_memory). Index builds also refuse CS05067 when their charged chunk workspace exceeds the grant (#1808): CREATE [UNIQUE] INDEX and UNIQUE/PRIMARY KEY constraints report it directly; schema-apply migration and rollback rebuilds report CS03402 with that CS05067 refusal as the cause. Plain SELECT also charges nested-loop inners, normalized
 join child buffers, staged matches, group keys and aggregate state, aggregate DISTINCT tuples
 and ordered inputs, full sorts and bounded top-N heaps, output rows and DISTINCT sets,
 materialized results retained by consumers, derived/view/CTE caches, independent subquery

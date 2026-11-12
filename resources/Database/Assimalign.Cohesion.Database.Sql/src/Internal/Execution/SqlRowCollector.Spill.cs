@@ -39,6 +39,7 @@ internal sealed partial class SqlRowCollector
         var joinStatement = SqlHashSpillMetrics.For(_metrics!)?.JoinStatement;
         var statement = _sharedStatements.TryGetValue(this, out var shared) ? shared : joinStatement;
         bool chargeResidue = deferred || joinStatement is not null && ReferenceEquals(statement, joinStatement);
+        System.Diagnostics.Debug.Assert(SqlHashSpillMetrics.For(_metrics!)?.HasOptionalArenas != true);
         long grant = Math.Min(int.MaxValue, deferred ? _budget : _budget - (_metrics!.HashMemoryBytes - _memory.Bytes));
         long bound = (grant - 32768) / 16 - 8192;
         if (deferred) { bound = Math.Min(16384, bound); }
@@ -139,6 +140,7 @@ internal sealed partial class SqlRowCollector
     {
         var source = state.Deferred!; source.Seal(_cancellationToken);
         long scratch = hashDeferredReaderBytes + source.MaximumRecordLength;
+        System.Diagnostics.Debug.Assert(SqlHashSpillMetrics.For(_metrics!)?.HasOptionalArenas != true);
         long grant = Math.Min(int.MaxValue, _budget - (_metrics!.HashMemoryBytes - _memory.Bytes) - scratch - SpillObjectCharge(state.Columns.Length));
         int bound = (int)((grant - 32768) / 16 - 8192);
         if (grant < 65536 || bound < 16 || source.MaximumRecordLength + 12L > bound)
