@@ -116,7 +116,13 @@ internal sealed class SqlOutputSpool : IDisposable
     internal IEnumerable<object?[]> Read(CancellationToken token)
     {
         Seal(token); Release();
+        SqlSortSpillMetrics.RecordOutput(_metrics, _statement);
         _shared = SqlHashSpillMetrics.AdoptTemp(_metrics, _statement);
+        return ReadRows(token);
+    }
+
+    private IEnumerable<object?[]> ReadRows(CancellationToken token)
+    {
         long bytes = StorageTempSpace.PageSize + _run.MaximumRecordLength + 256L + 2 * _maximumDecoded;
         _metrics.ReservePlainSelectMemory(bytes, _budget);
         try
@@ -178,7 +184,14 @@ internal sealed class SqlOutputSpool : IDisposable
     }
     public void Dispose()
     {
-        try { if (!_transferred) { if (_shared) { _run.Dispose(); } else { _statement.Dispose(); } } }
+        try
+        {
+            if (!_transferred)
+            {
+                SqlSortSpillMetrics.Refresh(_metrics, _statement);
+                if (_shared) { _run.Dispose(); } else { _statement.Dispose(); }
+            }
+        }
         catch (StorageTempException failure) { throw SqlSpilledResultSet.Translate(failure); }
         catch (AggregateException failure) { throw SqlSpilledResultSet.TranslateCleanup(failure); }
         finally { Release(); }

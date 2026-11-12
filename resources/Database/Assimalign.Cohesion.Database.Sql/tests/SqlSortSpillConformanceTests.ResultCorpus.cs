@@ -13,6 +13,32 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - A staged unordered join reports its source run even when final output fits or is empty (#1789)")]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task ExecuteAsync_StagedUnorderedExplain_ShouldReportSourceRun(int limit)
+    {
+        // Arrange
+        await using var engine = await Create("output-source-explain", 262144);
+        var database = await engine.CreateDatabaseAsync("db");
+        database.Definitions.ForceSelectRetentionBasePath = true;
+        await using var session = await database.CreateSessionAsync(); await Seed(session);
+
+        // Act
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(
+            $"EXPLAIN ANALYZE SELECT nextval('s'),t.id FROM t CROSS JOIN u LIMIT {limit}");
+        string description = string.Join('\n', (await Rows(result)).SelectMany(row => row.Cells.OfType<string>()));
+
+        // Assert
+        description.ShouldContain("spill_runs=1", Case.Sensitive);
+        description.ShouldContain("spilled_bytes=", Case.Sensitive);
+        description.ShouldNotContain("hash_spilled_bytes=", Case.Sensitive);
+        var metrics = session.LastStatementMetrics!;
+        SqlSortSpillMetrics.For(metrics).ShouldNotBeNull().PeakBytes.ShouldBeGreaterThan(0);
+        metrics.RecordsExamined.ShouldBe(4001); metrics.HashMemoryBytes.ShouldBe(0);
+        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Unordered output differential preserves exact cells, pagination, nested sources and volatile boundaries (#1789)")]
     public async Task ExecuteAsync_UnorderedOutputCorpus_ShouldMatchFittingRowsAndEvaluation()
     {

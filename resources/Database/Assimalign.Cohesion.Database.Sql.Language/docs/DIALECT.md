@@ -24,6 +24,8 @@ delivery exit. Early enumeration disposal frees its cursor. Quota, floor, integr
 temporary I/O failures retain located CK05 codes; codec/record/reader refusals retain
 CS05067. EXPLAIN ANALYZE uses the existing spill byte/run fields. Temporary files have no
 durable catalog or journal representation; startup sweeping removes crash leftovers.
+Staged unordered join sources report their run even when final output fits or LIMIT 0
+returns no rows.
 
 ## Indexed hash join spilling (#1789, SQ-L3b)
 

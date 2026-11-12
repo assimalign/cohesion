@@ -135,7 +135,7 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         await result.DisposeAsync(); TempBytes(engine.TempSpace!).ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Spill admission: missing directory, small grants and nested roots keep CS05067 (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Spill admission: missing directory, small grants and excluded owners keep CS05067 (#1789)")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(4)]

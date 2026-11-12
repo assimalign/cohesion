@@ -36,6 +36,8 @@ reader and decoded overlap must fit the full grant, after the producing operator
 its state; nested readers additionally reserve on the live outer ledger. Output runs use
 the existing private row format, quotas, reserve floor and located CK05 diagnostics.
 EXPLAIN ANALYZE reports an output run through the existing spill byte/run fields.
+Staged unordered join sources seal and report their run before projection, including
+when the final projection fits or LIMIT 0 consumes no source row.
 
 Delivery uses SqlSpilledResultSet's lazy, rewindable cursors. Closing an enumeration frees
 its cursor; disposing the result releases its runs. Session/engine close and server
