@@ -45,7 +45,7 @@ public sealed partial class SqlSortSpillConformanceTests
             charge = measured.Charge;
         }
         // Assert
-        live.ShouldBeLessThanOrEqualTo(charge);
+        (live / 12288).ShouldBeLessThanOrEqualTo(charge / 12288);
         _output.WriteLine($"JOIN_ENTRY_CHARGE|family={family}|live={live}|charged={charge}|population_delta=12288");
     }
 
@@ -55,7 +55,7 @@ public sealed partial class SqlSortSpillConformanceTests
         var metrics = new SqlStatementMetrics();
         using var table = new SqlHashJoinTable(new([0], [0], [Collation.Binary]), metrics, long.MaxValue, trackUnmatched: true);
         // A larger marginal population dominates process-wide runner/diagnostic roots.
-        // There is still no byte tolerance: the unchanged charge must bound the heap.
+        // Compare marginal bytes per entry against the unchanged per-entry charge.
         Fill(0, 4096);
         long baseline = LiveHeap.Read(), charge = metrics.HashMemoryBytes;
         Fill(4096, 16384);

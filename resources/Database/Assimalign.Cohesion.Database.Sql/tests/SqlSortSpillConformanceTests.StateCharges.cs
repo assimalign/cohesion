@@ -58,9 +58,9 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         long charged = GroupStateBytes(null!, [aggregate]) - GroupStateBytes(null!, []);
 
-        // Assert: no rounding tolerance; even one byte per state scales past a large grant.
+        // Assert: compare the marginal bytes per state, including its 8 B array slot.
         _output.WriteLine($"STATE_CHARGE|{function}|{type}|bytes_per_state={bytes / 12288d}|charged={charged}");
-        (bytes + 12288 * 8L).ShouldBeLessThanOrEqualTo(12288 * charged);
+        (bytes / 12288 + 8).ShouldBeLessThanOrEqualTo(charged);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

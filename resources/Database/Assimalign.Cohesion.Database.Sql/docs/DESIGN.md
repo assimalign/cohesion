@@ -340,7 +340,7 @@ batch entry, populated replay batches and ordered output at 12,000 and 24,000 ro
 include the executor wrapper, accumulator, retained scalar box and group-array slot; MIN/MAX
 also retain the executor's mirrored value. SqlFunctionContext is a ref struct and is not retained.
 Marginal forced-GC tests at two populations bound every spillable native kind and value family,
-key rows and identity maps, replay entries, DISTINCT representatives and ordinal source readers.
+key rows and identity maps, replay entries, DISTINCT representatives and ordinal source readers. They compare marginal bytes per entry, rounded down, with the unchanged per-entry charge; a constant heap artefact smaller than one byte per entry cannot fail the contract. An additional 8 B per replay entry must fail in every measurement round.
 The seeded corpus replays and samples phase changes at 1 and 2 MiB in CI, each in two statement-range shards ([0,128) and [128,256)); at 4 MiB every statement fits under the original charges, so that unsharded case pins fitting equivalence and the absence of a handoff and has nothing to sample. The extended run uses 2,000 statements at 1, 2, 4 and 16 MiB. Near-budget aggregates complete wherever the original charges complete at the same grant and quota. Only replay charges the measured state; an input handoff occurs
 only at the original refusal boundary. Decoded hash records validate their ordinal, key families,
 acceptance flags and state types before use; mismatched tags retain located CK05004.

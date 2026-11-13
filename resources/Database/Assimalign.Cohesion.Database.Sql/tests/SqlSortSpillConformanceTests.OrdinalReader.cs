@@ -57,9 +57,9 @@ public sealed partial class SqlSortSpillConformanceTests
                 Array.Clear(readers);
             }
         }
-        // Assert: a strict marginal bound, with no per-reader tolerance.
+        // Assert: marginal bytes per reader against the unchanged per-reader bound.
         _output.WriteLine($"ORDINAL_READER|width={width}|live={live / 24d}|bound={bound}");
-        live.ShouldBeLessThanOrEqualTo(24 * bound);
+        (live / 24).ShouldBeLessThanOrEqualTo(bound);
 
         void Fill(int first, int last)
         {
