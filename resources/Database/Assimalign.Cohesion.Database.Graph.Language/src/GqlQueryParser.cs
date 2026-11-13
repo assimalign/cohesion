@@ -404,6 +404,8 @@ public sealed partial class GqlQueryParser : QueryParser
             if (value == "ALL" && i > 0 && (IsConjunctionAt(i - 1) || IsWordAt(i - 1, "RETURN") || IsWordAt(i - 1, "WITH") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && (_tokens[i - 2].Type == TokenType.Function || _allowCustomFunctions && _tokens[i - 2].Type == TokenType.Identifier))) { continue; }
             if (patternDepth != 0 && !valuePosition) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
+            if (value == "ALTER" && IsWordAt(i + 1, "CURRENT") && IsWordAt(i + 2, "GRAPH") && IsWordAt(i + 3, "TYPE"))
+            { Unsupported("ALTER CURRENT GRAPH TYPE", token); return; }
 
             bool first = i == start;
             var end = token;

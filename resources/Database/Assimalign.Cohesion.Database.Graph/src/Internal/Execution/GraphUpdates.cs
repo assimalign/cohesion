@@ -63,10 +63,13 @@ internal sealed class GraphUpdates : IDisposable
         return node;
     }
 
-    internal async ValueTask<GraphRelationship> CreateRelationshipAsync(GraphNodeId from, GraphNodeId to, string type,
+    internal async ValueTask<GraphRelationship> CreateRelationshipAsync(GraphNode source, GraphNode target, string type,
         IReadOnlyDictionary<string, object?> properties, CancellationToken token, bool deferRequired = false)
     {
-        var typeId = await _database.ValidateRelationshipAsync(_operation, type, properties, token, deferRequired).ConfigureAwait(false);
+        var typeId = await _database.ValidateRelationshipAsync(_operation, type, properties, token, deferRequired,
+            ((GraphNode)Current(source)!).Labels, ((GraphNode)Current(target)!).Labels).ConfigureAwait(false);
+        var from = source.Id;
+        var to = target.Id;
         _typeSelections.Clear();
         var edge = new GraphRelationship(new GraphRelationshipId((ulong)_database.DataStorage.ReserveTransactionSequence()), type, from, to,
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));
@@ -520,6 +523,7 @@ internal sealed class GraphUpdates : IDisposable
     {
         var touchedNodes = new HashSet<ulong>();
         var touchedRelationships = new HashSet<ulong>();
+        HashSet<ulong>? labelChanges = null;
         foreach (var binding in bindings)
         {
             token.ThrowIfCancellationRequested();
@@ -563,6 +567,7 @@ internal sealed class GraphUpdates : IDisposable
                     var replacement = (GraphNode)update(value);
                     if (!node.Labels.SequenceEqual(replacement.Labels) || !Identical(node.Properties, replacement.Properties))
                     {
+                        if (!node.Labels.SequenceEqual(replacement.Labels)) { (labelChanges ??= []).Add(node.Id.Value); }
                         _changed.Add((true, node.Id.Value));
                         RememberNode(replacement, token);
                         touchedNodes.Add(node.Id.Value);
@@ -588,7 +593,8 @@ internal sealed class GraphUpdates : IDisposable
         foreach (ulong id in touchedNodes)
         { await _database.ValidateNodeAsync(_operation, _nodes[id].Labels, _nodes[id].Properties, token).ConfigureAwait(false); }
         foreach (ulong id in touchedRelationships)
-        { await _database.ValidateRelationshipAsync(_operation, _relationships[id].Type, _relationships[id].Properties, token).ConfigureAwait(false); }
+        { await ValidateRelationshipAsync(_relationships[id], token).ConfigureAwait(false); }
+        if (labelChanges is not null) { await ValidateLabelEndpointsAsync(labelChanges, token).ConfigureAwait(false); }
         // Shared composites are traversed once per stage and copied only along changed branches.
         var refreshed = new Dictionary<object, object?>(ReferenceEqualityComparer.Instance);
         foreach (var binding in bindings)
@@ -598,6 +604,67 @@ internal sealed class GraphUpdates : IDisposable
             { binding[name] = Refresh(binding[name], touchedNodes, touchedRelationships, refreshed); }
             bindingMemory?.RetainValue(binding, token);
         }
+    }
+
+    internal ValueTask<Guid> ValidateRelationshipAsync(GraphRelationship edge, CancellationToken token)
+    {
+        var type = _database.Catalog.GetEdgeTypeForWrite(edge.Type, _operation.Context.Snapshot, _database.LatestSnapshot(_operation.Context));
+        if (type is null) { return _database.ValidateRelationshipCoreAsync(_operation, edge.Type, edge.Properties, token, null); }
+        return ValidateTypedRelationshipAsync(edge, type, token);
+    }
+
+    private async ValueTask<Guid> ValidateTypedRelationshipAsync(GraphRelationship edge, GraphEdgeTypeDeclaration type, CancellationToken token)
+    {
+        using var memory = new GraphMemoryOwner(_operation.EnsureQueryBudget().Memory);
+        var source = FindNode(edge.From.Value);
+        var target = edge.From == edge.To ? source : FindNode(edge.To.Value);
+        if (source is { } from) { memory.RetainValue(GraphDatabase.Materialize(from), token); }
+        if (target is { } to && edge.From != edge.To) { memory.RetainValue(GraphDatabase.Materialize(to), token); }
+        return await _database.ValidateRelationshipCoreAsync(_operation, edge.Type, edge.Properties, token, type, false, source?.Labels ?? [], target?.Labels ?? []).ConfigureAwait(false);
+    }
+
+    private async ValueTask ValidateLabelEndpointsAsync(HashSet<ulong> changed, CancellationToken token)
+    {
+        var budget = _operation.EnsureQueryBudget();
+        using var memory = new GraphMemoryOwner(budget.Memory);
+        var latest = _database.LatestSnapshot(_operation.Context);
+        var types = _database.Catalog.GetEdgeTypesForWrite(_operation.Context.Snapshot, latest, memory.Add);
+        foreach (var type in types)
+        {
+            token.ThrowIfCancellationRequested();
+            var metadata = _database.Catalog.FindRelationshipType(type.RelationshipType, latest);
+            if (metadata is null) { continue; }
+            foreach (ulong id in changed)
+            {
+                // Seek only declared types, without decoding untyped incident relationships.
+                await foreach (var stored in _database.Store.StreamIncidentRangeAsync(id, GraphIncidentDirection.Both, [metadata.Value.Id], latest,
+                    _ => budget.Consume(), token).ConfigureAwait(false))
+                {
+                    Validate(_relationships.TryGetValue(stored.Id, out var current)
+                        ? new StoredGraphRelationship(current.Id.Value, current.From.Value, current.To.Value, current.Type, current.Properties) : stored);
+                }
+                if (_createdByType.TryGetValue(type.RelationshipType, out var created))
+                {
+                    foreach (ulong edgeId in created)
+                    {
+                        budget.Consume();
+                        if (FindRelationship(edgeId) is { } edge && (edge.SourceId == id || edge.TargetId == id)) { Validate(edge); }
+                    }
+                }
+            }
+            void Validate(StoredGraphRelationship edge)
+            {
+                using var values = new GraphMemoryOwner(budget.Memory);
+                values.RetainValue(GraphDatabase.Materialize(edge), token);
+                var source = Endpoint(edge.SourceId);
+                var target = edge.SourceId == edge.TargetId ? source : Endpoint(edge.TargetId);
+                if (source is { } from) { values.RetainValue(GraphDatabase.Materialize(from), token); }
+                if (target is { } to && edge.SourceId != edge.TargetId) { values.RetainValue(GraphDatabase.Materialize(to), token); }
+                GraphDatabase.ValidateEdgeType(type, source?.Labels ?? [], target?.Labels ?? [], edge.Properties, false, false);
+            }
+        }
+        StoredGraphNode? Endpoint(ulong id) => _nodes.TryGetValue(id, out var node)
+            ? new StoredGraphNode(id, node.Labels, node.Properties) : _database.Store.FindNode(id, latest);
     }
 
     // MERGE applies a branch per input row. Refresh the complete output table afterward,
@@ -637,7 +704,12 @@ internal sealed class GraphUpdates : IDisposable
         foreach (var edge in _relationships.Values)
         {
             if (IsCreated(false, edge.Id.Value))
-            { await _database.Store.CreateRelationshipAsync(new StoredGraphRelationship(edge.Id.Value, edge.From.Value, edge.To.Value, edge.Type, edge.Properties), _createdTypes[edge.Id.Value], _operation.Context, token).ConfigureAwait(false); }
+            {
+                var type = _database.Catalog.GetEdgeTypeForWrite(edge.Type, _operation.Context.Snapshot, _database.LatestSnapshot(_operation.Context));
+                Action<StoredGraphNode, StoredGraphNode>? validate = type is null ? null : GraphDatabase.EdgeEndpointValidator(type, edge.Properties);
+                await _database.Store.CreateRelationshipAsync(new StoredGraphRelationship(edge.Id.Value, edge.From.Value, edge.To.Value, edge.Type, edge.Properties),
+                    _createdTypes[edge.Id.Value], _operation.Context, token, validate).ConfigureAwait(false);
+            }
             else
             { await _database.Store.UpdateRelationshipAsync(edge.Id.Value, edge.Properties, _operation.Context, token).ConfigureAwait(false); }
             if (_changed.Contains((false, edge.Id.Value)) && !_created.Contains((false, edge.Id.Value))) { count++; }

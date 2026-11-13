@@ -248,10 +248,16 @@ that membership; deleting a node is permitted. Missing implied labels use CG0301
 type and NOT NULL violations retain CG03003. Snapshot writes
 compare the selected node-type record against latest visibility, including an absent old rule;
 a stale writer reports CG04007. The existing database writer lock serializes DDL and data through
-commit or rollback. Edge properties and endpoints are persisted declarations only in GQ-T1;
-their enforcement, text ALTER and SHOW CURRENT GRAPH TYPE are GQ-T2. GQ-T2 must add the
-CG03009 cross-check against independent relationship keys/constraints, edge RequiresValidation
-selection, and the write-time selected-record reference check. Closedness is GQ-T3.
+commit or rollback. Edge properties and endpoints are enforced in GQ-T2. Selected edge declarations compare their
+physical references at snapshot and latest visibility, as node types do. Staged relationship
+creation passes the already loaded endpoint nodes into validation. Typed creation validates
+endpoints in an internal store callback over the endpoint reads already needed for existence;
+no public storage seam is added. SET/REMOVE label changes seek declared edge types' incident
+ranges and overlay-created edges, then validate final endpoint labels. Untyped edges add no
+endpoint read or expansion work. Missing endpoint membership is CG03013, distinct from CG03010
+for existing data during schema validation; property violations retain CG03003. Independent
+relationship key/constraint types are checked in both publication orders with CG03009. Closedness
+is GQ-T3.
 
 Before publication, structural comparison by identifying label selects only new or strengthened
 node declarations for owner-posting validation under latest visibility and the writer lock.
@@ -259,7 +265,7 @@ Unchanged declarations, removed elements, nullable-property relaxations, removed
 and removed implied labels scan no members for open types only. GQ-T3 closedness makes removal a
 tightening and must extend validation selection accordingly. Scalar declarations currently use exact types after
 CLR normalization, without scalar subtyping; changing the scalar type requires validation.
-Edge-only ALTER scans nothing in GQ-T1. Skipping these scans preserves deployment availability
+New or strengthened edge declarations stream relationship-type postings and validate endpoints and properties; unchanged or relaxed declarations scan no edges. Skipping these scans preserves deployment availability
 when previously validated typed owners have grown beyond the work budget, and avoids holding
 the writer lock over unaffected postings. Every node write continues to enforce the published
 rule. A violation stops at the first node
@@ -332,11 +338,12 @@ fragment replacement/default rules above are Cohesion's explicit API contract fo
 
 | Code | Graph-type condition |
 | --- | --- |
-| CG03003 | A node write violates a property-type or NOT NULL rule, or a declared token is still in use |
-| CG03009 | A node declaration conflicts with an independent property-type constraint or declared key type |
+| CG03003 | A node or edge write violates a property-type or NOT NULL rule, or a declared token is still in use |
+| CG03009 | A node or edge declaration conflicts with an independent property-type constraint or declared key type |
 | CG03010 | Existing member data violates a proposed graph type |
 | CG03011 | ADD/ALTER/DROP names or edge node-type references are invalid, or identifying/implied labels overlap |
 | CG03012 | A node write omits a required implied label |
+| CG03013 | A relationship or endpoint-label write violates declared source/target membership |
 | CG04025 | A schema mutation is attempted inside an explicit transaction |
 | CG05004 / CG05020 | Schema work / retained-memory budget is exhausted |
 | CG06019 | A catalog record version differs from v4 |
@@ -2616,6 +2623,7 @@ are GUIDs, and `IS_REQUIRED` and `IS_UNIQUE` are Booleans.
 | `SHOW RELATIONSHIP TYPES` | `DATABASE_NAME`, `RELATIONSHIP_TYPE_ID`, `RELATIONSHIP_TYPE_NAME` |
 | `SHOW PROPERTY KEYS` | `DATABASE_NAME`, `DEFINITION_TYPE`, `DEFINITION_ID`, `DEFINITION_NAME`, `PROPERTY_KEY`, `DATA_TYPE`, `IS_REQUIRED` |
 | `SHOW INDEXES` | `DATABASE_NAME`, `LABEL_ID`, `LABEL_NAME`, `INDEX_NAME`, `PROPERTY_KEY`, `IS_UNIQUE` |
+| `SHOW CURRENT GRAPH TYPE` | `DATABASE_NAME`, `MODE`, `DEFINITION` (all STRING, non-nullable; OPEN and canonical SET DDL; no row for an absent type) |
 | `SHOW OBJECT OWNERSHIP` | `DATABASE_NAME`, `DEFINITION_TYPE`, `DEFINITION_ID`, `DEFINITION_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` |
 
 `DEFINITION_TYPE` distinguishes `LABEL` from `RELATIONSHIP TYPE`, including when both have the same
@@ -3726,6 +3734,8 @@ The payload begins at byte 16:
 | Following name, kind 7 | int32, strings, properties | Implied-label count and labels, then property declarations |
 | Following name, kind 8 | string, string, properties | Source and target node identifying labels, then property declarations |
 | Properties in kinds 7/8 | int32, repeated (string, byte, byte) | Property count, then name, DatabaseType and NOT NULL flag (0 or 1) |
+
+GQ-T2's text commands and endpoint enforcement reuse these v4 fields without a format bump.
 
 All fixed-width numeric values are little-endian. Strings use a signed 32-bit little-endian
 UTF-8 byte length followed by exactly that many strict UTF-8 bytes. Length -1 represents

@@ -401,7 +401,9 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.Show] =
             [
                 new("SHOW LABELS", [["audit", _personLabelId, "Person"], ["audit", _robotLabelId, "Robot"]]),
+                new("SHOW CURRENT GRAPH TYPE", []),
             ],
+            [GqlClauses.AlterCurrentGraphType] = [Mutation("ALTER CURRENT GRAPH TYPE SET {(:Fresh => {p :: STRING})}", 1)],
             [GqlClauses.CreateTextIndex] = [Mutation("CREATE TEXT INDEX ix FOR (n:Fresh) ON (n.p)", 1)],
             [GqlClauses.CreateIndex] = [Mutation("CREATE INDEX ix FOR (n:Fresh) ON (n.p)", 1)],
             [GqlClauses.DropIndex] = [Mutation("DROP INDEX ix IF EXISTS", 0)],
@@ -616,7 +618,8 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Intersect or GqlClauses.IntersectDistinct => query.Composite is { Operator: GqlCompositeOperator.Intersect },
         GqlClauses.IntersectAll => query.Composite is { Operator: GqlCompositeOperator.IntersectAll },
         GqlClauses.Otherwise => query.Composite is { Operator: GqlCompositeOperator.Otherwise },
-        GqlClauses.CreateIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: false },
+        GqlClauses.AlterCurrentGraphType => query.SchemaCommand?.GraphType is not null,
+        GqlClauses.CreateIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: false, GraphType: null },
         GqlClauses.CreateTextIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: true },
         GqlClauses.DropIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: true },
         GqlClauses.CreateConstraint => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Constraint, Drop: false },

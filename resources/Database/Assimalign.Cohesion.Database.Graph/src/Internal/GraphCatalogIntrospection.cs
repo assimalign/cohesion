@@ -32,6 +32,34 @@ internal static class GraphCatalogIntrospection
         var snapshot = operation.Context.Snapshot;
         var catalog = database.Catalog;
         string name = database.Name.ToString();
+        if (surface == GqlCatalogSurface.CurrentGraphType)
+        {
+            using var memory = new GraphMemoryOwner(operation.QueryBudget!.Memory);
+            var declaration = catalog.GetGraphType(snapshot, memory.Add);
+            if (declaration is not null)
+            {
+                memory.Add(1024L + declaration.NodeTypes.Sum(node => 512L + node.ImpliedLabels.Count * 64L + node.Properties.Count * 256L) +
+                    declaration.EdgeTypes.Sum(edge => 512L + edge.Properties.Count * 256L));
+                foreach (var node in declaration.NodeTypes) { token.ThrowIfCancellationRequested(); operation.QueryBudget.Consume(); }
+                foreach (var edge in declaration.EdgeTypes) { token.ThrowIfCancellationRequested(); operation.QueryBudget.Consume(); }
+                var command = new GqlGraphTypeCommand
+                {
+                    Operation = GqlGraphTypeOperation.Set,
+                    Nodes = declaration.NodeTypes.Select(node => new GqlGraphNodeType(node.IdentifyingLabel, node.ImpliedLabels,
+                        node.Properties.Select(Property).ToArray())).ToArray(),
+                    Edges = declaration.EdgeTypes.Select(edge => new GqlGraphEdgeType(edge.RelationshipType, edge.SourceNodeType, edge.TargetNodeType,
+                        edge.Properties.Select(Property).ToArray())).ToArray(),
+                };
+                rows.Add([name, "OPEN", command.ToString()]);
+            }
+            return new GraphQueryResult(columns, rows);
+            GqlGraphPropertyType Property(GraphPropertyTypeDeclaration property)
+            {
+                token.ThrowIfCancellationRequested(); operation.QueryBudget.Consume();
+                return new(property.Name,
+                Enum.Parse<GqlSchemaPropertyType>(property.Type.ToString()), property.Required);
+            }
+        }
         foreach (var label in catalog.GetLabels(snapshot))
         {
             token.ThrowIfCancellationRequested();
@@ -113,6 +141,8 @@ internal static class GraphCatalogIntrospection
                 [("DATABASE_NAME", DatabaseType.String), ("DEFINITION_TYPE", DatabaseType.String), ("DEFINITION_ID", DatabaseType.Guid),
                  ("DEFINITION_NAME", DatabaseType.String), ("CONSTRAINT_NAME", DatabaseType.String), ("PROPERTY_KEY", DatabaseType.String),
                  ("DATA_TYPE", DatabaseType.String), ("IS_REQUIRED", DatabaseType.Boolean)],
+            GqlCatalogSurface.CurrentGraphType =>
+                [("DATABASE_NAME", DatabaseType.String), ("MODE", DatabaseType.String), ("DEFINITION", DatabaseType.String)],
             GqlCatalogSurface.ObjectOwnership =>
                 [("DATABASE_NAME", DatabaseType.String), ("DEFINITION_TYPE", DatabaseType.String), ("DEFINITION_ID", DatabaseType.Guid),
                  ("DEFINITION_NAME", DatabaseType.String), ("OBJECT_TYPE", DatabaseType.String), ("OBJECT_NAME", DatabaseType.String),

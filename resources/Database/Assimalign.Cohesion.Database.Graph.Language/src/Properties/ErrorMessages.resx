@@ -16,6 +16,12 @@
   <data name="GqlQueryParserExpectVoid" xml:space="preserve"><value>Expected {0}.</value></data>
   <data name="SchemaVariableMismatch" xml:space="preserve"><value>The schema property must reference the variable declared by FOR.</value></data>
   <data name="SchemaIndexParentheses" xml:space="preserve"><value>ON requires a parenthesized property reference.</value></data>
+  <data name="GraphTypeOperationExpected" xml:space="preserve"><value>Expected SET, ADD, ALTER or DROP for the current graph type.</value></data>
+  <data name="GraphTypeEndpointExpected" xml:space="preserve"><value>An edge endpoint must reference a node type without an inline declaration.</value></data>
+  <data name="GraphTypeNodeExpected" xml:space="preserve"><value>A node type requires an identifying label followed by IMPLIES or =&gt;.</value></data>
+  <data name="GraphTypeImpliesExpected" xml:space="preserve"><value>Expected IMPLIES or =&gt; after the identifying name.</value></data>
+  <data name="GraphTypeDuplicate" xml:space="preserve"><value>Graph type declarations contain repeated names or invalid implied labels.</value></data>
+  <data name="GraphTypeReferenceMissing" xml:space="preserve"><value>A graph type endpoint alias does not reference a node declaration in this body.</value></data>
   <data name="GqlQueryParserIdentifierVoid" xml:space="preserve"><value>An identifier cannot be empty.</value></data>
   <data name="GqlQueryParserIdentifierVoid2" xml:space="preserve"><value>Expected an identifier.</value></data>
   <data name="GqlQueryParserHasStackToNestVoid" xml:space="preserve"><value>The statement nests deeper than the stack available to the parser on this thread; reduce the nesting of its parentheses or run it on a thread with a larger stack.</value></data>

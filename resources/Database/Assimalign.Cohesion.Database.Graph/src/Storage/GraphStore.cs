@@ -303,8 +303,12 @@ public sealed partial class GraphStore
     /// <exception cref="ArgumentOutOfRangeException">The identity is zero.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="GraphElementTooLargeException">The type and properties exceed one graph record.</exception>
-    public async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(StoredGraphRelationship relationship, Guid typeId,
+    public ValueTask<StoredGraphRelationship> CreateRelationshipAsync(StoredGraphRelationship relationship, Guid typeId,
         TransactionContext context, CancellationToken cancellationToken = default)
+        => CreateRelationshipAsync(relationship, typeId, context, cancellationToken, null);
+
+    internal async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(StoredGraphRelationship relationship, Guid typeId,
+        TransactionContext context, CancellationToken cancellationToken, Action<StoredGraphNode, StoredGraphNode>? validateEndpoints)
     {
         if (typeId == Guid.Empty) { throw new ArgumentException(ErrorMessages.RelationshipTypeIdInvalid, nameof(typeId)); }
         ArgumentException.ThrowIfNullOrWhiteSpace(relationship.Type);
@@ -317,10 +321,13 @@ public sealed partial class GraphStore
         if (FindNode(sourceId, latest) is null && FindNode(sourceId, context.Snapshot) is not null ||
             FindNode(targetId, latest) is null && FindNode(targetId, context.Snapshot) is not null)
         { throw new TransactionAbortedException(ErrorMessages.EndpointDeleted); }
-        if (FindNode(sourceId, latest) is null || FindNode(targetId, latest) is null)
+        var source = FindNode(sourceId, latest);
+        var target = FindNode(targetId, latest);
+        if (source is null || target is null)
         {
             throw new InvalidOperationException(ErrorMessages.StoreCreateRelationshipAsyncFailure);
         }
+        validateEndpoints?.Invoke(source.Value, target.Value);
         ulong id = relationship.Id;
         EnsureNew(2, id);
         byte[] bytes = await EncodeAsync(new GraphRecord(2, id, Relationship: relationship, TypeId: typeId), context.Sequence).ConfigureAwait(false);

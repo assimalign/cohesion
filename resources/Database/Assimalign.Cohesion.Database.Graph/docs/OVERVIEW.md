@@ -58,9 +58,10 @@ Catalog v4 refuses earlier catalogs without writing; entity format remains 5. Se
 enforcement, database-wide node-property index names and independently named type/existence
 constraints. Named constraints validate existing data and share enforcement with property metadata;
 index/constraint drops preserve snapshot visibility. Its immutable GraphType model supports
-typed set/add/alter/drop/get and open node rules for implied labels, scalar types and NOT NULL.
-New types validate existing members before publication; edge enforcement and text graph-type
-DDL follow in GQ-T2. Catalog v4 refuses earlier catalogs. `AddGraph(name, graph => ...)` captures
+typed set/add/alter/drop/get, text ALTER CURRENT GRAPH TYPE, canonical SHOW CURRENT GRAPH TYPE,
+and open node/edge rules for implied labels, scalar types, NOT NULL and directed endpoints.
+New or strengthened types validate existing members before publication; failed changes preserve
+the prior type. Catalog v4 refuses earlier catalogs. `AddGraph(name, graph => ...)` captures
 construction through `IDatabaseApplicationBuilder` and returns that builder. At Build the callback
 configures the sealed `GraphDatabaseEngineBuilder`: its `Options` (copied at build), the databases
 it declares (`AddDatabase(name)`: opened or created by the build, never dropped while declared), a

@@ -13,6 +13,8 @@ public enum GqlCatalogSurface
     Indexes,
     /// <summary>Named type and existence constraints.</summary>
     Constraints,
+    /// <summary>The canonical database-scoped open graph type.</summary>
+    CurrentGraphType,
     /// <summary>The authority governing each definition and its child metadata.</summary>
     ObjectOwnership,
 }

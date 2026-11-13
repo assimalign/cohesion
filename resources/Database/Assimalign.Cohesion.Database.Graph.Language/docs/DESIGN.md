@@ -125,11 +125,24 @@ label scan after exact and relationship candidates compete. DIALECT records the 
 
 ## Schema DDL (#1738, GQ-D2)
 
-GQ-T1 (#1806) adds a typed, open GraphSchema API in the engine. Catalog v4 retains its v3 declaration kinds. Its node
-rules apply to existing INSERT/CREATE, MERGE and SET/REMOVE syntax; no parser, keyword,
-SHOW-column or wire contract changes here. GraphTypeTests supplies the engine conformance
-matrix, and the existing graph-type text refusal corpus stays in force. GQ-T2 supplies text
-ALTER and edge enforcement; GQ-T3 supplies opt-in closedness. See Graph DESIGN and DIALECT.
+GQ-T2 (#1806) adds ALTER CURRENT GRAPH TYPE and SHOW CURRENT GRAPH TYPE. GqlSchemaCommand
+holds a GqlGraphTypeCommand in the existing query body slot, so ordinary query allocation size is
+unchanged. Its sealed node, edge and property records describe semantic fields; rendering never
+uses source text. The parser uses flat loops for type bodies and resolves optional node aliases
+after the complete body, without nesting recursion. Unsupported constraint definitions, inline
+KEY/UNIQUE and CLOSED/OPEN modes return one CK00001. The ALTER capability is advertised only as
+ALTER CURRENT GRAPH TYPE; other ALTER positions retain the unsupported-vocabulary entry.
+The clause corpus grows by exactly one; no lexer keywords are added. Empty node types follow
+GQ-T1's model contract, deliberately broader than Neo4j's nonempty-node semantic check.
+GraphTypeDdlTests, GqlGraphTypeParserTests and the InMemory/TCP GraphTypeWireTests pin execution,
+canonical reparse, refusal and availability. DIALECT defines SHOW columns and defaults. Catalog
+v4 already holds all declarations; this run changes no persisted or wire format. Closedness is GQ-T3.
+
+Reference grammar: local Neo4j Cypher25Parser.g4:1280-1410 under
+C:/Source/repos/neo4j/neo4j/community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/.
+GraphType.scala:419-433 under community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/
+refuses independent constraint definitions during ALTER and DROP. Cohesion keeps those specifications
+unsupported in every graph-type operation; standalone CREATE/DROP CONSTRAINT remains available.
 
 Read-only unknown-property warnings (#1249, GQ-D3) are engine diagnostics, using the existing
 property/member AST and source spans. The parser corpus admits the same syntax independently of
@@ -300,7 +313,8 @@ The function table advertises the aggregates and core scalar functions listed be
 | `REMOVE` | Property keys or node labels with IS or colon | Removes keys/labels, ignoring OPTIONAL NULL targets |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
-| `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, `CONSTRAINTS`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
+| `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, `CONSTRAINTS`, `CURRENT GRAPH TYPE`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
+| `ALTER CURRENT GRAPH TYPE` | SET, ADD, ALTER or DROP with a flat type body | Validates and atomically publishes the database's open node and edge declarations |
 | `CREATE/DROP INDEX` | Standalone Neo4j-style single node-property index commands, optional names and conditionals | Transactional discovery and physical/catalog coordination |
 | `CREATE/DROP CONSTRAINT` | Named type/existence rules for one node or relationship property | Independent rules; validates existing owner data |
 | `CREATE/DROP LABEL` | Cohesion definition commands with optional conditionals | Creates an empty definition or drops an unused one |

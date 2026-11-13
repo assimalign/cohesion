@@ -8,6 +8,8 @@ public static class GqlClauses
 {
     /// <summary>The Cohesion database-scoped catalog introspection extension.</summary>
     public const string Show = "SHOW";
+    /// <summary>Alters the database-scoped open graph type.</summary>
+    public const string AlterCurrentGraphType = "ALTER CURRENT GRAPH TYPE";
 
     /// <summary>Create a named undo scope.</summary>
     public const string Savepoint = "SAVEPOINT";

@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
-    private bool IsSchemaStart() => (Is("CREATE") || Is("DROP")) &&
+    private bool IsSchemaStart() => Is("ALTER") && IsWordAt(_position + 1, "CURRENT") && IsWordAt(_position + 2, "GRAPH") && IsWordAt(_position + 3, "TYPE") || (Is("CREATE") || Is("DROP")) &&
         (IsWordAt(_position + 1, "INDEX") || Is("CREATE") && IsWordAt(_position + 1, "TEXT") || IsWordAt(_position + 1, "CONSTRAINT") ||
          IsWordAt(_position + 1, "LABEL") || IsWordAt(_position + 1, "RELATIONSHIP") ||
          IsWordAt(_position + 1, "UNIQUE") || IsWordAt(_position + 1, "CLOSED") ||
@@ -13,6 +13,7 @@ public sealed partial class GqlQueryParser
 
     private GqlQueryExpression ParseSchema()
     {
+        if (Is("ALTER")) { return ParseGraphType(); }
         var start = Current;
         bool drop = Take("DROP");
         if (!drop) { Expect("CREATE"); }

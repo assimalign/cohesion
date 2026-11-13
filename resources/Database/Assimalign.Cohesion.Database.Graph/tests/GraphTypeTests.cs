@@ -216,8 +216,7 @@ public sealed class GraphTypeTests
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         (await GraphCatalogIntrospectionTests.Rows(session, "MATCH (n:Person) RETURN n.name")).ShouldHaveSingleItem()[0].ShouldBe("A");
         await session.ExecuteAsync("INSERT (a:Undeclared {unknown:TRUE})-[:UNDECLARED {other:1}]->(a)", cancellationToken: CancellationToken.None);
-        // Edge enforcement is deliberately GQ-T2; its model already round-trips.
-        await session.ExecuteAsync("INSERT (a)-[:VISITS]->(a)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:Person:Entity {name:'B'})-[:VISITS {count:1}]->(:Place)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("MATCH (n:Person) DETACH DELETE n", cancellationToken: CancellationToken.None);
     }
 

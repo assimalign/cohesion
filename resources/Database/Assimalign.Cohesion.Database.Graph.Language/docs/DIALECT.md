@@ -54,18 +54,36 @@ returns declared metadata only; SHOW PROPERTY KEYS continues to report effective
 
 ## Schema DDL (#1738, GQ-D2; #1249)
 
-The typed GraphSchema graph-type API (#1806, GQ-T1) can set, add, alter, drop and read the
-database's open type. A node with an identifying label must already have each implied label
-and satisfy declared scalar types and NOT NULL; other labels, relationship types and
-properties remain writable. These rules apply to INSERT/CREATE, MERGE final state, SET and
-REMOVE, including typed creates. Missing implied labels use CG03012; property violations retain
-CG03003. Proposed types validate existing
-members through owner postings and refuse with CG03010 without replacing the prior type.
-Budgets remain CG05004/CG05020, and explicit-transaction DDL remains CG04025. GraphTypeTests
-is the typed-schema/write-path conformance corpus. Edge declarations persist but do not yet
-enforce properties or endpoints. Text ALTER CURRENT GRAPH TYPE and SHOW CURRENT GRAPH TYPE
-remain outside this run; their parser refusals are unchanged. Catalog v4 refuses v3 before
-any write (CG06019), while graph entity format remains 5. Closed mode remains a later opt-in.
+`ALTER CURRENT GRAPH TYPE (SET | ADD | ALTER | DROP) { ... }` operates on the database's
+open type (#1806, GQ-T2). Node declarations are `(:Label => :Implied & Other {p :: STRING NOT NULL})`;
+implied labels and property lists may be empty. Edge declarations are `(:Source)-[:TYPE => {p :: INT64}]->(:Target)`.
+`IMPLIES` aliases `=>`; `TYPED` or an omitted type separator aliases `::`. Optional node variables
+can name references within the same body, including forward references. Canonical rendering resolves
+aliases, quotes every identifier and orders elements, implied labels and properties ordinally.
+SET replaces the complete type; ADD requires new names; ALTER replaces complete existing declarations
+and cannot introduce element names; unmentioned types survive. DROP selects identifying names,
+using `(:Label =>)` or `()-[:TYPE =>]->()`; dangling endpoint references refuse with CG03011.
+Empty ADD, ALTER and DROP preserve the current state; SET {} sets an empty type. Every successful
+text graph-type command reports affected count 1. An absent type differs from an empty set type.
+
+Nodes with an identifying label require each implied label and declared scalar property rules.
+Declared edges require source and target identifying labels and declared property rules on CREATE,
+INSERT, both MERGE branches, and SET/REMOVE. A label removal that breaks an incident declared edge
+refuses with CG03013. Missing node implied labels use CG03012; property violations retain CG03003.
+Other labels, relationship types and properties remain writable. MERGE ON CREATE can complete
+required labels and properties before final validation. Proposed SET/ADD/ALTER validates only new or
+strengthened members through owner postings under CG05004/CG05020; violations use CG03010 and leave
+the previous type available. Independent constraints must agree with declared scalar types (CG03009)
+and cannot be altered through a graph-type command. Inline IS KEY / IS UNIQUE and graph-type
+constraint specifications remain one CK00001. CLOSED/OPEN mode clauses and ISO CREATE [CLOSED]
+GRAPH TYPE also remain CK00001 for the later opt-in closed-mode run.
+
+`SHOW CURRENT GRAPH TYPE` returns DATABASE_NAME (STRING), MODE (STRING, OPEN), and DEFINITION
+(STRING, canonical complete ALTER CURRENT GRAPH TYPE SET DDL). All columns are non-nullable.
+An absent type returns no rows; a set empty type returns one row with SET {}. The definition reparses
+to the same type; SHOW uses existing row framing on InMemory and TCP. Explicit-transaction DDL
+remains CG04025. GraphTypeDdlTests, GraphTypeWireTests and GqlGraphTypeParserTests extend the
+conformance corpus. Catalog v4 and entity format 5 are unchanged; no format bump is needed.
 
 Standalone commands run on the session's database:
 
