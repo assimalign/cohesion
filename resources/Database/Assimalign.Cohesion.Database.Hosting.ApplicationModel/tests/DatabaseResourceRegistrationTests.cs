@@ -78,7 +78,7 @@ public sealed class DatabaseResourceRegistrationTests
         IApplicationInstance instance = service.ControlPlane.Instance;
         instance.Provider.ShouldBe((ProviderName)"Database");
         instance.Name.ShouldBe((ResourceName)"orders-db");
-        instance.HealthContributors.ShouldBeEmpty();
+        instance.HealthContributors.ShouldHaveSingleItem().Name.ShouldBe("database.accepting");
         instance.Actions.ShouldHaveSingleItem().Name.ShouldBe((ActionName)"greeting");
     }
 

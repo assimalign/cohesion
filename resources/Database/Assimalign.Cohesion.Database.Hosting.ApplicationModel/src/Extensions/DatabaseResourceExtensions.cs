@@ -81,7 +81,7 @@ public static class DatabaseResourceExtensions
             DeploymentId? deployment = options.Deployment;
             services.AddSingleton<IHostService>(provider => ApplicationInstanceService.Create(
                 ApplicationInstanceControlPlane.Create(
-                    new DatabaseResource(name, deployment, options.CreateActions(provider)),
+                    new DatabaseResource(name, deployment, options.CreateActions(provider), provider.GetRequiredService<DatabaseApplicationContext>()),
                     serializer),
                 client));
 

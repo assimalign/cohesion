@@ -12,7 +12,11 @@ without an explicit listener consumes its named runtime endpoint when COHESION_G
 blob); explicit Listen wins. Managed HTTP health binds the platform's plain http endpoint at a
 bindable host, reporting and skipping unsuitable assignments. Unmanaged
 applications opt in with builder.AddHealthEndpoint(uri). The in-process platform still allocates
-only http, so wire addresses remain explicit there.
+only http, so wire addresses remain explicit there. Managed instances expose health contributors
+for each engine and database, plus database.accepting readiness, from Hosting's existing health
+observations. Offline databases are Unhealthy; provisioning and held schemas are Degraded with
+their existing refusal details. Contributors are usable directly today; gateway consumption and
+readiness separate from publication remain ApplicationModel follow-ups (E-AM2).
 
 ## Storage corruption diagnostics (#1160)
 

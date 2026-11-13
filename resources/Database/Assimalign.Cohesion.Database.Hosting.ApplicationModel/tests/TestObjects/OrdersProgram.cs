@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ApplicationModel.Hosting.InProcess;
@@ -16,16 +17,19 @@ internal sealed class OrdersProgram
 
     private readonly string _path;
     private readonly int _port;
+    private readonly bool _managed;
 
-    public OrdersProgram(string path, int port)
+    public OrdersProgram(string path, int port, bool managed = true)
     {
         _path = path;
         _port = port;
+        _managed = managed;
     }
 
     public TaskCompletionSource<DatabaseApplication> Created { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public bool Stopped { get; private set; }
     public Task Completion { get; private set; } = Task.CompletedTask;
+    public int AddedRegistrations { get; private set; }
 
     public Task MainAsync(string[] args) => Completion = RunAsync(args);
 
@@ -33,10 +37,15 @@ internal sealed class OrdersProgram
     {
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
         RunningResource.ConfigureSql(builder, _path, _port);
-        builder.Services.AddResource(Name, resource => resource
-            .UseInProcess()
-            .AddAction(new GreetingAction("hello"), GreetingJsonContext.Default)
-            .AddAction(new GreetingAction(name: "second"), GreetingJsonContext.Default));
+        int registrations = builder.Services.Container.Count();
+        builder.Services.AddResource(Name, resource =>
+        {
+            resource.UseInProcess()
+                .AddAction(new GreetingAction("hello"), GreetingJsonContext.Default)
+                .AddAction(new GreetingAction(name: "second"), GreetingJsonContext.Default);
+            if (!_managed) { resource.Platform = null; }
+        });
+        AddedRegistrations = builder.Services.Container.Count() - registrations;
 
         await using (DatabaseApplication application = builder.Build())
         {

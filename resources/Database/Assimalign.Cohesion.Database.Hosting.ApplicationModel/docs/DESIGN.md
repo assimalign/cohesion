@@ -45,7 +45,7 @@ and creating all AddService products. It creates these pieces:
 | Piece | Role |
 | --- | --- |
 | `DatabaseResourceOptions` | A sealed leaf of `ApplicationInstanceOptions`, adding only `Name`. The base supplies platform selection, deployment, AddAction, JsonContexts and CreateActions. |
-| `DatabaseResource` (internal) | An `IApplicationInstance` with provider `Database`, the resource name, a new instance key, the environment's deployment, exactly the added actions in order, and no health contributors. |
+| `DatabaseResource` (internal) | An `IApplicationInstance` with provider `Database`, the resource name, a new instance key, the environment's deployment, exactly the added actions in order, and health contributors mapped from Hosting's observations. |
 | `ApplicationInstanceControlPlane` | The actions and their state, with JSON content resolved through the added actions' source-generated contexts. Duplicate action names fail composition. |
 | `ApplicationInstanceService` | Publishes and restores in StartingAsync, opens the selected platform client in StartAsync, and closes it and stops lease renewal in StopAsync. |
 
@@ -102,13 +102,40 @@ D3): a write is restored on every instance, and database data and principals liv
 instance's durable catalog. Only the application's added actions are exposed. Database management
 actions need an owner design follow-up rather than replaying catalog mutations as snapshots.
 
-**D4 — No health contributors yet.** The instance reports an empty collection. No gateway consumes
-instance health yet (ApplicationModel.Hosting open question 2; Gateway G18). Database.Hosting's
-existing health/admin behavior stays separate. The owner will decide aggregation and readiness.
+**D4 — Health contributors use Hosting's observations (#1790, EN-A2).** The instance exposes one
+IApplicationInstanceHealthContributor per engine and database, followed by database.accepting.
+It resolves the application's reserved DatabaseApplicationContext singleton once. Each check maps
+GetHealthAsync's transport-neutral observation directly to ApplicationInstanceHealthContribution,
+including its description and immutable string data. No model type, private Web type, additional
+health calculation, listener or platform registration is introduced by this mapping.
+
+Contributor names are engine/<escaped-engine> and database/<escaped-engine>/<escaped-database>;
+database names are uppercased invariantly before URI escaping, while engine identity stays ordinal.
+Engine health reflects its state and workers independently of database health. An offline database
+is Unhealthy, including while a pending reopen temporarily removes it from engine inventory.
+Provisioning, held schemas and journal admission pauses are Degraded; held-schema failureCode and
+detail retain the code, hashes and refused steps, within Hosting's existing 4,096-unit detail bound.
+database.accepting is Healthy only at the existing outer-host Started gate, after all server starts
+confirmed accept, and Unhealthy before start, during start/stop, after failure and after stop.
+
+HealthContributors refreshes discovery on each property access so later opens, closes and pending
+reopens remain represented. The current instance contract discovers contributors synchronously,
+whereas Database inventory is asynchronous; a worker bridge avoids capturing the caller's
+synchronization context. Each discovered contributor reads a fresh full observation pass when
+checked, with the caller's cancellation token. A retained contributor whose database disappeared
+reports Unhealthy until rediscovery removes it. There is no cache, subscription, timer or resource
+ownership to tear down. Discovery and each check cost one inventory pass; checking all contributors
+therefore repeats that pass. A future asynchronous batch health contract could avoid those repeats.
+
+These contributions are complete without a consumer. The gateway still counts publication as
+ready and consumes no instance health (ApplicationModel.Hosting open question 2; Gateway G18,
+E-AM2). The contract has no readiness discriminator, so database.accepting names that contribution;
+gateway aggregation and separate readiness remain ApplicationModel work. Unmanaged AddResource
+still registers nothing, including no contributors or lifecycle service.
 
 **D5 — Concrete-first and AOT.** DatabaseResourceOptions is a sealed public leaf with an internal
 constructor; no new public interface or shipped friend grant exists. The internal resource carries
-only public instance properties; neither new type introduces nonpublic instance state requiring a new debugger proxy. Content
+the borrowed context in a private field, filtered by its debugger proxy. Content
 uses JsonApplicationContentSerializer.Create with exactly the added JSON contexts, with no
 reflection fallback. The package raises no events and needs no EventSource.
 
@@ -118,6 +145,6 @@ reflection fallback. The package raises no events and needs no EventSource.
 2. **Readiness — owner: ApplicationModel.Gateway (G18).** The gateway counts the first publication as ready, in StartingAsync before Database servers listen, so a dependent can deploy before Database accepts connections.
 3. **Startup window — owner: gateway application.** Publication waits for Build's open, recovery and schema migration; the gateway's startup window must cover that work.
 4. **Database-owned actions — owner: Database.** Define management operations that fit instance snapshot restore and each instance's durable catalog before adding actions.
-5. **Instance health — owner: ApplicationModel.Hosting/Gateway.** Settle health aggregation (Hosting open question 2; Gateway G18) before Database contributes health.
+5. **Instance health — owner: ApplicationModel.Hosting/Gateway, E-AM2.** Database now contributes health. Define gateway consumption, a readiness discriminator and asynchronous batch discovery/evaluation (Hosting open question 2; Gateway G18) without delaying these valid instance contributions.
 6. **Publication-to-open window — owner: ApplicationModel.Hosting/Database.** AddService services always start after publication and restore but before the control plane opens. A slow service widens Hosting open question 7's window, and Database users cannot reorder these services as Web and EmailHub users can.
-7. **Instance health and actions — owner: Database, T3 EN-A2/EN-A3.** HTTP health now binds the platform's http endpoint in Hosting, with the existing readiness gate and loopback-only namespaced probes. Mapping those observations to application-instance contributors and adding read-only Database actions remain separate runs.
+7. **Read-only actions — owner: Database, T3 EN-A3.** HTTP health and instance contributors now share Hosting's observations. Read-only databases and health actions remain a separate run; this integration still exposes only application-added actions.

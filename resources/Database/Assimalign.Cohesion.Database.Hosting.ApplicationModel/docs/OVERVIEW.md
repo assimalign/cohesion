@@ -11,8 +11,11 @@ adds. Database construction and wire listeners remain ordinary application compo
 
 - The AddResource extension on builder.Services, DatabaseResourceOptions and the internal instance.
 - Application-added actions through ApplicationInstanceOptions.AddAction, in registration order.
-- No Database-owned actions or health contributors yet: catalog mutations need a design suited to
-  snapshot restore, and gateway health aggregation remains an owner follow-up.
+- One health contributor per engine and database, plus database.accepting readiness, mapped from
+  Database.Hosting's existing observations. Offline is Unhealthy; provisioning and held schemas
+  are Degraded with the existing code and refused-step detail. Discovery follows live inventory.
+- No Database-owned actions yet: catalog mutations need a design suited to snapshot restore.
+  Gateway health consumption and readiness remain an ApplicationModel follow-up (E-AM2).
 - Transports belong to platform packages; gateways and the logical model belong to ApplicationModel.Gateway.
 
 ## Dependencies
