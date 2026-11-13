@@ -59,7 +59,7 @@ Each recovered image converges to an absent/reclaimed or complete destination.
 The CI grant sweep compares every spilling point with the fitting 64 MiB run, including
 rows and observed order, volatile calls, sequence values and RecordsExamined. The comparison
 against the c9ac0df64 batch-base binary was a one-off recorded run. A quota-zero pass also
-preserves all 28 recorded base completions. Ledger-peak assertions check admission only. The seed-17890507 1 MiB hash corpus pins four CS05067 refusals out of 256, compared with 30 at the batch base.
+compares with the base at the same quota: its 22 completions survive. Six of the 28 regular-quota base completions already used temporary runs and also refuse at quota zero on the base. Ledger-peak assertions check admission only. The seed-17890507 1 MiB hash corpus pins four CS05067 refusals out of 256, compared with 30 at the batch base.
 During-operation LiveHeap.Read samples at output drain/append and CTAS record encoding use
 the minimum peak of three executions per population in a warmed engine, each with its own
 pre-statement baseline. They bound output by G + 26,392 B plus fixture slack and copy credit

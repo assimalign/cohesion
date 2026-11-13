@@ -50,8 +50,6 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     internal void ClearRow(int index) => _rows[index] = [];
     internal void ClearRows() { _rows.Clear(); _rows.Capacity = 0; }
 
-    internal bool HasConsumedMemory => _consumed?.TryGetValue(this, out _) == true;
-
     // CTAS begins consuming ownership only after its original copy admission fails.
     // Keep the result's arrays/list (and their charges) until enumeration ends; clearing
     // consumed cells does not invalidate List's enumerator or retain wide identities.

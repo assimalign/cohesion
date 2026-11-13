@@ -66,23 +66,25 @@ public sealed partial class SqlSortSpillConformanceTests
             else { actual.Code.ShouldBe("CS05067"); }
             if (baseline is not null)
             {
-                var before = await File.ReadAllLinesAsync(Path.Combine(baseline, shape + "-" + grant + ".txt"));
+                string profile = quotaZero ? Path.Combine(baseline, "quota-zero") : baseline;
+                var before = await File.ReadAllLinesAsync(Path.Combine(profile, shape + "-" + grant + ".txt"));
                 if (before[0] == "ok") { actual.Lines().Take(5).ShouldBe(before.Take(5)); }
                 if (before[0] == "ok" && before[5] == "0" && actual.Runs == 0)
                 { actual.Peak.ShouldBe(long.Parse(before[6], System.Globalization.CultureInfo.InvariantCulture)); }
             }
             if (!quotaZero && record is null && grant >= (shape == "group" ? 196608 : 262144))
             { actual.Code.ShouldBe("ok", customMessage: shape + " at " + grant); }
-            // These 28 base completions are also CI obligations with no temporary pages.
+            // These 22 base completions used no temporary pages. Six of the 28
+            // regular-quota completions already spilled on the base.
             bool baseCompleted = shape switch
             {
                 "insert" => true,
-                "group" => grant is 196608 or 262144 or 1048576 or 4184396 or 4223999 or 6000000 or 8388608,
-                "copy" => grant is 196608 or 524288 or 1048576 or 4194304 or 8388608,
+                "group" => grant is 6000000 or 8388608,
+                "copy" => grant is 524288 or 1048576 or 4194304 or 8388608,
                 "nested" => grant == 8388608,
                 _ => grant >= 4194304,
             };
-            if (quotaZero && baseCompleted) { actual.Code.ShouldBe("ok"); }
+            if (quotaZero && record is null && baseCompleted) { actual.Code.ShouldBe("ok"); }
         }
     }
 
