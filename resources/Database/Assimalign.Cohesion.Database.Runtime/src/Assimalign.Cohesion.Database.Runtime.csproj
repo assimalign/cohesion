@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		
+
 		<RootNamespace>Assimalign.Cohesion</RootNamespace>
 		<AssemblyName>Assimalign.Cohesion.App.Database</AssemblyName>
 
@@ -24,4 +24,8 @@
 	</ItemGroup>
 
 	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.targets" />
+	<ItemGroup>
+		<None Include="../../Assimalign.Cohesion.Database.Text/docs/SNOWBALL_LICENSE.txt"
+		      Pack="true" PackagePath="licenses/Database.Text/SNOWBALL_LICENSE.txt" />
+	</ItemGroup>
 </Project>
