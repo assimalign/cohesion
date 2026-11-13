@@ -67,7 +67,7 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
             }
             LazyInitializer.EnsureInitialized(ref _consumed).Add(this, consumed);
         }
-        while (consumed.Count < count)
+        while (consumed!.Count < count)
         {
             var row = _rows[consumed.Count++];
             long bytes = consumed.Memory.RemoveConsumedPayload(row);
