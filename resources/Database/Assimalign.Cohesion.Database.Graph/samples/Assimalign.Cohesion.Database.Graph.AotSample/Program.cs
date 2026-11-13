@@ -201,7 +201,19 @@ await schema.DropGraphTypeAsync(["ExtraSmoke"], ["SmokeEdge"], CancellationToken
 await schema.DropGraphTypeAsync(CancellationToken.None);
 checks++;
 await session.ExecuteAsync("ALTER CURRENT GRAPH TYPE SET {(:SmokeA =>),(:SmokeB =>),(:SmokeA)-[:TypedEdge => {p :: INT64 NOT NULL}]->(:SmokeB)}", cancellationToken: CancellationToken.None);
-await Check("SHOW CURRENT GRAPH TYPE", [["app", "OPEN", "ALTER CURRENT GRAPH TYPE SET {(:\"SmokeA\" =>), (:\"SmokeB\" =>), (:\"SmokeA\")-[:\"TypedEdge\" => {\"p\" :: INT64 NOT NULL}]->(:\"SmokeB\")}"]]);
+await using (var shown = (DatabaseResultSet)await session.ExecuteAsync("SHOW CURRENT GRAPH TYPE", cancellationToken: CancellationToken.None))
+{
+    int rows = 0;
+    await foreach (var row in shown.GetRowsAsync(CancellationToken.None))
+    {
+        if (!Equals(row.GetValue(0), "app") || !Equals(row.GetValue(1), "OPEN") ||
+            !Equals(row.GetValue(2), "ALTER CURRENT GRAPH TYPE SET {(:\"SmokeA\" =>), (:\"SmokeB\" =>), (:\"SmokeA\")-[:\"TypedEdge\" => {\"p\" :: INT64 NOT NULL}]->(:\"SmokeB\")}"))
+        { throw new InvalidOperationException("Graph type AOT SHOW mismatch."); }
+        rows++;
+    }
+    if (rows != 1) { throw new InvalidOperationException("Graph type AOT SHOW row count mismatch."); }
+    checks++;
+}
 await session.ExecuteAsync("INSERT (:SmokeA)-[:TypedEdge {p:1}]->(:SmokeB)", cancellationToken: CancellationToken.None);
 try
 {
