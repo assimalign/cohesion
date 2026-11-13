@@ -346,7 +346,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 Services.AddSingleton<IHostService>(_ => new DatabaseAdminEndpointService(healthEndpoint, context!));
             }
 
-            ServiceProvider services = BuildServiceProvider(loggerFactory);
+            ServiceProvider services = BuildServiceProvider(loggerFactory, () => context!);
             ownership.Infrastructure.Add(services);
             DatabaseApplicationOptions options = SnapshotOptions(_options);
 
@@ -562,7 +562,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// A registration needs constructor activation or is open generic, or registers a reserved
     /// service type.
     /// </exception>
-    private ServiceProvider BuildServiceProvider(LoggerFactory loggerFactory)
+    private ServiceProvider BuildServiceProvider(LoggerFactory loggerFactory, Func<DatabaseApplicationContext> getContext)
     {
         var container = (ServiceContainer)Services.Container;
         try
@@ -577,6 +577,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
                 if (descriptor.ServiceType == typeof(IConfiguration)
                     || descriptor.ServiceType == typeof(IHostEnvironment)
+                    || descriptor.ServiceType == typeof(DatabaseApplicationContext)
                     || descriptor.ServiceType == typeof(ILoggerFactory))
                 {
                     throw new InvalidOperationException(
@@ -592,6 +593,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             Services.AddSingleton<IHostEnvironment>(Environment);
             Services.AddSingleton<IConfiguration>(Configuration);
             Services.AddSingleton<ILoggerFactory>(loggerFactory);
+            // Created before engine factories run; lifecycle factories resolve it after registries freeze.
+            Services.AddSingleton<DatabaseApplicationContext>(_ => getContext());
         }
         finally
         {
@@ -605,6 +608,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         static string Describe(Type reserved)
             => reserved == typeof(IConfiguration) ? "configuration"
                 : reserved == typeof(IHostEnvironment) ? "host environment"
+                : reserved == typeof(DatabaseApplicationContext) ? "application context"
                 : "logger factory";
     }
 

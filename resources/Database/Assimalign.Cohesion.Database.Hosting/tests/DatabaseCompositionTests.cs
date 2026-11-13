@@ -156,6 +156,7 @@ public sealed class DatabaseCompositionTests
     [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Services: rejects registrations of the reserved host-level types")]
     [InlineData(typeof(IHostEnvironment))]
     [InlineData(typeof(IConfiguration))]
+    [InlineData(typeof(DatabaseApplicationContext))]
     [InlineData(typeof(ILoggerFactory))]
     public void Build_WithReservedServiceRegistration_ShouldReject(Type reserved)
     {

@@ -110,6 +110,30 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     internal DatabaseReopenService? ReopenService { get; set; }
 
     /// <summary>
+    /// Observes each engine, each currently open or reopening database, and server readiness through
+    /// the same evaluation used by HTTP health. Reading health does not provision or reopen a database.
+    /// </summary>
+    /// <param name="cancellationToken">Signals that the evaluation should be abandoned.</param>
+    /// <returns>Immutable component observations, with invariant string data and bounded provisioning detail.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    public async ValueTask<IReadOnlyList<DatabaseHealthObservation>> GetHealthAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var observations = new DatabaseHealthObservations();
+        await CheckObservedAsync(cancellationToken, observations).ConfigureAwait(false);
+        return observations.Complete(CheckReadiness());
+    }
+
+    // Both the HTTP readiness check and transport-neutral observations use this outer-host gate.
+    internal HealthCheckResult CheckReadiness()
+    {
+        var state = State;
+        return state == HostState.Started
+            ? HealthCheckResult.Healthy("All database servers are accepting connections.")
+            : HealthCheckResult.Unhealthy($"The database application is '{state}' and is not accepting connections.");
+    }
+
+    /// <summary>
     /// Aggregates the state and worker inventory of every distinct registered or server-fronted
     /// database engine.
     /// </summary>
@@ -133,17 +157,21 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// the application's logging forwards (<c>docs/EVENT_SOURCES.md</c>).
     /// </remarks>
     internal ValueTask<HealthCheckResult> CheckAsync(CancellationToken cancellationToken = default)
+        => CheckObservedAsync(cancellationToken, null);
+
+    private ValueTask<HealthCheckResult> CheckObservedAsync(CancellationToken cancellationToken, DatabaseHealthObservations? components)
     {
         if (!DatabaseHostingEventSource.Log.IsEnabled(System.Diagnostics.Tracing.EventLevel.Warning, System.Diagnostics.Tracing.EventKeywords.None) &&
             !DatabaseHostingEventSource.Log.IsEnabled(System.Diagnostics.Tracing.EventLevel.Informational, System.Diagnostics.Tracing.EventKeywords.None))
         {
-            return CheckCoreAsync(cancellationToken);
+            return CheckCoreAsync(cancellationToken, components: components);
         }
         var trace = LazyInitializer.EnsureInitialized(ref _healthTrace, static () => new DatabaseHealthTrace());
-        return trace.CheckAsync(this, cancellationToken);
+        return trace.CheckAsync(this, cancellationToken, components);
     }
 
-    internal async ValueTask<HealthCheckResult> CheckCoreAsync(CancellationToken cancellationToken, DatabaseHealthTrace.Observation? observation = null)
+    internal async ValueTask<HealthCheckResult> CheckCoreAsync(CancellationToken cancellationToken, DatabaseHealthTrace.Observation? observation = null,
+        DatabaseHealthObservations? components = null)
     {
         var engines = new List<DatabaseEngine>(_engines.Count + _servers.Count);
         var observedEngines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
@@ -247,6 +275,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     if (paused) { pausedDatabases.Add($"{engine.Name}/{database.Name}"); }
                     if (progress is null)
                     {
+                        components?.Database(engine.Name, database.Name.ToString(), paused, null, new Dictionary<string, object>(StringComparer.Ordinal));
                         continue;
                     }
                     string progressPrefix = $"engine.{engineIndex}.provisioning.{databaseIndex++}";
@@ -275,6 +304,18 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                         (progress.RowsProcessed is { } rows ? $"{rows} of {progress.TotalRows?.ToString() ?? "unknown"} rows" : "pending") +
                         (progress.FailureCode is { } failed ? $", {failed}" : string.Empty) +
                         (detail is not null ? $", {detail}" : string.Empty));
+                    if (components is not null)
+                    {
+                        var progressData = new Dictionary<string, object>(StringComparer.Ordinal);
+                        foreach (var entry in data)
+                        {
+                            if (entry.Key.StartsWith(progressPrefix + ".", StringComparison.Ordinal))
+                            {
+                                progressData.Add(entry.Key[(progressPrefix.Length + 1)..], entry.Value);
+                            }
+                        }
+                        components.Database(engine.Name, database.Name.ToString(), paused, provisioningDatabases[^1], progressData);
+                    }
                 }
                 data[$"engine.{engineIndex}.provisioningDatabaseCount"] = databaseIndex;
                 List<string> offline = [.. engine.OfflineDatabases.Select(name => (string)name)];
@@ -325,8 +366,21 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     offlineDatabases.Add(detail.Count == 0
                         ? $"{engine.Name}/{database}"
                         : $"{engine.Name}/{database} ({string.Join("; ", detail)})");
+                    if (components is not null)
+                    {
+                        var offlineData = new Dictionary<string, object>(StringComparer.Ordinal);
+                        foreach (var entry in data)
+                        {
+                            if (entry.Key.StartsWith(prefix + ".", StringComparison.Ordinal))
+                            {
+                                offlineData.Add(entry.Key[(prefix.Length + 1)..], entry.Value);
+                            }
+                        }
+                        components.Offline(engine.Name, database, offlineDatabases[^1], offlineData);
+                    }
                 }
             }
+            components?.Engine(engine.Name, state, data, $"engine.{engineIndex}.");
         }
 
         data["journalAdmissionPausedDatabaseCount"] = pausedDatabases.Count;

@@ -95,6 +95,39 @@ is Started, after every model server confirmed accept. Liveness omits that readi
 Other /cohesion/v1 paths remain forbidden. No gateway readiness semantics, health contributors,
 resource actions, existing event identities, wire messages or store formats change in this run.
 
+## Transport-neutral health observations (#1790, EN-A2)
+
+DatabaseApplicationContext.GetHealthAsync is the public read-only health seam. It captures one
+immutable DatabaseHealthObservation per engine and open or pending-reopen database, plus
+database.accepting, during the existing health evaluation. The optional collector receives only
+values that evaluation already read; it does not query storage, re-evaluate provisioning, or create
+an admission pause. HTTP health and observed transition events continue through that same pass.
+Observations use DatabaseHealthStatus and invariant string data, so no private Web type crosses
+the public boundary. Provisioning detail retains Hosting's existing 4,096 UTF-16-unit limit and
+exception diagnostics retain types only. The returned list and each diagnostic dictionary are
+read-only snapshots; reads do not reopen or provision a database.
+
+Engine observations describe their own state and workers: Running is Healthy, Faulted is Degraded,
+and Disposed or unknown is Unhealthy. Database observations independently preserve Offline over
+journal admission pause over provisioning over Healthy. Pending reopens remain Unhealthy when the
+engine temporarily has no open instance, with cause, attempts and the last failure type. Held
+schemas remain Degraded with failureCode and detail containing the existing code, hashes and
+refused steps. One unavailable database does not change another database's contribution.
+
+Names are engine/<escaped-engine>, database/<escaped-engine>/<escaped-database>, and
+database.accepting. Database segments are uppercased invariantly before URI escaping to preserve
+case-insensitive identity; engine segments retain their ordinal identity. The readiness observation
+uses exactly the same outer-host Started gate as HTTP readiness: every server's StartAsync has
+confirmed accept. A host with no servers still follows that host gate. Cancellation is checked at
+entry, including an empty application; other inventory failures propagate unchanged.
+
+The builder registers its own DatabaseApplicationContext singleton for hosting-layer composition,
+reserving that service type alongside configuration, environment and logging. Its factory resolves
+the already created context, whose complete engine/server registry is frozen before lifecycle
+factories run. The application-model integration resolves this context once and maps observations;
+Hosting takes no ApplicationModel reference. The integration design records contributor discovery
+and the remaining gateway readiness gap.
+
 ## Build and configuration
 
 Build consumes the builder before user code runs, even if construction fails. Registration methods and the service container reject late mutation, and so does the logging builder once Build built its factory. The `Options` host settings are copied at Build and cannot alter the application later. The root builder has no live `Engines` property. `DatabaseApplicationOptions` holds host policy only: its borrowed `Engines`, `Servers` and `Services` lists, the `DatabaseApplication(options)` constructor and `CreateBuilder(options)` were deleted (owner decision 54 of 2026-10-09), so there is one registration path per kind of thing (`AddEngine`, `AddService`, and a server on its engine's builder).
@@ -108,7 +141,7 @@ The builder exposes the four host-level pieces `WebApplicationBuilder` exposes, 
 | `Environment` | `HostEnvironment` | from `Options.Environment` (`production` when unset) and `Options.ContentRootPath` | registered as `IHostEnvironment`; the application context's `Environment` |
 | `Configuration` | `ConfigurationManager` | empty; `CreateBuilder(args)` adds the default sources | registered as `IConfiguration`; owned and disposed by the application |
 | `Logging` | `LoggerFactoryBuilder` | empty | built once into the application's `LoggerFactory`, registered as `ILoggerFactory`, owned and disposed after the provider |
-| `Services` | `ServiceProviderBuilder` | `EnableDynamicCode = false`, `ValidateOnBuild`, `ValidateScopes` | checked, given the three registrations above, made read-only, built once into the application's `ServiceProvider` |
+| `Services` | `ServiceProviderBuilder` | `EnableDynamicCode = false`, `ValidateOnBuild`, `ValidateScopes` | checked, given the three infrastructure registrations above and a factory for the application's context, made read-only, built once into the application's `ServiceProvider` |
 
 The root `IDatabaseApplicationBuilder` gains none of them: model packages and other feature code compose against the root without the container, configuration or logging (COHRES004, `resource-areas.md`). The engine factories of `AddEngine(name, factory)` run at Build, after the container closed, so their `DatabaseApplicationBuildContext` carries the built counterparts, not the builders: `Environment` (`HostEnvironment`, the builder's instance), `Configuration` (`ConfigurationManager`, the builder's instance), `Services` (the built `ServiceProvider`; the DependencyInjection library's provider type is public, so the context names it rather than `IServiceProvider`) and `LoggerFactory` (the built `LoggerFactory`). One build context exists per application, and every named factory receives it.
 
