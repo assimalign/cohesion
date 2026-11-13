@@ -50,7 +50,7 @@ internal sealed class TextVectorBuilder
     {
         if (_minimumBytes > TextVector.MaxPayloadBytes)
         {
-            throw new TextException(TextErrorReason.VectorTooLarge, ErrorMessages.VectorTooLarge);
+            throw new TextException(TextErrorCode.VectorTooLarge, ErrorMessages.VectorTooLarge);
         }
     }
 
@@ -78,7 +78,7 @@ internal sealed class TextVectorBuilder
 
             if (bytes > TextVector.MaxPayloadBytes)
             {
-                throw new TextException(TextErrorReason.VectorTooLarge, ErrorMessages.VectorTooLarge);
+                throw new TextException(TextErrorCode.VectorTooLarge, ErrorMessages.VectorTooLarge);
             }
 
             lexemes[i] = new TextLexeme(term, positions);

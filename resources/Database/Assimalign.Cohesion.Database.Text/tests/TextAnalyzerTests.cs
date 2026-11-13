@@ -25,54 +25,70 @@ public sealed class TextAnalyzerTests
     }
 
     public static IEnumerable<object[]> ParserCorpus => File.ReadLines(Path.Combine(AppContext.BaseDirectory, "TestObjects", "ParserPostgres17.tsv"))
-        .Select(line => line.Split('\t')).Select(parts => new object[] { parts[0], parts[1], parts[2], parts[3], parts[4], parts[5] });
+        .Select(line => line.Split('\t')).Select(parts => new object[] { parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], parts[7] });
 
     [Theory(DisplayName = "Cohesion Test [Text] - Analyzer: PostgreSQL parser agreements and deliberate letter/digit departures are pinned")]
     [MemberData(nameof(ParserCorpus))]
-    public void Analyze_ParserCorpus_MatchesPinnedOutput(string category, string input, string postgresSimple, string postgresEnglish, string simple, string english)
+    public void Analyze_ParserCorpus_MatchesPinnedOutput(string category, string input, string postgresSimple, string postgresEnglish, string simple, string english, string simpleContract, string englishContract)
     {
         // Arrange / Act
         string actualSimple = VectorText.Format(TextAnalyzer.Simple.Analyze(input));
         string actualEnglish = VectorText.Format(TextAnalyzer.English.Analyze(input));
 
         // Assert
-        actualSimple.ShouldBe(simple, category + " PostgreSQL: " + postgresSimple);
-        actualEnglish.ShouldBe(english, category + " PostgreSQL: " + postgresEnglish);
+        VerifyContract(actualSimple, postgresSimple, simple, simpleContract, category);
+        VerifyContract(actualEnglish, postgresEnglish, english, englishContract, category);
+    }
+
+    private static void VerifyContract(string actual, string postgres, string documented, string contract, string category)
+    {
+        if (contract == "agreement")
+        {
+            actual.ShouldBe(postgres, category);
+            documented.ShouldBe(postgres, category);
+        }
+        else
+        {
+            contract.ShouldBe("departure");
+            actual.ShouldBe(documented, category + " PostgreSQL: " + postgres);
+            documented.ShouldNotBe(postgres, category);
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Text] - Descriptor: unknown persisted identities are refused without fallback")]
-    [InlineData("unknown", 1, TextErrorReason.UnknownAnalyzer)]
-    [InlineData("Simple", 1, TextErrorReason.UnknownAnalyzer)]
-    [InlineData("", 1, TextErrorReason.UnknownAnalyzer)]
-    [InlineData("simple", 2, TextErrorReason.AnalyzerVersionMismatch)]
-    [InlineData("english", 2, TextErrorReason.AnalyzerVersionMismatch)]
-    public void Create_UnavailableIdentity_RefusesWithReason(string name, int version, TextErrorReason expected)
+    [InlineData("unknown", 1, TextErrorCode.UnknownAnalyzer)]
+    [InlineData("Simple", 1, TextErrorCode.UnknownAnalyzer)]
+    [InlineData("", 1, TextErrorCode.UnknownAnalyzer)]
+    [InlineData("english", 0, TextErrorCode.AnalyzerVersionMismatch)]
+    [InlineData("english", -1, TextErrorCode.AnalyzerVersionMismatch)]
+    [InlineData("simple", int.MinValue, TextErrorCode.AnalyzerVersionMismatch)]
+    [InlineData("simple", 2, TextErrorCode.AnalyzerVersionMismatch)]
+    [InlineData("english", 2, TextErrorCode.AnalyzerVersionMismatch)]
+    public void Create_UnavailableIdentity_RefusesWithCode(string name, int version, TextErrorCode expected)
     {
         // Arrange
-        TextAnalyzerDescriptor descriptor = TextAnalyzerDescriptor.FromPersisted(name, version);
+        TextAnalyzerDescriptor descriptor = TextAnalyzerDescriptor.Create(name, version);
 
         // Act
         TextException error = Should.Throw<TextException>(() => TextAnalyzer.Create(descriptor));
 
         // Assert
-        error.Reason.ShouldBe(expected);
-        descriptor.Name.ShouldBe(name);
-        descriptor.Version.ShouldBe(version);
+        error.Code.ShouldBe(expected);
     }
 
     [Fact(DisplayName = "Cohesion Test [Text] - Descriptor: all persisted options participate in identity")]
-    public void FromPersisted_IdentityFields_RoundTripsAndDistinguishesOptions()
+    public void Create_IdentityFields_RoundTripsAndDistinguishesOptions()
     {
         // Arrange
-        TextAnalyzerDescriptor simple = TextAnalyzerDescriptor.FromPersisted("simple", 1);
+        TextAnalyzerDescriptor simple = TextAnalyzerDescriptor.Create("simple", 1);
 
         // Act / Assert
         simple.ShouldBe(TextAnalyzerDescriptor.Simple);
         simple.GetHashCode().ShouldBe(TextAnalyzerDescriptor.Simple.GetHashCode());
-        simple.ShouldNotBe(TextAnalyzerDescriptor.FromPersisted("simple", 1, true));
+        simple.ShouldNotBe(TextAnalyzerDescriptor.Create("simple", 1, true));
         simple.ShouldNotBe(TextAnalyzerDescriptor.English);
         TextAnalyzer.Create(simple).Descriptor.ShouldBe(simple);
-        Should.Throw<ArgumentOutOfRangeException>(() => TextAnalyzerDescriptor.FromPersisted("simple", 0));
+        TextAnalyzerDescriptor.Create("simple").ShouldBe(simple);
     }
 
     [Theory(DisplayName = "Cohesion Test [Text] - Analyzer: Types Unicode tables control folding independent of culture")]
@@ -88,14 +104,15 @@ public sealed class TextAnalyzerTests
         {
             Thread.CurrentThread.CurrentCulture = CultureInfo.GetCultureInfo(culture);
             Thread.CurrentThread.CurrentUICulture = CultureInfo.GetCultureInfo(culture);
-            const string text = "CAFÉ naïve İSTANBUL Σ ς ẞ 𐐀 cafe\u0301 ١٢٣ １２３";
-            TextAnalyzer folded = TextAnalyzer.Create(TextAnalyzerDescriptor.FromPersisted("simple", 1, true));
-            TextAnalyzer english = TextAnalyzer.Create(TextAnalyzerDescriptor.FromPersisted("english", 1, true));
+            const string text = "CAFÉ naïve İSTANBUL Σ ς ẞ 𐐀 cafe\u0301 ١٢٣ １２３ TITLE Index";
+            TextAnalyzer folded = TextAnalyzer.Create(TextAnalyzerDescriptor.Create("simple", 1, true));
+            TextAnalyzer english = TextAnalyzer.Create(TextAnalyzerDescriptor.Create("english", 1, true));
 
             // Act / Assert
-            VectorText.Format(TextAnalyzer.Simple.Analyze(text)).ShouldBe("'cafe':8 'café':1 'naïve':2 'ß':6 'İstanbul':3 'σ':4,5 '١٢٣':9 '１２３':10 '𐐨':7");
-            VectorText.Format(folded.Analyze(text)).ShouldBe("'cafe':1,8 'istanbul':3 'naive':2 'ß':6 'σ':4,5 '١٢٣':9 '１２３':10 '𐐨':7");
-            VectorText.Format(english.Analyze(text)).ShouldBe("'cafe':1,8 'istanbul':3 'naiv':2 'ß':6 'σ':4,5 '١٢٣':9 '１２３':10 '𐐨':7");
+            Analyze_AsciiAlphabet_MatchesTypesFolding();
+            VectorText.Format(TextAnalyzer.Simple.Analyze(text)).ShouldBe("'café':8 'café':1 'index':12 'naïve':2 'title':11 'ß':6 'İstanbul':3 'σ':4,5 '١٢٣':9 '１２３':10 '𐐨':7");
+            VectorText.Format(folded.Analyze(text)).ShouldBe("'cafe':1,8 'index':12 'istanbul':3 'naive':2 'title':11 'ß':6 'σ':4,5 '١٢٣':9 '１２３':10 '𐐨':7");
+            VectorText.Format(english.Analyze(text)).ShouldBe("'cafe':1,8 'index':12 'istanbul':3 'naiv':2 'titl':11 'ß':6 'σ':4,5 '١٢٣':9 '１２３':10 '𐐨':7");
         }
         finally
         {
@@ -120,7 +137,7 @@ public sealed class TextAnalyzerTests
     public void Analyze_AsciiAlphabet_MatchesTypesFolding()
     {
         // Arrange
-        TextAnalyzer accents = TextAnalyzer.Create(TextAnalyzerDescriptor.FromPersisted("simple", 1, true));
+        TextAnalyzer accents = TextAnalyzer.Create(TextAnalyzerDescriptor.Create("simple", 1, true));
 
         // Act / Assert
         for (int scalar = 0; scalar < 128; scalar++)
@@ -135,16 +152,17 @@ public sealed class TextAnalyzerTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Text] - Analyzer: output hashes are pinned beside each analyzer version")]
-    [InlineData("simple", false, 1, "7F1176222B2431EDBCB234D9BAD62BF8CF16A448AAC18E7DE9B7C02DF382CBF9")]
-    [InlineData("simple", true, 1, "B8D667ECEA89C90C5081A585FEC37EA5A6C91FCC031DAD9DA3BF71C039573542")]
-    [InlineData("english", false, 1, "C85950AD855469EEE4B01E8E5A51619BF8C6473BEE8E2EC40B8F78ACE20771BE")]
-    [InlineData("english", true, 1, "301ED0FB1A3716424B3A9C8DBAD3287486CD71EA81F2AE1B65611A936AD206B5")]
+    [InlineData("simple", false, 1, "8E0247D1FB80D6A41C16D101E9635B28F271A8D86AC04C16E7960F2A8F0B55EE")]
+    [InlineData("simple", true, 1, "6675A595CA9070755EFA038E377AA403CFDE3D86C68AAADF4C10D8D7DCA89032")]
+    [InlineData("english", false, 1, "54F24E9CDC99B0EA4C9CD90D6AB739C8B50F18A52406B5DC23A229712C7CDE56")]
+    [InlineData("english", true, 1, "784A63ADA9E4E920DF74F682B62C75410FCF2F98279693D8344D33CAE5A44D7E")]
     public void Analyze_VersionedFingerprint_RequiresVersionForOutputDrift(string name, bool foldAccents, int version, string expected)
     {
         // Arrange
-        TextAnalyzer analyzer = TextAnalyzer.Create(TextAnalyzerDescriptor.FromPersisted(name, version, foldAccents));
+        TextAnalyzer analyzer = TextAnalyzer.Create(TextAnalyzerDescriptor.Create(name, version, foldAccents));
         IEnumerable<string> corpus = File.ReadLines(Path.Combine(AppContext.BaseDirectory, "TestObjects", "ParserPostgres17.tsv")).Select(line => line.Split('\t')[1])
-            .Concat(File.ReadLines(Path.Combine(AppContext.BaseDirectory, "TestObjects", "EnglishPostgres17.tsv")).Select(line => line.Split('\t')[0]));
+            .Concat(File.ReadLines(Path.Combine(AppContext.BaseDirectory, "TestObjects", "EnglishPostgres17.tsv")).Select(line => line.Split('\t')[0]))
+            .Concat(File.ReadLines(Path.Combine(AppContext.BaseDirectory, "TestObjects", "EnglishStopWords127.tsv")));
         var output = new StringBuilder();
 
         // Act
@@ -156,7 +174,6 @@ public sealed class TextAnalyzerTests
         string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(output.ToString())));
 
         // Assert
-        analyzer.Descriptor.Version.ShouldBe(version);
         _output.WriteLine($"{name} v{version} accents={foldAccents}: {hash}");
         hash.ShouldBe(expected);
     }

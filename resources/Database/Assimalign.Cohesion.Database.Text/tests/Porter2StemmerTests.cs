@@ -36,7 +36,7 @@ public sealed class Porter2StemmerTests
             words.Add(word).ShouldBeTrue();
             if (EnglishStopWords.Contains(word))
             {
-                expected.ShouldBeEmpty(word);
+                expected.ShouldBe("{}", word);
                 continue;
             }
 

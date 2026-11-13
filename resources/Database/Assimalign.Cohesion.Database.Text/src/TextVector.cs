@@ -35,7 +35,7 @@ public sealed class TextVector : IEquatable<TextVector>
 
     /// <summary>Gets the PostgreSQL payload size, including alignment and position counts;
     /// excludes the datum header and four-byte lexeme directory entries.</summary>
-    public int PayloadBytes { get; }
+    internal int PayloadBytes { get; }
 
     /// <summary>Creates a vector by merging explicit lexemes without applying an analyzer.</summary>
     /// <param name="lexemes">Lexemes; duplicate text merges its positions and weights.</param>

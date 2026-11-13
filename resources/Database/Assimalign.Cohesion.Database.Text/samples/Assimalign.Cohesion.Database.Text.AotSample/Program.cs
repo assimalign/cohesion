@@ -19,18 +19,19 @@ internal static class Program
             checks++;
         }
 
-        TextAnalyzer accents = TextAnalyzer.Create(TextAnalyzerDescriptor.FromPersisted("simple", 1, true));
+        TextAnalyzer accents = TextAnalyzer.Create(TextAnalyzerDescriptor.Create("simple", 1, true));
         TextVector folded = accents.Analyze("CAFÉ İSTANBUL Σ ς 𐐀");
-        if (folded.Lexemes.Count == 4 && folded.Lexemes[0].Text == "cafe" && folded.Lexemes[2].Positions.Count == 2)
+        if (folded.Lexemes.Count == 4 && folded.Lexemes[0].Text == "cafe" && folded.Lexemes[1].Text == "istanbul"
+            && folded.Lexemes[2].Positions.Count == 2 && folded.Lexemes[3].Text == "𐐨")
         {
             checks++;
         }
 
         try
         {
-            TextAnalyzer.Create(TextAnalyzerDescriptor.FromPersisted("english", 2));
+            TextAnalyzer.Create(TextAnalyzerDescriptor.Create("english", 2));
         }
-        catch (TextException error) when (error.Reason == TextErrorReason.AnalyzerVersionMismatch)
+        catch (TextException error) when (error.Code == TextErrorCode.AnalyzerVersionMismatch)
         {
             checks++;
         }

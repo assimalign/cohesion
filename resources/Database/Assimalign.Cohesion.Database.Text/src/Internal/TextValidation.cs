@@ -14,7 +14,7 @@ internal static class TextValidation
         {
             if (Rune.DecodeFromUtf16(remaining, out Rune rune, out int consumed) != OperationStatus.Done)
             {
-                throw new TextException(TextErrorReason.InvalidUnicode, ErrorMessages.InvalidUnicode);
+                throw new TextException(TextErrorCode.InvalidUnicode, ErrorMessages.InvalidUnicode);
             }
 
             // Callers need an exact count only for admissible lexemes. Saturate

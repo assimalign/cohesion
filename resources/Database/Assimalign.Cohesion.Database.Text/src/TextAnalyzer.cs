@@ -8,8 +8,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Text;
 
 /// <summary>A deterministic, immutable built-in text analyzer.</summary>
-/// <remarks>Tokenizes Unicode letters and decimal digits using .NET 10 managed Unicode
-/// categories pinned in source. Case and optional accent folding use Types' pinned Unicode 17 tables.
+/// <remarks>Tokenizes Unicode 17 letters and decimal digits with marks continuing open tokens.
+/// Categories are pinned in source. Case and optional accent folding use Types' pinned Unicode 17 tables.
 /// English then removes stop words and applies the in-house Porter2 stemmer.</remarks>
 public sealed class TextAnalyzer
 {
@@ -37,13 +37,13 @@ public sealed class TextAnalyzer
         ArgumentNullException.ThrowIfNull(descriptor);
         if (descriptor.Name is not ("simple" or "english"))
         {
-            throw new TextException(TextErrorReason.UnknownAnalyzer, ErrorMessages.UnknownAnalyzer);
+            throw new TextException(TextErrorCode.UnknownAnalyzer, ErrorMessages.UnknownAnalyzer);
         }
 
         int version = descriptor.Name == "simple" ? TextAnalyzerDescriptor.Simple.Version : TextAnalyzerDescriptor.English.Version;
         if (descriptor.Version != version)
         {
-            throw new TextException(TextErrorReason.AnalyzerVersionMismatch, ErrorMessages.AnalyzerVersionMismatch);
+            throw new TextException(TextErrorCode.AnalyzerVersionMismatch, ErrorMessages.AnalyzerVersionMismatch);
         }
 
         return new TextAnalyzer(descriptor);
@@ -67,10 +67,10 @@ public sealed class TextAnalyzer
         {
             if (Rune.DecodeFromUtf16(text.AsSpan(offset), out Rune rune, out int consumed) != OperationStatus.Done)
             {
-                throw new TextException(TextErrorReason.InvalidUnicode, ErrorMessages.InvalidUnicode);
+                throw new TextException(TextErrorCode.InvalidUnicode, ErrorMessages.InvalidUnicode);
             }
 
-            if (TextUnicodeData.IsLetterOrDigit(rune.Value))
+            if (TextUnicodeData.IsLetterOrDigit(rune.Value) || (tokenStart >= 0 && TextUnicodeData.IsContinuation(rune.Value)))
             {
                 if (tokenStart < 0)
                 {
@@ -106,9 +106,10 @@ public sealed class TextAnalyzer
         }
 
         position = Math.Min(position + 1, TextVector.MaxPosition);
-        bool ascii = true, foldedAscii = true;
+        bool ascii = true, foldedAscii = true, asciiDigit = false;
         foreach (char c in token)
         {
+            asciiDigit |= c is >= '0' and <= '9';
             ascii &= c <= 0x7f;
             foldedAscii &= c <= 0x7f && c is not (>= 'A' and <= 'Z');
         }
@@ -121,7 +122,7 @@ public sealed class TextAnalyzer
             Collation collation = Descriptor.FoldAccents && !ascii ? Collation.CaseAccentInsensitive : Collation.CaseInsensitive;
             lexeme = collation.Normalize(lexeme);
         }
-        if (Descriptor.Name == "english")
+        if (Descriptor.Name == "english" && !asciiDigit && bytes <= 1000)
         {
             if (EnglishStopWords.Contains(lexeme))
             {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 using Shouldly;
@@ -9,12 +10,42 @@ namespace Assimalign.Cohesion.Database.Text.Tests;
 
 public sealed class TextVectorTests
 {
-    [Fact(DisplayName = "Cohesion Test [Text] - Vector: terminal duplicate weights match PostgreSQL's position cutoff")]
-    public void Create_DuplicateAtClampedLimit_KeepsFirstWeightAtCutoff()
+    public static IEnumerable<object[]> TerminalCorpus => File.ReadLines(Path.Combine(AppContext.BaseDirectory, "TestObjects", "VectorPostgres17.tsv"))
+        .Select(line => line.Split('\t')).Select(parts => new object[] { parts[0], parts[2], parts[3] });
+
+    [Theory(DisplayName = "Cohesion Test [Text] - Vector: documented terminal weight departures are pinned against PostgreSQL")]
+    [MemberData(nameof(TerminalCorpus))]
+    public void Create_TerminalWeightDepartures_KeepsHighestWeight(string name, string postgres, string documented)
+    {
+        // Arrange
+        TextVector vector;
+        if (name == "count-cutoff")
+        {
+            TextLexeme first = TextLexeme.Create("x", Enumerable.Range(1, 255).Select(n => TextPosition.Create(n)));
+            TextLexeme last = TextLexeme.Create("x", [TextPosition.Create(256, TextWeight.B), TextPosition.Create(256, TextWeight.A)]);
+            vector = TextVector.Create([first, last]);
+            postgres.ShouldBe("'x':" + string.Join(",", Enumerable.Range(1, 255)) + ",256B");
+        }
+        else
+        {
+            name.ShouldBe("position-cutoff");
+            vector = TextVector.Create([TextLexeme.Create("x", [TextPosition.Create(16383, TextWeight.A),
+                TextPosition.Create(16383, TextWeight.B), TextPosition.Create(1), TextPosition.Create(2),
+                TextPosition.Create(3), TextPosition.Create(4), TextPosition.Create(5)])]);
+            postgres.ShouldBe("'x':1,2,3,4,5,16383B");
+        }
+
+        // Act / Assert
+        VectorText.Format(vector).ShouldBe(documented);
+        documented.ShouldNotBe(postgres);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Text] - Vector: terminal duplicate positions retain the highest weight")]
+    public void Create_DuplicateAtClampedLimit_KeepsHighestWeightAtCutoff()
     {
         // Arrange
         // PostgreSQL 17.11: 'a:1A,2B,3C,4D,16382,16383,16384A,20000B'
-        // renders 'a':1A,2B,3C,4,16382,16383, stopping at the first maximum.
+        // renders 'a':1A,2B,3C,4,16382,16383. Text keeps the highest duplicate weight.
         TextPosition[] positions = [TextPosition.Create(1, TextWeight.A), TextPosition.Create(2, TextWeight.B),
             TextPosition.Create(3, TextWeight.C), TextPosition.Create(4), TextPosition.Create(16382),
             TextPosition.Create(16383), TextPosition.Create(16384, TextWeight.A), TextPosition.Create(20000, TextWeight.B)];
@@ -23,7 +54,7 @@ public sealed class TextVectorTests
         TextVector vector = TextVector.Create([TextLexeme.Create("a", positions)]);
 
         // Assert
-        VectorText.Format(vector).ShouldBe("'a':1A,2B,3C,4,16382,16383");
+        VectorText.Format(vector).ShouldBe("'a':1A,2B,3C,4,16382,16383A");
         VectorText.Format(TextVector.Create([TextLexeme.Create("a", [TextPosition.Create(16383), TextPosition.Create(16384, TextWeight.A)])]))
             .ShouldBe("'a':16383A");
     }
@@ -109,7 +140,7 @@ public sealed class TextVectorTests
         vector.Lexemes[1].Text.ShouldBe("z");
         vector.Lexemes[1].Positions[0].Position.ShouldBe(2);
         TextLexeme.Create(skipped).Text.Length.ShouldBe(2047);
-        Should.Throw<TextException>(() => TextLexeme.Create(new string('x', 2048))).Reason.ShouldBe(TextErrorReason.InvalidLexeme);
+        Should.Throw<TextException>(() => TextLexeme.Create(new string('x', 2048))).Code.ShouldBe(TextErrorCode.InvalidLexeme);
         TextAnalyzer.Simple.Analyze(new string('é', 1023)).Lexemes.Count.ShouldBe(1);
         TextAnalyzer.Simple.Analyze(new string('é', 1024) + " z").Lexemes[0].Positions[0].Position.ShouldBe(1);
     }
@@ -152,7 +183,7 @@ public sealed class TextVectorTests
 
         // Assert
         maximum.PayloadBytes.ShouldBe(1048575);
-        failure.Reason.ShouldBe(TextErrorReason.VectorTooLarge);
+        failure.Code.ShouldBe(TextErrorCode.VectorTooLarge);
     }
 
     [Fact(DisplayName = "Cohesion Test [Text] - Vector: position alignment and count bytes participate in the payload bound")]
@@ -168,17 +199,17 @@ public sealed class TextVectorTests
 
         // Assert
         vector.PayloadBytes.ShouldBe(8);
-        failure.Reason.ShouldBe(TextErrorReason.VectorTooLarge);
+        failure.Code.ShouldBe(TextErrorCode.VectorTooLarge);
     }
 
     [Fact(DisplayName = "Cohesion Test [Text] - Vector: invalid scalars, empty lexemes and default positions are refused")]
     public void Create_InvalidValues_RefusesStructuredOrArgumentFailure()
     {
         // Arrange / Act / Assert
-        Should.Throw<TextException>(() => TextLexeme.Create("")).Reason.ShouldBe(TextErrorReason.InvalidLexeme);
-        Should.Throw<TextException>(() => TextLexeme.Create("a\0b")).Reason.ShouldBe(TextErrorReason.InvalidLexeme);
-        Should.Throw<TextException>(() => TextLexeme.Create("\ud800")).Reason.ShouldBe(TextErrorReason.InvalidUnicode);
-        Should.Throw<TextException>(() => TextAnalyzer.Simple.Analyze("a\udfff")).Reason.ShouldBe(TextErrorReason.InvalidUnicode);
+        Should.Throw<TextException>(() => TextLexeme.Create("")).Code.ShouldBe(TextErrorCode.InvalidLexeme);
+        Should.Throw<TextException>(() => TextLexeme.Create("a\0b")).Code.ShouldBe(TextErrorCode.InvalidLexeme);
+        Should.Throw<TextException>(() => TextLexeme.Create("\ud800")).Code.ShouldBe(TextErrorCode.InvalidUnicode);
+        Should.Throw<TextException>(() => TextAnalyzer.Simple.Analyze("a\udfff")).Code.ShouldBe(TextErrorCode.InvalidUnicode);
         Should.Throw<ArgumentOutOfRangeException>(() => TextLexeme.Create("a", [default]));
         Should.Throw<ArgumentOutOfRangeException>(() => TextPosition.Create(0));
         Should.Throw<ArgumentOutOfRangeException>(() => TextPosition.Create(1, (TextWeight)4));

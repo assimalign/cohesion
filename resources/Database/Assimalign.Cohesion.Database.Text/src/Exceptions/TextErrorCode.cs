@@ -1,7 +1,7 @@
 namespace Assimalign.Cohesion.Database.Text;
 
 /// <summary>Identifies a text-analysis failure independently of model diagnostic codes.</summary>
-public enum TextErrorReason
+public enum TextErrorCode
 {
     /// <summary>The persisted analyzer name is unavailable.</summary>
     UnknownAnalyzer,

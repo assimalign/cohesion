@@ -5,15 +5,11 @@
 		<IsPackable>false</IsPackable>
 		<PublishAot>true</PublishAot>
 		<PublishTrimmed>true</PublishTrimmed>
-		<InvariantGlobalization>true</InvariantGlobalization>
-		<!-- The pinned SDK selects vulnerable 10.0.12 packs; this new guard uses
-		     the patched compiler/runtime without changing the repository SDK. -->
-		<RuntimeFrameworkVersion>10.0.14</RuntimeFrameworkVersion>
+		<WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051</WarningsAsErrors>
+		<IlcTreatWarningsAsErrors>true</IlcTreatWarningsAsErrors>
+		<TrimmerSingleWarn>false</TrimmerSingleWarn>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Text" />
-	</ItemGroup>
-	<ItemGroup>
-		<KnownILCompilerPack Update="Microsoft.DotNet.ILCompiler" ILCompilerPackVersion="10.0.14" />
 	</ItemGroup>
 </Project>

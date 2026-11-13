@@ -6,6 +6,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
 	<ItemGroup>
-		<None Update="Properties/SNOWBALL-LICENSE.txt" Pack="true" PackagePath="" />
+		<None Include="../docs/SNOWBALL_LICENSE.txt" Pack="true" PackagePath="licenses/Database.Text/SNOWBALL_LICENSE.txt" />
 	</ItemGroup>
 </Project>

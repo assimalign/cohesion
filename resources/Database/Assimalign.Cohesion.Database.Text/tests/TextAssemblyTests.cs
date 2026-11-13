@@ -41,7 +41,8 @@ public sealed class TextAssemblyTests
         // Act
         for (int scalar = 0; scalar < classification.Length; scalar++)
         {
-            classification[scalar] = TextUnicodeData.IsLetterOrDigit(scalar) ? (byte)1 : (byte)0;
+            classification[scalar] = TextUnicodeData.IsLetterOrDigit(scalar) ? (byte)1
+                : TextUnicodeData.IsContinuation(scalar) ? (byte)2 : (byte)0;
         }
 
         string hash = Convert.ToHexString(SHA256.HashData(classification));
@@ -50,6 +51,6 @@ public sealed class TextAssemblyTests
         _output.WriteLine("Classification: " + hash);
         TextAnalyzerDescriptor.Simple.Version.ShouldBe(1);
         TextAnalyzerDescriptor.English.Version.ShouldBe(1);
-        hash.ShouldBe("A97D3C808483919939AD80C7D898ACEC6727AB8ACA8F8CA0247F426524304E36");
+        hash.ShouldBe("CB1B5F63C7050E70BDC89FFE829288DC26E04E072C544B4FE46F4797633A0752");
     }
 }

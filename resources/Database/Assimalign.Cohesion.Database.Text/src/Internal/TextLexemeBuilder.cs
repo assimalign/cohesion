@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Text.Internal;
 internal sealed class TextLexemeBuilder
 {
     [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
-    private readonly List<(TextPosition Position, TextWeight FirstWeight)> _positions = new();
+    private readonly List<TextPosition> _positions = new();
 
     [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
     internal int Count => _positions.Count;
@@ -19,7 +19,7 @@ internal sealed class TextLexemeBuilder
         while (low < high)
         {
             int mid = (low + high) / 2;
-            if (_positions[mid].Position.Position < position.Position)
+            if (_positions[mid].Position < position.Position)
             {
                 low = mid + 1;
             }
@@ -29,11 +29,11 @@ internal sealed class TextLexemeBuilder
             }
         }
 
-        if (low < _positions.Count && _positions[low].Position.Position == position.Position)
+        if (low < _positions.Count && _positions[low].Position == position.Position)
         {
-            if (_positions[low].Position.Weight < position.Weight)
+            if (_positions[low].Weight < position.Weight)
             {
-                _positions[low] = (position, _positions[low].FirstWeight);
+                _positions[low] = position;
             }
         }
         else if (low < limit)
@@ -43,24 +43,16 @@ internal sealed class TextLexemeBuilder
                 _positions.RemoveAt(limit - 1);
             }
 
-            _positions.Insert(low, (position, position.Weight));
+            _positions.Insert(low, position);
         }
     }
 
-    internal TextPosition[] Snapshot(int limit = TextVector.MaxPositionsPerLexeme)
+    internal TextPosition[] Snapshot()
     {
         var positions = new TextPosition[_positions.Count];
         for (int i = 0; i < positions.Length; i++)
         {
-            positions[i] = _positions[i].Position;
-        }
-
-        // PostgreSQL uniquePos stops on arrival at a new final retained position,
-        // before inspecting further duplicates there. Stable input order makes
-        // that cutoff deterministic; a sole position still merges its weights.
-        if (positions.Length > 1 && (positions.Length == limit || positions[^1].Position == TextVector.MaxPosition))
-        {
-            positions[^1] = TextPosition.Create(positions[^1].Position, _positions[^1].FirstWeight);
+            positions[i] = _positions[i];
         }
 
         return positions;

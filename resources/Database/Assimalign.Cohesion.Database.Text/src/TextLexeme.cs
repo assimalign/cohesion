@@ -18,7 +18,7 @@ public sealed class TextLexeme : IEquatable<TextLexeme>
     public string Text { get; }
 
     /// <summary>Gets at most 256 ascending positions. Duplicate positions keep the highest
-    /// weight, except on reaching a new terminal position/count cutoff, which retains the first.</summary>
+    /// weight, including at the terminal position or count cutoff.</summary>
     public IReadOnlyList<TextPosition> Positions { get; }
 
     /// <summary>Creates an explicit lexeme, optionally stripped of positions.</summary>
@@ -33,7 +33,7 @@ public sealed class TextLexeme : IEquatable<TextLexeme>
         ArgumentNullException.ThrowIfNull(text);
         if (text.Length == 0 || text.Contains('\0') || TextValidation.Utf8Length(text) > TextVector.MaxLexemeBytes)
         {
-            throw new TextException(TextErrorReason.InvalidLexeme, ErrorMessages.InvalidLexeme);
+            throw new TextException(TextErrorCode.InvalidLexeme, ErrorMessages.InvalidLexeme);
         }
 
         var builder = new TextLexemeBuilder();

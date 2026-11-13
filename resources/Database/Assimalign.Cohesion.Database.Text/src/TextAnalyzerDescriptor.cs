@@ -29,17 +29,22 @@ public sealed class TextAnalyzerDescriptor : IEquatable<TextAnalyzerDescriptor>
     /// <summary>Gets whether canonical accent removal precedes case folding.</summary>
     public bool FoldAccents { get; }
 
+    /// <summary>Creates an identity using the current analyzer version.</summary>
+    /// <param name="name">The exact analyzer name, including unavailable names.</param>
+    /// <param name="foldAccents">Whether to remove canonical accents; the default is false.</param>
+    /// <returns>An immutable version-1 identity; resolution verifies availability.</returns>
+    /// <exception cref="ArgumentNullException">The name is null.</exception>
+    public static TextAnalyzerDescriptor Create(string name, bool foldAccents = false) => Create(name, 1, foldAccents);
+
     /// <summary>Reconstitutes a persisted identity without silently upgrading it.</summary>
     /// <param name="name">The persisted name, including names unavailable to this implementation.</param>
-    /// <param name="version">The positive persisted version.</param>
+    /// <param name="version">The persisted version, including unavailable versions.</param>
     /// <param name="foldAccents">The persisted accent-folding choice; the default is false.</param>
     /// <returns>An immutable identity; <see cref="TextAnalyzer.Create"/> verifies availability.</returns>
     /// <exception cref="ArgumentNullException">The name is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The version is not positive.</exception>
-    public static TextAnalyzerDescriptor FromPersisted(string name, int version, bool foldAccents = false)
+    public static TextAnalyzerDescriptor Create(string name, int version, bool foldAccents = false)
     {
         ArgumentNullException.ThrowIfNull(name);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(version);
         return new TextAnalyzerDescriptor(name, version, foldAccents);
     }
 
