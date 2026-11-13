@@ -21,21 +21,13 @@ internal sealed class DatabaseHealthContributor : IApplicationInstanceHealthCont
 
     public async ValueTask<ApplicationInstanceHealthContribution> CheckAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var observation in await _context.GetHealthAsync(cancellationToken).ConfigureAwait(false))
+        var observation = await _context.GetHealthAsync(Name, cancellationToken).ConfigureAwait(false);
+        return new ApplicationInstanceHealthContribution(observation.Status switch
         {
-            if (observation.Name == Name)
-            {
-                return new ApplicationInstanceHealthContribution(observation.Status switch
-                {
-                    DatabaseHealthStatus.Healthy => ApplicationInstanceHealthStatus.Healthy,
-                    DatabaseHealthStatus.Degraded => ApplicationInstanceHealthStatus.Degraded,
-                    _ => ApplicationInstanceHealthStatus.Unhealthy,
-                }, observation.Description, observation.Data);
-            }
-        }
-
-        // A caller may retain a contributor after its database closes. It cannot attest availability.
-        return ApplicationInstanceHealthContribution.Unhealthy("The database component is no longer in the application's health inventory.");
+            DatabaseHealthStatus.Healthy => ApplicationInstanceHealthStatus.Healthy,
+            DatabaseHealthStatus.Degraded => ApplicationInstanceHealthStatus.Degraded,
+            _ => ApplicationInstanceHealthStatus.Unhealthy,
+        }, observation.Description, observation.Data);
     }
 
     private sealed class DebugView

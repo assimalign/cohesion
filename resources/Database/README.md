@@ -13,10 +13,14 @@ blob); explicit Listen wins. Managed HTTP health binds the platform's plain http
 bindable host, reporting and skipping unsuitable assignments. Unmanaged
 applications opt in with builder.AddHealthEndpoint(uri). The in-process platform still allocates
 only http, so wire addresses remain explicit there. Managed instances expose health contributors
-for each engine and database, plus database.accepting readiness, from Hosting's existing health
+for each engine and database, plus the database.accepting host accept gate, from Hosting's existing health
 observations. Offline databases are Unhealthy; provisioning and held schemas are Degraded with
-their existing refusal details. Contributors are usable directly today; gateway consumption and
-readiness separate from publication remain ApplicationModel follow-ups (E-AM2).
+their existing refusal details. Consumers read `IApplicationInstance.HealthContributors` for cheap
+live membership and re-read it to follow opens and drops. A retained contributor of a vanished
+database is Unhealthy ("not open"). Each check evaluates only its engine, or the host accept gate,
+without opening or waiting for databases. Stored databases this process has not opened are absent
+from health in every model. Gateway consumption and readiness separate from publication remain
+ApplicationModel follow-ups (ApplicationModel.Hosting open questions 2 and 7; Gateway G18).
 
 ## Storage corruption diagnostics (#1160)
 

@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Hosting;
@@ -40,12 +39,8 @@ internal sealed class DatabaseResource : IApplicationInstance
     {
         get
         {
-            // The instance contract discovers contributors synchronously, but engine inventory is
-            // asynchronous. Bridge off the caller's synchronization context, as Hosting's Build does.
-            // Refresh on each discovery so opens, closes and pending reopens remain represented.
-            var observations = Task.Run(() => _context.GetHealthAsync().AsTask()).GetAwaiter().GetResult();
-            return observations.Select(observation => (IApplicationInstanceHealthContributor)
-                new DatabaseHealthContributor(_context, observation.Name)).ToArray();
+            return _context.HealthComponentNames.Select(name => (IApplicationInstanceHealthContributor)
+                new DatabaseHealthContributor(_context, name)).ToArray();
         }
     }
 

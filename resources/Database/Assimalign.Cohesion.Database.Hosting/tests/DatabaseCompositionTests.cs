@@ -157,6 +157,7 @@ public sealed class DatabaseCompositionTests
     [InlineData(typeof(IHostEnvironment))]
     [InlineData(typeof(IConfiguration))]
     [InlineData(typeof(DatabaseApplicationContext))]
+    [InlineData(typeof(IDatabaseApplicationContext))]
     [InlineData(typeof(ILoggerFactory))]
     public void Build_WithReservedServiceRegistration_ShouldReject(Type reserved)
     {

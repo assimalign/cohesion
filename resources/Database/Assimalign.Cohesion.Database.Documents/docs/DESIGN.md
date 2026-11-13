@@ -1,5 +1,12 @@
 # Documents engine design
 
+## Open database inventory (#1790)
+
+GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+this process has not opened is absent from health; a leftover directory cannot fail readiness.
+OpenDatabases retains offline open instances and excludes closing ones.
+
 ## Journal admission backstop (#1283, EN-C2)
 
 At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
@@ -1078,7 +1085,7 @@ correlation rules, including explicit-alias capture versus an independent collec
 Index DDL still refuses element-rooted relative paths with CD03027, and VALUES subqueries still
 refuse unbound destination capture with CD01036, including compounds (#1767).
 
-DocumentSetOperationPlan binds two independent query plans and chooses T3-30's result shape
+DocumentSetOperationPlan binds two independent query plans and chooses the area's result shape
 before document reads: all RAW/VALUE leaves give `value`; identical ordered named projections
 give typed columns; otherwise the existing whole-document mode gives one `document` Json column.
 Wildcard operands keep document mode and open result-member names. Compound ORDER BY addresses
@@ -1139,7 +1146,7 @@ Captured expression sources are normalized per operand; the executor
 supplies the current outer bindings even to a plain-collection operand with correlated projections.
 Grouping equivalence compares complete compound trees, operators, modifiers and tails while its
 capture checks retain each operand's lexical identity. Derived sources pull complete set-row values;
-expression arrays unwrap whole-document results directly. DML sources retain T3-30's static shape,
+expression arrays unwrap whole-document results directly. DML sources retain the area's static shape,
 bind named members on heterogeneous row values and stage every write before publication. Their
 omitted VALUE is the complete row value. Every retained equality/sort/output owner releases on
 success, cancellation and refusal. Recursive planning, EXPLAIN and async expression/constructor paths
@@ -1163,7 +1170,7 @@ probes exercise the same contract; the engine-linked NativeAOT consumer checks b
 
 #### Window stage (#1805, OQ-W1)
 
-Documents ports the SQL window contract over JSON without referencing Database.Sql (T3-31).
+Documents ports the SQL window contract over JSON without referencing Database.Sql (#1804).
 Window-bearing queries use the existing statement-local async execution context even without
 subqueries. After grouping/HAVING, the window path owns complete representative rows and groups,
 shares equal-specification sorts through EquivalentPath-aware scoped expression equivalence,

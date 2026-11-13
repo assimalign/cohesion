@@ -52,7 +52,8 @@ public static class DatabaseResourceExtensions
         /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
         /// <exception cref="InvalidOperationException">
-        /// The instance's environment names a platform the resource uses no client for.
+        /// The instance's environment names a platform the resource uses no client for, or a managed
+        /// registration is built in a container without a Database application and its context.
         /// </exception>
         public IServiceProviderBuilder AddResource(ResourceName name, Action<DatabaseResourceOptions>? configure = null)
         {

@@ -13,6 +13,7 @@ using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Hosting.ApplicationModel.Tests;
 
+[Collection(DatabaseHealthCollection.Name)]
 public sealed class DatabaseResourceHealthTests
 {
     private const string displayPrefix = "Cohesion Test [Database.Hosting.ApplicationModel] - Health: ";
@@ -32,7 +33,7 @@ public sealed class DatabaseResourceHealthTests
 
         // Act
         var contributors = instance.HealthContributors;
-        IApplicationInstanceHealthContributor orders = contributors.Single(value => value.Name == "database/sql%2Fone/ORDERS");
+        IApplicationInstanceHealthContributor orders = contributors.Single(value => value.Name == "database/sql%2Fone/orders");
         var healthy = await orders.CheckAsync(guard.Token);
         await engine.CreateDatabaseAsync("later", guard.Token);
         var withLater = instance.HealthContributors;
@@ -40,7 +41,7 @@ public sealed class DatabaseResourceHealthTests
         var closed = await orders.CheckAsync(guard.Token);
 
         // Assert
-        contributors.Select(value => value.Name).ShouldBe(new[] { "engine/sql%2Fone", "database/sql%2Fone/ORDERS", "database.accepting" });
+        contributors.Select(value => value.Name).ShouldBe(new[] { "engine/sql%2Fone", "database/sql%2Fone/orders", "database.accepting" });
         healthy.Status.ShouldBe(ApplicationInstanceHealthStatus.Healthy);
         healthy.Data.ShouldNotBeNull()["database"].ShouldBe("Orders");
         withLater.Count.ShouldBe(4);
@@ -99,20 +100,23 @@ public sealed class DatabaseResourceHealthTests
             sql.AddDatabase("ordinary");
         });
         Register(builder);
+        using var events = new HealthEventRecorder();
         await using var application = builder.Build(guard.Token);
+        int transitionsAtBuild = events.HealthTransitions;
         var contributors = Instance(application).HealthContributors;
 
         // Act
-        var held = await contributors.Single(value => value.Name == "database/sql/HELD").CheckAsync(guard.Token);
+        var held = await contributors.Single(value => value.Name == "database/sql/held").CheckAsync(guard.Token);
 
         // Assert
+        transitionsAtBuild.ShouldBe(0);
         held.Status.ShouldBe(ApplicationInstanceHealthStatus.Degraded);
         held.Data.ShouldNotBeNull()["failureCode"].ShouldBe(previouslyApplied ? "CS03405" : "CS03105");
         held.Data["detail"].ShouldContain("DropColumn 'items.Added'", Case.Sensitive);
         held.Description.ShouldNotBeNull().ShouldContain("DropColumn 'items.Added'", Case.Sensitive);
         held.Data["detail"].ShouldContain(first.Compile().Hash, Case.Sensitive);
         held.Data["detail"].ShouldContain(second.Compile().Hash, Case.Sensitive);
-        (await contributors.Single(value => value.Name == "database/sql/ORDINARY").CheckAsync(guard.Token)).Status.ShouldBe(ApplicationInstanceHealthStatus.Healthy);
+        (await contributors.Single(value => value.Name == "database/sql/ordinary").CheckAsync(guard.Token)).Status.ShouldBe(ApplicationInstanceHealthStatus.Healthy);
         (await contributors.Single(value => value.Name == "engine/sql").CheckAsync(guard.Token)).Status.ShouldBe(ApplicationInstanceHealthStatus.Healthy);
     }
 

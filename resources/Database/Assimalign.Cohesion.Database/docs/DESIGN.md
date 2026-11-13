@@ -1,5 +1,18 @@
 # Assimalign.Cohesion.Database — Design
 
+## Open database inventory (#1790)
+
+DatabaseEngine.OpenDatabases is a public non-virtual, synchronous snapshot over a protected
+abstract core. Every model supplies its existing published GetInstanceSnapshot. The root copies
+it to a new read-only list, excludes closing instances as TryGetDatabase does, retains offline
+open instances, and returns empty after disposal. It takes no engine lock, does no I/O and never
+opens, reopens or waits for a database. OfflineDatabases still names offline open instances.
+GetDatabasesAsync retains model enumeration semantics: Documents, Graph and Blob open stored
+databases through recovery; SQL and KeyValue enumerate open instances. Health uses OpenDatabases
+in every model, so a stored database not opened by this process is absent from health and a
+leftover directory cannot fail readiness.
+
+
 ## Named savepoint admission (#1726, XT-4)
 
 The protected non-virtual session controls CreateSavepointAsync, ReleaseSavepointAsync and
@@ -780,7 +793,7 @@ ordinary storage transaction contention is retried as busy.
     worker, and every failure is written to the event source for the whole window; Blob's
     server refuses only the failing database meanwhile ("A failing worker refuses its database
     alone", below).
-  - *Journal admission (T3-27, #1283).* The limit still defaults to 4x CheckpointJournalSize
+  - *Journal admission (#1283).* The limit still defaults to 4x CheckpointJournalSize
     (1 GiB at the default trigger, or with the trigger off). Each model attaches every data
     and catalog interlock through ConfigureJournalAdmission after open-time provisioning and before publishing DatabaseInstance.
     IsJournalAdmissionPaused folds pure live-state reads for health. Reaching half the limit
@@ -1455,7 +1468,7 @@ The coordinator owns the horizon/apply gate; models supply their current manager
 interfaces, model-specific vacuum loops or root access to index-page internals. Blob has no
 B-tree manager. Indexing DESIGN owns the physical rollback decision #1393 and pruning details.
 
-## Named platform endpoints (#1790, EN-A1)
+## Named platform endpoints (#1790)
 
 Server creation snapshots options before validation. When that snapshot has no Listener and
 COHESION_GATEWAY is nonempty, DatabaseServerOptions reads the current AppEnvironment flow with TryGetEndpoint: SQL uses sql,
@@ -1491,7 +1504,7 @@ releasing the first listener.
 
 The in-process platform currently assigns only http. Five-model tests assign the named runtime
 values directly and complete handshake/Ping, including under NativeAOT; named platform allocation
-and per-endpoint outputs remain ApplicationModel escalation E-AM1. No wire or store format changes.
+and per-endpoint outputs remain ApplicationModel.Hosting's named-endpoint open question. No wire or store format changes.
 
 ## Shared server options and TCP composition (#1391, D7 B)
 

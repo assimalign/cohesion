@@ -1,8 +1,8 @@
 # Database TCP composition design
 
-## Named platform endpoints (#1790, EN-A1)
+## Named platform endpoints (#1790)
 
-The [root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790-en-a1)
+The [root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790)
 owns resolution, precedence, transport and ownership. Fallback requires a nonempty COHESION_GATEWAY.
 Values come from the current AppEnvironment flow: the scope when inside one, otherwise the process
 environment. Explicit Listener/Listen(Uri) wins; unmanaged applications must supply a listener.

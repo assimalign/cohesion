@@ -1,5 +1,12 @@
 # Graph engine design
 
+## Open database inventory (#1790)
+
+GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+this process has not opened is absent from health; a leftover directory cannot fail readiness.
+OpenDatabases retains offline open instances and excludes closing ones.
+
 ## Trigram text indexes (#1644, IX-R1)
 
 CREATE TEXT INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property) shares schema
@@ -251,12 +258,12 @@ a stale writer reports CG04007. The existing database writer lock serializes DDL
 commit or rollback. Edge properties and endpoints are persisted declarations only in GQ-T1;
 their enforcement, text ALTER and SHOW CURRENT GRAPH TYPE are GQ-T2. GQ-T2 must add the
 CG03009 cross-check against independent relationship keys/constraints, edge RequiresValidation
-selection, and the write-time selected-record reference check. Closedness is GQ-T3.
+selection, and the write-time selected-record reference check. Closed-type enforcement remains a separate feature.
 
 Before publication, structural comparison by identifying label selects only new or strengthened
 node declarations for owner-posting validation under latest visibility and the writer lock.
 Unchanged declarations, removed elements, nullable-property relaxations, removed property rules
-and removed implied labels scan no members for open types only. GQ-T3 closedness makes removal a
+and removed implied labels scan no members for open types only. Closed-type enforcement makes removal a
 tightening and must extend validation selection accordingly. Scalar declarations currently use exact types after
 CLR normalization, without scalar subtyping; changing the scalar type requires validation.
 Edge-only ALTER scans nothing in GQ-T1. Skipping these scans preserves deployment availability

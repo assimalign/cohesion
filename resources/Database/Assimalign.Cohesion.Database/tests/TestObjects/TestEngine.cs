@@ -248,6 +248,9 @@ internal sealed class TestEngine : DatabaseEngine
         return ValueTask.CompletedTask;
     }
 
+    protected override IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore() => Volatile.Read(ref _snapshot);
+
+
     protected override async IAsyncEnumerable<DatabaseInstance> GetDatabasesCore([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _coreCalls);

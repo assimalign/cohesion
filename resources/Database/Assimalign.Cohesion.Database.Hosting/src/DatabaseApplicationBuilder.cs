@@ -554,9 +554,11 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <summary>
     /// Closes service registration and builds the application's provider once: checks every
     /// registration, registers the environment, the configuration and the logger factory as
-    /// borrowed instances, makes the container read-only, and builds.
+    /// borrowed instances and the application context through concrete and interface factories,
+    /// makes the container read-only, and builds.
     /// </summary>
     /// <param name="loggerFactory">The application's logger factory.</param>
+    /// <param name="getContext">Returns the application's context once it has been constructed.</param>
     /// <returns>The provider, which the application owns.</returns>
     /// <exception cref="InvalidOperationException">
     /// A registration needs constructor activation or is open generic, or registers a reserved
@@ -578,6 +580,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 if (descriptor.ServiceType == typeof(IConfiguration)
                     || descriptor.ServiceType == typeof(IHostEnvironment)
                     || descriptor.ServiceType == typeof(DatabaseApplicationContext)
+                    || descriptor.ServiceType == typeof(IDatabaseApplicationContext)
                     || descriptor.ServiceType == typeof(ILoggerFactory))
                 {
                     throw new InvalidOperationException(
@@ -594,7 +597,10 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             Services.AddSingleton<IConfiguration>(Configuration);
             Services.AddSingleton<ILoggerFactory>(loggerFactory);
             // Created before engine factories run; lifecycle factories resolve it after registries freeze.
-            Services.AddSingleton<DatabaseApplicationContext>(_ => getContext());
+            // The application owns the context, which is not disposable; the provider must never own it.
+            Func<IServiceProvider, DatabaseApplicationContext> contextFactory = _ => getContext();
+            Services.AddSingleton<DatabaseApplicationContext>(contextFactory);
+            Services.AddSingleton<IDatabaseApplicationContext>(contextFactory);
         }
         finally
         {
@@ -608,7 +614,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         static string Describe(Type reserved)
             => reserved == typeof(IConfiguration) ? "configuration"
                 : reserved == typeof(IHostEnvironment) ? "host environment"
-                : reserved == typeof(DatabaseApplicationContext) ? "application context"
+                : reserved == typeof(DatabaseApplicationContext) || reserved == typeof(IDatabaseApplicationContext) ? "application context"
                 : "logger factory";
     }
 

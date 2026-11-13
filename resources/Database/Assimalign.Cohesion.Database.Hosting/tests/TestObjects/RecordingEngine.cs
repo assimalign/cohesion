@@ -46,6 +46,13 @@ internal sealed class RecordingEngine : DatabaseEngine
 
     internal Func<CancellationToken, IAsyncEnumerable<DatabaseInstance>>? Inventory { get; set; }
 
+    internal Func<IReadOnlyList<DatabaseInstance>>? OpenInventory { get; set; }
+
+    internal IReadOnlyList<DatabaseInstance> Instances { get; set; } = [];
+
+    protected override IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore()
+        => InventoryException is { } failure ? throw failure : OpenInventory?.Invoke() ?? Instances;
+
     /// <summary>Gets or sets the databases the engine reports offline.</summary>
     internal IReadOnlyList<DatabaseName> Offline { get; set; } = [];
 

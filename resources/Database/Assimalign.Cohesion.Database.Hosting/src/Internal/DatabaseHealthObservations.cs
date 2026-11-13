@@ -10,39 +10,69 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 [System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DatabaseHealthObservations
 {
+    internal const string JournalAdmissionPauseDescription = "CK06006: Write admission is paused for a pending journal checkpoint{0}. Reads retain their ordinary snapshot and locking rules.";
+
     private readonly List<DatabaseHealthObservation> _engines = [];
-    private readonly Dictionary<string, HealthCheckResult> _databases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DatabaseHealthObservation> _databases = new(StringComparer.Ordinal);
+    private readonly List<string> _databaseNames = [];
+    private readonly string? _componentName;
+    private readonly string? _databaseFilter;
+    private HealthCheckResult? _failure;
+
+    internal DatabaseHealthObservations(string? componentName = null)
+    {
+        _componentName = componentName;
+        _databaseFilter = componentName?.StartsWith("database/", StringComparison.Ordinal) == true
+            ? componentName[(componentName.LastIndexOf('/') + 1)..] : null;
+    }
+
+    internal bool WantsDatabase(string name)
+        => _componentName is null || _databaseFilter is not null && string.Equals(_databaseFilter, name, StringComparison.OrdinalIgnoreCase);
 
     internal void Engine(string name, EngineState state, Dictionary<string, object> data, string prefix)
     {
+        string componentName = EngineName(name);
+        if (_componentName is not null && _componentName != componentName) { return; }
         var detail = new Dictionary<string, object>(StringComparer.Ordinal);
+        string provisioningPrefix = prefix + "provisioning.";
+        string offlinePrefix = prefix + "offline.";
         foreach (var entry in data)
         {
-            if (entry.Key.StartsWith(prefix, StringComparison.Ordinal))
+            if (entry.Key.StartsWith(prefix, StringComparison.Ordinal) &&
+                !entry.Key.StartsWith(provisioningPrefix, StringComparison.Ordinal) &&
+                !entry.Key.StartsWith(offlinePrefix, StringComparison.Ordinal))
             {
                 detail.Add(entry.Key[prefix.Length..], entry.Value);
             }
         }
-        HealthCheckResult result = state switch
+        HealthCheckResult result = EngineStatus(state) switch
         {
-            EngineState.Running => HealthCheckResult.Healthy($"Database engine '{name}' is running.", detail),
-            EngineState.Faulted => HealthCheckResult.Degraded($"Database engine '{name}' has worker faults.", data: detail),
+            HealthStatus.Healthy => HealthCheckResult.Healthy($"Database engine '{name}' is running.", detail),
+            HealthStatus.Degraded => HealthCheckResult.Degraded($"Database engine '{name}' has worker faults.", data: detail),
             _ => HealthCheckResult.Unhealthy($"Database engine '{name}' is unavailable.", data: detail),
         };
-        _engines.Add(new DatabaseHealthObservation($"engine/{Uri.EscapeDataString(name)}", result));
+        _engines.Add(new DatabaseHealthObservation(componentName, result));
     }
 
-    internal void Database(string engine, string name, bool paused, string? provisioning, Dictionary<string, object> data)
+    internal void Database(string engine, string name, bool paused, string? provisioning, Dictionary<string, object>? data)
     {
+        string componentName = DatabaseName(engine, name);
+        if (!paused && provisioning is null)
+        {
+            SetDatabase(componentName, new DatabaseHealthObservation(componentName, engine, name));
+            return;
+        }
+        data ??= new Dictionary<string, object>(StringComparer.Ordinal);
         data["engine"] = engine;
         data["database"] = name;
+        if (paused) { data["journalAdmissionPauseCode"] = "CK06006"; }
         var result = paused
-            ? HealthCheckResult.Degraded("CK06006: Write admission is paused for a pending journal checkpoint. Reads retain their ordinary snapshot and locking rules.", data: data)
+            ? HealthCheckResult.Degraded(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                JournalAdmissionPauseDescription, string.Empty), data: data)
             : provisioning is not null
                 ? HealthCheckResult.Degraded($"Provisioning database: {provisioning}.", data: data)
                 : HealthCheckResult.Healthy("The database is online.", data);
-        if (paused) { data["journalAdmissionPauseCode"] = "CK06006"; }
-        _databases[DatabaseName(engine, name)] = result;
+        SetDatabase(componentName, new DatabaseHealthObservation(componentName, result));
     }
 
     internal void Offline(string engine, string name, string description, Dictionary<string, object> data)
@@ -56,22 +86,67 @@ internal sealed class DatabaseHealthObservations
         foreach (var entry in data) { detail[entry.Key] = entry.Value; }
         detail["engine"] = engine;
         detail["database"] = name;
-        _databases[key] = HealthCheckResult.Unhealthy($"Offline database: {description}.", data: detail);
+        SetDatabase(key, new DatabaseHealthObservation(key, HealthCheckResult.Unhealthy($"Offline database: {description}.", data: detail)));
+    }
+
+    private void SetDatabase(string name, DatabaseHealthObservation result)
+    {
+        if (!_databases.ContainsKey(name)) { _databaseNames.Add(name); }
+        _databases[name] = result;
+    }
+
+    internal void Failure(string engine, string fault)
+    {
+        var result = HealthCheckResult.Unhealthy($"Database engine '{engine}' health evaluation failed: {fault}.");
+        _failure = result;
+        string name = EngineName(engine);
+        int index = _engines.FindIndex(value => value.Name == name);
+        var observation = new DatabaseHealthObservation(name, result);
+        if (index >= 0) { _engines[index] = observation; } else { _engines.Add(observation); }
+        string prefix = DatabasePrefix(engine);
+        foreach (var database in _databaseNames)
+        {
+            if (database.StartsWith(prefix, StringComparison.Ordinal)) { _databases[database] = new DatabaseHealthObservation(database, result); }
+        }
+    }
+
+    internal DatabaseHealthObservation GetComponent(string name)
+    {
+        if (_failure is { } failure) { return new DatabaseHealthObservation(name, failure); }
+        foreach (var engine in _engines) { if (engine.Name == name) { return engine; } }
+        return _databases.TryGetValue(name, out var result)
+            ? result : new DatabaseHealthObservation(name, HealthCheckResult.Unhealthy("The database component is not open."));
     }
 
     internal IReadOnlyList<DatabaseHealthObservation> Complete(HealthCheckResult readiness)
     {
-        var result = new List<DatabaseHealthObservation>(_engines);
-        foreach (var database in _databases)
+        var result = new List<DatabaseHealthObservation>();
+        foreach (var engine in _engines)
         {
-            result.Add(new DatabaseHealthObservation(database.Key, database.Value));
+            result.Add(engine);
+            string prefix = "database/" + engine.Name["engine/".Length..] + "/";
+            var names = _databaseNames.FindAll(name => name.StartsWith(prefix, StringComparison.Ordinal));
+            names.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (string name in names) { result.Add(_databases[name]); }
         }
         result.Add(new DatabaseHealthObservation("database.accepting", readiness));
         return result.AsReadOnly();
     }
 
-    private static string DatabaseName(string engine, string database)
-        => $"database/{Uri.EscapeDataString(engine)}/{Uri.EscapeDataString(database.ToUpperInvariant())}";
+    internal static string EngineName(string engine) => $"engine/{Uri.EscapeDataString(engine)}";
+
+    internal static HealthStatus EngineStatus(EngineState state) => state switch
+    {
+        EngineState.Running => HealthStatus.Healthy,
+        EngineState.Faulted => HealthStatus.Degraded,
+        _ => HealthStatus.Unhealthy,
+    };
+
+    internal static string DatabasePrefix(string engine) => $"database/{Uri.EscapeDataString(engine)}/";
+
+    // DatabaseFileNames.GetStorageName uses this one fold; valid database names are ASCII.
+    internal static string DatabaseName(string engine, string database)
+        => DatabasePrefix(engine) + Uri.EscapeDataString(database.ToLowerInvariant());
 
     private sealed class DebugView
     {

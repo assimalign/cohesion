@@ -10,6 +10,18 @@ namespace Assimalign.Cohesion.Database.Hosting;
 /// <summary>An immutable, transport-neutral observation from the application's health evaluation.</summary>
 public sealed class DatabaseHealthObservation
 {
+    internal DatabaseHealthObservation(string name, string engine, string database)
+    {
+        Name = name;
+        Status = DatabaseHealthStatus.Healthy;
+        Description = "The database is online.";
+        Data = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["engine"] = engine,
+            ["database"] = database,
+        });
+    }
+
     internal DatabaseHealthObservation(string name, HealthCheckResult result)
     {
         Name = name;
@@ -31,7 +43,13 @@ public sealed class DatabaseHealthObservation
         Data = new ReadOnlyDictionary<string, string>(data);
     }
 
-    /// <summary>Gets the stable name, with URI-escaped ordinal engine and invariant uppercase database segments.</summary>
+    /// <summary>Gets the stable component name.</summary>
+    /// <remarks>
+    /// The public forms are <c>engine/&lt;escaped engine&gt;</c>,
+    /// <c>database/&lt;escaped engine&gt;/&lt;escaped lowercase database&gt;</c>, and
+    /// <c>database.accepting</c>. Each segment is URI-escaped separately. Engine identity is ordinal;
+    /// database names use the area's invariant lower-case storage-name fold.
+    /// </remarks>
     public string Name { get; }
 
     /// <summary>Gets the observed component status.</summary>

@@ -94,8 +94,9 @@ namespace Assimalign.Cohesion.Database;
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 3, #1259).</b> Every public member is non-virtual and owns
-/// the argument, disposed and cancellation checks before it calls a protected core; the one
-/// abstract public member is <see cref="OfflineDatabases"/>, state the leaf computes. The leaves
+/// the argument, disposed and cancellation checks before it calls a protected core, except that
+/// <see cref="OpenDatabases"/> remains readable after disposal and filters closing instances from
+/// its non-opening core snapshot. <see cref="OfflineDatabases"/> is abstract public state the leaf computes. The leaves
 /// live in the model assemblies, so the constructor is <c>protected</c>. A leaf re-exposes its
 /// typed database with <c>new</c> members that await the public members here, never the cores.
 /// The hosting layer composes every model through this base (concrete-types plan, phase 6, #1262).
@@ -104,6 +105,33 @@ namespace Assimalign.Cohesion.Database;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
 {
+    /// <summary>Gets a new read-only snapshot of open database instances, including offline instances.</summary>
+    /// <remarks>
+    /// Never opens, reopens or waits for a database, takes no engine lock, and excludes instances
+    /// whose close has started. Stored databases this process has not opened are absent. A disposed
+    /// engine returns an empty list. The returned list never exposes the leaf's snapshot array.
+    /// </remarks>
+    public IReadOnlyList<DatabaseInstance> OpenDatabases
+    {
+        get
+        {
+            var result = new List<DatabaseInstance>();
+            if (!IsDisposed)
+            {
+                foreach (var database in GetOpenDatabasesCore())
+                {
+                    if (!database.IsClosing) { result.Add(database); }
+                }
+                if (IsDisposed) { result.Clear(); }
+            }
+            return result.AsReadOnly();
+        }
+    }
+
+    /// <summary>Reads the leaf's published instance snapshot without locks, I/O or lifecycle work.</summary>
+    /// <returns>The current instances; the base filters closing instances and copies the collection.</returns>
+    protected abstract IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore();
+
     /// <summary>Configures the per-storage journal admission backstop and attaches its live state to a database.</summary>
     /// <param name="database">The newly constructed database, before publication to callers.</param>
     /// <param name="journalSizeLimit">The engine's resolved journal limit, in bytes.</param>

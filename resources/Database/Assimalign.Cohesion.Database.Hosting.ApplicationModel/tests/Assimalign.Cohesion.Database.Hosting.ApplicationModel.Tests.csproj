@@ -8,6 +8,11 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Health" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />

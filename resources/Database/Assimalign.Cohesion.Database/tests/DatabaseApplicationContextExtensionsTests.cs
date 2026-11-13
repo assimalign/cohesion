@@ -156,6 +156,9 @@ public class DatabaseApplicationContextExtensionsTests
         protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
             => throw new NotSupportedException();
 
+        protected override IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore() => [];
+
+
         protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
             => throw new NotSupportedException();
 

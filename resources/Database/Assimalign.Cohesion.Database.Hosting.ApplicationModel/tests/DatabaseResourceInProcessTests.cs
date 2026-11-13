@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -60,15 +61,15 @@ public sealed class DatabaseResourceInProcessTests
                 }
                 await program.Completion.WaitAsync(guard.Token);
             }
-            application.Context.State.ShouldBe(HostState.Started);
+
+            // Act: these are in-process instance checks; the gateway does not consume contributors.
             var health = DatabaseResourceHealthTests.Instance(application).HealthContributors;
-            health.Select(value => value.Name).ShouldBe(new[] { "engine/orders-sql", "database/orders-sql/ORDERS", "database.accepting" });
+            var contributions = new List<ApplicationInstanceHealthContribution>();
             foreach (var contributor in health)
             {
-                (await contributor.CheckAsync(guard.Token)).Status.ShouldBe(ApplicationInstanceHealthStatus.Healthy);
+                contributions.Add(await contributor.CheckAsync(guard.Token));
             }
 
-            // Act
             ApplicationActionResult write = await gateway.ExecuteAsync("Database", OrdersProgram.Name, "greeting", ApplicationActionContext.Create(
                 ApplicationActionOperation.Write,
                 JsonApplicationContentSerializer.Create(),
@@ -79,6 +80,9 @@ public sealed class DatabaseResourceInProcessTests
 
             // Assert: the instance published, repeating the deployment that started it, and the
             // gateway recorded the write and read it back from the instance.
+            application.Context.State.ShouldBe(HostState.Started);
+            health.Select(value => value.Name).ShouldBe(new[] { "engine/orders-sql", "database/orders-sql/orders", "database.accepting" });
+            contributions.ShouldAllBe(value => value.Status == ApplicationInstanceHealthStatus.Healthy);
             IApplicationGatewayDeployment resource = gateway.Resources.Single();
             ApplicationInstanceManifest instance = resource.Instances.ShouldHaveSingleItem();
             instance.Provider.ShouldBe((ProviderName)"Database");

@@ -109,19 +109,85 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// </summary>
     internal DatabaseReopenService? ReopenService { get; set; }
 
+    /// <summary>Gets live health membership without evaluating health or waiting for database lifecycle work.</summary>
+    /// <remarks>
+    /// Engines follow registration order; each engine is followed by its open or pending-reopen
+    /// databases in ordinal ignore-case name order, then database.accepting follows all engines.
+    /// A faulty inventory contributes its engine name. Re-read this member to follow opens and drops.
+    /// </remarks>
+    public IReadOnlyList<string> HealthComponentNames
+    {
+        get
+        {
+            var result = new List<string>();
+            foreach (var engine in _engines)
+            {
+                result.Add(DatabaseHealthObservations.EngineName(engine.Name));
+                IReadOnlyList<DatabaseInstance> databases;
+                // Discovery must survive a custom engine's broken inventory; evaluation fails closed.
+                try { databases = engine.OpenDatabases; }
+                catch (Exception) { databases = []; }
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var database in databases) { names.Add(database.Name.ToString()); }
+                foreach (var pending in ReopenService?.GetPendingReopens() ?? [])
+                {
+                    if (ReferenceEquals(pending.Engine, engine)) { names.Add(pending.Name); }
+                }
+                var ordered = new List<string>(names);
+                ordered.Sort(StringComparer.OrdinalIgnoreCase);
+                foreach (string name in ordered) { result.Add(DatabaseHealthObservations.DatabaseName(engine.Name, name)); }
+            }
+            result.Add("database.accepting");
+            return result.AsReadOnly();
+        }
+    }
+
     /// <summary>
-    /// Observes each engine, each currently open or reopening database, and server readiness through
-    /// the same evaluation used by HTTP health. Reading health does not provision or reopen a database.
+    /// Observes each engine, each currently open or reopening database, and the host accept gate through
+    /// the same evaluation core used by HTTP health. Reading health never opens, reopens or waits for a database.
     /// </summary>
     /// <param name="cancellationToken">Signals that the evaluation should be abandoned.</param>
     /// <returns>Immutable component observations, with invariant string data and bounded provisioning detail.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    /// <remarks>
+    /// Non-cancellation evaluation failures become Unhealthy for that engine's components, with
+    /// exception types only. Other engines and the accepting gate remain independent.
+    /// Stored databases this process has not opened are absent.
+    /// </remarks>
     public async ValueTask<IReadOnlyList<DatabaseHealthObservation>> GetHealthAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var observations = new DatabaseHealthObservations();
         await CheckObservedAsync(cancellationToken, observations).ConfigureAwait(false);
         return observations.Complete(CheckReadiness());
+    }
+
+    /// <summary>Evaluates one named component, reading only its engine, or only the host accepting gate.</summary>
+    /// <param name="componentName">A name from <see cref="HealthComponentNames"/>.</param>
+    /// <param name="cancellationToken">Signals that evaluation should be abandoned.</param>
+    /// <returns>An immutable observation; a database no longer open or pending is Unhealthy, "not open".</returns>
+    /// <exception cref="ArgumentException"><paramref name="componentName"/> is null, empty or white space.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    /// <remarks>
+    /// Non-cancellation evaluation failures become Unhealthy with exception types only. Cancellation
+    /// of the caller's token propagates. The accepting gate reads no engine inventory. Re-read
+    /// <see cref="HealthComponentNames"/> to follow membership changes.
+    /// </remarks>
+    public async ValueTask<DatabaseHealthObservation> GetHealthAsync(string componentName, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(componentName);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (componentName == "database.accepting") { return new DatabaseHealthObservation(componentName, CheckReadiness()); }
+        foreach (var engine in _engines)
+        {
+            if (componentName != DatabaseHealthObservations.EngineName(engine.Name) &&
+                !componentName.StartsWith(DatabaseHealthObservations.DatabasePrefix(engine.Name), StringComparison.Ordinal)) { continue; }
+            var observations = new DatabaseHealthObservations(componentName);
+            // A partial observation must not replace the aggregate trace's view of other engines.
+            await CheckCoreAsync(cancellationToken, components: observations, onlyEngine: engine).ConfigureAwait(false);
+            return observations.GetComponent(componentName);
+        }
+        return new DatabaseHealthObservation(componentName, HealthCheckResult.Unhealthy("The database component is not open."));
     }
 
     // Both the HTTP readiness check and transport-neutral observations use this outer-host gate.
@@ -171,7 +237,12 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     }
 
     internal async ValueTask<HealthCheckResult> CheckCoreAsync(CancellationToken cancellationToken, DatabaseHealthTrace.Observation? observation = null,
-        DatabaseHealthObservations? components = null)
+        DatabaseHealthObservations? components = null, DatabaseEngine? onlyEngine = null)
+        // Keep the existing async exception/cancellation surface even though inventory is synchronous.
+        => await new ValueTask<HealthCheckResult>(CheckCore(cancellationToken, observation, components, onlyEngine)).ConfigureAwait(false);
+
+    private HealthCheckResult CheckCore(CancellationToken cancellationToken, DatabaseHealthTrace.Observation? observation,
+        DatabaseHealthObservations? components, DatabaseEngine? onlyEngine)
     {
         var engines = new List<DatabaseEngine>(_engines.Count + _servers.Count);
         var observedEngines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
@@ -207,181 +278,203 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
 
         // The databases the application is reopening: a failed reopen left them closed, so their
         // engine no longer lists them, but they are not open again (owner decision 22).
-        IReadOnlyList<ReopenState> reopening = ReopenService?.GetPendingReopens() ?? [];
-
         for (int engineIndex = 0; engineIndex < engines.Count; engineIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             DatabaseEngine engine = engines[engineIndex];
-            EngineState state = engine.State;
-            IReadOnlyList<DatabaseEngineWorker> workers = engine.Workers;
+            if (onlyEngine is not null && !ReferenceEquals(engine, onlyEngine)) { continue; }
+            try
+            {
+                EngineState state = engine.State;
+                IReadOnlyList<DatabaseEngineWorker> workers = engine.Workers;
 
-            data[$"engine.{engineIndex}.name"] = engine.Name;
-            data[$"engine.{engineIndex}.model"] = engine.Model.ToString();
-            data[$"engine.{engineIndex}.state"] = state.ToString();
-            data[$"engine.{engineIndex}.workerCount"] = workers.Count;
+                data[$"engine.{engineIndex}.name"] = engine.Name;
+                data[$"engine.{engineIndex}.model"] = engine.Model.ToString();
+                data[$"engine.{engineIndex}.state"] = state.ToString();
+                data[$"engine.{engineIndex}.workerCount"] = workers.Count;
 
-            for (int workerIndex = 0; workerIndex < workers.Count; workerIndex++)
+                for (int workerIndex = 0; workerIndex < workers.Count; workerIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    DatabaseEngineWorker worker = workers[workerIndex];
+                    string prefix = $"engine.{engineIndex}.worker.{workerIndex}";
+                    data[$"{prefix}.name"] = worker.Name;
+                    data[$"{prefix}.kind"] = worker.Kind.ToString();
+                    data[$"{prefix}.intervalMilliseconds"] = worker.Interval.TotalMilliseconds;
+                    data[$"{prefix}.failureCount"] = worker.FailureCount;
+                    workerCount++;
+
+                    // A worker that keeps failing keeps running; its record says which, and what kind of
+                    // failure (the event source carries the rest).
+                    if (worker.Fault is { } fault)
+                    {
+                        string kind = DescribeFault(fault);
+                        int consecutiveFailures = worker.ConsecutiveFailures;
+                        data[$"{prefix}.consecutiveFailures"] = consecutiveFailures;
+                        data[$"{prefix}.fault"] = kind;
+                        failingWorkers.Add($"{worker.Name} ({consecutiveFailures} failed pass(es); {kind})");
+                    }
+                }
+
+                switch (DatabaseHealthObservations.EngineStatus(state))
+                {
+                    case HealthStatus.Healthy:
+                        break;
+                    case HealthStatus.Degraded:
+                        faultedEngines.Add(engine.Name);
+                        break;
+                    default:
+                        unavailableEngines.Add(engine.Name);
+                        break;
+                }
+
+                // A database that went offline refuses every request until it is reopened (#1243,
+                // #1252, #1268, owner decision 25); the engine itself keeps running, so its state does
+                // not show it. A database whose reopen failed is closed, and its engine no longer lists
+                // it, so the reopen service's own list adds it. A disposed engine has no databases to
+                // report.
+                if (state != EngineState.Disposed)
+                {
+                    int databaseIndex = 0;
+                    IReadOnlyList<DatabaseInstance> databases = engine.OpenDatabases;
+                    IReadOnlyList<ReopenState> reopening = ReopenService?.GetPendingReopens() ?? [];
+                    foreach (var database in databases)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var progress = database.Provisioning;
+                        bool paused = database.IsJournalAdmissionPaused;
+                        observation?.ObserveDatabase(engine, database, progress, paused);
+                        if (paused) { pausedDatabases.Add($"{engine.Name}/{database.Name}"); }
+                        if (progress is null)
+                        {
+                            if (components?.WantsDatabase(database.Name.ToString()) == true)
+                            {
+                                components.Database(engine.Name, database.Name.ToString(), paused, null, null);
+                            }
+                            continue;
+                        }
+                        string progressPrefix = $"engine.{engineIndex}.provisioning.{databaseIndex++}";
+                        data[$"{progressPrefix}.database"] = database.Name.ToString();
+                        data[$"{progressPrefix}.operation"] = progress.Operation;
+                        data[$"{progressPrefix}.object"] = progress.ObjectName;
+                        data[$"{progressPrefix}.position"] = progress.Position;
+                        data[$"{progressPrefix}.stepCount"] = progress.StepCount;
+                        data[$"{progressPrefix}.state"] = progress.FailureCode is not null ? "Failed" : progress.IsRunning ? "Running" : "Pending";
+                        if (progress.RowsProcessed is { } processed)
+                        {
+                            data[$"{progressPrefix}.rowsProcessed"] = processed;
+                        }
+                        if (progress.TotalRows is { } total)
+                        {
+                            data[$"{progressPrefix}.totalRows"] = total;
+                        }
+                        if (progress.FailureCode is { } code)
+                        {
+                            data[$"{progressPrefix}.failureCode"] = code;
+                        }
+                        string? detail = progress.Detail is { } refusal ? DatabaseHostingEventSource.BoundDetail(refusal) : null;
+                        if (detail is not null) { data[$"{progressPrefix}.detail"] = detail; }
+                        provisioningDatabases.Add($"{engine.Name}/{database.Name}: {progress.Operation} {progress.ObjectName}, " +
+                            $"step {progress.Position} of {progress.StepCount}, " +
+                            (progress.RowsProcessed is { } rows ? $"{rows} of {progress.TotalRows?.ToString() ?? "unknown"} rows" : "pending") +
+                            (progress.FailureCode is { } failed ? $", {failed}" : string.Empty) +
+                            (detail is not null ? $", {detail}" : string.Empty));
+                        if (components?.WantsDatabase(database.Name.ToString()) == true)
+                        {
+                            var progressData = new Dictionary<string, object>(StringComparer.Ordinal);
+                            string progressDataPrefix = progressPrefix + ".";
+                            foreach (var entry in data)
+                            {
+                                if (entry.Key.StartsWith(progressDataPrefix, StringComparison.Ordinal))
+                                {
+                                    progressData.Add(entry.Key[(progressPrefix.Length + 1)..], entry.Value);
+                                }
+                            }
+                            components.Database(engine.Name, database.Name.ToString(), paused, provisioningDatabases[^1], progressData);
+                        }
+                    }
+                    data[$"engine.{engineIndex}.provisioningDatabaseCount"] = databaseIndex;
+                    List<string> offline = [.. engine.OfflineDatabases.Select(name => (string)name)];
+                    foreach (ReopenState pending in reopening)
+                    {
+                        if (ReferenceEquals(pending.Engine, engine) && !offline.Contains(pending.Name, StringComparer.OrdinalIgnoreCase))
+                        {
+                            offline.Add(pending.Name);
+                        }
+                    }
+
+                    data[$"engine.{engineIndex}.offlineDatabaseCount"] = offline.Count;
+                    if (offline.Count > 0 && components is null)
+                    {
+                        data[$"engine.{engineIndex}.offlineDatabases"] = string.Join(", ", offline);
+                    }
+
+                    for (int offlineIndex = 0; offlineIndex < offline.Count; offlineIndex++)
+                    {
+                        string database = offline[offlineIndex];
+                        string prefix = $"engine.{engineIndex}.offline.{offlineIndex}";
+                        ReopenState? pending = FindPending(reopening, engine, database);
+                        StorageOfflineCause? cause = DatabaseReopenService.GetCause(engine, database) ?? pending?.Cause;
+                        observation?.ObserveOffline(engine, database, cause);
+                        data[$"{prefix}.name"] = database;
+                        if (cause is { } known)
+                        {
+                            data[$"{prefix}.cause"] = known.ToString();
+                        }
+
+                        var detail = new List<string>(2);
+                        if (cause is { } named)
+                        {
+                            detail.Add(named.ToString());
+                        }
+
+                        if (pending is { Attempts: > 0 } attempted)
+                        {
+                            data[$"{prefix}.reopenAttempts"] = attempted.Attempts;
+                            if (attempted.LastFailure is { } failure)
+                            {
+                                string kind = DescribeFault(failure);
+                                data[$"{prefix}.reopenFault"] = kind;
+                                detail.Add($"{attempted.Attempts} failed reopen attempt(s), last {kind}");
+                            }
+                        }
+
+                        offlineDatabases.Add(detail.Count == 0
+                            ? $"{engine.Name}/{database}"
+                            : $"{engine.Name}/{database} ({string.Join("; ", detail)})");
+                        if (components?.WantsDatabase(database) == true)
+                        {
+                            var offlineData = new Dictionary<string, object>(StringComparer.Ordinal);
+                            string offlineDataPrefix = prefix + ".";
+                            foreach (var entry in data)
+                            {
+                                if (entry.Key.StartsWith(offlineDataPrefix, StringComparison.Ordinal))
+                                {
+                                    offlineData.Add(entry.Key[(prefix.Length + 1)..], entry.Value);
+                                }
+                            }
+                            components.Offline(engine.Name, database, offlineDatabases[^1], offlineData);
+                        }
+                    }
+                }
+                components?.Engine(engine.Name, state, data, $"engine.{engineIndex}.");
+                if (components is not null && state != EngineState.Disposed && engine.State == EngineState.Disposed)
+                {
+                    components.Failure(engine.Name, nameof(ObjectDisposedException));
+                }
+            }
+            // Component consumers fail closed per engine. HTTP retains its throwing-check policy.
+            catch (Exception failure) when (components is not null)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                DatabaseEngineWorker worker = workers[workerIndex];
-                string prefix = $"engine.{engineIndex}.worker.{workerIndex}";
-                data[$"{prefix}.name"] = worker.Name;
-                data[$"{prefix}.kind"] = worker.Kind.ToString();
-                data[$"{prefix}.intervalMilliseconds"] = worker.Interval.TotalMilliseconds;
-                data[$"{prefix}.failureCount"] = worker.FailureCount;
-                workerCount++;
-
-                // A worker that keeps failing keeps running; its record says which, and what kind of
-                // failure (the event source carries the rest).
-                if (worker.Fault is { } fault)
-                {
-                    string kind = DescribeFault(fault);
-                    int consecutiveFailures = worker.ConsecutiveFailures;
-                    data[$"{prefix}.consecutiveFailures"] = consecutiveFailures;
-                    data[$"{prefix}.fault"] = kind;
-                    failingWorkers.Add($"{worker.Name} ({consecutiveFailures} failed pass(es); {kind})");
-                }
+                components.Failure(engine.Name, DescribeFault(failure));
             }
-
-            switch (state)
-            {
-                case EngineState.Running:
-                    break;
-                case EngineState.Faulted:
-                    faultedEngines.Add(engine.Name);
-                    break;
-                case EngineState.Disposed:
-                default:
-                    unavailableEngines.Add(engine.Name);
-                    break;
-            }
-
-            // A database that went offline refuses every request until it is reopened (#1243,
-            // #1252, #1268, owner decision 25); the engine itself keeps running, so its state does
-            // not show it. A database whose reopen failed is closed, and its engine no longer lists
-            // it, so the reopen service's own list adds it. A disposed engine has no databases to
-            // report.
-            if (state != EngineState.Disposed)
-            {
-                int databaseIndex = 0;
-                await foreach (var database in engine.GetDatabasesAsync(cancellationToken).ConfigureAwait(false))
-                {
-                    var progress = database.Provisioning;
-                    bool paused = database.IsJournalAdmissionPaused;
-                    observation?.ObserveDatabase(engine, database, progress, paused);
-                    if (paused) { pausedDatabases.Add($"{engine.Name}/{database.Name}"); }
-                    if (progress is null)
-                    {
-                        components?.Database(engine.Name, database.Name.ToString(), paused, null, new Dictionary<string, object>(StringComparer.Ordinal));
-                        continue;
-                    }
-                    string progressPrefix = $"engine.{engineIndex}.provisioning.{databaseIndex++}";
-                    data[$"{progressPrefix}.database"] = database.Name.ToString();
-                    data[$"{progressPrefix}.operation"] = progress.Operation;
-                    data[$"{progressPrefix}.object"] = progress.ObjectName;
-                    data[$"{progressPrefix}.position"] = progress.Position;
-                    data[$"{progressPrefix}.stepCount"] = progress.StepCount;
-                    data[$"{progressPrefix}.state"] = progress.FailureCode is not null ? "Failed" : progress.IsRunning ? "Running" : "Pending";
-                    if (progress.RowsProcessed is { } processed)
-                    {
-                        data[$"{progressPrefix}.rowsProcessed"] = processed;
-                    }
-                    if (progress.TotalRows is { } total)
-                    {
-                        data[$"{progressPrefix}.totalRows"] = total;
-                    }
-                    if (progress.FailureCode is { } code)
-                    {
-                        data[$"{progressPrefix}.failureCode"] = code;
-                    }
-                    string? detail = progress.Detail is { } refusal ? DatabaseHostingEventSource.BoundDetail(refusal) : null;
-                    if (detail is not null) { data[$"{progressPrefix}.detail"] = detail; }
-                    provisioningDatabases.Add($"{engine.Name}/{database.Name}: {progress.Operation} {progress.ObjectName}, " +
-                        $"step {progress.Position} of {progress.StepCount}, " +
-                        (progress.RowsProcessed is { } rows ? $"{rows} of {progress.TotalRows?.ToString() ?? "unknown"} rows" : "pending") +
-                        (progress.FailureCode is { } failed ? $", {failed}" : string.Empty) +
-                        (detail is not null ? $", {detail}" : string.Empty));
-                    if (components is not null)
-                    {
-                        var progressData = new Dictionary<string, object>(StringComparer.Ordinal);
-                        foreach (var entry in data)
-                        {
-                            if (entry.Key.StartsWith(progressPrefix + ".", StringComparison.Ordinal))
-                            {
-                                progressData.Add(entry.Key[(progressPrefix.Length + 1)..], entry.Value);
-                            }
-                        }
-                        components.Database(engine.Name, database.Name.ToString(), paused, provisioningDatabases[^1], progressData);
-                    }
-                }
-                data[$"engine.{engineIndex}.provisioningDatabaseCount"] = databaseIndex;
-                List<string> offline = [.. engine.OfflineDatabases.Select(name => (string)name)];
-                foreach (ReopenState pending in reopening)
-                {
-                    if (ReferenceEquals(pending.Engine, engine) && !offline.Contains(pending.Name, StringComparer.OrdinalIgnoreCase))
-                    {
-                        offline.Add(pending.Name);
-                    }
-                }
-
-                data[$"engine.{engineIndex}.offlineDatabaseCount"] = offline.Count;
-                if (offline.Count > 0)
-                {
-                    data[$"engine.{engineIndex}.offlineDatabases"] = string.Join(", ", offline);
-                }
-
-                for (int offlineIndex = 0; offlineIndex < offline.Count; offlineIndex++)
-                {
-                    string database = offline[offlineIndex];
-                    string prefix = $"engine.{engineIndex}.offline.{offlineIndex}";
-                    ReopenState? pending = FindPending(reopening, engine, database);
-                    StorageOfflineCause? cause = DatabaseReopenService.GetCause(engine, database) ?? pending?.Cause;
-                    observation?.ObserveOffline(engine, database, cause);
-                    data[$"{prefix}.name"] = database;
-                    if (cause is { } known)
-                    {
-                        data[$"{prefix}.cause"] = known.ToString();
-                    }
-
-                    var detail = new List<string>(2);
-                    if (cause is { } named)
-                    {
-                        detail.Add(named.ToString());
-                    }
-
-                    if (pending is { Attempts: > 0 } attempted)
-                    {
-                        data[$"{prefix}.reopenAttempts"] = attempted.Attempts;
-                        if (attempted.LastFailure is { } failure)
-                        {
-                            string kind = DescribeFault(failure);
-                            data[$"{prefix}.reopenFault"] = kind;
-                            detail.Add($"{attempted.Attempts} failed reopen attempt(s), last {kind}");
-                        }
-                    }
-
-                    offlineDatabases.Add(detail.Count == 0
-                        ? $"{engine.Name}/{database}"
-                        : $"{engine.Name}/{database} ({string.Join("; ", detail)})");
-                    if (components is not null)
-                    {
-                        var offlineData = new Dictionary<string, object>(StringComparer.Ordinal);
-                        foreach (var entry in data)
-                        {
-                            if (entry.Key.StartsWith(prefix + ".", StringComparison.Ordinal))
-                            {
-                                offlineData.Add(entry.Key[(prefix.Length + 1)..], entry.Value);
-                            }
-                        }
-                        components.Offline(engine.Name, database, offlineDatabases[^1], offlineData);
-                    }
-                }
-            }
-            components?.Engine(engine.Name, state, data, $"engine.{engineIndex}.");
         }
+
+        // Components already carry their own descriptions; never build and discard an aggregate.
+        if (components is not null) { return HealthCheckResult.Healthy(); }
 
         data["journalAdmissionPausedDatabaseCount"] = pausedDatabases.Count;
         if (pausedDatabases.Count > 0)
@@ -425,7 +518,8 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         }
         else if (pausedDatabases.Count > 0)
         {
-            return HealthCheckResult.Degraded($"CK06006: Write admission is paused for a pending journal checkpoint: {string.Join(", ", pausedDatabases)}. Reads retain their ordinary snapshot and locking rules.", data: data);
+            return HealthCheckResult.Degraded(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                DatabaseHealthObservations.JournalAdmissionPauseDescription, $": {string.Join(", ", pausedDatabases)}"), data: data);
         }
         else if (provisioningDatabases.Count > 0)
         {

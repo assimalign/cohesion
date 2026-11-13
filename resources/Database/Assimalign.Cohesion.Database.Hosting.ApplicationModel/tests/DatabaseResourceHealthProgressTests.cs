@@ -32,14 +32,13 @@ public sealed class DatabaseResourceHealthProgressTests
         DatabaseResourceHealthTests.Register(builder);
         await using var application = builder.Build(guard.Token);
         var contributors = DatabaseResourceHealthTests.Instance(application).HealthContributors;
-        var database = contributors.Single(value => value.Name == "database/sql/OFFLINE");
+        var database = contributors.Single(value => value.Name == "database/sql/offline");
         var engineHealth = contributors.Single(value => value.Name == "engine/sql");
 
         // Act: two recorded failed passes cross the engine's configured offline window.
-        worker.RunIteration(guard.Token).ShouldBeFalse();
-        (await engineHealth.CheckAsync(guard.Token)).Status.ShouldBe(ApplicationInstanceHealthStatus.Degraded);
-        Thread.Sleep(1);
-        worker.RunIteration(guard.Token).ShouldBeFalse();
+        bool firstPass = worker.RunIteration(guard.Token);
+        var faulted = await engineHealth.CheckAsync(guard.Token);
+        bool secondPass = worker.RunIteration(guard.Token);
         while (engine.GetOfflineError("offline") is null || engine.State != EngineState.Running)
         {
             await Task.Delay(1, guard.Token);
@@ -49,6 +48,9 @@ public sealed class DatabaseResourceHealthProgressTests
         var reopened = await database.CheckAsync(guard.Token);
 
         // Assert
+        firstPass.ShouldBeFalse();
+        secondPass.ShouldBeFalse();
+        faulted.Status.ShouldBe(ApplicationInstanceHealthStatus.Degraded);
         offline.Status.ShouldBe(ApplicationInstanceHealthStatus.Unhealthy);
         offline.Data.ShouldNotBeNull()["cause"].ShouldBe("CheckpointFailures");
         offline.Description.ShouldNotBeNull().ShouldNotContain("private storage path", Case.Sensitive);
@@ -93,7 +95,7 @@ public sealed class DatabaseResourceHealthProgressTests
         try
         {
             await entered.Task.WaitAsync(guard.Token);
-            var contributor = DatabaseResourceHealthTests.Instance(application).HealthContributors.Single(value => value.Name == "database/sql/PROGRESS");
+            var contributor = DatabaseResourceHealthTests.Instance(application).HealthContributors.Single(value => value.Name == "database/sql/progress");
 
             // Act
             var provisioning = await contributor.CheckAsync(guard.Token);
