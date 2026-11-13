@@ -389,6 +389,7 @@ internal sealed partial class SqlPlanExecutor
                 // The common scan needs only its output list. Avoid allocating sort state
                 // for an unordered query, including the unlimited single-row lookup path.
                 var projected = new List<object?[]>();
+                SqlOutputSpool? outputSpool = null;
                 unorderedRows = projected;
                 long skip = offset?.Count ?? 0;
                 long remaining = limit?.Count ?? long.MaxValue;
@@ -405,7 +406,7 @@ internal sealed partial class SqlPlanExecutor
                     SqlWindowMemory.For(_metrics)?.Retain(output);
                     if (retainRows is null || projected.Count < retainRows)
                     {
-                        if (spillOwner is not null && SqlOutputSpool.For(projected) is { } outputSpool)
+                        if (outputSpool is not null)
                         { outputSpool.Append(output, cancellationToken); }
                         else
                         {
@@ -418,14 +419,14 @@ internal sealed partial class SqlPlanExecutor
                             }
                             catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
                                 && hashInput is null && spillOwner?.Database.Engine.TempSpace is not null && retainRows is null)
-                            { SqlOutputSpool.Add(projected, output, ref outputBytes, _metrics!, _definitions.StatementMemoryBudget, spillOwner, cancellationToken); }
+                            { outputSpool = SqlOutputSpool.Add(projected, output, ref outputBytes, _metrics!, _definitions.StatementMemoryBudget, spillOwner, cancellationToken); }
                         }
                     }
                     if (--remaining == 0) { break; }
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
-                if (SqlOutputSpool.For(projected) is { } completed)
+                if (outputSpool is { } completed)
                 {
                     var result = completed.Take(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns, cancellationToken,
                         isDistinct ? resultOffset?.Count ?? 0 : 0, isDistinct ? resultLimit?.Count ?? -1 : -1);

@@ -2,27 +2,27 @@
 
 ## Retained SELECT output spooling (#1789, SQ-L4a; #1838)
 
-Unordered root SELECTs, primary-key ordered scans, unordered CTAS source roots and
+Unordered root SELECTs, ordered index scans (primary or secondary), unordered CTAS source roots and
 unordered GROUP BY output spool on the existing memory refusal. Independent nested
 SELECTs inherit the outer statement's spill permission; derived/view/CTE caches retain
 their runs and decode rows in encounter order. Fitting results, observed unordered order,
 volatile calls, sequence values, the first expression error and RecordsExamined are
 unchanged. File engines use their configured temporary space; in-memory engines require
-an explicit TempDirectory. Window, recursive, set, NOT IN and joined-DML owners retain
-their existing paths. INSERT SELECT's uncharged source policy remains tracked by #1828.
+an explicit TempDirectory. Window, recursive, set, every membership vector (IN, = ANY, > ALL and NOT IN), and joined-DML owners retain
+their existing paths. INSERT SELECT does not spill and keeps its source uncharged (#1828); scope item (2) covers CTAS only.
 
 | Retained output | Capacity |
 | --- | --- |
 | Sequential output/cache run | One encounter-order run; at most 16,384 encoded bytes per row. For encoded length L and decoded cost D, 9,984 + L + 24 + 2D must fit the grant |
 | Sequential writer and encoding scratch | Charged where space permits; at most 26,392 fixed bytes beyond the grant while resident producer state drains |
-| Delivered reader | Workspace plus retained decoded rows and one old/new decoding overlap fit the grant; nested readers also charge the outer live ledger |
+| Delivered reader | Workspace plus retained decoded rows and one old/new decoding overlap fit the grant; scalar/EXISTS and materialized group-input readers reserve workspace and decode overlap on the outer live ledger; relation-cache readers also reserve conversion overlap |
 | CTAS source copy | Existing source/batch charges when fitting; after copy refusal, consumed source-cell payloads release before batch admission. The fixed batch may use at most 520,472 B beyond the grant after refusal; 64-row write brackets are unchanged |
 
 No sort is added to unordered delivery. A spooled result starts reading on enumeration,
 supports rewind, and releases files on result/session/engine disposal and every server
 delivery exit. Early enumeration disposal frees its cursor. Quota, floor, integrity and
 temporary I/O failures retain located CK05 codes; codec/record/reader refusals retain
-CS05067. EXPLAIN ANALYZE uses the existing spill byte/run fields. Temporary files have no
+CS05067. Relation caches count toward the session cap of eight live spilled results; the refusal names active relation caches when they contribute. EXPLAIN ANALYZE uses the existing spill byte/run fields. Nested hash joins under a permitted spill root print hash_budget=spill_on_refusal even when nothing spills. Temporary files have no
 durable catalog or journal representation; startup sweeping removes crash leftovers.
 Staged unordered join sources report their run even when final output fits or LIMIT 0
 returns no rows.
@@ -1325,7 +1325,7 @@ This differs from PostgreSQL's statement-transaction publication. A completed ca
 is irrevocable; cancellation after it returns the committed result. A disconnect may lose that
 response. The source uses one statement MVCC snapshot. Its retained source output, ORDER BY and ordered DISTINCT may spill under the SELECT rules above, in sessions and declared scripts. A source whose copy fits retains its existing memory admission; a spilled source streams into 64-row copy brackets
 and is disposed before the statement ends, releasing its temporary files and result slot.
-Unordered and primary-key ordered source output spool on refusal. A fitting source whose copy would refuse releases consumed source-cell charges on demand (#1838). With 1,024-character notes at 262,144 B, all points 80 through 120 complete (sorting spills from 114); with 7,000-character notes at 67,108,864 B, all points 4,690 through 4,710 complete (sorting spills from 4,708). Retained fitting query output and encoded batch buffers share StatementMemoryBudget, with the bounded-copy allowance above after refusal. Unsupported source/record shapes
+Unordered and ordered index source output (primary or secondary) spool on refusal. A fitting source whose copy would refuse releases consumed source-cell charges on demand (#1838), including on an in-memory engine without a temp directory. With 1,024-character notes at 262,144 B, all points 80 through 120 complete (sorting spills from 114); with 7,000-character notes at 67,108,864 B, all points 4,690 through 4,710 complete (sorting spills from 4,708). Retained fitting query output and encoded batch buffers share StatementMemoryBudget, with the bounded-copy allowance above after refusal. Unsupported source/record shapes
 report CS05067 and leave no table. Temp quota and I/O failures retain CK05 codes and leave
 the database online; a declared script keeps its completed prefix and resumes at the failed
 CTAS on a later Build. After a completed copy, a counted temporary close failure does

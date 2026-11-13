@@ -22,6 +22,7 @@ internal sealed class SqlOutputSpool : IDisposable
     private readonly long _budget;
     private readonly StorageTempStatement _statement;
     private readonly StorageTempRun _run;
+    private byte[] _scratch = new byte[maximumRecordBytes];
     private bool _shared;
     private long _reserved;
     private long _maximumDecoded;
@@ -44,24 +45,21 @@ internal sealed class SqlOutputSpool : IDisposable
     internal static SqlSpilledResultSet SpillMaterialized(SqlMaterializedResultSet source, SqlStatementMetrics metrics,
         long budget, SqlDatabaseSession owner, ref long reserved, CancellationToken token)
     {
-        foreach (var row in source.Rows) { token.ThrowIfCancellationRequested(); Validate(row, budget, out _, out _); }
         using var output = new SqlOutputSpool(owner, metrics, budget);
         try
         {
             for (int i = 0; i < source.Rows.Count; i++)
-            { output.Append(source.Rows[i], token, draining: true); source.ClearRow(i); }
+            { output.Append(source.Rows[i], token); source.ClearRow(i); }
             source.ClearRows(); metrics.ReleasePlainSelectMemory(reserved); reserved = 0;
             return output.Take(source.Columns, token);
         }
         catch (Exception failure) { output.DisposeAfterFailure(failure); throw; }
     }
 
-    internal static void Add(List<object?[]> rows, object?[] pending, ref SqlSelectMemory memory,
+    internal static SqlOutputSpool Add(List<object?[]> rows, object?[] pending, ref SqlSelectMemory memory,
         SqlStatementMetrics metrics, long budget, SqlDatabaseSession owner, CancellationToken token)
     {
-        if (_outputs?.TryGetValue(rows, out var existing) == true) { existing.Append(pending, token); return; }
-        foreach (var row in rows) { token.ThrowIfCancellationRequested(); Validate(row, budget, out _, out _); }
-        Validate(pending, budget, out _, out _);
+        if (_outputs?.TryGetValue(rows, out var existing) == true) { existing.Append(pending, token); return existing; }
         var output = new SqlOutputSpool(owner, metrics, budget);
         try
         {
@@ -69,33 +67,33 @@ internal sealed class SqlOutputSpool : IDisposable
             // current encoding are bounded handoff scratch; no second row collection.
             for (int i = 0; i < rows.Count; i++)
             {
-                output.Append(rows[i], token, draining: true);
+                output.Append(rows[i], token);
                 long bytes = memory.RemoveRow(rows[i]); rows[i] = [];
                 metrics.ReleasePlainSelectMemory(bytes); memory.Bytes -= bytes;
             }
             rows.Clear(); rows.Capacity = 0; memory.Clear();
-            output._reserved = output.ReserveFixed(writerBytes);
+            output._reserved = output.ReserveFixed(writerBytes + maximumRecordBytes + 24L);
             SqlRowCollector.ObserveSpill?.Invoke("output-drained");
             output.Append(pending, token); LazyInitializer.EnsureInitialized(ref _outputs).Add(rows, output);
+            return output;
         }
         catch (Exception failure) { output.DisposeAfterFailure(failure); throw; }
     }
 
-    internal void Append(object?[] row, CancellationToken token, bool draining = false)
+    internal void Append(object?[] row, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        Validate(row, _budget, out int length, out long decoded);
+        if (!SqlTempRowCodec.TryWrite(row, _scratch, out int length)) { Refuse(); }
+        long decoded = SqlTempRowCodec.DecodedBytes(row);
+        if (writerBytes + length + 24L + 2 * decoded > _budget) { Refuse(); }
         // Sequential runs need no merge arena or fixed sort fan-in. Admit their
         // actual encoding and decoding workspace, including an old/new row overlap.
-        long scratch = draining ? 0 : ReserveFixed(length + 24L);
         try
         {
-            if (!SqlTempRowCodec.TryEncode(row, out var bytes)) { Refuse(); return; }
-            _run.Append(bytes, token); _maximumDecoded = Math.Max(_maximumDecoded, decoded);
+            _run.Append(_scratch.AsSpan(0, length), token); _maximumDecoded = Math.Max(_maximumDecoded, decoded);
             SqlRowCollector.ObserveSpill?.Invoke("output-append");
         }
         catch (StorageTempException failure) { throw SqlSpilledResultSet.Translate(failure); }
-        finally { _metrics.ReleasePlainSelectMemory(scratch); }
     }
 
     internal SqlSpilledResultSet Take(IReadOnlyList<DatabaseColumn> columns, CancellationToken token, long offset = 0, long limit = -1)
@@ -159,15 +157,7 @@ internal sealed class SqlOutputSpool : IDisposable
         else { output.Dispose(); }
     }
 
-    private void Release() { _metrics.ReleasePlainSelectMemory(_reserved); _reserved = 0; }
-    private static void Validate(object?[] row, long budget, out int length, out long decoded)
-    {
-        if (!SqlTempRowCodec.TryGetLength(row, out length) || length > maximumRecordBytes)
-        { throw SqlExecutionException.StatementMemoryBudget(budget); }
-        decoded = SqlTempRowCodec.DecodedBytes(row);
-        if (writerBytes + length + 24L + 2 * decoded > budget)
-        { throw SqlExecutionException.StatementMemoryBudget(budget); }
-    }
+    private void Release() { _metrics.ReleasePlainSelectMemory(_reserved); _reserved = 0; _scratch = []; }
     private long ReserveFixed(long bytes)
     {
         if (bytes > _budget - _metrics.HashMemoryBytes && SqlHashSpillMetrics.For(_metrics)?.HasOptionalArenas != true)

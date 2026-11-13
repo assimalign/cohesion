@@ -58,6 +58,8 @@ internal sealed partial class SqlPlanExecutor
             _definitions.ObserveSelectRetention?.Invoke("group-input", false,
                 input is SqlMaterializedResultSet retainedInput ? retainedInput.Rows.Count : 0);
             inputBytes = AdmitSelectResult(input, cancellationToken);
+            if (input is SqlSpilledResultSet spilledInput)
+            { inputBytes = spilledInput.ReserveReader(statement.Metrics, _definitions.StatementMemoryBudget, converting: true); }
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
             var keys = plan.Keys;
             var aggregates = plan.Aggregates;
@@ -160,6 +162,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
 
+            if (input is SqlSpilledResultSet) { ReleaseSelectMemory(ref inputBytes); }
             if (input is HashGroupInput stagedInput) { stagedInput.Consumed(); }
             ObserveHashSpill?.Invoke("groups-live", groups.Count);
             if (hashSpill is not null)

@@ -36,11 +36,24 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     private bool _ownsStatement;
     private bool _relationLease;
     internal Location? Location { get; set; }
+    internal bool IsRelationCache { get; private set; }
 
     internal void RetainRelation(List<object?[]> rows, SqlStatementMetrics metrics)
     {
         if (SqlHashSpillMetrics.AdoptTemp(metrics, _statement)) { _ownsStatement = false; }
-        LazyInitializer.EnsureInitialized(ref _relations).Add(rows, this); _relationLease = true;
+        LazyInitializer.EnsureInitialized(ref _relations).Add(rows, this); _relationLease = true; IsRelationCache = true;
+    }
+    internal long ReserveReader(SqlStatementMetrics metrics, long budget, bool converting = false)
+    {
+        long bytes;
+        lock (_gate)
+        {
+            Check();
+            bytes = WorkspaceBytes + (converting ? 4 : 2) * _maximumDecodedRowBytes
+                + (converting ? 64L * _columns.Count : 0);
+        }
+        metrics.ReservePlainSelectMemory(bytes, budget);
+        return bytes;
     }
     internal static void ReleaseRelation(List<object?[]> rows)
     {

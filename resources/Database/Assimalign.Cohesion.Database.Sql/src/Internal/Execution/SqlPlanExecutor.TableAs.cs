@@ -56,6 +56,7 @@ internal sealed partial class SqlPlanExecutor
                 // A fitting source retains its exact admission; a spilled source streams into
                 // 64-row brackets. Temp reads finish outside every apply bracket/page latch.
                 long sourceBytes = 0, batchBytes = 0, bufferBytes = 0;
+                bool consumingSource = false;
                 try
                 {
                     await using var source = (DatabaseResultSet)await ExecuteRootAsync(
@@ -71,7 +72,7 @@ internal sealed partial class SqlPlanExecutor
                             bufferBytes = 24L + 64L * 8;
                         }
                         catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
-                            && spillOwner?.Database.Engine.TempSpace is not null && source is SqlMaterializedResultSet or SqlSpilledResultSet)
+                            && source is SqlMaterializedResultSet or SqlSpilledResultSet)
                         { /* The first consumed row credits its cells before this fixed buffer is admitted. */ }
                         var batch = new List<byte[]>(64);
                         var domains = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken,
@@ -92,16 +93,16 @@ internal sealed partial class SqlPlanExecutor
                             byte[] record = SqlRowCodec.Encode(table, values, builder.Sequence);
                             TableAsRecordEncoded?.Invoke(record);
                             long bytes = 32L + record.Length;
-                            if (source is SqlMaterializedResultSet consumed && (bufferBytes == 0 || consumed.HasConsumedMemory))
-                            { consumed.ReleaseConsumedMemory(statement.Metrics, ref sourceBytes, written + 1); }
+                            if (source is SqlMaterializedResultSet consumed && (bufferBytes == 0 || consumingSource))
+                            { consumed.ReleaseConsumedMemory(statement.Metrics, ref sourceBytes, written + 1); consumingSource = true; }
                             if (bufferBytes == 0)
                             { bufferBytes = ReserveBoundedTableAsCopy(statement, 536); }
                             try { statement.Metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget); }
                             catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
-                                && spillOwner?.Database.Engine.TempSpace is not null && source is SqlMaterializedResultSet or SqlSpilledResultSet)
+                                && source is SqlMaterializedResultSet or SqlSpilledResultSet)
                             {
                                 if (source is SqlMaterializedResultSet retained)
-                                { retained.ReleaseConsumedMemory(statement.Metrics, ref sourceBytes, written + 1); }
+                                { retained.ReleaseConsumedMemory(statement.Metrics, ref sourceBytes, written + 1); consumingSource = true; }
                                 bytes = ReserveBoundedTableAsCopy(statement, bytes);
                             }
                             batchBytes += bytes;

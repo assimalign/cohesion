@@ -524,13 +524,16 @@ internal sealed partial class SqlPlanExecutor
     {
         SqlSelectMemory retainedBytes = default, seenBytes = default;
         var rows = new List<object?[]>();
+        // Ordered collection and unordered spooling share the optional slot, keeping
+        // a fitting join's async frame the same size as the base.
+        object? collection = null;
         try
         {
             var seen = plan.IsDistinct ? new HashSet<object?[]>(new GroupKeyComparer(plan.Projections
                 .Select(projection => projection.Collation.Resolve(_subqueryValues)).ToArray())) : null;
             // Eligibility excludes window owners. Base did not create its collector until input
             // succeeded, so publish the ordered-row peak only after the complete input drain.
-            using var collector = plan.OrderBy.Count == 0 ? null : new SqlRowCollector(plan.OrderBy, _subqueryValues,
+            collection = plan.OrderBy.Count == 0 ? null : new SqlRowCollector(plan.OrderBy, _subqueryValues,
                 plan.Limit, plan.Offset, cancellationToken, statement.Metrics, SelectBufferBudget, publishPeak: false);
             long skip = plan.Offset?.Count ?? 0;
             long remaining = plan.Limit?.Count ?? long.MaxValue;
@@ -547,7 +550,7 @@ internal sealed partial class SqlPlanExecutor
                 if (projectionFailure is not null) { continue; }
                 try
                 {
-                    if (collector is null)
+                    if (collection is not SqlRowCollector collector)
                     {
                         if (seen is null && remaining == 0) { continue; }
                         var output = ProjectRow(source, plan.Projections, evaluator, cancellationToken);
@@ -574,13 +577,13 @@ internal sealed partial class SqlPlanExecutor
                         {
                             if (hashInput is null)
                             {
-                                if (spillOwner is not null && SqlOutputSpool.For(rows) is { } retainedOutput) { retainedOutput.Append(output, cancellationToken); }
+                                if (collection is SqlOutputSpool outputSpool) { outputSpool.Append(output, cancellationToken); }
                                 else
                                 {
                                     try { RetainSelectRow(ref retainedBytes, output); rows.Add(output); }
                                     catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
                                         && spillOwner?.Database.Engine.TempSpace is not null && retainRows is null)
-                                    { SqlOutputSpool.Add(rows, output, ref retainedBytes, statement.Metrics, _definitions.StatementMemoryBudget, spillOwner, cancellationToken); }
+                                    { collection = SqlOutputSpool.Add(rows, output, ref retainedBytes, statement.Metrics, _definitions.StatementMemoryBudget, spillOwner, cancellationToken); }
                                 }
                             }
                             else if (RetainStagedSortSource(rows, output, ref retainedBytes, [], spillOwner, cancellationToken, hashInput: hashInput))
@@ -611,14 +614,14 @@ internal sealed partial class SqlPlanExecutor
                     projectionFailure = ExceptionDispatchInfo.Capture(failure);
                 }
             }
-            if (collector is not null)
-            { statement.Metrics.PeakOrderedRows = Math.Max(statement.Metrics.PeakOrderedRows, collector.RetainedCount); }
+            if (collection is SqlRowCollector measured)
+            { statement.Metrics.PeakOrderedRows = Math.Max(statement.Metrics.PeakOrderedRows, measured.RetainedCount); }
             projectionFailure?.Throw();
             distinctFailure?.Throw();
-            if (collector is not null)
+            if (collection is SqlRowCollector completed)
             {
-                if (collector.HasSpilled) { return FinishCollected(collector, plan.Projections, plan.Limit, plan.Offset, false, evaluator, cancellationToken, resolveEmptyCollations: false); }
-                rows = collector.Finish(resolveEmptyCollations: false);
+                if (completed.HasSpilled) { return FinishCollected(completed, plan.Projections, plan.Limit, plan.Offset, false, evaluator, cancellationToken, resolveEmptyCollations: false); }
+                rows = completed.Finish(resolveEmptyCollations: false);
             }
             if (seen is not null)
             {
@@ -626,8 +629,8 @@ internal sealed partial class SqlPlanExecutor
                 rows = ApplyRowWindow(rows, plan.Limit, plan.Offset);
             }
             if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, rows.Count); }
-            if (SqlOutputSpool.For(rows) is { } outputSpool)
-            { return outputSpool.Take(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns, cancellationToken); }
+            if (collection is SqlOutputSpool finished)
+            { return finished.Take(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns, cancellationToken); }
             if (hashInput is not null && SqlStagedSortSource.For(rows) is { } spooled)
             {
                 spooled.Seal(cancellationToken);
@@ -639,7 +642,7 @@ internal sealed partial class SqlPlanExecutor
         catch (Exception failure) { SqlOutputSpool.Release(rows, failure); if (hashInput is not null) { SqlStagedSortSource.ReleaseAfterFailure(rows, failure); } throw; }
         finally
         {
-            try { SqlOutputSpool.Release(rows); if (hashInput is not null) { SqlStagedSortSource.Release(rows); } }
+            try { if (collection is SqlRowCollector ordered) { ordered.Dispose(); } SqlOutputSpool.Release(rows); if (hashInput is not null) { SqlStagedSortSource.Release(rows); } }
             finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); }
         }
     }

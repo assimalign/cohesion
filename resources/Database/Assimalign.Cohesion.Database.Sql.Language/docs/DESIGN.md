@@ -17,7 +17,7 @@ corpora retain their existing behavior.
 SqlSortSpillConformanceTests extends the executable SQL corpus with root ORDER BY and ordered
 DISTINCT spill, stable evaluation and representative selection, lazy repeatable delivery,
 located CK05 failures and retained-grant refusals. Grammar and wire formats are unchanged.
-DIALECT records the SELECT spill scope and default quota capacity. SQ-L4a adds unordered root/ordered-index delivery, inherited independent nested SELECT permission, retained relation runs, resident hash-aggregation output and consumed CTAS source credit (#1838). Its grant sweep compares the batch-base binary point by point, and the lifetime/live-object corpus covers sequential runs. The seed 178903
+DIALECT records the SELECT spill scope and default quota capacity. SQ-L4a adds unordered root/ordered-index delivery, inherited independent nested SELECT permission, retained relation runs, resident hash-aggregation output and consumed CTAS source credit (#1838). Its CI grant sweep compares spilling points with the fitting 64 MiB run; the batch-base binary comparison was a one-off recorded run. A quota-zero pass preserves base completions. The lifetime and during-operation live-heap corpus covers sequential runs. The seed 178903
 generator adds 2,048 statements crossing root sources, typed keys, volatile and sequence
 positions, empty windows and row failures; comparisons retain CLR types and exact binary
 and floating-point representations. The hash differential also compares decimal.GetBits,

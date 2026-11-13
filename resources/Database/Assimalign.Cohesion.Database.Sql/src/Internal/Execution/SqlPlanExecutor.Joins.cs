@@ -101,7 +101,15 @@ internal sealed partial class SqlPlanExecutor
         catch (Exception exception) { if (matches is not null) { SqlOutputSpool.Release(matches, exception); SqlStagedSortSource.ReleaseAfterFailure(matches, exception); } throw; }
         finally
         {
-            try { if (matches is not null) { SqlOutputSpool.Release(matches); SqlStagedSortSource.Release(matches); } }
+            try
+            {
+                if (matches is not null)
+                {
+                    try { SqlOutputSpool.Release(matches); }
+                    catch (SqlExecutionException) { /* Storage counted cleanup; preserve the computed result. */ }
+                    SqlStagedSortSource.Release(matches);
+                }
+            }
             finally { ReleaseSelectMemory(ref matchBytes); ReleaseSelectMemory(ref derivedBytes); }
         }
     }
