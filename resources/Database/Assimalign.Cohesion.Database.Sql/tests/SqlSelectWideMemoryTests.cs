@@ -101,7 +101,14 @@ public sealed partial class SqlSelectWideMemoryTests
         success.Code.ShouldBeNull();
         exact.Code.ShouldBeNull();
         exact.Rows.ShouldBe(success.Rows);
-        refused.Code.ShouldBe("CS05067");
+        if (shape == 20)
+        {
+            // #1838 copy credit also applies without a temp directory. This point
+            // keeps the former refusal peak while completing the same three rows.
+            refused.Code.ShouldBeNull();
+            refused.Rows.ShouldBe(success.Rows);
+        }
+        else { refused.Code.ShouldBe("CS05067"); }
         success.Peak.ShouldBe(expectedPeak);
         refused.Peak.ShouldBe(expectedRefusal);
         for (int point = 1; point <= success.Reservations; point++)
