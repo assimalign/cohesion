@@ -2,12 +2,12 @@
 .SYNOPSIS
 Captures the English stemmer and parser fixtures from PostgreSQL 17.11.
 .DESCRIPTION
-Start a postgres:17.11 container named t3-fx-ix-t1-oracle separately. This script
+Start a postgres:17.11 container named text-oracle separately. This script
 checks the server version and queries it read-only; it does not manage containers.
 The pinned repository revision supplies vocabulary, with suffix bases spread over
 its ordinal-sorted vocabulary by deterministic stride. Tests need no running server.
 !#>
-param([string] $Container = 't3-fx-ix-t1-oracle', [string] $Revision = 'c9ac0df64', [string] $OutputPath = "$PSScriptRoot/../../../resources/Database/Assimalign.Cohesion.Database.Text/tests/TestObjects/EnglishPostgres17.tsv")
+param([string] $Container = 'text-oracle', [string] $Revision = 'c9ac0df64', [string] $OutputPath = "$PSScriptRoot/../../../resources/Database/Assimalign.Cohesion.Database.Text/tests/TestObjects/EnglishPostgres17.tsv")
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -36,7 +36,7 @@ $query = "CREATE TEMP TABLE words(word text);`nCOPY words FROM STDIN;`n" + ($wor
 $result = @($query | & podman exec -i $Container psql -X -q -t -A -F "`t" -U postgres)
 if ($LASTEXITCODE -ne 0) { throw 'Oracle query failed.' }
 if ($result.Count -lt 20000) { throw 'Oracle corpus must contain at least 20,000 distinct words.' }
-[IO.File]::WriteAllText([IO.Path]::GetFullPath($OutputPath),($result -join "`r`n") + "`r`n",[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText([IO.Path]::GetFullPath($OutputPath),($result -join "`n") + "`n",[Text.UTF8Encoding]::new($false))
 Write-Output "Captured $($result.Count) total and $($words.Count) distinct PostgreSQL 17.11 english_stem pairs."
 $words | Group-Object { $_.Substring(0, $(if ([char]::IsHighSurrogate($_[0])) { 2 } else { 1 })) } | Sort-Object Name | ForEach-Object { Write-Output "Initial $($_.Name): $($_.Count)" }
 $parserPath = Join-Path $repository 'resources/Database/Assimalign.Cohesion.Database.Text/tests/TestObjects/ParserPostgres17.tsv'
@@ -51,7 +51,7 @@ foreach ($line in Get-Content -Encoding utf8 $parserPath) {
     $parts[2] = $columns[0]; $parts[3] = $columns[1]
     $parserRows.Add(($parts -join "`t"))
 }
-[IO.File]::WriteAllText($parserPath,($parserRows -join "`r`n") + "`r`n",[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($parserPath,($parserRows -join "`n") + "`n",[Text.UTF8Encoding]::new($false))
 $vectorRows = [Collections.Generic.List[string]]::new()
 $prefix = "'x':" + ((1..255) -join ',') + ','
 foreach ($case in @(
@@ -64,4 +64,4 @@ foreach ($case in @(
     $vectorRows.Add((@($case.Name, $case.Input, $observed[0], $case.Expected) -join "`t"))
 }
 $vectorPath = Join-Path (Split-Path $parserPath) 'VectorPostgres17.tsv'
-[IO.File]::WriteAllText($vectorPath,($vectorRows -join "`r`n") + "`r`n",[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($vectorPath,($vectorRows -join "`n") + "`n",[Text.UTF8Encoding]::new($false))

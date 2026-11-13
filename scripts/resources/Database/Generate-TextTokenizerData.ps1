@@ -80,5 +80,5 @@ foreach ($kind in 1,2) {
 '@)
 $repository = [IO.Path]::GetFullPath("$PSScriptRoot/../../..")
 $destination = Join-Path $repository 'resources/Database/Assimalign.Cohesion.Database.Text/src/Internal/TextUnicodeData.Generated.cs'
-[IO.File]::WriteAllText($destination,($output.ToString() -replace '\r?\n',"`r`n"),[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($destination,($output.ToString() -replace '\r?\n',"`n"),[Text.UTF8Encoding]::new($false))
 Write-Output 'Generated Unicode 17.0 word and continuation ranges.'
