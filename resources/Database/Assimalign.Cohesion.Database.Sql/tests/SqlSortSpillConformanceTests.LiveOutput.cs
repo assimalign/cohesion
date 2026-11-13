@@ -102,10 +102,15 @@ public sealed partial class SqlSortSpillConformanceTests
             for (int first = 0; first < count; first += 200)
             { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first, Math.Min(200,count-first)).Select(i => $"({i},NULL)"))); }
             await session.ExecuteAsync("CREATE TABLE warm AS SELECT note FROM t");
-            await session.ExecuteAsync("DROP TABLE warm");
             await session.ExecuteAsync("CREATE TABLE pool_fill(note TEXT)");
             for (int first = 0; first < 1000; first += 25)
             { await session.ExecuteAsync("INSERT INTO pool_fill VALUES" + string.Join(',', Enumerable.Range(0, 25).Select(_ => "('" + new string('x', 2048) + "')"))); }
+            // Keep the warm owners alive so reclamation cannot evict frames during a sample.
+            for (int pass = 0; pass < 8 && TableAsPoolCount(TableAsPool(session.Database.DataStorage)) < 128; pass++)
+            {
+                await using var scan = (DatabaseResultSet)await session.ExecuteAsync("SELECT MAX(note) FROM pool_fill");
+                (await Rows(scan)).ShouldHaveSingleItem().Cells[0].ShouldBe(new string('x', 2048));
+            }
             TableAsPoolCount(TableAsPool(session.Database.DataStorage)).ShouldBe(128);
             var retained = new List<byte[]>();
             long minimum = long.MaxValue;
@@ -129,7 +134,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 try
                 {
                     // Act
-                    (await session.ExecuteAsync("CREATE TABLE archive AS SELECT note FROM t")).AffectedCount.ShouldBe(count);
+                    (await session.ExecuteAsync($"CREATE TABLE archive{execution} AS SELECT note FROM t")).AffectedCount.ShouldBe(count);
                     // Assert: completing with the source at G and no temp run proves that
                     // the fixed copy-refusal allowance ran; NULL cells release no payload.
                     admitted.ShouldBe(64L * count); smallest.ShouldBe(admitted);
@@ -145,7 +150,6 @@ public sealed partial class SqlSortSpillConformanceTests
                     SqlStatementMetrics.AfterMemoryReservation = null; SqlPlanExecutor.TableAsSourceAdmitted = null;
                     SqlPlanExecutor.TableAsRecordEncoded = null; SqlPlanExecutor.TableAsStage = null;
                 }
-                await session.ExecuteAsync("DROP TABLE archive");
             }
             long excess = minimum - grant - batch - slack; excesses.Add(excess);
             _output.WriteLine($"COPY_CREDIT_DURING|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|batch={batch}|slack={slack}");

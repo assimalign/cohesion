@@ -196,23 +196,14 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue;
             for (int execution = -1; execution < 3; execution++)
             {
-                var retained = mutant && execution >= 0 ? new List<object>() : null;
-                var weak = new List<WeakReference>();
                 long before = LiveHeap.Read();
-                var metrics = new SqlStatementMetrics();
-                using var collector = new SqlRowCollector([], null, null, null, default, metrics, grant);
-
-                // Act
-                for (int i = 0; i < count; i++) { AddOutputVector(collector, i, session, weak, retained); }
-                await using var result = collector.TakeSpilled([], 0, -1);
-                long live = LiveHeap.Read() - before;
+                long during = MeasureOutputLiveRows(count, session, mutant && execution >= 0, grant);
+                long after = LiveHeap.Read();
+                // The helper has released its objects before the second quiescent reading.
+                // The lower baseline prevents ambient reclamation from hiding retention.
+                long live = Math.Max(0, during - Math.Min(before, after));
                 if (execution >= 0) { minimum = Math.Min(minimum, live); }
-
-                // Assert: drained rows are dead even when the mutant retains their boxed value.
-                weak.Count(reference => reference.IsAlive).ShouldBe(0);
-                metrics.HashMemoryBytes.ShouldBe(0); metrics.PlainSelectMemoryBytes.ShouldBe(0);
-                metrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(grant); // ledger admission only
-                GC.KeepAlive(retained);
+                _output.WriteLine($"OUTPUT_LIVE_ROUND|rows={count}|mutant={mutant}|execution={execution}|baseline_before={before}|during={during}|baseline_after={after}|live={live}");
             }
             populations.Add(minimum);
             _output.WriteLine($"OUTPUT_LIVE|rows={count}|mutant={mutant}|live={minimum}");
@@ -223,11 +214,48 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long MeasureOutputLiveRows(int count, SqlDatabaseSession owner, bool mutant, long grant)
+    {
+        var retained = mutant ? new List<object>() : null;
+        var weak = new List<WeakReference>();
+        var metrics = new SqlStatementMetrics();
+        using var collector = new SqlRowCollector([], null, null, null, default, metrics, grant);
+        int drained = 0;
+        SqlRowCollector.ObserveSpill = phase =>
+        {
+            if (phase != "output-drained") { return; }
+            drained++;
+            LiveHeap.Read();
+            // Drained arrays and payloads must die before Take, even if a retained prefix fits G.
+            weak.Count(reference => reference.IsAlive).ShouldBe(0);
+        };
+        try
+        {
+            // Act
+            for (int i = 0; i < count; i++) { AddOutputVector(collector, i, owner, weak, retained); }
+        }
+        finally { SqlRowCollector.ObserveSpill = null; }
+        drained.ShouldBe(1);
+        var result = collector.TakeSpilled([], 0, -1);
+        try
+        {
+            long live = LiveHeap.Read();
+            // Assert: retaining boxed values cannot keep their row arrays or wide payloads alive.
+            weak.Count(reference => reference.IsAlive).ShouldBe(0);
+            metrics.HashMemoryBytes.ShouldBe(0); metrics.PlainSelectMemoryBytes.ShouldBe(0);
+            metrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(grant); // ledger admission only
+            GC.KeepAlive(retained);
+            return live;
+        }
+        finally { result.Dispose(); }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AddOutputVector(SqlRowCollector collector, int value, SqlDatabaseSession owner,
         List<WeakReference> weak, List<object>? mutant)
     {
         object?[] row = [value, new string('x', 512)];
-        if (value < 128) { weak.Add(new WeakReference(row)); }
+        if (value < 128) { weak.Add(new WeakReference(row)); weak.Add(new WeakReference(row[1])); }
         mutant?.Add(row[0]!); collector.Add(row, [], owner);
     }
 }
