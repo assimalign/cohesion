@@ -22,7 +22,7 @@ public sealed class GraphTypeDdlTests
     [Theory(DisplayName = "Cohesion Test [Graph] - Graph type endpoints: latest edge and endpoint visibility prevents stale Snapshot admission")]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Execute_StaleEndpointOrIncidentRead_ShouldRefuse(bool createRelationship)
+    public async Task Execute_StaleEndpointOrIncidentRead_ShouldRefuseAsync(bool createRelationship)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("edge-stale", new());
@@ -44,7 +44,7 @@ public sealed class GraphTypeDdlTests
     [Theory(DisplayName = "Cohesion Test [Graph] - Graph type validation: a writer overlapping ALTER edge validation cannot admit a violation")]
     [InlineData(IsolationLevel.Snapshot)]
     [InlineData(IsolationLevel.ReadCommitted)]
-    public async Task AlterGraphTypeAsync_ConcurrentViolatingWriter_ShouldConflictOrRefuse(IsolationLevel isolation)
+    public async Task AlterGraphTypeAsync_ConcurrentViolatingWriter_ShouldConflictOrRefuseAsync(IsolationLevel isolation)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -99,7 +99,7 @@ public sealed class GraphTypeDdlTests
     [InlineData("INSERT (a:U)-[:UNKNOWN]->(a)")]
     [InlineData("MATCH (a:U) SET a.p=1")]
     [InlineData("MATCH (a:U) SET a:Extra")]
-    public async Task Execute_UntypedEdgeWrite_ShouldPreserveWork(string query)
+    public async Task Execute_UntypedEdgeWrite_ShouldPreserveWorkAsync(string query)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("edge-work", new());
@@ -135,7 +135,7 @@ public sealed class GraphTypeDdlTests
     [InlineData("MATCH (a:A)-[r:R]->(b:B) SET a:C REMOVE a:A", "CG03013")]
     [InlineData("MATCH (a:A)-[r:R]->(b:B) REMOVE r.p", "CG03003")]
     [InlineData("MATCH (a:A)-[r:R]->(b:B) SET r={}", "CG03003")]
-    public async Task Execute_EdgeViolation_ShouldRollbackAndRemainAvailable(string text, string code)
+    public async Task Execute_EdgeViolation_ShouldRollbackAndRemainAvailableAsync(string text, string code)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("edge-matrix", new());
@@ -155,7 +155,7 @@ public sealed class GraphTypeDdlTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Graph type DDL: SET ADD ALTER DROP and SHOW use one canonical complete type")]
-    public async Task Execute_GraphTypeCommands_ShouldPreserveSemantics()
+    public async Task Execute_GraphTypeCommands_ShouldPreserveSemanticsAsync()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("edge-ddl", new());
@@ -185,7 +185,7 @@ public sealed class GraphTypeDdlTests
     [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A =>), (:B =>), (:B)-[:R =>]->(:A)}")]
     [InlineData("ALTER CURRENT GRAPH TYPE ALTER {(:B)-[:R =>]->(:A)}")]
     [InlineData("ALTER CURRENT GRAPH TYPE ALTER {(:A)-[:R => {p :: STRING}]->(:B)}")]
-    public async Task Execute_ExistingEdgeViolation_ShouldPreservePriorType(string text)
+    public async Task Execute_ExistingEdgeViolation_ShouldPreservePriorTypeAsync(string text)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("edge-validation", new());
@@ -204,7 +204,7 @@ public sealed class GraphTypeDdlTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Graph type edge declarations: independent constraints agree or refuse in both publication orders")]
-    public async Task Execute_IndependentEdgeConstraint_ShouldRefuseConflictingTypes()
+    public async Task Execute_IndependentEdgeConstraint_ShouldRefuseConflictingTypesAsync()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("edge-constraint", new());
@@ -222,7 +222,7 @@ public sealed class GraphTypeDdlTests
     [Theory(DisplayName = "Cohesion Test [Graph] - Graph type DDL: long bodies obey admitted work and memory limits")]
     [InlineData(true, "CG05004")]
     [InlineData(false, "CG05020")]
-    public async Task Execute_LongTypeBody_ShouldRespectStatementLimits(bool work, string code)
+    public async Task Execute_LongTypeBody_ShouldRespectStatementLimitsAsync(bool work, string code)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("edge-budget", new());
@@ -240,7 +240,7 @@ public sealed class GraphTypeDdlTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Graph type edge rules: typed writes and stale snapshots cannot bypass endpoints")]
-    public async Task CreateRelationshipAsync_StaleTypeAndInvalidEndpoints_ShouldRefuse()
+    public async Task CreateRelationshipAsync_StaleTypeAndInvalidEndpoints_ShouldRefuseAsync()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("edge-snapshot", new());

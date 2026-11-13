@@ -22,7 +22,7 @@ public sealed class GraphTypeWireTests
     [Theory(DisplayName = "Cohesion Test [Graph] - Graph type DDL and SHOW: canonical definitions and endpoint diagnostics cross InMemory and TCP")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Execute_GraphTypeDdlAndEndpoints_ShouldRoundTripOverWire(bool tcp)
+    public async Task Execute_GraphTypeDdlAndEndpoints_ShouldRoundTripOverWireAsync(bool tcp)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
