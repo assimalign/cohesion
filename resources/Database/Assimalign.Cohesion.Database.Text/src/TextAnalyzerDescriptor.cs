@@ -32,9 +32,14 @@ public sealed class TextAnalyzerDescriptor : IEquatable<TextAnalyzerDescriptor>
     /// <summary>Creates an identity using the current analyzer version.</summary>
     /// <param name="name">The exact analyzer name, including unavailable names.</param>
     /// <param name="foldAccents">Whether to remove canonical accents; the default is false.</param>
-    /// <returns>An immutable version-1 identity; resolution verifies availability.</returns>
+    /// <returns>An immutable identity using the current version for a known name; resolution verifies availability.</returns>
     /// <exception cref="ArgumentNullException">The name is null.</exception>
-    public static TextAnalyzerDescriptor Create(string name, bool foldAccents = false) => Create(name, 1, foldAccents);
+    public static TextAnalyzerDescriptor Create(string name, bool foldAccents = false) => Create(name, name switch
+    {
+        "simple" => Simple.Version,
+        "english" => English.Version,
+        _ => 1
+    }, foldAccents);
 
     /// <summary>Reconstitutes a persisted identity without silently upgrading it.</summary>
     /// <param name="name">The persisted name, including names unavailable to this implementation.</param>

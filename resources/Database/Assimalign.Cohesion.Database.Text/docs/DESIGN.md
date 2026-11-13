@@ -19,7 +19,8 @@ The fixed pipeline tokenizes, optionally removes canonical accents, folds case,
 and for English removes stop words and applies Porter2. `simple` is the default;
 both analyzers preserve accents by default and assign weight D. Custom analyzers,
 other languages, queries, ranking, canonical rendering, postings, evaluation and
-bulk builds are non-goals.
+bulk builds are non-goals. `FoldAccents` removes every combining mark (`Mn`, `Mc`
+and `Me`), including vowel signs: `काम` and `कम` both fold to `कम`.
 
 ## Determinism and analyzer identity
 
@@ -108,8 +109,9 @@ The generator's pinned vocabulary revision makes capture reproducible.
 The 127 stop words equal REL_17_11
 `src/backend/snowball/stopwords/english.stop:1-127`. Source headers cite and retain
 Snowball v2.2.0's BSD-3 notice, stored verbatim in `docs/SNOWBALL_LICENSE.txt`.
-It ships at `licenses/Database.Text/SNOWBALL_LICENSE.txt` in Text's package and
-both App.Database framework packs. See [Snowball v2.2.0 COPYING](https://raw.githubusercontent.com/snowballstem/snowball/v2.2.0/COPYING).
+It ships at `licenses/Database.Text/SNOWBALL_LICENSE.txt` in Text's package,
+both App.Database framework packs, and the `Assimalign.Cohesion.Sdk.Database` package
+that bundles the Text assembly under `Tasks/`. See [Snowball v2.2.0 COPYING](https://raw.githubusercontent.com/snowballstem/snowball/v2.2.0/COPYING).
 
 ## Tokenizer comparison with PostgreSQL 17.11
 
@@ -160,16 +162,26 @@ Additional observed pins apply to both analyzers unless noted:
 | `二〇二四年` | `'二〇二四年':1` | Same |
 | `123̈ z` | `'123̈':1 'z':2` | Same |
 | `123̈abc` | `'123̈abc':1` | Same |
-| Leading mark + `a`, simple / English | `'a':1` / `{}` | Same |
+| Leading non-alphabetic mark U+0308 + `a`, simple / English | `'a':1` / `{}` | Same |
 | `a` + U+200D + `b`, or `a` + U+20DD + `z` | One marked lexeme at position 1 | Same |
 | `ſo`, English | `'ſo':1` | `{}`: folding produces stop word `so` |
 | `ſo`, simple | `'ſo':1` | `'so':1` |
 | `5µm` | `'5µm':1` | `'5μm':1` |
 | Cherokee `ᎠᎡᎢ` | `'ꭰꭱꭲ':1` | `'ᎠᎡᎢ':1` |
+| Leading alphabetic mark `◌ि` (U+25CC U+093F) | `'ि':1` | `{}`: a mark cannot start a Text token |
+| Leading alphabetic mark `िa`, simple / English | `'िa':1` / `'िa':1` | `'a':1` / `{}` |
+| Non-alphabetic spacing mark `a` + U+1D165 + `b`, simple / English | `'a':1 'b':2` / `'b':2` | `'a𝅥b':1` in both analyzers |
 | Unicode 17 U+323B0 | `{}` | `'𲎰':1`, using pinned Unicode 17 classification |
 
-With `FoldAccents`, NFC and NFD spellings give identical lexemes and positions.
-It also decomposes Hangul syllables into conjoining jamo: `한국어` becomes
+With `FoldAccents`, NFC and NFD spellings give identical lexemes and positions
+for tokens below both raw-byte cutoffs in both spellings. Raw UTF-8 length controls
+the 1,000-byte stemming cutoff and the 2,047-byte parser cutoff, as in PostgreSQL.
+For simple analysis, 1,000 NFC `é` followed by ` z` gives 1,000 `e` at position 1
+and `z` at position 2; NFD skips the 3,000-byte word and leaves `z` at position 1.
+For English, 400 NFC `é` followed by `ing` is 803 bytes and stems to 400 `e`;
+NFD is 1,203 bytes and keeps `ing` after folding. The raw-byte rules take precedence
+over canonical-spelling agreement at these boundaries.
+`FoldAccents` also decomposes Hangul syllables into conjoining jamo: `한국어` becomes
 `한국어` (24 bytes rather than 9). Korean lexemes roughly triple in size;
 the **2,047-byte** value limit applies to the folded form.
 
@@ -200,7 +212,6 @@ and skips silently. Explicit invalid lexemes instead raise `InvalidLexeme`.
 | `(quote_literal(repeat('x',2047)))::tsvector` | Text reader errors at 2047, max 2046; Text models values, not this reader |
 | `to_tsvector('simple', 'Ⱦ' \|\| repeat('x',2044))` (also English) | Raw 2046 bytes becomes a valid 2047-byte lexeme after folding; retained |
 | `to_tsvector('simple', 'ȾȾ' \|\| repeat('x',2042) \|\| ' z')` (also English) | Raw 2046 bytes becomes 2048 after folding; skipped with notice, leaving `'z':2` |
-| `'a:1A,2B,3C,4D,16382,16383,16384A,20000B'::tsvector` | `'a':1A,2B,3C,4,16382,16383`; positions clamp at 16383 |
 | `'a:0'::tsvector` | Wrong position info; zero and default positions refused |
 | Explicit `a:1,...,257` | 256 entries, last 256; explicit values cap at 256 |
 | `to_tsvector('simple', repeat('a ',257))` | 255 entries, last 255; analyzer caps at 255 |
@@ -223,8 +234,9 @@ from PostgreSQL's deterministic but unstable sort followed by early cutoff:
 |---|---|---|
 | `x:1,…,255 x:256B,256A` | `x:1,…,255,256B` | `x:1,…,255,256A` |
 | `x:16383A,16383B,1,2,3,4,5` | `x:1,2,3,4,5,16383B` | `x:1,2,3,4,5,16383A` |
+| `a:1A,2B,3C,4D,16382,16383,16384A,20000B` | `'a':1A,2B,3C,4,16382,16383` | `'a':1A,2B,3C,4,16382,16383A`; highest weight kept (departure) |
 
-Both cases are pinned from the server. PostgreSQL's sort is deterministic across
+All three cases are pinned from the server. PostgreSQL's sort is deterministic across
 OSes; the difference comes from unstable ordering and stopping before all terminal
 duplicates have been examined.
 

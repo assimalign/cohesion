@@ -91,6 +91,26 @@ public sealed class TextAnalyzerTests
         TextAnalyzerDescriptor.Create("simple").ShouldBe(simple);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Text] - Descriptor: creation follows each analyzer's current version")]
+    [InlineData("simple", false)]
+    [InlineData("simple", true)]
+    [InlineData("english", false)]
+    [InlineData("english", true)]
+    public void Create_CurrentAnalyzerVersion_FollowsBuiltInIdentity(string name, bool foldAccents)
+    {
+        // Arrange
+        TextAnalyzerDescriptor current = name == "simple" ? TextAnalyzerDescriptor.Simple : TextAnalyzerDescriptor.English;
+
+        // Act
+        TextAnalyzerDescriptor descriptor = TextAnalyzerDescriptor.Create(name, foldAccents);
+
+        // Assert
+        descriptor.Name.ShouldBe(current.Name);
+        descriptor.Version.ShouldBe(current.Version);
+        descriptor.FoldAccents.ShouldBe(foldAccents);
+        TextAnalyzer.Create(descriptor).Descriptor.ShouldBe(descriptor);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Text] - Analyzer: Types Unicode tables control folding independent of culture")]
     [InlineData("en-US")]
     [InlineData("tr-TR")]

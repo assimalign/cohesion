@@ -78,6 +78,79 @@ public sealed class TextUnicodeTests
             .ShouldBe("'alpha':1 'beta':2");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Text] - Folding: canonical spellings retain the raw parser cutoff")]
+    public void Analyze_CanonicalSpellingsAcrossParserCutoff_SkipsOnlyOversizedRawWord()
+    {
+        // Arrange
+        TextAnalyzer analyzer = TextAnalyzer.Create(TextAnalyzerDescriptor.Create("simple", foldAccents: true));
+        string nfc = new string('é', 1000);
+        string nfd = nfc.Normalize(NormalizationForm.FormD);
+
+        // Act
+        string composed = VectorText.Format(analyzer.Analyze(nfc + " z"));
+        string decomposed = VectorText.Format(analyzer.Analyze(nfd + " z"));
+
+        // Assert
+        Encoding.UTF8.GetByteCount(nfc).ShouldBe(2000);
+        Encoding.UTF8.GetByteCount(nfd).ShouldBe(3000);
+        composed.ShouldBe("'" + new string('e', 1000) + "':1 'z':2");
+        decomposed.ShouldBe("'z':1");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Text] - Folding: canonical spellings retain the raw stemming cutoff")]
+    public void Analyze_CanonicalSpellingsAcrossStemmingCutoff_StemsOnlyShortRawWord()
+    {
+        // Arrange
+        TextAnalyzer analyzer = TextAnalyzer.Create(TextAnalyzerDescriptor.Create("english", foldAccents: true));
+        string nfc = new string('é', 400) + "ing";
+        string nfd = nfc.Normalize(NormalizationForm.FormD);
+
+        // Act
+        string composed = VectorText.Format(analyzer.Analyze(nfc));
+        string decomposed = VectorText.Format(analyzer.Analyze(nfd));
+
+        // Assert
+        Encoding.UTF8.GetByteCount(nfc).ShouldBe(803);
+        Encoding.UTF8.GetByteCount(nfd).ShouldBe(1203);
+        composed.ShouldBe("'" + new string('e', 400) + "':1");
+        decomposed.ShouldBe("'" + new string('e', 400) + "ing':1");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Text] - Marks: alphabetic and spacing mark departures from PostgreSQL 17.11 are pinned")]
+    [InlineData("◌ि", "'ि':1", "'ि':1", "{}", "{}")]
+    [InlineData("िa", "'िa':1", "'िa':1", "'a':1", "{}")]
+    [InlineData("a\U0001D165b", "'a':1 'b':2", "'b':2", "'a\U0001D165b':1", "'a\U0001D165b':1")]
+    public void Analyze_AlphabeticAndSpacingMarks_PreservesDocumentedDepartures(string input, string postgresSimple, string postgresEnglish, string simple, string english)
+    {
+        // Arrange
+        // Observed with postgres:17.11, server_version 17.11: to_tsvector('simple'/'english', input).
+
+        // Act
+        string actualSimple = VectorText.Format(TextAnalyzer.Simple.Analyze(input));
+        string actualEnglish = VectorText.Format(TextAnalyzer.English.Analyze(input));
+
+        // Assert
+        actualSimple.ShouldBe(simple);
+        actualEnglish.ShouldBe(english);
+        actualSimple.ShouldNotBe(postgresSimple);
+        actualEnglish.ShouldNotBe(postgresEnglish);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Text] - Folding: every combining mark includes vowel signs")]
+    [InlineData("काम")]
+    [InlineData("कम")]
+    public void Analyze_DevanagariVowelSignsWithAccentsFolded_RemovesMarks(string input)
+    {
+        // Arrange
+        TextAnalyzer analyzer = TextAnalyzer.Create(TextAnalyzerDescriptor.Create("simple", foldAccents: true));
+
+        // Act
+        string actual = VectorText.Format(analyzer.Analyze(input));
+
+        // Assert
+        actual.ShouldBe("'कम':1");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Text] - Folding: Hangul decomposes before the folded byte limit")]
     public void Analyze_HangulAccentFolding_AppliesFoldedByteLimit()
     {

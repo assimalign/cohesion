@@ -20,4 +20,7 @@
 		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="runtime" />
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
 	</ItemGroup>
+	<ItemGroup>
+		<None Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Text\docs\SNOWBALL_LICENSE.txt" Pack="true" PackagePath="licenses/Database.Text/SNOWBALL_LICENSE.txt" />
+	</ItemGroup>
 </Project>
