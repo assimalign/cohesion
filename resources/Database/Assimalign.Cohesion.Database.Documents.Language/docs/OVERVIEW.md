@@ -1,15 +1,20 @@
 # Assimalign.Cohesion.Database.Documents.Language
 
-This package parses the Documents engine's executable SQL++ profile, retaining the OQL name, into typed statement and
+This package parses the Documents engine's declared SQL++ profile, retaining the OQL name, into typed statement and
 expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `OqlQueryParser`,
 `OqlQueryStatement`, `OqlTransactionExpression`, `OqlTransactionCommand`, `OqlTransactionIsolation`,
 `OqlQueryExpression`, `OqlSelectExpression`, `OqlSetOperationExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access. GROUP BY terms accept aliases with or without AS; GROUP AS retains binding-wrapper arrays, including group-term aliases, for SELECT, HAVING and ORDER BY. LETTING remains unavailable.
-One immutable standard-function table declares META, eleven aggregates and 34 SQL++ scalars, with
+OVER and WINDOW execute eight ranking/navigation functions over complete partitions, including named references and copies. Sealed window AST nodes and WindowKind metadata retain the public syntax contract. Frames and aggregate/value windows remain deferred.
+One immutable standard-function table declares META, eleven aggregates, eight window functions and 34 SQL++ scalars, with
 ALL/DISTINCT aggregate metadata, native parse-time arity checks and static result types used by native registrations. The standalone
 parser default reports CD00008 for unknown calls; engine requests defer additional named calls to
 the executing engine's function catalog.
+`OqlMergeExpression` and its sealed source/action records describe Couchbase lookup and key-equality
+ANSI MERGE, with canonical rendering, action WHERE clauses and RETURNING. Both forms bind and
+EXPLAIN shows their source, key access and actions. Execution refuses with CD05022 until OQ-M2.
+MERGE remains contextual, including as an unquoted FROM alias.
 BEGIN/START, COMMIT, ROLLBACK and named SAVEPOINT/RELEASE/ROLLBACK TO execute on in-process and wire sessions. Snapshot is the default;
 explicit SNAPSHOT and READ COMMITTED are supported. Wire sessions negotiate transaction status;
 pool return rolls back open or failed work and discards peers that cannot certify a clean session.

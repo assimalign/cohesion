@@ -20,6 +20,34 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// <summary>Measures every advertised OQL clause through a real document session.</summary>
 public sealed class OqlExecutionConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents] - CREATE INDEX conformance charges build workspace before publication (#1808)")]
+    public async Task ExecuteAsync_IndexBuildOverMemoryGrant_ShouldRefuseAndKeepCollection()
+    {
+        // Arrange.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = DocumentDatabaseEngine.Create("index-build-budget", new()
+        { StatementMemoryBudget = 32 * 1024 });
+        var database = await engine.CreateDatabaseAsync("test", guard.Token);
+        await using var session = await database.CreateSessionAsync(guard.Token);
+        var collection = await session.CreateCollectionAsync("items", guard.Token);
+        await collection.PutAsync(session, "one", "{\"v\":1}"u8.ToArray(), cancellationToken: guard.Token);
+        // The exact-size snapshot retains 5,001 name references (40,032 bytes),
+        // which alone genuinely exceeds the 32 KiB statement grant.
+        for (int row = 0; row < 5000; row++)
+        { await collection.PutAsync(session, row.ToString("D10"), "{\"v\":1}"u8.ToArray(), cancellationToken: guard.Token); }
+
+        // Act.
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("CREATE INDEX ix ON items(v)", cancellationToken: guard.Token));
+
+        // Assert: metadata publication is atomic and the session remains usable.
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CD05018");
+        (await collection.GetAsync(session, "one", guard.Token)).ShouldNotBeNull();
+        await VerifyRowsAsync(await session.ExecuteAsync("SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES", cancellationToken: guard.Token),
+            [], "Refused index build", guard.Token);
+        database.IsOffline.ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - Conformance: doubled identifier quotes preserve collection, property and alias names (#1235)")]
     public async Task ExecuteAsync_DoubledIdentifierQuotes_ShouldPreserveDocumentNames()
     {
@@ -104,6 +132,8 @@ public sealed class OqlExecutionConformanceTests
             [
                 InsertCase(),
             ],
+            [OqlClauses.Over] = [new("SELECT ROW_NUMBER() OVER (ORDER BY name) AS n FROM items ORDER BY n", [[1L], [2L], [3L], [4L]])],
+            [OqlClauses.Window] = [new("SELECT RANK() OVER w AS n FROM items WINDOW w AS ()", [[1L], [1L], [1L], [1L]])],
             [OqlClauses.Union] =
             [
                 new("SELECT 1 AS n FROM items UNION SELECT 1 AS n FROM items", [[1m]]),
@@ -385,6 +415,8 @@ public sealed class OqlExecutionConformanceTests
                     "SELECT PATH FROM COHESION_SCHEMA.INDEXES"),
                 new("CREATE INDEX inclusive ON items (amount INCLUDE MISSING)", [["amount INCLUDE MISSING", true]],
                     VerificationStatement: "SELECT PATH, INCLUDE_MISSING FROM COHESION_SCHEMA.INDEXES"),
+                new("CREATE INDEX budgeted ON items (amount)", [["budgeted", "amount", false]],
+                    VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES", StatementMemoryBudget: 128 * 1024),
                 new("CREATE INDEX by_score ON items (details.score)", [["by_score", "details.score", false]],
                     VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
                 new("CREATE UNIQUE INDEX by_name ON items (name)", [["by_name", "name", "name", null, true]],
@@ -527,6 +559,14 @@ public sealed class OqlExecutionConformanceTests
         new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
         {
             ["META"] = new("META().id", [["a"], ["b"], ["c"], ["d"]]),
+            ["ROW_NUMBER"] = new("ROW_NUMBER() OVER (ORDER BY META().id)", [[1L], [2L], [3L], [4L]]),
+            ["RANK"] = ScalarCase("RANK() OVER ()", 1L),
+            ["DENSE_RANK"] = ScalarCase("DENSE_RANK() OVER ()", 1L),
+            ["PERCENT_RANK"] = ScalarCase("PERCENT_RANK() OVER ()", 0m),
+            ["CUME_DIST"] = ScalarCase("CUME_DIST() OVER ()", 1m),
+            ["NTILE"] = new("NTILE(9) OVER (ORDER BY META().id)", [[1L], [2L], [3L], [4L]]),
+            ["LAG"] = new("LAG(name,1,'before') OVER (ORDER BY META().id)", [["before"], ["alpha"], ["beta"], ["gamma"]]),
+            ["LEAD"] = new("LEAD(name,1,'after') OVER (ORDER BY META().id)", [["beta"], ["gamma"], ["delta"], ["after"]]),
             ["LOWER"] = ScalarCase("LOWER('AbC')", "abc"),
             ["UPPER"] = ScalarCase("UPPER('AbC')", "ABC"),
             ["LENGTH"] = ScalarCase("LENGTH('😀a')", 2L),
@@ -702,6 +742,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.GroupBy => expression is OqlSelectExpression { GroupBy.Count: > 0 },
         OqlClauses.GroupAs => expression is OqlSelectExpression { GroupAs: not null },
         OqlClauses.Having => expression is OqlSelectExpression { Having: not null },
+        OqlClauses.Over => expression is OqlSelectExpression windows && Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.HasWindows(windows),
+        OqlClauses.Window => expression is OqlSelectExpression { Windows.Count: > 0 },
         OqlClauses.OrderBy => expression is OqlSelectExpression { OrderBy.Count: > 0 },
         OqlClauses.Limit => expression is OqlSelectExpression { Limit: not null },
         OqlClauses.Offset => expression is OqlSelectExpression { Offset: not null },

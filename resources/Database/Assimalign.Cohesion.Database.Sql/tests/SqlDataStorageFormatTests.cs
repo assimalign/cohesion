@@ -26,7 +26,7 @@ using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// The data-storage format gate (#1099, owner decisions of 2026-10-01 and
-/// 2026-10-02): a new database is created on format 37, and an existing database on
+/// 2026-10-02): a new database is created on format 39, and an existing database on
 /// any other format is refused at open — an older one must be dropped and recreated
 /// (there is no upgrade path; upgrades are #1152), and a newer one belongs to the
 /// engine that wrote it. The gate reads only the catalog, before the data file set is
@@ -64,7 +64,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a new database is created on format 37 and reopens (#1099, #1194, #1241, E3)")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a new database is created on format 39 and reopens (#1099, #1194, #1241, E3)")]
     public async Task Create_NewDatabase_ShouldUseCurrentFormatAndReopen()
     {
         // Arrange + Act: create, write temporal keys, close.
@@ -74,8 +74,8 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // Default primary-key ordering is independently covered by the ordered-access tests.
         await using var engine = CreateEngine();
         var database = await engine.OpenDatabaseAsync(testDatabase);
-        database.Catalog.RecordSpaceFormatVersion.ShouldBe(37);
-        SqlRowCodec.RecordSpaceFormatVersion.ShouldBe(37);
+        database.Catalog.RecordSpaceFormatVersion.ShouldBe(39);
+        SqlRowCodec.RecordSpaceFormatVersion.ShouldBe(39);
 
         await using var session = await database.CreateSessionAsync();
         (await IdsAsync(session, "SELECT id FROM events WHERE at = @p ORDER BY id+0", _instant.ToOffset(TimeSpan.FromHours(9)))).ShouldBe([1, 2]);
@@ -119,6 +119,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [InlineData(34)]
     [InlineData(35)]
     [InlineData(36)]
+    [InlineData(37)]
     public async Task Open_OlderFormat_ShouldBeRefusedWithoutTouchingFiles(int version)
     {
         // Arrange: a closed database whose catalog marker says an older format —
@@ -136,8 +137,9 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // Assert: the message names the database, both formats and the remedy —
         // drop and create again, since create refuses a name whose storage
         // exists; version 1 (no marker) also covers an interrupted creation...
+        refusal.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
         refusal.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format {version}");
-        refusal.Message.ShouldContain("this engine supports only format 37");
+        refusal.Message.ShouldContain("this engine supports only format 39");
         refusal.Message.ShouldContain("drop the database (DropDatabaseAsync) and create it again");
         refusal.Message.ShouldContain(version == 1 ? "its creation was interrupted" : "export its data with the engine that wrote it");
         refusal.Message.ShouldContain("#1152");
@@ -183,7 +185,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(async () => await engine.OpenDatabaseAsync(testDatabase));
 
         // Assert: this is the refusal the server forwards as Unavailable.
-        refusal.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format 7, but this engine supports only format 37");
+        refusal.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format 7, but this engine supports only format 39");
         refusal.Message.ShouldContain("export its data with the engine that wrote it");
         refusal.Message.ShouldContain("#1152");
         engine.TryGetDatabase(testDatabase, out _).ShouldBeFalse();
@@ -206,7 +208,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(async () => await engine.OpenDatabaseAsync(testDatabase));
 
         // Assert
-        refusal.Message.ShouldContain("uses data-storage format 1, but this engine supports only format 37");
+        refusal.Message.ShouldContain("uses data-storage format 1, but this engine supports only format 39");
         refusal.Message.ShouldContain("drop the database (DropDatabaseAsync) and create it again");
         engine.TryGetDatabase(testDatabase, out _).ShouldBeFalse();
         AssertUnchanged(before);
@@ -216,6 +218,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [InlineData(2, 2)]
     [InlineData(4, -1)]
     [InlineData(9, 1)]
+    [InlineData(21, 0)]
     public async Task Open_DamagedMarkerFreeLegacyCatalog_ShouldPreserveCatalogRefusal(int kind, int value)
     {
         // Arrange: one genuine old counter, plus corruption that must not become a format refusal.
@@ -297,7 +300,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
         // Assert
         refusal.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format {SqlRowCodec.RecordSpaceFormatVersion + 1}");
-        refusal.Message.ShouldContain("this engine supports only format 37");
+        refusal.Message.ShouldContain("this engine supports only format 39");
         refusal.Message.ShouldContain("written by a newer engine");
         AssertUnchanged(before);
     }
@@ -393,7 +396,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         var refusal = await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync(testDatabase));
 
         // Assert: refused on the catalog alone, before any index page is read.
-        refusal.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format 4, but this engine supports only format 37", Case.Sensitive);
+        refusal.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format 4, but this engine supports only format 39", Case.Sensitive);
         refusal.Message.ShouldContain("export its data with the engine that wrote it");
         AssertUnchanged(before);
     }
@@ -415,7 +418,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // Assert: the coded refusal, carried through the engine's own format error
         // with the index manager's as its cause.
         refusal.ShouldBeOfType<SqlDataStorageFormatException>();
-        refusal.Message.ShouldStartWith($"Database '{testDatabase}' uses data-storage format 37, but one of its index trees does not: ", Case.Sensitive);
+        refusal.Message.ShouldStartWith($"Database '{testDatabase}' uses data-storage format 39, but one of its index trees does not: ", Case.Sensitive);
         refusal.Message.ShouldContain(IndexFormatException.ErrorCode + ": Index '", Case.Sensitive);
         refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 3", Case.Sensitive);
         var cause = refusal.InnerException.ShouldBeOfType<IndexFormatException>();
@@ -489,6 +492,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [InlineData(3)]
     [InlineData(34)]
     [InlineData(35)]
+    [InlineData(37)]
     public async Task Open_CrashedOlderFormat_ShouldBeRefusedAndStayRecoverable(int version)
     {
         // Arrange: an older-format database (the marker forged before the workload)
@@ -529,6 +533,8 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         AssertSameBytes(crashed.GetDurableImage(testDatabase).Journal, dataImage.Journal, "data journal");
         AssertSameBytes(crashed.GetDurableImage(testDatabase).Backup, dataImage.Backup, "data backup");
         AssertSameBytes(crashed.GetDurableImage(testDatabase, catalog: true).Journal, catalogImage.Journal, "catalog journal");
+        AssertSameBytes(crashed.GetDurableImage(testDatabase, catalog: true).Data, catalogImage.Data, "catalog data");
+        AssertSameBytes(crashed.GetDurableImage(testDatabase, catalog: true).Backup, catalogImage.Backup, "catalog backup");
 
         // The engine that wrote the database can still recover it. Stand in for
         // it by re-forging the marker to this engine's format over the post-refusal
@@ -576,7 +582,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
             // Assert: the format-3 catalog was not declared current...
             refusal.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format 3");
-            refusal.Message.ShouldContain("this engine supports only format 37");
+            refusal.Message.ShouldContain("this engine supports only format 39");
         }
 
         // ...so its files are as they were, and a real open still refuses it.
@@ -598,6 +604,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [InlineData(22, false)]
     [InlineData(32, false)]
     [InlineData(36, false)]
+    [InlineData(37, false)]
     [InlineData(7, true)]
     [InlineData(1, true)]
     public async Task Handshake_OlderFormatDatabase_ShouldSendRefusalToClient(int version, bool removeCounterGeneration)
@@ -622,7 +629,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // and the session closes.
         var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        error.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format {version}, but this engine supports only format 37");
+        error.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format {version}, but this engine supports only format 39");
         error.Message.ShouldContain("#1152");
         (await client.ReadAsync()).ShouldBeNull();
     }
@@ -715,6 +722,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         (PageId PageId, int SlotIndex)? location = null;
         long nextObjectId = 0;
         (PageId PageId, int SlotIndex)? formatLocation = null;
+        (PageId PageId, int SlotIndex, byte[] Bytes)? legacyRegistration = null;
         using (var iterator = storage.GetUnitIterator())
         {
             while (iterator.MoveNext())
@@ -722,6 +730,20 @@ public sealed class SqlDataStorageFormatTests : IDisposable
                 var unit = iterator.Current;
                 var reader = new DatabaseKeyReader(unit.Data.Span);
                 int kind = reader.ReadInt32();
+                if (removeFormatMarker && kind == 21)
+                {
+                    // A genuine marker-free format-1 fixture has kind-3 registrations,
+                    // never format 39's owner map. This writer exists only in the fixture.
+                    int count = reader.ReadInt32();
+                    var legacy = new DatabaseKeyWriter().AppendInt32(3).AppendInt32(count);
+                    for (int index = 0; index < count; index++)
+                    {
+                        legacy.AppendInt64(reader.ReadInt64()).AppendString(reader.ReadString(out _)!, Collation.Binary)
+                            .AppendInt8(reader.ReadInt8()).AppendBoolean(reader.ReadBoolean()).AppendInt64(reader.ReadInt64());
+                        _ = reader.ReadInt64(); // The physical owner did not exist in the old shape.
+                    }
+                    legacyRegistration = (unit.PageId, unit.SlotIndex, legacy.ToArray());
+                }
                 if (kind is 4 or 8)
                 {
                     formatLocation = (unit.PageId, unit.SlotIndex);
@@ -743,6 +765,8 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         storage.UpdateRow(transaction, persisted.PageId, persisted.SlotIndex, counter.ToArray());
         if (removeFormatMarker)
         {
+            var legacy = legacyRegistration.ShouldNotBeNull();
+            storage.UpdateRow(transaction, legacy.PageId, legacy.SlotIndex, legacy.Bytes);
             var format = formatLocation.ShouldNotBeNull();
             storage.DeleteRow(transaction, format.PageId, format.SlotIndex);
         }

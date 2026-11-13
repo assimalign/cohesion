@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
-/// <summary>Parses the executable OQL profile into an expression tree with diagnostics.</summary>
+/// <summary>Parses the declared OQL profile into an expression tree with diagnostics.</summary>
 /// <remarks>Instances serialize concurrent calls. Offsets are zero-based UTF-16 positions with exclusive ends.</remarks>
 [global::System.Diagnostics.DebuggerDisplay("OqlQueryParser")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser.DebugView))]
@@ -20,6 +20,7 @@ public sealed partial class OqlQueryParser : QueryParser
     private readonly HashSet<int> _parameterFormPositions = [];
     private readonly Dictionary<OqlQueryExpression, int> _queryOperationDepths = [];
     private bool[] _comprehensionTails = [];
+    private int[] _callPairs = [];
     private int _position;
     private int _depth;
     private int _selectOperationDepth;
@@ -52,6 +53,8 @@ public sealed partial class OqlQueryParser : QueryParser
         _selectOperationDepth = 0;
         int line = 1;
         int scanned = 0;
+        bool needsCallPairs = false;
+        _callPairs = [];
         while (lexer.MoveNext())
         {
             var token = lexer.Current;
@@ -71,6 +74,9 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             else
             {
+                if (_tokens.Count > 0 && _tokens[^1].Type == TokenType.RightParen &&
+                    (IsWord(item, "OVER") || IsWord(item, "RESPECT") || IsWord(item, "IGNORE")))
+                { needsCallPairs = true; }
                 _tokens.Add(item);
                 if (token.Type is TokenType.String or TokenType.QuotedIdentifier && !IsCompleteQuoted(item.Text))
                 {
@@ -88,6 +94,7 @@ public sealed partial class OqlQueryParser : QueryParser
 
         _tokens.Add(new Lexeme(TokenType.Eof, string.Empty, _source.Length, _source.Length, line));
         FindComprehensionTails();
+        if (needsCallPairs) { FindCallPairs(); }
 
         // Capability checks precede syntax parsing, so a known unsupported construct
         // cannot be disguised by the first downstream syntax error it would cause.
@@ -126,6 +133,10 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 expression = new OqlExplainExpression(ParseUpdate(), Span(start, Previous));
             }
+            else if (Is("MERGE"))
+            {
+                expression = new OqlExplainExpression(ParseMerge(), Span(start, Previous));
+            }
             else
             {
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"EXPLAIN {Current.Text}", Profile.Language, Span(start, Current)));
@@ -155,6 +166,10 @@ public sealed partial class OqlQueryParser : QueryParser
         else if (Is("UPDATE"))
         {
             expression = ParseUpdate();
+        }
+        else if (Is("MERGE"))
+        {
+            expression = ParseMerge();
         }
         else if (IsIndexStatement("CREATE"))
         {
@@ -210,6 +225,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             expression = EmptyExpression();
         }
+        if (!Failed && HasWindowSuffix()) { ValidateWindowPositions(expression); }
         expression.SetStatementText(_source);
         var statement = new OqlQueryStatement(expression);
         foreach (var (clause, token) in unsupported)
@@ -237,6 +253,7 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         List<(string, Lexeme)> result = [];
         int statementStart = IsWord(_tokens[0], "EXPLAIN") ? 1 : 0;
+        bool merge = IsWord(_tokens[statementStart], "MERGE");
         var (updateHeaderEnd, updateClause) = FindUpdateClause(statementStart);
         bool hasGroupBy = false;
         int parentheses = 0;
@@ -286,6 +303,16 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             string value = token.Text.ToUpperInvariant();
+            // A window-only call owns OVER even before a deferred clause word such
+            // as LETTING; locate its malformed target before capability refusals.
+            if (value == "OVER" && index + 1 < _tokens.Count && !IsWindowTarget(index + 1) && IsWindowOnlyCall(index))
+            {
+                Error("CD00002", ErrorMessages.WindowTargetExpected, _tokens[index + 1]);
+                break;
+            }
+            // Only the action-clause SET is structural. SET(...) in a MERGE value
+            // retains its ordinary unsupported-vocabulary refusal.
+            if (merge && value == "SET" && index > statementStart && IsWord(_tokens[index - 1], "UPDATE")) { continue; }
             // UPDATE's parsed destination and alias keep ordinary contextual names such
             // as use. SET is exempt only at the assignment-clause token after that header;
             // SET(...) elsewhere still refuses.
@@ -416,7 +443,7 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 // A nested MERGE statement owns its text, while a field named merge
                 // remains an ordinary expression in SATISFIES.
-                AddUnsupported(result, "MERGE", token);
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("MERGE", Profile.Language, Span(token, token)));
                 break;
             }
 
@@ -517,6 +544,22 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
+            if (value is "RESPECT" or "IGNORE" && !IsCallNullModifier(index)) { continue; }
+            if (value is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" or "RATIO_TO_REPORT" && index > 0 &&
+                (IsWord(_tokens[index - 1], "INTO") || IsWord(_tokens[index - 1], "AS") ||
+                 IsWord(_tokens[index - 1], "ON") && IsIndexStatement("CREATE"))) { continue; }
+            if (value is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" or "RATIO_TO_REPORT" &&
+                index + 1 < _callPairs.Length && _tokens[index + 1].Type == TokenType.LeftParen)
+            {
+                int windowCallEnd = _callPairs[index + 1];
+                if (windowCallEnd > 0 && windowCallEnd + 1 < _tokens.Count && IsWord(_tokens[windowCallEnd], "OVER") &&
+                    !IsWindowTarget(windowCallEnd + 1))
+                {
+                    Error("CD00002", ErrorMessages.WindowTargetExpected, _tokens[windowCallEnd + 1]);
+                    break;
+                }
+            }
+
             // Words of other languages are not reserved field names: they name a construct
             // only where it can start, so mixed-shape fields such as fetch still parse. A
             // statement verb names one only as the first word, so an AS-less FROM alias named
@@ -537,11 +580,12 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             if (value is "JOIN" or "NEST")
-            { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + " in UPDATE or DELETE", Profile.Language, Span(token, token))); break; }
+            { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + (merge ? " in MERGE" : " in UPDATE or DELETE"), Profile.Language, Span(token, token))); break; }
 
             var reported = token;
 
             result.Add((word.Construct, reported));
+            if (value is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" or "RATIO_TO_REPORT" or "RESPECT" or "IGNORE") { break; }
             if (value == "FETCH") { fetchHead = index; }
 
             // A statement that does not start as OQL is one unsupported construct; the rest of

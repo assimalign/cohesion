@@ -415,7 +415,7 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
         {
             try
             {
-                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression or SqlTruncateExpression or SqlCreateTableAsExpression or SqlAlterTableExpression)
+                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression or SqlTruncateExpression or SqlCreateTableAsExpression or SqlAlterTableExpression or SqlDropIndexExpression or SqlCreateIndexExpression)
                 {
                     _database.TableReclamation.Request();
                 }
@@ -733,7 +733,7 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
                 _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation,
-                request.Statement.SqlExpression is SqlAlterSequenceExpression or SqlDropSequenceExpression
+                IsSelfCommitting(request)
                     ? LockTimeout ?? _database.Engine.EngineOptions.LockTimeout : TimeSpan.Zero);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
@@ -829,7 +829,8 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
                 scope.Metrics.BeginAnalysis();
                 return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken, sequenceUsage);
             }
-            var result = SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), request.Statement.Diagnostics);
+            var result = SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), request.Statement.Diagnostics,
+                allowHashSpill: _database.Engine.TempSpace is not null && _database.Definitions.StatementMemoryBudget >= 262144);
             return Task.FromResult<DatabaseResult>(result);
         }
         catch (SqlUnsupportedQueryException exception)
@@ -849,7 +850,8 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
             cancellationToken.ThrowIfCancellationRequested();
             for (int ordinal = 0; ordinal < row.FieldCount; ordinal++) { _ = row.GetValue(ordinal); }
         }
-        return SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), diagnostics, scope.Metrics);
+        return SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), diagnostics, scope.Metrics,
+            allowHashSpill: _database.Engine.TempSpace is not null && _database.Definitions.StatementMemoryBudget >= 262144);
     }
 
     private static async Task<DatabaseResult> PrepareExecutionResultAsync(Task<DatabaseResult> execution,

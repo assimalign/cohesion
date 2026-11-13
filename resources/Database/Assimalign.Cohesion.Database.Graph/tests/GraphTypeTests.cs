@@ -51,7 +51,8 @@ public sealed class GraphTypeTests
             {
                 storage.OnCheckpointNeeded = () =>
                 {
-                    storage.OnCheckpointNeeded = original;
+                    // Keep the engine worker asleep until the checkpoint assertions finish.
+                    storage.OnCheckpointNeeded = null;
                     entered.Set();
                     release.Wait(ceiling.Token);
                 };

@@ -11,6 +11,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Testing;
 
@@ -242,20 +243,22 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - CTAS binary cells, deferred collations and mixed key families retain source refusal (#1789)")]
-    [InlineData("SELECT id,app_binary(id) AS cell FROM t ORDER BY id")]
-    [InlineData("SELECT id FROM t ORDER BY CASE WHEN id%2=0 THEN id ELSE note END")]
-    [InlineData("SELECT id FROM t ORDER BY note IN (SELECT 'a' COLLATE binary)")]
-    public async Task ExecuteAsync_TableAsCodecRefusal_ShouldLeaveNoTable(string query)
+    [InlineData("SELECT id,app_binary(id) AS cell FROM t ORDER BY id", "CS05067")]
+    [InlineData("SELECT id FROM t ORDER BY CASE WHEN id%2=0 THEN id ELSE note END", "CS02080")]
+    [InlineData("SELECT id FROM t ORDER BY unproved_result(id,CAST(NULL AS BIGINT))", "CS05067")]
+    [InlineData("SELECT id FROM t ORDER BY note IN (SELECT 'a' COLLATE binary)", "CS05067")]
+    public async Task ExecuteAsync_TableAsCodecRefusal_ShouldLeaveNoTable(string query, string code)
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("ctas-codec-refusal");
         builder.Options.RootPath = Path.Combine(_root, "codec"); builder.Options.StatementMemoryBudget = 262144;
         builder.Functions.Add(SqlScalarFunction.Create("app_binary", (long value) => new byte[] { (byte)value }));
+        builder.Functions.Add(new HashUnprovedResultFunction(true, text: true));
         await using var engine = await builder.BuildAsync(); var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(); await Seed(session);
         // Act / Assert
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE TABLE archive AS " + query));
-        failure.Diagnostics[0].Code.ShouldBe("CS05067"); database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse();
+        failure.Diagnostics[0].Code.ShouldBe(code); database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse();
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0); database.IsOffline.ShouldBeFalse();
     }
 

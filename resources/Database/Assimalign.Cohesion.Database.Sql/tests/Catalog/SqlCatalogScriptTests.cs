@@ -88,7 +88,7 @@ public sealed class SqlCatalogScriptTests
         var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, generation, null,
             SqlObjectIdentity.Index(expectedSchema, expectedTable, expectedIndex));
         var index = new SqlCatalogIndex(table.ObjectId, actualIndex, ["id"], false);
-        var registration = new BTreeIndexRegistration(table.ObjectId, new IndexDefinition(actualIndex), 42);
+        var registration = await PreparedCatalogIndexes.CreateAsync(catalog, storage, table.ObjectId, new IndexDefinition(actualIndex));
 
         // Act
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () =>
@@ -123,7 +123,7 @@ public sealed class SqlCatalogScriptTests
         var indexPublication = new SqlCatalogScriptPublication("001", hash, 2, catalog.Scripts.ShouldHaveSingleItem(),
             catalog.DdlGeneration, null, "I:\"A\".\"B.C\".\"D:E.F\"");
         var index = new SqlCatalogIndex(table.ObjectId, "d:e.f", ["id"], false);
-        await catalog.CreateIndexAsync(index, [new BTreeIndexRegistration(table.ObjectId, new IndexDefinition(index.Name), 42)],
+        await catalog.CreateIndexAsync(index, [await PreparedCatalogIndexes.CreateAsync(catalog, storage, table.ObjectId, new IndexDefinition(index.Name))],
             indexPublication, CancellationToken.None);
 
         // Assert

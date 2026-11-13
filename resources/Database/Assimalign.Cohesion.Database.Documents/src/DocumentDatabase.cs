@@ -112,6 +112,11 @@ public sealed class DocumentDatabase : DatabaseInstance
             }
         }
         else { Catalog = DocumentCatalog.Open(storage, Coordinator); }
+        Catalog.IndexBuildStarted = owner => DocumentDatabaseEventSource.Log.IndexBuildBegan(storage, owner);
+        Catalog.IndexBuildStopped = (owner, succeeded) => DocumentDatabaseEventSource.Log.IndexBuildEnded(storage, owner, succeeded);
+        Catalog.IndexPagesReclaimed = (owner, pages) => DocumentDatabaseEventSource.Log.PagesReclaimed(storage, owner, pages);
+        Catalog.IndexBuildMemoryBudget = engine.EngineOptions.StatementMemoryBudget;
+        Catalog.ReclamationCheckpointDue = () => engine.CheckpointNeededSignal.IsSet || storage.IsCheckpointDue(engine.EngineOptions.CheckpointInterval);
     }
 
     internal static void EnsureFormats(DatabaseName name, DocumentStorage storage)

@@ -41,9 +41,7 @@ public sealed class BTreeIndexManager
     private readonly Dictionary<(ulong ObjectId, string Name), BTreeIndex> _indexes = new();
     private readonly object _sync = new();
     private readonly object _pruneSync = new();
-    private readonly List<BTreeIndex> _maintenanceIndexes = [];
-    private readonly Dictionary<BTreeIndex, int> _maintenancePositions = new();
-    private int _pruneIndex;
+    private readonly IndexStructureDirectory _structures = new();
     internal const int PrunePageBudget = 64;
 
     private BTreeIndexManager(BTreeIndexManagerOptions options)
@@ -68,7 +66,7 @@ public sealed class BTreeIndexManager
                     registration.RootPageId, options.PruneBound);
             }
         }
-        foreach (var index in _indexes.Values) { AddMaintenanceIndex(index); }
+        foreach (var pair in _indexes) { AddMaintenanceIndex(pair.Key.ObjectId, pair.Value); }
     }
 
     /// <summary>
@@ -117,17 +115,14 @@ public sealed class BTreeIndexManager
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(registrations);
 
-        foreach (var registration in registrations)
-        {
-            BTreeIndex.EnsureFormat(storage, registration);
-        }
+        IndexStructureDirectory.EnsureFormat(registrations.Select(registration => new BTreeStructure(storage, registration)));
     }
 
     /// <summary>
     /// Creates a new index on the specified object.
     /// </summary>
     /// <param name="transaction">The transaction the DDL operation belongs to.</param>
-    /// <param name="objectId">The identity of the object (table, collection, container) being indexed.</param>
+    /// <param name="objectId">The physical page-owner identity of this index; model catalogs map it to their logical object.</param>
     /// <param name="definition">The definition of the index to create.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created index.</returns>
@@ -159,7 +154,7 @@ public sealed class BTreeIndexManager
             index = new BTreeIndex(
                 _options.Storage, _options.TransactionSource, _options.LockManager, objectId, definition, rootPageId, _options.PruneBound);
             _indexes[key] = index;
-            AddMaintenanceIndex(index);
+            AddMaintenanceIndex(objectId, index);
         }
 
         IndexEventSource.Log.IndexCreated(_options.Storage, objectId, definition);
@@ -186,18 +181,13 @@ public sealed class BTreeIndexManager
             {
                 throw new IndexException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexManagerDropIndexAsyncIndex, name, objectId));
             }
-            int position = _maintenancePositions[removed];
-            var last = _maintenanceIndexes[^1];
-            _maintenanceIndexes[position] = last;
-            _maintenancePositions[last] = position;
-            _maintenanceIndexes.RemoveAt(_maintenanceIndexes.Count - 1);
-            _maintenancePositions.Remove(removed);
+            _structures.Retire(objectId, name);
         }
 
         IndexEventSource.Log.IndexDropped(_options.Storage, objectId, name);
 
-        // The tree's pages are left for the vacuum feature to reclaim — dropping is
-        // a directory operation, not a physical walk.
+        // The model retains a durable retirement intent and detached reader horizon;
+        // dropping this directory entry does not walk or free its physical owner.
         return default;
     }
 
@@ -263,19 +253,8 @@ public sealed class BTreeIndexManager
         bool timed = IndexEventSource.Log.IsEnabled(EventLevel.Informational, EventKeywords.None);
         long started = timed ? Stopwatch.GetTimestamp() : 0;
 
-        List<BTreeIndex> indexes;
-        lock (_sync)
-        {
-            indexes = _indexes.Values.ToList();
-        }
-
-        long purged = 0;
-
-        foreach (var index in indexes)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            purged += index.PurgeWriters(transaction, writers);
-        }
+        long purged;
+        purged = _structures.PurgeWriters(transaction, writers, cancellationToken);
 
         if (timed)
         {
@@ -300,42 +279,14 @@ public sealed class BTreeIndexManager
         cancellationToken.ThrowIfCancellationRequested();
         lock (_pruneSync)
         {
-            int count;
-            lock (_sync) { count = _maintenanceIndexes.Count; }
-            long removed = 0;
-            int completed = 0;
-            for (int page = 0; page < PrunePageBudget && completed < count; page++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                BTreeIndex index;
-                lock (_sync)
-                {
-                    if (_maintenanceIndexes.Count == 0) { break; }
-                    _pruneIndex %= _maintenanceIndexes.Count;
-                    index = _maintenanceIndexes[_pruneIndex];
-                }
-                var result = index.PruneLeaf(pruneBound, cancellationToken);
-                removed += result.Removed;
-                if (result.Completed)
-                {
-                    lock (_sync)
-                    {
-                        _pruneIndex = _maintenanceIndexes.Count == 0 ? 0 : (_pruneIndex + 1) % _maintenanceIndexes.Count;
-                    }
-                    completed++;
-                }
-            }
-            return new ValueTask<long>(removed);
+            return new ValueTask<long>(_structures.Prune(pruneBound, PrunePageBudget, cancellationToken));
         }
     }
 
-    // Called only during composition or under the directory lock. Creating/dropping one index
-    // must not copy the whole directory; large catalogs otherwise pay quadratic allocation.
-    private void AddMaintenanceIndex(BTreeIndex index)
-    {
-        _maintenancePositions.Add(index, _maintenanceIndexes.Count);
-        _maintenanceIndexes.Add(index);
-    }
+    // Called only during composition or under the directory lock.
+    private void AddMaintenanceIndex(ulong objectId, BTreeIndex index)
+        => _structures.Add(new BTreeStructure(_options.Storage,
+            new BTreeIndexRegistration(objectId, new IndexDefinition(index.Name, index.Kind, index.IsUnique), index.RootPageId), index));
 
     /// <summary>
     /// Gets the current registrations of every live index.

@@ -6,6 +6,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -190,8 +191,8 @@ public sealed class SqlArithmeticFaultTests
     /// </summary>
     /// <param name="statement">The query whose ORDER BY mixes string and integer keys.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Evaluation: incomparable ORDER BY keys fail the statement and keep the session")]
-    [InlineData("SELECT id FROM numbers ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END")]
-    [InlineData("SELECT id FROM numbers GROUP BY id ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END")]
+    [InlineData("SELECT id FROM numbers ORDER BY mixed_sort_key(id, NULL)")]
+    [InlineData("SELECT id FROM numbers GROUP BY id ORDER BY mixed_sort_key(id, NULL)")]
     public async Task OrderBy_IncomparableKeys_ShouldFailStatementAndKeepSession(string statement)
     {
         // Arrange
@@ -462,18 +463,18 @@ public sealed class SqlArithmeticFaultTests
             new Dictionary<string, object?> { ["nothing"] = null })).ShouldBeNull();
     }
 
-    /// <summary>A REAL branch beyond Decimal's range cannot take a Decimal result type.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: result-type normalization reports out-of-range values with CS02002")]
-    public async Task ResultTypeNormalization_OutOfRange_ShouldFailWithCode()
+    /// <summary>A REAL alternative determines the common type even beyond Decimal's range.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: REAL alternatives retain their range under common typing (#1788)")]
+    public async Task ResultTypeNormalization_RealAlternative_ShouldRetainRealRange()
     {
         // Arrange
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
 
-        // Act / Assert: COALESCE(REAL, DECIMAL) is typed DECIMAL; 3e38 does not fit it.
-        AssertCode(await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
+        // Act / Assert: PostgreSQL resolves COALESCE(REAL, DECIMAL) to REAL.
+        (await ScalarAsync(session,
             "SELECT COALESCE(@large, decimal_value) FROM numbers WHERE id = 1",
-            new Dictionary<string, object?> { ["large"] = 3e38f })), outOfRange);
+            new Dictionary<string, object?> { ["large"] = 3e38f })).ShouldBe(3e38f);
     }
 
     /// <summary>SUM and AVG accumulation overflow carries the overflow code.</summary>
@@ -539,13 +540,13 @@ public sealed class SqlArithmeticFaultTests
     public async Task Wire_IncomparableOrderByKeys_ShouldReturnExecutionFailureAndKeepSession()
     {
         // Arrange
-        await using var harness = await ServerTestHarness.StartAsync();
+        await using var harness = await ServerTestHarness.StartAsync(engine: CreateEngine());
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
         // Act
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(
-            "SELECT id FROM users ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END").Encode());
+            "SELECT id FROM users ORDER BY mixed_sort_key(id, NULL)").Encode());
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
 
         // Assert
@@ -592,7 +593,11 @@ public sealed class SqlArithmeticFaultTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create("arithmetic-faults", new SqlDatabaseEngineOptions());
+    {
+        var builder = SqlDatabaseEngine.CreateBuilder("arithmetic-faults");
+        builder.Functions.Add(new MixedSortKeyFunction());
+        return builder.Build();
+    }
 
     private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
     {

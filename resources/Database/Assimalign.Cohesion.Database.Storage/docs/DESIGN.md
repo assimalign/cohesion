@@ -77,7 +77,15 @@ Reads check version, ordinal, run identity, used length, checksum, record bounda
 before publishing buffer positions. Any read exception after argument checks permanently fails
 the reader; later calls raise CK05004 with a previous-read-failed message and without I/O,
 damage events or damage counters, even after cancellation before consuming bytes.
-This disposable format is independent of durable storage format 4. No WAL, MVCC, recovery or
+StorageTempRun.Position saves an opaque record boundary before Append. The authorized
+OpenReader(memoryGrant, position) overload starts there without scanning earlier records,
+including length headers or payloads spanning pages. Only saved positions from that run are
+valid; callers never calculate offsets. A position that is not a record start has undefined
+behavior: it can refuse as damage or return misframed records. Seek readers validate each visited page's identity,
+ordinal, used length and checksum, plus the tail and EOF. A failed read permanently poisons
+the reader. Unsealed/disposed runs refuse, and out-of-range positions or insufficient
+grants fail argument validation. There is no durable or temporary format-version change.
+This disposable format is independent of durable storage format 4 and its physical index-owner directory. Temp runs allocate separate files, never owner pages or free-space-map entries; owner retirement never sees or reclaims temp runs, and temp cleanup never changes the owner directory. No WAL, MVCC, recovery or
 StorageBufferPool participates, and no durable I/O counter moves.
 
 Keys encode direction, collation and NULL placement; a unique Int64 input ordinal breaks ties.
@@ -87,7 +95,7 @@ directory fit the rest; one directory slot is reserved for merge output.
 FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2.
 Create and CreateWithSortedPrefix overloads accept maximumOpenRuns (at least FanIn + 1),
 reducing the directory and merging sooner; the ordinary overloads keep 64 * FanIn. SQL
-uses 64 including a merge-output slot. The ceiling is exercised by a counted 20,000-row
+uses 64, or 32 for a hash join build sorter, including a merge-output slot. The ceiling is exercised by a counted 20,000-row
 test; concurrent sorts/results still add up across the process. Runs accumulate during
 generation until the directory is full apart from that output slot, then the FanIn smallest merge
 repeatedly until the directory is at most half full.
@@ -109,8 +117,10 @@ an unstarted owning final reader into independent nonowning cursors. Forking dis
 template workspace and prohibits starting that template; it remains the file owner until
 all consumers finish. A fork releases only its own buffers, so rewind/concurrent delivery
 never deletes another reader's input. BufferBytes states the required read workspace.
-StorageTempSortPrefixTests pins its two-run physical peak exactly at 212,992 bytes. Statement
-PhysicalBytes/PeakBytes expose live and peak reservations. RecordsWritten/KeyComparisons are internal test counters; two input sizes
+StorageTempSortPrefixTests pins its two-run physical peak exactly at 212,992 bytes.
+SQL's statement quota also includes any staged probe-side input when its sorted join build
+and index coexist at Seal. Statement PhysicalBytes/PeakBytes expose live and peak reservations.
+RecordsWritten/KeyComparisons are internal test counters; two input sizes
 bound merge depth and write growth, while differential cases cover several grants and levels.
 Hash partition instances require serialized use. Partitions are lazy files selected by hash
 modulo count; their grant covers an 8-KiB writer plus 512 bytes bookkeeping per partition.
@@ -218,7 +228,10 @@ or recovery error still reaches the caller. `ProvisioningFailure` is the other n
 in-memory publication failed after a catalog commit and recovery must decide the published state. Both reuse the
 existing offline write fence and add no new events or on-disk storage format.
 
-`HasOwnerPages(ownerId)` is a constant-time physical-allocation query beside `GetOwnerPages`.
+`HasOwnerPages(ownerId)` is a constant-time data-page allocation query beside `GetOwnerPages`.
+`GetOwnerIndexPageCount(ownerId)` probes the separate index directory with the same constant-time,
+allocation-free contract (#1808). Retirement checks both directories before removing an intent;
+a short release batch cannot prove that the physical owner is empty.
 It reads the native owner directory without loading a page or copying its ids. The existing
 owner-scoped iterator snapshots the entire directory before its first `MoveNext`, so it is not
 a bounded presence probe. Final-slot deletion, commit, rollback and recovery maintain the same
@@ -2585,11 +2598,13 @@ reference is PostgreSQL's `max_wal_size` of 1 GB (`max_wal_size_mb = 1024`,
   beside another engine's suite, one late checkpoint took a peak to 4.4 sizes while the journal
   written per truncation stayed between 0.89 and 1.06 sizes (in format 2 a peak reached almost
   ten). It is not a hard bound: a single statement journals all of its bracket before the
-  checkpoint can run, so one statement that writes more than the size (a large index build or
-  `INSERT ... SELECT`, a large upload) overshoots it by that much. The owner default for
+  checkpoint can run, so one statement that writes more than the size (`INSERT ... SELECT` or a large upload) overshoots it by that much. The owner default for
   #1270 keeps this soft trigger: bracket caps remain rejected, and splitting a statement
   requires a separate design that preserves statement atomicity.
-  The journal-size hard bound is deferred; #1270 is not fully delivered by this soft trigger.
+  Index builds (#1808) now use a shared 64-entry durable-bracket loop in the models,
+  preserving one logical/catalog publication while allowing checkpoints between chunks.
+  Their size overshoot is limited to the admitted chunk; the generic journal-size hard
+  bound remains deferred, and #1270 is not fully delivered by this soft trigger.
 - Recovery replayed about 20 ms per MB of journal from a warm file cache in format 2 (the #1251
   table below: a 50.2 MB journal in 0.9–1.2 s), so the bound capped a crash recovery at about five
   seconds. Format 3 (#1253) replays 5–8 ms per MB from a file, a journal of small deltas or of
@@ -3354,3 +3369,5 @@ Concrete eligible types carry their own concise display and private nested Debug
 Size-only checkpoint hints (TimeSpan.MaxValue) short-circuit elapsed-time sampling after the
 journal-size trigger. Failed physical-bracket registration completes the unreturned transaction;
 probe write refusal still precedes construction in all BeginTransaction overloads (#1283, #1744).
+
+GetIndexOwners(afterOwner, maximumOwners) enumerates nonzero index owners in bounded ordered snapshots from the directory already rebuilt by the storage open scan. It returns each owner's lowest allocated index page without loading pages through the buffer pool. A bounded maximum heap selects the requested owners in one directory walk, followed by one result sort. Open-time model orphan discovery uses this directory before admitting sessions. Each snapshot is independent of later directory changes; releases become visible only at commit, as for GetOwnerIndexPageCount.

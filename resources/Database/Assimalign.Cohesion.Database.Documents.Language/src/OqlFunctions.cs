@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// <summary>The executable OQL function vocabulary, arities, kinds and static result types.</summary>
 public static class OqlFunctions
 {
-    private static readonly IReadOnlyList<OqlFunction> _all = Array.AsReadOnly<OqlFunction>(
+    private static readonly OqlFunction[] _functions =
     [
         new("META", 0, 1, DatabaseType.Json),
         new("COUNT", 1, 1, DatabaseType.Int64, true),
@@ -23,6 +23,14 @@ public static class OqlFunctions
         new("EVERY", 1, 1, DatabaseType.Boolean, true),
         new("STDDEV", 1, 1, DatabaseType.Decimal, true),
         new("VARIANCE", 1, 1, DatabaseType.Decimal, true),
+        new("ROW_NUMBER", 0, 0, DatabaseType.Int64),
+        new("RANK", 0, 0, DatabaseType.Int64),
+        new("DENSE_RANK", 0, 0, DatabaseType.Int64),
+        new("PERCENT_RANK", 0, 0, DatabaseType.Decimal),
+        new("CUME_DIST", 0, 0, DatabaseType.Decimal),
+        new("NTILE", 1, 1, DatabaseType.Int64),
+        new("LAG", 1, 3, DatabaseType.Null),
+        new("LEAD", 1, 3, DatabaseType.Null),
         new("LOWER", 1, 1, DatabaseType.String, false, JsonValueKind.String),
         new("UPPER", 1, 1, DatabaseType.String, false, JsonValueKind.String),
         new("LENGTH", 1, 1, DatabaseType.Int64, false, JsonValueKind.String),
@@ -58,7 +66,8 @@ public static class OqlFunctions
         new("IFMISSING", 2, int.MaxValue, DatabaseType.Null),
         new("IFNULL", 2, int.MaxValue, DatabaseType.Null),
         new("IFMISSINGORNULL", 2, int.MaxValue, DatabaseType.Null),
-    ]);
+    ];
+    private static readonly IReadOnlyList<OqlFunction> _all = Array.AsReadOnly(_functions);
 
     /// <summary>Gets the immutable function table in declaration order.</summary>
     public static IReadOnlyList<OqlFunction> All => _all;
@@ -68,7 +77,8 @@ public static class OqlFunctions
     /// <returns>The definition, or null for an unknown function.</returns>
     public static OqlFunction? Find(string name)
     {
-        foreach (var function in _all)
+        if (name is null) { return null; }
+        foreach (var function in _functions)
         {
             if (string.Equals(function.Name, name, StringComparison.OrdinalIgnoreCase)) { return function; }
         }

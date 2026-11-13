@@ -327,6 +327,36 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
         return failure.Diagnostics[0].Code ?? string.Empty;
     }
 
+    [NonEvent]
+    internal void IndexBuildBegan(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        { IndexBuildBegan(storage.Name.ToString(), unchecked((long)objectId)); }
+    }
+
+    [Event(13, Level = EventLevel.Informational, Message = "Database '{0}' started building index object {1}.")]
+    private void IndexBuildBegan(string database, long objectId) => WriteEvent(13, database, objectId);
+
+    [NonEvent]
+    internal void IndexBuildEnded(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, bool succeeded)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        { IndexBuildEnded(storage.Name.ToString(), unchecked((long)objectId), succeeded); }
+    }
+
+    [Event(14, Level = EventLevel.Informational, Message = "Database '{0}' stopped building index object {1}; succeeded: {2}.")]
+    private void IndexBuildEnded(string database, long objectId, bool succeeded) => WriteEvent(14, database, objectId, succeeded);
+
+    [NonEvent]
+    internal void PagesReclaimed(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, int pages)
+    {
+        if (pages != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
+        { PagesReclaimed(storage.Name.ToString(), unchecked((long)objectId), pages); }
+    }
+
+    [Event(15, Level = EventLevel.Informational, Message = "Database '{0}' reclaimed {2} pages of object {1}.")]
+    private void PagesReclaimed(string database, long objectId, int pages) => WriteEvent(15, database, objectId, pages);
+
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
     private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)
         => WriteEvent(1, engineName, sessionId, activeSessions);

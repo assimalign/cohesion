@@ -35,6 +35,14 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
+  <Target Name="CopyDatabaseSampleHost" AfterTargets="Build">
+    <ItemGroup>
+      <_DatabaseSampleHostOutput Include="$(MSBuildThisFileDirectory)..\fixtures\Assimalign.Cohesion.Database.SampleHost\bin\$(Configuration)\$(TargetFramework)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_DatabaseSampleHostOutput)"
+          DestinationFiles="@(_DatabaseSampleHostOutput->'$(OutDir)SampleHost\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
   <Target Name="CopyDatabaseTcpSdkHost" AfterTargets="Build">
     <ItemGroup>
       <_DatabaseTcpSdkHostOutput Include="$(MSBuildThisFileDirectory)..\fixtures\Assimalign.Cohesion.Database.TcpSdkHost\bin\$(Configuration)\$(TargetFramework)\**\*" />

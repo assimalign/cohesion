@@ -196,6 +196,8 @@ public sealed class SqlTableReclamationTests
         var retirementPoints = new ConcurrentBag<int>();
         var retirementWriteStarts = new ConcurrentBag<int>();
         ulong oldId;
+        ulong[] oldIndexOwners;
+        ulong executingOwner = 0;
         ulong replacementId;
         int oldPages;
         long pages;
@@ -213,10 +215,13 @@ public sealed class SqlTableReclamationTests
             await using var session = await database.CreateSessionAsync(timeout.Token);
             await SeedAsync(session, "t", 140, timeout.Token);
             oldId = TableId(database, "t");
+            oldIndexOwners = database.IndexManager.ExportRegistrations().Where(item => item.ObjectId == oldId)
+                .Select(database.IndexManager.PageOwner).ToArray();
             oldPages = database.DataStorage.GetOwnerPages(oldId).Count;
             oldPages.ShouldBeGreaterThan(SqlTableReclamation.BatchSize);
             pages = database.DataStorage.PageManager.PageCount;
-            database.TableReclamation.BeforeBatch = (_, token) => { entered.Set(); release.Wait(token); };
+            database.TableReclamation.BeforeBatch = (owner, token) =>
+            { Volatile.Write(ref executingOwner, owner); entered.Set(); release.Wait(token); };
             if (wire) { await ExecuteWireAsync(engine, "DROP TABLE t", timeout.Token); }
             else { await session.ExecuteAsync("DROP TABLE t", cancellationToken: timeout.Token); }
             entered.Wait(timeout.Token);
@@ -229,18 +234,20 @@ public sealed class SqlTableReclamationTests
             // Act: retain every durable change through rollback, all data commits, and retirement.
             using (recorder = strategy.RecordCrashPoints())
             {
-                database.TableReclamation.BeforeBatchCommit = (_, _) =>
+                database.TableReclamation.BeforeBatchCommit = (owner, _) =>
                 {
+                    if (owner != oldId) { return; }
                     if (Interlocked.Exchange(ref interrupted, 1) != 0) { return; }
-                    database.TableReclamation.ReclaimedPages.ShouldBe(0);
+                    database.DataStorage.GetOwnerPages(oldId).Count.ShouldBe(oldPages);
                     // Force steal of uncommitted frees, with their WAL pre-images, then interrupt
                     // the actual bracket before Commit. Its disposal must restore every page.
                     database.DataStorage.WriteBackDirtyPages(int.MaxValue).ShouldBeGreaterThan(0);
                     interruptedPoint = recorder.Count - 1;
                     throw new OperationCanceledException("Injected active reclamation batch interruption.");
                 };
-                database.TableReclamation.AfterBatch = (_, count) =>
+                database.TableReclamation.AfterBatch = (owner, count) =>
                 {
+                    if (owner != oldId) { return; }
                     Interlocked.Increment(ref batches);
                     if (count < SqlTableReclamation.BatchSize)
                     {
@@ -252,7 +259,7 @@ public sealed class SqlTableReclamationTests
                 };
                 strategy.DurableStorageChanged = catalog =>
                 {
-                    if (catalog && Volatile.Read(ref finalBatches) > 0)
+                    if (catalog && Volatile.Read(ref finalBatches) > 0 && Volatile.Read(ref executingOwner) == oldId)
                     {
                         // These callbacks run inside retirement I/O, before its Commit returns.
                         retirementPoints.Add(recorder.Count - 1);
@@ -260,7 +267,7 @@ public sealed class SqlTableReclamationTests
                 };
                 strategy.StorageWriteStarting = catalog =>
                 {
-                    if (catalog && Volatile.Read(ref finalBatches) > 0)
+                    if (catalog && Volatile.Read(ref finalBatches) > 0 && Volatile.Read(ref executingOwner) == oldId)
                     {
                         retirementWriteStarts.Add(recorder.Count - 1);
                     }
@@ -323,6 +330,11 @@ public sealed class SqlTableReclamationTests
             await WaitDoneAsync(recovered, timeout.Token);
             recovered.DataStorage.GetOwnerPages(oldId).ShouldBeEmpty();
             recovered.CatalogStorage.GetOwnerPages(oldId).ShouldBeEmpty();
+            foreach (ulong owner in oldIndexOwners)
+            {
+                recovered.DataStorage.GetOwnerIndexPages(owner).ShouldBeEmpty();
+                recovered.CatalogStorage.GetOwnerPages(owner).ShouldBeEmpty();
+            }
             AssertSpaceMap(recovered.DataStorage, oldId);
             AssertSpaceMap(recovered.CatalogStorage, oldId);
             long free = recovered.DataStorage.FreeSpaceMap.FreePageCount;

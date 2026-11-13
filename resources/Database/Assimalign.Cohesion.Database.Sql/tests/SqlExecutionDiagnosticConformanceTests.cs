@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,6 +18,64 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// <summary>The execution-diagnostic corpus exercises both SQL execution boundaries (#1653).</summary>
 public sealed class SqlExecutionDiagnosticConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - CREATE INDEX refuses a chunk exceeding its statement grant and retains the table (#1808)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_IndexBuildExceedsGrant_ShouldRefuseWithoutPublication(bool unique)
+    {
+        // Arrange: IX-S1 deliberately adds CS05067 at G=4,096 B, no temp quota.
+        // Batch 4 (1eefed274) completed this build without charging its workspace (#1808).
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var engine = SqlDatabaseEngine.Create("index-budget", new() { StatementMemoryBudget = 4096 });
+        var database = await engine.CreateDatabaseAsync("app", guard.Token);
+        await using var session = await database.CreateSessionAsync(guard.Token);
+        await session.ExecuteAsync("CREATE TABLE items(v INT)", cancellationToken: guard.Token);
+        await session.ExecuteAsync("INSERT INTO items VALUES(1),(2)", cancellationToken: guard.Token);
+
+        // Act.
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            unique ? "CREATE UNIQUE INDEX ix ON items(v)" : "CREATE INDEX ix ON items(v)", cancellationToken: guard.Token));
+
+        // Assert.
+        failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
+        database.Catalog.GetIndexRegistrations().ShouldBeEmpty();
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        (await session.ExecuteAsync("SELECT COUNT(*) FROM items", cancellationToken: guard.Token)).Status.ShouldBe(DatabaseResultStatus.Success);
+        database.IsOffline.ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - IX-S1 pins its deliberate chunk-workspace refusal boundaries (#1808)")]
+    [InlineData(1, 0, 4096L, false)]
+    [InlineData(1, 0, 6927L, false)]
+    [InlineData(1, 0, 6928L, true)]
+    [InlineData(64, 4000, 262144L, false)]
+    [InlineData(64, 4000, 555408L, true)]
+    public async Task ExecuteAsync_IndexChunkBoundary_ShouldEnforceBuildBudget(int count, int width, long grant, bool completes)
+    {
+        // Arrange: no temp space/quota. Batch 4 (1eefed274) completed every build here.
+        await using var engine = SqlDatabaseEngine.Create("index-chunk-boundary", new() { StatementMemoryBudget = grant });
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE items(v INT" + (width == 0 ? ")" : ",note TEXT)"));
+        await session.ExecuteAsync("INSERT INTO items VALUES" + string.Join(',', Enumerable.Range(0, count).Select(i => width == 0 ? $"({i})" : $"({i},'{new string('x', width)}')")));
+
+        // Act / Assert
+        if (completes)
+        {
+            (await session.ExecuteAsync("CREATE INDEX ix ON items(v)")).Status.ShouldBe(DatabaseResultStatus.Success);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(grant);
+            database.Catalog.GetIndexRegistrations().ShouldHaveSingleItem();
+        }
+        else
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE INDEX ix ON items(v)"));
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
+            database.Catalog.GetIndexRegistrations().ShouldBeEmpty();
+        }
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        database.IsOffline.ShouldBeFalse();
+    }
+
     public static IEnumerable<object[]> Cases()
     {
         foreach (string expression in new[] { "CAST('abc' AS INT)", "ABS(-9223372036854775808)" })
@@ -27,6 +86,7 @@ public sealed class SqlExecutionDiagnosticConformanceTests
             yield return [setup, "MERGE INTO target USING (SELECT 1 AS k) s ON target.k=s.k WHEN NOT MATCHED THEN INSERT(id,k) OVERRIDING USER VALUE VALUES(" + expression + ",1)", code];
         }
         yield return ["", "SELECT (SELECT id FROM t)", "CS02046"];
+        yield return ["", "SELECT COALESCE(1,TRUE)", "CS02080"];
         yield return ["", "INSERT INTO t VALUES (3, 'bad')", "CS02022"];
         yield return ["CREATE TABLE target (v DATE)", "INSERT INTO target VALUES ('bad')", "CS02047"];
         yield return ["CREATE TABLE target (v TIME)", "INSERT INTO target VALUES ('bad')", "CS02047"];
@@ -54,7 +114,7 @@ public sealed class SqlExecutionDiagnosticConformanceTests
         yield return ["", "DROP FUNCTION missing(INT)", "CS01009"];
         yield return ["CREATE TABLE target (v UUID)", "INSERT INTO target VALUES ('bad')", "CS02022"];
         yield return ["CREATE TABLE target (v BYTEA)", "INSERT INTO target VALUES ('bad')", "CS02055"];
-        yield return ["", "SELECT id FROM t ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END", "CS02055"];
+        yield return ["", "SELECT id FROM t ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END", "CS02022"];
         yield return ["", "CREATE TABLE t (id INT)", "CS03049"];
         yield return ["", "CREATE INDEX uq_t ON t(v)", "CS03049"];
         yield return ["", "ALTER TABLE t ADD CONSTRAINT uq_t CHECK(id > 0)", "CS03050"];

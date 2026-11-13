@@ -23,12 +23,19 @@ internal sealed partial class DocumentPlanner
             { if (HasSubquery(compound.OrderBy[index].Expression, cancellationToken)) { return true; } }
             return false;
         }
-        if (expression is OqlSubqueryExpression) { return true; }
+        // Windows use the budgeted async row pipeline even without expression subqueries.
+        if (expression is OqlSubqueryExpression or OqlWindowExpression) { return true; }
+        if (expression is OqlMergeExpression merge)
+        {
+            foreach (var child in NestedChildren(merge)) { if (HasSubquery(child, cancellationToken)) { return true; } }
+            return false;
+        }
         if (expression is OqlSelectExpression query)
         {
             if (query.Source is not null || query.Bindings != query.Unnest) { return true; }
             for (int index = 0; index < query.Projections.Count; index++) { if (HasSubquery(query.Projections[index].Expression)) { return true; } }
             if (HasSubquery(query.Predicate) || HasSubquery(query.Having)) { return true; }
+            foreach (var definition in query.Windows) { if (HasSubquery(definition, cancellationToken)) { return true; } }
             for (int index = 0; index < query.GroupBy.Count; index++) { if (HasSubquery(query.GroupBy[index])) { return true; } }
             for (int index = 0; index < query.OrderBy.Count; index++) { if (HasSubquery(query.OrderBy[index].Expression)) { return true; } }
             for (int index = 0; index < query.Bindings.Count; index++) { if (HasSubquery(query.Bindings[index].Expression)) { return true; } }
@@ -36,6 +43,8 @@ internal sealed partial class DocumentPlanner
         }
         if (expression is OqlUnaryExpression unary) { return HasSubquery(unary.Operand); }
         if (expression is OqlBinaryExpression binary) { return HasSubquery(binary.Left) || HasSubquery(binary.Right); }
+        if (expression is OqlWindowDefinition or OqlWindowSpecification)
+        { foreach (var child in NestedChildren(expression)) { if (HasSubquery(child, cancellationToken)) { return true; } } return false; }
         if (expression is OqlCallExpression call)
         { for (int index = 0; index < call.Arguments.Count; index++) { if (HasSubquery(call.Arguments[index])) { return true; } } return false; }
         if (expression is OqlArrayExpression array)
@@ -106,7 +115,34 @@ internal sealed partial class DocumentPlanner
         string? unboundValuesName = null;
         bool valuesAliasExplicit = false;
         int subqueryDepth = 0;
+        string? unavailableMergeTarget = null;
+        string? unavailableMergeReturningSource = null;
         if (expression is OqlQueryExpression query) { VisitQuery(query, empty, free); }
+        else if (expression is OqlMergeExpression merge)
+        {
+            ValidateMergeDeclaration(merge);
+            string target = DocumentSourceName.Of(merge.Collection, merge.Alias);
+            string source = MergeSourceName(merge.Source);
+            VisitQuery(MergeSourceQuery(merge.Source), empty, free);
+            // Preserve OQ-K1 provenance: implicit names do not redirect an inner FROM
+            // keyspace, while explicit correlation aliases can supply expression rows.
+            var both = new Dictionary<string, bool>(StringComparer.Ordinal)
+            { [source] = merge.Source.Alias is null, [target] = merge.Alias is null };
+            var sourceOnly = new Dictionary<string, bool>(StringComparer.Ordinal) { [source] = merge.Source.Alias is null };
+            unavailableMergeTarget = merge.IsLookup ? target : null;
+            Visit(merge.On, "MERGE ON", merge.IsLookup ? sourceOnly : both, empty, free);
+            unavailableMergeTarget = null;
+            foreach (var child in MergeActionExpressions(merge))
+            {
+                if (child is OqlReturningExpression)
+                {
+                    unavailableMergeReturningSource = source;
+                    Visit(child, "RETURNING", new Dictionary<string, bool>(StringComparer.Ordinal) { [target] = merge.Alias is null }, empty, free);
+                    unavailableMergeReturningSource = null;
+                }
+                else { Visit(child, "MERGE action", both, empty, free); }
+            }
+        }
         else
         {
             string? name = expression switch
@@ -186,6 +222,7 @@ internal sealed partial class DocumentPlanner
             if (select.GroupAs is string group) { grouped[group] = false; }
             foreach (var projection in select.Projections) { Visit(projection.Expression, "projection", grouped, outer, free); }
             Visit(select.Having, "HAVING", grouped, outer, free);
+            foreach (var window in select.Windows) { Visit(window.Specification, "WINDOW", grouped, outer, free); }
             VisitOrdering(select, grouped,
                 (scope, name) => new Dictionary<string, bool>(scope, StringComparer.Ordinal) { [name] = false },
                 (expression, scope, nested) => { Visit(expression, "ORDER BY", scope, outer, free, nested); return true; });
@@ -206,6 +243,10 @@ internal sealed partial class DocumentPlanner
             if (node is null) { return; }
             if (node is OqlPathExpression path && path.Segments.Count > 0 && path.Segments[0].Name is string name)
             {
+                if (name == unavailableMergeTarget && !local.ContainsKey(name) && !outer.ContainsKey(name))
+                { throw new DocumentPlanningException("CD01040", ErrorMessages.MergeBindingInvalid, node.Location); }
+                if (name == unavailableMergeReturningSource && !local.ContainsKey(name) && !outer.ContainsKey(name))
+                { throw new DocumentPlanningException("CK00001", ErrorMessages.MergeReturningSourceUnsupported, node.Location); }
                 if (subqueryDepth > 0 && name == unboundValuesName && !local.ContainsKey(name) && !outer.ContainsKey(name))
                 { throw new DocumentPlanningException("CD01036", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.ValuesDestinationUnbound, name), node.Location); }
@@ -268,6 +309,14 @@ internal sealed partial class DocumentPlanner
     {
         switch (node)
         {
+            case OqlWindowExpression or OqlWindowSpecification or OqlWindowDefinition:
+                foreach (var child in WindowNodeChildren(node)) { yield return child; }
+                break;
+            case OqlMergeExpression merge:
+                if (merge.Source.Expression is not null) { yield return merge.Source.Expression; }
+                yield return merge.On;
+                foreach (var child in MergeActionExpressions(merge)) { yield return child; }
+                break;
             case OqlInsertExpression insert:
                 if (insert.Select is not null) { yield return insert.Select; }
                 foreach (var pair in insert.Values) { yield return pair.Key; yield return pair.Value; }
@@ -304,6 +353,7 @@ internal sealed partial class DocumentPlanner
                 if (query.Predicate is not null) { yield return query.Predicate; }
                 foreach (var key in query.GroupBy) { yield return key; }
                 if (query.Having is not null) { yield return query.Having; }
+                foreach (var definition in (IEnumerable<OqlExpression>)query.Windows) { yield return definition; }
                 foreach (var order in query.OrderBy) { yield return order.Expression; }
                 foreach (var binding in query.Bindings) { yield return binding.Expression; }
                 break;
@@ -316,6 +366,23 @@ internal sealed partial class DocumentPlanner
             default: foreach (var child in PredicateChildren(node)) { yield return child; } break;
         }
     }
+
+    private static IEnumerable<OqlExpression> WindowNodeChildren(OqlExpression node)
+    {
+        switch (node)
+        {
+            case OqlWindowExpression window:
+                foreach (var argument in window.Call.Arguments) { yield return argument; }
+                if (window.Specification is not null) { yield return window.Specification; }
+                break;
+            case OqlWindowSpecification specification:
+                foreach (var key in specification.PartitionBy) { yield return key; }
+                foreach (var order in specification.OrderBy) { yield return order.Expression; }
+                break;
+            case OqlWindowDefinition definition: yield return definition.Specification; break;
+        }
+    }
+
     private static DatabasePlanDescription DescribeNested(DocumentNestedPlan plan, IEnumerable<Diagnostic>? diagnostics)
     {
         var nodes = new List<DatabasePlanNode>();
@@ -325,6 +392,7 @@ internal sealed partial class DocumentPlanner
         void AddQuery(DocumentStatementPlan queryPlan, int? parent)
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (queryPlan is DocumentMergePlan mergePlan) { AddMerge(mergePlan, parent); return; }
             int offset = nodes.Count;
             foreach (var node in queryPlan is DocumentSetOperationPlan ? DescribeNodes(queryPlan).Take(1) : DescribeNodes(queryPlan))
             {
@@ -339,6 +407,7 @@ internal sealed partial class DocumentPlanner
             }
             OqlExpression query = queryPlan switch
             {
+                DocumentMergePlan merge => merge.Statement,
                 DocumentUpdatePlan update => update.Statement,
                 DocumentDeletePlan delete => delete.Statement,
                 DocumentInsertPlan insert => insert.Statement,
@@ -363,6 +432,38 @@ internal sealed partial class DocumentPlanner
                 else if (inputPlan is DocumentFromPlan { Input: null })
                 { AddExpressions(child, nodes.Skip(offset).First(node => node.Operator == "ExpressionSource").NodeId); }
             }
+        }
+
+        void AddMerge(DocumentMergePlan plan, int? parent)
+        {
+            int root = nodes.Count;
+            var merge = plan.Statement;
+            // Emit each owner's nested expressions before its next sibling, retaining
+            // the description contract's depth-first pre-order and contiguous ids.
+            foreach (var node in DescribeNodes(plan))
+            {
+                int id = nodes.Count;
+                nodes.Add(new DatabasePlanNode { NodeId = id, ParentId = node.ParentId is null ? parent : root,
+                    Operator = node.Operator, Target = node.Target, Index = node.Index, Detail = node.Detail,
+                    EstimatedRows = node.EstimatedRows });
+                switch (node.Operator)
+                {
+                    case "KeyLookup" or "KeyJoin": AddOwned(merge.On); break;
+                    case "MergeUpdate":
+                        foreach (var assignment in merge.Update!.Assignments) { AddOwned(assignment.Value); }
+                        AddOwned(merge.Update.Predicate);
+                        break;
+                    case "MergeDelete": AddOwned(merge.Delete!.Predicate); break;
+                    case "MergeInsert":
+                        AddOwned(merge.Insert!.Key); AddOwned(merge.Insert.Value); AddOwned(merge.Insert.Predicate);
+                        break;
+                    case "Returning" or "ReturningValue": AddOwned(merge.Returning); break;
+                }
+
+                void AddOwned(OqlExpression? expression)
+                { if (expression is not null) { AddExpressions(expression, id); } }
+            }
+            AddQuery(plan.Source, root);
         }
 
         void AddExpressions(OqlExpression node, int parent)
@@ -404,7 +505,14 @@ internal sealed partial class DocumentPlanner
         if (left.Collection != right.Collection || left.Alias != right.Alias || left.IsAliasImplicit != right.IsAliasImplicit || left.IsValue != right.IsValue ||
             left.IsDistinct != right.IsDistinct || left.GroupAs != right.GroupAs ||
             !left.GroupAliases.SequenceEqual(right.GroupAliases) || left.Projections.Count != right.Projections.Count ||
-            left.OrderBy.Count != right.OrderBy.Count || left.Bindings.Count != right.Bindings.Count) { return false; }
+            left.OrderBy.Count != right.OrderBy.Count || left.Bindings.Count != right.Bindings.Count || left.Windows.Count != right.Windows.Count) { return false; }
+        if (left.Windows.Count > 0)
+        {
+            var leftWindows = WindowDefinitions(left);
+            var rightWindows = WindowDefinitions(right);
+            foreach (var window in left.Windows)
+            { if (!rightWindows.TryGetValue(window.Name, out var specification) || !EquivalentWindowSpecifications(leftWindows[window.Name], specification, left)) { return false; } }
+        }
         for (int index = 0; index < left.Projections.Count; index++)
         { if (left.Projections[index].Alias != right.Projections[index].Alias) { return false; } }
         for (int index = 0; index < left.OrderBy.Count; index++)

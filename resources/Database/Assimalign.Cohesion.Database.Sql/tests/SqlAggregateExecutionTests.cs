@@ -614,9 +614,10 @@ public sealed partial class SqlAggregateExecutionTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT MIN({expression}) FROM metrics;"));
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02080");
         error.Message.ShouldContain("compatible types", Case.Sensitive);
-        error.Message.ShouldContain("Int32", Case.Sensitive);
-        error.Message.ShouldContain("String", Case.Sensitive);
+        error.Message.ShouldContain("INTEGER", Case.Sensitive);
+        error.Message.ShouldContain("TEXT", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: DISTINCT tuples and ordinary calls have separate slots")]

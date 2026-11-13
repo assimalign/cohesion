@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
 internal static class GraphWriteAllocations
 {
-    internal static long[] Measure(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false)
+    internal static long[] Measure(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false, bool textIndexed = false)
     {
         var engine = GraphDatabaseEngine.Create("allocation", new()
         {
@@ -14,6 +14,7 @@ internal static class GraphWriteAllocations
         });
         var database = engine.CreateDatabaseAsync("graph", CancellationToken.None).GetAwaiter().GetResult();
         var session = database.CreateSessionAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var probe = Environment.GetEnvironmentVariable("T3_ALLOCATION_PROBE") == "1" ? new GraphAllocationProbe(database, textIndexed) : null;
         try
         {
             var schema = GraphSchema.Open(database, session);
@@ -30,11 +31,28 @@ internal static class GraphWriteAllocations
                 session.ExecuteAsync("CREATE INDEX counter_c FOR (n:Counter) ON (n.c)", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
                 session.ExecuteAsync("CREATE INDEX temporary_id FOR (n:Temporary) ON (n.id)", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
             }
+            if (textIndexed) { session.ExecuteAsync("CREATE TEXT INDEX other_body FOR (n:Other) ON (n.body)", cancellationToken: CancellationToken.None).GetAwaiter().GetResult(); }
             session.ExecuteAsync("CREATE (:Counter {c:0})", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
             string[] queries = ["CREATE (:Temporary {id:1})", "MATCH (n:Counter) SET n.c=n.c+1", "MATCH (n:Temporary) DELETE n"];
             var minima = new[] { long.MaxValue, long.MaxValue, long.MaxValue };
-            for (int warmup = 0; warmup < 100; warmup++) { Round(false); }
-            for (int round = 0; round < 5; round++) { Round(true); }
+            // The smallest DELETE pre-images occur at one statement in this window. A Gen2
+            // collection there trims the shared scratch buffers and loses that sample to
+            // two pool misses (8 KiB and 16 KiB), leaving the next floor 248 B higher.
+            // Reserve before warming and drain any startup finalizers, so the same warmed
+            // pools remain available throughout measurement. EndNoGCRegion verifies that
+            // the reservation held; byte ceilings and injected allocations are unchanged.
+            if (indexed && !GC.TryStartNoGCRegion(268435456, 67108864))
+            { throw new InvalidOperationException("Could not reserve the indexed allocation measurement window."); }
+            long windowStart = GC.GetAllocatedBytesForCurrentThread();
+            try
+            {
+                if (indexed) { GC.WaitForPendingFinalizers(); }
+                for (int warmup = 0; warmup < 100; warmup++) { Round(false); }
+                for (int round = 0; round < 5; round++) { Round(true); }
+                probe?.Complete();
+            }
+            finally { if (indexed) { GC.EndNoGCRegion(); } }
+            if (indexed) { Console.WriteLine($"ALLOCATION_WINDOW|bytes={GC.GetAllocatedBytesForCurrentThread() - windowStart}|gc=none"); }
             return minima;
 
             void Round(bool measure)
@@ -44,11 +62,13 @@ internal static class GraphWriteAllocations
                     for (int kind = 0; kind < queries.Length; kind++)
                     {
                         long before = GC.GetAllocatedBytesForCurrentThread();
+                        probe?.Begin(before, measure && kind == 2);
                         if (kind == injectedKind) { GC.KeepAlive(new byte[injectedBytes]); }
                         var pending = session.ExecuteAsync(queries[kind], cancellationToken: CancellationToken.None);
                         if (!pending.IsCompletedSuccessfully) { throw new InvalidOperationException("Allocation fixture changed threads."); }
                         var result = pending.GetAwaiter().GetResult();
                         long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                        probe?.End(bytes, bytes < minima[kind]);
                         if (result.AffectedCount != 1) { throw new InvalidOperationException("Allocation fixture expected one affected entity."); }
                         if (measure) { minima[kind] = Math.Min(minima[kind], bytes); }
                     }

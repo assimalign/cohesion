@@ -16,7 +16,7 @@ internal sealed partial class DocumentPlanner
         var logical = CreateLogicalPlan(query, _cancellationToken, _parameters, _functions, outerNames);
         // Expression rows have no physical order to consume. Their headers describe the
         // selected window; a dynamic path does not force reads beyond LIMIT.
-        logical = logical with { CanStopEarly = !logical.IsGrouped && !query.IsDistinct && query.OrderBy.Count == 0 };
+        logical = logical with { CanStopEarly = !HasWindows(query) && !logical.IsGrouped && !query.IsDistinct && query.OrderBy.Count == 0 };
         return new DocumentFromPlan(logical, query.Source is OqlSubqueryExpression derived
             ? nested is not null ? nested[derived].Plan : PlanCore(derived.Query) : null);
     }

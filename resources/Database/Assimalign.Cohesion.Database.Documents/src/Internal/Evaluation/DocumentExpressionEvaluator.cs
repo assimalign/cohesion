@@ -82,6 +82,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlBetweenExpression between => Between(between, document, group),
                 OqlLikeExpression like => Like(like, document, group),
                 OqlCaseExpression conditional => Case(conditional, document, group),
+                OqlWindowExpression window => WindowValue(window, document),
                 OqlCallExpression call => Call(call, document, group),
                 _ => throw new DocumentPlanningException("CD05001", ErrorMessages.ExpressionEvaluatorEvaluateFailure),
             };
@@ -128,6 +129,9 @@ internal sealed partial class DocumentExpressionEvaluator
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
+            case OqlWindowExpression or OqlWindowSpecification or OqlWindowDefinition:
+                foreach (var child in DocumentPlanner.NestedChildren(expression)) { ValidateInputs(child); }
+                break;
             case OqlSetOperationExpression compound:
                 ValidateInputs(compound.Left);
                 ValidateInputs(compound.Right);
@@ -160,6 +164,9 @@ internal sealed partial class DocumentExpressionEvaluator
                 ValidateInputs(update.Predicate);
                 ValidateInputs(update.Returning);
                 break;
+            case OqlMergeExpression merge:
+                foreach (var child in DocumentPlanner.NestedChildren(merge)) { ValidateInputs(child); }
+                break;
             case OqlInsertExpression insert:
                 foreach (var pair in insert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
                 ValidateInputs(insert.Select);
@@ -183,6 +190,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 foreach (var member in obj.Members) { ValidateInputs(member.Value); }
                 break;
             case OqlSelectExpression select:
+                foreach (var definition in select.Windows) { ValidateInputs(definition); }
                 ValidateInputs(select.Source);
                 _ = PagingCount(select.Limit, "LIMIT");
                 _ = PagingCount(select.Offset, "OFFSET");
@@ -250,7 +258,7 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             frames.Push(frame);
         }
-        foreach (var frame in frames) { members.Add(new(frame.Name, frame.Value is DocumentEvaluationContext source ? ReadJson(source.Content) : frame.Value)); }
+        foreach (var frame in frames) { if (IsWindowBinding(frame)) { continue; } members.Add(new(frame.Name, frame.Value is DocumentEvaluationContext source ? ReadJson(source.Content) : frame.Value)); }
         return DocumentJsonValue.Object(members, _writeVerb, _constructorMaxDepth);
     }
 
@@ -321,11 +329,11 @@ internal sealed partial class DocumentExpressionEvaluator
         if (path.Segments.Count > 0)
         {
             for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
-            { if (frame.Name == path.Segments[0].Name) { found = frame; break; } }
+            { if (frame.Name == path.Segments[0].Name && !IsWindowBinding(frame)) { found = frame; break; } }
             if (found is null && start == 0)
             {
                 for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
-                { if (frame.Name == path.Segments[0].Name) { found = frame; break; } }
+                { if (frame.Name == path.Segments[0].Name && !IsWindowBinding(frame)) { found = frame; break; } }
             }
         }
         if (found is not null)
@@ -363,11 +371,11 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             DocumentVariableBinding? found = null;
             for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
-            { if (frame.Name == name) { found = frame; break; } }
+            { if (frame.Name == name && !IsWindowBinding(frame)) { found = frame; break; } }
             if (found is null)
             {
                 for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
-                { if (frame.Name == name) { found = frame; break; } }
+                { if (frame.Name == name && !IsWindowBinding(frame)) { found = frame; break; } }
             }
             if (found?.Value is DocumentMissing missing && !ReferenceEquals(missing, DocumentMissing.Instance))
             { return DocumentMissing.Instance; }

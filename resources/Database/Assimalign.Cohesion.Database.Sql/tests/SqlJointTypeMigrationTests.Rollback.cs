@@ -68,12 +68,12 @@ public sealed partial class SqlJointTypeMigrationTests
         (await RowsAsync(reader, "SELECT Value FROM items WHERE Id=1000", timeout.Token)).Single()[0].ShouldBe(9L);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Joint TYPE: reverse Build gates lossy conversion before any step and allows exact widening")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint TYPE: reverse Build holds lossy conversion regardless of opt-in and allows exact widening")]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
-    public async Task BuildAsync_ReverseType_ShouldRequireOptInOnlyForLossyConversion(bool lossy, bool optIn)
+    public async Task BuildAsync_ReverseType_ShouldHoldLossyConversionAndApplyExactWidening(bool lossy, bool optIn)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -92,35 +92,35 @@ public sealed partial class SqlJointTypeMigrationTests
         var storage = new CrashCaptureSqlStorageStrategy();
         await using (var seed = await Builder(storage).BuildAsync(timeout.Token))
         {
-            var database = await seed.CreateDatabaseAsync("typed", timeout.Token);
-            await database.ApplySchemaAsync(Old(true).Compile(), timeout.Token);
-            await using var writer = await database.CreateSessionAsync(timeout.Token);
+            var seeded = await seed.CreateDatabaseAsync("typed", timeout.Token);
+            await seeded.ApplySchemaAsync(Old(true).Compile(), timeout.Token);
+            await using var writer = await seeded.CreateSessionAsync(timeout.Token);
             await writer.ExecuteAsync("INSERT INTO items VALUES(7)", cancellationToken: timeout.Token);
-            await database.ApplySchemaAsync(New().Compile(), timeout.Token);
+            await seeded.ApplySchemaAsync(New().Compile(), timeout.Token);
             storage = storage.CaptureDurableImages();
         }
 
-        // Act / Assert
-        if (lossy && !optIn)
+        // Act
+        await using var reversed = await Builder(storage).AddDatabase(Old(optIn)).BuildAsync(timeout.Token);
+        var database = await reversed.OpenDatabaseAsync("typed", timeout.Token);
+        await WaitDoneAsync(database, timeout.Token);
+
+        // Assert: Old(false) is never seen here, while Old(true) is in history.
+        if (lossy)
         {
-            var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
-                await Builder(storage).AddDatabase(Old(false)).BuildAsync(timeout.Token));
-            failure.Message.ShouldContain("CS03105");
-            await using var unchanged = await Builder(storage).BuildAsync(timeout.Token);
-            var database = await unchanged.OpenDatabaseAsync("typed", timeout.Token);
+            database.Provisioning!.FailureCode.ShouldBe(optIn ? "CS03405" : "CS03105");
+            database.Provisioning.Detail!.ShouldContain("AlterColumn 'items.Value'", Case.Sensitive);
             database.Catalog.SchemaState!.ContentHash.ShouldBe(New().Compile().Hash);
             database.Catalog.PendingMigration.ShouldBeNull();
             Table(database).FindColumn("Value")!.Type.Type.ShouldBe(DatabaseType.Int32);
         }
         else
         {
-            await using var reversed = await Builder(storage).AddDatabase(Old(optIn)).BuildAsync(timeout.Token);
-            var database = await reversed.OpenDatabaseAsync("typed", timeout.Token);
-            await WaitDoneAsync(database, timeout.Token);
             database.Catalog.SchemaState!.ContentHash.ShouldBe(Old(optIn).Compile().Hash);
-            await using var reader = await database.CreateSessionAsync(timeout.Token);
-            Convert.ToInt32((await RowsAsync(reader, "SELECT Value FROM items", timeout.Token)).Single()[0]).ShouldBe(7);
+            database.Provisioning.ShouldBeNull();
         }
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        Convert.ToInt32((await RowsAsync(reader, "SELECT Value FROM items", timeout.Token)).Single()[0]).ShouldBe(7);
     }
 
     private sealed record SmallRollbackRow(short Value);

@@ -94,6 +94,8 @@ public static class OqlLanguageProfile
         OqlClauses.GroupBy,
         OqlClauses.GroupAs,
         OqlClauses.Having,
+        OqlClauses.Over,
+        OqlClauses.Window,
         OqlClauses.OrderBy,
         OqlClauses.Limit,
         OqlClauses.Offset,

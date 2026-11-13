@@ -74,7 +74,7 @@ public sealed class DocumentClientFailureTests
             // Act / Assert
             foreach (var (statement, code, diagnostic) in new[]
             {
-                ("MERGE INTO items", ProtocolErrorCode.ParseFailure, "CK00001"),
+                ("MERGE INTO items", ProtocolErrorCode.ParseFailure, "CD00002"),
                 ("COMMIT", ProtocolErrorCode.ExecutionFailure, "CD04104"),
                 ("ROLLBACK", ProtocolErrorCode.ExecutionFailure, "CD04104"),
             })

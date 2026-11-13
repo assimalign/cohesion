@@ -44,6 +44,14 @@ deletion that survived transaction end. Leading array definitions keep IncludeMi
 These are catalog checks;
 the client API and wire contract do not change. OQL array-index DDL and planning follow in OQ-I2.
 
+## Window wire conformance (#1805, OQ-W1)
+
+Ranking/navigation use existing OQL text, Int64/Decimal headers and JSON cells on InMemory
+and TCP. Named-window copies, peers, MISSING/NULL partitions, complete-partition paging,
+WindowAggregate EXPLAIN, located CK00001 and CD05018 refusal/reuse have permanent tests.
+The NativeAOT consumer executes all eight functions and EXPLAIN on both transports.
+No API, capability, frame, codec or protocol version changes.
+
 ## Aggregate wire conformance (#1729, OQ-G1)
 
 ALL/DISTINCT arguments and ARRAY_AGG, BOOL_AND, BOOL_OR, aggregate EVERY, STDDEV and VARIANCE
@@ -117,6 +125,9 @@ the forced-sort control across complete duplicate prefixes and residual rejectio
 transports; dynamic projections preserve full-result type inference. The NativeAOT sample checks
 selected consumption and LIMIT/OFFSET execution. No client API, capability, codec or frame changes.
 
+The 16 KiB tie-bucket refusal fixture seeds its index under the normal build grant, then
+reopens the same file set at 16 KiB before testing query refusal and explicit rollback (#1808).
+
 ## Contract-only dependencies
 
 Direct references are Database.Client, Documents.Protocol, Database.Types, Database.Protocol, Database.Execution and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
@@ -124,6 +135,14 @@ Direct references are Database.Client, Documents.Protocol, Database.Types, Datab
 ## Client exception ownership
 
 `DocumentClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
+
+## MERGE planning wire conformance (#1804, OQ-M1)
+
+Lookup and key-equality ANSI MERGE use existing OQL request text and EXPLAIN result rows.
+DocumentMergeWireTests and the NativeAOT consumer check both forms on InMemory/TCP: the plan
+includes Merge, source access and actions; execution reports one located CD05022/ExecutionFailure
+and leaves document contents intact. The same connection accepts the next query. No client API,
+capability, frame or version changes are needed; execution remains OQ-M2 work.
 
 ## Key join wire results (#1732)
 

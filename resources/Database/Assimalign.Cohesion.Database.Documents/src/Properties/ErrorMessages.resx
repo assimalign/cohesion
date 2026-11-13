@@ -37,6 +37,11 @@
   <data name="WriteOutputMissing" xml:space="preserve"><value>{0} binding '{1}' must name a SELECT output column.</value></data>
   <data name="MetaContextInvalid" xml:space="preserve"><value>META requires a stored document source, an optional matching source alias, and the member id or version.</value></data>
   <data name="WriteJsonInvalid" xml:space="preserve"><value>{0} JSON must be valid and nested no deeper than 128 levels.</value></data>
+  <data name="MergeShapeInvalid" xml:space="preserve"><value>The MERGE source, actions or insert key do not match the selected MERGE form.</value></data>
+  <data name="MergeBindingInvalid" xml:space="preserve"><value>MERGE expressions require a visible source or target binding; META requires an explicit source or target binding.</value></data>
+  <data name="MergeOnUnsupported" xml:space="preserve"><value>MERGE ANSI matching requires ON META(target).id = expression with a source-computable key.</value></data>
+  <data name="MergeReturningSourceUnsupported" xml:space="preserve"><value>MERGE RETURNING currently binds only the target image; source references remain unsupported.</value></data>
+  <data name="MergeExecutionUnavailable" xml:space="preserve"><value>MERGE execution is unavailable; EXPLAIN MERGE is supported.</value></data>
   <data name="UpdateTargetsMissing" xml:space="preserve"><value>UPDATE requires at least one SET assignment or UNSET path.</value></data>
   <data name="UpdateTargetInvalid" xml:space="preserve"><value>UPDATE targets must be non-root document paths; UNSET must end in a property name.</value></data>
   <data name="UpdateTargetsOverlap" xml:space="preserve"><value>UPDATE targets must not repeat or overlap, including across SET and UNSET.</value></data>
@@ -255,4 +260,11 @@
   <data name="QualifiedStarDeferred" xml:space="preserve"><value>Qualified star projections are not supported yet.</value></data>
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
   <data name="StatementTooComplex" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce its query and expression nesting, or run it on a thread with a larger stack.</value></data>
+  <data name="WindowPlacementInvalid" xml:space="preserve"><value>Window functions require OVER in a projection or ORDER BY.</value></data>
+  <data name="WindowFunctionDeferred" xml:space="preserve"><value>This window function or modifier is not supported.</value></data>
+  <data name="WindowIntegerDeferred" xml:space="preserve"><value>Window bucket counts require positive Int64 integer literals; navigation offsets require nonnegative Int64 integer literals.</value></data>
+  <data name="WindowNameDuplicate" xml:space="preserve"><value>A WINDOW name is empty or declared more than once.</value></data>
+  <data name="WindowReferenceUnknown" xml:space="preserve"><value>The named window is unknown, self-referencing or declared later.</value></data>
+  <data name="WindowSpecificationInvalid" xml:space="preserve"><value>A window must have one specification or name; a copy cannot add PARTITION BY or replace an existing ORDER BY.</value></data>
+  <data name="WindowNestingInvalid" xml:space="preserve"><value>A window function cannot contain another window in its arguments or keys.</value></data>
 </root>

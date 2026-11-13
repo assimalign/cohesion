@@ -33,11 +33,13 @@ public partial class SqlCatalogTests
     {
         private readonly MemoryStream _data = new();
         private readonly MemoryStream _journal = new();
+        internal SqlStorage Storage { get; private set; } = null!;
 
         public SqlCatalog Open()
         {
             var storage = SqlStorage.Create(
                 new NonClosingStream(_data), new NonClosingStream(_journal), new MemoryStream(), "catalog-test");
+            Storage = storage;
             return SqlCatalog.Open(storage);
         }
 
@@ -96,7 +98,8 @@ public partial class SqlCatalogTests
             [Column("id", DatabaseType.Int64), Column("legacy", DatabaseType.String)],
             null, DatabaseObjectOwner.Schema, "AppSchema", default);
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_customers_id", ["id"], false,
-            DatabaseObjectOwner.Schema, "AppSchema"), [new(table.ObjectId, new IndexDefinition("ix_customers_id"), 7)]);
+            DatabaseObjectOwner.Schema, "AppSchema"), [await PreparedCatalogIndexes.CreateAsync(catalog, harness.Storage,
+                table.ObjectId, new IndexDefinition("ix_customers_id"))]);
         await catalog.AddColumnAsync("dbo", "customers", Column("note", DatabaseType.String));
         await catalog.DropColumnAsync("dbo", "customers", "legacy");
         await catalog.CreateTableAsync("dbo", "scratch", [Column("id", DatabaseType.Int64)]);
@@ -339,8 +342,8 @@ public partial class SqlCatalogTests
         var orders = await catalog.CreateTableAsync("dbo", "orders", [Column("date", DatabaseType.Int64)]);
         var registrations = new List<BTreeIndexRegistration>
         {
-            new(1, new IndexDefinition("pk_users", IndexKind.BTree, IsUnique: true), 7),
-            new(2, new IndexDefinition("ix_orders_date"), 12),
+            await PreparedCatalogIndexes.CreateAsync(catalog, harness.Storage, users.ObjectId, new("pk_users", IndexKind.BTree, IsUnique: true)),
+            await PreparedCatalogIndexes.CreateAsync(catalog, harness.Storage, orders.ObjectId, new("ix_orders_date")),
         };
 
         // Act
@@ -354,7 +357,7 @@ public partial class SqlCatalogTests
         loaded.Count.ShouldBe(2);
         loaded[0].Definition.Name.ShouldBe("pk_users");
         loaded[0].Definition.IsUnique.ShouldBeTrue();
-        loaded[0].RootPageId.ShouldBe(7);
+        loaded[0].RootPageId.ShouldBe(registrations[0].RootPageId);
         loaded[1].ObjectId.ShouldBe(2UL);
     }
 

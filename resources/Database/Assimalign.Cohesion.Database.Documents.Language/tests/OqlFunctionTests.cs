@@ -15,13 +15,13 @@ public sealed class OqlFunctionTests
     public void Profile_FunctionTable_ShouldContainExactVocabulary()
     {
         // Arrange
-        var expected = scalarNames.Split(' ').Concat(["META", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARRAY_AGG", "BOOL_AND", "BOOL_OR", "EVERY", "STDDEV", "VARIANCE"]).Order().ToArray();
+        var expected = scalarNames.Split(' ').Concat(["META", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARRAY_AGG", "BOOL_AND", "BOOL_OR", "EVERY", "STDDEV", "VARIANCE", "ROW_NUMBER", "RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST", "NTILE", "LAG", "LEAD"]).Order().ToArray();
         // Act / Assert
         OqlFunctions.All.Select(function => function.Name).Order().ToArray().ShouldBe(expected);
         OqlLanguageProfile.Instance.Functions.ToArray().Order().ToArray().ShouldBe(expected);
     }
 
-    public static IEnumerable<object[]> Calls => OqlFunctions.All.Where(function => function.Name != "META")
+    public static IEnumerable<object[]> Calls => OqlFunctions.All.Where(function => function.Name != "META" && function.WindowKind == OqlWindowFunctionKind.None)
         .Select(function => new object[] { function.Name, function.MinimumArguments });
 
     [Theory(DisplayName = "Cohesion Test [OQL] - Functions: every call parses in all expression positions")]

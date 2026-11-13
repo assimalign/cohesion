@@ -20,8 +20,9 @@ internal sealed partial class SqlPlanExecutor
     /// use the same captured statement snapshot, including every index cursor.
     /// Table intent locks protect definitions; MVCC readers need no FK row locks.
     /// </summary>
-    private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null)
+    private async Task<DatabaseResult> ExecuteJoinAsync(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
+        RecordJoinSpillPolicies(plan, statement.Metrics, spillOwner);
         SqlSelectMemory matchBytes = default;
         long derivedBytes = 0;
         List<object?[]>? matches = null;
@@ -54,7 +55,7 @@ internal sealed partial class SqlPlanExecutor
             var sourceOwner = spillOwner is not null && HasSequenceProjection(plan.Projections) && !OrderingUsesSequence(plan.Projections, plan.OrderByProjections?.Values)
                 ? null : spillOwner;
             matches = new List<object?[]>();
-            await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows).ConfigureAwait(false))
+            await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows, spillOwner: spillOwner).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 await PrepareSubqueriesAsync(plan.Where, row, statement, cancellationToken).ConfigureAwait(false);
@@ -66,13 +67,20 @@ internal sealed partial class SqlPlanExecutor
                         memory.Reserve(32);
                     }
                     if (RetainStagedSortSource(matches, row, ref matchBytes, plan.OrderBy,
-                        sourceOwner, cancellationToken)) { matches.Add(row); }
+                        sourceOwner, cancellationToken, hashInput: hashInput)) { matches.Add(row); }
                 }
             }
 
             _definitions.ObserveSelectRetention?.Invoke("join-matches", false, matches.Count);
             if (SqlStagedSortSource.For(matches) is { } spooled)
             {
+                if (hashInput is not null)
+                {
+                    spooled.Seal(cancellationToken);
+                    var input = new HashGroupInput(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns,
+                        spooled, plan.Projections, evaluator);
+                    SqlStagedSortSource.Detach(matches); return input;
+                }
                 return MaterializeStagedSort(spooled, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset, plan.IsDistinct,
                     evaluator, plan.OrderByProjections, cancellationToken,
                     plan.OrderByProjections is not { Count: > 0 } && plan.Projections.Any(p => ContainsVolatileCall(p.Value)));
@@ -83,23 +91,32 @@ internal sealed partial class SqlPlanExecutor
                     plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
             }
             return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-                plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken, spillOwner: spillOwner);
+                plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken, spillOwner: spillOwner, hashInput: hashInput);
         }
         catch (Exception exception) { if (matches is not null) { SqlStagedSortSource.ReleaseAfterFailure(matches, exception); } throw; }
         finally { if (matches is not null) { SqlStagedSortSource.Release(matches); } ReleaseSelectMemory(ref matchBytes); ReleaseSelectMemory(ref derivedBytes); }
     }
 
     private async ValueTask<DatabaseResult> ExecutePipelinedJoinAsync(SqlJoinPlan plan,
-        SqlStatementContext statement, CancellationToken cancellationToken, int? retainRows = null, SqlDatabaseSession? spillOwner = null)
+        SqlStatementContext statement, CancellationToken cancellationToken, int? retainRows = null, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
+        RecordJoinSpillPolicies(plan, statement.Metrics, spillOwner);
         var (derivedRows, derivedBytes) = await PrepareJoinInputsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
         try
         {
             var sharedColumns = new bool[plan.Columns.Count];
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
-            return await ProjectJoinRowsAsync(plan, statement, sharedColumns, derivedRows, evaluator, cancellationToken, retainRows, spillOwner).ConfigureAwait(false);
+            return await ProjectJoinRowsAsync(plan, statement, sharedColumns, derivedRows, evaluator, cancellationToken, retainRows, spillOwner, hashInput).ConfigureAwait(false);
         }
         finally { ReleaseSelectMemory(ref derivedBytes); }
+    }
+
+    private void RecordJoinSpillPolicies(SqlJoinPlan plan, SqlStatementMetrics metrics, SqlDatabaseSession? spillOwner)
+    {
+        if (!metrics.IsAnalyzing) { return; }
+        bool allowed = _definitions.StatementMemoryBudget >= 262144 && CanSpillJoinRows(plan, spillOwner);
+        foreach (var step in plan.Steps)
+        { if (step.Hash is not null) { metrics.RecordHashSpillPolicy(step, allowed); } }
     }
 
     // Shared with group input: retain derived materialization, lock, definition and snapshot order.
@@ -144,7 +161,7 @@ internal sealed partial class SqlPlanExecutor
     private async IAsyncEnumerable<object?[]> EnumerateJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, [EnumeratorCancellation] CancellationToken cancellationToken,
         IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derivedRows,
-        (int Binding, IReadOnlyList<object?[]> Rows)? dmlTarget = null, bool streamRoot = false)
+        (int Binding, IReadOnlyList<object?[]> Rows)? dmlTarget = null, bool streamRoot = false, SqlDatabaseSession? spillOwner = null)
     {
         // Every earlier step is retained by a later loop. Only the final index inner
         // is a fresh read for each delivered pair. Delivery detaches selected binary cells only.
@@ -157,10 +174,12 @@ internal sealed partial class SqlPlanExecutor
             if (plan.Inputs[i].Access is SqlIndexSeekPath seek &&
                 TryResolveSeekTree(plan.Bindings[i].Source.Table!, seek.Index, out var tree)) { inputIndexes[i] = tree; }
         }
+        RecordJoinSpillPolicies(plan, statement.Metrics, spillOwner);
         if (plan.Tree is not null)
         {
             // All tree inputs may be reused by a parent; delivery detaches selected cells.
-            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken, dmlTarget?.Binding, streamRoot).ConfigureAwait(false))
+            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken, dmlTarget?.Binding,
+                (streamRoot ? SqlJoinRowMode.StreamRoot : SqlJoinRowMode.None) | (spillOwner is not null ? SqlJoinRowMode.AllowSpill : SqlJoinRowMode.None)).ConfigureAwait(false))
             {
                 yield return row;
             }
@@ -197,7 +216,6 @@ internal sealed partial class SqlPlanExecutor
             Array.Fill(sharedColumns, false, fresh.Offset, fresh.Source.Columns.Count);
         }
         bool reversed = plan is not SqlSearchedJoinPlan && plan.FirstBinding == 1;
-        var initial = plan.Bindings[plan.FirstBinding];
         var buffered = new (List<object?[]>? Rows, SqlSelectMemory Memory)[plan.Steps.Count];
         var hashes = new SqlHashJoinTable?[plan.Steps.Count];
         var cursors = new IEnumerator<object?[]>?[plan.Steps.Count];
@@ -209,7 +227,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var first in ReadInput(plan.FirstBinding))
             {
                 rows[0] = new object?[plan.Columns.Count + (dmlTarget is null ? 0 : 1)];
-                first.CopyTo(rows[0], initial.Offset);
+                first.CopyTo(rows[0], plan.Bindings[plan.FirstBinding].Offset);
                 if (dmlTarget?.Binding == plan.FirstBinding) { rows[0][^1] = first; }
                 // An explicit cursor stack keeps N inputs from becoming N recursive
                 // MoveNext calls. Query text controls N independently of expression depth.
@@ -229,14 +247,13 @@ internal sealed partial class SqlPlanExecutor
                         level--;
                         continue;
                     }
-                    var step = plan.Steps[level];
-                    int innerBinding = level == 0 && reversed ? 0 : step.Binding;
+                    int innerBinding = level == 0 && reversed ? 0 : plan.Steps[level].Binding;
                     var inner = plan.Bindings[innerBinding];
                     var outer = rows[level];
                     if (cursors[level] is null)
                     {
                         IEnumerable<object?[]> candidates;
-                        if (step.Hash is { } hashKeys)
+                        if (plan.Steps[level].Hash is { } hashKeys)
                         {
                             if (hashes[level] is null)
                             {
@@ -244,7 +261,14 @@ internal sealed partial class SqlPlanExecutor
                                 // release every reservation in the enclosing finally.
                                 var table = new SqlHashJoinTable(hashKeys, statement.Metrics, _definitions.StatementMemoryBudget);
                                 hashes[level] = table;
-                                foreach (var item in ReadInput(innerBinding)) { table.Add(item, cancellationToken); }
+                                foreach (var item in ReadInput(innerBinding))
+                                {
+                                    try { table.Add(item, cancellationToken); }
+                                    catch (SqlExecutionException error) when (CanSpillJoinBuild(plan, hashKeys, spillOwner, error))
+                                    { table.Spill(spillOwner!, item, cancellationToken, error); }
+                                }
+                                if (statement.Metrics.IsAnalyzing)
+                                { statement.Metrics.RecordHashSpillStatus(plan.Steps[level], table.IsSpilled); }
                             }
                             candidates = hashes[level]!.Probe(outer, cancellationToken);
                         }
@@ -281,12 +305,12 @@ internal sealed partial class SqlPlanExecutor
                     if (cursors[level]!.MoveNext())
                     {
                         statement.Metrics.RecordJoinCandidate();
-                        if (statement.Metrics.Analysis(step) is { } work) { work.Candidates++; }
+                        if (statement.Metrics.Analysis(plan.Steps[level]) is { } work) { work.Candidates++; }
                         var joined = (object?[])outer.Clone();
                         cursors[level]!.Current.CopyTo(joined, inner.Offset);
                         if (dmlTarget?.Binding == innerBinding) { joined[^1] = cursors[level]!.Current; }
-                        await PrepareSubqueriesAsync(step.Condition, joined, statement, cancellationToken).ConfigureAwait(false);
-                        if (evaluator.Matches(step.Condition, joined))
+                        await PrepareSubqueriesAsync(plan.Steps[level].Condition, joined, statement, cancellationToken).ConfigureAwait(false);
+                        if (evaluator.Matches(plan.Steps[level].Condition, joined))
                         {
                             matched[level] = true;
                             rows[++level] = joined;
@@ -296,7 +320,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         cursors[level]!.Dispose();
                         cursors[level] = null;
-                        if (!matched[level] && step.Kind == SqlJoinType.LeftOuter)
+                        if (!matched[level] && plan.Steps[level].Kind == SqlJoinType.LeftOuter)
                         {
                             extended[level] = true;
                             rows[++level] = outer;

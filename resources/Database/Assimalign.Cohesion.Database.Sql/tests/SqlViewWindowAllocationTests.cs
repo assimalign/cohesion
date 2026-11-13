@@ -34,6 +34,7 @@ public sealed class SqlViewWindowAllocationTests
         // or ledger growth. Physical transaction brackets still append journal records; both
         // dispatchers retain that work, and the reference omits only window startup.
         var builder = SqlDatabaseEngine.CreateBuilder("view-window-allocations");
+        builder.Options.TempDirectory = SqlAllocationTemp.Directory;
         builder.Functions.Add(SqlScalarFunction.Create("application_value", static (int value) => value));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var actual = await engine.CreateDatabaseAsync("actual", CancellationToken.None);

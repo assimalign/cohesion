@@ -284,11 +284,23 @@ public sealed partial class SqlJointTypeMigrationTests
         await writer.ExecuteAsync("INSERT INTO items(Id,Value) VALUES(2,42)", cancellationToken: guard.Token);
         // Assert
         (await RowsAsync(writer, "SELECT Legacy FROM items ORDER BY Id", guard.Token)).Select(row => row[0]).ShouldBe(new object?[] { 7, 9 });
-        database.SchemaProvisioner.JointStage = phase => { if (phase == "Publishing") { throw new InvalidOperationException("injected drop refusal"); } };
-        (await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(source, guard.Token))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+        int publications = 0;
+        database.SchemaProvisioner.JointStage = phase =>
+        { if (phase == "Publishing") { publications++; throw new InvalidOperationException("injected drop refusal"); } };
+        // The historical declaration cannot authorize deletion of these newer values.
+        (await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(source, guard.Token)))
+            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03105");
+        publications.ShouldBe(0);
+        (await RowsAsync(writer, "SELECT Legacy FROM items ORDER BY Id", guard.Token)).Select(row => row[0]).ShouldBe(new object?[] { 7, 9 });
+        // A new opted-in declaration deliberately drops Legacy and adds a non-unique Id index.
+        // Keep the physical drop/re-add and failed-publication coverage on this forward path.
+        var drop = ParityDeclaration("missing", false, index: true).Compile();
+        (await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(drop, guard.Token)))
+            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+        publications.ShouldBe(1);
         (await RowsAsync(writer, "SELECT Legacy FROM items ORDER BY Id", guard.Token)).Select(row => row[0]).ShouldBe(new object?[] { 7, 9 });
         database.SchemaProvisioner.JointStage = null;
-        await database.ApplySchemaAsync(source, guard.Token);
+        await database.ApplySchemaAsync(drop, guard.Token);
         Table(database).DroppedColumnOrdinals.ShouldBe(new[] { 2 });
         await database.ApplySchemaAsync(Default(11), guard.Token);
         Table(database).ObjectId.ShouldBe(owner);

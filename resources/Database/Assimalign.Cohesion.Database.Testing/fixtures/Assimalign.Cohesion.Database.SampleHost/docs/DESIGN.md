@@ -17,7 +17,17 @@ The fixture is owned by `Database.Testing`. The retired resource integration was
 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource
 integration is `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
 
-The sequence below shows the build and run of the fixture.
+The opt-in Sample:TestHandshake=true mode reserves a loopback port in 20000-31999 through Build,
+retrying occupied/reserved candidates below the platform ephemeral ranges. It releases the port
+immediately before StartAsync, writes READY with its port and provisioning code/detail,
+and waits for STOP on stdin before graceful shutdown. Database.Testing uses that process
+handshake to verify that an older executable opens a newer schema with CS03405, preserves
+newer values and serves writes using stored defaults (#1779). The ordinary mode retains RunAsync. AppendRuntimeIdentifierToOutputPath=false puts the
+self-contained apphost in bin/<configuration>/net10.0 so the acceptance copy places it directly
+in SampleHost/, matching the executable path the test launches. Clean output is required when
+verifying the copy, so an older flat apphost cannot mask a RID-directory regression.
+
+The sequence below shows the ordinary build and run of the fixture.
 
 ```mermaid
 sequenceDiagram

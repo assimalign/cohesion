@@ -399,6 +399,36 @@ internal sealed class DocumentDatabaseEventSource : EventSource
     private void SessionsAborted(string engineName, int sessions, double drainTimeoutMilliseconds, int suppressedCount)
         => WriteEvent(11, engineName, sessions, drainTimeoutMilliseconds, suppressedCount);
 
+    [NonEvent]
+    internal void IndexBuildBegan(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        { IndexBuildBegan(storage.Name.ToString(), unchecked((long)objectId)); }
+    }
+
+    [Event(15, Level = EventLevel.Informational, Message = "Database '{0}' started building index object {1}.")]
+    private void IndexBuildBegan(string database, long objectId) => WriteEvent(15, database, objectId);
+
+    [NonEvent]
+    internal void IndexBuildEnded(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, bool succeeded)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        { IndexBuildEnded(storage.Name.ToString(), unchecked((long)objectId), succeeded); }
+    }
+
+    [Event(16, Level = EventLevel.Informational, Message = "Database '{0}' stopped building index object {1}; succeeded: {2}.")]
+    private void IndexBuildEnded(string database, long objectId, bool succeeded) => WriteEvent(16, database, objectId, succeeded);
+
+    [NonEvent]
+    internal void PagesReclaimed(global::Assimalign.Cohesion.Database.Storage.Storage storage, ulong objectId, int pages)
+    {
+        if (pages != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
+        { PagesReclaimed(storage.Name.ToString(), unchecked((long)objectId), pages); }
+    }
+
+    [Event(17, Level = EventLevel.Informational, Message = "Database '{0}' reclaimed {2} pages of object {1}.")]
+    private void PagesReclaimed(string database, long objectId, int pages) => WriteEvent(17, database, objectId, pages);
+
     [Event(1, Level = EventLevel.Informational, Message = "Database '{0}' started recovering its indexes from {1} aborted writer(s).")]
     private void IndexRecoveryStart(string database, int abortedWriters)
         => WriteEvent(1, database, abortedWriters);

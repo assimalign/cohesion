@@ -35,6 +35,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlBetweenExpression between => (await BetweenAsync(between, document, group, nested).ConfigureAwait(false)),
                 OqlLikeExpression like => (await LikeAsync(like, document, group, nested).ConfigureAwait(false)),
                 OqlCaseExpression conditional => (await CaseAsync(conditional, document, group, nested).ConfigureAwait(false)),
+                OqlWindowExpression window => WindowValue(window, document),
                 OqlCallExpression call => (await CallAsync(call, document, group, nested).ConfigureAwait(false)),
                 _ => throw new DocumentPlanningException("CD05001", ErrorMessages.ExpressionEvaluatorEvaluateFailure),
             };

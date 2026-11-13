@@ -29,7 +29,7 @@ public sealed partial class SqlJointTypeMigrationTests
             var database = await seed.OpenDatabaseAsync("typed", guard.Token);
             heap = Table(database).ObjectId;
             var tree = database.IndexManager.ExportRegistrations().Single(index => index.Definition.Name == "script_unique");
-            database.IndexManager.PageOwner(tree).ShouldBe(heap);
+            database.IndexManager.PageOwner(tree).ShouldNotBe(heap);
             await using var writer = await database.CreateSessionAsync(guard.Token);
             await writer.ExecuteAsync("INSERT INTO items VALUES(1,3,7)", cancellationToken: guard.Token);
             storage = storage.CaptureDurableImages();
@@ -57,7 +57,7 @@ public sealed partial class SqlJointTypeMigrationTests
         var current = await engine.OpenDatabaseAsync("typed", guard.Token);
         await WaitDoneAsync(current, guard.Token);
 
-        // Assert: retaining this heap-owned script index cannot force a rewrite.
+        // Assert: retaining this separately owned script index cannot force a rewrite.
         handoffs.ShouldBe(1);
         (Table(current).ObjectId == heap).ShouldBe(!rewrite);
         current.Catalog.GetIndexes(Table(current).ObjectId).ShouldContain(index => index.Name == "script_unique" && index.IsUnique);

@@ -20,7 +20,9 @@ located CK05 failures and retained-grant refusals. Grammar and wire formats are 
 DIALECT records the root-only scope and the default quota capacity. The seed 178903
 generator adds 2,048 statements crossing root sources, typed keys, volatile and sequence
 positions, empty windows and row failures; comparisons retain CLR types and exact binary
-and floating-point representations. Eighteen additional seeded shapes cover independent volatile
+and floating-point representations. The hash differential also compares decimal.GetBits,
+repeated groups across handoff, NaN/signed-zero and collated keys, extrema ties, sequences in
+aggregate arguments and row-N failures against an original materialized reference (#1789). Eighteen additional seeded shapes cover independent volatile
 projections in the staged-source sorter and runtime refusal of application-produced binary keys
 and cells; the dialect records decoded-row admission and preservation of fitting aliases. Cancellation belongs to an enumeration, while real
 temporary failures remain coded and terminal for the result.
@@ -67,11 +69,11 @@ directions and zero retained sort rows (see DIALECT). NULL placement is ignored 
 keys proven non-NULL by declarations, equality prefixes, mandatory local NULL rejection or a
 proven partial predicate. Strict comparison NULL rejection shares SQ-P2's rule, including
 parameter operands; OR/NOT and outer NULL extension provide no proof. The live corpus also
-covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 37 and compiled v12 fence the
+covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 38 and compiled v12 fence the
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
-The current record-space format is 37; index predicates are persisted by Sql, independently
+The current record-space format is 39; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -199,7 +201,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 37's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 39's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -1403,9 +1405,12 @@ predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refu
 The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
 ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
 including grouping, windows, correlation, persisted equivalence and definition checks.
-The engine resolves CASE/COALESCE alternatives through one scoped common-type path in JSON
-positions, records the selector overload, and folds adjacent bound arrows over one validated
-document. Source syntax and canonical rendering are unchanged. DIALECT.md records unknown
+The engine shares the existing CASE/COALESCE common-type path across scalar and persisted
+positions (#1788), records the selector overload, and folds adjacent bound arrows over one
+validated document. Alternatives convert at each boundary, with unknown literals converted
+during binding even when skipped; all-unknown sets become TEXT. CS02080 covers incompatible
+declared alternatives in every position. DDL binds definitions before publication; grouped
+output normalization and statistical transitions retain their established contracts. Source syntax and canonical rendering are unchanged. DIALECT.md records unknown
 literal coercion and the CS02080 declared-type mismatch refusal; the conformance corpus covers
 common selectors and JSON partial predicates.
 The shared reader validates complete input with strict UTF-8 and maximum depth 128;
@@ -1427,7 +1432,7 @@ admission now refuses malformed input; it does not rewrite existing row bytes.
 | CS01067 | Invalid JSON access or IS JSON signature (42883) |
 | CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
 | CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
-| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives (42804/42846) |
 
 The extraction oracle performs 10,240 comparisons over generated nested values,
 negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.

@@ -116,7 +116,8 @@ internal sealed partial class SqlExpressionEvaluator
         SqlRelationReference? relation = null,
         SqlCorrelationScope? outerScope = null,
         HashSet<int>? outerDependencies = null,
-        bool foldConstants = true)
+        bool foldConstants = true,
+        bool groupedOutput = false)
     {
         _columns = columns;
         _bindingContext = bindingContext;
@@ -134,7 +135,7 @@ internal sealed partial class SqlExpressionEvaluator
         _foldConstants = foldConstants && !_functions.IsView;
         _typing = slotScope is null && outerScope is null ? null : new SqlTypingMemory(slotScope)
         {
-            OuterScope = outerScope, OuterDependencies = outerDependencies,
+            OuterScope = outerScope, OuterDependencies = outerDependencies, GroupedOutput = groupedOutput,
         };
     }
 
@@ -167,6 +168,9 @@ internal sealed partial class SqlExpressionEvaluator
 
     /// <summary>Gets the engine's function catalog and the database that calls in this scope bind against.</summary>
     internal SqlFunctionEnvironment Functions => _functions;
+
+    /// <summary>The source scope aggregate inputs bind in, before grouped output normalization.</summary>
+    internal SqlExpressionEvaluator GroupInputScope => _typing?.GroupedOutput == true ? _typing.SlotScope! : this;
 
     // Grouping and ordering already resolved these nodes to completed value slots.
     internal bool IsBoundValue(SqlExpression expression) => _valueOrdinals?.ContainsKey(expression) == true;
@@ -210,7 +214,7 @@ internal sealed partial class SqlExpressionEvaluator
         return new SqlExpressionEvaluator(_columns, _parameters, _relations as IReadOnlyList<SqlRelationBinding>, ordinals,
             _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope, _bindingContext,
             relation: _relations as SqlRelationReference, outerScope: _typing?.OuterScope,
-            outerDependencies: _typing?.OuterDependencies, foldConstants: _foldConstants);
+            outerDependencies: _typing?.OuterDependencies, foldConstants: _foldConstants, groupedOutput: _typing?.GroupedOutput == true);
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 
 using Shouldly;
 using Xunit;
@@ -9,6 +10,44 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Current SQL format claims exclude superseded batch markers (#1779, #1808)")]
+    public void Documentation_CurrentFormatClaims_ShouldExcludeSupersededMarkers()
+    {
+        // Arrange.
+        string[] documents = [ReadDialect(), ReadDocumentation("Sql.Language", "DESIGN.md"), ReadDocumentation("Sql", "DESIGN.md"),
+            ReadDocumentation("Sql", "OVERVIEW.md"), ReadDocumentation("Indexing", "DESIGN.md"), ReadAreaDesign()];
+
+        // Act / Assert: historical introductions of 37/38 remain valid prose.
+        foreach (string document in documents)
+        {
+            Regex.IsMatch(Regex.Replace(document, @"\s+", " "), @"(?i)\bcurrent[^.;]*\bformat(?: is)?\s+(?:37|38)\b").ShouldBeFalse();
+            document.ShouldNotContain("any format but 38", Case.Insensitive);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Rollback docs: Build holds at stored schema and Verify remains strict (#1779)")]
+    public void Documentation_SchemaRollback_ShouldDescribeHoldAndStrictPipeline()
+    {
+        // Arrange
+        string dialect = ReadDialect();
+        string design = ReadDocumentation("Sql", "DESIGN.md");
+
+        // Act / Assert
+        dialect.ShouldContain("Degraded with CS03405 and both hashes plus refused steps", Case.Sensitive);
+        dialect.ShouldContain("Verify (CS03103)", Case.Sensitive);
+        dialect.ShouldContain("all earlier formats, including 37 and 38", Case.Sensitive);
+        design.ShouldContain("86,320 bytes across 32 chunks", Case.Sensitive);
+        design.ShouldContain("the very same StorageTransaction", Case.Sensitive);
+        foreach (string documentation in new[] { design, dialect })
+        {
+            documentation.ShouldContain("FirstAppliedGeneration", Case.Sensitive);
+            foreach (string step in new[] { "AddColumn", "AddTable", "AddConstraint", "AddIndex: unique", "AddIndex: other non-unique" })
+            { documentation.ShouldContain("| " + step + " | Held |", Case.Sensitive); }
+            documentation.ShouldContain("| AddIndex: non-unique, no predicate, keys provably within limit | Applied |", Case.Sensitive);
+            documentation.ShouldContain("owner decision 65", Case.Sensitive);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Batch diagnostics distinguish target/deadline refusals, paused health and retired schema codes (#1792, #1283, #1778)")]
     public void Documentation_BatchDiagnostics_ShouldDistinguishActiveAndRetiredCodes()
     {
@@ -39,7 +78,7 @@ public sealed class SqlDialectDocumentationTests
         dialect.ShouldContain("Statements naming a new table in the plan also wait before binding", Case.Sensitive);
         dialect.ShouldContain("Default-only changes publish jointly", Case.Sensitive);
         dialect.ShouldContain("ApplySchemaAsync use the same joint executor inline", Case.Sensitive);
-        design.ShouldContain("SQL record-space format 37 requires this joint kind-9 meaning", Case.Sensitive);
+        design.ShouldContain("SQL record-space format 37 required this joint kind-9 meaning", Case.Sensitive);
         design.ShouldContain("prepared target plus untouched objects", Case.Sensitive);
     }
 
@@ -120,9 +159,12 @@ public sealed class SqlDialectDocumentationTests
     [InlineData("Sql", "DESIGN.md", "SQL remains format 29. Failed preparation and crash recovery use kind 14 unchanged.")]
     [InlineData("Sql", "DESIGN.md", "SQL stays format 29: ordinary table records and kind 14")]
     [InlineData("Sql.Language", "DIALECT.md", "Format 36 introduced ASC NULLS FIRST as the default key order (#1787). Current")]
-    [InlineData("Sql.Language", "DIALECT.md", "Format 37 requires joint publication for every deferred")]
-    [InlineData("Sql", "DESIGN.md", "current format 37 and mandatory index")]
-    [InlineData("Sql", "DESIGN.md", "Current format 37 also requires extension 8's OnUpdate byte")]
+    [InlineData("Sql.Language", "DIALECT.md", "Format 37 introduced mandatory joint publication for every deferred")]
+    [InlineData("Sql", "DESIGN.md", "current format 39 and mandatory index")]
+    [InlineData("Sql", "DESIGN.md", "format 38 never shipped on its own")]
+    [InlineData("Sql.Language", "DIALECT.md", "Current format 39")]
+    [InlineData("Sql.Language", "DIALECT.md", "never shipped on its own")]
+    [InlineData("Sql", "DESIGN.md", "Current format 39 also requires extension 8's OnUpdate byte")]
     [InlineData("Indexing", "DESIGN.md", "B-tree page format 2, but this engine supports only format 3")]
     [InlineData("Graph", "DESIGN.md", "catalog v3 and B-tree page format 2 therefore reports only CK06101")]
     [InlineData("Graph", "DESIGN.md", "and roots, and catalog v4 records including")]
@@ -156,6 +198,19 @@ public sealed class SqlDialectDocumentationTests
 
     private static string ReadDialect([CallerFilePath] string source = "")
         => File.ReadAllText(Path.Combine(Path.GetDirectoryName(source)!, "..", "docs", "DIALECT.md"));
+
+    private static string ReadAreaDesign([CallerFilePath] string source = "")
+        => File.ReadAllText(Path.Combine(Path.GetDirectoryName(source)!, "..", "..", "..", "..", "docs", "resources", "Database", "DESIGN.md"));
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Index admission documents owner waits and chunk retry bounds (#1808)")]
+    public void Documentation_IndexAdmission_ShouldDistinguishWaitBoundaries()
+    {
+        // Arrange
+        string dialect = Regex.Replace(ReadDialect(), @"\s+", " ");
+        // Act / Assert
+        dialect.ShouldNotContain("Session DDL keeps its immediate CK04014 refusal", Case.Sensitive);
+        dialect.ShouldContain("Session catalog mutations keep the immediate CK04014 refusal. Index-owner reservations (CREATE INDEX and index-backed constraints) release the catalog monitor and wait, per refusal, up to the session or engine LockTimeout (no limit at 0), then report CK04014. An ordinary build's first data-allocation refusal stays immediate. Later roots and chunk retries wait outside the apply gate, bounded only by StatementTimeout and cancellation.", Case.Sensitive);
+    }
 
     private static string ReadDocumentation(string project, string file, [CallerFilePath] string source = "")
         => File.ReadAllText(Path.Combine(Path.GetDirectoryName(source)!, "..", "..", $"Assimalign.Cohesion.Database.{project}", "docs", file));
