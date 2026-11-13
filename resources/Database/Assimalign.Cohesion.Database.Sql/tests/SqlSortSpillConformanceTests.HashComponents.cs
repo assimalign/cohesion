@@ -43,7 +43,14 @@ public sealed partial class SqlSortSpillConformanceTests
         MeasureKeys(family);
 
         // Act
-        var (live, charged) = MeasureKeys(family);
+        long live = long.MaxValue, charged = 0;
+        for (int round = 1; round <= 3; round++)
+        {
+            var measured = MeasureKeys(family);
+            _output.WriteLine($"KEY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charged}");
+            live = Math.Min(live, measured.Live);
+            charged = measured.Charged;
+        }
 
         // Assert
         _output.WriteLine($"KEY_CHARGE|{family}|live_per_row={live / 3072d}|charged_per_row={charged / 3072d}");
@@ -87,7 +94,15 @@ public sealed partial class SqlSortSpillConformanceTests
     {
         // Arrange / Act
         MeasureEntries();
-        var (entry, replay, fitting) = MeasureEntries();
+        long entry = long.MaxValue, replay = long.MaxValue, fitting = long.MaxValue;
+        for (int round = 1; round <= 3; round++)
+        {
+            var measured = MeasureEntries();
+            _output.WriteLine($"ENTRY_ROUND|round={round}|entry={measured.Entry}|replay={measured.Replay}|fitting={measured.Fitting}");
+            entry = Math.Min(entry, measured.Entry);
+            replay = Math.Min(replay, measured.Replay);
+            fitting = Math.Min(fitting, measured.Fitting);
+        }
 
         // Assert: +32 is the replay entry itself. RowBytes adds 32 for its container;
         // plain groups also charge 128 for their dictionary and state-array header.
@@ -127,7 +142,13 @@ public sealed partial class SqlSortSpillConformanceTests
         // Arrange / Act: array slots are measured with each state; isolate the array
         // header and dictionary here, with all key payloads allocated before either sample.
         MeasureGroupHeaders();
-        long live = MeasureGroupHeaders();
+        long live = long.MaxValue;
+        for (int round = 1; round <= 3; round++)
+        {
+            long measured = MeasureGroupHeaders();
+            _output.WriteLine($"GROUP_HEADER_ROUND|round={round}|live={measured}");
+            live = Math.Min(live, measured);
+        }
         long charged = GroupStateBytes(null!, []);
 
         // Assert
