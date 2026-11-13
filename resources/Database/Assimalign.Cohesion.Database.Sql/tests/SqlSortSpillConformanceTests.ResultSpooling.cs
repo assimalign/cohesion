@@ -24,7 +24,14 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData("insert")]
     [InlineData("nested")]
     [InlineData("group")]
-    public async Task ExecuteAsync_ResultGrantSweep_ShouldPreserveCapability(string shape)
+    [InlineData("root", true)]
+    [InlineData("index", true)]
+    [InlineData("ctas", true)]
+    [InlineData("copy", true)]
+    [InlineData("insert", true)]
+    [InlineData("nested", true)]
+    [InlineData("group", true)]
+    public async Task ExecuteAsync_ResultGrantSweep_ShouldPreserveCapability(string shape, bool quotaZero = false)
     {
         // Arrange: the optional recording directory lets the same test run against the
         // batch base and the implementation, point for point, without changing a plan.
@@ -39,12 +46,13 @@ public sealed partial class SqlSortSpillConformanceTests
         // Act / Assert
         foreach (long grant in grants)
         {
-            var actual = await ResultProbeAsync(shape, grant, "grant-" + grant);
-            _output.WriteLine($"RESULT_SWEEP|{shape}|G={grant}|{actual}");
+            var actual = await ResultProbeAsync(shape, grant, "grant-" + grant, quotaZero ? 0 : 67108864);
+            _output.WriteLine($"RESULT_SWEEP|{shape}|quotaZero={quotaZero}|G={grant}|{actual}");
             if (record is not null)
             {
-                Directory.CreateDirectory(record);
-                await File.WriteAllLinesAsync(Path.Combine(record, shape + "-" + grant + ".txt"), actual.Lines());
+                string destination = quotaZero ? Path.Combine(record, "quota-zero") : record;
+                Directory.CreateDirectory(destination);
+                await File.WriteAllLinesAsync(Path.Combine(destination, shape + "-" + grant + ".txt"), actual.Lines());
             }
             if (actual.Code == "ok")
             {
@@ -53,6 +61,9 @@ public sealed partial class SqlSortSpillConformanceTests
                 actual.Sequence.ShouldBe(expected.Sequence);
                 actual.Examined.ShouldBe(expected.Examined);
             }
+            else if (quotaZero)
+            { new[] { "CS05067", "CK05002" }.ShouldContain(actual.Code); }
+            else { actual.Code.ShouldBe("CS05067"); }
             if (baseline is not null)
             {
                 var before = await File.ReadAllLinesAsync(Path.Combine(baseline, shape + "-" + grant + ".txt"));
@@ -60,15 +71,25 @@ public sealed partial class SqlSortSpillConformanceTests
                 if (before[0] == "ok" && before[5] == "0" && actual.Runs == 0)
                 { actual.Peak.ShouldBe(long.Parse(before[6], System.Globalization.CultureInfo.InvariantCulture)); }
             }
-            if (record is null && grant >= (shape == "group" ? 196608 : 262144))
+            if (!quotaZero && record is null && grant >= (shape == "group" ? 196608 : 262144))
             { actual.Code.ShouldBe("ok", customMessage: shape + " at " + grant); }
+            // These 28 base completions are also CI obligations with no temporary pages.
+            bool baseCompleted = shape switch
+            {
+                "insert" => true,
+                "group" => grant is 196608 or 262144 or 1048576 or 4184396 or 4223999 or 6000000 or 8388608,
+                "copy" => grant is 196608 or 524288 or 1048576 or 4194304 or 8388608,
+                "nested" => grant == 8388608,
+                _ => grant >= 4194304,
+            };
+            if (quotaZero && baseCompleted) { actual.Code.ShouldBe("ok"); }
         }
     }
 
-    private async Task<ResultProbe> ResultProbeAsync(string shape, long grant, string name)
+    private async Task<ResultProbe> ResultProbeAsync(string shape, long grant, string name, long quota = 67108864)
     {
         var calls = new List<long>();
-        await using var engine = await Create(shape + "-" + name, grant, calls);
+        await using var engine = await Create(shape + "-" + name, grant, calls, quota);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY,k INT,note TEXT)");
         int count = shape is "group" or "nested" ? 12000 : shape == "copy" ? 100 : 1600;

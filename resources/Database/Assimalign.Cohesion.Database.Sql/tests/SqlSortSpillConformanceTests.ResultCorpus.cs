@@ -65,6 +65,8 @@ public sealed partial class SqlSortSpillConformanceTests
             "SELECT DISTINCT RPAD(CASE WHEN id%80%2=0 THEN 'a' ELSE 'A' END,2000,'x') COLLATE case_insensitive AS note FROM t GROUP BY id%80 LIMIT 1 OFFSET 1",
             "WITH d AS (SELECT id,MIN(k) AS k FROM t GROUP BY id) SELECT * FROM d",
             "SELECT * FROM (SELECT id,MIN(k) AS k FROM t GROUP BY id) d",
+            "SELECT * FROM (SELECT id,k FROM t ORDER BY k LIMIT 3000 OFFSET 17) d",
+            "WITH d AS (SELECT id,k FROM t ORDER BY k LIMIT 3000 OFFSET 17) SELECT * FROM d",
             "WITH d AS (SELECT id,CAST(note AS CHAR(10)) AS c,X'00FF' AS raw FROM t) SELECT id,c,raw FROM d",
         ];
 

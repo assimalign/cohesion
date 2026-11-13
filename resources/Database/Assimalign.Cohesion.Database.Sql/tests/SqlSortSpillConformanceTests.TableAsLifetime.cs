@@ -198,6 +198,7 @@ public sealed partial class SqlSortSpillConformanceTests
         string query = "CREATE TABLE archive AS SELECT * FROM t " + suffix;
         CrashCaptureSqlStorageStrategy.CrashPointRecorder recorder;
         CrashCaptureSqlStorageStrategy? sorting = null; ulong owner = 0; int copied = 0;
+        SqlStatementMetrics? creditMetrics = null; long admittedBytes = 0; bool credited = false;
         await using (var engine = SqlDatabaseEngine.Create("ctas-crash", new() { StorageStrategy = strategy, TempDirectory = temp, StatementMemoryBudget = grant, CheckpointJournalSize = 0 }))
         {
             var database = await engine.CreateDatabaseAsync("db");
@@ -205,11 +206,13 @@ public sealed partial class SqlSortSpillConformanceTests
             await session.ExecuteAsync("CREATE TABLE t(id INT,note TEXT)");
             await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(0, 180).Select(i => $"({i},{(width == 0 ? "NULL" : "'" + new string('x', width) + "'")})")));
             SqlRowCollector.ObserveSpill = phase => { if (phase is "arena" or "output-drained") { sorting = strategy.CaptureDurableImages(); } };
-            SqlPlanExecutor.TableAsSourceAdmitted = _ => sorting ??= strategy.CaptureDurableImages();
+            SqlStatementMetrics.AfterMemoryReservation = (metrics, _) => creditMetrics = metrics;
+            SqlPlanExecutor.TableAsSourceAdmitted = bytes => { admittedBytes = bytes; sorting ??= strategy.CaptureDurableImages(); };
             SqlPlanExecutor.TableAsStage = (phase, id) =>
             {
                 owner = id;
                 if (phase != "Copied") { return; }
+                credited |= admittedBytes > 0 && creditMetrics!.HashMemoryBytes < admittedBytes;
                 copied++; database.Coordinator.Checkpoint(guard.Token); database.CatalogStorage.Checkpoint();
             };
             try
@@ -218,12 +221,13 @@ public sealed partial class SqlSortSpillConformanceTests
                 using (recorder = strategy.RecordCrashPoints())
                 { (await session.ExecuteAsync(query, cancellationToken: guard.Token)).AffectedCount.ShouldBe(count); }
             }
-            finally { SqlRowCollector.ObserveSpill = null; SqlPlanExecutor.TableAsStage = null; SqlPlanExecutor.TableAsSourceAdmitted = null; }
+            finally { SqlStatementMetrics.AfterMemoryReservation = null; SqlRowCollector.ObserveSpill = null; SqlPlanExecutor.TableAsStage = null; SqlPlanExecutor.TableAsSourceAdmitted = null; }
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
         // Assert: the sort adds no durable state. Every write/flush/length image of the
         // existing reservation, copy, builder commit and publication is replayed below.
         sorting.ShouldNotBeNull(); copied.ShouldBe((count + 63) / 64); int absent = 0, complete = 0;
+        if (width == 0) { credited.ShouldBeTrue(); }
         for (int point = -1; point < recorder.Count; point++)
         {
             await using var reopened = SqlDatabaseEngine.Create("ctas-crash-reopen", new() { StorageStrategy = point < 0 ? sorting : recorder.Open(point) });

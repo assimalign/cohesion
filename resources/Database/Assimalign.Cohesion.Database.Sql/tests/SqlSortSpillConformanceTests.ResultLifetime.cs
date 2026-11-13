@@ -181,48 +181,53 @@ public sealed partial class SqlSortSpillConformanceTests
         finally { BeforeRead(engine.TempSpace!, null); await result.DisposeAsync(); }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Output spool live objects stay bounded at two populations and reject a per-row retention mutant (#1789)")]
-    [InlineData(10000)]
-    [InlineData(30000)]
-    public async Task Add_OutputLiveHeap_ShouldRejectPerRowRetention(int count)
+    [Theory(DisplayName = "Cohesion Test [Sql] - Output spool live growth rejects one boxed value per row at two populations (#1789)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Add_OutputLiveHeap_ShouldRejectPerRowRetention(bool mutant)
     {
-        // Arrange
-        const long grant = 1048576, allowance = 524288;
+        // Arrange: minimum of three executions per population in the same warmed engine.
+        const long grant = 1048576;
         await using var engine = await Create("output-live", grant);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
-        foreach (bool mutant in new[] { false, true })
+        var populations = new List<long>();
+        foreach (int count in new[] { 10000, 30000 })
         {
-            var retained = mutant ? new List<object?[]>() : null;
-            var weak = new List<WeakReference>();
-            long before = LiveHeap.Read();
-            var metrics = new SqlStatementMetrics();
-            using var collector = new SqlRowCollector([], null, null, null, default, metrics, grant);
-
-            // Act
-            for (int i = 0; i < count; i++) { AddOutputVector(collector, i, session, weak, retained); }
-            await using var result = collector.TakeSpilled([], 0, -1);
-            long live = Math.Max(0, LiveHeap.Read() - before);
-
-            // Assert: the same bound fails when exactly one output object per row is retained.
-            if (mutant) { live.ShouldBeGreaterThan(grant + allowance); retained!.Count.ShouldBe(count); }
-            else
+            long minimum = long.MaxValue;
+            for (int execution = -1; execution < 3; execution++)
             {
-                live.ShouldBeLessThanOrEqualTo(grant + allowance);
+                var retained = mutant && execution >= 0 ? new List<object>() : null;
+                var weak = new List<WeakReference>();
+                long before = LiveHeap.Read();
+                var metrics = new SqlStatementMetrics();
+                using var collector = new SqlRowCollector([], null, null, null, default, metrics, grant);
+
+                // Act
+                for (int i = 0; i < count; i++) { AddOutputVector(collector, i, session, weak, retained); }
+                await using var result = collector.TakeSpilled([], 0, -1);
+                long live = LiveHeap.Read() - before;
+                if (execution >= 0) { minimum = Math.Min(minimum, live); }
+
+                // Assert: drained rows are dead even when the mutant retains their boxed value.
                 weak.Count(reference => reference.IsAlive).ShouldBe(0);
+                metrics.HashMemoryBytes.ShouldBe(0); metrics.PlainSelectMemoryBytes.ShouldBe(0);
+                metrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(grant); // ledger admission only
+                GC.KeepAlive(retained);
             }
-            metrics.HashMemoryBytes.ShouldBe(0); metrics.PlainSelectMemoryBytes.ShouldBe(0);
-            metrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(grant);
-            _output.WriteLine($"OUTPUT_LIVE|rows={count}|mutant={mutant}|live={live}|bound={grant + allowance}");
-            GC.KeepAlive(retained);
+            populations.Add(minimum);
+            _output.WriteLine($"OUTPUT_LIVE|rows={count}|mutant={mutant}|live={minimum}");
         }
+        void AssertGrowth() => (populations[1] - populations[0]).ShouldBeLessThanOrEqualTo(65536);
+        if (mutant) { Should.Throw<ShouldAssertException>(AssertGrowth); }
+        else { AssertGrowth(); }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AddOutputVector(SqlRowCollector collector, int value, SqlDatabaseSession owner,
-        List<WeakReference> weak, List<object?[]>? mutant)
+        List<WeakReference> weak, List<object>? mutant)
     {
         object?[] row = [value, new string('x', 512)];
         if (value < 128) { weak.Add(new WeakReference(row)); }
-        mutant?.Add(row); collector.Add(row, [], owner);
+        mutant?.Add(row[0]!); collector.Add(row, [], owner);
     }
 }
