@@ -76,8 +76,9 @@ public sealed partial class SqlSortSpillConformanceTests
             await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,note,n FROM archive ORDER BY id", cancellationToken: guard.Token);
             var rows = await Rows(result, guard.Token); rows.Length.ShouldBe(96);
             for (int i = 0; i < rows.Length; i++) { rows[i].Cells.ShouldBe([i,new string('x',2048),(long)(i/12+1)]); }
-            await using var source = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) FROM t", cancellationToken: guard.Token);
-            (await Rows(source, guard.Token)).ShouldHaveSingleItem().Cells[0].ShouldBe(96L);
+            await using var source = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,note FROM t ORDER BY id", cancellationToken: guard.Token);
+            var original = await Rows(source, guard.Token); original.Length.ShouldBe(96);
+            for (int i = 0; i < original.Length; i++) { original[i].Cells.ShouldBe([i,new string('x',2048)]); }
             database.IsOffline.ShouldBeFalse(); TempBytes(reopened.TempSpace!).ShouldBe(0); Files(reopened).ShouldBe(0);
         }
         absent.ShouldBeGreaterThan(0); complete.ShouldBeGreaterThan(0);
