@@ -292,9 +292,10 @@ internal sealed partial class SqlPlanExecutor
         SqlSortSpillMetrics.RecordOutput(_metrics!, spill.Statement);
         if (SqlWindowMemory.For(_metrics) is { } window)
         {
-            var staged = new SqlWindowInputSpool(_metrics!, _definitions.StatementMemoryBudget, spill.Statement, output,
+            var metrics = _metrics!;
+            var staged = new SqlWindowInputSpool(metrics, _definitions.StatementMemoryBudget, spill.Statement, output,
                 maximumDecoded, visited, SqlWindowInputSpool.RefusalFor(window) ?? SqlExecutionException.StatementMemoryBudget(_definitions.StatementMemoryBudget));
-            SqlHashSpillMetrics.Refresh(_metrics, spill.Statement); spill.Transfer(); return staged;
+            SqlHashSpillMetrics.Refresh(metrics, spill.Statement); spill.Transfer(); return staged;
         }
         var result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns,
             spill.Statement, output, offset, plan.Limit?.Count ?? -1, spill.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, maximumDecoded,
