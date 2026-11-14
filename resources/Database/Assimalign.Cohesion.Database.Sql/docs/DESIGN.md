@@ -27,7 +27,7 @@ owners without enlarging the context or cloning a provisioning name pair. Readin
 transaction timestamp masks that bit; schema, database identity and lock timeout survive
 permission changes. A result-only shared temp owner does not report a hash spill.
 
-Sequential output records use one reusable 16,384-byte encoding buffer and are capped at 16,384 encoded bytes. For a row of encoded length
+Sequential output records use one reusable 16,384-byte encoding buffer and are capped at 16,384 encoded bytes. Retained rows are checked with that buffer before the first temporary write; later rows are checked at append. An unwritable row refuses CS05067 before its quota check, because more quota cannot make it fit. For a row of encoded length
 L and decoded cost D, 9,984 + L + 24 + 2D must fit the grant before writing. The writer's
 9,984 B and one capped encoding (at most 16,408 B) are charged when the live grant permits;
 when resident producer states fill the grant, these fixed I/O buffers use a maximum
@@ -50,7 +50,7 @@ clear consumed source cells and release their payload charges, retaining and cha
 the source arrays through enumeration. Subsequent rows transfer ownership as they are
 encoded. For null/fixed-width sources that cannot release enough cell payload, the existing
 64-record batch uses its fixed 520,472 B allowance beyond the grant; successful reservations
-remain charged. This credit also applies to in-memory engines without a temp directory. It closes #1838 without changing a fitting copy's charges or introducing a
+remain charged. This credit applies only to statements admitted by the spill root: recursive sources, SQL/JSON sources and JSON-using domain CHECKs retain their original copy admission. Eligible in-memory statements can use the credit without a temp directory. It closes #1838 without changing a fitting copy's charges or introducing a
 write bracket. The durable boundaries remain table reservation, each existing 64-row
 copy bracket, builder commit and catalog publication; fault-injected write/flush/length
 images cover unordered spooling and consumed-source credit as well as ordered spooling.

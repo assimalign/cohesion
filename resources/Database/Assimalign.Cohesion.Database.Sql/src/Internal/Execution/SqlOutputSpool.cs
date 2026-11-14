@@ -48,6 +48,7 @@ internal sealed class SqlOutputSpool : IDisposable
         using var output = new SqlOutputSpool(owner, metrics, budget);
         try
         {
+            output.ValidatePrefix(source.Rows, token);
             for (int i = 0; i < source.Rows.Count; i++)
             { output.Append(source.Rows[i], token); source.ClearRow(i); }
             source.ClearRows(); metrics.ReleasePlainSelectMemory(reserved); reserved = 0;
@@ -63,11 +64,13 @@ internal sealed class SqlOutputSpool : IDisposable
         var output = new SqlOutputSpool(owner, metrics, budget);
         try
         {
+            output.ValidatePrefix(rows, token);
             // The retiring list pays for its rows while they drain. The one writer and
             // current encoding are bounded handoff scratch; no second row collection.
             for (int i = 0; i < rows.Count; i++)
             {
                 output.Append(rows[i], token);
+                SqlRowCollector.ObserveBuffer?.Invoke("output-drain", rows[i]);
                 long bytes = memory.RemoveRow(rows[i]); rows[i] = [];
                 metrics.ReleasePlainSelectMemory(bytes); memory.Bytes -= bytes;
             }
@@ -94,6 +97,17 @@ internal sealed class SqlOutputSpool : IDisposable
             SqlRowCollector.ObserveSpill?.Invoke("output-append");
         }
         catch (StorageTempException failure) { throw SqlSpilledResultSet.Translate(failure); }
+    }
+
+    private void ValidatePrefix(IReadOnlyList<object?[]> rows, CancellationToken token)
+    {
+        // More quota cannot make an unwritable row fit. Reuse the writer scratch
+        // before the first temp write so an earlier quota check cannot hide it.
+        for (int i = 0; i < rows.Count; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!SqlTempRowCodec.TryWrite(rows[i], _scratch, out _)) { Refuse(); }
+        }
     }
 
     internal SqlSpilledResultSet Take(IReadOnlyList<DatabaseColumn> columns, CancellationToken token, long offset = 0, long limit = -1)
