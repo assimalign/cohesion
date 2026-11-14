@@ -118,6 +118,7 @@ internal sealed partial class SqlPlanExecutor
                         }
                         catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode && CanSpillHashGroup(plan, spillOwner))
                         {
+                            if (SqlWindowMemory.For(_metrics) is { } window) { SqlWindowInputSpool.RecordRefusal(window, failure); }
                             if (keyBytes.Bytes != previousBytes)
                             {
                                 long bytes = keyBytes.RemoveRow(key); keyBytes.Bytes -= bytes;

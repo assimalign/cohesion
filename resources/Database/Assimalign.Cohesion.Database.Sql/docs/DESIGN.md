@@ -1461,16 +1461,23 @@ runs and merge passes, with byte/peak snapshots of the shared temporary statemen
 
 Every group must have PARTITION BY and fixed key collations. A partition larger than the
 remaining grant, including OVER (), retains CS05079; concurrent statement totals retain
-CS05067. Codec/family/record refusals retain CS05067. An attempted memory/quota/floor fallback
+CS05067. Unsupported codec cells/key families retain CS05067; record/key capacity preserves the original memory refusal. An attempted memory/quota/floor fallback
 which cannot complete preserves the original memory refusal and message, with the temp cause
 in exception data. No diagnostic, persistent format, journal or MVCC contract changes.
 Correlated/deferred frames, SQL/JSON, recursion and DML sources keep their existing paths.
 Grouped input uses hash aggregation's existing eligibility; grouping sets, ordered or opaque
 group state and unproved hash expressions keep refusing rather than replaying expressions.
+Application callbacks can observe CLR reference identity even for immutable TEXT. Because
+the value codec does not preserve aliases across runs or downstream CTE consumers, a catalog
+with an application TEXT/CHAR/binary/JSON/pseudo-type parameter, application cast or domain
+check keeps the base window owner. This catalog-wide check is conservative even for unused
+registrations; the bound function generation caches this eligibility at binding, so fitting statements do not enumerate the catalog. Fitting statements still complete. Numeric application aggregates/functions
+remain eligible. Narrowing this exclusion requires an explicit value-only callback contract
+or an alias-preserving spill representation, not a change in observed callback results.
 
 Sequential stage records are capped at 16,384 B. Sort arenas consume only the grant remaining
-after the active reader and fixed stage charges, leaving 32,768 B for construction; their
-record bound also admits a two-way merge. One writer and capped record/key construction use
+after the active reader and fixed stage charges, including 256 + 64 bytes per sort key and the retained 24 + 8 bytes per ordering entry, leaving 32,768 B for construction; their
+record bound also admits a two-way merge. Key encoding uses a capped buffer and rune-local collation fragments, so repeated wide keys cannot grow an unbounded encoding. One writer and capped record/key construction use
 at most 131,072 B of handoff scratch beyond the grant. During-operation live-heap tests use
 G + 655,360 B, including 524,288 B runtime slack, at two partition counts; minima of three
 independently based executions reject both a retained decoded row per partition and a boxed

@@ -70,8 +70,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 result = initialized switch
                 {
-                    SqlCreateTableAsPlan tableAs => await ExecuteCreateTableAsAsync(tableAs, statement, cancellationToken, spillOwner).ConfigureAwait(false),
-                    SqlWindowAggregatePlan window => await ExecuteWindowAggregateAsync(window, statement, cancellationToken, spillOwner).ConfigureAwait(false),
+                    SqlPlan stage when stage is SqlCreateTableAsPlan or SqlWindowAggregatePlan => await ExecuteSpillStageAsync(stage, statement, cancellationToken, spillOwner).ConfigureAwait(false),
                     SqlSelectPlan scan => ExecuteSelect(scan, statement, cancellationToken, null, plan, spillOwner, hashInput),
                     SqlSystemViewPlan view => ExecuteSystemView(view, statement, cancellationToken, plan, spillOwner, hashInput),
                     SqlConstantPlan constant => ExecuteRootConstant(constant, plan, cancellationToken, spillOwner),
@@ -111,6 +110,15 @@ internal sealed partial class SqlPlanExecutor
             if (statementRoot && _materializedRelations is { } relations) { ReleaseRelations(relations); }
         }
     }
+
+    // Keep one awaited stage arm: fitting roots retain the base async layout.
+    // Both kinds have an explicit owner; the default dispatcher would recurse for
+    // an admitted window plan.
+    private Task<DatabaseResult> ExecuteSpillStageAsync(SqlPlan plan, SqlStatementContext statement,
+        CancellationToken token, SqlDatabaseSession owner)
+        => plan is SqlWindowAggregatePlan window
+            ? ExecuteWindowAggregateAsync(window, statement, token, owner)
+            : ExecuteCreateTableAsAsync((SqlCreateTableAsPlan)plan, statement, token, owner);
 
     private DatabaseResult ExecuteRootConstant(SqlConstantPlan constant, SqlPlan plan, CancellationToken token, SqlDatabaseSession owner)
     {

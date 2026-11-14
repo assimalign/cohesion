@@ -38,13 +38,17 @@ internal sealed partial class SqlPlanExecutor
                 ? ExecuteAsync(plan.Input, statement, cancellationToken)
                 : ExecuteSpillRootAsync(plan.Input, statement, cancellationToken, spillOwner, null)).ConfigureAwait(false);
         }
-        catch (SqlExecutionException failure) when (spillOwner is not null && (SqlWindowInputSpool.IsMemoryRefusal(failure)
+        catch (SqlExecutionException failure) when (spillOwner is not null && !failure.Data.Contains(nameof(SqlTempRowCodec)) && (SqlWindowInputSpool.IsMemoryRefusal(failure)
             || failure.Diagnostics[0].Code is StorageTempException.EngineQuotaCode or StorageTempException.StatementQuotaCode or StorageTempException.FreeSpaceCode))
         {
             var original = SqlWindowInputSpool.RefusalFor(memory);
             if (original is not null && !ReferenceEquals(original, failure))
             { original.Data[nameof(SqlWindowInputSpool)] = failure; ExceptionDispatchInfo.Throw(original); }
-            if (!SqlWindowInputSpool.IsMemoryRefusal(failure)) { throw SqlExecutionException.StatementMemoryBudget(_definitions.StatementMemoryBudget); }
+            if (!SqlWindowInputSpool.IsMemoryRefusal(failure))
+            {
+                var refusal = SqlExecutionException.StatementMemoryBudget(_definitions.StatementMemoryBudget);
+                refusal.Data[nameof(SqlWindowInputSpool)] = failure; throw refusal;
+            }
             throw;
         }
         await using var stageInput = (DatabaseResultSet)inputResult;
@@ -61,7 +65,8 @@ internal sealed partial class SqlPlanExecutor
         bool expressionsStarted = false;
         long previousVisits = statement.Metrics.WindowFrameWorkVisits;
         if (stageInput is SqlWindowInputSpool spooledInput)
-        { return await TrySpillAsync(spooledInput, spooledInput.Refusal!).ConfigureAwait(false); }
+        { return await PreserveWindowRefusalAsync(SpillWindowStageAsync(spooledInput, plan, previousPending, width, spillOwner,
+            statement, cancellationToken, memory, evaluator, rows, frameOffsets, ComputePartitionAsync, FrameOffsetAsync, BindPartition), spooledInput.Refusal!).ConfigureAwait(false); }
         try
         {
             long inputBufferBytes = input!.RowBufferBytes;
@@ -195,8 +200,11 @@ internal sealed partial class SqlPlanExecutor
                         foreach (var function in group.Functions) { ClearWork(statement.Metrics.Analysis(function)); }
                     }
                 }
-                return await TrySpillAsync(source, failure).ConfigureAwait(false);
+                return await PreserveWindowRefusalAsync(SpillWindowStageAsync(source, plan, previousPending, width, spillOwner,
+                    statement, cancellationToken, memory, evaluator, rows, frameOffsets, ComputePartitionAsync, FrameOffsetAsync, BindPartition), failure).ConfigureAwait(false);
             }
+            catch (SqlExecutionException refused) when (!ReferenceEquals(refused, failure) && SqlWindowInputSpool.IsMemoryRefusal(refused) && !refused.Data.Contains(nameof(SqlTempRowCodec)))
+            { failure.Data[nameof(SqlWindowInputSpool)] = refused; ExceptionDispatchInfo.Throw(failure); throw; }
             catch (StorageTempException temp) when (temp.Code is StorageTempException.EngineQuotaCode or
                 StorageTempException.StatementQuotaCode or StorageTempException.FreeSpaceCode)
             { failure.Data[nameof(SqlWindowInputSpool)] = temp; ExceptionDispatchInfo.Throw(failure); throw; }
@@ -207,143 +215,8 @@ internal sealed partial class SqlPlanExecutor
         static void ClearWork(SqlOperatorWork? work)
         { if (work is not null) { work.Candidates = 0; work.WindowTransitions = 0; work.WindowInverseTransitions = 0; work.WindowBoundaryVisits = 0; } }
 
-        async Task<DatabaseResult> TrySpillAsync(SqlWindowInputSpool source, SqlExecutionException refusal)
-        {
-            try { return await SpillAsync(source).ConfigureAwait(false); }
-            catch (SqlExecutionException failure) when (SqlWindowInputSpool.IsMemoryRefusal(failure) && !failure.Data.Contains(nameof(SqlTempRowCodec)))
-            { refusal.Data[nameof(SqlWindowInputSpool)] = failure; ExceptionDispatchInfo.Throw(refusal); throw; }
-            catch (StorageTempException failure) when (failure.Code is StorageTempException.EngineQuotaCode or
-                StorageTempException.StatementQuotaCode or StorageTempException.FreeSpaceCode)
-            { refusal.Data[nameof(SqlWindowInputSpool)] = failure; ExceptionDispatchInfo.Throw(refusal); throw; }
-        }
-
-        async Task<DatabaseResult> SpillAsync(SqlWindowInputSpool source)
-        {
-            ResetMemory();
-            using var prepared = new SqlWindowInputSpool(statement.Metrics, _definitions.StatementMemoryBudget, spillOwner!, cancellationToken);
-            long ordinal = 0;
-            foreach (var raw in source.Read(cancellationToken))
-            {
-                if (raw.Length != plan.InputWidth)
-                { throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged); }
-                var record = new object?[1 + width]; record[0] = ordinal++;
-                raw.CopyTo(record, 1); prepared.Append(record, cancellationToken);
-            }
-            prepared.Seal(cancellationToken); source.Dispose();
-            SqlWindowInputSpool current = prepared;
-            int savedKeyCount = 0;
-            SqlBoundOrdering[] ordering = [];
-            try
-            {
-                foreach (var group in plan.Groups)
-                {
-                    ResetMemory();
-                    if (statement.Metrics.Analysis(group) is { } work) { work.Candidates += current.Count; }
-                    if (!group.SortShared) { ordering = group.Partition.Concat(group.Ordering).ToArray(); }
-                    using var ordered = await SortWindowSpoolAsync(current, width, savedKeyCount, ordering,
-                        !group.SortShared, group, statement, evaluator, cancellationToken).ConfigureAwait(false);
-                    current.Dispose();
-                    savedKeyCount = ordering.Length;
-                    collations = ordering.Select(key => key.Collation.Resolve(_subqueryValues)).ToArray();
-                    if (!group.SortShared && statement.Metrics.Analysis(group.Functions) is { } sortWork) { sortWork.Candidates++; }
-                    if (ordered.Count > 0)
-                    {
-                        foreach (var function in group.Functions)
-                        {
-                            if (function.Frame is not { } frame || frameOffsets.ContainsKey(frame)) { continue; }
-                            memory.Reserve(128);
-                            var offsets = (await FrameOffsetAsync(frame.StartOffset, frame.Syntax.Mode).ConfigureAwait(false),
-                                await FrameOffsetAsync(frame.EndOffset, frame.Syntax.Mode).ConfigureAwait(false));
-                            memory.RetainValue(offsets.Item1); memory.RetainValue(offsets.Item2); frameOffsets.Add(frame, offsets);
-                        }
-                    }
-                    using var output = new SqlWindowInputSpool(statement.Metrics, _definitions.StatementMemoryBudget, spillOwner!, cancellationToken);
-                    using (var reader = ordered.Read(cancellationToken).GetEnumerator())
-                    {
-                        bool more = reader.MoveNext();
-                        while (more)
-                        {
-                            ResetMemory();
-                            var partitionKeys = new List<object?[]>();
-                            var ordinals = new List<long>();
-                            object?[] first = reader.Current;
-                            do
-                            {
-                                cancellationToken.ThrowIfCancellationRequested();
-                                var record = reader.Current;
-                                if (record.Length != 1 + savedKeyCount + width || record[0] is not long)
-                                { throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged); }
-                                var row = record[(1 + savedKeyCount)..];
-                                var key = record[1..(1 + savedKeyCount)];
-                                memory.Reserve(48); // key/ordinal list capacity and growth
-                                memory.Retain(row); memory.Retain(key);
-                                rows.Add(row); partitionKeys.Add(key); ordinals.Add((long)record[0]!);
-                                more = reader.MoveNext();
-                            }
-                            while (more && SamePartition(first, reader.Current, group.Partition.Count));
-                            memory.Reserve(152L + 12L * rows.Count);
-                            sorted = Enumerable.Range(0, rows.Count).ToArray(); keys = partitionKeys.ToArray();
-                            long scratch = 768L + group.Functions.Count * 128L;
-                            memory.Reserve(scratch); memory.BeginPartition();
-                            try
-                            { await ComputePartitionAsync(0, rows.Count, group, bytes => { memory.Reserve(bytes); scratch += bytes; }).ConfigureAwait(false); }
-                            finally
-                            {
-                                if (_subqueryValues is { HasCorrelatedQueries: true } frame) { frame.BeginRow([], RecursiveState?.Memory); }
-                                memory.EndPartition(); memory.Release(scratch);
-                            }
-                            for (int i = 0; i < rows.Count; i++)
-                            {
-                                var record = new object?[1 + savedKeyCount + width]; record[0] = ordinals[i];
-                                keys[i].CopyTo(record, 1); rows[i].CopyTo(record, 1 + savedKeyCount);
-                                output.Append(record, cancellationToken);
-                            }
-                            SqlRowCollector.ObserveBuffer?.Invoke("window-partition", rows);
-                            rows.Clear(); rows.Capacity = 0; partitionKeys.Clear(); partitionKeys.Capacity = 0;
-                            ordinals.Clear(); ordinals.Capacity = 0; keys = null; sorted = [];
-                        }
-                    }
-                    ResetMemory(); output.Seal(cancellationToken);
-                    SqlRowCollector.ObserveSpill?.Invoke("window-output");
-                    current = await SortWindowSpoolAsync(output, width, savedKeyCount, null, false,
-                        group, statement, evaluator, cancellationToken).ConfigureAwait(false);
-                    // Complete the whole group, including ordinal restoration, before the
-                    // next group's offsets/arguments run. Shared keys are carried as cells.
-                }
-                memory.Dispose();
-                var result = MaterializeSelect(OutputRows(), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-                    plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken, spillOwner: spillOwner);
-                _subqueryValues?.AdmitPendingStatementMemory(previousPending);
-                return result;
-            }
-            finally { current.Dispose(); }
-
-            IEnumerable<object?[]> OutputRows()
-            {
-                foreach (var record in current.Read(cancellationToken)) { yield return record[(1 + savedKeyCount)..]; }
-            }
-            bool SamePartition(object?[] left, object?[] right, int length)
-            {
-                for (int k = 0; k < length; k++)
-                {
-                    var a = left[1 + k]; var b = right[1 + k];
-                    if (a is null ? b is not null : b is null || SqlValueComparer.Compare(a, b, collations![k]) != 0) { return false; }
-                }
-                return true;
-            }
-        }
-
-        void ResetMemory()
-        {
-            memory.Reset();
-            if (_subqueryValues is { MemoryMetrics: null } subqueries)
-            { foreach (var values in subqueries.StatementValues.Values) { memory.AdoptResult(values); } }
-            if (_materializedRelations is { Reserved: 0 } relations)
-            { foreach (var relation in relations.Values) { foreach (var row in relation) { memory.AdoptResult(row); } } }
-            memory.Reserve(128L + 96L * (plan.InputWidth + plan.Projections.Count) + 64L * plan.OrderBy.Count);
-            foreach (var offsets in frameOffsets.Values)
-            { memory.Reserve(128); memory.RetainValue(offsets.Start); memory.RetainValue(offsets.End); }
-        }
+        void BindPartition(int[] indexes, object?[][]? partitionKeys, Collation[]? resolved)
+        { sorted = indexes; keys = partitionKeys; collations = resolved; }
 
         bool SameKeys(int a, int b, int length)
         {

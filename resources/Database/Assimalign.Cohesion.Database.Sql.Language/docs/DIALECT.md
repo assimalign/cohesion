@@ -518,8 +518,9 @@ existing refusal. CTAS uses the same source path; INSERT SELECT keeps #1828's ex
 | Sort arena | Remaining statement grant after active reader and fixed stage state, less 32,768 B construction allowance; record bound admits at least a two-way merge |
 | Partition/frame buffer | Must fit the remaining statement grant; a single larger partition and OVER () retain CS05079 |
 | Handoff scratch | At most 131,072 fixed bytes beyond the grant; real-heap verification uses G + 655,360 B including runtime slack and rejects retention mutants |
-| Deferred collation, unsupported key family or unencodable cell | Existing refusal, without approximate encoding; codec/record refusals use CS05067 |
+| Deferred collation, unsupported key family or unencodable cell | Existing refusal, without approximate encoding; unencodable cells/key families use CS05067 |
 | Correlated/deferred frames, recursion, SQL/JSON and DML sources | Existing ownership and refusal |
+| Catalog with application reference/pseudo-type parameters, casts or domain checks | Existing window owner; opaque code can observe reference identity that decoded values do not preserve, even if a registration is unused |
 
 Fitting statements use the existing charges. A later refusal restarts only when no
 restart-sensitive expression can be repeated, restoring its visit count; otherwise it keeps

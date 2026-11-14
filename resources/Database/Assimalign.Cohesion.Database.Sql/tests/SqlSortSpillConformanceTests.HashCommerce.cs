@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql] - Commerce hash shapes: default-grant annual aggregation completes; CTE/window and NOT IN owners retain their boundaries (#1789)")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Commerce hash shapes: default-grant annual aggregation and category rank complete; NOT IN keeps its owner (#1789)")]
     public async Task ExecuteAsync_CommerceHashShapes_ShouldCompleteRootGroupAndReportRemainingOwners()
     {
         // Arrange: exact SQL shapes from cohesion-benchmarks SQL.md:775,835,915.

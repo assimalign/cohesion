@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 // An internal stage handoff, never a client result or a relation cache. Only the
 // refused input owner creates one; its runs share the outer statement's quota.
+[System.Diagnostics.DebuggerDisplay("SQL window input stage")]
+[System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
 {
     private static ConditionalWeakTable<List<object?[]>, SqlWindowInputSpool>? _inputs;
@@ -65,7 +67,7 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
         try { memory.Retain(row); return false; }
         catch (SqlExecutionException failure) when (owner is not null && IsMemoryRefusal(failure))
         {
-            LazyInitializer.EnsureInitialized(ref _refusals).GetValue(memory, _ => failure);
+            RecordRefusal(memory, failure);
             SqlWindowInputSpool? spool = null;
             try
             {
@@ -86,6 +88,8 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
         => failure.Diagnostics[0].Code is "CS05079" or SqlExecutionException.StatementMemoryBudgetCode;
     internal static SqlExecutionException? RefusalFor(SqlWindowMemory memory)
         => _refusals?.TryGetValue(memory, out var failure) == true ? failure : null;
+    internal static void RecordRefusal(SqlWindowMemory memory, SqlExecutionException failure)
+        => LazyInitializer.EnsureInitialized(ref _refusals).GetValue(memory, _ => failure);
     internal static void ForgetRefusal(SqlWindowMemory memory) => _refusals?.Remove(memory);
 
     internal static SqlWindowInputSpool Take(List<object?[]> rows, IReadOnlyList<DatabaseColumn> columns)
@@ -101,9 +105,9 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
 
     internal void Append(object?[] row, CancellationToken token)
     {
-        if (!SqlTempRowCodec.TryGetLength(row, out int size) || size > MaximumRecordBytes
-            || !SqlTempRowCodec.TryEncode(row, out var encoded))
-        { throw EncodingRefusal(_budget); }
+        if (!SqlTempRowCodec.TryGetLength(row, out int size)) { throw EncodingRefusal(_budget); }
+        if (size > MaximumRecordBytes) { throw SqlExecutionException.StatementMemoryBudget(_budget); }
+        if (!SqlTempRowCodec.TryEncode(row, out var encoded)) { throw EncodingRefusal(_budget); }
         _maximumDecoded = Math.Max(_maximumDecoded, SqlTempRowCodec.DecodedBytes(row));
         _run!.Append(encoded, token); Count++;
     }
@@ -171,4 +175,14 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
         await Task.CompletedTask.ConfigureAwait(false);
     }
     public override ValueTask DisposeAsync() { Dispose(); return default; }
+
+    private sealed class DebugView
+    {
+        private readonly SqlWindowInputSpool _value;
+        public DebugView(SqlWindowInputSpool value) { _value = value; }
+        public DatabaseResultStatus Status => _value.Status;
+        public long AffectedCount => _value.AffectedCount;
+        public IReadOnlyList<DatabaseColumn> Columns => _value.Columns;
+        public IReadOnlyList<Diagnostic> Diagnostics => _value.Diagnostics;
+    }
 }
