@@ -48,6 +48,7 @@ internal sealed class SqlOutputSpool : IDisposable
         using var output = new SqlOutputSpool(owner, metrics, budget);
         try
         {
+            output.ValidatePrefix(source.Rows, token);
             for (int i = 0; i < source.Rows.Count; i++)
             { output.Append(source.Rows[i], token); source.ClearRow(i); }
             source.ClearRows(); metrics.ReleasePlainSelectMemory(reserved); reserved = 0;
@@ -63,11 +64,15 @@ internal sealed class SqlOutputSpool : IDisposable
         var output = new SqlOutputSpool(owner, metrics, budget);
         try
         {
+            output.ValidatePrefix(rows, token);
+            token.ThrowIfCancellationRequested();
+            output.Encode(pending, out _);
             // The retiring list pays for its rows while they drain. The one writer and
             // current encoding are bounded handoff scratch; no second row collection.
             for (int i = 0; i < rows.Count; i++)
             {
                 output.Append(rows[i], token);
+                SqlRowCollector.ObserveBuffer?.Invoke("output-drain", rows[i]);
                 long bytes = memory.RemoveRow(rows[i]); rows[i] = [];
                 metrics.ReleasePlainSelectMemory(bytes); memory.Bytes -= bytes;
             }
@@ -83,9 +88,7 @@ internal sealed class SqlOutputSpool : IDisposable
     internal void Append(object?[] row, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (!SqlTempRowCodec.TryWrite(row, _scratch, out int length)) { Refuse(); }
-        long decoded = SqlTempRowCodec.DecodedBytes(row);
-        if (writerBytes + length + 24L + 2 * decoded > _budget) { Refuse(); }
+        int length = Encode(row, out long decoded);
         // Sequential runs need no merge arena or fixed sort fan-in. Admit their
         // actual encoding and decoding workspace, including an old/new row overlap.
         try
@@ -94,6 +97,25 @@ internal sealed class SqlOutputSpool : IDisposable
             SqlRowCollector.ObserveSpill?.Invoke("output-append");
         }
         catch (StorageTempException failure) { throw SqlSpilledResultSet.Translate(failure); }
+    }
+
+    private int Encode(object?[] row, out long decoded)
+    {
+        if (!SqlTempRowCodec.TryWrite(row, _scratch, out int length)) { Refuse(); }
+        decoded = SqlTempRowCodec.DecodedBytes(row);
+        if (writerBytes + length + 24L + 2 * decoded > _budget) { Refuse(); }
+        return length;
+    }
+
+    private void ValidatePrefix(IReadOnlyList<object?[]> rows, CancellationToken token)
+    {
+        // More quota cannot make an unwritable row fit. Reuse the writer scratch
+        // before the first temp write so an earlier quota check cannot hide it.
+        for (int i = 0; i < rows.Count; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            Encode(rows[i], out _);
+        }
     }
 
     internal SqlSpilledResultSet Take(IReadOnlyList<DatabaseColumn> columns, CancellationToken token, long offset = 0, long limit = -1)
