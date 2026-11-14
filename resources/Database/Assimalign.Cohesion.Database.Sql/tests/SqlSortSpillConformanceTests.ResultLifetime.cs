@@ -181,10 +181,10 @@ public sealed partial class SqlSortSpillConformanceTests
         finally { BeforeRead(engine.TempSpace!, null); await result.DisposeAsync(); }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Output spool live growth rejects one boxed value per row at two populations (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Output spool weak references reject a kept prefix and live growth rejects per-row retention (#1789)")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Add_OutputLiveHeap_ShouldRejectPerRowRetention(bool mutant)
+    public async Task Add_OutputLiveHeap_ShouldRejectKeptPrefixAndPerRowRetention(bool mutant)
     {
         // Arrange: minimum of three executions per population in the same warmed engine.
         const long grant = 1048576;
@@ -205,6 +205,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 if (execution >= 0) { minimum = Math.Min(minimum, live); }
                 _output.WriteLine($"OUTPUT_LIVE_ROUND|rows={count}|mutant={mutant}|execution={execution}|baseline_before={before}|during={during}|baseline_after={after}|live={live}");
             }
+            minimum.ShouldBeLessThanOrEqualTo(grant + 524288);
             populations.Add(minimum);
             _output.WriteLine($"OUTPUT_LIVE|rows={count}|mutant={mutant}|live={minimum}");
         }
@@ -214,13 +215,15 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static long MeasureOutputLiveRows(int count, SqlDatabaseSession owner, bool mutant, long grant)
+    private static long MeasureOutputLiveRows(int count, SqlDatabaseSession owner, bool mutant, long grant, bool keptPrefix = false)
     {
         var retained = mutant ? new List<object>() : null;
+        var prefix = keptPrefix ? new List<object>() : null;
         var weak = new List<WeakReference>();
         var metrics = new SqlStatementMetrics();
         using var collector = new SqlRowCollector([], null, null, null, default, metrics, grant);
         int drained = 0;
+        SqlRowCollector.ObserveBuffer = (phase, row) => { if (phase == "output-drain") { prefix?.Add(row); } };
         SqlRowCollector.ObserveSpill = phase =>
         {
             if (phase != "output-drained") { return; }
@@ -234,7 +237,7 @@ public sealed partial class SqlSortSpillConformanceTests
             // Act
             for (int i = 0; i < count; i++) { AddOutputVector(collector, i, owner, weak, retained); }
         }
-        finally { SqlRowCollector.ObserveSpill = null; }
+        finally { SqlRowCollector.ObserveSpill = null; SqlRowCollector.ObserveBuffer = null; GC.KeepAlive(prefix); }
         drained.ShouldBe(1);
         var result = collector.TakeSpilled([], 0, -1);
         try
@@ -257,5 +260,25 @@ public sealed partial class SqlSortSpillConformanceTests
         object?[] row = [value, new string('x', 512)];
         if (value < 128) { weak.Add(new WeakReference(row)); weak.Add(new WeakReference(row[1])); }
         mutant?.Add(row[0]!); collector.Add(row, [], owner);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Output spool weak-reference check rejects a kept prefix before Take (#1789)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Add_KeptOutputPrefix_ShouldFailWeakReferenceCheck(bool mutant)
+    {
+        // Arrange
+        const long grant = 1048576;
+        await using var engine = await Create("kept-prefix", grant);
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        // Act / Assert: the mutant holds the actual drained arrays and their payloads.
+        if (mutant)
+        {
+            var failure = Should.Throw<ShouldAssertException>(() => MeasureOutputLiveRows(10000, session, false, grant, true));
+            failure.Message.ShouldContain("weak.Count", Case.Sensitive);
+        }
+        else { MeasureOutputLiveRows(10000, session, false, grant).ShouldBeGreaterThan(0); }
+        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+        _output.WriteLine($"OUTPUT_PREFIX|mutant={mutant}|weakCheck={(mutant ? "rejected" : "passed")}");
     }
 }

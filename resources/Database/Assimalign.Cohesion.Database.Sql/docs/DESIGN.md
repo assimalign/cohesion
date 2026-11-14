@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
-## Retained SELECT output spooling (#1789, SQ-L4a; #1838)
+## Retained SELECT output spooling (#1789; #1838)
 
 Unordered root SELECT output, ordered index scans (primary or secondary), unordered CTAS sources and
 plain GROUP BY output hand off at their existing CS05067 row-admission boundary.
@@ -21,7 +21,7 @@ overlap, and 64 B per column to the outer statement. Cached runs
 join the existing temporary statement owner, so later operators share its physical quota. Relation caches count toward the session cap of eight live spilled results; CS05067 names active caches when they contribute to the limit. A correlated subquery over a spilled CTE re-reads and decodes its run for each outer row. Each rescan opens a reader workspace; CHAR and binary conversion repeats on each read.
 Root completion, error and cancellation close cached runs. Correlated/deferred frames,
 window stages, recursive owners, set operations, every membership vector (IN, = ANY, > ALL and NOT IN), and joined DML keep their existing
-operator paths. INSERT SELECT does not spill and keeps its source uncharged under _isDml (#1828); scope item (2) covers CTAS only.
+operator paths. INSERT SELECT does not spill and keeps its source uncharged under _isDml (#1828); CREATE TABLE AS is the only table-writing statement whose source spools.
 The context's unused UTC-tick sign bit suppresses inherited permission for excluded
 owners without enlarging the context or cloning a provisioning name pair. Reading the
 transaction timestamp masks that bit; schema, database identity and lock timeout survive
@@ -56,16 +56,24 @@ copy bracket, builder commit and catalog publication; fault-injected write/flush
 images cover unordered spooling and consumed-source credit as well as ordered spooling.
 Each recovered image converges to an absent/reclaimed or complete destination.
 
-The CI grant sweep compares every spilling point with the fitting 64 MiB run, including
-rows and observed order, volatile calls, sequence values and RecordsExamined. The comparison
-against the c9ac0df64 batch-base binary was a one-off recorded run. A quota-zero pass also
-compares with the base at the same quota: its 22 completions survive. Six of the 28 regular-quota base completions already used temporary runs and also refuse at quota zero on the base. Ledger-peak assertions check admission only. The seed-17890507 1 MiB hash corpus pins four CS05067 refusals out of 256, compared with 30 at the batch base.
-During-operation LiveHeap.Read samples at output drain/append and CTAS record encoding use
-the minimum peak of three executions per population in a warmed engine, each with its own
-pre-statement baseline. They bound output by G + 26,392 B plus fixture slack and copy credit
-by G + 520,472 B plus slack; retained-prefix and uncapped-record mutants fail these bounds.
-The separate live-object check compares 30,000 with 10,000 rows with a 64 KiB growth cap,
-and rejects one retained boxed value per row. No persistent format or diagnostic identity changes.
+The grant sweep compares every spilling point with a fitting 64 MiB execution, including
+rows and observed order, volatile calls, sequence values and RecordsExamined. The quota-zero
+checks require the 22 points that need no temporary space to keep completing. Comparisons
+with recorded reference points, including matching quota settings, occur only when those
+points are supplied. Ledger-peak assertions check admission only. The seed-17890507 1 MiB
+hash corpus pins four CS05067 refusals out of 256 statements.
+LiveHeap.Read samples during output draining, output appends and CTAS record encoding use
+the minimum peak of three executions per population in a warmed engine. Output samples
+bound the peak by G + 26,392 B plus fixture slack and, during draining, bound excess over
+the remaining live reservations by 26,392 B plus slack. The drain is sampled every 16 appends.
+Copy-credit samples retain the G + 520,472 B plus slack bound and compare two populations
+from source-admission baselines with a 524,288 B growth cap. These live bounds catch
+retention that grows with row count; a mutant retaining one copy record per row fails the
+growth check. A mutant retaining drained row copies until the drain ends fails the drain
+excess check. The collector also checks G + 524,288 B at each population and limits growth
+from 10,000 to 30,000 rows to 64 KiB, rejecting one kept boxed value per row. Its separate
+weak-reference assertion catches a kept prefix before delivery. No persistent format or
+diagnostic identity changes.
 
 ## Journal admission backstop (#1283, EN-C2)
 
