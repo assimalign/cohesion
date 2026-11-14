@@ -112,8 +112,8 @@ public sealed partial class SqlSortSpillConformanceTests
 
         // Assert: +32 is the replay entry itself. RowBytes adds 32 for its container;
         // plain groups also charge 128 for their dictionary and state-array header.
-        CheckEntryCharges(entry, replay, fitting);
         _output.WriteLine($"ENTRY_CHARGE|entry={entry / 3072d}|replay={replay / 3072d}|distinct={fitting / 3072d}|bound=32/96/64");
+        CheckEntryCharges(entry, replay, fitting);
     }
 
     private static void CheckEntryCharges(long entry, long replay, long fitting)

@@ -141,7 +141,10 @@ public sealed class SqlTempCodecTests
     private static void RoundTrip(object?[] row)
     {
         SqlTempRowCodec.TryEncode(row, out var bytes).ShouldBeTrue();
-        SqlTempRowCodec.TryDecode(bytes, out var decoded).ShouldBeTrue();
+        var scratch = new byte[16384];
+        SqlTempRowCodec.TryWrite(row, scratch, out int written).ShouldBeTrue();
+        scratch.AsSpan(0, written).ToArray().ShouldBe(bytes);
+        SqlTempRowCodec.TryDecode(scratch.AsSpan(0, written), out var decoded).ShouldBeTrue();
         decoded.Length.ShouldBe(row.Length);
         for (int i = 0; i < row.Length; i++)
         {

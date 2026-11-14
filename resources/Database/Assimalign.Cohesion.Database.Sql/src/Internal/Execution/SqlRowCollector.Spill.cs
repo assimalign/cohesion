@@ -22,7 +22,7 @@ internal sealed partial class SqlRowCollector
     { if (!_sharedStatements.TryGetValue(this, out _)) { _sharedStatements.Add(this, statement); } }
     internal static Action<string>? ObserveSpill { get; set; }
     internal static Action<string, object>? ObserveBuffer { get; set; }
-    internal bool HasSpilled => _spills.TryGetValue(this, out _);
+    internal bool HasSpilled => _spills.TryGetValue(this, out _) || SqlOutputSpool.For(_rows) is not null;
 
     private bool AdmitEntry(Entry entry, SqlDatabaseSession? owner)
     {
@@ -171,6 +171,8 @@ internal sealed partial class SqlRowCollector
 
     internal SqlSpilledResultSet TakeSpilled(IReadOnlyList<DatabaseColumn> columns, long offset, long limit)
     {
+        if (SqlOutputSpool.For(_rows) is { } output)
+        { return output.Take(columns, _cancellationToken, Math.Max(0, offset - _offset), limit); }
         var state = _spills.GetValue(this, _ => throw new InvalidOperationException());
         try
         {

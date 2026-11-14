@@ -56,6 +56,7 @@ internal sealed partial class SqlPlanExecutor
                 // A fitting source retains its exact admission; a spilled source streams into
                 // 64-row brackets. Temp reads finish outside every apply bracket/page latch.
                 long sourceBytes = 0, batchBytes = 0, bufferBytes = 0;
+                bool consumingSource = false;
                 try
                 {
                     await using var source = (DatabaseResultSet)await ExecuteRootAsync(
@@ -65,8 +66,14 @@ internal sealed partial class SqlPlanExecutor
                         if (source is SqlMaterializedResultSet materialized)
                         { sourceBytes = materialized.ReserveMemory(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken); }
                         TableAsSourceAdmitted?.Invoke(sourceBytes);
-                        statement.Metrics.ReserveHashMemory(24L + 64L * 8, _definitions.StatementMemoryBudget);
-                        bufferBytes = 24L + 64L * 8;
+                        try
+                        {
+                            statement.Metrics.ReserveHashMemory(24L + 64L * 8, _definitions.StatementMemoryBudget);
+                            bufferBytes = 24L + 64L * 8;
+                        }
+                        catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                            && source is SqlMaterializedResultSet or SqlSpilledResultSet)
+                        { /* The first consumed row credits its cells before this fixed buffer is admitted. */ }
                         var batch = new List<byte[]>(64);
                         var domains = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken,
                             transactionTimestamp: statement.TransactionStart);
@@ -86,7 +93,18 @@ internal sealed partial class SqlPlanExecutor
                             byte[] record = SqlRowCodec.Encode(table, values, builder.Sequence);
                             TableAsRecordEncoded?.Invoke(record);
                             long bytes = 32L + record.Length;
-                            statement.Metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget);
+                            if (source is SqlMaterializedResultSet consumed && (bufferBytes == 0 || consumingSource))
+                            { consumed.ReleaseConsumedMemory(statement.Metrics, ref sourceBytes, written + 1); consumingSource = true; }
+                            if (bufferBytes == 0)
+                            { bufferBytes = ReserveBoundedTableAsCopy(statement, 536); }
+                            try { statement.Metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget); }
+                            catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                                && source is SqlMaterializedResultSet or SqlSpilledResultSet)
+                            {
+                                if (source is SqlMaterializedResultSet retained)
+                                { retained.ReleaseConsumedMemory(statement.Metrics, ref sourceBytes, written + 1); consumingSource = true; }
+                                bytes = ReserveBoundedTableAsCopy(statement, bytes);
+                            }
                             batchBytes += bytes;
                             batch.Add(record);
                             written++;
@@ -168,6 +186,15 @@ internal sealed partial class SqlPlanExecutor
 
         ValueTask<DatabaseResult> CompleteAsync(long count)
             => statement.PrepareResultAsync(new SqlQueryResult(DatabaseResultStatus.Success, count), cancellationToken);
+    }
+
+    private long ReserveBoundedTableAsCopy(SqlStatementContext statement, long bytes)
+    {
+        // Called only after the original copy admission refuses. A null/fixed-width
+        // source may release too few cell bytes to admit even the first batch. Its
+        // existing 64 storable records and 536 B list have a fixed 520,472 B bound.
+        if (bytes > _definitions.StatementMemoryBudget - statement.Metrics.HashMemoryBytes) { return 0; }
+        statement.Metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget); return bytes;
     }
 
     private static void DisposeCompletedTableAsSource(DatabaseResultSet source)

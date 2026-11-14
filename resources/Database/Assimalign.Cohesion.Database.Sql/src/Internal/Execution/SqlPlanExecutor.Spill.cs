@@ -13,19 +13,25 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    // Root SELECT and the CTAS source root supply permission explicitly. Every other nested
-    // ExecuteAsync call retains the original path, including DML, windows and compound operands.
+    // The statement session owns permission, including retained nested SELECT bodies.
+    // Unsupported operator owners keep their dispatcher and their existing ledger.
     internal Task<DatabaseResult> ExecuteRootAsync(SqlPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken, SqlDatabaseSession? spillOwner, Location? location = null)
         => plan is SqlCreateTableAsPlan tableAs && spillOwner?.Database.Engine.TempSpace is not null
             && !plan.ContainsRecursion && !PlanUsesJson(plan, cancellationToken) && CanSpillTableAs(tableAs, cancellationToken)
             ? ExecuteSpillRootAsync(plan, statement, cancellationToken, spillOwner, location)
-            : spillOwner?.Database.Engine.TempSpace is not null && plan is SqlSelectPlan or SqlJoinPlan or SqlGroupPlan or SqlSystemViewPlan or SqlConstantPlan or SqlWithPlan or SqlSubqueryPlan
+            : CanExecuteSpillSelect(plan, spillOwner, cancellationToken)
+                ? ExecuteSpillRootAsync(plan, statement, cancellationToken, spillOwner!, location)
+                : ExecuteAsync(plan, statement, cancellationToken);
+
+    private bool CanExecuteSpillSelect(SqlPlan plan, SqlDatabaseSession? spillOwner, CancellationToken cancellationToken)
+        => spillOwner?.Database.Engine.TempSpace is not null && !_isDml && RecursiveState is null
+            && SqlWindowMemory.For(_metrics) is null
+            && _subqueryValues is not { HasCorrelatedQueries: true }
+            && plan is SqlSelectPlan or SqlJoinPlan or SqlGroupPlan or SqlSystemViewPlan or SqlConstantPlan or SqlWithPlan or SqlSubqueryPlan
             && StatementInput(plan) is SqlRelationPlan
             && plan is not SqlGroupingSetsPlan && !plan.ContainsRecursion && !PlanUsesJson(plan, cancellationToken)
-            && (plan is not SqlSubqueryPlan subquery || !subquery.Queries.Any(query => query.IsCorrelated || query.IsDeferred))
-                ? ExecuteSpillRootAsync(plan, statement, cancellationToken, spillOwner, location)
-                : ExecuteAsync(plan, statement, cancellationToken);
+            && (plan is not SqlSubqueryPlan subquery || !subquery.Queries.Any(query => query.IsCorrelated || query.IsDeferred));
 
     private bool CanSpillTableAs(SqlCreateTableAsPlan plan, CancellationToken token)
     {
@@ -100,7 +106,7 @@ internal sealed partial class SqlPlanExecutor
         finally
         {
             if (frame is not null) { metrics.EndAnalysisFrame(frame); }
-            if (statementRoot && _materializedRelations is { } relations) { ReleaseSelectMemory(ref relations.Reserved); }
+            if (statementRoot && _materializedRelations is { } relations) { ReleaseRelations(relations); }
         }
     }
 
@@ -115,8 +121,8 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteRootSubqueriesAsync(SqlPlan input, IReadOnlyList<SqlSubqueryBinding> queries,
         SqlStatementContext statement, CancellationToken token, SqlDatabaseSession owner, Location? location)
     {
-        // Only independent, eager frames enter here. Each child retains the ordinary ExecuteAsync
-        // boundary; the explicit permission continues solely into this statement's outer body.
+        // Independent scalar/EXISTS bodies inherit permission. Eager membership vectors
+        // retain their existing boundary for SQ-L4c.
         var parent = _subqueryValues;
         var frame = SqlSubqueryValues.WithMemory(parent, queries[0].ScopeId, queries, false, statement.Metrics, _definitions.StatementMemoryBudget);
         _subqueryValues = frame;
@@ -126,7 +132,8 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (!frame.StatementValues.TryGetValue(query.Slot, out var values))
                 {
-                    values = await MaterializeSubqueryAsync(query, statement, token).ConfigureAwait(false);
+                    values = await MaterializeSubqueryAsync(query,
+                        query.Kind is SqlSubqueryKind.Scalar or SqlSubqueryKind.Exists ? statement : statement.WithoutSession(), token).ConfigureAwait(false);
                     frame.Admit(values, correlated: false); frame.StatementValues.Add(query.Slot, values);
                 }
                 frame.Set(query.Slot, values);
@@ -168,10 +175,13 @@ internal sealed partial class SqlPlanExecutor
     private bool RetainStagedSortSource(List<object?[]> rows, object?[] row, ref SqlSelectMemory memory,
         IReadOnlyList<SqlBoundOrdering> orderBy, SqlDatabaseSession? owner, CancellationToken token, bool includeWindow = true, SqlGroupPlan? hashInput = null)
     {
+        if (owner is not null && hashInput is null && SqlOutputSpool.For(rows) is { } output) { output.Append(row, token); return false; }
         if (owner is not null && (hashInput is null || rows.Count == 0) && SqlStagedSortSource.For(rows) is { } source) { source.Append(row, token); return false; }
         try { RetainSelectRow(ref memory, row, includeWindow: includeWindow); return true; }
         catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
         {
+            if (hashInput is null && orderBy.Count == 0 && owner?.Database.Engine.TempSpace is not null)
+            { SqlOutputSpool.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner, token); return false; }
             if (hashInput is not null ? !CanSpillHashGroup(hashInput, owner)
                 : owner is null || orderBy.Count == 0 || orderBy.Any(order => !order.Collation.IsFixed)) { throw; }
             SqlStagedSortSource.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner!, token);

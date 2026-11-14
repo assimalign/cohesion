@@ -71,8 +71,8 @@ public sealed partial class SqlSortSpillConformanceTests
             "WITH revenues AS (SELECT p.category_id,p.product_id,SUM(i.line_total) AS revenue FROM products p INNER JOIN order_items i ON p.product_id=i.product_id GROUP BY p.category_id,p.product_id), ranked AS (SELECT category_id,product_id,revenue,RANK() OVER(PARTITION BY category_id ORDER BY revenue DESC) AS revenue_rank FROM revenues) SELECT category_id,product_id,revenue,revenue_rank FROM ranked WHERE revenue_rank<=3 ORDER BY category_id,revenue_rank,product_id",
             "SELECT order_id,customer_id,order_date,total FROM orders WHERE status='paid' AND order_date<@end AND order_id NOT IN(SELECT order_id FROM shipments) ORDER BY order_date,order_id",
         ];
-        // These are explicit scope boundaries in SQ-L3a, rather than silently granting
-        // nested bodies, window buffers or eager subquery vectors permission to spill.
+        // Revenues must complete its nested aggregation. The remaining window input
+        // and eager NOT IN vector belong to the following SQ-L4 runs.
         foreach (string sql in remaining)
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, parameters, guard.Token));
@@ -80,6 +80,11 @@ public sealed partial class SqlSortSpillConformanceTests
             var metrics = session.LastStatementMetrics!;
             _output.WriteLine($"COMMERCE_REMAINING|shape={(sql.StartsWith("WITH", StringComparison.Ordinal) ? "category-rank-window" : "unshipped-orders")}|code={error.Diagnostics[0].Code}|peak_memory={metrics.PeakHashMemoryBytes}|examined={metrics.RecordsExamined}|message={error.Message}");
             _output.WriteLine($"COMMERCE_STACK|{error.InnerException?.StackTrace ?? error.StackTrace}");
+            if (sql.StartsWith("WITH", StringComparison.Ordinal))
+            {
+                (error.InnerException?.StackTrace ?? error.StackTrace)!.ShouldContain("ExecuteWindowAggregateAsync", Case.Sensitive);
+                SqlHashSpillMetrics.For(metrics).ShouldNotBeNull().Batches.ShouldBeGreaterThan(0);
+            }
             metrics.HashMemoryBytes.ShouldBe(0); metrics.PlainSelectMemoryBytes.ShouldBe(0);
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
