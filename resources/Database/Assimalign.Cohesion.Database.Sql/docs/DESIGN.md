@@ -21,13 +21,13 @@ overlap, and 64 B per column to the outer statement. Cached runs
 join the existing temporary statement owner, so later operators share its physical quota. Relation caches count toward the session cap of eight live spilled results; CS05067 names active caches when they contribute to the limit. A correlated subquery over a spilled CTE re-reads and decodes its run for each outer row. Each rescan opens a reader workspace; CHAR and binary conversion repeats on each read.
 Root completion, error and cancellation close cached runs. Correlated/deferred frames,
 window stages, recursive owners, set operations, every membership vector (IN, = ANY, > ALL and NOT IN), and joined DML keep their existing
-operator paths. INSERT SELECT does not spill and keeps its source uncharged under _isDml (#1828); CREATE TABLE AS is the only table-writing statement whose source spools.
+operator paths. INSERT SELECT does not spill and keeps its source uncharged (#1828); CREATE TABLE AS is the only table-writing statement whose source spools.
 The context's unused UTC-tick sign bit suppresses inherited permission for excluded
 owners without enlarging the context or cloning a provisioning name pair. Reading the
 transaction timestamp masks that bit; schema, database identity and lock timeout survive
 permission changes. A result-only shared temp owner does not report a hash spill.
 
-Sequential output records use one reusable 16,384-byte encoding buffer and are capped at 16,384 encoded bytes. Retained rows are checked with that buffer before the first temporary write; later rows are checked at append. An unwritable row refuses CS05067 before its quota check, because more quota cannot make it fit. For a row of encoded length
+Sequential output records use one reusable 16,384-byte encoding buffer and are capped at 16,384 encoded bytes. Retained rows and the known pending row are checked with that buffer before the first temporary write, including their delivery workspace; later rows are checked at append. An unwritable row refuses CS05067 before its quota check, because more quota cannot make it fit. For a row of encoded length
 L and decoded cost D, 9,984 + L + 24 + 2D must fit the grant before writing. The writer's
 9,984 B and one capped encoding (at most 16,408 B) are charged when the live grant permits;
 when resident producer states fill the grant, these fixed I/O buffers use a maximum

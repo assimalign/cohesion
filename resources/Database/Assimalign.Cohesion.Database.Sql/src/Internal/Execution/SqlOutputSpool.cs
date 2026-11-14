@@ -65,6 +65,8 @@ internal sealed class SqlOutputSpool : IDisposable
         try
         {
             output.ValidatePrefix(rows, token);
+            token.ThrowIfCancellationRequested();
+            output.Encode(pending, out _);
             // The retiring list pays for its rows while they drain. The one writer and
             // current encoding are bounded handoff scratch; no second row collection.
             for (int i = 0; i < rows.Count; i++)
@@ -86,9 +88,7 @@ internal sealed class SqlOutputSpool : IDisposable
     internal void Append(object?[] row, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (!SqlTempRowCodec.TryWrite(row, _scratch, out int length)) { Refuse(); }
-        long decoded = SqlTempRowCodec.DecodedBytes(row);
-        if (writerBytes + length + 24L + 2 * decoded > _budget) { Refuse(); }
+        int length = Encode(row, out long decoded);
         // Sequential runs need no merge arena or fixed sort fan-in. Admit their
         // actual encoding and decoding workspace, including an old/new row overlap.
         try
@@ -99,6 +99,14 @@ internal sealed class SqlOutputSpool : IDisposable
         catch (StorageTempException failure) { throw SqlSpilledResultSet.Translate(failure); }
     }
 
+    private int Encode(object?[] row, out long decoded)
+    {
+        if (!SqlTempRowCodec.TryWrite(row, _scratch, out int length)) { Refuse(); }
+        decoded = SqlTempRowCodec.DecodedBytes(row);
+        if (writerBytes + length + 24L + 2 * decoded > _budget) { Refuse(); }
+        return length;
+    }
+
     private void ValidatePrefix(IReadOnlyList<object?[]> rows, CancellationToken token)
     {
         // More quota cannot make an unwritable row fit. Reuse the writer scratch
@@ -106,7 +114,7 @@ internal sealed class SqlOutputSpool : IDisposable
         for (int i = 0; i < rows.Count; i++)
         {
             token.ThrowIfCancellationRequested();
-            if (!SqlTempRowCodec.TryWrite(rows[i], _scratch, out _)) { Refuse(); }
+            Encode(rows[i], out _);
         }
     }
 

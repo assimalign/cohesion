@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    private static int _outputPrefixAlive;
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Nested spill permission preserves timestamp, schema, database and metadata timeout (#1789)")]
     [InlineData(null, false)]
     [InlineData("app", false)]
@@ -217,6 +219,7 @@ public sealed partial class SqlSortSpillConformanceTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static long MeasureOutputLiveRows(int count, SqlDatabaseSession owner, bool mutant, long grant, bool keptPrefix = false)
     {
+        _outputPrefixAlive = -1;
         var retained = mutant ? new List<object>() : null;
         var prefix = keptPrefix ? new List<object>() : null;
         var weak = new List<WeakReference>();
@@ -230,7 +233,8 @@ public sealed partial class SqlSortSpillConformanceTests
             drained++;
             LiveHeap.Read();
             // Drained arrays and payloads must die before Take, even if a retained prefix fits G.
-            weak.Count(reference => reference.IsAlive).ShouldBe(0);
+            _outputPrefixAlive = weak.Count(reference => reference.IsAlive);
+            _outputPrefixAlive.ShouldBe(0);
         };
         try
         {
@@ -274,11 +278,15 @@ public sealed partial class SqlSortSpillConformanceTests
         // Act / Assert: the mutant holds the actual drained arrays and their payloads.
         if (mutant)
         {
-            var failure = Should.Throw<ShouldAssertException>(() => MeasureOutputLiveRows(10000, session, false, grant, true));
-            failure.Message.ShouldContain("weak.Count", Case.Sensitive);
+            Should.Throw<ShouldAssertException>(() => MeasureOutputLiveRows(10000, session, false, grant, true));
+            _outputPrefixAlive.ShouldBe(256);
         }
-        else { MeasureOutputLiveRows(10000, session, false, grant).ShouldBeGreaterThan(0); }
+        else
+        {
+            MeasureOutputLiveRows(10000, session, false, grant).ShouldBeGreaterThan(0);
+            _outputPrefixAlive.ShouldBe(0);
+        }
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
-        _output.WriteLine($"OUTPUT_PREFIX|mutant={mutant}|weakCheck={(mutant ? "rejected" : "passed")}");
+        _output.WriteLine($"OUTPUT_PREFIX|mutant={mutant}|alive={_outputPrefixAlive}|weakCheck={(mutant ? "rejected" : "passed")}");
     }
 }

@@ -13,17 +13,21 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Unwritable retained output refuses CS05067 before any temporary write (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Unwritable known output refuses CS05067 before any temporary write (#1789)")]
     [InlineData(0, 0L)]
     [InlineData(15, 0L)]
     [InlineData(31, 0L)]
     [InlineData(0, 67108864L)]
     [InlineData(15, 67108864L)]
     [InlineData(31, 67108864L)]
-    public async Task Add_UnwritableRetainedOutput_ShouldRefuseBeforeQuota(int position, long quota)
+    [InlineData(32, 0L)]
+    [InlineData(32, 67108864L)]
+    [InlineData(31, 0L, 10000, 512)]
+    [InlineData(31, 67108864L, 10000, 512)]
+    public async Task Add_UnwritableKnownOutput_ShouldRefuseBeforeQuota(int position, long quota, int wideLength = 18000, int ordinaryLength = 2048)
     {
         // Arrange: all 32 rows fit exactly; the following row triggers the handoff.
-        var rows = Enumerable.Range(0, 32).Select(i => new object?[] { new string('x', i == position ? 18000 : 2048) }).ToArray();
+        var rows = Enumerable.Range(0, 32).Select(i => new object?[] { new string('x', i == position ? wideLength : ordinaryLength) }).ToArray();
         long grant = rows.Sum(SqlSelectMemory.VectorBytes);
         await using var engine = await Create("unwritable-prefix", grant, quota: quota);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
@@ -35,8 +39,8 @@ public sealed partial class SqlSortSpillConformanceTests
         try
         {
             // Act
-            var failure = Should.Throw<DatabaseException>(() => collector.Add([new string('p', 2048)], [], session));
-            _output.WriteLine($"UNWRITABLE_PREFIX|position={position}|quota={quota}|code={failure.Diagnostics[0].Code}|writes={writes}");
+            var failure = Should.Throw<DatabaseException>(() => collector.Add([new string('p', position == 32 ? wideLength : ordinaryLength)], [], session));
+            _output.WriteLine($"UNWRITABLE_PREFIX|position={position}|width={wideLength}|quota={quota}|code={failure.Diagnostics[0].Code}|writes={writes}");
             // Assert
             failure.Diagnostics[0].Code.ShouldBe("CS05067"); writes.ShouldBe(0);
         }
@@ -57,15 +61,19 @@ public sealed partial class SqlSortSpillConformanceTests
         var metrics = new SqlStatementMetrics();
         bool draining = false;
         SqlOutputSpool? output = null;
-        SqlRowCollector.ObserveSpill = phase => { if (phase == "output-drained") { draining = true; } };
+        object?[] arriving = [null];
+        SqlRowCollector.ObserveSpill = phase =>
+        {
+            if (phase == "output-drained") { draining = true; arriving[0] = new string('x', 18000); }
+        };
         try
         {
             if (quota > 0) { output = SqlOutputSpool.Add(rows, ["first"], ref memory, metrics, 1048576, session, default); }
             // Act
             var failure = Should.Throw<DatabaseException>(() =>
             {
-                if (output is not null) { output.Append([new string('x', 18000)], default); }
-                else { SqlOutputSpool.Add(rows, [new string('x', 18000)], ref memory, metrics, 1048576, session, default); }
+                if (output is not null) { output.Append(arriving, default); }
+                else { SqlOutputSpool.Add(rows, arriving, ref memory, metrics, 1048576, session, default); }
             });
             _output.WriteLine($"UNWRITABLE_APPEND|quota={quota}|draining={draining}|code={failure.Diagnostics[0].Code}");
             // Assert
@@ -100,26 +108,42 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData("domain")]
     public async Task ExecuteAsync_ExcludedCopyCredit_ShouldKeepAdmission(string shape)
     {
-        // Arrange: NULL sources nearly fill the grant; a full copy buffer cannot fit.
-        await using var engine = await Create("excluded-credit", 65000);
+        // Arrange: sources fit, but a full copy buffer cannot fit alongside them.
+        // Wide recursive rows leave room for the recursive reader's own reservations.
+        bool recursive = shape == "recursive";
+        int count = recursive ? 210 : 1000;
+        await using var engine = await Create("excluded-credit", recursive ? 524288 : 65000);
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         if (shape == "domain")
         { await session.ExecuteAsync("CREATE DOMAIN guarded AS TEXT CHECK(JSON_VALUE('[1]', '$[0]' RETURNING BIGINT)=1)"); }
-        await session.ExecuteAsync("CREATE TABLE t(note " + (shape == "domain" ? "guarded" : "TEXT") + ")");
-        for (int first = 0; first < 1000; first += 200)
-        { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Repeat("(NULL)", 200))); }
+        if (!recursive)
+        {
+            await session.ExecuteAsync("CREATE TABLE t(note " + (shape == "domain" ? "guarded" : "TEXT") + ")");
+            for (int first = 0; first < count; first += 200)
+            { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Repeat("(NULL)", Math.Min(200, count - first)))); }
+        }
         string source = shape switch
         {
-            "recursive" => "WITH RECURSIVE r(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM r WHERE n<1) SELECT note FROM t",
+            "recursive" => $"WITH RECURSIVE r(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM r WHERE n<{count - 1}) SELECT RPAD(CAST(n AS TEXT),1024,'x') AS note FROM r",
             "json" => "SELECT JSON_VALUE('null', '$' RETURNING VARCHAR(10)) AS note FROM t",
             _ => "SELECT note FROM t",
         };
-        // Act
-        var exception = await Record.ExceptionAsync(async () => await session.ExecuteAsync("CREATE TABLE archive AS " + source));
+        long admitted = 0; int encoded = 0;
+        SqlPlanExecutor.TableAsSourceAdmitted = bytes => admitted = bytes;
+        SqlPlanExecutor.TableAsRecordEncoded = _ => encoded++;
+        Exception? exception;
+        try
+        {
+            // Act
+            exception = await Record.ExceptionAsync(async () => await session.ExecuteAsync("CREATE TABLE archive AS " + source));
+        }
+        finally { SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsRecordEncoded = null; }
         string code = exception is DatabaseException failure ? failure.Diagnostics[0].Code! : exception is null ? "ok" : exception.GetType().Name;
-        _output.WriteLine($"EXCLUDED_CREDIT|shape={shape}|code={code}");
+        _output.WriteLine($"EXCLUDED_CREDIT|shape={shape}|code={code}|admitted={admitted}|encoded={encoded}");
         // Assert
+        admitted.ShouldBeGreaterThan(0);
+        if (recursive) { encoded.ShouldBeGreaterThan(0); }
         code.ShouldBe("CS05067"); database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse();
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
