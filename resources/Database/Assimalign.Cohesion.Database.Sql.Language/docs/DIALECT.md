@@ -102,7 +102,8 @@ LIMIT/OFFSET also stops projection and sequences at the fitting boundary.
 | Stored integer columns, declared integer calls, sequences, stored bounded NUMERIC columns/casts, numeric constants | Can establish the SUM/AVG magnitude proof; pseudo-type calls, derived/Null-typed columns, unbounded NUMERIC, floating sums and unproven compound inputs retain CS05067 |
 | Encoded row | At most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; each phase's G is its remaining grant after active reader buffers and must admit the existing external sorter |
 | Input-order output spool | The remaining-grant record bound above, without the partition record's 16,384 B cap; wide projections remain admitted when their codec and decoded overlap fit |
-| STRING_AGG/ARRAY_AGG, aggregate DISTINCT/ORDER BY, statistical/application accumulators, grouping sets, direct window-over-group owners | Existing refusal/ownership; independent nested relation bodies inherit SELECT permission under SQ-L4a |
+| Direct window-over-group owners | Partitioned windows inherit eligible hash-group input/output spilling under SQ-L4b; unsupported group state retains its existing refusal |
+| STRING_AGG/ARRAY_AGG, aggregate DISTINCT/ORDER BY, statistical/application accumulators, grouping sets | Existing refusal/ownership; independent nested relation bodies inherit SELECT permission under SQ-L4a |
 | Deferred collation, second key family, unsupported cells or application-binary cells | CS05067 |
 | Join-output hash DISTINCT | Existing memory refusal; join execution is unchanged in SQ-L3a |
 | Subquery-bearing group inputs/expressions or unproved MIN/MAX argument families | Existing refusal; hash eligibility remains conservative |
@@ -496,8 +497,40 @@ key payloads and partition scratch reserve the statement grant before retention;
 an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first. Every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
 Reference-identity ownership avoids duplicate payload charges; consumed input rows and
-partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
+partition state release as described under SQ-W3 below. Partitioned stages can spill under SQ-L4b below. LIMIT cannot truncate the
 input partitions. Window-free queries retain their existing plan and object layouts.
+
+### Partitioned window spill (#1789, SQ-L4b)
+
+With temporary space, an eligible PARTITION BY window spools its completed input on the
+existing grant refusal. Each sort group evaluates keys in input order, sorts by partition,
+ordering and input ordinal, then computes one charged partition at a time with the existing
+frame code. Output sorts back by ordinal before the next group and final projection.
+Compatible groups carry their saved keys; their functions still execute group by group.
+Observed unordered order, peer ties, DISTINCT's first representative, LIMIT, volatile calls,
+sequence values, expression errors and RecordsExamined retain the fitting path's behavior.
+Eligible hash-aggregation output may feed a window. Unsupported grouped state retains its
+existing refusal. CTAS uses the same source path; INSERT SELECT keeps #1828's existing policy.
+
+| Window state | Capacity |
+| --- | --- |
+| Stage input/output run | At most 16,384 encoded bytes per row, sharing the outer statement's temp quota; no slot in the eight-result session limit |
+| Sort arena | Remaining statement grant after active reader and fixed stage state, less 32,768 B construction allowance; record bound admits at least a two-way merge |
+| Partition/frame buffer | Must fit the remaining statement grant; a single larger partition and OVER () retain CS05079 |
+| Handoff scratch | At most 131,072 fixed bytes beyond the grant; real-heap verification uses G + 655,360 B including runtime slack and rejects retention mutants |
+| Deferred collation, unsupported key family or unencodable cell | Existing refusal, without approximate encoding; codec/record refusals use CS05067 |
+| Correlated/deferred frames, recursion, SQL/JSON and DML sources | Existing ownership and refusal |
+
+Fitting statements use the existing charges. A later refusal restarts only when no
+restart-sensitive expression can be repeated, restoring its visit count; otherwise it keeps
+the original refusal. If an attempted memory/quota/floor fallback cannot finish, it preserves
+that original memory code/message, with its temp cause retained as diagnostic exception data.
+The 1,000,000-visit cap and CS05084/CS05094 are unchanged. EXPLAIN ANALYZE includes the stage's
+spilled bytes, runs and merge passes. Stage runs close on completion and every failure or
+owner termination; consumed-run cleanup cannot replace the computed outcome. Startup sweeping
+removes crash leftovers. No persistent or wire format changes. The executable conformance
+corpus covers grant boundaries, quota zero, frames/navigation, shared sorts, grouped input,
+CTAS, volatile/sequence evaluation, crash images and real live-heap retention mutants.
 
 Views render, compare and reload window expressions and named definitions through canonical SQL;
 no disk or wire version changes. Reference semantics were re-derived from PostgreSQL
@@ -680,7 +713,7 @@ Scalar, EXISTS and IN/quantified subquery caches share this admission path. Plai
 clear their owned source cells and buffers after copying the cached values, including unread
 EXISTS rows, so completed async frames cannot keep discarded payloads alive across admission. Computed IN-list
 inputs use normal expression evaluation and retention; ARRAY subqueries remain unsupported.
-There is no spill, and success/refusal/cancellation releases the entire grant. Window-free
+Partitioned stages can spill under SQ-L4b; success/refusal/cancellation releases the entire grant. Window-free
 queries retain their existing layouts and allocation costs. No public accumulator contract,
 compiled-schema/catalog version or wire format changed.
 

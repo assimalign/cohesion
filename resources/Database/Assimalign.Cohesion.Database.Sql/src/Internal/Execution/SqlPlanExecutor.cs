@@ -403,7 +403,8 @@ internal sealed partial class SqlPlanExecutor
                 {
                     var output = ProjectRow(inputs.Current, projections, evaluator, cancellationToken);
                     if (skip > 0) { skip--; continue; }
-                    SqlWindowMemory.For(_metrics)?.Retain(output);
+                    if (SqlWindowInputSpool.Retain(projected, output, _metrics, _definitions.StatementMemoryBudget, spillOwner, cancellationToken))
+                    { if (--remaining == 0) { break; } continue; }
                     if (retainRows is null || projected.Count < retainRows)
                     {
                         if (outputSpool is not null)
@@ -426,6 +427,8 @@ internal sealed partial class SqlPlanExecutor
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
+                if (SqlWindowInputSpool.For(projected) is not null)
+                { spilled = SqlWindowInputSpool.Take(projected, ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns); return []; }
                 if (outputSpool is { } completed)
                 {
                     var result = completed.Take(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns, cancellationToken,
@@ -551,7 +554,7 @@ internal sealed partial class SqlPlanExecutor
         catch (Exception failure) { if (unorderedRows is not null) { SqlOutputSpool.Release(unorderedRows, failure); } throw; }
         finally
         {
-            try { if (unorderedRows is not null) { SqlOutputSpool.Release(unorderedRows); } }
+            try { if (unorderedRows is not null) { SqlWindowInputSpool.Release(unorderedRows); SqlOutputSpool.Release(unorderedRows); } }
             finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref outputBytes); }
         }
     }

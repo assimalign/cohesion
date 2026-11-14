@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -69,7 +70,9 @@ internal sealed partial class SqlRowCollector : IDisposable
         if (spillOwner is not null && _spills.TryGetValue(this, out var spill))
         { AppendSpilled(spill, output, keys); _visited++; return output; }
         var windowMemory = SqlWindowMemory.For(_metrics);
-        windowMemory?.Retain(output);
+        if (_orderBy.Count == 0 && SqlWindowInputSpool.Retain(_rows, output, _metrics, _budget, spillOwner, _cancellationToken))
+        { _visited++; return output; }
+        if (_orderBy.Count > 0) { windowMemory?.Retain(output); }
         if (keys.Length > 0) { windowMemory?.Retain(keys); }
         long ordinal = _visited++;
         if (_orderBy.Count == 0)
@@ -180,6 +183,10 @@ internal sealed partial class SqlRowCollector : IDisposable
         return _rows;
     }
 
+    internal bool HasWindowInput => SqlWindowInputSpool.For(_rows) is not null;
+    internal SqlWindowInputSpool? TakeWindowInput(IReadOnlyList<DatabaseColumn> columns)
+        => SqlWindowInputSpool.For(_rows) is not null ? SqlWindowInputSpool.Take(_rows, columns) : null;
+
     private void ReserveRow(object?[] output)
     {
         long bytes = _memory.RowBytes(output, out bool wide);
@@ -214,6 +221,7 @@ internal sealed partial class SqlRowCollector : IDisposable
     {
         try
         {
+            SqlWindowInputSpool.Release(_rows);
             try { SqlOutputSpool.Release(_rows); }
             catch (SqlExecutionException) { /* Preserve the initiating evaluator/cancellation failure. */ }
             if (_spills.TryGetValue(this, out var spill)) { _spills.Remove(this); try { spill.Dispose(); } catch (SqlExecutionException) { /* Storage counted cleanup; preserve the statement outcome during unwinding. */ } }

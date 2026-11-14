@@ -361,7 +361,8 @@ the live ≤ G + 262,144 bound holds from the handoff onward, when measured repl
 | Rows in partitions or ordinal spool | Private SQ-L2 row encoding, at most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; each phase's G is its remaining grant after active reader buffers and must admit SQ-L2's sorter |
 | Input-order source/output spool | Existing SQ-L2 grant-derived record bound (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192 B, without the hash partition's 16,384 B cap; output projection rows reserve their codec/page/decoded overlap from the same ledger |
 | STRING_AGG, ARRAY_AGG, DISTINCT/ordered aggregates, statistical or application accumulators | Existing CS05067 refusal; no spill permission |
-| Grouping sets, direct window-over-group owners, correlated/deferred frames, SQL/JSON, DML | Existing ownership and refusal; independent nested relation bodies inherit SELECT permission under SQ-L4a |
+| Direct window-over-group owners | SQ-L4b passes permission through the existing conservative hash-aggregation output owner; grouping sets, ordered/statistical/application group state and deferred/correlated inputs retain their existing refusal |
+| Grouping sets, correlated/deferred frames, SQL/JSON, DML | Existing ownership and refusal; independent nested relation bodies inherit SELECT permission under SQ-L4a |
 | Subquery-bearing group inputs/expressions or unproved MIN/MAX argument families | Existing refusal; hash eligibility remains conservative |
 | Deferred collation, second key family, application-binary cells, unsupported or oversized encoded cells | CS05067; no approximate key, state or result |
 
@@ -421,7 +422,7 @@ between processes, so partition membership, batch/pass counts and EXPLAIN counte
 Near the eight-level limit, a statement may succeed in one process and refuse in another;
 the equality-compatible hash and existing pass limit are unchanged.
 
-The commerce-shaped default-grant probe completes a 1.5-million-row annual repeat-customers slice with 250,000 groups. The 500,000-product category-rank CTE/window shape inherits nested aggregation spill permission under SQ-L4a; its window remains SQ-L4b work. The 800,000-row NOT IN child first refuses its materialized SELECT input, before completing the eager membership vector. The eager NOT IN input/vector remains SQ-L4c work. These probes preserve those explicit scope boundaries.
+The commerce-shaped default-grant probe completes a 1.5-million-row annual repeat-customers slice with 250,000 groups. The 500,000-product category-rank CTE/window shape inherits nested aggregation spill permission under SQ-L4a and partitioned window spill under SQ-L4b. The 800,000-row NOT IN child first refuses its materialized SELECT input, before completing the eager membership vector. The eager NOT IN input/vector remains SQ-L4c work. These probes preserve those explicit scope boundaries.
 
 No durable write or flush boundary is added. Crash images captured at partition append
 and ordinal-merge completion, with the fault-injecting durable recorder armed, reopen
@@ -436,7 +437,7 @@ as exception data.
 
 A root plain SELECT may spill ORDER BY, its bounded OFFSET + LIMIT heap, and ordered
 DISTINCT when the existing reservation refuses CS05067. A fitting collector keeps its existing representation; application-binary provenance
-accounting is described below. Permission starts with an explicit root argument and independent nested SELECT bodies inherit it. Correlated/deferred frames, recursion, windows and grouping sets retain their existing operator paths. CTAS grants permission to its source as described below. DML sources
+accounting is described below. Permission starts with an explicit root argument and independent nested SELECT bodies inherit it. Correlated/deferred frames, recursion, unpartitioned or oversized window partitions and grouping sets retain their existing operator paths. CTAS grants permission to its source as described below. DML sources
 gain no spill permission and keep their existing policy: INSERT SELECT sort/output
 buffers bypass SELECT charging under _isDml; that budgeting gap belongs to #1828.
 An ordered index scan omits sorting and can spool its output under SQ-L4a.
@@ -1234,7 +1235,7 @@ key payloads and partition scratch reserve the statement grant before retention;
 an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first. Every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
 Reference-identity ownership avoids duplicate payload charges; consumed input rows and
-partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
+partition state release as described under SQ-W3 below. Partitioned stages can spill as described under SQ-L4b below. LIMIT cannot truncate the
 input partitions. Window-free queries retain their existing plan and object layouts.
 Named-window enumeration uses separate iterators so extra retained enumerators do not
 increase ordinary query or persisted-view traversal allocations.
@@ -1421,7 +1422,7 @@ Scalar, EXISTS and IN/quantified subquery caches share this admission path. Plai
 clear their owned source cells and buffers after copying the cached values, including unread
 EXISTS rows, so completed async frames cannot keep discarded payloads alive across admission. Computed IN-list
 inputs use normal expression evaluation and retention; ARRAY subqueries remain unsupported.
-There is no spill, and success/refusal/cancellation releases the entire grant. Window-free
+Partitioned stages can spill under SQ-L4b; success/refusal/cancellation releases the entire grant. Window-free
 queries retain their existing layouts and allocation costs. No public accumulator contract,
 compiled-schema/catalog version or wire format changed.
 
@@ -1429,6 +1430,61 @@ The committed full-output fixture admits 138,961 two-window rows and 162,448 mov
 rows under the default 64 MiB grant, with the next row refused and the grant released.
 The former 2,000-row shrinking-SUM cap refusal now succeeds with 2,000 input visits and
 1,999 inverse transitions, while Release guards retain the window-free allocation costs.
+
+### Partitioned window spill (#1789, SQ-L4b)
+
+An eligible window root keeps the outer spill owner for its completed input, including
+join matches and eligible hash-group output. The existing window admission is tried first.
+On refusal, atomic row admission unwinds its partial references and drains evaluated input
+in encounter order to a statement-owned run. Fitting inputs, charges and frame evaluation
+remain on the existing path. A later stage refusal may restart from saved input only when
+the existing restart-sensitivity rule excludes sequences, volatile calls, subqueries and
+application aggregates from every expression already reachable in that stage; the shared
+visit counter is restored before retry. Input predicates and projections are never rerun.
+
+Each group evaluates keys in input order after the preceding group's functions. An external
+sort uses partition keys, ordering keys and input ordinal. One partition is admitted to the
+window ledger, and the existing partition/frame code computes it once. Completed rows carry
+their saved keys to an output run, which sorts back by ordinal before the next group or final
+projection. Compatible successor groups reuse saved keys without evaluating them again.
+They make a separate pass so all of one group's functions finish before the next group's
+offsets or arguments; fusing shared groups per partition would change volatile calls and
+first errors. All reads are forward scans; Storage's API is unchanged.
+
+Stage runs share the statement's other temp quota and do not register as client results or
+relation caches. They close at stage end, error, cancellation or session/engine termination;
+a consumed run's close failure is counted by Storage and does not replace the computed
+outcome. Final projection runs in input order through existing DISTINCT, ORDER BY and output
+owners. Nested spilled readers reserve on the outer statement ledger. No page latch crosses
+a temporary call. Each spilled WindowAgg in EXPLAIN ANALYZE reports its key/ordinal sort
+runs and merge passes, with byte/peak snapshots of the shared temporary statement owner.
+
+Every group must have PARTITION BY and fixed key collations. A partition larger than the
+remaining grant, including OVER (), retains CS05079; concurrent statement totals retain
+CS05067. Codec/family/record refusals retain CS05067. An attempted memory/quota/floor fallback
+which cannot complete preserves the original memory refusal and message, with the temp cause
+in exception data. No diagnostic, persistent format, journal or MVCC contract changes.
+Correlated/deferred frames, SQL/JSON, recursion and DML sources keep their existing paths.
+Grouped input uses hash aggregation's existing eligibility; grouping sets, ordered or opaque
+group state and unproved hash expressions keep refusing rather than replaying expressions.
+
+Sequential stage records are capped at 16,384 B. Sort arenas consume only the grant remaining
+after the active reader and fixed stage charges, leaving 32,768 B for construction; their
+record bound also admits a two-way merge. One writer and capped record/key construction use
+at most 131,072 B of handoff scratch beyond the grant. During-operation live-heap tests use
+G + 655,360 B, including 524,288 B runtime slack, at two partition counts; minima of three
+independently based executions reject both a retained decoded row per partition and a boxed
+value per decoded row. Opaque application accumulator state remains application-owned.
+
+The new temp boundaries are input seal, key-sort completion, partition-output seal and
+ordinal-sort completion. They add no durable write or flush boundary. Fault-injecting CTAS
+images at each boundary and every existing reservation/copy/publication write, flush and
+length boundary reopen to the exact source and either absent or complete destination. Copied
+temp crash images are swept before reopening; existing delete-on-close and startup sweeping
+also cover abrupt process termination. The 1,000,000 recomputation visit cap is unchanged.
+PostgreSQL's locally rechecked executor/nodeWindowAgg.c:1359-1441 spools a partition into
+tuplestore; this implementation retains the existing SQL frame evaluator and a statement
+grant, with an explicit oversized-partition refusal until paged partition access (SQ-L4d).
 
 Independent membership tests cover every legal bound category and all exclusions in ROWS,
 GROUPS and all twelve supported RANGE key types, both directions and NULL placements;

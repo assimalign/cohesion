@@ -71,20 +71,33 @@ public sealed partial class SqlSortSpillConformanceTests
             "WITH revenues AS (SELECT p.category_id,p.product_id,SUM(i.line_total) AS revenue FROM products p INNER JOIN order_items i ON p.product_id=i.product_id GROUP BY p.category_id,p.product_id), ranked AS (SELECT category_id,product_id,revenue,RANK() OVER(PARTITION BY category_id ORDER BY revenue DESC) AS revenue_rank FROM revenues) SELECT category_id,product_id,revenue,revenue_rank FROM ranked WHERE revenue_rank<=3 ORDER BY category_id,revenue_rank,product_id",
             "SELECT order_id,customer_id,order_date,total FROM orders WHERE status='paid' AND order_date<@end AND order_id NOT IN(SELECT order_id FROM shipments) ORDER BY order_date,order_id",
         ];
-        // Revenues must complete its nested aggregation. The remaining window input
-        // and eager NOT IN vector belong to the following SQ-L4 runs.
+        // SQ-L4b completes the category-rank stage; the eager NOT IN vector remains SQ-L4c.
         foreach (string sql in remaining)
         {
+            if (sql.StartsWith("WITH", StringComparison.Ordinal))
+            {
+                await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql, parameters, guard.Token))
+                {
+                    long count = 0;
+                    await foreach (var row in result.GetRowsAsync(guard.Token))
+                    {
+                        long category = count / 1250;
+                        row.GetInt64(0).ShouldBe(category); row.GetInt64(1).ShouldBe(category + count % 1250 * 400);
+                        row.GetValue(2).ShouldBe(1m); row.GetInt64(3).ShouldBe(1); count++;
+                    }
+                    count.ShouldBe(500000);
+                    SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull().Batches.ShouldBeGreaterThan(0);
+                    _output.WriteLine($"COMMERCE_WINDOW|rows={count}|runs={SqlHashSpillMetrics.For(session.LastStatementMetrics!)!.Runs}|examined={session.LastStatementMetrics!.RecordsExamined}");
+                }
+                session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+                TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+                continue;
+            }
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, parameters, guard.Token));
             error.Diagnostics.ShouldContain(d => d.Code == "CS05067");
             var metrics = session.LastStatementMetrics!;
             _output.WriteLine($"COMMERCE_REMAINING|shape={(sql.StartsWith("WITH", StringComparison.Ordinal) ? "category-rank-window" : "unshipped-orders")}|code={error.Diagnostics[0].Code}|peak_memory={metrics.PeakHashMemoryBytes}|examined={metrics.RecordsExamined}|message={error.Message}");
             _output.WriteLine($"COMMERCE_STACK|{error.InnerException?.StackTrace ?? error.StackTrace}");
-            if (sql.StartsWith("WITH", StringComparison.Ordinal))
-            {
-                (error.InnerException?.StackTrace ?? error.StackTrace)!.ShouldContain("ExecuteWindowAggregateAsync", Case.Sensitive);
-                SqlHashSpillMetrics.For(metrics).ShouldNotBeNull().Batches.ShouldBeGreaterThan(0);
-            }
             metrics.HashMemoryBytes.ShouldBe(0); metrics.PlainSelectMemoryBytes.ShouldBe(0);
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }

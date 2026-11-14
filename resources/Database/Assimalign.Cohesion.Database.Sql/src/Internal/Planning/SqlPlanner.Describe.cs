@@ -243,7 +243,8 @@ internal sealed partial class SqlPlanner
                                 "; boundary_visits=" + group.Functions.Sum(function => metrics.Analysis(function)?.WindowBoundaryVisits ?? 0)) +
                             "; functions=" + string.Join(", ", group.Functions.Select(function => function.Name)) +
                             "; sort_shared=" + group.SortShared.ToString().ToLowerInvariant() +
-                            (metrics?.ActualCandidates(group.Functions) is { } sorts ? "; sort_count=" + sorts : ""), actual: metrics?.ActualCandidates(group));
+                            (metrics?.ActualCandidates(group.Functions) is { } sorts ? "; sort_count=" + sorts : "") +
+                            SqlWindowSpillMetrics.Detail(metrics, group), actual: metrics?.ActualCandidates(group));
                         windowParent = groupId;
                     }
                     Visit(window.Input, windowParent);

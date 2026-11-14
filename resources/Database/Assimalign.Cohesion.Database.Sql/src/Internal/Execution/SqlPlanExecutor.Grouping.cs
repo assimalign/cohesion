@@ -50,8 +50,10 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             input = (DatabaseResultSet)await (RecursiveState is null
-                ? spillOwner?.Database.Engine.TempSpace is not null && IsPlainRetentionInput(plan.Input) && CanPipelineSelectRetention()
-                    ? ExecuteSpillRootAsync(plan.Input, statement, cancellationToken, spillOwner, null, plan)
+                ? spillOwner?.Database.Engine.TempSpace is not null && IsPlainRetentionInput(plan.Input)
+                    && (CanPipelineSelectRetention() || SqlWindowMemory.For(_metrics) is not null)
+                    ? ExecuteSpillRootAsync(plan.Input, statement, cancellationToken, spillOwner, null,
+                        SqlWindowMemory.For(_metrics) is null ? plan : null)
                     : ExecuteAsync(plan.Input, statement, cancellationToken)
                 : RecursiveGroupInputAsync(plan, statement, cancellationToken)).ConfigureAwait(false);
             hashInput = input as HashGroupInput;

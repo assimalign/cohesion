@@ -28,10 +28,11 @@ internal sealed partial class SqlPlanExecutor
         => spillOwner?.Database.Engine.TempSpace is not null && !_isDml && RecursiveState is null
             && SqlWindowMemory.For(_metrics) is null
             && _subqueryValues is not { HasCorrelatedQueries: true }
-            && plan is SqlSelectPlan or SqlJoinPlan or SqlGroupPlan or SqlSystemViewPlan or SqlConstantPlan or SqlWithPlan or SqlSubqueryPlan
+            && plan is SqlSelectPlan or SqlJoinPlan or SqlGroupPlan or SqlSystemViewPlan or SqlConstantPlan or SqlWithPlan or SqlSubqueryPlan or SqlWindowAggregatePlan
             && StatementInput(plan) is SqlRelationPlan
             && plan is not SqlGroupingSetsPlan && !plan.ContainsRecursion && !PlanUsesJson(plan, cancellationToken)
-            && (plan is not SqlSubqueryPlan subquery || !subquery.Queries.Any(query => query.IsCorrelated || query.IsDeferred));
+            && (plan is not SqlSubqueryPlan subquery || !subquery.Queries.Any(query => query.IsCorrelated || query.IsDeferred))
+            && (plan is not SqlWindowAggregatePlan window || !_definitions.ForceSelectRetentionBasePath && CanSpillWindow(window));
 
     private bool CanSpillTableAs(SqlCreateTableAsPlan plan, CancellationToken token)
     {
@@ -70,6 +71,7 @@ internal sealed partial class SqlPlanExecutor
                 result = initialized switch
                 {
                     SqlCreateTableAsPlan tableAs => await ExecuteCreateTableAsAsync(tableAs, statement, cancellationToken, spillOwner).ConfigureAwait(false),
+                    SqlWindowAggregatePlan window => await ExecuteWindowAggregateAsync(window, statement, cancellationToken, spillOwner).ConfigureAwait(false),
                     SqlSelectPlan scan => ExecuteSelect(scan, statement, cancellationToken, null, plan, spillOwner, hashInput),
                     SqlSystemViewPlan view => ExecuteSystemView(view, statement, cancellationToken, plan, spillOwner, hashInput),
                     SqlConstantPlan constant => ExecuteRootConstant(constant, plan, cancellationToken, spillOwner),
@@ -147,6 +149,8 @@ internal sealed partial class SqlPlanExecutor
         SqlRowCount? limit, SqlRowCount? offset, bool isDistinct, SqlExpressionEvaluator evaluator,
         CancellationToken cancellationToken, Collation[]? projectionCollations = null, bool resolveEmptyCollations = true)
     {
+        if (collector.HasWindowInput)
+        { return collector.TakeWindowInput(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns)!; }
         if (!collector.HasSpilled)
         { return FinishSelect(collector.Finish(resolveEmptyCollations), projections, limit, offset, isDistinct, evaluator, cancellationToken, projectionCollations); }
         var columns = ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns;

@@ -30,7 +30,7 @@ internal sealed class SqlOutputSpool : IDisposable
 
     private SqlOutputSpool(SqlDatabaseSession owner, SqlStatementMetrics metrics, long budget)
     {
-        SqlSpillLifetime.CheckCapacity(owner);
+        if (SqlWindowMemory.For(metrics) is null) { SqlSpillLifetime.CheckCapacity(owner); }
         _owner = owner; _metrics = metrics; _budget = budget;
         var shared = SqlHashSpillMetrics.For(metrics)?.JoinStatement;
         _shared = shared is not null;
