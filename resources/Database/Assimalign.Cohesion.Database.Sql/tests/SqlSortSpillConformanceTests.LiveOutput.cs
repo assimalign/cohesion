@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Live output peaks during drain and append obey the grant plus fixed writer bound and reject retained prefixes (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Live output peaks during drain and append stay bounded as row count grows (#1789)")]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
@@ -27,6 +27,7 @@ public sealed partial class SqlSortSpillConformanceTests
         long grant = grouped ? 8388608 : 1048576;
         const long writer = 26392, slack = 524288;
         var peaks = new List<long>();
+        var drainPeaks = new List<long>();
         foreach (int count in new[] { 4000, 16000 })
         {
             var retained = new List<object>();
@@ -38,51 +39,83 @@ public sealed partial class SqlSortSpillConformanceTests
             builder.Functions.Add(SqlScalarFunction.Create("fresh", (long id) =>
             {
                 var text = new string((char)('a' + id % 23), 2048);
-                if (retaining) { retained.Add(text); }
+                if (retaining && grouped) { retained.Add(text); }
                 return text;
             }, volatility: SqlFunctionVolatility.Immutable));
             await using var engine = await builder.BuildAsync();
             await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session, count);
             string sql = grouped ? "SELECT id,MIN(k),fresh(id) FROM t GROUP BY id" : "SELECT id,fresh(id) FROM t";
             await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
-            long minimum = long.MaxValue;
+            long minimum = long.MaxValue, minimumDrain = long.MaxValue;
             for (int execution = 0; execution < 3; execution++)
             {
                 retained.Clear();
-                long baseline = LiveHeap.Read(), peak = 0;
-                int appended = 0, drained = 0, sampled = 0;
+                long baseline = LiveHeap.Read(), peak = 0, drainPeak = 0;
+                int appended = 0, drained = 0, sampled = 0, drainSamples = 0;
+                SqlStatementMetrics? metrics = null;
+                SqlStatementMetrics.AfterMemoryReservation = (current, _) => metrics = current;
+                SqlRowCollector.ObserveBuffer = (phase, row) =>
+                {
+                    if (phase == "output-drain" && retaining && !grouped)
+                    { retained.Add(((object?[])row).Clone()); }
+                };
                 retaining = mutant;
                 SqlRowCollector.ObserveSpill = phase =>
                 {
-                    if (phase == "output-drained") { drained++; Sample(); }
-                    if (phase == "output-append" && ++appended % 512 == 0) { Sample(); }
+                    if (phase == "output-drained") { Sample(true); drained++; if (!grouped) { retained.Clear(); } }
+                    if (phase == "output-append" && ++appended % (drained == 0 ? 16 : 512) == 0)
+                    { Sample(drained == 0); }
                 };
                 try
                 {
-                    // Act: the mutant keeps the prefix already written to the run
-                    // alive until Take, including rows appended after the handoff.
+                    // Act: the root mutant copies drained rows until the drain ends.
+                    // The grouped mutant retains every projected payload until completion.
                     await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
                     // Assert
                     drained.ShouldBe(1); appended.ShouldBe(count); sampled.ShouldBeGreaterThan(1);
+                    drainSamples.ShouldBeGreaterThan(1);
                     minimum = Math.Min(minimum, peak);
+                    minimumDrain = Math.Min(minimumDrain, drainPeak);
                     session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
                     SqlSortSpillMetrics.For(session.LastStatementMetrics).ShouldNotBeNull().Runs.ShouldBe(1);
                     GC.KeepAlive(retained);
                 }
-                finally { SqlRowCollector.ObserveSpill = null; retaining = false; }
-                void Sample() { sampled++; peak = Math.Max(peak, LiveHeap.Read() - baseline); }
+                finally
+                {
+                    SqlRowCollector.ObserveSpill = null; SqlRowCollector.ObserveBuffer = null;
+                    SqlStatementMetrics.AfterMemoryReservation = null; retaining = false;
+                }
+                void Sample(bool duringDrain)
+                {
+                    sampled++;
+                    long live = LiveHeap.Read() - baseline;
+                    peak = Math.Max(peak, live);
+                    if (duringDrain)
+                    {
+                        drainSamples++;
+                        drainPeak = Math.Max(drainPeak, live - (metrics?.HashMemoryBytes ?? 0));
+                    }
+                }
             }
-            peaks.Add(minimum);
-            _output.WriteLine($"OUTPUT_DURING|grouped={grouped}|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|writer={writer}|slack={slack}");
-            void AssertBound() => minimum.ShouldBeLessThanOrEqualTo(grant + writer + slack);
+            peaks.Add(minimum); drainPeaks.Add(minimumDrain);
+            _output.WriteLine($"OUTPUT_DURING|grouped={grouped}|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|writer={writer}|slack={slack}|drainExcess={minimumDrain}");
+            void AssertBound()
+            {
+                minimum.ShouldBeLessThanOrEqualTo(grant + writer + slack);
+                minimumDrain.ShouldBeLessThanOrEqualTo(writer + slack);
+            }
             if (mutant) { Should.Throw<ShouldAssertException>(AssertBound); }
             else { AssertBound(); }
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
-        if (!mutant) { (peaks[1] - peaks[0]).ShouldBeLessThanOrEqualTo(slack); }
+        if (!mutant)
+        {
+            (peaks[1] - peaks[0]).ShouldBeLessThanOrEqualTo(slack);
+            (drainPeaks[1] - drainPeaks[0]).ShouldBeLessThanOrEqualTo(slack);
+        }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Live copy-credit batches obey the fixed 64-record allowance and reject uncharged retained records (#1789, #1838)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Live copy-credit peaks stay bounded as row count grows (#1789, #1838)")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ExecuteAsync_CopyCreditDuringOperation_ShouldBoundLiveHeap(bool mutant)
@@ -90,6 +123,7 @@ public sealed partial class SqlSortSpillConformanceTests
         // Arrange: The NULL source fills G exactly, so no list or record reservation can succeed.
         const long batch = 520472, slack = 32768;
         var excesses = new List<long>();
+        var copyPeaks = new List<long>();
         foreach (int count in new[] { 10000, 100000 })
         {
             long grant = 64L * count;
@@ -113,21 +147,25 @@ public sealed partial class SqlSortSpillConformanceTests
             }
             TableAsPoolCount(TableAsPool(session.Database.DataStorage)).ShouldBe(128);
             var retained = new List<byte[]>();
-            long minimum = long.MaxValue;
+            long minimum = long.MaxValue, minimumCopy = long.MaxValue;
             for (int execution = 0; execution < 3; execution++)
             {
                 retained.Clear();
-                long baseline = LiveHeap.Read(), peak = 0, admitted = 0, smallest = long.MaxValue;
+                long baseline = LiveHeap.Read(), copyBaseline = 0, peak = 0, copyPeak = 0, admitted = 0, smallest = long.MaxValue;
                 int encoded = 0, sampled = 0;
                 SqlStatementMetrics? metrics = null;
                 SqlStatementMetrics.AfterMemoryReservation = (current, _) => metrics = current;
-                SqlPlanExecutor.TableAsSourceAdmitted = bytes => admitted = bytes;
+                SqlPlanExecutor.TableAsSourceAdmitted = bytes => { admitted = bytes; copyBaseline = LiveHeap.Read(); };
                 SqlPlanExecutor.TableAsRecordEncoded = record =>
                 {
                     // Models a copy implementation that lets uncharged batches grow
                     // past 64 records instead of releasing them at each flush.
                     if (mutant) { retained.Add(record); }
-                    if (++encoded % 512 == 0) { sampled++; peak = Math.Max(peak, LiveHeap.Read() - baseline); }
+                    if (++encoded % 512 == 0)
+                    {
+                        sampled++; long live = LiveHeap.Read();
+                        peak = Math.Max(peak, live - baseline); copyPeak = Math.Max(copyPeak, live - copyBaseline);
+                    }
                 };
                 SqlPlanExecutor.TableAsStage = (phase, _) =>
                 { if (phase == "Copied") { smallest = Math.Min(smallest, metrics!.HashMemoryBytes); } };
@@ -142,7 +180,7 @@ public sealed partial class SqlSortSpillConformanceTests
                     TableAsPoolCount(TableAsPool(session.Database.DataStorage)).ShouldBe(128);
                     session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
                     SqlSortSpillMetrics.For(session.LastStatementMetrics).ShouldBeNull();
-                    minimum = Math.Min(minimum, peak);
+                    minimum = Math.Min(minimum, peak); minimumCopy = Math.Min(minimumCopy, copyPeak);
                     GC.KeepAlive(retained);
                 }
                 finally
@@ -151,11 +189,19 @@ public sealed partial class SqlSortSpillConformanceTests
                     SqlPlanExecutor.TableAsRecordEncoded = null; SqlPlanExecutor.TableAsStage = null;
                 }
             }
-            long excess = minimum - grant - batch - slack; excesses.Add(excess);
-            _output.WriteLine($"COPY_CREDIT_DURING|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|batch={batch}|slack={slack}");
+            long excess = minimum - grant - batch - slack; excesses.Add(excess); copyPeaks.Add(minimumCopy);
+            _output.WriteLine($"COPY_CREDIT_DURING|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|batch={batch}|slack={slack}|copyPeak={minimumCopy}");
             if (!mutant) { excess.ShouldBeLessThanOrEqualTo(0); }
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
-        if (mutant) { Should.Throw<ShouldAssertException>(() => excesses.Max().ShouldBeLessThanOrEqualTo(0)); }
+        long growth = copyPeaks[1] - copyPeaks[0];
+        _output.WriteLine($"COPY_CREDIT_GROWTH|mutant={mutant}|growth={growth}|bound=524288");
+        void AssertGrowth() => Math.Abs(growth).ShouldBeLessThanOrEqualTo(524288);
+        if (mutant)
+        {
+            Should.Throw<ShouldAssertException>(AssertGrowth);
+            Should.Throw<ShouldAssertException>(() => excesses.Max().ShouldBeLessThanOrEqualTo(0));
+        }
+        else { AssertGrowth(); }
     }
 }

@@ -72,7 +72,8 @@ internal sealed partial class SqlPlanExecutor
                             bufferBytes = 24L + 64L * 8;
                         }
                         catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
-                            && source is SqlMaterializedResultSet or SqlSpilledResultSet)
+                            && source is SqlMaterializedResultSet or SqlSpilledResultSet
+                            && !plan.ContainsRecursion && !PlanUsesJson(plan, cancellationToken) && CanSpillTableAs(plan, cancellationToken))
                         { /* The first consumed row credits its cells before this fixed buffer is admitted. */ }
                         var batch = new List<byte[]>(64);
                         var domains = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken,
@@ -99,7 +100,8 @@ internal sealed partial class SqlPlanExecutor
                             { bufferBytes = ReserveBoundedTableAsCopy(statement, 536); }
                             try { statement.Metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget); }
                             catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
-                                && source is SqlMaterializedResultSet or SqlSpilledResultSet)
+                                && source is SqlMaterializedResultSet or SqlSpilledResultSet
+                                && !plan.ContainsRecursion && !PlanUsesJson(plan, cancellationToken) && CanSpillTableAs(plan, cancellationToken))
                             {
                                 if (source is SqlMaterializedResultSet retained)
                                 { retained.ReleaseConsumedMemory(statement.Metrics, ref sourceBytes, written + 1); consumingSource = true; }

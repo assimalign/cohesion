@@ -1,6 +1,6 @@
 # The Declared SQL Dialect
 
-## Retained SELECT output spooling (#1789, SQ-L4a; #1838)
+## Retained SELECT output spooling (#1789; #1838)
 
 Unordered root SELECTs, ordered index scans (primary or secondary), unordered CTAS source roots and
 unordered GROUP BY output spool on the existing memory refusal. Independent nested
@@ -9,13 +9,13 @@ their runs and decode rows in encounter order. Fitting results, observed unorder
 volatile calls, sequence values, the first expression error and RecordsExamined are
 unchanged. File engines use their configured temporary space; in-memory engines require
 an explicit TempDirectory. Window, recursive, set, every membership vector (IN, = ANY, > ALL and NOT IN), and joined-DML owners retain
-their existing paths. INSERT SELECT does not spill and keeps its source uncharged (#1828); scope item (2) covers CTAS only.
+their existing paths. INSERT SELECT does not spill and keeps its source uncharged (#1828); CREATE TABLE AS is the only table-writing statement whose source spools.
 
 | Retained output | Capacity |
 | --- | --- |
 | Sequential output/cache run | One encounter-order run; at most 16,384 encoded bytes per row. For encoded length L and decoded cost D, 9,984 + L + 24 + 2D must fit the grant |
 | Sequential writer and encoding scratch | Charged where space permits; at most 26,392 fixed bytes beyond the grant while resident producer state drains |
-| Delivered reader | Workspace plus retained decoded rows and one old/new decoding overlap fit the grant; scalar/EXISTS and materialized group-input readers reserve workspace and decode overlap on the outer live ledger; relation-cache readers also reserve conversion overlap |
+| Delivered reader | Workspace plus retained decoded rows and one old/new decoding overlap fit the grant; scalar/EXISTS readers reserve workspace plus two decoded-row allowances on the outer live ledger; materialized group-input and relation-cache readers reserve W + 4D + 64C there, with workspace W, decoded-row cost D and column count C, including conversion overlap |
 | CTAS source copy | Existing source/batch charges when fitting; after copy refusal, consumed source-cell payloads release before batch admission. The fixed batch may use at most 520,472 B beyond the grant after refusal; 64-row write brackets are unchanged |
 
 No sort is added to unordered delivery. A spooled result starts reading on enumeration,
