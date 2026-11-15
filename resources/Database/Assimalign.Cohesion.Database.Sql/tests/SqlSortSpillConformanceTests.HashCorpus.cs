@@ -122,7 +122,7 @@ public sealed partial class SqlSortSpillConformanceTests
         var spilled = new List<CorpusRun>();
         foreach (long selectedGrant in grants) { spilled.Add(await CreateCorpusEngineAsync(selectedGrant, true)); }
         long[] excesses = grants.Select(_ => long.MinValue).ToArray();
-        int spills = 0, matches = 0;
+        int spills = 0, matches = 0, refusals = 0;
         try
         {
             // Act / Assert: rows, exact temporal representatives, errors, visits and calls.
@@ -156,6 +156,8 @@ public sealed partial class SqlSortSpillConformanceTests
                     actual.Peak.ShouldBeLessThanOrEqualTo(grants[index]);
                     if (actual.Error?.StartsWith("CS05067|", StringComparison.Ordinal) == true)
                     {
+                        refusals++;
+                        _output.WriteLine($"HASH_CORPUS_REFUSAL|test={test}|grant={grants[index]}|{sql}");
                         await using var baseline = await CreateCorpusEngineAsync(grants[index], false);
                         (await ExecuteCorpusAsync(baseline, sql, fail)).Error.ShouldStartWith("CS05067|");
                     }
@@ -170,7 +172,9 @@ public sealed partial class SqlSortSpillConformanceTests
         // Each replaying range needs a spill witness; the default 4 MiB corpus must fit.
         if (grant < 4194304) { spills.ShouldBeGreaterThan(0); }
         else if (statements == 256) { spills.ShouldBe(0); }
+        if (statements == 256 && grant == 1048576 && shards == 2)
+        { refusals.ShouldBe(shard == 0 ? 3 : 1); } // four of 256, versus 30 on c9ac0df64
         for (int index = 0; index < grants.Length; index++)
-        { _output.WriteLine($"HASH_CORPUS_HEAP|seed={corpusSeed}|statements={statements}|range=[{first},{last})|grant={grants[index]}|largest_excess={excesses[index]}|matches={matches}|spills={spills}"); }
+        { _output.WriteLine($"HASH_CORPUS_HEAP|seed={corpusSeed}|statements={statements}|range=[{first},{last})|grant={grants[index]}|largest_excess={excesses[index]}|matches={matches}|spills={spills}|refusals={refusals}"); }
     }
 }

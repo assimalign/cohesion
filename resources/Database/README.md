@@ -38,7 +38,7 @@ signal or the model code; a damaged read never becomes a successful result with 
 every model: engine, database, session, and transaction contracts; the provisioning
 seam and compiled-schema identity; object ownership; value objects; and exceptions.
 It composes the **child roots** `Types`, `Language`, `Storage`, `Transactions`,
-`Indexing`, `Execution`, `Protocol`, and `Security`. The dependency
+`Indexing`, `Execution`, `Text`, `Protocol`, and `Security`. The dependency
 arrow always points **root → child**; a child root never references the area root.
 
 **A project whose name contains a model segment — `*.Sql.*`, `*.Documents.*`,
@@ -127,10 +127,11 @@ In the repo's L1/L2/L3 model (see `docs/programs/DELIVERY_ROADMAP.md`), this are
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts and, since phase 3 of the concrete-types plan, the abstract bases that replace them (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseExecutionSession<TRequest>`, `DatabaseLanguageSession<TRequest>`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`), exceptions, application composition, and object ownership (no schema type since B1) — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`; child roots never reference the root) |
+| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts and, since phase 3 of the concrete-types plan, the abstract bases that replace them (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseExecutionSession<TRequest>`, `DatabaseLanguageSession<TRequest>`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`), exceptions, application composition, and object ownership (no schema type since B1) — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Text`/`Indexing`/`Protocol`/`Security`; child roots never reference the root) |
 | `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
 | `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
 | `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (child root; rolled up by the root) |
+| `Assimalign.Cohesion.Database.Text` | Child root — deterministic versioned `simple`/`english` analysis and immutable tsvector values; Types only ([overview](Assimalign.Cohesion.Database.Text/docs/OVERVIEW.md), [design](Assimalign.Cohesion.Database.Text/docs/DESIGN.md)) |
 | `Assimalign.Cohesion.Database.Types` | Child root — shared scalar type system: identity, comparison/collation, binary encoding |
 | `Assimalign.Cohesion.Database.Execution` | Child root — model-neutral request/result families (Types-only dependency) (`DatabaseRequest`, `DatabaseResult`, `DatabaseResultSet`, `DatabaseRow`) |
 | `Assimalign.Cohesion.Database.Language` | Child root — shared lexer/parser and diagnostic-production infrastructure; diagnostic value types live in Types |

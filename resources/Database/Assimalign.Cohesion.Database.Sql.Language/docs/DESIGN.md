@@ -17,7 +17,7 @@ corpora retain their existing behavior.
 SqlSortSpillConformanceTests extends the executable SQL corpus with root ORDER BY and ordered
 DISTINCT spill, stable evaluation and representative selection, lazy repeatable delivery,
 located CK05 failures and retained-grant refusals. Grammar and wire formats are unchanged.
-DIALECT records the root-only scope and the default quota capacity. The seed 178903
+DIALECT records SELECT spill eligibility and default quota capacity. Unordered root and ordered-index delivery, independent nested SELECT permission, retained relation files, resident hash-aggregation output and consumed CTAS source credit (#1838) share the retained-output checks. The grant sweep compares spilling points with a fitting 64 MiB execution. Quota-zero checks require points needing no temporary space to keep completing; recorded reference points are compared only when supplied. Live bounds catch retention that grows with row count, and a weak-reference assertion catches a kept prefix. The seed 178903
 generator adds 2,048 statements crossing root sources, typed keys, volatile and sequence
 positions, empty windows and row failures; comparisons retain CLR types and exact binary
 and floating-point representations. The hash differential also compares decimal.GetBits,

@@ -213,6 +213,17 @@ internal static class Program
                 }
             }
             Check("spilled ORDER BY releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
+            foreach (string sql in new[] { "SELECT id,k FROM t", "WITH d AS (SELECT id,k FROM t) SELECT * FROM d" })
+            {
+                await using var output = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                Check("unordered output has files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length > 0, true);
+                int count = 0; bool ordered = true;
+                await foreach (var row in output.GetRowsAsync())
+                { ordered &= row.GetInt32(0) == count && row.GetInt32(1) == 3999 - count; count++; }
+                Check("unordered output encounter order", ordered, true);
+                Check("unordered output count", count, 4000);
+            }
+            Check("unordered output releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
             foreach (string sql in new[] { "SELECT id,COUNT(*) FROM t GROUP BY id", "SELECT DISTINCT id FROM t" })
             {
                 await using var hash = (DatabaseResultSet)await session.ExecuteAsync(sql);
@@ -232,6 +243,9 @@ internal static class Program
             Check("spilled DISTINCT CTAS completion", (await session.ExecuteAsync("CREATE TABLE distinct_archive AS SELECT DISTINCT k%3 AS n FROM t ORDER BY id DESC")).AffectedCount, 3L);
             Check("spilled DISTINCT CTAS representatives", await RowsAsync(session, "SELECT n FROM distinct_archive", CancellationToken.None), [[0L], [1L], [2L]]);
             Check("spilled CTAS releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
+            Check("unordered CTAS completion", (await session.ExecuteAsync("CREATE TABLE unordered_archive AS SELECT * FROM t")).AffectedCount, 4000L);
+            Check("unordered CTAS physical order", await RowsAsync(session, "SELECT id,k FROM unordered_archive LIMIT 3", CancellationToken.None), [[0, 3999], [1, 3998], [2, 3997]]);
+            Check("unordered CTAS releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
             await using (var deferred = (DatabaseResultSet)await session.ExecuteAsync("SELECT observe_value(id),id FROM t WHERE id<1000 ORDER BY id"))
             {
                 Check("deferred ORDER BY spills", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length > 0, true);

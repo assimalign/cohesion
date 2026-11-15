@@ -45,7 +45,7 @@ public sealed partial class SqlCreateTableAsTests
     [Theory(DisplayName = "Cohesion Test [Sql] - CTAS: retained source output and encoded batches share and release the statement budget")]
     [InlineData(64)]
     [InlineData(150000)]
-    public async Task ExecuteAsync_RetainedMemoryExceedsBudget_ShouldRefuseAndRelease(long budget)
+    public async Task ExecuteAsync_RetainedMemory_ShouldEnforceBudgetAndRelease(long budget)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -61,12 +61,21 @@ public sealed partial class SqlCreateTableAsTests
         try
         {
             // Act
-            var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "CREATE TABLE copy AS SELECT * FROM src ORDER BY id", timeout.Token));
+            if (budget == 64)
+            {
+                var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "CREATE TABLE copy AS SELECT * FROM src ORDER BY id", timeout.Token));
 
-            // Assert before the worker can reclaim the abandoned build.
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
+                // Assert before the worker can reclaim the abandoned build.
+                failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
+                database.Catalog.GetPendingTableReclamations().ShouldContain(owner);
+            }
+            else
+            {
+                // The fitting source now uses bounded copy credit without temp space (#1789, #1838).
+                await ExecAsync(session, "CREATE TABLE copy AS SELECT * FROM src ORDER BY id", timeout.Token);
+                database.Catalog.GetPendingTableReclamations().ShouldNotContain(owner);
+            }
             owner.ShouldBeGreaterThan(0UL);
-            database.Catalog.GetPendingTableReclamations().ShouldContain(owner);
         }
         finally
         {
@@ -76,12 +85,19 @@ public sealed partial class SqlCreateTableAsTests
 
         // Assert
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
-        database.Catalog.TryGetTable("dbo", "copy", out _).ShouldBeFalse();
+        bool completed = budget != 64;
+        database.Catalog.TryGetTable("dbo", "copy", out _).ShouldBe(completed);
         await ReclaimAsync(database, timeout.Token);
-        database.DataStorage.HasOwnerPages(owner).ShouldBeFalse();
+        database.DataStorage.HasOwnerPages(owner).ShouldBe(completed);
         database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
         database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
-        await ExecAsync(session, "CREATE TABLE copy AS SELECT * FROM src WITH NO DATA", timeout.Token);
+        if (completed)
+        {
+            var rows = await RowsAsync(session, "SELECT id,value FROM copy ORDER BY id", timeout.Token);
+            rows.Select(row => (int)row[0]!).ShouldBe(Enumerable.Range(1, 65));
+            rows.ShouldAllBe(row => Equals(row[1], new string('x', 1024)));
+        }
+        await ExecAsync(session, "CREATE TABLE empty AS SELECT * FROM src WITH NO DATA", timeout.Token);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - CTAS: publication collisions report duplicate names or IF NOT EXISTS no-op")]

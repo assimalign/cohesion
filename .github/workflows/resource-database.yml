@@ -139,6 +139,7 @@ jobs:
             'Assimalign.Cohesion.Database.Storage',
             'Assimalign.Cohesion.Database.Tcp',
             'Assimalign.Cohesion.Database.Testing',
+            'Assimalign.Cohesion.Database.Text',
             'Assimalign.Cohesion.Database.Transactions',
             'Assimalign.Cohesion.Database.Types'
         ]]
@@ -178,6 +179,7 @@ jobs:
   # - the Documents client guard, which drives OQL and document commands through real servers
   #   over InMemory and TCP, checking typed failures and pooled session reuse.
   # - the shared TCP guard, which authenticates and exchanges Ping/Pong with every model.
+  # - the Text guard, which checks analysis, analyzer identities and immutable vector values.
   # All guard projects set PublishAot. Each publish step fails on any IL2xxx/IL3xxx warning in its
   # output, whatever the project promotes to an error (the guard also makes ILC's warnings errors).
   sql-benchmarks:
@@ -301,6 +303,30 @@ jobs:
           }
           if ($checks -notcontains "Database.Tcp NativeAOT: 5/5 model servers passed.") {
             throw "Database.Tcp.AotSample did not complete all five model checks."
+          }
+
+      - name: Publish and run the Text NativeAOT guard
+        shell: pwsh
+        env:
+          MSBUILDDISABLENODEREUSE: '1'
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "text-aot-sample"
+          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Text/samples/Assimalign.Cohesion.Database.Text.AotSample/Assimalign.Cohesion.Database.Text.AotSample.csproj" `
+              --configuration Release `
+              --runtime linux-x64 `
+              --output $output `
+              --nologo 2>&1
+          $log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT publish of Database.Text.AotSample failed with exit code $LASTEXITCODE."
+          }
+          if ($log -match "warning IL[23][0-9]{3}") {
+            throw "NativeAOT publish of Database.Text.AotSample reported IL2xxx/IL3xxx warnings."
+          }
+          $checks = & (Join-Path $output "Assimalign.Cohesion.Database.Text.AotSample")
+          $checks | Write-Host
+          if ($LASTEXITCODE -ne 0 -or $checks -notcontains "Database.Text NativeAOT: 5/5 checks passed.") {
+            throw "Database.Text.AotSample did not complete all five checks."
           }
 
       - name: Publish and smoke-run the NativeAOT statement benchmark

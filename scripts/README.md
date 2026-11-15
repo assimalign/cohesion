@@ -21,6 +21,8 @@ from CI or an agent skill.
 | `New-CohesionWorkItem.ps1` | Search, audit, or create work items using the cohesion-work-items skill's contract. |
 | `build/Test-CohesionSharedSource.ps1` | Exercise shared-source module selection and rejection cases. |
 | `resources/Database/Generate-CollationUnicodeData.ps1` | Regenerate collation tables from checksum-pinned Unicode inputs. |
+| `resources/Database/Generate-TextTokenizerData.ps1` | Regenerate text token classes from checksum-pinned Unicode 17.0 data. |
+| `resources/Database/Generate-TextStemmerOracle.ps1` | Capture the English stemmer and parser fixtures from PostgreSQL 17.11. |
 | `resources/Database/Get-CohesionRoadmapData.ps1` | Read the Database work board and generate roadmap data and HTML. |
 | `resources/Database/Prepare-Q8PhaseInstrumentation.ps1` | Prepare SQL phase instrumentation in an extracted archive beneath `_out/`. |
 | `resources/Web/Measure-OutputCacheCounters.ps1` | Run the output-cache counter experiment; temporarily edits source and restores it in `finally`. |

@@ -21,7 +21,14 @@ internal sealed class SqlSpillLifetime
         { lock (session._results) { session.CheckCapacity(); } }
     }
     private void CheckCapacity()
-    { if (_results.Count >= MaximumResultsPerSession) { throw SqlExecutionException.UndisposedResults(MaximumResultsPerSession); } }
+    {
+        if (_results.Count < MaximumResultsPerSession) { return; }
+        int caches = 0;
+        foreach (var result in _results) { if (result.IsRelationCache) { caches++; } }
+        if (caches == 0) { throw SqlExecutionException.UndisposedResults(MaximumResultsPerSession); }
+        throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SpillRelationCachesLimit, MaximumResultsPerSession, caches));
+    }
 
     internal static void Attach(SqlDatabaseSession owner, SqlSpilledResultSet result)
     {

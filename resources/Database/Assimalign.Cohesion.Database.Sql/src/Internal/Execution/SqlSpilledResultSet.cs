@@ -17,6 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [System.Diagnostics.DebuggerTypeProxy(typeof(SqlSpilledResultSet.DebugView))]
 internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
 {
+    private static System.Runtime.CompilerServices.ConditionalWeakTable<List<object?[]>, SqlSpilledResultSet>? _relations;
     private readonly object _gate = new();
     private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly StorageTempStatement _statement;
@@ -33,7 +34,71 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     private readonly long _limit;
     private bool _disposed;
     private bool _ownsStatement;
+    private bool _relationLease;
     internal Location? Location { get; set; }
+    internal bool IsRelationCache { get; private set; }
+
+    internal void RetainRelation(List<object?[]> rows, SqlStatementMetrics metrics)
+    {
+        if (SqlHashSpillMetrics.AdoptTemp(metrics, _statement)) { _ownsStatement = false; }
+        LazyInitializer.EnsureInitialized(ref _relations).Add(rows, this); _relationLease = true; IsRelationCache = true;
+    }
+    internal long ReserveReader(SqlStatementMetrics metrics, long budget, bool converting = false)
+    {
+        long bytes;
+        lock (_gate)
+        {
+            Check();
+            bytes = WorkspaceBytes + (converting ? 4 : 2) * _maximumDecodedRowBytes
+                + (converting ? 64L * _columns.Count : 0);
+        }
+        metrics.ReservePlainSelectMemory(bytes, budget);
+        return bytes;
+    }
+    internal static void ReleaseRelation(List<object?[]> rows)
+    {
+        var relations = _relations;
+        if (relations is null || !relations.TryGetValue(rows, out var retained)) { return; }
+        relations.Remove(rows); retained.Dispose();
+    }
+    internal static IEnumerable<object?[]> ReadRelation(List<object?[]> rows, SqlStatementMetrics metrics, long budget, CancellationToken token)
+        => _relations?.TryGetValue(rows, out var retained) == true ? retained.ReadValues(metrics, budget, token) : rows;
+
+    private IEnumerable<object?[]> ReadValues(SqlStatementMetrics metrics, long budget, CancellationToken token)
+    {
+        // Relation materialization delivers CHAR through its declared type and copies
+        // binary cells. Four raw-row allowances cover decoding, conversion and old/new
+        // consumer overlap, including a runtime value whose declared type differs.
+        long bytes;
+        lock (_gate) { Check(); bytes = WorkspaceBytes + 4 * _maximumDecodedRowBytes + 64L * _columns.Count; }
+        metrics.ReservePlainSelectMemory(bytes, budget);
+        Cursor? reader = null;
+        try
+        {
+            reader = Open(token);
+            long skip = _offset, left = _limit;
+            while (left != 0 && Read(reader, token, out var row))
+            {
+                if (skip > 0) { skip--; continue; }
+                if (left > 0) { left--; }
+                for (int i = 0; i < row!.Length; i++)
+                { row[i] = SqlBinaryValue.CopyShared(SqlCharacter.Input(SqlCharacter.Output(row[i]), _columns[i].Type)); }
+                yield return row!;
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (reader is not null)
+                {
+                    lock (_gate)
+                    { if (_readers.Remove(reader)) { _readerBytes -= reader.ReservedBytes; } reader.Dispose(); }
+                }
+            }
+            finally { metrics.ReleasePlainSelectMemory(bytes); }
+        }
+    }
     internal bool AdoptStatement(StorageTempStatement statement)
     {
         lock (_gate)
@@ -231,6 +296,9 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     }
     public override ValueTask DisposeAsync()
     {
+        // A relation transfers its result before the materializer's existing await-using
+        // lease closes. The cache/session closes it through Dispose, never through this lease.
+        if (_relationLease) { _relationLease = false; return default; }
         try { Dispose(); return default; }
         catch (Exception exception) { return ValueTask.FromException(exception); }
     }
