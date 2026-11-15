@@ -21,6 +21,7 @@
   <data name="GraphTypeNodeExpected" xml:space="preserve"><value>A node type requires an identifying label followed by IMPLIES or =&gt;.</value></data>
   <data name="GraphTypeImpliesExpected" xml:space="preserve"><value>Expected IMPLIES or =&gt; after the identifying name.</value></data>
   <data name="GraphTypeDuplicate" xml:space="preserve"><value>Graph type declarations contain repeated names or invalid implied labels.</value></data>
+  <data name="GraphTypeNameInvalid" xml:space="preserve"><value>A graph type name must contain a non-whitespace character.</value></data>
   <data name="GraphTypeReferenceMissing" xml:space="preserve"><value>A graph type endpoint alias does not reference a node declaration in this body.</value></data>
   <data name="GqlQueryParserIdentifierVoid" xml:space="preserve"><value>An identifier cannot be empty.</value></data>
   <data name="GqlQueryParserIdentifierVoid2" xml:space="preserve"><value>Expected an identifier.</value></data>

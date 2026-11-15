@@ -498,6 +498,8 @@ public sealed class GqlProfileExecutionTests
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
     [InlineData("SHOW DATABASES")]
+    [InlineData("ALTER CURRENT GRAPH TYPE SET {(p:Person => {name :: STRING}) REQUIRE p.name IS UNIQUE}")]
+    [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A =>),(:B =>),(:A)-[r:R => {p :: STRING}]->(:B) REQUIRE r.p IS UNIQUE}")]
     [InlineData("MATCH (a)~[r]~(b) RETURN a")]
     [InlineData("MATCH (a)<~(b) RETURN a")]
     public async Task Profile_UnsupportedForms_ReportCapabilityDiagnosticAsync(string source)
@@ -619,7 +621,7 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.IntersectAll => query.Composite is { Operator: GqlCompositeOperator.IntersectAll },
         GqlClauses.Otherwise => query.Composite is { Operator: GqlCompositeOperator.Otherwise },
         GqlClauses.AlterCurrentGraphType => query.SchemaCommand?.GraphType is not null,
-        GqlClauses.CreateIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: false, GraphType: null },
+        GqlClauses.CreateIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: false },
         GqlClauses.CreateTextIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: true },
         GqlClauses.DropIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: true },
         GqlClauses.CreateConstraint => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Constraint, Drop: false },

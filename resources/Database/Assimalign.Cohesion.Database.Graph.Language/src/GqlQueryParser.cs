@@ -405,7 +405,23 @@ public sealed partial class GqlQueryParser : QueryParser
             if (patternDepth != 0 && !valuePosition) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
             if (value == "ALTER" && IsWordAt(i + 1, "CURRENT") && IsWordAt(i + 2, "GRAPH") && IsWordAt(i + 3, "TYPE"))
-            { Unsupported("ALTER CURRENT GRAPH TYPE", token); return; }
+            {
+                Unsupported("ALTER CURRENT GRAPH TYPE", token);
+                if (i == start) { return; }
+                i += 3;
+                if (IsWordAt(i + 1, "SET") || IsWordAt(i + 1, "ADD") || IsWordAt(i + 1, "ALTER") || IsWordAt(i + 1, "DROP")) { i++; }
+                if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftBrace)
+                {
+                    int depth = 0;
+                    do
+                    {
+                        i++;
+                        if (_tokens[i].Type == TokenType.LeftBrace) { depth++; }
+                        else if (_tokens[i].Type == TokenType.RightBrace) { depth--; }
+                    } while (i + 1 < _tokens.Count && depth != 0);
+                }
+                continue;
+            }
 
             bool first = i == start;
             var end = token;

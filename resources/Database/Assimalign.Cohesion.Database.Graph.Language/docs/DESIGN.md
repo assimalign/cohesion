@@ -119,24 +119,28 @@ node-only, single-property grammar, name and conditional rules; unsupported comp
 relationship forms keep CK00001. CreateTextIndex is advertised beside CreateIndex and has
 parser, profile execution, Unicode differential and InMemory/TCP conformance cases. No
 ordinary query-expression layout, lexer keyword or wire encoding changes. Graph DESIGN owns
-posting maintenance, runtime parameter selection and the v4 catalog fence. Text access preserves
+posting maintenance, runtime parameter selection and the v5 catalog fence. Text access preserves
 the anchor node and label selected without text indexes, substituting only an eligible
 label scan after exact and relationship candidates compete. DIALECT records the tie rule.
 
 ## Schema DDL (#1738, GQ-D2)
 
 GQ-T2 (#1806) adds ALTER CURRENT GRAPH TYPE and SHOW CURRENT GRAPH TYPE. GqlSchemaCommand
-holds a GqlGraphTypeCommand in the existing query body slot, so ordinary query allocation size is
+holds a GqlGraphTypeCommand with Kind GraphType in the existing query body slot, so ordinary query allocation size is
 unchanged. Its sealed node, edge and property records describe semantic fields; rendering never
 uses source text. The parser uses flat loops for type bodies and resolves optional node aliases
 after the complete body, without nesting recursion. Unsupported constraint definitions, inline
-KEY/UNIQUE and CLOSED/OPEN modes return one CK00001. The ALTER capability is advertised only as
+KEY/UNIQUE, element-level IS/REQUIRE and CLOSED/OPEN modes return one CK00001. DROP accepts
+identifier forms only, including optional declaration aliases; any partial or full body is CK00001.
+An explicit scalar-name table admits only unquoted supported names in both graph types and
+standalone constraints. Duplicate names and variables point at the offending name. The ALTER capability is advertised only as
 ALTER CURRENT GRAPH TYPE; other ALTER positions retain the unsupported-vocabulary entry.
 The clause corpus grows by exactly one; no lexer keywords are added. Empty node types follow
 GQ-T1's model contract, deliberately broader than Neo4j's nonempty-node semantic check.
 GraphTypeDdlTests, GqlGraphTypeParserTests and the InMemory/TCP GraphTypeWireTests pin execution,
 canonical reparse, refusal and availability. DIALECT defines SHOW columns and defaults. Catalog
-v4 already holds all declarations; this run changes no persisted or wire format. Closedness is GQ-T3.
+format 5 marks kind-8 declarations as enforced invariants and refuses v4 and earlier with CG06019
+before any write. Entity and wire formats are unchanged. Closed graph types remain unsupported.
 
 Reference grammar: local Neo4j Cypher25Parser.g4:1280-1410 under
 C:/Source/repos/neo4j/neo4j/community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/.
@@ -342,7 +346,9 @@ return-after-delete are not accepted.
 The executable grammar is:
 
 ```text
-statement    := (query | EXPLAIN query | catalog) [';']
+statement    := (query | EXPLAIN query | catalog | schema-ddl) [';']
+schema-ddl   := ALTER CURRENT GRAPH TYPE (SET | ADD | ALTER | DROP) '{' graph-type-elements? '}'
+              | (CREATE | DROP) standalone-schema-object
 query        := segment (NEXT segment)*
 segment      := stage* [RETURN projections return-tail]
 stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
@@ -413,7 +419,7 @@ sort-item    := predicate [ASC | ASCENDING | DESC | DESCENDING] [NULLS (FIRST | 
 paging       := (OFFSET | SKIP) page-value [LIMIT page-value]
               | LIMIT page-value
 page-value   := unsigned-int64 | parameter
-catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OBJECT OWNERSHIP)
+catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | CONSTRAINTS | CURRENT GRAPH TYPE | OBJECT OWNERSHIP)
 ```
 
 The repeated-colon form of `label-spec` applies to node patterns only; a relationship has one type.

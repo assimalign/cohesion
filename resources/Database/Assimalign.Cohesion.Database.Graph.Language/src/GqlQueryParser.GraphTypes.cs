@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 using Assimalign.Cohesion.Database.Language;
 
@@ -24,7 +23,10 @@ public sealed partial class GqlQueryParser
         var nodes = new List<GqlGraphNodeType>();
         var edges = new List<GqlGraphEdgeType>();
         var aliases = new Dictionary<string, string>(StringComparer.Ordinal);
-        var references = new List<(int Edge, string? Source, string? Target)>();
+        var variables = new HashSet<string>(StringComparer.Ordinal);
+        var nodeNames = new HashSet<string>(StringComparer.Ordinal);
+        var edgeNames = new HashSet<string>(StringComparer.Ordinal);
+        var references = new List<(int Edge, string? Source, Lexeme SourceToken, string? Target, Lexeme TargetToken)>();
         Expect(TokenType.LeftBrace, "'{'");
         while (!Failed && Current.Type != TokenType.RightBrace)
         {
@@ -33,27 +35,48 @@ public sealed partial class GqlQueryParser
             if (Take(TokenType.Minus))
             {
                 Expect(TokenType.LeftBracket, "'['");
-                if (Current.Type != TokenType.Colon) { Identifier(allowKeyword: true); }
+                if (Current.Type != TokenType.Colon)
+                {
+                    var variable = Current;
+                    string name = Name();
+                    if (!Failed && !variables.Add(name)) { Error("CG03011", ErrorMessages.GraphTypeDuplicate, variable); }
+                }
+                if (Failed) { break; }
                 Expect(TokenType.Colon, "':'");
-                string type = Identifier(allowKeyword: true);
+                var typeToken = Current;
+                string type = Name();
+                if (!Failed && !edgeNames.Add(type)) { Error("CG03011", ErrorMessages.GraphTypeDuplicate, typeToken); }
+                if (Failed) { break; }
                 Implies(required: true);
+                if (!Failed && mode == GqlGraphTypeOperation.Drop && Current.Type == TokenType.LeftBrace)
+                { Unsupported("GRAPH TYPE DROP BODY", Current); }
+                if (Failed) { break; }
                 var properties = Properties();
                 Expect(TokenType.RightBracket, "']'"); Expect(TokenType.RightArrow, "'->'");
                 var last = Node();
+                if (!Failed && mode == GqlGraphTypeOperation.Drop &&
+                    (first.Label is not null || first.Alias is not null || last.Label is not null || last.Alias is not null))
+                { Unsupported("GRAPH TYPE DROP BODY", first.Label is not null || first.Alias is not null ? first.NameToken : last.NameToken); }
                 if (!Failed && (first.Implied.Count != 0 || first.Properties.Count != 0 || last.Implied.Count != 0 || last.Properties.Count != 0))
                 { Error("CG00002", ErrorMessages.GraphTypeEndpointExpected, Current); }
-                references.Add((edges.Count, first.Label is null ? first.Alias : null, last.Label is null ? last.Alias : null));
+                references.Add((edges.Count, first.Label is null ? first.Alias : null, first.NameToken, last.Label is null ? last.Alias : null, last.NameToken));
                 edges.Add(new(type, first.Label ?? "", last.Label ?? "", properties));
             }
             else
             {
-                if (!Failed && (first.Label is null || !first.Implies)) { Error("CG00002", ErrorMessages.GraphTypeNodeExpected, Current); }
+                if (!Failed && (first.Label is null || !first.Implies)) { Error("CG00002", ErrorMessages.GraphTypeNodeExpected, first.NameToken); }
+                if (!Failed && mode == GqlGraphTypeOperation.Drop && (first.Implied.Count != 0 || first.Properties.Count != 0))
+                { Unsupported("GRAPH TYPE DROP BODY", first.NameToken); }
+                if (!Failed && !nodeNames.Add(first.Label ?? "")) { Error("CG03011", ErrorMessages.GraphTypeDuplicate, first.NameToken); }
                 nodes.Add(new(first.Label ?? "", first.Implied, first.Properties));
-                if (first.Alias is { } alias && !aliases.TryAdd(alias, first.Label ?? "") && !Failed)
-                { Error("CG03011", ErrorMessages.GraphTypeDuplicate, Current); }
+                if (!Failed && first.Alias is { } alias)
+                {
+                    if (!variables.Add(alias)) { Error("CG03011", ErrorMessages.GraphTypeDuplicate, first.AliasToken); }
+                    else { aliases.Add(alias, first.Label ?? ""); }
+                }
             }
             if (Failed) { break; }
-            if (Is("IS")) { Unsupported("GRAPH TYPE CONSTRAINT", Current); break; }
+            if (Is("IS") || Is("REQUIRE")) { Unsupported("GRAPH TYPE CONSTRAINT", Current); break; }
             if (!Take(TokenType.Comma)) { break; }
             if (Current.Type == TokenType.RightBrace) { Error("CG00002", ErrorMessages.GraphTypeNodeExpected, Current); }
         }
@@ -63,44 +86,67 @@ public sealed partial class GqlQueryParser
         {
             if (Failed) { break; }
             var edge = edges[reference.Edge];
-            string Resolve(string? alias, string label)
+            string Resolve(string? alias, string label, Lexeme name)
             {
-                if (alias is null) { return label; }
+                if (alias is null)
+                {
+                    if (label.Length == 0 && mode != GqlGraphTypeOperation.Drop && !Failed) { Unsupported("GRAPH TYPE ENDPOINT", name); }
+                    return label;
+                }
                 if (aliases.TryGetValue(alias, out var found)) { return found; }
-                Error("CG03011", ErrorMessages.GraphTypeReferenceMissing, operation);
+                if (!Failed) { Error("CG03011", ErrorMessages.GraphTypeReferenceMissing, name); }
                 return "";
             }
-            edge = edge with { Source = Resolve(reference.Source, edge.Source), Target = Resolve(reference.Target, edge.Target) };
-            if (!Failed && mode != GqlGraphTypeOperation.Drop && (edge.Source.Length == 0 || edge.Target.Length == 0))
-            { Unsupported("GRAPH TYPE ENDPOINT", operation); }
+            edge = edge with { Source = Resolve(reference.Source, edge.Source, reference.SourceToken), Target = Resolve(reference.Target, edge.Target, reference.TargetToken) };
             edges[reference.Edge] = edge;
         }
-        if (!Failed && (nodes.Select(node => node.Label).Distinct(StringComparer.Ordinal).Count() != nodes.Count ||
-            edges.Select(edge => edge.Type).Distinct(StringComparer.Ordinal).Count() != edges.Count))
-        { Error("CG03011", ErrorMessages.GraphTypeDuplicate, operation); }
         return new GqlQueryExpression([], Span(start, Previous))
-        { SchemaCommand = new() { GraphType = new() { Operation = mode, Nodes = nodes.AsReadOnly(), Edges = edges.AsReadOnly() } } };
+        { SchemaCommand = new() { Kind = GqlSchemaObjectKind.GraphType, GraphType = new() { Operation = mode, Nodes = nodes.AsReadOnly(), Edges = edges.AsReadOnly() } } };
 
-        (string? Alias, string? Label, bool Implies, IReadOnlyList<string> Implied, IReadOnlyList<GqlGraphPropertyType> Properties) Node()
+        (string? Alias, Lexeme AliasToken, string? Label, Lexeme NameToken, bool Implies, IReadOnlyList<string> Implied, IReadOnlyList<GqlGraphPropertyType> Properties) Node()
         {
+            var open = Current;
             Expect(TokenType.LeftParen, "'('");
-            string? alias = Current.Type is not (TokenType.Colon or TokenType.RightParen) ? Identifier(allowKeyword: true) : null;
-            string? label = Take(TokenType.Colon) ? Identifier(allowKeyword: true) : null;
+            var aliasToken = Current;
+            string? alias = Current.Type is not (TokenType.Colon or TokenType.RightParen) ? Name() : null;
+            bool colon = Take(TokenType.Colon);
+            var nameToken = colon ? Current : alias is null ? open : aliasToken;
+            string? label = colon ? Name() : null;
             bool implies = Implies(required: false);
             var labels = new List<string>();
+            if (!Failed && mode == GqlGraphTypeOperation.Drop && Current.Type is TokenType.Colon or TokenType.LeftBrace)
+            {
+                Unsupported("GRAPH TYPE DROP BODY", Current);
+                return (alias, aliasToken, label, nameToken, implies, labels, []);
+            }
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            if (label is not null) { names.Add(label); }
             if (Take(TokenType.Colon))
             {
-                labels.Add(Identifier(allowKeyword: true));
-                while (!Failed && Take(TokenType.Ampersand)) { labels.Add(Identifier(allowKeyword: true)); }
+                do
+                {
+                    var token = Current;
+                    string implied = Name();
+                    if (!Failed && !names.Add(implied)) { Error("CG03011", ErrorMessages.GraphTypeDuplicate, token); }
+                    labels.Add(implied);
+                } while (!Failed && Take(TokenType.Ampersand));
             }
+            if (Failed) { return (alias, aliasToken, label, nameToken, implies, labels, []); }
             var properties = Properties();
             Expect(TokenType.RightParen, "')'");
-            if (!Failed && (labels.Distinct(StringComparer.Ordinal).Count() != labels.Count || labels.Contains(label, StringComparer.Ordinal)))
-            { Error("CG03011", ErrorMessages.GraphTypeDuplicate, operation); }
-            return (alias, label, implies, labels.AsReadOnly(), properties);
+            return (alias, aliasToken, label, nameToken, implies, labels.AsReadOnly(), properties);
+        }
+        string Name()
+        {
+            if (Failed) { return ""; }
+            var token = Current;
+            string name = Identifier(allowKeyword: true);
+            if (!Failed && string.IsNullOrWhiteSpace(name)) { Error("CG03011", ErrorMessages.GraphTypeNameInvalid, token); }
+            return name;
         }
         bool Implies(bool required)
         {
+            if (Failed) { return false; }
             if (Take("IMPLIES")) { return true; }
             if (Take(TokenType.Equals)) { Expect(TokenType.GreaterThan, "'>'"); return true; }
             if (required) { Error("CG00002", ErrorMessages.GraphTypeImpliesExpected, Current); }
@@ -109,31 +155,24 @@ public sealed partial class GqlQueryParser
         IReadOnlyList<GqlGraphPropertyType> Properties()
         {
             var properties = new List<GqlGraphPropertyType>();
+            var names = new HashSet<string>(StringComparer.Ordinal);
             if (!Take(TokenType.LeftBrace)) { return properties.AsReadOnly(); }
             while (!Failed && Current.Type != TokenType.RightBrace)
             {
-                string name = Identifier(allowKeyword: true);
+                var nameToken = Current;
+                string name = Name();
+                if (!Failed && !names.Add(name)) { Error("CG03011", ErrorMessages.GraphTypeDuplicate, nameToken); break; }
                 if (!Take(TokenType.ColonColon)) { Take("TYPED"); }
-                var scalar = Current;
-                string spelling = Identifier(allowKeyword: true).ToUpperInvariant();
-                GqlSchemaPropertyType? type = spelling switch
-                {
-                    "INTEGER" or "INT" => GqlSchemaPropertyType.Int64,
-                    "FLOAT" => GqlSchemaPropertyType.Float64,
-                    "BOOL" => GqlSchemaPropertyType.Boolean,
-                    _ => Enum.TryParse<GqlSchemaPropertyType>(spelling, true, out var parsed) && Enum.IsDefined(parsed) ? parsed : null,
-                };
-                if (!Failed && type is null) { Unsupported("GRAPH PROPERTY TYPE " + spelling, scalar); }
-                bool required = Take("NOT");
+                var type = ParseSchemaPropertyType("GRAPH PROPERTY TYPE");
+                if (!Failed && Current.Type is TokenType.Bang or TokenType.Pipe) { Unsupported("GRAPH PROPERTY TYPE", Current); }
+                bool required = !Failed && Take("NOT");
                 if (required) { Expect("NULL"); }
-                if (!Failed && Is("IS")) { Unsupported("GRAPH TYPE CONSTRAINT", Current); }
+                if (!Failed && (Is("IS") || Is("REQUIRE"))) { Unsupported("GRAPH TYPE CONSTRAINT", Current); }
                 properties.Add(new(name, type ?? default, required));
-                if (!Take(TokenType.Comma)) { break; }
+                if (Failed || !Take(TokenType.Comma)) { break; }
                 if (Current.Type == TokenType.RightBrace) { Error("CG00002", ErrorMessages.GraphTypeNodeExpected, Current); }
             }
             Expect(TokenType.RightBrace, "'}'");
-            if (!Failed && properties.Select(property => property.Name).Distinct(StringComparer.Ordinal).Count() != properties.Count)
-            { Error("CG03011", ErrorMessages.GraphTypeDuplicate, operation); }
             return properties.AsReadOnly();
         }
     }

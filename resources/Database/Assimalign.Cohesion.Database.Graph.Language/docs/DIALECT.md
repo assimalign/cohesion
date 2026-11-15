@@ -46,7 +46,7 @@ entity writes enforce the effective rules. SHOW PROPERTY KEYS reports their comb
 required state; SHOW OBJECT OWNERSHIP includes named CONSTRAINT rows with parent ownership.
 The existing column contracts remain fixed. D2 adds the schema commands and transaction policy below. Duplicate names use CG03008, conflicting rules CG03009,
 invalid existing data CG03010 and an absent named drop CG01021. Graph catalog v2 refuses with
-CG06019; only v4 is read.
+CG06019; only v5 is read.
 
 A named constraint may repeat an identical unnamed property rule. The declarations are
 independent: dropping that constraint preserves the unnamed rule. Typed GetPropertyKeysAsync
@@ -62,28 +62,43 @@ can name references within the same body, including forward references. Canonica
 aliases, quotes every identifier and orders elements, implied labels and properties ordinally.
 SET replaces the complete type; ADD requires new names; ALTER replaces complete existing declarations
 and cannot introduce element names; unmentioned types survive. DROP selects identifying names,
-using `(:Label =>)` or `()-[:TYPE =>]->()`; dangling endpoint references refuse with CG03011.
+using `(:Label =>)` or `()-[:TYPE =>]->()`, with optional declaration aliases. Partial and full
+DROP bodies refuse with CK00001; unlike Neo4j, no full-declaration equivalence form is accepted.
+Endpoints must reference declared node types of the resulting type. Unlike Neo4j, `()` endpoints
+refuse with CK00001 and plain or implied labels that are not node types refuse with CG03011.
+Dangling endpoint references also refuse with CG03011.
 Empty ADD, ALTER and DROP preserve the current state; SET {} sets an empty type. Every successful
 text graph-type command reports affected count 1. An absent type differs from an empty set type.
 
 Nodes with an identifying label require each implied label and declared scalar property rules.
 Declared edges require source and target identifying labels and declared property rules on CREATE,
-INSERT, both MERGE branches, and SET/REMOVE. A label removal that breaks an incident declared edge
+INSERT and the MERGE create branch. Relationship property SET/REMOVE checks properties; matching
+MERGE rows validate only their writes. Label additions do no edge work. A label removal that breaks an incident declared edge
 refuses with CG03013. Missing node implied labels use CG03012; property violations retain CG03003.
 Other labels, relationship types and properties remain writable. MERGE ON CREATE can complete
 required labels and properties before final validation. Proposed SET/ADD/ALTER validates only new or
 strengthened members through owner postings under CG05004/CG05020; violations use CG03010 and leave
 the previous type available. Independent constraints must agree with declared scalar types (CG03009)
-and cannot be altered through a graph-type command. Inline IS KEY / IS UNIQUE and graph-type
+and cannot be altered through a graph-type command. Unlike Neo4j, SET replaces element types while
+keeping independent constraints, and DEFINITION omits those constraints. Rules are checked per write
+and per SET/REMOVE stage, so clause order matters: `REMOVE a:A DELETE r` refuses while
+`DELETE r REMOVE a:A` succeeds for an otherwise matching declared edge. Neo4j checks at commit.
+Inline IS KEY / IS UNIQUE, element-level IS or REQUIRE and graph-type
 constraint specifications remain one CK00001. CLOSED/OPEN mode clauses and ISO CREATE [CLOSED]
 GRAPH TYPE also remain CK00001 for the later opt-in closed-mode run.
+Property types accept only unquoted BOOLEAN/BOOL, INT8, INT16, INT32, INT64/INTEGER/INT,
+FLOAT32, FLOAT64/FLOAT, DECIMAL and STRING. Quoted spellings, unions and `!` nullability
+suffixes refuse with CK00001, including standalone `IS :: type` constraints.
 
 `SHOW CURRENT GRAPH TYPE` returns DATABASE_NAME (STRING), MODE (STRING, OPEN), and DEFINITION
 (STRING, canonical complete ALTER CURRENT GRAPH TYPE SET DDL). All columns are non-nullable.
 An absent type returns no rows; a set empty type returns one row with SET {}. The definition reparses
-to the same type; SHOW uses existing row framing on InMemory and TCP. Explicit-transaction DDL
+to the same element type; SHOW uses existing row framing on InMemory and TCP. This three-column
+shape and absent state depart from Neo4j's single `specification` column and initially empty type.
+Only the typed `DropGraphTypeAsync()` can restore absence; no text command does so. Explicit-transaction DDL
 remains CG04025. GraphTypeDdlTests, GraphTypeWireTests and GqlGraphTypeParserTests extend the
-conformance corpus. Catalog v4 and entity format 5 are unchanged; no format bump is needed.
+conformance corpus. Catalog format 5 marks edge declarations as enforced invariants; v4 and earlier
+refuse with CG06019 before any write, without an upgrade path. Entity format 5 is unchanged.
 
 Standalone commands run on the session's database:
 
@@ -141,7 +156,7 @@ remain ordinal and case-sensitive across the shared database-wide namespace.
 SHOW CONSTRAINTS returns DATABASE_NAME, DEFINITION_TYPE, DEFINITION_ID, DEFINITION_NAME,
 CONSTRAINT_NAME, PROPERTY_KEY, DATA_TYPE and IS_REQUIRED, ordered by label name then constraint
 name, followed by relationship type name then constraint name. Other SHOW column contracts
-stay fixed. Graph catalog is v4 (#1806); graph entity format remains 5.
+stay fixed. Graph catalog is v5 (#1806); graph entity format remains 5.
 
 Read-only statements warn with structured CG01023 for each distinct, ordinal, statically named
 entity property unknown database-wide (#1249, GQ-D3). This includes MATCH node/relationship
@@ -927,7 +942,7 @@ Retirement yields to size/interval checkpoints and pending checkpoint requests. 
 build grants remain statement-owned; direct GraphStore callers retain caller-owned accounting.
 Exact-key workspace is reserved only by builds, through their high-water mark. No text index
 adds exact-key workspace charges to ordinary CREATE, SET or DELETE, including one on the same label and property.
-Catalog v4 admits this index kind and refuses v3 with CG06019 without changing files; graph
+Catalog v5 admits this index kind and refuses v4 and earlier with CG06019 without changing files; graph
 entity layout remains format 5.
 
 A real text seek shares exact seeks' candidate-dependent error evaluation. For example,

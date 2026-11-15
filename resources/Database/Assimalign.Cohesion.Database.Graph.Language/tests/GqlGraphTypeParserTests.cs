@@ -16,7 +16,7 @@ public sealed class GqlGraphTypeParserTests
     [InlineData("SET {(:A =>), (:B => :Z & Y {p :: INT NOT NULL, q BOOL, r TYPED FLOAT})}")]
     [InlineData("ADD {(a:A IMPLIES :I), (b:B =>), (a)-[e:R IMPLIES {p :: STRING}]->(b)}")]
     [InlineData("ALTER {(:A)-[:R => {p :: DECIMAL NOT NULL}]->(:B)}")]
-    [InlineData("DROP {(:A =>), (:A)-[:R =>]->(:B)}")]
+    [InlineData("DROP {(a:A =>), ()-[r:R =>]->()}")]
     [InlineData("SET {(:\"a\"\"b\" => :\"Odd name\" {\"p\"\"q\" :: STRING NOT NULL}), (:\"a\"\"b\")-[:\"Edge name\" =>]->(:\"a\"\"b\")}")]
     public void Parse_GraphType_ShouldRoundTripCanonicalForm(string body)
     {
@@ -51,6 +51,8 @@ public sealed class GqlGraphTypeParserTests
         var statement = new GqlQueryParser().Parse(text);
         // Assert
         statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        if (text == "ALTER GRAPH g")
+        { statement.Diagnostics.ShouldHaveSingleItem().Message.ShouldContain("The ALTER clause", Case.Sensitive); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Graph type DDL: malformed and nested bodies refuse with a code")]
@@ -69,8 +71,8 @@ public sealed class GqlGraphTypeParserTests
         statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Graph type DDL: deep invalid bodies never recurse")]
-    public void Parse_DeepBody_ShouldRefuseWithoutRecursion()
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Graph type DDL: malformed nested-looking bodies refuse")]
+    public void Parse_NestedLookingBody_ShouldRefuseMalformedInput()
     {
         // Arrange / Act
         var statement = new GqlQueryParser().Parse("ALTER CURRENT GRAPH TYPE SET {" + new string('(', 20000) + "}");

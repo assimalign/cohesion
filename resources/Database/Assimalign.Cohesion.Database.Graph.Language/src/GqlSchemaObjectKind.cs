@@ -11,4 +11,6 @@ public enum GqlSchemaObjectKind
     Label,
     /// <summary>A relationship type definition.</summary>
     RelationshipType,
+    /// <summary>The current graph type.</summary>
+    GraphType,
 }

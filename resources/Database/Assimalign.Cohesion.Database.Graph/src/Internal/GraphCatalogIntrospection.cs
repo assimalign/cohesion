@@ -56,8 +56,21 @@ internal static class GraphCatalogIntrospection
             GqlGraphPropertyType Property(GraphPropertyTypeDeclaration property)
             {
                 token.ThrowIfCancellationRequested(); operation.QueryBudget.Consume();
-                return new(property.Name,
-                Enum.Parse<GqlSchemaPropertyType>(property.Type.ToString()), property.Required);
+                var type = property.Type switch
+                {
+                    DatabaseType.Boolean => GqlSchemaPropertyType.Boolean,
+                    DatabaseType.Int8 => GqlSchemaPropertyType.Int8,
+                    DatabaseType.Int16 => GqlSchemaPropertyType.Int16,
+                    DatabaseType.Int32 => GqlSchemaPropertyType.Int32,
+                    DatabaseType.Int64 => GqlSchemaPropertyType.Int64,
+                    DatabaseType.Float32 => GqlSchemaPropertyType.Float32,
+                    DatabaseType.Float64 => GqlSchemaPropertyType.Float64,
+                    DatabaseType.Decimal => GqlSchemaPropertyType.Decimal,
+                    DatabaseType.String => GqlSchemaPropertyType.String,
+                    _ => throw DatabaseException.CreateGraphFailure("CG03003", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.ConstraintTypeUnsupported, property.Type)),
+                };
+                return new(property.Name, type, property.Required);
             }
         }
         foreach (var label in catalog.GetLabels(snapshot))
