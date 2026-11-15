@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
-    private bool IsSchemaStart() => (Is("CREATE") || Is("DROP")) &&
+    private bool IsSchemaStart() => Is("ALTER") && IsWordAt(_position + 1, "CURRENT") && IsWordAt(_position + 2, "GRAPH") && IsWordAt(_position + 3, "TYPE") || (Is("CREATE") || Is("DROP")) &&
         (IsWordAt(_position + 1, "INDEX") || Is("CREATE") && IsWordAt(_position + 1, "TEXT") || IsWordAt(_position + 1, "CONSTRAINT") ||
          IsWordAt(_position + 1, "LABEL") || IsWordAt(_position + 1, "RELATIONSHIP") ||
          IsWordAt(_position + 1, "UNIQUE") || IsWordAt(_position + 1, "CLOSED") ||
@@ -13,6 +13,7 @@ public sealed partial class GqlQueryParser
 
     private GqlQueryExpression ParseSchema()
     {
+        if (Is("ALTER")) { return ParseGraphType(); }
         var start = Current;
         bool drop = Take("DROP");
         if (!drop) { Expect("CREATE"); }
@@ -71,17 +72,8 @@ public sealed partial class GqlQueryParser
                 if (Take("NOT")) { Expect("NULL"); }
                 else if (Take(TokenType.ColonColon))
                 {
-                    var target = Current;
-                    string spelling = Identifier(allowKeyword: true).ToUpperInvariant();
-                    type = spelling switch
-                    {
-                        "INTEGER" or "INT" => GqlSchemaPropertyType.Int64,
-                        "FLOAT" => GqlSchemaPropertyType.Float64,
-                        "BOOL" => GqlSchemaPropertyType.Boolean,
-                        _ => Enum.TryParse<GqlSchemaPropertyType>(spelling, true, out var parsed) && Enum.IsDefined(parsed) ? parsed : null,
-                    };
-                    if (!Failed && type is null) { Unsupported("CONSTRAINT TYPE " + spelling, target); }
-                    if (!Failed && (Is("LIST") || Current.Type == TokenType.LeftBracket || Is("NOT")))
+                    type = ParseSchemaPropertyType("CONSTRAINT TYPE");
+                    if (!Failed && (Is("LIST") || Current.Type is TokenType.LeftBracket or TokenType.Bang or TokenType.Pipe || Is("NOT")))
                     { Unsupported("CONSTRAINT TYPE", Current); }
                 }
                 else
@@ -95,5 +87,34 @@ public sealed partial class GqlQueryParser
             command = command with { Definition = definition, Relationship = relationship, Variable = variable, Property = property, Type = type };
         }
         return new GqlQueryExpression(Array.Empty<GqlStage>(), Span(start, Previous)) { SchemaCommand = command };
+    }
+
+    private GqlSchemaPropertyType? ParseSchemaPropertyType(string construct)
+    {
+        if (Failed) { return null; }
+        var token = Current;
+        GqlSchemaPropertyType? type = token.Type is TokenType.Identifier or TokenType.Keyword ? token.Text.ToUpperInvariant() switch
+        {
+            "BOOLEAN" or "BOOL" => GqlSchemaPropertyType.Boolean,
+            "INT8" => GqlSchemaPropertyType.Int8,
+            "INT16" => GqlSchemaPropertyType.Int16,
+            "INT32" => GqlSchemaPropertyType.Int32,
+            "INT64" or "INTEGER" or "INT" => GqlSchemaPropertyType.Int64,
+            "FLOAT32" => GqlSchemaPropertyType.Float32,
+            "FLOAT64" or "FLOAT" => GqlSchemaPropertyType.Float64,
+            "DECIMAL" => GqlSchemaPropertyType.Decimal,
+            "STRING" => GqlSchemaPropertyType.String,
+            _ => null,
+        } : null;
+        if (type is null)
+        {
+            if (token.Type == TokenType.QuotedIdentifier && token.Text.Length <= 2)
+            { Error("CG00002", ErrorMessages.GqlQueryParserIdentifierVoid, token); }
+            else if (token.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function or TokenType.QuotedIdentifier)
+            { Unsupported(construct + " " + token.Text, token); }
+            else { Error("CG00002", ErrorMessages.GqlQueryParserIdentifierVoid2, token); }
+        }
+        else { Advance(); }
+        return type;
     }
 }

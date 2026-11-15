@@ -14,6 +14,14 @@ public sealed partial class GraphCatalog
     // One database-scoped type. This identity is private to kinds 6-8 and is never a token identity.
     internal static readonly Guid GraphTypeId = new("672bf6e9-3491-4306-a153-2a0f4c0370ed");
     internal Action<string>? AfterGraphTypeMutation { get; set; }
+    internal Action<string>? BeforeGraphTypeValidation { get; set; }
+
+    internal bool HasGraphTypeMarker()
+    {
+        lock (_sync) { return _versions.ContainsKey((6, Guid.Empty, "CURRENT")); }
+    }
+
+    internal bool HasGraphType(TransactionSnapshot snapshot) => Find(6, Guid.Empty, "CURRENT", snapshot) is not null;
 
     internal GraphTypeDeclaration? GetGraphType(TransactionSnapshot snapshot, Action<long>? reserve = null)
         => LoadGraphType(snapshot, reserve, out _);
@@ -37,6 +45,17 @@ public sealed partial class GraphCatalog
         return previous?.Record.NodeType;
     }
 
+    internal GraphEdgeTypeDeclaration? GetEdgeTypeForWrite(string type, TransactionSnapshot snapshot, TransactionSnapshot latest)
+    {
+        var previous = Find(8, GraphTypeId, type, snapshot, latest, out var current);
+        if (previous?.Reference != current?.Reference) { throw Conflict(); }
+        return previous?.Record.EdgeType;
+    }
+
+    internal IReadOnlyList<GraphEdgeTypeDeclaration> GetEdgeTypesForLabelWrite(TransactionSnapshot latest,
+        Action<long> reserve)
+        => List(8, GraphTypeId, latest, reserve).Select(item => item.Record.EdgeType!).ToArray();
+
     internal void EnsureGraphTypeDefinitionMutable(string name, bool relationship, TransactionSnapshot snapshot)
     {
         Guid? id = relationship ? FindRelationshipType(name, snapshot)?.Id : FindLabel(name, snapshot)?.Id;
@@ -47,10 +66,22 @@ public sealed partial class GraphCatalog
     {
         if (node.Properties.Count == 0) { return; }
         if (FindLabel(node.IdentifyingLabel, snapshot) is not { } label) { return; }
-        var keys = List(3, label.Id, snapshot, reserve).Select(item => item.Record.Property!.Value)
+        EnsureElementTypeCompatible(label.Id, node.Properties, snapshot, consume, reserve);
+    }
+
+    internal void EnsureEdgeTypeCompatible(GraphEdgeTypeDeclaration edge, TransactionSnapshot snapshot, Action consume, Action<long> reserve)
+    {
+        if (edge.Properties.Count == 0 || FindRelationshipType(edge.RelationshipType, snapshot) is not { } type) { return; }
+        EnsureElementTypeCompatible(type.Id, edge.Properties, snapshot, consume, reserve);
+    }
+
+    private void EnsureElementTypeCompatible(Guid definition, IReadOnlyList<GraphPropertyTypeDeclaration> properties,
+        TransactionSnapshot snapshot, Action consume, Action<long> reserve)
+    {
+        var keys = List(3, definition, snapshot, reserve).Select(item => item.Record.Property!.Value)
             .Select(item => (item.Name, item.Type))
-            .Concat(List(5, label.Id, snapshot, reserve).Select(item => (item.Record.Constraint!.Value.PropertyKey, item.Record.Constraint.Value.Type))).ToArray();
-        foreach (var property in node.Properties)
+            .Concat(List(5, definition, snapshot, reserve).Select(item => (item.Record.Constraint!.Value.PropertyKey, item.Record.Constraint.Value.Type))).ToArray();
+        foreach (var property in properties)
         {
             foreach (var key in keys)
             {
@@ -64,10 +95,12 @@ public sealed partial class GraphCatalog
     private void EnsureGraphPropertyCompatible(Guid definition, string property, Types.DatabaseType type, TransactionSnapshot snapshot,
         Action? consume = null, Action<long>? reserve = null)
     {
-        if (FindLabel(definition, snapshot) is not { } label) { return; }
-        var node = Find(7, GraphTypeId, label.Name, snapshot, reserve)?.Record.NodeType;
-        if (node is null) { return; }
-        foreach (var item in node.Properties)
+        var label = FindLabel(definition, snapshot);
+        var relationship = label is null ? FindRelationshipType(definition, snapshot) : null;
+        var properties = label is { } nodeLabel ? Find(7, GraphTypeId, nodeLabel.Name, snapshot, reserve)?.Record.NodeType?.Properties
+            : relationship is { } edgeType ? Find(8, GraphTypeId, edgeType.Name, snapshot, reserve)?.Record.EdgeType?.Properties : null;
+        if (properties is null) { return; }
+        foreach (var item in properties)
         {
             consume?.Invoke();
             if (item.Name == property && item.Type != type) { throw ConstraintConflict(property); }

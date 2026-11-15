@@ -16,7 +16,7 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
     public StorageJournal WriteAheadJournal => WriteAheadLog;
     /// <summary>Gets the stamped-record adapter for the transaction coordinator.</summary>
     public TransactionRecordSpace Records { get; }
-    internal Action<PageId, int, ReadOnlyMemory<byte>>? CatalogVersionUndone { get; set; }
+    internal Action<PageId, int, ReadOnlyMemory<byte>>? CatalogVersionDeleted { get; set; }
     internal Action<TransactionSequence, bool, RecordSpaceVersionStore>? UndoScopesChanged { get; set; }
     internal Action<TransactionContext>? UndoTransactionEnded { get; set; }
     /// <summary>Creates a graph file set, taking ownership of its streams.</summary>
@@ -100,12 +100,20 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
         {
             _storage = storage;
         }
-        protected override void OnCreatedVersionUndoneCore(PageId page, int slot, ReadOnlyMemory<byte> record) => _storage.CatalogVersionUndone?.Invoke(page, slot, record);
         protected override void OnUndoScopesChangedCore(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger) => _storage.UndoScopesChanged?.Invoke(writer, active, ledger);
         protected override void OnTransactionEndedCore(TransactionContext context) => _storage.UndoTransactionEnded?.Invoke(context);
         protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => _storage.ReadEntry(pageId, slotIndex);
         protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
-        protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
+        protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex)
+        {
+            // Catalog and entity format numbers can coincide. Capture ownership before deletion:
+            // deleting the last slot may free the page and clear its owner tag.
+            bool catalog;
+            using (var handle = _storage.PageManager.GetPage(pageId)) { catalog = handle.Page.OwnerId == 0; }
+            var record = catalog && _storage.CatalogVersionDeleted is not null ? _storage.ReadEntry(pageId, slotIndex) : default;
+            _storage.DeleteEntry(transaction, pageId, slotIndex);
+            if (!record.IsEmpty) { _storage.CatalogVersionDeleted?.Invoke(pageId, slotIndex, record); }
+        }
         protected override ulong PackLocationCore(PageId pageId, int slotIndex) => GraphStorage.PackLocation(pageId, slotIndex);
         protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location) => GraphStorage.UnpackLocation(location);
 

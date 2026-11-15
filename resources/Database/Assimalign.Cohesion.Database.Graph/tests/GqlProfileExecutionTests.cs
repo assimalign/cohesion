@@ -401,7 +401,9 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.Show] =
             [
                 new("SHOW LABELS", [["audit", _personLabelId, "Person"], ["audit", _robotLabelId, "Robot"]]),
+                new("SHOW CURRENT GRAPH TYPE", []),
             ],
+            [GqlClauses.AlterCurrentGraphType] = [Mutation("ALTER CURRENT GRAPH TYPE SET {(:Fresh => {p :: STRING})}", 1)],
             [GqlClauses.CreateTextIndex] = [Mutation("CREATE TEXT INDEX ix FOR (n:Fresh) ON (n.p)", 1)],
             [GqlClauses.CreateIndex] = [Mutation("CREATE INDEX ix FOR (n:Fresh) ON (n.p)", 1)],
             [GqlClauses.DropIndex] = [Mutation("DROP INDEX ix IF EXISTS", 0)],
@@ -496,6 +498,8 @@ public sealed class GqlProfileExecutionTests
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
     [InlineData("SHOW DATABASES")]
+    [InlineData("ALTER CURRENT GRAPH TYPE SET {(p:Person => {name :: STRING}) REQUIRE p.name IS UNIQUE}")]
+    [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A =>),(:B =>),(:A)-[r:R => {p :: STRING}]->(:B) REQUIRE r.p IS UNIQUE}")]
     [InlineData("MATCH (a)~[r]~(b) RETURN a")]
     [InlineData("MATCH (a)<~(b) RETURN a")]
     public async Task Profile_UnsupportedForms_ReportCapabilityDiagnosticAsync(string source)
@@ -616,6 +620,7 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Intersect or GqlClauses.IntersectDistinct => query.Composite is { Operator: GqlCompositeOperator.Intersect },
         GqlClauses.IntersectAll => query.Composite is { Operator: GqlCompositeOperator.IntersectAll },
         GqlClauses.Otherwise => query.Composite is { Operator: GqlCompositeOperator.Otherwise },
+        GqlClauses.AlterCurrentGraphType => query.SchemaCommand?.GraphType is not null,
         GqlClauses.CreateIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: false },
         GqlClauses.CreateTextIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: true },
         GqlClauses.DropIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: true },

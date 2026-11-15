@@ -501,9 +501,10 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1735, GQ-M2 fixes) | CG03007 | Constraints — MERGE relationship variable is already declared before the clause |
 | New (#1738, GQ-D1) | CG03008 | Schema — database-wide index/constraint name is already used |
 | New (#1738, GQ-D1) | CG03009 | Constraints — duplicate constraint kind or incompatible property type rule |
-| New (#1738, GQ-D1; #1806, GQ-T1) | CG03010 | Constraints — existing data violates a newly created named constraint or proposed graph type |
-| New (#1806, GQ-T1) | CG03011 | Schema — graph-type ADD/ALTER/DROP element name is invalid, an edge references an absent node type, or identifying and implied labels overlap |
+| New (#1738, GQ-D1; #1806, GQ-T1) | CG03010 | Constraints — existing data violates a newly created named constraint or proposed graph type, including edge endpoints and properties |
+| New (#1806, GQ-T1) | CG03011 | Schema — graph-type declaration or ADD/ALTER/DROP element name is invalid, an edge references an absent node type, or identifying and implied labels overlap |
 | New (#1806, GQ-T1) | CG03012 | Constraints — a node write omits an implied label required by its node type |
+| New (#1806, GQ-T2) | CG03013 | Constraints — a relationship or endpoint-label write violates its edge type's source/target node-type membership |
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
@@ -528,7 +529,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
 | COHDBG018 | CG06018 | Storage/durability |
-| New (#1738, GQ-D1; #1806, GQ-T1) | CG06019 | Format — graph catalog record version differs from v4; recreate database, no legacy reader |
+| New (#1738, GQ-D1; #1806, GQ-T1) | CG06019 | Format — graph catalog record version differs from v5; recreate database, no legacy reader |
 | COHDBG005 | CG07005 | Protocol/transport |
 | COHDBG016 | CG07016 | Protocol/transport |
 | COHDBG021 | CG08021 | Configuration |

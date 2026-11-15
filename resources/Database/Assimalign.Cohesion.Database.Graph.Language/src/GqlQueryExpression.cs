@@ -114,7 +114,7 @@ public sealed class GqlQueryExpression : GqlExpression
         GqlTransactionCommand.Savepoint => "SAVEPOINT",
         GqlTransactionCommand.ReleaseSavepoint => "RELEASE SAVEPOINT",
         _ => "ROLLBACK TO SAVEPOINT",
-    }) + " \"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"" : SchemaCommand is { } schema ? schema.ToString() : CatalogSurface is not null || TransactionCommand != GqlTransactionCommand.None
+    }) + " \"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"" : SchemaCommand is { } schema ? schema.ToString() : CatalogSurface == GqlCatalogSurface.CurrentGraphType ? "SHOW CURRENT GRAPH TYPE" : CatalogSurface is not null || TransactionCommand != GqlTransactionCommand.None
         ? Text ?? base.ToString()! : Internal.GqlPathRenderer.RenderExpression(this);
 
     /// <summary>Gets SET items across all stages in source order.</summary>

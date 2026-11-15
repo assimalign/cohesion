@@ -14,6 +14,15 @@ public sealed partial class GqlQueryParser
         else if (Take("PROPERTY")) { Expect("KEYS"); surface = GqlCatalogSurface.PropertyKeys; }
         else if (Take("INDEXES")) { surface = GqlCatalogSurface.Indexes; }
         else if (Take("CONSTRAINTS")) { surface = GqlCatalogSurface.Constraints; }
+        else if (Take("CURRENT"))
+        {
+            if (!Is("GRAPH") || !IsWordAt(_position + 1, "TYPE")) { Unsupported("SHOW CURRENT", Previous); }
+            else
+            {
+                Expect("GRAPH"); Expect("TYPE"); surface = GqlCatalogSurface.CurrentGraphType;
+                if (Is("AS") || Is("YIELD")) { Unsupported("SHOW CURRENT GRAPH TYPE " + Current.Text.ToUpperInvariant(), Current); }
+            }
+        }
         else if (Take("OBJECT")) { Expect("OWNERSHIP"); surface = GqlCatalogSurface.ObjectOwnership; }
         else { Unsupported("SHOW " + Current.Text, Current); }
         return new GqlQueryExpression([], null, [], [], false, [], Span(start, Previous)) { CatalogSurface = surface };

@@ -101,7 +101,7 @@ public sealed class GqlKeywordDispositionTests
         ["USE"] = Rejects("USE g MATCH (a) RETURN a", "USE"),
         ["SESSION"] = Rejects("SESSION SET GRAPH g", "SESSION"),
         ["DROP"] = Rejects("DROP GRAPH g", "DROP"),
-        ["ALTER"] = Rejects("ALTER GRAPH g", "ALTER"),
+        ["ALTER"] = Parses("ALTER CURRENT GRAPH TYPE SET {}"),
         ["GRANT"] = Rejects("GRANT READ ON GRAPH g TO u", "GRANT"),
         ["REVOKE"] = Rejects("REVOKE READ ON GRAPH g FROM u", "REVOKE"),
         ["BEGIN"] = Parses("BEGIN TRANSACTION"),

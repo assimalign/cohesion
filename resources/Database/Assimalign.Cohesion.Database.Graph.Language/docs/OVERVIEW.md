@@ -33,7 +33,7 @@ COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or IS
 ORDER BY with ASC/DESC and NULLS FIRST/LAST, OFFSET (Cypher SKIP) and LIMIT,
 `INSERT`, `CREATE` as an insertion compatibility extension, SET/REMOVE properties and node labels,
 literal-map replacement and D3 merge (`+=`), whole-pattern MERGE with ON CREATE/ON MATCH SET, and restricted or
-cascading deletion. Unsupported features, including the undirected tilde edges, produce
+cascading deletion. Standalone ALTER CURRENT GRAPH TYPE sets, adds, alters or drops open node/edge types; SHOW CURRENT GRAPH TYPE returns its canonical definition. Unsupported features, including the undirected tilde edges, produce
 `CK00001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
 as `(a)-->(b)`, which GQL reads as a comment, produces `CG00008`. The parser does not throw for
 malformed query text. As in Neo4j, label expressions and predicates have no length or nesting

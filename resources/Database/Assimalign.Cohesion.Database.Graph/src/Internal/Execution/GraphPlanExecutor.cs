@@ -316,8 +316,8 @@ internal static partial class GraphPlanExecutor
             { throw new GraphPlanningException("CG05001", ErrorMessages.PlanExecutorCreateAsyncGraphPlanning); }
             // The planner admits only Outgoing and Incoming here.
             bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing;
-            var relationship = await operation.Updates.CreateRelationshipAsync(nodes[outgoing ? i : i + 1].Id,
-                nodes[outgoing ? i + 1 : i].Id, GraphLabelEvaluator.InsertType(pattern), EvaluateProperties(pattern.Properties, bindings, operation.EvaluationContext, parameters), token).ConfigureAwait(false);
+            var relationship = await operation.Updates.CreateRelationshipAsync(nodes[outgoing ? i : i + 1],
+                nodes[outgoing ? i + 1 : i], GraphLabelEvaluator.InsertType(pattern), EvaluateProperties(pattern.Properties, bindings, operation.EvaluationContext, parameters), token).ConfigureAwait(false);
             Accept(pattern.Variable, relationship, bindings);
             affected++;
         }

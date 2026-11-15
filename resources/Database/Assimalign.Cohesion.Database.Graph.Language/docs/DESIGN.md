@@ -119,17 +119,38 @@ node-only, single-property grammar, name and conditional rules; unsupported comp
 relationship forms keep CK00001. CreateTextIndex is advertised beside CreateIndex and has
 parser, profile execution, Unicode differential and InMemory/TCP conformance cases. No
 ordinary query-expression layout, lexer keyword or wire encoding changes. Graph DESIGN owns
-posting maintenance, runtime parameter selection and the v4 catalog fence. Text access preserves
+posting maintenance, runtime parameter selection and the v5 catalog fence. Text access preserves
 the anchor node and label selected without text indexes, substituting only an eligible
 label scan after exact and relationship candidates compete. DIALECT records the tie rule.
 
 ## Schema DDL (#1738, GQ-D2)
 
-GQ-T1 (#1806) adds a typed, open GraphSchema API in the engine. Catalog v4 retains its v3 declaration kinds. Its node
-rules apply to existing INSERT/CREATE, MERGE and SET/REMOVE syntax; no parser, keyword,
-SHOW-column or wire contract changes here. GraphTypeTests supplies the engine conformance
-matrix, and the existing graph-type text refusal corpus stays in force. GQ-T2 supplies text
-ALTER and edge enforcement; GQ-T3 supplies opt-in closedness. See Graph DESIGN and DIALECT.
+ALTER CURRENT GRAPH TYPE uses GqlSchemaCommand (#1806) with Kind GraphType, holding a
+GqlGraphTypeCommand in the existing query body slot, so ordinary query allocation size is unchanged.
+SHOW CURRENT GRAPH TYPE is the CurrentGraphType catalog surface.
+The command's sealed node, edge and property records describe semantic fields; rendering never
+uses source text. The parser uses flat loops for type bodies and resolves optional node aliases
+after the complete body, without nesting recursion. Unsupported constraint definitions, inline
+KEY/UNIQUE, element-level IS/REQUIRE and CLOSED/OPEN modes return one CK00001. DROP accepts
+identifier forms only, including optional declaration aliases; any partial or full body is CK00001.
+An explicit scalar-name table admits only unquoted supported names in both graph types and
+standalone constraints. Missing, empty delimited or non-name type tokens report CG00002;
+empty delimited names retain "An identifier cannot be empty." Unsupported names retain CK00001.
+An edge endpoint accepts an optional variable and one optional label; implication markers are CG00002.
+Duplicate names and variables point at the offending name. The ALTER capability is advertised only as
+ALTER CURRENT GRAPH TYPE; other ALTER positions retain the unsupported-vocabulary entry.
+The clause corpus grows by exactly one; no lexer keywords are added. Empty node types follow
+the typed model contract, deliberately broader than Neo4j's nonempty-node semantic check.
+GraphTypeDdlTests, GqlGraphTypeParserTests and the InMemory/TCP GraphTypeWireTests pin execution,
+canonical reparse, refusal and availability. DIALECT defines SHOW columns and defaults. Catalog
+format 5 marks kind-8 declarations as enforced invariants and refuses v4 and earlier with CG06019
+before any write. Entity and wire formats are unchanged. Closed graph types remain unsupported.
+
+Reference grammar: local Neo4j Cypher25Parser.g4:1280-1410 under
+C:/Source/repos/neo4j/neo4j/community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/.
+GraphType.scala:419-433 under community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/
+refuses independent constraint definitions during ALTER and DROP. Cohesion keeps those specifications
+unsupported in every graph-type operation; standalone CREATE/DROP CONSTRAINT remains available.
 
 Read-only unknown-property warnings (#1249, GQ-D3) are engine diagnostics, using the existing
 property/member AST and source spans. The parser corpus admits the same syntax independently of
@@ -300,7 +321,8 @@ The function table advertises the aggregates and core scalar functions listed be
 | `REMOVE` | Property keys or node labels with IS or colon | Removes keys/labels, ignoring OPTIONAL NULL targets |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
-| `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, `CONSTRAINTS`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
+| `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, `CONSTRAINTS`, `CURRENT GRAPH TYPE`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
+| `ALTER CURRENT GRAPH TYPE` | SET, ADD, ALTER or DROP with a flat type body | Validates and atomically publishes the database's open node and edge declarations |
 | `CREATE/DROP INDEX` | Standalone Neo4j-style single node-property index commands, optional names and conditionals | Transactional discovery and physical/catalog coordination |
 | `CREATE/DROP CONSTRAINT` | Named type/existence rules for one node or relationship property | Independent rules; validates existing owner data |
 | `CREATE/DROP LABEL` | Cohesion definition commands with optional conditionals | Creates an empty definition or drops an unused one |
@@ -328,7 +350,24 @@ return-after-delete are not accepted.
 The executable grammar is:
 
 ```text
-statement    := (query | EXPLAIN query | catalog) [';']
+statement    := (query | EXPLAIN query | catalog | schema-ddl) [';']
+schema-ddl   := ALTER CURRENT GRAPH TYPE (SET | ADD | ALTER | DROP) '{' [graph-type-elements] '}'
+              | standalone-schema-object
+graph-type-elements := graph-type-element (',' graph-type-element)*
+graph-type-element := '(' [variable] ':' label ('=>' | IMPLIES) [':' label ('&' label)*] [type-properties] ')'
+              | type-endpoint '-[' [variable] ':' label ('=>' | IMPLIES) [type-properties] ']->' type-endpoint
+type-endpoint := '(' [variable] [':' label] ')'
+type-properties := '{' [type-property (',' type-property)*] '}'
+type-property := property [('::' | TYPED)] schema-type [NOT NULL]
+schema-type  := BOOLEAN | BOOL | INT8 | INT16 | INT32 | INT64 | INTEGER | INT
+              | FLOAT32 | FLOAT64 | FLOAT | DECIMAL | STRING
+standalone-schema-object := CREATE [TEXT] INDEX [name] [IF NOT EXISTS] FOR schema-node ON '(' variable '.' property ')'
+              | CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (schema-node | schema-edge) REQUIRE schema-rule
+              | CREATE (LABEL | RELATIONSHIP TYPE) name [IF NOT EXISTS]
+              | DROP (INDEX | CONSTRAINT | LABEL | RELATIONSHIP TYPE) name [IF EXISTS]
+schema-node  := '(' variable ':' label ')'
+schema-edge  := '()' ('-' | '<-') '[' variable ':' label ']' ('-' | '->') '()'
+schema-rule  := (variable '.' property | '(' variable '.' property ')') IS (NOT NULL | '::' schema-type)
 query        := segment (NEXT segment)*
 segment      := stage* [RETURN projections return-tail]
 stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
@@ -399,7 +438,7 @@ sort-item    := predicate [ASC | ASCENDING | DESC | DESCENDING] [NULLS (FIRST | 
 paging       := (OFFSET | SKIP) page-value [LIMIT page-value]
               | LIMIT page-value
 page-value   := unsigned-int64 | parameter
-catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OBJECT OWNERSHIP)
+catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | CONSTRAINTS | CURRENT GRAPH TYPE | OBJECT OWNERSHIP)
 ```
 
 The repeated-colon form of `label-spec` applies to node patterns only; a relationship has one type.

@@ -168,9 +168,9 @@ public sealed class GraphIncrementalAdjacencyTests
             await database.LockWriterAsync(operation, timeout.Token);
             var hub = operation.Updates.GetNodes("Hub", timeout.Token).Single();
             var leaf = operation.Updates.GetNodes("Leaf", timeout.Token).Single();
-            await operation.Updates.CreateRelationshipAsync(new GraphNodeId(hub.Id), new GraphNodeId(leaf.Id), "T",
+            await operation.Updates.CreateRelationshipAsync(GraphDatabase.Materialize(hub), GraphDatabase.Materialize(leaf), "T",
                 new Dictionary<string, object?>(), timeout.Token);
-            await operation.Updates.CreateRelationshipAsync(new GraphNodeId(hub.Id), new GraphNodeId(hub.Id), "U",
+            await operation.Updates.CreateRelationshipAsync(GraphDatabase.Materialize(hub), GraphDatabase.Materialize(hub), "U",
                 new Dictionary<string, object?>(), timeout.Token);
             Guid[]? types = selectType
                 ? [database.Catalog.FindRelationshipType("T", operation.Context.Snapshot)!.Value.Id] : null;

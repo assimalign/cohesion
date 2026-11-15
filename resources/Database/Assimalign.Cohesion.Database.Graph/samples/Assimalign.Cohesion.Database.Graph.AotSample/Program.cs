@@ -200,6 +200,29 @@ checks++;
 await schema.DropGraphTypeAsync(["ExtraSmoke"], ["SmokeEdge"], CancellationToken.None);
 await schema.DropGraphTypeAsync(CancellationToken.None);
 checks++;
+await session.ExecuteAsync("ALTER CURRENT GRAPH TYPE SET {(:SmokeA =>),(:SmokeB =>),(:SmokeA)-[:TypedEdge => {p :: INT64 NOT NULL}]->(:SmokeB)}", cancellationToken: CancellationToken.None);
+await using (var shown = (DatabaseResultSet)await session.ExecuteAsync("SHOW CURRENT GRAPH TYPE", cancellationToken: CancellationToken.None))
+{
+    int rows = 0;
+    await foreach (var row in shown.GetRowsAsync(CancellationToken.None))
+    {
+        if (!Equals(row.GetValue(0), "app") || !Equals(row.GetValue(1), "OPEN") ||
+            !Equals(row.GetValue(2), "ALTER CURRENT GRAPH TYPE SET {(:\"SmokeA\" =>), (:\"SmokeB\" =>), (:\"SmokeA\")-[:\"TypedEdge\" => {\"p\" :: INT64 NOT NULL}]->(:\"SmokeB\")}"))
+        { throw new InvalidOperationException("Graph type AOT SHOW mismatch."); }
+        rows++;
+    }
+    if (rows != 1) { throw new InvalidOperationException("Graph type AOT SHOW row count mismatch."); }
+    checks++;
+}
+await session.ExecuteAsync("INSERT (:SmokeA)-[:TypedEdge {p:1}]->(:SmokeB)", cancellationToken: CancellationToken.None);
+try
+{
+    await session.ExecuteAsync("MATCH (n:SmokeA) REMOVE n:SmokeA", cancellationToken: CancellationToken.None);
+    throw new InvalidOperationException("Graph edge endpoint enforcement smoke mismatch.");
+}
+catch (DatabaseException error) when (error.Diagnostics.Any(item => item.Code == "CG03013")) { checks++; }
+await session.ExecuteAsync("ALTER CURRENT GRAPH TYPE SET {}", cancellationToken: CancellationToken.None);
+checks++;
 Guid schemaLabel = Guid.NewGuid();
 await schema.SaveLabelAsync(new(schemaLabel, "SchemaSmoke"), CancellationToken.None);
 await schema.CreateConstraintAsync(new(schemaLabel, "schema_type", "p", Assimalign.Cohesion.Database.Types.DatabaseType.Int64), CancellationToken.None);

@@ -99,6 +99,7 @@ public static class GqlLanguageProfile
         GqlClauses.For,
         GqlClauses.Unwind,
         GqlClauses.Show,
+        GqlClauses.AlterCurrentGraphType,
         GqlClauses.Savepoint,
         GqlClauses.ReleaseSavepoint,
         GqlClauses.RollbackToSavepoint,

@@ -29,7 +29,7 @@ public sealed class GraphCatalogFormatTests
 
         // Assert: the recovered read-only gate refuses before physical redo (#1744).
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
-        failure.Message.ShouldContain("supports only format 4", Case.Sensitive);
+        failure.Message.ShouldContain("supports only format 5", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Catalog format: uncheckpointed v3 refusal names the database")]
@@ -49,7 +49,19 @@ public sealed class GraphCatalogFormatTests
         failure.Diagnostics[0].Message.ShouldBe(failure.Message);
     }
 
-    private static async Task<DatabaseException> RefuseUncheckpointedCatalogAsync(int kind)
+    [Theory(DisplayName = "Cohesion Test [Graph] - Catalog format: every v4 record kind refuses from WAL without writes (#1806)")]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)]
+    [InlineData(4)] [InlineData(5)] [InlineData(6)] [InlineData(7)]
+    public async Task OpenDatabaseAsync_UncheckpointedVersionFour_ShouldRefuseEveryKindAsync(int kind)
+    {
+        // Arrange / Act
+        var failure = await RefuseUncheckpointedCatalogAsync(kind, 4);
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
+        failure.Message.ShouldContain("supports only format 5", Case.Sensitive);
+    }
+
+    private static async Task<DatabaseException> RefuseUncheckpointedCatalogAsync(int kind, byte version = 3)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         string root = Path.Combine(Path.GetTempPath(), "cohesion-catalog-wal-" + Guid.NewGuid().ToString("N"));
@@ -70,11 +82,14 @@ public sealed class GraphCatalogFormatTests
                     1 => new(relationshipType: new(id, "T")),
                     2 => new(property: new(id, "p", DatabaseType.Int64, true)),
                     3 => new(index: new(id, "index", "p")),
-                    _ => new(constraint: new(id, "typed", "p", DatabaseType.Int64)),
+                    4 => new(constraint: new(id, "typed", "p", DatabaseType.Int64)),
+                    5 => new(graphType: GraphTypeDeclaration.Create()),
+                    6 => new(nodeType: GraphNodeTypeDeclaration.Create("N")),
+                    _ => new(edgeType: GraphEdgeTypeDeclaration.Create("T", "N", "M")),
                 };
                 byte[] bytes = GraphCatalogCodec.Encode(record, new TransactionSequence(7));
-                if (kind == 3) { bytes = bytes[..^1]; } // A v3 index has no v4 kind byte.
-                bytes[17] = 3;
+                if (kind == 3 && version == 3) { bytes = bytes[..^1]; } // A v3 index has no v4 kind byte.
+                bytes[17] = version;
                 using (var bracket = storage.BeginTransaction())
                 {
                     storage.InsertEntry(bracket, bytes);
@@ -82,7 +97,15 @@ public sealed class GraphCatalogFormatTests
                 }
                 storage.FlushPendingCommits();
                 data.ToArray().AsSpan().IndexOf(bytes).ShouldBe(-1);
-                journal.ToArray().AsSpan().IndexOf(bytes).ShouldBeGreaterThanOrEqualTo(0);
+                // WAL page deltas may split or compress a record; inspect its recovered bytes.
+                using (var probe = GraphStorage.Open(new MemoryStream(data.ToArray(), writable: false),
+                    new MemoryStream(journal.ToArray(), writable: false), new MemoryStream(backup.ToArray(), writable: false)))
+                using (var records = probe.GetUnitIterator(0))
+                {
+                    records.MoveNext().ShouldBeTrue();
+                    records.Current.Data.ToArray().ShouldBe(bytes);
+                    records.MoveNext().ShouldBeFalse();
+                }
                 // Copy live streams before disposal/checkpoint: the only v3 record is in the WAL.
                 File.WriteAllBytes(Path.Combine(directory, "graph.dat"), data.ToArray());
                 File.WriteAllBytes(Path.Combine(directory, "graph.log"), journal.ToArray());
@@ -100,10 +123,11 @@ public sealed class GraphCatalogFormatTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Catalog format: v3 and future versions refuse before scrub and preserve every file")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Catalog format: earlier and future versions refuse before scrub and preserve every file")]
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(255)]
+    [InlineData(4)]
     public async Task OpenDatabaseAsync_UnsupportedCatalogVersion_ShouldRefuseWithoutWritingAsync(byte version)
     {
         // Arrange: alter a cleanly closed catalog record through a real storage bracket.
@@ -126,7 +150,7 @@ public sealed class GraphCatalogFormatTests
                 records.MoveNext().ShouldBeTrue();
                 var record = records.Current;
                 byte[] bytes = record.Data.ToArray();
-                bytes[17].ShouldBe((byte)4);
+                bytes[17].ShouldBe((byte)5);
                 bytes[17] = version;
                 using var bracket = storage.BeginTransaction();
                 storage.UpdateEntry(bracket, record.PageId, record.SlotIndex, bytes);
@@ -140,7 +164,7 @@ public sealed class GraphCatalogFormatTests
 
             // Assert
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
-            failure.Message.ShouldContain("supports only format 4", Case.Sensitive);
+            failure.Message.ShouldContain("supports only format 5", Case.Sensitive);
             reopened.TryGetDatabase("graph", out _).ShouldBeFalse();
             await reopened.DisposeAsync();
             Directory.GetFiles(directory).Order().ShouldBe(before.Keys.Order());

@@ -3,6 +3,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// <summary>A standalone schema mutation; names use ordinal, case-sensitive comparison.</summary>
 public sealed record GqlSchemaCommand
 {
+    /// <summary>Gets a current graph-type alteration, or null for ordinary schema DDL.</summary>
+    public GqlGraphTypeCommand? GraphType { get; init; }
     /// <summary>Gets whether this command drops its target.</summary>
     public bool Drop { get; init; }
     /// <summary>Gets the schema object kind.</summary>
@@ -28,6 +30,7 @@ public sealed record GqlSchemaCommand
     /// <returns>The statement with quoted schema identifiers.</returns>
     public override string ToString()
     {
+        if (GraphType is { } graphType) { return graphType.ToString(); }
         string kind = Kind switch { GqlSchemaObjectKind.RelationshipType => "RELATIONSHIP TYPE", _ => Kind.ToString().ToUpperInvariant() };
         string prefix = (Drop ? "DROP " : "CREATE ") + (IsText && !Drop ? "TEXT " : "") + kind + (Name is null ? "" : " " + Quote(Name)) +
             (IfExists ? Drop ? " IF EXISTS" : " IF NOT EXISTS" : "");
