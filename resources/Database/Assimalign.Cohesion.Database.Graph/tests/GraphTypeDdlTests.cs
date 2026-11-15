@@ -33,11 +33,21 @@ public sealed class GraphTypeDdlTests
         await first.ExecuteAsync("INSERT (:A),(:B)", cancellationToken: CancellationToken.None);
         await using var transaction = await stale.BeginTransactionAsync(IsolationLevel.Snapshot, CancellationToken.None);
         await first.ExecuteAsync(createRelationship ? "MATCH (a:A) REMOVE a:A" : "MATCH (a:A),(b:B) INSERT (a)-[:R {p:1}]->(b)", cancellationToken: CancellationToken.None);
+        var before = await Counts(first);
+        int writes = 0;
+        database.Store.AfterApply = () => writes++;
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await stale.ExecuteAsync(createRelationship
-            ? "MATCH (a:A),(b:B) INSERT (a)-[:R {p:2}]->(b)" : "MATCH (a:A) REMOVE a:A", cancellationToken: CancellationToken.None));
+        DatabaseException error;
+        try
+        {
+            error = await Should.ThrowAsync<DatabaseException>(async () => await stale.ExecuteAsync(createRelationship
+                ? "MATCH (a:A),(b:B) INSERT (:Unrelated),(a)-[:R {p:2}]->(b)" : "MATCH (a:A) REMOVE a:A", cancellationToken: CancellationToken.None));
+        }
+        finally { database.Store.AfterApply = null; }
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03013");
+        if (createRelationship) { writes.ShouldBeGreaterThan(0); }
+        (await Counts(first)).ShouldBe(before);
         await transaction.RollbackAsync(CancellationToken.None);
     }
 
@@ -131,10 +141,12 @@ public sealed class GraphTypeDdlTests
     [InlineData("MERGE (a:A)-[r:R {p:1}]->(b:B) ON MATCH SET a:C REMOVE a:A", "CG03013")]
     [InlineData("MERGE (a:A)-[r:R {p:1}]->(b:B) ON CREATE SET r.p='bad'", "CG03003")]
     [InlineData("MATCH (a:A) REMOVE a:A", "CG03013")]
+    [InlineData("MATCH (a:A)-[r:R]->(b:B) REMOVE a:A DELETE r", "CG03013")]
     [InlineData("MATCH (b:B) REMOVE b:B", "CG03013")]
     [InlineData("MATCH (a:A)-[r:R]->(b:B) SET a:C REMOVE a:A", "CG03013")]
     [InlineData("MATCH (a:A)-[r:R]->(b:B) REMOVE r.p", "CG03003")]
     [InlineData("MATCH (a:A)-[r:R]->(b:B) SET r={}", "CG03003")]
+    [InlineData("CREATE (a:A)-[:R {p:1}]->(b:B) REMOVE a:A", "CG03013")]
     public async Task Execute_EdgeViolation_ShouldRollbackAndRemainAvailableAsync(string text, string code)
     {
         // Arrange
@@ -145,10 +157,12 @@ public sealed class GraphTypeDdlTests
         if (!text.Contains("ON CREATE", StringComparison.Ordinal))
         { await session.ExecuteAsync("INSERT (:A)-[:R {p:1}]->(:B)", cancellationToken: CancellationToken.None); }
         var previous = (await GraphCatalogIntrospectionTests.Rows(session, "SHOW CURRENT GRAPH TYPE"))[0][2];
+        var before = await Counts(session);
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(text, cancellationToken: CancellationToken.None));
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+        (await Counts(session)).ShouldBe(before);
         (await GraphCatalogIntrospectionTests.Rows(session, "SHOW CURRENT GRAPH TYPE")).ShouldHaveSingleItem()[2].ShouldBe(previous);
         await session.ExecuteAsync("INSERT (:A)-[:R {p:2,extra:TRUE}]->(:B)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT (a:Unknown)-[:UNKNOWN]->(a)", cancellationToken: CancellationToken.None);
@@ -196,11 +210,12 @@ public sealed class GraphTypeDdlTests
         string previous = (string)(await GraphCatalogIntrospectionTests.Rows(session, "SHOW CURRENT GRAPH TYPE"))[0][2]!;
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(text, cancellationToken: CancellationToken.None));
+        var refusedMetrics = session.LastStatementMetrics!;
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03010");
         (await GraphCatalogIntrospectionTests.Rows(session, "SHOW CURRENT GRAPH TYPE"))[0][2].ShouldBe(previous);
         await session.ExecuteAsync("INSERT (:A)-[:R {p:2}]->(:B)", cancellationToken: CancellationToken.None);
-        session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
+        refusedMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Graph type edge declarations: independent constraints agree or refuse in both publication orders")]
@@ -260,5 +275,14 @@ public sealed class GraphTypeDdlTests
         violation.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03013");
         await transaction.RollbackAsync(CancellationToken.None);
         await database.CreateRelationshipAsync(session, target.Id, source.Id, "R", new Dictionary<string, object?> { ["p"] = 1L }, CancellationToken.None);
+    }
+
+    private static async Task<long[]> Counts(GraphDatabaseSession session)
+    {
+        var counts = new List<long>();
+        foreach (string query in new[] { "MATCH (n) RETURN count(n)", "MATCH ()-[r]->() RETURN count(r)",
+            "MATCH (n:A) RETURN count(n)", "MATCH (n:B) RETURN count(n)" })
+        { counts.Add((long)(await GraphCatalogIntrospectionTests.Rows(session, query)).ShouldHaveSingleItem()[0]!); }
+        return counts.ToArray();
     }
 }

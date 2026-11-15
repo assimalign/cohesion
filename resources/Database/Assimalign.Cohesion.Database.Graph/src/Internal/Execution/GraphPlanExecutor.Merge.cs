@@ -79,7 +79,6 @@ internal static partial class GraphPlanExecutor
                     using var rowMemory = new GraphMemoryOwner(budget.Memory);
                     rowMemory.RetainValue(matched, token);
                     await ApplyAsync(matched, stage.OnMatch, rowMemory).ConfigureAwait(false);
-                    await ValidateEdgesAsync(matched).ConfigureAwait(false);
                     rowMemory.ReleaseValue(matched);
                     foreach (string name in hidden) { matched.Remove(name); }
                     rowMemory.RetainValue(matched, token);

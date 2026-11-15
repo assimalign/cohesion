@@ -17,7 +17,7 @@
   <data name="GraphEdgeEndpointViolation" xml:space="preserve"><value>Edge type '{0}' requires source node type '{1}' and target node type '{2}'.</value></data>
   <data name="GraphEdgePropertyViolation" xml:space="preserve"><value>Edge type '{0}' requires property '{1}' with its declared type and nullability.</value></data>
   <data name="TextIndexKindInvalid" xml:space="preserve"><value>Invalid graph index kind.</value></data>
-  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Graph catalog format {0} is unsupported; this engine supports only format 4. Recreate the database.</value></data>
+  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Graph catalog format {0} is unsupported; this engine supports only format 5. Recreate the database.</value></data>
   <data name="CatalogIndexPropertyMismatch" xml:space="preserve"><value>Index '{0}' already identifies property '{1}' with a fixed index kind.</value></data>
   <data name="CatalogIdentityMismatch" xml:space="preserve"><value>Definition '{0}' already has a different identity.</value></data>
   <data name="CatalogIdentityReused" xml:space="preserve"><value>A definition identity cannot be reused or renamed. After a drop, wait for version purge before reusing the identity.</value></data>

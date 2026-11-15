@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Graph.Catalog.Tests;
 
 public sealed class GraphCatalogConstraintTests
 {
-    [Theory(DisplayName = "Cohesion Test [Graph.Catalog] - Codec: v4 is symmetric for all record kinds and refuses v3")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Catalog] - Codec: v5 is symmetric for all record kinds and refuses earlier catalogs")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
@@ -23,7 +23,7 @@ public sealed class GraphCatalogConstraintTests
     [InlineData(4)]
     [InlineData(5)]
     [InlineData(6)]
-    public void Codec_VersionFour_ShouldRoundTripAndRefuseEarlierCatalogs(int kind)
+    public void Codec_VersionFive_ShouldRoundTripAndRefuseEarlierCatalogs(int kind)
     {
         // Arrange
         Guid id = Guid.NewGuid();
@@ -40,12 +40,15 @@ public sealed class GraphCatalogConstraintTests
 
         // Act / Assert
         byte[] bytes = GraphCatalogCodec.Encode(record, new TransactionSequence(7));
-        bytes[17].ShouldBe((byte)4);
+        bytes[17].ShouldBe((byte)5);
         GraphCatalogCodec.Decode(bytes).ShouldBe(record);
-        bytes[17] = 3;
-        var failure = Should.Throw<GraphCatalogException>(() => GraphCatalogCodec.Decode(bytes));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
-        failure.Message.ShouldContain("Recreate the database", Case.Sensitive);
+        foreach (byte version in new byte[] { 2, 3, 4 })
+        {
+            bytes[17] = version;
+            var failure = Should.Throw<GraphCatalogException>(() => GraphCatalogCodec.Decode(bytes));
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
+            failure.Message.ShouldContain("Recreate the database", Case.Sensitive);
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Catalog] - Codec: malformed constraint payloads refuse with catalog corruption")]

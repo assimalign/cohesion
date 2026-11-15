@@ -68,11 +68,11 @@ public sealed partial class GraphCatalog
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer, record.Id));
         }
-        storage.CatalogVersionUndone = catalog.CreatedVersionUndone;
+        storage.CatalogVersionDeleted = catalog.VersionDeleted;
         return catalog;
     }
 
-    private void CreatedVersionUndone(PageId page, int slot, ReadOnlyMemory<byte> bytes)
+    private void VersionDeleted(PageId page, int slot, ReadOnlyMemory<byte> bytes)
     {
         if (bytes.Length < 18 || bytes.Span[17] != GraphCatalogCodec.FormatVersion) { return; }
         var record = GraphCatalogCodec.Decode(bytes.Span, page, slot);

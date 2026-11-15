@@ -364,6 +364,8 @@ public sealed partial class GraphStore
 
     // Instance counters for deterministic complexity tests; no process-global telemetry.
     private long _incidentRecordsDecoded;
+    private long _incidentRangeSeeks;
+    internal long IncidentRangeSeeks => Interlocked.Read(ref _incidentRangeSeeks);
     internal long IncidentRecordsDecoded => Interlocked.Read(ref _incidentRecordsDecoded);
 
     // Discover only the types present at this endpoint. Jump past each whole type run
@@ -431,6 +433,7 @@ public sealed partial class GraphStore
                 var low = AdjacencyKey(nodeId, selected, type ?? Guid.Empty, 0);
                 var high = AdjacencyKey(nodeId, selected, type ?? _maximumTypeId, ulong.MaxValue);
                 cancellationToken.ThrowIfCancellationRequested();
+                Interlocked.Increment(ref _incidentRangeSeeks);
                 await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(low, high, true, true), cancellationToken: cancellationToken);
                 while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
                 {

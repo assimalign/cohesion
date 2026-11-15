@@ -590,6 +590,14 @@ public sealed partial class GraphDatabase : DatabaseInstance
     {
         await LockWriterAsync(operation, token).ConfigureAwait(false);
         var edgeType = Catalog.GetEdgeTypeForWrite(type, operation.Context.Snapshot, LatestSnapshot(operation.Context));
+        if (edgeType is not null)
+        {
+            var latest = LatestSnapshot(operation.Context);
+            var source = Store.FindNode(from.Value, latest);
+            var target = from == to ? source : Store.FindNode(to.Value, latest);
+            if (source is { } first && target is { } last)
+            { ValidateEdgeType(edgeType, first.Labels, last.Labels, properties, false, false); }
+        }
         var typeId = await ValidateRelationshipCoreAsync(operation, type, properties, token, edgeType).ConfigureAwait(false);
         Action<StoredGraphNode, StoredGraphNode>? validate = edgeType is null ? null : EdgeEndpointValidator(edgeType, properties);
         return Materialize(await Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)DataStorage.ReserveTransactionSequence(), from.Value, to.Value, type, properties ?? new Dictionary<string, object?>()), typeId, operation.Context, token, validate).ConfigureAwait(false));

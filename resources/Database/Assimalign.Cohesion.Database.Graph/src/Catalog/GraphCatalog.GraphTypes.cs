@@ -45,15 +45,9 @@ public sealed partial class GraphCatalog
         return previous?.Record.EdgeType;
     }
 
-    internal IReadOnlyList<GraphEdgeTypeDeclaration> GetEdgeTypesForWrite(TransactionSnapshot snapshot, TransactionSnapshot latest,
+    internal IReadOnlyList<GraphEdgeTypeDeclaration> GetEdgeTypesForLabelWrite(TransactionSnapshot latest,
         Action<long> reserve)
-    {
-        var previous = List(8, GraphTypeId, snapshot, reserve);
-        var current = List(8, GraphTypeId, latest, reserve);
-        if (!previous.OrderBy(item => item.Record.Name, StringComparer.Ordinal).Select(item => item.Reference)
-            .SequenceEqual(current.OrderBy(item => item.Record.Name, StringComparer.Ordinal).Select(item => item.Reference))) { throw Conflict(); }
-        return previous.Select(item => item.Record.EdgeType!).ToArray();
-    }
+        => List(8, GraphTypeId, latest, reserve).Select(item => item.Record.EdgeType!).ToArray();
 
     internal void EnsureGraphTypeDefinitionMutable(string name, bool relationship, TransactionSnapshot snapshot)
     {

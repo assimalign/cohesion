@@ -12,11 +12,11 @@ namespace Assimalign.Cohesion.Database.Graph.Catalog.Tests;
 
 public sealed class GraphCatalogTypeTests
 {
-    [Theory(DisplayName = "Cohesion Test [Graph.Catalog] - Graph types: every new kind round-trips only at v4")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Catalog] - Graph types: every new kind round-trips only at v5")]
     [InlineData(6)]
     [InlineData(7)]
     [InlineData(8)]
-    public void Codec_GraphTypeKind_ShouldRoundTripAndRefuseV3(byte kind)
+    public void Codec_GraphTypeKind_ShouldRoundTripAndRefuseEarlierCatalogs(byte kind)
     {
         // Arrange
         var property = GraphPropertyTypeDeclaration.Create("p", DatabaseType.Int64, true);
@@ -32,7 +32,7 @@ public sealed class GraphCatalogTypeTests
         var decoded = GraphCatalogCodec.Decode(bytes);
 
         // Assert
-        bytes[17].ShouldBe((byte)4);
+        bytes[17].ShouldBe((byte)5);
         decoded.Kind.ShouldBe(kind);
         decoded.Id.ShouldBe(GraphCatalog.GraphTypeId);
         decoded.Name.ShouldBe(record.Name);
@@ -47,8 +47,11 @@ public sealed class GraphCatalogTypeTests
             (decoded.EdgeType!.SourceNodeType, decoded.EdgeType.TargetNodeType).ShouldBe(("N", "M"));
             decoded.EdgeType.Properties.ShouldHaveSingleItem().Required.ShouldBeTrue();
         }
-        bytes[17] = 3;
-        Should.Throw<GraphCatalogException>(() => GraphCatalogCodec.Decode(bytes)).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
+        foreach (byte version in new byte[] { 3, 4 })
+        {
+            bytes[17] = version;
+            Should.Throw<GraphCatalogException>(() => GraphCatalogCodec.Decode(bytes)).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Catalog] - Graph types: malformed counts flags types identity and trailing bytes are corruption")]

@@ -5,7 +5,7 @@
 CREATE TEXT INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property) shares schema
 autocommit, ordinal names and token discovery with exact indexes. GraphIndexMetadata.IsText
 and its v4 kind-4 payload byte (0 exact, 1 text) identify the kind; malformed bytes use existing
-CG06006. Catalog v3 is refused with CG06019 through the recovered read-only gate, including
+CG06006. Catalog v4 and earlier are refused with CG06019 through the recovered read-only gate, including
 WAL-only records, preserving every file. No legacy reader is present. The mutually exclusive catalog definition slot holds a shared
 text-kind tag in memory, preserving ordinary CatalogRecord size. Physical kind-3 index
 definitions reuse their existing revision word as the immutable discriminator (0 exact,
@@ -150,8 +150,8 @@ now yields before each candidate/page batch to size/interval checkpoints, pendin
 signals and admission pauses. Maintenance owns the coordinator apply gate already; the shared
 physical freeing helper does not recursively acquire it. The registry/rebuild lock order,
 read-only discriminator/liveness preflight and receipt validation remain unchanged.
-Graph catalog v4, record format 5 and B-tree format 3 remain current: these lifecycle changes
-introduce no new persisted discriminator. Start/stop events 16/17 carry database, physical
+Graph catalog format 5, record format 5 and B-tree format 3 are current. The index lifecycle
+changes introduce no new persisted discriminator; graph-type enforcement requires catalog v5. Start/stop events 16/17 carry database, physical
 objectId and succeeded on stop; PagesReclaimed (18, #1842) reports each committed owner-page
 batch. No indexed value is emitted and no diagnostic identity is added.
 With 8 nodes each contributing 1,022 distinct trigrams (8,176 postings) and a 64 KiB checkpoint trigger, the controlled whole-bracket
@@ -187,7 +187,7 @@ four real writers therefore reach admission in each episode; this probe does not
 simultaneous kernel waiters. The disabled comparison uses the same load and never cancels
 because it records no admission waits. Production cancellation and writer locking are unchanged.
 
-## Open graph types (#1806, GQ-T1)
+## Open graph types (#1806)
 
 Graph-type marker, node and edge publication and tombstones reuse the catalog SaveAsync/DeleteAsync
 helpers. Each physical write enters the data coordinator's checkpoint interlock; its release
@@ -240,39 +240,41 @@ dependencies scan kind 7, and neither label lookup scans edge declarations.
 
 A node carrying an identifying label must carry every implied label and satisfy its property
 types and NOT NULL rules. Missing implied labels are refused, never synthesized. Multiple matching
-node types all apply. Additional labels, types and properties remain writable: this run supplies
-open semantics only. Validation uses ValidateNodeAsync for typed creates and staged INSERT,
+node types all apply. Open semantics keep additional labels, types and properties writable. Validation uses ValidateNodeAsync for typed creates and staged INSERT,
 CREATE, MERGE, SET and REMOVE. MERGE defers required properties and implied labels until its
 final working copy, permitting ON CREATE to complete them. Removing an identifying label removes
 that membership; deleting a node is permitted. Missing implied labels use CG03012; property
 type and NOT NULL violations retain CG03003. Snapshot writes
 compare the selected node-type record against latest visibility, including an absent old rule;
 a stale writer reports CG04007. The existing database writer lock serializes DDL and data through
-commit or rollback. Edge properties and endpoints are enforced in GQ-T2. Selected edge declarations compare their
+commit or rollback. Edge properties and endpoints are enforced on writes. Selected edge declarations compare their
 physical references at snapshot and latest visibility, as node types do. Staged relationship
-creation passes the already loaded endpoint nodes into validation. Typed creation validates
-endpoints in an internal store callback over the endpoint reads already needed for existence;
-no public storage seam is added. SET/REMOVE label changes seek declared edge types' incident
-ranges and overlay-created edges, then validate final endpoint labels. Untyped edges add no
+creation passes the already loaded endpoint nodes into validation. Typed creation checks endpoints before properties and rechecks them in the internal store callback
+against latest endpoint reads. Relationship property writes check properties without rereading
+endpoints. A matching MERGE validates only its writes. Label additions do no edge work. For removals,
+one statement-local map selects declarations by identifying label and source/outgoing or target/incoming
+direction. Each selected type receives its own stale check; each seek consumes one work unit, even
+when empty. Validation reads only that node/direction/type range and its corresponding created-edge
+incident list, then checks final endpoint labels. The map is built once under the writer lock. Untyped edges add no
 endpoint read or expansion work. Missing endpoint membership is CG03013, distinct from CG03010
 for existing data during schema validation; property violations retain CG03003. Independent
-relationship key/constraint types are checked in both publication orders with CG03009. Closedness
-is GQ-T3.
+relationship key/constraint types are checked in both publication orders with CG03009. Closed
+graph types remain unsupported.
 
 Before publication, structural comparison by identifying label selects only new or strengthened
 node declarations for owner-posting validation under latest visibility and the writer lock.
 Unchanged declarations, removed elements, nullable-property relaxations, removed property rules
-and removed implied labels scan no members for open types only. GQ-T3 closedness makes removal a
-tightening and must extend validation selection accordingly. Scalar declarations currently use exact types after
+and removed implied labels scan no members under open semantics. Closed semantics would make
+removal a tightening and require broader validation selection. Scalar declarations currently use exact types after
 CLR normalization, without scalar subtyping; changing the scalar type requires validation.
 New or strengthened edge declarations stream relationship-type postings and validate endpoints and properties; unchanged or relaxed declarations scan no edges. Skipping these scans preserves deployment availability
 when previously validated typed owners have grown beyond the work budget, and avoids holding
 the writer lock over unaffected postings. Every node write continues to enforce the published
-rule. A violation stops at the first node
+rule. A violation stops at the first invalid node or edge
 with CG03010 and leaves the previous type in force. Empty owners decode no unrelated nodes.
 Compatibility and ownership checks cover only new, changed and removed declarations; compatibility
-reads keys/constraints only for new or changed node types. Each compared key consumes one work
-unit, and both publication orders reserve the kind-7 decode grant before decoding. Forward checks
+reads keys/constraints only for new or changed node and edge types. Each compared key consumes one
+work unit, and both publication orders reserve the kind-7/8 decode grant before decoding. Forward checks
 also reserve kind-3/5 candidate and decode buffers. Descriptor work and selected postings consume CG05004's engine work budget; descriptor containers
 and bounded posting cursors consume CG05020's memory grant. Each decoded node's labels and
 property payload have a temporary value grant, released before advancing to the next member.
@@ -306,15 +308,20 @@ discovers label/type/property tokens in the same logical transaction; dropping a
 those discoveries. Failed operations roll all new tokens back. The defaults remain 1,000,000
 work units and 256 MiB retained memory. Every grant unwinds on success, cancellation or failure.
 
-Catalog v3 introduced kind 6 (current-type marker), 7 (node declaration) and 8 (edge declaration); v4 retains them.
+Catalog v3 introduced kind 6 (current-type marker), 7 (node declaration) and 8 (edge declaration).
+Catalog v5 retains their fields and makes kind-8 records enforced invariants; v4 and earlier are refused.
+The storage adapter captures an owner-zero record before deletion and notifies the catalog only
+after deletion succeeds, including when the last slot frees its page and clears the owner tag.
+Equal entity/catalog version numbers therefore cannot misclassify an entity rollback as a catalog mutation.
 The private fixed GUID 672bf6e9-3491-4306-a153-2a0f4c0370ed routes only these kinds; it is never
 a graph token identity. Membership remains label-derived and graph entity format stays 5.
 Only changed or removed kind-7/8 records are tombstoned; only new or changed declarations are
 inserted through the existing physical apply brackets in one logical transaction. Structural
 comparison covers every encoded field. The kind-6 marker changes only between absent and present
 types. Unchanged records retain their physical identity and version chain: an unrelated ADD
-causes no false CG04007 conflict for a Snapshot writer to an unchanged identifying label.
-Added, changed and removed selected rules still conflict. Typed-label validation decodes each
+causes no false CG04007 conflict for node-property writes or label additions. Label removals compare
+only edge types that name a removed identifying label in the matching direction. Added, changed
+and removed rules selected by a write still conflict. Typed-label validation decodes each
 candidate once and pins the same immutable declaration for both visibility checks and enforcement.
 The publication
 boundaries are token discovery, old-record tombstones, marker, each node, each edge, and the
@@ -323,18 +330,21 @@ replacement publishes the complete type. No independently committed metadata or 
 cache exists. Crash-image tests interrupt after tombstones, marker and each element publication,
 and check exact state on two successive reopens; the fault-injecting storage also supplies
 images at the logical commit record before flush confirmation and after confirmed replacement
-and drop. Version 3, including journal-only images, refuses with CG06019 through the
+and drop. Version 4 and earlier, including journal-only images, refuse with CG06019 through the
 existing recovered read-only gate before any write. No upgrade or legacy reader is added.
 
-GraphTypeTests is the typed-schema and node-write conformance corpus; GraphTypeWireTests verifies
-node refusals and continued session use over InMemory and TCP. Catalog-format tests pin
-v4 for every existing record kind and byte-preserving v2 refusal. The NativeAOT sample exercises
-all five schema verbs and node enforcement. No new interface, assembly reference, wire message
+GraphTypeTests and GraphTypeDdlTests cover typed and text schema changes, node and edge writes,
+rollback state and lease release. GraphTypeTextRecoveryTests interrupts same-name text edge ALTER
+at tombstones, edge publication and logical commit, checks exact state twice after reopen, and
+cancels edge validation. GraphTypeWireTests verifies node and edge refusals and continued session
+use over InMemory and TCP. Catalog-format tests pin v5 for every record kind and byte-preserving
+earlier-version refusal. The NativeAOT sample exercises all five schema verbs, text DDL, canonical
+SHOW, and node and edge enforcement. No new interface, assembly reference, wire message
 or EventSource is introduced. This follows the concrete-first Database rule (database-area.md).
 Local Neo4j shapes consulted without copying code: GraphType.scala:277-343 under
 `C:/Source/repos/neo4j/neo4j/community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/`
 defines identifying and additional labels, property types and endpoint references. The typed
-fragment replacement/default rules above are Cohesion's explicit API contract for this run.
+fragment replacement/default rules above define Cohesion's typed API contract.
 
 | Code | Graph-type condition |
 | --- | --- |
@@ -346,12 +356,12 @@ fragment replacement/default rules above are Cohesion's explicit API contract fo
 | CG03013 | A relationship or endpoint-label write violates declared source/target membership |
 | CG04025 | A schema mutation is attempted inside an explicit transaction |
 | CG05004 / CG05020 | Schema work / retained-memory budget is exhausted |
-| CG06019 | A catalog record version differs from v4 |
+| CG06019 | A catalog record version differs from v5 |
 
 ## Refused opens preserve every file (#1744)
 
 GraphStore.EnsureIndexFormat and GraphCatalog.EnsureFormat read graph headers, physical index
-definition revisions, signed index registrations and roots, and catalog v4 records including
+definition revisions, signed index registrations and roots, and catalog v5 records including
 index-kind bytes. Receipt checks use read-only lifecycle classification to determine recovered liveness. The engine validates these through Storage's recovered read-only
 view before acquiring writable file handles.
 The graph entity/registration and B-tree gates precede the catalog gate. An image with both
@@ -382,7 +392,7 @@ analysis, including correlated EXISTS and pattern comprehensions. Results, expli
 EXPLAIN performs the same admission and reports the same warnings without execution.
 
 The catalog maintains a property-name directory alongside its existing version directory, loaded
-from existing v4 records and updated on publication and undo. Resolution checks snapshot-visible
+from existing v5 records and updated on publication and undo. Resolution checks snapshot-visible
 writer stamps in memory, without decoding catalog records or scanning labels, types or entities.
 Entity records currently embed string keys; there is no separate property-token identity to consult.
 Unlabeled writes and undeclared keys on schema-owned definitions therefore save untyped kind-3
@@ -518,7 +528,7 @@ a named rule into an unnamed declaration. CreateConstraintAsync validates names,
 owner identities and supported types before statement admission, leaving an explicit transaction
 usable after a bad argument. D2 applies this order to the remaining schema mutations. Oversized encoded constraint metadata reports DatabaseException with CG02009.
 
-The catalog record codec is v4 for every kind (1 label, 2 relationship type, 3 property, 4 index,
+The catalog record codec is v5 for every kind (1 label, 2 relationship type, 3 property, 4 index,
 5 constraint, 6 current-type marker, 7 node type, 8 edge type). Its prefix remains writer/deleter u64 stamps, kind byte, version byte, GUID and
 length-prefixed UTF-8 name. Constraint payload is a length-prefixed UTF-8 property key followed
 by one type byte (255 for existence). Other payload layouts are unchanged. Earlier or future
@@ -543,7 +553,7 @@ records to refuse. No wire bytes, public interface or assembly boundary changes 
 | CG03009 | Duplicate constraint kind or incompatible property type rules |
 | CG03010 | Existing data violates a new named constraint |
 | CG04025 | Schema DDL inside an explicit transaction (Cohesion policy) |
-| CG06019 | Unsupported catalog record format; only v4 is admitted |
+| CG06019 | Unsupported catalog record format; only v5 is admitted |
 
 ## Schema text coordination (#1738, GQ-D2; #1249)
 
@@ -3081,7 +3091,7 @@ non-integer bounds use CG02014 during planning. Dynamic numeric bounds follow it
 conversion: truncate toward zero, require Int32 range, then normalize
 negative offsets and clamp. NULL sources/bounds yield NULL and filters retain only TRUE.
 See the language design's [semantics and local reference citations](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#list-comprehensions-and-slices-1736-gq-c1).
-No disk, protocol or public interface boundary changes accompany this run.
+List comprehensions preserve disk, protocol and public interface boundaries.
 
 Reduce and ALL/ANY/NONE/SINGLE (#1736, GQ-C2) reuse these lexical frames, with a second
 accumulator frame for reduce. Sources evaluate once; a non-NULL reduce source evaluates the
@@ -3723,7 +3733,7 @@ The payload begins at byte 16:
 | Offset / order | Encoding | Meaning |
 | --- | --- | --- |
 | 16 | byte | Kind: 1 label, 2 relationship type, 3 property key, 4 named index, 5 named constraint, 6 current graph type, 7 node type, 8 edge type |
-| 17 | byte | Format version 4 for every kind; earlier versions refuse with CG06019 before any write |
+| 17 | byte | Format version 5 for every kind; earlier versions refuse with CG06019 before any write |
 | 18 | 16 bytes | CLR `Guid.ToByteArray()` representation: definition ID for kinds 1/2, parent ID for kinds 3/4/5, private current-type GUID for kinds 6/7/8 |
 | 34 | string | Definition name, property key, or index name |
 | Following name, kinds 1/2 | byte, string | `DatabaseObjectOwner` value and owning schema |
@@ -3735,7 +3745,9 @@ The payload begins at byte 16:
 | Following name, kind 8 | string, string, properties | Source and target node identifying labels, then property declarations |
 | Properties in kinds 7/8 | int32, repeated (string, byte, byte) | Property count, then name, DatabaseType and NOT NULL flag (0 or 1) |
 
-GQ-T2's text commands and endpoint enforcement reuse these v4 fields without a format bump.
+Catalog v5 preserves the v4 field layout but changes kind-8 declarations from unenforced metadata
+to invariants. The existing read-only format gate refuses v4 and earlier before any write; no
+legacy reader or upgrade path is provided. Graph entity format remains 5.
 
 All fixed-width numeric values are little-endian. Strings use a signed 32-bit little-endian
 UTF-8 byte length followed by exactly that many strict UTF-8 bytes. Length -1 represents
