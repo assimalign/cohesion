@@ -28,7 +28,8 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             // Act
             var actual = await WindowProbeAsync(shape, grant, false, false);
-            // Assert: the grant sweep separately checks every refusal against that binary.
+            // Assert: in CI, the grant sweep compares shapes 0-18 with the in-binary switch
+            // and shape 19 with its committed 9973a4e36 outcomes.
             if (grant == 67108864) { actual.Code.ShouldBe("ok"); }
             if (actual.Code != "ok") { continue; }
             actual.Digest.ShouldBe(digest); actual.Sequence.ShouldBe(sequence);
@@ -51,13 +52,17 @@ public sealed partial class SqlSortSpillConformanceTests
             1048576, 2097152, 4194304, 8388608, expected.Peak - 1, expected.Peak, expected.Peak + 1];
         if (shape is 16 or 17 or 18)
         { grants = grants.Concat(Enumerable.Range(0, 17).Select(index => 393216L + 8192L * index)).ToArray(); }
+        if (shape == 19) { grants = _windowMembershipBase.Select(point => point.Grant).ToArray(); }
         string? record = Environment.GetEnvironmentVariable("SQ_L4B_RECORD");
         string? baseline = Environment.GetEnvironmentVariable("SQ_L4B_BASELINE");
         foreach (bool zero in new[] { false, true })
         {
             foreach (long grant in grants.Distinct().Order())
             {
-                var before = await WindowProbeAsync(shape, grant, true, zero);
+                var before = shape == 19
+                    ? new ResultProbe(_windowMembershipBase.Single(point => point.Grant == grant).Code,
+                        "3C40BECB1E1D494D2D48502B443438E4A9551F4AB839A2F51254CFB88F9FA70A", "", 0, 3608, 0, 1188896)
+                    : await WindowProbeAsync(shape, grant, true, zero);
                 // Act
                 var after = await WindowProbeAsync(shape, grant, false, zero);
                 // Assert
@@ -78,6 +83,18 @@ public sealed partial class SqlSortSpillConformanceTests
             }
         }
     }
+
+    // All 30 outcomes from 9973a4e36's 19-{False,True}-{grant}.txt archives agree
+    // between regular and zero quota. Base successes must survive; a base refusal
+    // may become a completion, but a remaining refusal must keep this exact code.
+    private static readonly (long Grant, string Code)[] _windowMembershipBase =
+    [
+        (4096, "CS05079"), (65536, "CS05067"), (131072, "CS05067"),
+        (196608, "CS05067"), (262144, "CS05067"), (393216, "CS05067"),
+        (524288, "CS05067"), (786432, "CS05067"), (1048576, "CS05067"),
+        (1188895, "CS05067"), (1188896, "ok"), (1188897, "ok"),
+        (2097152, "ok"), (4194304, "ok"), (8388608, "ok"),
+    ];
 
     private async Task<ResultProbe> WindowProbeAsync(int shape, long grant, bool forceBase, bool quotaZero)
     {

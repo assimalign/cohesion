@@ -75,7 +75,8 @@ public sealed partial class SqlSortSpillConformanceTests
             { Directory.CreateDirectory(record); await File.WriteAllTextAsync(Path.Combine(record, key), measured.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
             if (Environment.GetEnvironmentVariable("SQ_L4B_ALLOCATION_BASELINE") is { } baseline)
             { measured.ShouldBe(long.Parse(await File.ReadAllTextAsync(Path.Combine(baseline, key)), System.Globalization.CultureInfo.InvariantCulture)); }
-            // Pins are recorded from 9973a4e36 on each architecture, including a file engine.
+            // Pins use 9973a4e36 plus the allocation-free Selecting hook at TableAs.cs:62,
+            // on each architecture, including a file engine.
             // Recording a reference archive is the only mode that omits the committed guard.
             if (Environment.GetEnvironmentVariable("SQ_L4B_ALLOCATION_RECORD") is null)
             { measured.ShouldBeLessThanOrEqualTo(WindowAllocationPin(shape, RuntimeInformation.ProcessArchitecture)); }

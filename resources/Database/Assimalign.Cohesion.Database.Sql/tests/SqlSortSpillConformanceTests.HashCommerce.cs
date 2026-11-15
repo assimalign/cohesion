@@ -71,7 +71,7 @@ public sealed partial class SqlSortSpillConformanceTests
             "WITH revenues AS (SELECT p.category_id,p.product_id,SUM(i.line_total) AS revenue FROM products p INNER JOIN order_items i ON p.product_id=i.product_id GROUP BY p.category_id,p.product_id), ranked AS (SELECT category_id,product_id,revenue,RANK() OVER(PARTITION BY category_id ORDER BY revenue DESC) AS revenue_rank FROM revenues) SELECT category_id,product_id,revenue,revenue_rank FROM ranked WHERE revenue_rank<=3 ORDER BY category_id,revenue_rank,product_id",
             "SELECT order_id,customer_id,order_date,total FROM orders WHERE status='paid' AND order_date<@end AND order_id NOT IN(SELECT order_id FROM shipments) ORDER BY order_date,order_id",
         ];
-        // SQ-L4b completes the category-rank stage; the eager NOT IN vector remains SQ-L4c.
+        // The category-rank window completes; the eager NOT IN vector still refuses.
         foreach (string sql in remaining)
         {
             if (sql.StartsWith("WITH", StringComparison.Ordinal))
