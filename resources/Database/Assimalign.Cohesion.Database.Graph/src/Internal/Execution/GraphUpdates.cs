@@ -567,7 +567,7 @@ internal sealed class GraphUpdates : IDisposable
                     if (!node.Labels.SequenceEqual(replacement.Labels) || !Identical(node.Properties, replacement.Properties))
                     {
                         if (removesLabels && !ReferenceEquals(node.Labels, replacement.Labels))
-                        { RecordRemovedLabels(node, replacement); }
+                        { RecordRemovedLabels(node, replacement, token); }
                         _changed.Add((true, node.Id.Value));
                         RememberNode(replacement, token);
                         touchedNodes.Add(node.Id.Value);
@@ -617,12 +617,13 @@ internal sealed class GraphUpdates : IDisposable
         return _database.ValidateRelationshipCoreAsync(_operation, edge.Type, edge.Properties, token, type);
     }
 
-    private void RecordRemovedLabels(GraphNode node, GraphNode replacement)
+    private void RecordRemovedLabels(GraphNode node, GraphNode replacement, CancellationToken token)
     {
         foreach (string label in node.Labels)
         {
             if (replacement.Labels.Contains(label, StringComparer.Ordinal)) { continue; }
-            if (_nodeIndexes is null) { Charge(128); _nodeIndexes = new(); }
+            EnsureLabelEndpoints(token);
+            if (!_nodeIndexes!.LabelEndpoints!.ContainsKey(label)) { continue; }
             if (_nodeIndexes.RemovedLabels is null) { Charge(128); _nodeIndexes.RemovedLabels = []; }
             if (!_nodeIndexes.RemovedLabels.TryGetValue(node.Id.Value, out var removed))
             { Charge(256); _nodeIndexes.RemovedLabels.Add(node.Id.Value, removed = new(StringComparer.Ordinal)); }
@@ -630,49 +631,58 @@ internal sealed class GraphUpdates : IDisposable
         }
     }
 
+    private void EnsureLabelEndpoints(CancellationToken token)
+    {
+        if (_nodeIndexes?.LabelEndpoints is not null) { return; }
+        var latest = _database.LatestSnapshot(_operation.Context);
+        // The writer lock holds declarations stable for the entire statement, including MERGE rows.
+        Charge(256);
+        _nodeIndexes ??= new();
+        _nodeIndexes.LabelEndpoints = new(StringComparer.Ordinal);
+        foreach (var type in _database.Catalog.GetEdgeTypesForLabelWrite(latest, Charge))
+        {
+            token.ThrowIfCancellationRequested();
+            Add(type.SourceNodeType, GraphIncidentDirection.Outgoing);
+            Add(type.TargetNodeType, GraphIncidentDirection.Incoming);
+            void Add(string label, GraphIncidentDirection direction)
+            {
+                Charge(256L + label.Length * 2L);
+                if (!_nodeIndexes.LabelEndpoints.TryGetValue(label, out var selected)) { _nodeIndexes.LabelEndpoints.Add(label, selected = []); }
+                selected.Add((type, direction));
+            }
+        }
+    }
+
     private async ValueTask ValidateLabelEndpointsAsync(Dictionary<ulong, HashSet<string>> removedLabels, CancellationToken token)
     {
         var budget = _operation.EnsureQueryBudget();
         var latest = _database.LatestSnapshot(_operation.Context);
-        // The writer lock holds declarations stable for the entire statement, including MERGE rows.
-        if (_nodeIndexes?.LabelEndpoints is null)
-        {
-            Charge(256);
-            _nodeIndexes ??= new();
-            _nodeIndexes.LabelEndpoints = new(StringComparer.Ordinal);
-            foreach (var type in _database.Catalog.GetEdgeTypesForLabelWrite(latest, Charge))
-            {
-                token.ThrowIfCancellationRequested(); budget.Consume();
-                var metadata = _database.Catalog.FindRelationshipType(type.RelationshipType, latest);
-                if (metadata is null) { continue; }
-                Add(type.SourceNodeType, GraphIncidentDirection.Outgoing);
-                Add(type.TargetNodeType, GraphIncidentDirection.Incoming);
-                void Add(string label, GraphIncidentDirection direction)
-                {
-                    Charge(256L + label.Length * 2L);
-                    if (!_nodeIndexes.LabelEndpoints.TryGetValue(label, out var selected)) { _nodeIndexes.LabelEndpoints.Add(label, selected = []); }
-                    selected.Add((type, metadata.Value.Id, direction));
-                }
-            }
-        }
         foreach (var (id, removed) in removedLabels)
         {
             foreach (string label in removed)
             {
                 token.ThrowIfCancellationRequested();
-                if (!_nodeIndexes.LabelEndpoints.TryGetValue(label, out var selected)) { continue; }
-                foreach (var (type, typeId, direction) in selected)
+                if (!_nodeIndexes!.LabelEndpoints!.TryGetValue(label, out var selected)) { continue; }
+                foreach (var (type, direction) in selected)
                 {
-                    _database.Catalog.GetEdgeTypeForWrite(type.RelationshipType, _operation.Context.Snapshot, latest);
+                    if (_nodeIndexes.CheckedEdgeTypes is null) { Charge(128); _nodeIndexes.CheckedEdgeTypes = new(StringComparer.Ordinal); }
+                    if (!_nodeIndexes.CheckedEdgeTypes.TryGetValue(type.RelationshipType, out var typeId))
+                    {
+                        _database.Catalog.GetEdgeTypeForWrite(type.RelationshipType, _operation.Context.Snapshot, latest);
+                        typeId = _database.Catalog.FindRelationshipType(type.RelationshipType, latest)?.Id;
+                        Charge(128);
+                        _nodeIndexes.CheckedEdgeTypes.Add(type.RelationshipType, typeId);
+                    }
+                    if (typeId is not { } selectedId) { continue; }
                     // An empty seek is still work. Only this label's matching direction/type is read.
                     budget.Consume();
-                    await foreach (var stored in _database.Store.StreamIncidentRangeAsync(id, direction, [typeId], latest,
+                    await foreach (var stored in _database.Store.StreamIncidentRangeAsync(id, direction, [selectedId], latest,
                         _ => budget.Consume(), token).ConfigureAwait(false))
                     {
                         Validate(_relationships.TryGetValue(stored.Id, out var current)
                             ? new StoredGraphRelationship(current.Id.Value, current.From.Value, current.To.Value, current.Type, current.Properties) : stored);
                     }
-                    if (_createdIncident.TryGetValue((id, direction), out var types) && types.TryGetValue(typeId, out var created))
+                    if (_createdIncident.TryGetValue((id, direction), out var types) && types.TryGetValue(selectedId, out var created))
                     {
                         foreach (ulong edgeId in created)
                         {
@@ -845,7 +855,8 @@ internal sealed class GraphUpdates : IDisposable
     private sealed class WriteIndexes : Dictionary<(string Label, string Key), GraphOverlayIndex>
     {
         internal Dictionary<ulong, HashSet<string>>? RemovedLabels { get; set; }
-        internal Dictionary<string, List<(GraphEdgeTypeDeclaration Type, Guid Id, GraphIncidentDirection Direction)>>? LabelEndpoints { get; set; }
+        internal Dictionary<string, Guid?>? CheckedEdgeTypes { get; set; }
+        internal Dictionary<string, List<(GraphEdgeTypeDeclaration Type, GraphIncidentDirection Direction)>>? LabelEndpoints { get; set; }
     }
 
     private sealed class DebugView

@@ -221,7 +221,7 @@ public sealed partial class GraphCatalog
 
     // Tokens describe names a definition has had, independently of a particular entity's
     // current values. Consult the writer stamps already loaded by Add, without decoding
-    // metadata or scanning definitions on the read path. Undone versions leave this directory.
+    // metadata or scanning definitions on the read path. Undone and purged versions leave this directory.
     internal bool HasPropertyKey(string name, TransactionSnapshot snapshot)
     {
         BeforePropertyKeyLookup?.Invoke(name);

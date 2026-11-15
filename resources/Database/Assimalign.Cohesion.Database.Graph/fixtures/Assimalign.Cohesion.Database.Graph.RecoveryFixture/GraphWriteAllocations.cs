@@ -35,24 +35,24 @@ internal static class GraphWriteAllocations
             session.ExecuteAsync("CREATE (:Counter {c:0})", cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
             string[] queries = ["CREATE (:Temporary {id:1})", "MATCH (n:Counter) SET n.c=n.c+1", "MATCH (n:Temporary) DELETE n"];
             var minima = new[] { long.MaxValue, long.MaxValue, long.MaxValue };
-            // The smallest DELETE pre-images occur at one statement in this window. A Gen2
-            // collection there trims the shared scratch buffers and loses that sample to
-            // two pool misses (8 KiB and 16 KiB), leaving the next floor 248 B higher.
-            // Reserve before warming and drain any startup finalizers, so the same warmed
-            // pools remain available throughout measurement. EndNoGCRegion verifies that
-            // the reservation held; byte ceilings and injected allocations are unchanged.
-            if (indexed && !GC.TryStartNoGCRegion(268435456, 67108864))
-            { throw new InvalidOperationException("Could not reserve the indexed allocation measurement window."); }
+            // Typed CREATE and indexed DELETE minima can occur at just one statement in
+            // this window. Keep the warmed pools through that sample, including under GC
+            // pressure, by reserving before warming and draining startup finalizers.
+            // EndNoGCRegion verifies that the reservation held; byte ceilings, sampling
+            // rounds and injected allocations are unchanged.
+            bool stablePools = indexed || typed;
+            if (stablePools && !GC.TryStartNoGCRegion(268435456, 67108864))
+            { throw new InvalidOperationException("Could not reserve the allocation measurement window."); }
             long windowStart = GC.GetAllocatedBytesForCurrentThread();
             try
             {
-                if (indexed) { GC.WaitForPendingFinalizers(); }
+                if (stablePools) { GC.WaitForPendingFinalizers(); }
                 for (int warmup = 0; warmup < 100; warmup++) { Round(false); }
                 for (int round = 0; round < 5; round++) { Round(true); }
                 probe?.Complete();
             }
-            finally { if (indexed) { GC.EndNoGCRegion(); } }
-            if (indexed) { Console.WriteLine($"ALLOCATION_WINDOW|bytes={GC.GetAllocatedBytesForCurrentThread() - windowStart}|gc=none"); }
+            finally { if (stablePools) { GC.EndNoGCRegion(); } }
+            if (stablePools) { Console.WriteLine($"ALLOCATION_WINDOW|bytes={GC.GetAllocatedBytesForCurrentThread() - windowStart}|gc=none"); }
             return minima;
 
             void Round(bool measure)

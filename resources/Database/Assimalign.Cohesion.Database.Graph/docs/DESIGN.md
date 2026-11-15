@@ -253,9 +253,11 @@ creation passes the already loaded endpoint nodes into validation. Typed creatio
 against latest endpoint reads. Relationship property writes check properties without rereading
 endpoints. A matching MERGE validates only its writes. Label additions do no edge work. For removals,
 one statement-local map selects declarations by identifying label and source/outgoing or target/incoming
-direction. Each selected type receives its own stale check; each seek consumes one work unit, even
+direction. Each selected type receives one stale check per statement; each seek consumes one work unit, even
 when empty. Validation reads only that node/direction/type range and its corresponding created-edge
-incident list, then checks final endpoint labels. The map is built once under the writer lock. Untyped edges add no
+incident list, then checks final endpoint labels. The map is built on the first removal under the writer lock.
+Only labels selected by the map retain per-node removal state and its memory grant; untyped and unrelated
+removals perform one catalog read per statement and preserve ordinary write work. Untyped edges add no
 endpoint read or expansion work. Missing endpoint membership is CG03013, distinct from CG03010
 for existing data during schema validation; property violations retain CG03003. Independent
 relationship key/constraint types are checked in both publication orders with CG03009. Closed
@@ -295,6 +297,8 @@ shifted CREATE by 144 bytes depending on an injected control allocation. The sha
 UTF-8 codec lowers ordinary CREATE/SET/DELETE minima to 38,552/65,944/49,568 bytes and
 typed-label minima to 39,896/67,272/49,568 bytes. Every ceiling is tightened to its new minimum
 plus exactly 128 bytes; the 129-byte/1-KiB regression controls remain unchanged.
+Typed and indexed measurement children reserve and verify a no-GC window so pool trimming cannot
+discard a single minimum sample; production execution retains its normal GC policy.
 These fresh-process minima agree on win-arm64 and win-x64; typed writes have their
 own allocation guard and injected control. Child measurement processes use the testhost's
 runtime root and assert the matching architecture, including under --arch x64.
@@ -320,8 +324,9 @@ inserted through the existing physical apply brackets in one logical transaction
 comparison covers every encoded field. The kind-6 marker changes only between absent and present
 types. Unchanged records retain their physical identity and version chain: an unrelated ADD
 causes no false CG04007 conflict for node-property writes or label additions. Label removals compare
-only edge types that name a removed identifying label in the matching direction. Added, changed
-and removed rules selected by a write still conflict. Typed-label validation decodes each
+only latest edge types that name a removed identifying label in the matching direction. Added
+or changed selected edge rules conflict; a dropped edge rule is no longer selected by a label removal.
+Node and relationship writes still conflict on removed declarations they select. Typed-label validation decodes each
 candidate once and pins the same immutable declaration for both visibility checks and enforcement.
 The publication
 boundaries are token discovery, old-record tombstones, marker, each node, each edge, and the
@@ -392,7 +397,7 @@ analysis, including correlated EXISTS and pattern comprehensions. Results, expli
 EXPLAIN performs the same admission and reports the same warnings without execution.
 
 The catalog maintains a property-name directory alongside its existing version directory, loaded
-from existing v5 records and updated on publication and undo. Resolution checks snapshot-visible
+from existing v5 records and updated on publication, undo and version purge. Resolution checks snapshot-visible
 writer stamps in memory, without decoding catalog records or scanning labels, types or entities.
 Entity records currently embed string keys; there is no separate property-token identity to consult.
 Unlabeled writes and undeclared keys on schema-owned definitions therefore save untyped kind-3
