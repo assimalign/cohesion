@@ -430,7 +430,7 @@ internal sealed partial class SqlPlanExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
                 if (windowSpool is not null)
-                { spilled = SqlWindowInputSpool.Take(projected, ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns); return []; }
+                { spilled = SqlWindowInputSpool.Take(projected, ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns); windowSpool = null; return []; }
                 if (outputSpool is { } completed)
                 {
                     var result = completed.Take(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns, cancellationToken,
