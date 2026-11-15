@@ -12,7 +12,6 @@ databases through recovery; SQL and KeyValue enumerate open instances. Health us
 in every model, so a stored database not opened by this process is absent from health and a
 leftover directory cannot fail readiness.
 
-
 ## Named savepoint admission (#1726, XT-4)
 
 The protected non-virtual session controls CreateSavepointAsync, ReleaseSavepointAsync and
@@ -125,7 +124,6 @@ The abort remains a base because the shipped deadlock exception derives from it.
 Under statement atomicity a hard deadlock refuses the statement; the explicit victim
 transaction stays active with earlier work and locks until its caller rolls it back.
 
-
 ## Storage corruption (#1160)
 
 Storage corruption is `CK06003` (#1160). The engine translates a
@@ -183,7 +181,6 @@ independently consumable base components a database is made of (`Database.Types`
 `Database.Execution`, `Database.Indexing`, `Database.Text`, `Database.Protocol`,
 `Database.Security`) — so one reference to the root delivers the whole base
 surface. Child roots never reference the root.
-
 
 ## Phase 29 composition contract (current)
 
@@ -1422,7 +1419,6 @@ DatabaseNotFoundException preserves structured diagnostics from an inner Databas
 An incomplete file set can therefore keep precise absence semantics for provisioning while
 its allocated model diagnostic remains available through Diagnostics.
 
-
 ## Model architecture test support
 
 The root test project owns the stateless ModelArchitecture helper, linked into the five implemented model test assemblies by the Database-scoped ModelArchitecture.targets. Cache has no component source and no architecture test until implementation. Each model build exports actual compiler inputs, including generated sources, references and conditional symbols; the test reconstructs a complete Roslyn compilation and rejects Storage-to-Catalog/engine and Catalog-to-engine symbol references by source folder. Manifest copying asks the referenced model project for its evaluated IntermediateOutputPath. The query removes the test executable's RuntimeIdentifier, matching SDK library references, while preserving the model's own RID and custom intermediate paths (#1809).
@@ -1551,7 +1547,6 @@ The [error-code registry](ERROR-CODES.md) assigns two-character model prefixes a
 
 The convention review also inspected Neo4j `community/common/src/main/java/org/neo4j/kernel/api/exceptions/Status.java:877-886` (portable classification/category/title identities) and RavenDB `src/Raven.Client/Exceptions/RavenException.cs:26-29` (exception-owned construction). Cohesion keeps the approved short numeric identities and generated resources; neither engine's code or naming scheme is copied.
 
-
 ## Shared validation message completion (#1470)
 
 Engine option requirements and portable database-name refusal reasons, including their rule
@@ -1602,7 +1597,6 @@ remain unchanged. Execution's parameterless InvalidOperationException/Convert ro
 their BCL kinds; adding a root carrier there would create a dependency cycle and expand the
 deferred #1264 P8 result contract. This audit introduces no such result API change.
 
-
 ## Debugger inspection (#1470)
 
 Eligible concrete source types use private nested debugger views of reviewed public/protected
@@ -1610,7 +1604,6 @@ state; existing inherited display/proxy pairs are reused. See the shared
 [debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
 Only stored fields and reviewed pure getters are projected; inspection does not execute queries, enumerate results, invoke clocks or mutate lifecycle state.
 Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
-
 
 ## TCP delivery completion (#1391)
 

@@ -1,12 +1,5 @@
 # Graph engine design
 
-## Open database inventory (#1790)
-
-GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
-Health never opens, reopens or waits for a database and takes no engine lock. A stored database
-this process has not opened is absent from health; a leftover directory cannot fail readiness.
-OpenDatabases retains offline open instances and excludes closing ones.
-
 ## Trigram text indexes (#1644, IX-R1)
 
 CREATE TEXT INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property) shares schema
@@ -2919,6 +2912,11 @@ records a checkpoint failure for a database whose page writes fail, closes it wi
 transaction's undo deferred behind a bracket that holds every page, and asserts that the
 checkpointer's failure ends and the engine runs again (before the checkpointer's skip it stayed
 `Faulted` for the test's 30 seconds).
+
+GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+this process has not opened is absent from health; a leftover directory cannot fail readiness.
+OpenDatabases retains offline open instances and excludes closing ones.
 
 Names are single path components, directory lookup is case insensitive, and enumeration includes
 persisted databases not yet open in memory. Root-builder `AddGraph` captures a deferred

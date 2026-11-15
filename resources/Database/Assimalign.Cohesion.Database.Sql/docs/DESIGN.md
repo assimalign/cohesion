@@ -75,13 +75,6 @@ from 10,000 to 30,000 rows to 64 KiB, rejecting one kept boxed value per row. It
 weak-reference assertion catches a kept prefix before delivery. No persistent format or
 diagnostic identity changes.
 
-## Open database inventory (#1790)
-
-GetDatabasesAsync enumerates open instances; health uses the lock-free OpenDatabases snapshot instead.
-Health never opens, reopens or waits for a database and takes no engine lock. A stored database
-this process has not opened is absent from health; a leftover directory cannot fail readiness.
-OpenDatabases retains offline open instances and excludes closing ones.
-
 ## Journal admission backstop (#1283, EN-C2)
 
 At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
@@ -1240,7 +1233,7 @@ NEXT VALUE FOR remains excluded from window inputs with existing CS03076; nextva
 retains per-call evaluation. Window inputs do not extend standard sequence row-sharing scopes.
 The brief's once-per-partition NTILE rule includes a NULL first argument, which fixes NULL
 for that partition. PostgreSQL windowfuncs.c:424-440 leaves initialization unset after NULL
-and can retry on a later row; this run follows the explicit SQ-W1 contract for that corner.
+and can retry on a later row; Cohesion keeps the first NULL for the whole partition.
 
 The WindowAgg stage groups equal partition/order specifications and processes longer orderings
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
@@ -2037,7 +2030,7 @@ Derived-first groups retain their association through canonical rendering, CREAT
 database reopen, including when nested aliased groups render as derived SELECTs.
 
 Direct RIGHT or grouped join trees in UPDATE FROM / DELETE USING fail CS05069 before reads
-or mutation: this run preserves the target-outer identity invariant. A derived SELECT source
+or mutation to preserve the target-outer identity invariant. A derived SELECT source
 containing RIGHT executes through the existing materialization path with the target pinned.
 FULL follows the physical and eligibility contract below.
 
@@ -6696,6 +6689,11 @@ them), and the window: with the close held in its shutdown checkpoint by a data 
 not answer, every worker's pass succeeds and skips the database, the lookup misses it, a create
 is refused, an open waits and then reopens it, and a drop waits and then drops it.
 
+GetDatabasesAsync enumerates open instances; health uses the lock-free OpenDatabases snapshot instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+this process has not opened is absent from health; a leftover directory cannot fail readiness.
+OpenDatabases retains offline open instances and excludes closing ones.
+
 For the window between the close and the forget every worker skips it:
 `SqlDatabaseEngine.IsOpen` is false for it (`SqlDatabase.IsClosed`), the flush, write-back and
 version-purge workers do not begin it, and the checkpointer never finds it due. Before phase 4
@@ -9591,7 +9589,7 @@ clear. Recovery restores either no table plus reclamation
 work, or the entire table with no intent. SQL stays format 29: ordinary table records and kind 14
 already express this protocol. There is no public catalog seam, friend grant or new interface.
 CTAS follows existing self-committing DDL and is refused inside BEGIN with CS04003 (25001);
-commit-time transactional DDL needs broader catalog machinery and remains outside this run.
+commit-time transactional DDL requires catalog support that the engine does not provide.
 
 Tests cover metadata, renaming, no-data evaluation suppression, value/domain failures, pre-publication
 fault/cancellation cleanup, and both wire transports. Every captured storage crash boundary is reopened

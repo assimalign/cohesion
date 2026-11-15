@@ -1,12 +1,5 @@
 # Blob engine design
 
-## Open database inventory (#1790)
-
-GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
-Health never opens, reopens or waits for a database and takes no engine lock. A stored database
-this process has not opened is absent from health; a leftover directory cannot fail readiness.
-OpenDatabases retains offline open instances and excludes closing ones.
-
 ## Journal admission backstop (#1283, EN-C2)
 
 At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
@@ -457,7 +450,8 @@ existed on a case-sensitive file system; now the directory is a pure function of
 (`DatabaseFileNames`, shared with every model; the area design, §3.3, has the reasoning). A name
 follows the area's one rule, with the same verdict on every OS: 1 to 128 ASCII letters, digits,
 `_`, `-` and `.`; no leading, trailing or doubled dot; no Windows device name before the first
-dot. Database enumeration includes persisted databases and opens them through recovery: it takes
+dot. Database enumeration includes persisted databases and opens them through recovery; health
+uses the non-opening OpenDatabases snapshot described below. Enumeration takes
 each directory that is a lower-case valid name holding `blob.dat`, so it skips a case-variant
 directory made outside the engine (outside the contract: on Windows and macOS the file system
 resolves an open's lower-case path to it). An open needs `blob.dat` too, so a directory without it,
@@ -473,6 +467,11 @@ A file set in another storage format (#1251) is refused by the storage before it
 read, and the engine names the database: "Database 'x' cannot be opened. CK06001: …", the
 storage's `StorageFormatException` as its inner exception, the files byte-identical
 (`BlobEngineTests`).
+
+GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+this process has not opened is absent from health; a leftover directory cannot fail readiness.
+OpenDatabases retains offline open instances and excludes closing ones.
 
 ### Interrupted creation (#1421)
 

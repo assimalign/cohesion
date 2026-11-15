@@ -1,12 +1,5 @@
 # Documents engine design
 
-## Open database inventory (#1790)
-
-GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
-Health never opens, reopens or waits for a database and takes no engine lock. A stored database
-this process has not opened is absent from health; a leftover directory cannot fail readiness.
-OpenDatabases retains offline open instances and excludes closing ones.
-
 ## Journal admission backstop (#1283, EN-C2)
 
 At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
@@ -1170,7 +1163,7 @@ probes exercise the same contract; the engine-linked NativeAOT consumer checks b
 
 #### Window stage (#1805, OQ-W1)
 
-Documents ports the SQL window contract over JSON without referencing Database.Sql (#1804).
+Documents ports the SQL window contract over JSON without referencing Database.Sql (#1805).
 Window-bearing queries use the existing statement-local async execution context even without
 subqueries. After grouping/HAVING, the window path owns complete representative rows and groups,
 shares equal-specification sorts through EquivalentPath-aware scoped expression equivalence,
@@ -2216,6 +2209,11 @@ the database: "Database 'x' cannot be opened. CK06001: …", the storage's
 (`DocumentEngineTests`). Both synchronous and grouped durability
 acknowledge commits only after the journal is durable. Memory-backed databases
 use the identical storage/transaction implementation over in-memory streams.
+
+GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+this process has not opened is absent from health; a leftover directory cannot fail readiness.
+OpenDatabases retains offline open instances and excludes closing ones.
 
 ### Interrupted creation (#1421)
 
