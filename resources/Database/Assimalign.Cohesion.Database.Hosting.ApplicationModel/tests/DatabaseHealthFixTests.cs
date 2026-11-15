@@ -71,15 +71,18 @@ public sealed class DatabaseHealthFixTests
         var documents = DocumentDatabaseEngine.CreateBuilder("docs");
         documents.Options.WorkerFailureWindow = TimeSpan.FromTicks(1);
         documents.Options.WorkerFailureMinimumPasses = 2;
+        SetTimeProvider(documents.Options, new WorkerClock(worker));
         documents.AddWorker(_ => worker);
         await using var engine = documents.Build();
         var database = await engine.CreateDatabaseAsync("offline", guard.Token);
         var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = false });
         builder.AddEngine(engine);
         await using var application = builder.Build(guard.Token);
-        worker.RunIteration(guard.Token);
-        worker.RunIteration(guard.Token);
-        while (engine.GetOfflineError("offline") is null) { await Task.Delay(1, guard.Token); }
+        while (engine.GetOfflineError("offline") is null)
+        {
+            worker.RunIteration(guard.Token);
+            await Task.Delay(1, guard.Token);
+        }
 
         // Act
         var first = await application.Context.GetHealthAsync(guard.Token);
@@ -94,6 +97,7 @@ public sealed class DatabaseHealthFixTests
         }
         engine.TryGetDatabase("offline", out var retained).ShouldBeTrue();
         retained.ShouldBeSameAs(database);
+        worker.Passes.ShouldBeGreaterThanOrEqualTo(3);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Hosting.ApplicationModel] - Health never opens stored databases in any enumeration model (#1790)")]
@@ -135,6 +139,18 @@ public sealed class DatabaseHealthFixTests
         if (model == 0) { var builder = DocumentDatabaseEngine.CreateBuilder("docs"); builder.Options.RootPath = path; return builder.Build(); }
         if (model == 1) { var builder = GraphDatabaseEngine.CreateBuilder("graph"); builder.Options.RootPath = path; return builder.Build(); }
         var blob = BlobDatabaseEngine.CreateBuilder("blob"); blob.Options.RootPath = path; return blob.Build();
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "set_TimeProvider")]
+    private static extern void SetTimeProvider(DocumentDatabaseEngineOptions options, TimeProvider provider);
+
+    // The first two passes share one clock tick. Only a later pass can reach the failure window.
+    private sealed class WorkerClock : TimeProvider
+    {
+        private readonly HealthFailureWorker _worker;
+        internal WorkerClock(HealthFailureWorker worker) { _worker = worker; }
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _worker.Passes < 2 ? 0 : 1;
     }
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "CheckAsync")]

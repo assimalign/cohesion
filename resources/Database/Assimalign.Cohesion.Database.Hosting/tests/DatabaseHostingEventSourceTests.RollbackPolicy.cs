@@ -1,9 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -128,14 +126,6 @@ public sealed partial class DatabaseHostingEventSourceTests
         healthDetail.ShouldEndWith("...");
         char.IsHighSurrogate(healthDetail[^4]).ShouldBeFalse();
         result.Description!.ShouldContain(healthDetail, Case.Sensitive);
-    }
-
-    private static async IAsyncEnumerable<DatabaseInstance> Inventory(DatabaseInstance database,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        yield return database;
-        await Task.CompletedTask;
     }
 
     private sealed class DetailDatabase : DatabaseInstance

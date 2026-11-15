@@ -99,7 +99,6 @@ public class EmbeddedDatabaseTests
 
         protected override IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore() => [];
 
-
         protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
             => throw new NotSupportedException();
 

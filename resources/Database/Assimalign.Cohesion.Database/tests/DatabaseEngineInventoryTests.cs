@@ -21,13 +21,16 @@ public sealed class DatabaseEngineInventoryTests
 
         // Act
         var snapshot = engine.OpenDatabases;
+        var unchanged = engine.OpenDatabases;
         await engine.CreateDatabaseAsync("second");
 
         // Assert
         snapshot.ShouldBe([first]);
-        snapshot.ShouldNotBeSameAs(engine.OpenDatabases);
+        snapshot.ShouldBe(unchanged);
+        snapshot.ShouldNotBeSameAs(unchanged);
         ((IList<DatabaseInstance>)snapshot).IsReadOnly.ShouldBeTrue();
         Should.Throw<NotSupportedException>(() => ((IList<DatabaseInstance>)snapshot).Clear());
+        Should.Throw<NotSupportedException>(() => ((IList<DatabaseInstance>)snapshot)[0] = first);
         engine.OpenDatabases.Count.ShouldBe(2);
         engine.OfflineDatabases.ShouldBe([(DatabaseName)"First"]);
     }
