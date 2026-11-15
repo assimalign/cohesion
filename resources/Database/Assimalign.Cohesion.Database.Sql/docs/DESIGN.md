@@ -1243,7 +1243,7 @@ key payloads and partition scratch reserve the statement grant before retention;
 an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first. Every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
 Reference-identity ownership avoids duplicate payload charges; consumed input rows and
-partition state release as described under SQ-W3 below. Partitioned stages can spill as described as described below (#1789). LIMIT cannot truncate the
+partition state release as described under SQ-W3 below. Partitioned stages can spill as described below (#1789). LIMIT cannot truncate the
 input partitions. Window-free queries retain their existing plan and object layouts.
 Named-window enumeration uses separate iterators so extra retained enumerators do not
 increase ordinary query or persisted-view traversal allocations.
@@ -1469,9 +1469,14 @@ owners. Nested spilled readers reserve on the outer statement ledger. No page la
 a temporary call. Each spilled WindowAgg in EXPLAIN ANALYZE reports its key/ordinal sort
 runs and merge passes, with byte/peak snapshots of the shared temporary statement owner.
 
-Every group must have PARTITION BY and fixed key collations. A partition larger than the
-remaining grant, including OVER (), retains CS05079; concurrent statement totals retain
-CS05067. Unsupported codec cells/key families and record/key capacity preserve the first recorded window refusal (CS05079, SQLSTATE 54000, or CS05067, 53200); the codec failure is retained in exception data and never restarts the spilled stage. An attempted memory/quota/floor fallback
+Every spilled group must have PARTITION BY and fixed key collations.
+OVER () keeps the base path and its refusal. On the spilled route, every memory refusal
+reports the first recorded window refusal, which is the base's code: CS05079 with SQLSTATE
+54000, or CS05067 with SQLSTATE 53200. This covers a single partition larger than the
+remaining grant, concurrent statement totals, unsupported codec cells or key families, and
+record or key capacity. The stage's own failure stays in the exception's data; a codec
+failure never restarts the spilled stage.
+An attempted memory/quota/floor fallback
 which cannot complete preserves the original memory refusal and message, with the temp cause
 in exception data. No diagnostic, persistent format, journal or MVCC contract changes.
 Correlated/deferred frames, SQL/JSON, recursion and DML sources keep their existing paths.

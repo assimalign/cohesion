@@ -136,7 +136,7 @@ result, including one row of decoding overlap, cannot exceed its sort grant. A n
 its first MoveNextAsync, reporting live and requested bytes without affecting other readers.
 
 CS05067 remains for excluded correlated frames,
-recursion, oversized or excluded window stages, grouping sets, SQL/JSON statements, inferred SQL/JSON domain checks
+recursion, grouping sets, SQL/JSON statements, inferred SQL/JSON domain checks
 during CTAS assignment (a conservative exclusion using a private expression scope), deferred subqueries,
 ordered aggregates, ordered sequence deferral, and
 buffers belonging to operators preceding the root sort that have no handoff.
@@ -516,11 +516,18 @@ existing refusal. CTAS uses the same source path; INSERT SELECT keeps #1828's ex
 | --- | --- |
 | Stage input/output run | At most 16,384 encoded bytes per row, sharing the outer statement's temp quota; no slot in the eight-result session limit |
 | Sort arena | Remaining statement grant after active reader and fixed stage state, less 32,768 B construction allowance; record bound admits at least a two-way merge |
-| Partition/frame buffer | Must fit the remaining statement grant; a single larger partition and OVER () retain CS05079 |
+| Partition/frame buffer | Must fit the remaining statement grant; refusals follow the rule below |
 | Handoff scratch | At most 131,072 fixed bytes beyond the grant |
-| Deferred collation, unsupported key family or unencodable cell | The first recorded window refusal (CS05079, SQLSTATE 54000, or CS05067, 53200), with the codec cause retained in exception data; no approximate encoding or spilled-stage restart |
+| Deferred collation, unsupported key family or unencodable cell | Refusals follow the rule below; no approximate encoding or spilled-stage restart |
 | Correlated/deferred frames, recursion, SQL/JSON and DML sources | Existing ownership and refusal |
 | Catalog with application or SQL-defined reference/pseudo-type function parameters, application casts, or checked application/SQL domains | Existing window owner; opaque code can observe reference identity that decoded values do not preserve, even if a registration is unused |
+
+OVER () keeps the base path and its refusal. On the spilled route, every memory refusal
+reports the first recorded window refusal, which is the base's code: CS05079 with SQLSTATE
+54000, or CS05067 with SQLSTATE 53200. This covers a single partition larger than the
+remaining grant, concurrent statement totals, unsupported codec cells or key families, and
+record or key capacity. The stage's own failure stays in the exception's data; a codec
+failure never restarts the spilled stage.
 
 Fitting statements use the existing charges. A later refusal restarts only when no
 restart-sensitive expression can be repeated, restoring its visit count; otherwise it keeps
