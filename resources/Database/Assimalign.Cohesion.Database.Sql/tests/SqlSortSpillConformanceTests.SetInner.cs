@@ -18,6 +18,29 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - UNION filters duplicate-heavy input within the default four-grant quota (#1789)")]
+    public async Task ExecuteAsync_UnionSeenFilter_ShouldKeepDefaultQuota()
+    {
+        // Arrange: both sources exceed ten grants in retained rows. The bounded
+        // seen filter sends each duplicate batch's unseen keys to hash partitions.
+        var builder = SqlDatabaseEngine.CreateBuilder("union-seen-quota");
+        builder.Options.RootPath = Path.Combine(_root, "union-seen-quota");
+        builder.Options.StatementMemoryBudget = 262144; builder.Options.CheckpointJournalSize = 65536;
+        await using var engine = await builder.BuildAsync();
+        engine.StatementTempSpaceQuota.ShouldBe(1048576);
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session, 32768);
+        // Act
+        await using (var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id%1200 AS id FROM t UNION SELECT id%1200 FROM t"))
+        {
+            // Assert: the base's first encounters are the integers 0 through 1199.
+            (await Rows(result)).ShouldBe(Enumerable.Range(0, 1200).Select(value => new RowValues([(long)value])).ToArray());
+        }
+        var metrics = session.LastStatementMetrics!;
+        SqlSortSpillMetrics.For(metrics).ShouldNotBeNull().Runs.ShouldBeGreaterThan(0);
+        SqlSortSpillMetrics.For(metrics)!.PeakBytes.ShouldBeLessThanOrEqualTo(1048576);
+        metrics.HashMemoryBytes.ShouldBe(0); TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Fitting mixed joins preserve the base EXPLAIN hash policy without spill fields (#1789)")]
     public async Task ExecuteAsync_FittingMixedExplain_ShouldKeepBasePolicy()
     {

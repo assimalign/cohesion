@@ -96,6 +96,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
+            SetOperationSpill.For(rows)?.BeginOperand();
             _subqueryValues = parent is null ? null : new SqlSubqueryValues(parent);
             statement.Metrics.BeginStageResult();
             try { result = (DatabaseResultSet)await ExecuteAsync(operand, statement, token).ConfigureAwait(false); }
@@ -174,10 +175,10 @@ internal sealed partial class SqlPlanExecutor
     {
         if (SetOperationSpill.For(rows) is not null) { return; }
         failure ??= SetOperandPending.For(rows)!.Refusal;
-        var stage = new SetOperationSpill(this, plan, statement, failure, union: true);
+        seen?.Clear(); seen?.TrimExcess();
+        var stage = new SetOperationSpill(this, plan, statement, failure, union: true, unionSeen: seen);
         RegisterSetStage(statement.Metrics, plan, stage);
         SetOperationSpill.Attach(rows, stage);
-        seen?.Clear(); seen?.TrimExcess();
         for (int i = 0; i < rows.Count; i++) { stage.Append(rows[i], token); rows[i] = []; }
         rows.Clear(); rows.Capacity = 0;
     }

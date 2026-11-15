@@ -26,6 +26,8 @@ internal sealed partial class SqlPlanExecutor
         private readonly byte[] _families;
         private readonly Func<int, int>? _partitionHash;
         private readonly HashSpill? _union;
+        private readonly HashSet<object?[]>? _unionSeen;
+        private SqlSelectMemory _unionSeenMemory;
         private readonly StorageTempRun? _left;
         private StorageTempRun? _right;
         private StorageTempRun? _output;
@@ -37,7 +39,7 @@ internal sealed partial class SqlPlanExecutor
         internal Exception? Failure { get; set; }
 
         internal SetOperationSpill(SqlPlanExecutor executor, SqlSetOperationPlan plan, SqlStatementContext context,
-            SqlExecutionException refusal, bool union)
+            SqlExecutionException refusal, bool union, HashSet<object?[]>? unionSeen = null)
         {
             _executor = executor; _plan = plan; _metrics = context.Metrics;
             _budget = executor._definitions.StatementMemoryBudget; _refusal = refusal;
@@ -45,6 +47,7 @@ internal sealed partial class SqlPlanExecutor
             var collations = plan.Projections.Select(projection => projection.Collation.Resolve(executor._subqueryValues)).ToArray();
             _comparer = new GroupKeyComparer(collations); _families = new byte[collations.Length];
             _partitionHash = HashSpillPartitionHash;
+            _unionSeen = union && !plan.IsAll ? unionSeen : null;
             try
             {
                 _statement = SqlHashSpillMetrics.JoinTemp(_metrics, context.Session!);
@@ -67,22 +70,51 @@ internal sealed partial class SqlPlanExecutor
         internal static void Attach(List<object?[]> rows, SetOperationSpill stage)
         { LazyInitializer.EnsureInitialized(ref _rows).Add(rows, stage); }
 
+        internal void BeginOperand() => ClearUnionSeen();
+
         internal void Append(object?[] row, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
             try
             {
                 Validate(row);
-                if (_union is not null) { _union.Append(row, [], _ordinal++, token); }
+                SqlRowCollector.ObserveBuffer?.Invoke("set-append", row);
+                if (_union is not null)
+                {
+                    long ordinal = _ordinal++;
+                    if (_unionSeen?.Contains(row) == true) { return; }
+                    RememberUnionRow(row);
+                    _union.Append(row, [], ordinal, token);
+                }
                 else
                 {
                     var record = new object?[1 + row.Length]; record[0] = _ordinal++; row.CopyTo(record, 1);
                     (_right ?? _left)!.Append(Encode(record), token);
                 }
-                SqlRowCollector.ObserveBuffer?.Invoke("set-append", row);
             }
             catch (StorageTempException failure) { Refuse(failure); }
             catch (SqlExecutionException failure) when (!ReferenceEquals(failure, _refusal)) { Refuse(failure); }
+        }
+
+        // The fitting seen set remains a bounded first filter. Every accepted row
+        // already reached HashSpill, so forgetting a full filter cannot lose a key.
+        private void RememberUnionRow(object?[] row)
+        {
+            if (_unionSeen is null) { return; }
+            try { _executor.RetainSelectRow(ref _unionSeenMemory, row, includeWindow: true, overhead: 64); }
+            catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
+            {
+                ClearUnionSeen();
+                try { _executor.RetainSelectRow(ref _unionSeenMemory, row, includeWindow: true, overhead: 64); }
+                catch (SqlExecutionException retry) when (retry.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
+                { return; } // One key need not fit this optional filter to fit the later partition pass.
+            }
+            _unionSeen.Add(row);
+        }
+        private void ClearUnionSeen()
+        {
+            if (_unionSeen is null) { return; }
+            _unionSeen.Clear(); _unionSeen.TrimExcess(); _executor.ReleaseSelectMemory(ref _unionSeenMemory);
         }
 
         private void Validate(object?[] row)
@@ -128,6 +160,7 @@ internal sealed partial class SqlPlanExecutor
             if (_output is not null) { return; }
             try
             {
+                ClearUnionSeen();
                 if (_union is not null) { _output = _union.Complete(token); _maximumDecoded = _union.MaximumDecodedBytes; }
                 else if (_right is null)
                 { _left!.Seal(token); _output = _left; }
@@ -331,7 +364,7 @@ internal sealed partial class SqlPlanExecutor
             if (_disposed) { return; }
             _disposed = true; _scratch = null;
             try { Close(_output); _union?.Dispose(Failure ?? _refusal); Close(_left); Close(_right); }
-            finally { ReleaseWorkspace(); }
+            finally { ClearUnionSeen(); ReleaseWorkspace(); }
         }
         private sealed class DebugView { public DebugView(SetOperationSpill value) { } }
     }

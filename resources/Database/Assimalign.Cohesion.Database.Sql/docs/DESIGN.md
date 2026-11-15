@@ -4,7 +4,9 @@
 
 Eligible set operations and nested-loop buffers hand off only after the original CS05067
 admission fails. UNION ALL appends converted operands to an encounter-order run. UNION
-uses the fitting seen set until handoff, then the shared HashSpill partitions and a stable
+uses the fitting seen set before HashSpill, including a charged bounded filter after handoff.
+A full filter clears because all accepted rows already reached the partitions; it also clears
+before the next operand can claim its reader. The shared HashSpill partitions and a stable
 global encounter ordinal retain the first representative. INTERSECT/EXCEPT stage both
 complete converted inputs before partitioning by GroupKeyComparer hash. Each partition
 uses the original right-count and left-seen rules: INTERSECT ALL keeps the first min(m,n)
