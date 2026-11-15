@@ -21,11 +21,12 @@ internal sealed class DatabaseHealthTrace
     private long _nextObservation;
     private long _lastObservation;
 
-    internal async ValueTask<HealthCheckResult> CheckAsync(DatabaseApplicationContext context, CancellationToken cancellationToken)
+    internal async ValueTask<HealthCheckResult> CheckAsync(DatabaseApplicationContext context, CancellationToken cancellationToken,
+        DatabaseHealthObservations? components = null)
     {
         long sequence = Interlocked.Increment(ref _nextObservation);
         var observation = new Observation();
-        var result = await context.CheckCoreAsync(cancellationToken, observation).ConfigureAwait(false);
+        var result = await context.CheckCoreAsync(cancellationToken, observation, components).ConfigureAwait(false);
         lock (_gate)
         {
             // A slower, earlier check still returns its own result, but cannot replace

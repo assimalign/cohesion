@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Hosting;
 
@@ -38,6 +39,8 @@ public sealed class DatabaseResourceLifecycleTests
         client.OnPublish = async token =>
         {
             (await TestPorts.AcceptsAsync(resource.Port, token)).ShouldBeFalse();
+            var readiness = DatabaseResourceHealthTests.Instance(resource.Application).HealthContributors.Single(value => value.Name == "database.accepting");
+            (await readiness.CheckAsync(token)).Status.ShouldBe(ApplicationInstanceHealthStatus.Unhealthy);
             var engine = resource.Application.Context.GetEngine<SqlDatabaseEngine>("orders-sql");
             engine.TryGetDatabase("orders", out SqlDatabase? database).ShouldBeTrue();
             await using var session = await database!.CreateSessionAsync(cancellationToken: token);
@@ -48,6 +51,8 @@ public sealed class DatabaseResourceLifecycleTests
         {
             action.Value.Text.ShouldBe("restored");
             (await TestPorts.AcceptsAsync(resource.Port, token)).ShouldBeFalse();
+            var readiness = DatabaseResourceHealthTests.Instance(resource.Application).HealthContributors.Single(value => value.Name == "database.accepting");
+            (await readiness.CheckAsync(token)).Status.ShouldBe(ApplicationInstanceHealthStatus.Unhealthy);
             openings++;
         };
         client.OnStop = async token =>

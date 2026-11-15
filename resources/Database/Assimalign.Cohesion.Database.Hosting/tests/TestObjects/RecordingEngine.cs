@@ -22,8 +22,8 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 /// </remarks>
 internal sealed class RecordingEngine : DatabaseEngine
 {
-    internal RecordingEngine(string name = "recording-engine")
-        : base(name, EngineModel.Sql)
+    internal RecordingEngine(string name = "recording-engine", EngineModel model = EngineModel.Sql)
+        : base(name, model)
     {
     }
 
@@ -44,7 +44,12 @@ internal sealed class RecordingEngine : DatabaseEngine
 
     internal Exception? InventoryException { get; set; }
 
-    internal Func<CancellationToken, IAsyncEnumerable<DatabaseInstance>>? Inventory { get; set; }
+    internal Func<IReadOnlyList<DatabaseInstance>>? OpenInventory { get; set; }
+
+    internal IReadOnlyList<DatabaseInstance> Instances { get; set; } = [];
+
+    protected override IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore()
+        => InventoryException is { } failure ? throw failure : OpenInventory?.Invoke() ?? Instances;
 
     /// <summary>Gets or sets the databases the engine reports offline.</summary>
     internal IReadOnlyList<DatabaseName> Offline { get; set; } = [];
@@ -76,7 +81,7 @@ internal sealed class RecordingEngine : DatabaseEngine
         => throw new NotSupportedException();
 
     protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
-        => InventoryException is { } failure ? throw failure : Inventory?.Invoke(cancellationToken) ?? AsyncEnumerable.Empty<DatabaseInstance>();
+        => InventoryException is { } failure ? throw failure : AsyncEnumerable.Empty<DatabaseInstance>();
 
     protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
     {

@@ -220,7 +220,7 @@ Each model root project owns a public engine (`{Model}DatabaseEngine`, with a st
 |---|---|---|---|
 | SQL | `SqlDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | tables/schemas/views over row-oriented slotted pages | SQL dialect (declared matrix, conformance corpus) — `Sql.Language` |
 | Documents | `DocumentDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | named collections of versioned documents (`DocumentCollection`) | OQL query and index-DDL contract — `Documents.Language` |
-| Graph | `GraphDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | property graph: nodes, typed directed relationships, traversal; trigram text indexes for ordinal string predicates, with stored-value recheck (catalog v4, #1644) | ISO/IEC 39075:2024 GQL (owner decision of 2026-09-17) — `Graph.Language` |
+| Graph | `GraphDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | property graph: nodes, typed directed relationships, traversal; trigram text indexes for ordinal string predicates, with stored-value recheck (introduced in catalog v4, #1644) | ISO/IEC 39075:2024 GQL (owner decision of 2026-09-17) — `Graph.Language` |
 | Blob | `BlobDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | containers of streamed large objects (`BlobContainer`) + metadata catalog | none (API-driven) |
 | KeyValuePair | `KeyValueDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |
 
@@ -389,18 +389,26 @@ Deferred SQL migrations retain their worker/admission behavior. The gateway's st
 must cover Build's recovery and inline schema migration. A gateway declares the resource with
 `builder.AddResource("Database", "orders-db")`; it loads no Database planner or area definition.
 
-There are no Database-owned actions or instance health contributors yet. The retired catalog
-mutation commands do not fit snapshot restore: writes are restored on every instance, whose data
-and principals live in its durable catalog. Gateway health aggregation is unresolved. These remain
-owner follow-ups. When the application is managed (a nonempty COHESION_GATEWAY), a model server
-with no listener binds its named platform endpoint (`sql`, `documents`, `graph`, `kv` or `blob`)
-from the COHESION_ENDPOINT_* values, over plain TCP. An explicit Database.Tcp Listen(Uri) or a
-supplied listener wins. Unmanaged, Database binds only code-configured endpoints (EN-A1, #1790).
-Two servers of one model without a listener would share the assignment and collide at start;
-give each extra server its own listener. The in-process platform reports
-an HTTP endpoint unrelated to the database wire listener, so dependents pass the latter as a
-literal setting. Gateway G18 counts publication as readiness, before servers accept; dependent
-deployment can therefore precede database accept. See the integration's
+There are no Database-owned actions yet. Catalog mutations do not fit snapshot restore: writes
+are restored on every instance, whose data and principals live in its durable catalog. The
+integration contributes `IApplicationInstanceHealthContributor` instances from Hosting's
+observations for each engine and open or pending-reopen database, plus `database.accepting`.
+Membership is live and cheap to discover; consumers re-read `HealthContributors` to follow opens
+and drops. A retained contributor of a vanished database reports Unhealthy ("not open"). Each
+check evaluates only its engine or the host accept gate and fails closed per engine on
+non-cancellation evaluation exceptions other than `OutOfMemoryException`. The gateway does not
+consume these contributors yet. ApplicationModel.Hosting open question 2 covers health
+aggregation, question 7 covers the publication window, and Gateway G18 covers readiness separate
+from publication. Membership and batch semantics need a separate owner decision.
+
+When the application is managed (a nonempty `COHESION_GATEWAY`), a model server with no listener
+binds its named platform endpoint (`sql`, `documents`, `graph`, `kv` or `blob`) from
+`COHESION_ENDPOINT_*` over plain TCP. An explicit Database.Tcp `Listen(Uri)` or supplied listener
+wins. Unmanaged, Database binds only code-configured endpoints. Two servers of one model without
+a listener share the assignment and collide at start; give each extra server its own listener.
+The in-process platform allocates only `http`, which serves Database health, so dependents still
+pass wire addresses as literal settings. Gateway G18 counts publication as readiness before
+servers accept; dependent deployment can therefore precede database accept. See the integration's
 [open questions](../../../resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md#open-questions).
 
 The framework-owned `Assimalign.Cohesion.Database.Application` executable is deleted; #973
@@ -493,26 +501,39 @@ The integration architecture, in the order the work items landed:
 
 ### 3.9 Operational root seams
 
-- **Health/diagnostics (#168, delivered by #973):** `DatabaseApplicationContext` aggregates each distinct registered or
-  server-fronted engine. `Running` is healthy, `Faulted` is degraded, and `Disposed` or an unknown
-  state is unhealthy; diagnostic data includes the engine state and its complete worker
-  name/kind/cadence inventory. Since #1268 `Faulted` lasts exactly while a worker keeps failing
-  (the workers catch per database, skip a failing database for a second and retry it while the
-  others keep their pace, PostgreSQL's background-worker error recovery), and the degraded result
-  names each failing worker with the type of its last failure (never the message, which the
-  `Assimalign.Cohesion.Database` event source carries); a database a failed fsync, journal drain
-  or header slot write took offline is unhealthy until it is reopened, and every lock wait on it ends with the
-  coded refusal (`TransactionCoordinator.AbandonLockWaits`). `Database.Hosting`'s internal admin service exposes the aggregate over private
-  `Web.Health` routes (`/healthz`, `/readyz`, `/livez`). Under `/cohesion/v1` only the namespaced health aliases answer, to loopback callers only, and every other `/cohesion/v1` route (the retired resource control plane) returns 403. Which endpoint it binds (EN-A1, #1790):
-  - A managed application binds the platform's `http` assignment when it is plain HTTP with a bindable host (T3-28). It skips any other assignment with an event, and it replaces an explicit endpoint with an event.
-  - An unmanaged application binds the endpoint it passes to `DatabaseApplicationBuilder.AddHealthEndpoint(Uri)`.
-  - With neither, no health listener starts.
-  - A bind failure fails start with `CK07102`.
-  This realizes the observational
-  surface without adding a Database-specific health abstraction or treating the wire protocol's
-  `Ping` frame as readiness. Each Database application owns its context and health observations.
-  `Database.Hosting.ApplicationModel` currently contributes no instance health to the gateway;
-  Gateway G18 readiness is first publication, which precedes server accept.
+- **Health/diagnostics (#168, #973, #1790):** `DatabaseApplicationContext` exposes immutable
+  transport-neutral health observations through the same core as HTTP health. `Running` is
+  Healthy, `Faulted` is Degraded, and `Disposed` or an unknown state is Unhealthy. Since #1268
+  `Faulted` lasts exactly while a worker keeps failing (the workers catch per database, skip a
+  failing database for a second and retry it while the others keep their pace, PostgreSQL's
+  background-worker error recovery), and the degraded result names each failing worker with the
+  type of its last failure, never the message, which the `Assimalign.Cohesion.Database` event
+  source carries. Engine observations retain state, workers and counts. Offline databases and
+  pending reopens are Unhealthy: a database a failed fsync, journal drain or header slot write
+  took offline stays unhealthy until it is reopened, and every lock wait on it ends with the coded
+  refusal (`TransactionCoordinator.AbandonLockWaits`). Journal admission pauses, provisioning and
+  held schemas are Degraded with their existing codes and bounded detail. Health reads
+  `OpenDatabases` and pending reopens without opening, reopening, waiting or taking engine
+  lifecycle locks. Stored databases this process has not opened are absent. A reopen outside the
+  reopen service is absent during recovery; if recovery fails, it remains absent until opened
+  again. With `ReopenOfflineDatabases = false`, check the manual reopen's own result, because
+  health keeps no failed-open record. The integration contributes these observations as
+  `engine/<escaped engine>`, `database/<escaped engine>/<escaped database>` and
+  `database.accepting`. Database names lower-case only ASCII letters before URI-escaping, and
+  every inventory uses the same component spelling. Engine registration rejects invalid UTF-16.
+  Engines follow registration order; databases follow component-name order. `/readyz` is the
+  minimum over all contributions; `/livez` is the minimum over engine and database contributions.
+  `database.accepting` alone is the outer host's accept gate, Healthy only after every server
+  confirms accept. The internal admin service serves `/healthz`, `/readyz` and `/livez` through
+  private `Web.Health` routes; `/cohesion/v1` health aliases admit loopback transport peers only,
+  and other `/cohesion/v1` routes return 403. A managed application uses the platform's plain HTTP
+  assignment with a bindable host, reporting skipped assignments and endpoint replacement. An
+  unmanaged application opts in through `AddHealthEndpoint(Uri)`; without either configuration no
+  health listener starts. A bind failure fails start with `CK07102`. The wire protocol's `Ping`
+  remains distinct from readiness. The gateway does not consume contributors yet, and Gateway G18
+  still counts first publication before server accept. ApplicationModel.Hosting open question 2
+  covers health aggregation and question 7 covers the publication window; membership and batch
+  semantics need a separate owner decision.
 - **Backup/restore (#161):** becomes an **engine-level, per-model operation on the data-machine contract** — a data machine that can be snapshotted while running (checkpoint + copy of the file sets; PITR later via WAL archiving per R11), not a host service (embedded consumers need it identically, R10). The storage layer already reserves the backup seams (`.bak` asset naming in the strategy contract). Design note only; the contract lands with #161.
 - **Authorization (#177 family):** `Database.Security` (child root) grows the authorization vocabulary (principals, roles, permission checks — beside the existing `DatabaseAuthenticator` authentication seam), and **per-model enforcement composes in the model packages** (SQL enforcing over its catalog objects), consistent with per-model servers: the server authenticates, the model authorizes. Design note only.
 

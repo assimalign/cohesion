@@ -2931,6 +2931,11 @@ transaction's undo deferred behind a bracket that holds every page, and asserts 
 checkpointer's failure ends and the engine runs again (before the checkpointer's skip it stayed
 `Faulted` for the test's 30 seconds).
 
+GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+this process has not opened is absent from health; a leftover directory cannot fail readiness.
+OpenDatabases retains offline open instances and excludes closing ones.
+
 Names are single path components, directory lookup is case insensitive, and enumeration includes
 persisted databases not yet open in memory. Root-builder `AddGraph` captures a deferred
 engine factory without Hosting dependencies. Engine packages ship in the App.Database framework;

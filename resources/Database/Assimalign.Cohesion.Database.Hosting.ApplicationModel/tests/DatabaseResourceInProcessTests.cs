@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -13,6 +14,7 @@ using Xunit;
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway;
 using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Hosting.ApplicationModel.Tests;
@@ -59,9 +61,15 @@ public sealed class DatabaseResourceInProcessTests
                 }
                 await program.Completion.WaitAsync(guard.Token);
             }
-            application.Context.State.ShouldBe(HostState.Started);
 
-            // Act
+            // Act: these are in-process instance checks; the gateway does not consume contributors.
+            var health = DatabaseResourceHealthTests.Instance(application).HealthContributors;
+            var contributions = new List<ApplicationInstanceHealthContribution>();
+            foreach (var contributor in health)
+            {
+                contributions.Add(await contributor.CheckAsync(guard.Token));
+            }
+
             ApplicationActionResult write = await gateway.ExecuteAsync("Database", OrdersProgram.Name, "greeting", ApplicationActionContext.Create(
                 ApplicationActionOperation.Write,
                 JsonApplicationContentSerializer.Create(),
@@ -72,6 +80,9 @@ public sealed class DatabaseResourceInProcessTests
 
             // Assert: the instance published, repeating the deployment that started it, and the
             // gateway recorded the write and read it back from the instance.
+            application.Context.State.ShouldBe(HostState.Started);
+            health.Select(value => value.Name).ShouldBe(new[] { "engine/orders-sql", "database/orders-sql/orders", "database.accepting" });
+            contributions.ShouldAllBe(value => value.Status == ApplicationInstanceHealthStatus.Healthy);
             IApplicationGatewayDeployment resource = gateway.Resources.Single();
             ApplicationInstanceManifest instance = resource.Instances.ShouldHaveSingleItem();
             instance.Provider.ShouldBe((ProviderName)"Database");
@@ -110,5 +121,50 @@ public sealed class DatabaseResourceInProcessTests
 
         program.Stopped.ShouldBeTrue();
         (await program.Created.Task).Context.State.ShouldBe(HostState.Stopped);
+    }
+
+    [Fact(DisplayName = displayPrefix + "An unmanaged Database program runs under the platform without registering or publishing an instance")]
+    public async Task StartAsync_WithUnmanagedProgram_ShouldServeWithoutContributorsOrPublication()
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var startupCancellation = new CancellationTokenSource();
+        using var directory = new TemporaryDirectory();
+        int port = TestPorts.GetFree();
+        var program = new OrdersProgram(directory.Path, port, managed: false);
+        var builder = ApplicationGateway.CreateBuilder("unmanaged").UseInProcess(platform =>
+            platform.AddProgram("Database", OrdersProgram.Name, program.MainAsync));
+        builder.StartupTimeout = TimeSpan.FromSeconds(30);
+        builder.AddResource("Database", OrdersProgram.Name);
+        var gateway = builder.Build();
+        Task startup = gateway.StartAsync(startupCancellation.Token);
+        try
+        {
+            DatabaseApplication application = await program.Created.Task.WaitAsync(guard.Token);
+            while (application.Context.State is not (HostState.Started or HostState.Failed))
+            {
+                await Task.Delay(1, guard.Token);
+            }
+
+            // Act & Assert: the host's recorded Started state confirms the unmanaged program ran.
+            application.Context.State.ShouldBe(HostState.Started);
+            program.AddedRegistrations.ShouldBe(0);
+            application.Context.HostedServices.OfType<IApplicationInstanceService>().ShouldBeEmpty();
+            gateway.Resources.Single().Instances.ShouldBeEmpty();
+            (await TestPorts.AcceptsAsync(port, guard.Token)).ShouldBeTrue();
+        }
+        finally
+        {
+            // No publication can finish gateway startup. Cancel it once the assertions have run;
+            // platform disposal owns the running program, just as in the managed case.
+            startupCancellation.Cancel();
+            try
+            {
+                try { await startup.WaitAsync(guard.Token); }
+                catch (OperationCanceledException) when (startupCancellation.IsCancellationRequested) { }
+            }
+            finally { await gateway.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30)); }
+        }
+        program.Stopped.ShouldBeTrue();
     }
 }

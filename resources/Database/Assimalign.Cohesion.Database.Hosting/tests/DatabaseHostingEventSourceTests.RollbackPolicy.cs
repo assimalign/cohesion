@@ -1,9 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -110,7 +108,7 @@ public sealed partial class DatabaseHostingEventSourceTests
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await using var engine = new RecordingEngine();
         await using var database = new DetailDatabase(engine, new string('x', prefixLength) + "\U0001F600" + new string('y', 100));
-        engine.Inventory = token => Inventory(database, token);
+        engine.Instances = [database];
         var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = false });
         builder.AddEngine(engine);
         await using var app = builder.Build(guard.Token);
@@ -128,14 +126,6 @@ public sealed partial class DatabaseHostingEventSourceTests
         healthDetail.ShouldEndWith("...");
         char.IsHighSurrogate(healthDetail[^4]).ShouldBeFalse();
         result.Description!.ShouldContain(healthDetail, Case.Sensitive);
-    }
-
-    private static async IAsyncEnumerable<DatabaseInstance> Inventory(DatabaseInstance database,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        yield return database;
-        await Task.CompletedTask;
     }
 
     private sealed class DetailDatabase : DatabaseInstance

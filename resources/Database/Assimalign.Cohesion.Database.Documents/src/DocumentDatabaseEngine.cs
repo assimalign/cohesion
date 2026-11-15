@@ -477,6 +477,9 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
+    protected override IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore() => GetInstanceSnapshot();
+
+    /// <inheritdoc />
     protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
         => EnumerateDatabasesAsync(cancellationToken);
 
