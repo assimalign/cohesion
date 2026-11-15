@@ -306,7 +306,7 @@ their DEFAULT guard limits and keyword quoting, and sharing index rendering are 
 ALTER DEFAULT admission shares the engine's scalar carrier, literal-only and persisted-sequence
 checks, with the normal declaration nesting limit and the higher ceiling for its grouping guard.
 The SDK binding raises DatabaseException with the engine's message text, without structured CS diagnostic
-codes, and InsufficientExecutionStackException on stack exhaustion, as the engine binding does.
+codes; like the engine binding, it raises InsufficientExecutionStackException on stack exhaustion.
 It reparses rendered literals at the ceiling and requires a render fixed point;
 Sql.Language exposes no tree equivalence API, so the engine retains its stronger tree comparison.
 The task parses both forward and rollback statements at the engine's ceiling before accepting
@@ -322,8 +322,8 @@ Domain columns name the declared domain; registrations, conversions, stored valu
 bounds and typed-literal DEFAULT kind remain engine validation. Typed joint publication and applying
 the file refuse a typed-literal DEFAULT on another storage type (CS05013) or a type change without an
 assignment cast (CS02064); both per-step writers emit these statements. Mirroring those refusals in
-the SDK would make it stricter than the engine's per-step generator. #1863 and #1864 move the respective
-refusals earlier for both writers. ALTER TABLE metadata and constraints keep their existing refusals.
+the SDK would make it stricter than the engine's per-step generator. Moving them earlier, for both
+writers, is tracked by #1863 and #1864. ALTER TABLE metadata and constraints keep their existing refusals.
 
 Typed schema application publishes jointly, including empty, inline and DEFAULT-only plans (#1778).
 Every generated migration has a header explaining that the SQL file applies per statement.
