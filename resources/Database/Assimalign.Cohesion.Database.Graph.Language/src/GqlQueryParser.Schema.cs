@@ -108,7 +108,9 @@ public sealed partial class GqlQueryParser
         } : null;
         if (type is null)
         {
-            if (token.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function or TokenType.QuotedIdentifier)
+            if (token.Type == TokenType.QuotedIdentifier && token.Text.Length <= 2)
+            { Error("CG00002", ErrorMessages.GqlQueryParserIdentifierVoid, token); }
+            else if (token.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function or TokenType.QuotedIdentifier)
             { Unsupported(construct + " " + token.Text, token); }
             else { Error("CG00002", ErrorMessages.GqlQueryParserIdentifierVoid2, token); }
         }

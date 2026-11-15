@@ -102,13 +102,32 @@ public sealed class GqlGraphTypeFixTests
     [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS ::")]
     [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS :: 3")]
     [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS :: }")]
+    [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS :: \"\"")]
     [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A => {p ::")]
     [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A => {p :: 3})}")]
     [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A => {p :: })}")]
+    [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A => {p :: \"\"})}")]
     public void Parse_MissingOrNonNameType_ShouldReportSyntaxError(string text)
     {
         // Arrange / Act
         var result = new GqlQueryParser().Parse(text);
+        // Assert
+        var diagnostic = result.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CG00002");
+        if (text.Contains("\"\"", StringComparison.Ordinal)) { diagnostic.Message.ShouldBe("An identifier cannot be empty."); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Edge endpoints: implication markers are syntax errors (#1806)")]
+    [InlineData("SET", "(:A =>)-[:R =>]->(:B)")]
+    [InlineData("SET", "(:A)-[:R =>]->(:B =>)")]
+    [InlineData("SET", "(a:A IMPLIES)-[:R =>]->(b:B)")]
+    [InlineData("SET", "(a:A)-[:R =>]->(b:B IMPLIES)")]
+    [InlineData("DROP", "(:A =>)-[:R =>]->()")]
+    [InlineData("DROP", "()-[:R =>]->(:B IMPLIES)")]
+    public void Parse_EndpointImplication_ShouldReportSyntaxError(string operation, string edge)
+    {
+        // Arrange / Act
+        var result = new GqlQueryParser().Parse("ALTER CURRENT GRAPH TYPE " + operation + " {(:A =>),(:B =>)," + edge + "}");
         // Assert
         result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00002");
     }

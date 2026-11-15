@@ -64,6 +64,7 @@ SET replaces the complete type; ADD requires new names; ALTER replaces complete 
 and cannot introduce element names; unmentioned types survive. DROP selects identifying names,
 using `(:Label =>)` or `()-[:TYPE =>]->()`, with optional declaration aliases. Partial and full
 DROP bodies refuse with CK00001; unlike Neo4j, no full-declaration equivalence form is accepted.
+An endpoint accepts an optional variable and one optional label; `=>` and `IMPLIES` at an endpoint are CG00002.
 Endpoints must reference declared node types of the resulting type. Unlike Neo4j, `()` endpoints
 refuse with CK00001 and plain or implied labels that are not node types refuse with CG03011.
 Dangling endpoint references also refuse with CG03011.
@@ -87,9 +88,10 @@ Inline IS KEY / IS UNIQUE, element-level IS or REQUIRE and graph-type
 constraint specifications remain one CK00001. CLOSED/OPEN mode clauses and ISO CREATE [CLOSED]
 GRAPH TYPE also remain CK00001; closed mode is not implemented.
 Property types accept only unquoted BOOLEAN/BOOL, INT8, INT16, INT32, INT64/INTEGER/INT,
-FLOAT32, FLOAT64/FLOAT, DECIMAL and STRING. Quoted spellings, unions and `!` nullability
+FLOAT32, FLOAT64/FLOAT, DECIMAL and STRING. Nonempty quoted spellings, unions and `!` nullability
 suffixes refuse with CK00001, including standalone `IS :: type` constraints.
 Unsupported identifier names also use CK00001; missing, numeric or punctuation type tokens use CG00002.
+An empty delimited type name (`IS :: ""` or `{p :: ""}`) is CG00002, "An identifier cannot be empty."
 
 `SHOW CURRENT GRAPH TYPE` returns DATABASE_NAME (STRING), MODE (STRING, OPEN), and DEFINITION
 (STRING, canonical complete ALTER CURRENT GRAPH TYPE SET DDL). All columns are non-nullable.

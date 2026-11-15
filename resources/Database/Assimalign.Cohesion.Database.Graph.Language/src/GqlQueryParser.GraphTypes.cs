@@ -54,11 +54,11 @@ public sealed partial class GqlQueryParser
                 var properties = Properties();
                 Expect(TokenType.RightBracket, "']'"); Expect(TokenType.RightArrow, "'->'");
                 var last = Node();
+                if (!Failed && (first.Implies || last.Implies || first.Implied.Count != 0 || first.Properties.Count != 0 || last.Implied.Count != 0 || last.Properties.Count != 0))
+                { Error("CG00002", ErrorMessages.GraphTypeEndpointExpected, Current); }
                 if (!Failed && mode == GqlGraphTypeOperation.Drop &&
                     (first.Label is not null || first.Alias is not null || last.Label is not null || last.Alias is not null))
                 { Unsupported("GRAPH TYPE DROP BODY", first.Label is not null || first.Alias is not null ? first.NameToken : last.NameToken); }
-                if (!Failed && (first.Implied.Count != 0 || first.Properties.Count != 0 || last.Implied.Count != 0 || last.Properties.Count != 0))
-                { Error("CG00002", ErrorMessages.GraphTypeEndpointExpected, Current); }
                 references.Add((edges.Count, first.Label is null ? first.Alias : null, first.NameToken, last.Label is null ? last.Alias : null, last.NameToken));
                 edges.Add(new(type, first.Label ?? "", last.Label ?? "", properties));
             }

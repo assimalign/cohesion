@@ -125,15 +125,18 @@ label scan after exact and relationship candidates compete. DIALECT records the 
 
 ## Schema DDL (#1738, GQ-D2)
 
-ALTER CURRENT GRAPH TYPE and SHOW CURRENT GRAPH TYPE use GqlSchemaCommand (#1806), which
-holds a GqlGraphTypeCommand with Kind GraphType in the existing query body slot, so ordinary query allocation size is
-unchanged. Its sealed node, edge and property records describe semantic fields; rendering never
+ALTER CURRENT GRAPH TYPE uses GqlSchemaCommand (#1806) with Kind GraphType, holding a
+GqlGraphTypeCommand in the existing query body slot, so ordinary query allocation size is unchanged.
+SHOW CURRENT GRAPH TYPE is the CurrentGraphType catalog surface.
+The command's sealed node, edge and property records describe semantic fields; rendering never
 uses source text. The parser uses flat loops for type bodies and resolves optional node aliases
 after the complete body, without nesting recursion. Unsupported constraint definitions, inline
 KEY/UNIQUE, element-level IS/REQUIRE and CLOSED/OPEN modes return one CK00001. DROP accepts
 identifier forms only, including optional declaration aliases; any partial or full body is CK00001.
 An explicit scalar-name table admits only unquoted supported names in both graph types and
-standalone constraints. Missing or non-name type tokens report CG00002; unsupported names retain CK00001.
+standalone constraints. Missing, empty delimited or non-name type tokens report CG00002;
+empty delimited names retain "An identifier cannot be empty." Unsupported names retain CK00001.
+An edge endpoint accepts an optional variable and one optional label; implication markers are CG00002.
 Duplicate names and variables point at the offending name. The ALTER capability is advertised only as
 ALTER CURRENT GRAPH TYPE; other ALTER positions retain the unsupported-vocabulary entry.
 The clause corpus grows by exactly one; no lexer keywords are added. Empty node types follow
