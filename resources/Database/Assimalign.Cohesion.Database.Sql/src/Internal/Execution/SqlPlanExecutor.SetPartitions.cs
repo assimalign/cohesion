@@ -32,6 +32,7 @@ internal sealed partial class SqlPlanExecutor
         private byte[]? _scratch;
         private long _ordinal;
         private long _maximumDecoded;
+        private long _reserved;
         private bool _disposed;
         internal Exception? Failure { get; set; }
 
@@ -48,9 +49,17 @@ internal sealed partial class SqlPlanExecutor
             {
                 _statement = SqlHashSpillMetrics.JoinTemp(_metrics, context.Session!);
                 if (union && !plan.IsAll) { _union = new HashSpill(executor, context.Session!, collations, shared: _statement, stage: true); }
-                else { _left = _statement.CreateRun(); }
+                else
+                {
+                    const long writer = StorageTempSpace.PageSize + 16384 + 768;
+                    _metrics.ReservePlainSelectMemory(writer, _budget); _reserved = writer;
+                    _left = _statement.CreateRun();
+                }
             }
-            catch (StorageTempException failure) { Refuse(failure); throw; }
+            catch (StorageTempException failure) { ReleaseWorkspace(); Refuse(failure); throw; }
+            catch (SqlExecutionException failure) when (!ReferenceEquals(failure, _refusal))
+            { ReleaseWorkspace(); Refuse(failure); throw; }
+            catch { ReleaseWorkspace(); throw; }
         }
 
         internal static SetOperationSpill? For(List<object?[]> rows)
@@ -104,8 +113,14 @@ internal sealed partial class SqlPlanExecutor
 
         internal void NextSide(CancellationToken token)
         {
-            try { _left!.Seal(token); _right = _statement.CreateRun(token); _ordinal = 0; }
+            try
+            {
+                _left!.Seal(token);
+                _metrics.ReservePlainSelectMemory(512, _budget); _reserved += 512;
+                _right = _statement.CreateRun(token); _ordinal = 0;
+            }
             catch (StorageTempException failure) { Refuse(failure); }
+            catch (SqlExecutionException failure) when (!ReferenceEquals(failure, _refusal)) { Refuse(failure); }
         }
 
         internal void Complete(CancellationToken token)
@@ -129,6 +144,7 @@ internal sealed partial class SqlPlanExecutor
                     finally { Close(survivors); }
                 }
                 _scratch = null;
+                ReleaseWorkspace();
                 SqlSortSpillMetrics.RecordOutput(_metrics, _statement);
                 SqlRowCollector.ObserveSpill?.Invoke("set-operation");
             }
@@ -154,8 +170,14 @@ internal sealed partial class SqlPlanExecutor
                 Distribute(right, rightParts, depth, token);
                 leftParts.Seal(token); rightParts.Seal(token);
             }
-            catch { Close(leftParts); Close(rightParts); throw; }
-            finally { _metrics.ReleasePlainSelectMemory(writers); }
+            catch
+            {
+                try { Close(leftParts); Close(rightParts); }
+                finally { _metrics.ReleasePlainSelectMemory(writers); }
+                throw;
+            }
+            const long metadata = 2 * SqlHashSpillPartitioning.Count * 512L;
+            _metrics.ReleasePlainSelectMemory(writers - metadata);
             try
             {
                 // Sealed runs no longer own writer pages. Delete their parents before
@@ -178,7 +200,11 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
             }
-            finally { Close(leftParts); Close(rightParts); }
+            finally
+            {
+                try { Close(leftParts); Close(rightParts); }
+                finally { _metrics.ReleasePlainSelectMemory(metadata); }
+            }
         }
 
         private void Distribute(StorageTempRun source, StorageTempPartitions target, int depth, CancellationToken token)
@@ -298,11 +324,14 @@ internal sealed partial class SqlPlanExecutor
             catch (Exception cleanup) when (cleanup is StorageTempException or AggregateException)
             { (Failure ?? _refusal).Data["SetStageCleanup"] = cleanup; }
         }
+        private void ReleaseWorkspace()
+        { _metrics.ReleasePlainSelectMemory(_reserved); _reserved = 0; }
         public void Dispose()
         {
             if (_disposed) { return; }
             _disposed = true; _scratch = null;
-            Close(_output); Close(_union); Close(_left); Close(_right);
+            try { Close(_output); _union?.Dispose(Failure ?? _refusal); Close(_left); Close(_right); }
+            finally { ReleaseWorkspace(); }
         }
         private sealed class DebugView { public DebugView(SetOperationSpill value) { } }
     }

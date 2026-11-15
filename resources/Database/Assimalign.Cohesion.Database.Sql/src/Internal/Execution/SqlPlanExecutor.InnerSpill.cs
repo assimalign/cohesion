@@ -11,7 +11,9 @@ internal sealed partial class SqlPlanExecutor
             || HasOperatorSpillCorrelation(plan)) { return false; }
         foreach (var binding in plan.Bindings)
         { if (binding.Source.Derived is { IsCorrelated: true }) { return false; } }
-        return true;
+        foreach (var step in plan.Steps)
+        { if (step.Hash is null && step.Access is null) { return true; } }
+        return false;
     }
 
     // A normalized FULL/hash parent may consume a nested-loop subtree. The hash

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -10,11 +11,62 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_distinct")]
+    private static extern ref StorageTempRun? SetOperandRun(SqlSpilledResultSet result);
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Operand result close failure keeps success or cancellation after the cursor drains (#1789)")]
+    [InlineData(false)] [InlineData(true)]
+    public async Task ExecuteAsync_SetOperandClose_ShouldKeepOutcome(bool cancel)
+    {
+        // Arrange: the ordered operand spills while UNION's two keys fit. Inject
+        // only after its actual result cursor has delivered every converted row.
+        await using var engine = await Create("set-operand-close", 262144);
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session);
+        using var cancellation = new CancellationTokenSource(); bool injected = false, closed = false;
+        OperationCanceledException? cancellationFailure = null;
+        SqlRowCollector.ObserveBuffer = (phase, value) =>
+        {
+            if (phase != "set-operand-drained" || injected) { return; }
+            injected = true;
+            var result = (SqlSpilledResultSet)value;
+            result.IsStageResult.ShouldBeTrue();
+            var runs = Sorted(result) is { } sorted ? Runs(sorted) : new[] { SetOperandRun(result)! };
+            runs.Length.ShouldBeGreaterThan(0);
+            foreach (var run in runs)
+            { RunFile(run) = new TableAsFailedCloseStream(RunFile(run).SafeFileHandle, () => closed = true); }
+            if (cancel) { cancellation.Cancel(); throw cancellationFailure = new OperationCanceledException(cancellation.Token); }
+        };
+        try
+        {
+            // Act
+            const string sql = "(SELECT id%2 AS value FROM t ORDER BY id) UNION SELECT 0";
+            if (cancel)
+            {
+                var failure = await Record.ExceptionAsync(async () => await session.ExecuteAsync(sql, cancellationToken: cancellation.Token));
+                failure.ShouldNotBeNull(); failure.ShouldBeSameAs(cancellationFailure);
+                failure.ShouldBeAssignableTo<OperationCanceledException>();
+                WindowFailureData(failure, nameof(SqlSpilledResultSet)).ShouldBeTrue();
+            }
+            else
+            {
+                await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                result.Columns.Single().Type.ShouldBe(DatabaseType.Int64);
+                (await Rows(result)).ShouldBe(new[] { new RowValues([0L]), new RowValues([1L]) });
+            }
+            // Assert
+            injected.ShouldBeTrue(); closed.ShouldBeTrue(); TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        }
+        finally { SqlRowCollector.ObserveBuffer = null; }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Set/inner quota and floor failures keep the original memory refusal (#1789)")]
     [InlineData(false, 0)] [InlineData(false, 1)] [InlineData(false, 2)]
     [InlineData(true, 0)] [InlineData(true, 1)] [InlineData(true, 2)]
@@ -105,8 +157,8 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             if (phase != "join-inner" || injected) { return; }
             injected = true;
-            var run = StatementRuns(engine.TempSpace!).First(run => run.IsSealed);
-            RunFile(run) = new FailedCloseStream(RunFile(run).SafeFileHandle);
+            foreach (var run in StatementRuns(engine.TempSpace!).Where(run => run.IsSealed).ToArray())
+            { RunFile(run) = new FailedCloseStream(RunFile(run).SafeFileHandle); }
             if (cancel) { cancellation.Cancel(); cancellation.Token.ThrowIfCancellationRequested(); }
             throw SqlExecutionException.StatementMemoryBudget(262144);
         };
@@ -221,8 +273,8 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Reference-observing catalogs retain the original set/inner refusal without temp I/O (#1789)")]
-    [InlineData(false)] [InlineData(true)]
-    public async Task ExecuteAsync_SetInnerReferenceGate_ShouldKeepOriginal(bool inner)
+    [InlineData(false, false)] [InlineData(true, false)] [InlineData(false, true)] [InlineData(true, true)]
+    public async Task ExecuteAsync_SetInnerReferenceGate_ShouldKeepOriginal(bool inner, bool cte)
     {
         // Arrange: even an unused callback can inspect aliases in a later CTE consumer.
         var builder = SqlDatabaseEngine.CreateBuilder("set-inner-reference");
@@ -231,8 +283,9 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var engine = await builder.BuildAsync();
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session);
         // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(inner
-            ? "SELECT u.id FROM u CROSS JOIN t" : "SELECT id FROM t UNION ALL SELECT id FROM t"));
+        string sql = inner ? "SELECT u.id FROM u CROSS JOIN t" : "SELECT id FROM t UNION ALL SELECT id FROM t";
+        if (cte) { sql = "WITH c AS (" + sql + ") SELECT * FROM c"; }
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql));
         // Assert
         failure.Diagnostics[0].Code.ShouldBe("CS05067");
         SqlSortSpillMetrics.For(session.LastStatementMetrics!).ShouldBeNull();

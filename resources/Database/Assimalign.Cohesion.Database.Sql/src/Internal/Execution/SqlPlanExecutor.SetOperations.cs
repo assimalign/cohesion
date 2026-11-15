@@ -97,7 +97,7 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
             }
-            return MaterializeSelect(ReadSetRows(rows, cancellationToken), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset, false, evaluator, null, cancellationToken, spillOwner: statement.Session);
+            return MaterializeSetResult(ReadSetRows(rows, cancellationToken), plan, statement, evaluator, cancellationToken);
         }
         catch (Exception failure) when (statement.Session is not null
             && SqlHashSpillMetrics.For(statement.Metrics)?.JoinStatement is not null && SqlOperatorSpillRefusal.IsTemporary(failure))
@@ -112,7 +112,9 @@ internal sealed partial class SqlPlanExecutor
         List<object?[]>? destination = null, HashSet<object?[]>? seen = null)
         => statement.Session is null
             ? MaterializeSetOperandBaseAsync(operand, conversions, plan, statement, cancellationToken, destination, seen)
-            : MaterializePermittedSetOperandAsync(operand, conversions, plan, statement, cancellationToken, destination, seen);
+            : !CanSpillSetOperation(plan)
+                ? MaterializeSetOperandBaseAsync(operand, conversions, plan, statement.WithoutSession(), cancellationToken, destination, seen)
+                : MaterializePermittedSetOperandAsync(operand, conversions, plan, statement, cancellationToken, destination, seen);
 
     private async Task<List<object?[]>> MaterializeSetOperandBaseAsync(SqlPlan operand,
         IReadOnlyList<SqlBoundExpression> conversions, SqlSetOperationPlan plan,

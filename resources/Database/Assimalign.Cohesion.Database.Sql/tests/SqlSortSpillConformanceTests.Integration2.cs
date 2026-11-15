@@ -260,15 +260,15 @@ public sealed partial class SqlSortSpillConformanceTests
         await session.ExecuteAsync("INSERT INTO jc VALUES" + string.Join(',', values));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Computed common-type join keys expose the spill eligibility boundary (#1788, #1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Computed common-type keys keep the physical join spill boundary (#1788, #1789)")]
     [InlineData("INNER")]
     [InlineData("LEFT")]
     [InlineData("RIGHT")]
     [InlineData("FULL")]
-    public async Task ExecuteAsync_CommonComputedJoinKey_ShouldRetainExplicitSpillBoundary(string kind)
+    public async Task ExecuteAsync_CommonComputedJoinKey_ShouldKeepPhysicalSpillBoundary(string kind)
     {
-        // Arrange: G=262,144 B, Q=67,108,864 B. Computed keys are explicitly excluded
-        // from SQ-L3b; extending their retained/replayed representation needs an owner decision.
+        // Arrange: G=262,144 B, Q=67,108,864 B. Computed hash keys remain excluded;
+        // a computed ON expression executed by a nested loop rereads its inner spool.
         await using var engine = await Create("common-computed-join", 262144);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE jl(id INT,payload TEXT)");
@@ -280,7 +280,17 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         string sql = $"SELECT l.id,r.id FROM jl l {kind} JOIN jr r ON COALESCE(l.id,0)=r.n LIMIT 1";
 
-        // Act / Assert: no indexed handoff can occur on this currently excluded path.
+        // Act / Assert: the nested-loop path completes with the fitting first row.
+        if (kind is "INNER" or "LEFT")
+        {
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
+            (await Rows(result)).ShouldBe(new[] { new RowValues([0, 0]) });
+            result.Columns.Select(column => column.Type).ShouldBe(new[] { DatabaseType.Int32, DatabaseType.Int32 });
+            SqlSortSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull().Runs.ShouldBeGreaterThan(0);
+            session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); TempBytes(engine.TempSpace!).ShouldBe(0);
+            return;
+        }
+        // A computed hash build still refuses before any stage is created.
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql));
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05067");
         SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldBeNull();

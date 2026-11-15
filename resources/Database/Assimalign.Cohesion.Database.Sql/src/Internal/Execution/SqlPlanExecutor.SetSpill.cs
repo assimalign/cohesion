@@ -15,8 +15,23 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private bool CanSpillSetOperation(SqlSetOperationPlan plan)
-        => !_definitions.ForceSelectRetentionBasePath && _definitions.CanSpillValues
+        => CanPipelineSelectRetention() && _definitions.CanSpillValues
             && plan.Projections.All(projection => projection.Collation.IsFixed) && !HasOperatorSpillCorrelation(plan);
+
+    // Set output had no spill permission at the base. Keep its original memory
+    // refusal if this newly permitted final sort/output handoff cannot use temp;
+    // an older operand's own temporary failure never enters this wrapper.
+    private DatabaseResult MaterializeSetResult(IEnumerable<object?[]> rows, SqlSetOperationPlan plan,
+        SqlStatementContext statement, SqlExpressionEvaluator evaluator, CancellationToken token)
+    {
+        try
+        {
+            return MaterializeSelect(rows, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+                false, evaluator, null, token, spillOwner: CanSpillSetOperation(plan) ? statement.Session : null);
+        }
+        catch (Exception failure) when (statement.Session is not null && SqlOperatorSpillRefusal.IsTemporary(failure))
+        { throw SqlOperatorSpillRefusal.Preserve(statement.Metrics, failure, _definitions.StatementMemoryBudget); }
+    }
 
     private static bool HasOperatorSpillCorrelation(SqlPlan plan)
     {
@@ -115,14 +130,25 @@ internal sealed partial class SqlPlanExecutor
                     resultBytes = 0; result = null; reader = null; return rows;
                 }
             }
+            if (result is SqlSpilledResultSet) { SqlRowCollector.ObserveBuffer?.Invoke("set-operand-drained", result); }
             return rows;
+        }
+        catch (Exception failure)
+        {
+            if (result is SqlSpilledResultSet spilled) { spilled.DisposeAfterFailure(failure); result = null; }
+            throw;
         }
         finally
         {
             try { if (reader is not null) { await reader.DisposeAsync().ConfigureAwait(false); } }
             finally
             {
-                try { if (result is not null) { await result.DisposeAsync().ConfigureAwait(false); } }
+                try
+                {
+                    try { if (result is not null) { await result.DisposeAsync().ConfigureAwait(false); } }
+                    catch (SqlExecutionException) when (result is SqlSpilledResultSet { IsStageResult: true })
+                    { /* Storage counted the failed close; completed operand conversion keeps its outcome. */ }
+                }
                 finally
                 {
                     ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); ReleaseSelectMemory(ref resultBytes);
@@ -151,8 +177,9 @@ internal sealed partial class SqlPlanExecutor
         var stage = new SetOperationSpill(this, plan, statement, failure, union: true);
         RegisterSetStage(statement.Metrics, plan, stage);
         SetOperationSpill.Attach(rows, stage);
-        foreach (var row in rows) { stage.Append(row, token); }
-        rows.Clear(); rows.Capacity = 0; seen?.Clear(); seen?.TrimExcess();
+        seen?.Clear(); seen?.TrimExcess();
+        for (int i = 0; i < rows.Count; i++) { stage.Append(rows[i], token); rows[i] = []; }
+        rows.Clear(); rows.Capacity = 0;
     }
 
     private async Task<List<object?[]>> ResumeSetOperandAsync(List<object?[]> rows, SqlSetOperationPlan plan,
@@ -187,7 +214,7 @@ internal sealed partial class SqlPlanExecutor
         var stage = new SetOperationSpill(this, plan, statement, failure, union: false);
         RegisterSetStage(statement.Metrics, plan, stage);
         SetOperationSpill.Attach(left, stage);
-        foreach (var row in left) { stage.Append(row, token); }
+        for (int i = 0; i < left.Count; i++) { stage.Append(left[i], token); left[i] = []; }
         left.Clear(); left.Capacity = 0;
         await ResumeSetOperandAsync(left, plan, statement, token).ConfigureAwait(false);
         stage.NextSide(token);
@@ -200,7 +227,7 @@ internal sealed partial class SqlPlanExecutor
         else
         {
             SetOperationSpill.Attach(right, stage);
-            foreach (var row in right) { stage.Append(row, token); }
+            for (int i = 0; i < right.Count; i++) { stage.Append(right[i], token); right[i] = []; }
             right.Clear(); right.Capacity = 0;
             await ResumeSetOperandAsync(right, plan, statement, token).ConfigureAwait(false);
         }

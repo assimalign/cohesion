@@ -60,6 +60,7 @@ internal sealed partial class SqlPlanExecutor
                         if ((mode & SqlJoinRowMode.StreamRoot) != 0 && ReferenceEquals(node, plan.Tree)) { yield return frame; }
                         else { Retain(node, frame, rows, dmlTarget); }
                     }
+                    SqlJoinInnerSpool.For(rows)?.Seal(cancellationToken);
                     continue;
                 }
                 bool seek = indexes.TryGetValue(step, out var index);
@@ -206,6 +207,7 @@ internal sealed partial class SqlPlanExecutor
                     ReleaseSpool(inner.Rows);
                     inner.Rows.Clear();
                 }
+                SqlJoinInnerSpool.For(output)?.Seal(cancellationToken);
                 results.Remove(node.Left!);
                 results.Remove(node.Right!);
             }

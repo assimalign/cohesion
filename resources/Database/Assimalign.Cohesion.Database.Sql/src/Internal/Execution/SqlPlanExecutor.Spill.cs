@@ -116,8 +116,8 @@ internal sealed partial class SqlPlanExecutor
     }
 
     // Keep one awaited stage arm: fitting roots retain the base async layout.
-    // Both kinds have an explicit owner; the default dispatcher would recurse for
-    // an admitted window plan.
+    // Stage kinds have an explicit owner; the default dispatcher would recurse for
+    // an admitted window or set plan.
     private Task<DatabaseResult> ExecuteSpillStageAsync(SqlPlan plan, SqlStatementContext statement,
         CancellationToken token, SqlDatabaseSession owner)
         => plan is SqlWindowAggregatePlan window

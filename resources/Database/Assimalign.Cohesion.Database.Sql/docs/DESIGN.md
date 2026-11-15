@@ -37,13 +37,22 @@ nested-loop subtrees, retaining the existing charged match flags and unmatched o
 SqlJoinInnerSpool and set stages hang off existing lists through weak tables, leaving the
 shared fitting join iterators' allocation layout intact.
 
+Normalized buffers seal when their node completes, before a sibling is built; only one
+current inner writer can use handoff scratch. Persistent set writers are charged before
+another operand starts: sequential runs reserve their page, capped encoding buffer and
+bookkeeping, and UNION reserves partition pages, output writer and operator state.
+Partition replay charges its reader and possible next writers before admitting keys;
+only sealed-partition metadata stays charged while descending to the next level. This
+keeps nested operators from accumulating uncharged pages with plan depth.
+
 Both targets use the existing cached value-identity gate, renamed CanSpillValues without
 changing its condition. Catalogs with reference-bearing or pseudo-type application/SQL
 parameters, application casts or checked domains keep the base owner. Joined DML,
 correlated/lateral inputs, recursion, SQL/JSON and window ledgers retain their paths.
 Temporary failures following a new handoff preserve the original CS05067 and message,
 with the temp cause in Data. Existing temp failures reached before a new handoff retain
-their original code. Stage cleanup never replaces success, cancellation or an evaluator
+their original code. Final set sorting/output has its own narrow refusal translation;
+it never reclassifies an earlier operand failure. Stage cleanup never replaces success, cancellation or an evaluator
 error. Stage runs belong to the statement and share its quota; final client results retain
 their existing lifetime and cap. EXPLAIN ANALYZE reports bytes and runs only after spilling.
 

@@ -97,6 +97,7 @@ internal sealed class SqlJoinInnerSpool : IDisposable
             SqlRowCollector.ObserveSpill?.Invoke("join-inner");
         }
         catch (StorageTempException failure) { Refuse(failure); }
+        catch (SqlExecutionException failure) when (!ReferenceEquals(failure, _refusal)) { Refuse(failure); }
     }
 
     internal IEnumerable<object?[]> Read(CancellationToken token)
