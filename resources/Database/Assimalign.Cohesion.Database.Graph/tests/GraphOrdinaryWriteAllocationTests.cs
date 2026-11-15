@@ -44,6 +44,22 @@ public sealed class GraphOrdinaryWriteAllocationTests
         minima[2].ShouldBeLessThanOrEqualTo(49_568 + 128);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - Untyped label REMOVE retains base allocations and rejects injected regressions (#1806)")]
+    [InlineData(-1, 129)]
+    [InlineData(0, 129)]
+    [InlineData(0, 1024)]
+    public async Task Execute_UntypedLabelRemoval_ShouldGuardBaseAllocationsAsync(int injectedKind, int injectedBytes)
+    {
+        // Arrange / Act
+        var minima = await MeasureAsync(injectedKind, injectedBytes, removeLabels: true);
+        // Assert: 9973a4e36 measured 63,480 B in ten fresh Release children; retain exactly 128 B headroom.
+        _output.WriteLine($"untyped label REMOVE bytes/statement={minima[0]}");
+        if (injectedKind >= 0) { Should.Throw<ShouldAssertException>(() => CheckRemovalCeiling(minima)); }
+        else { CheckRemovalCeiling(minima); }
+    }
+
+    private static void CheckRemovalCeiling(long[] minima) => minima[0].ShouldBeLessThanOrEqualTo(63_480 + 128);
+
     [Fact(DisplayName = "Cohesion Test [Graph] - ordinary CREATE SET DELETE retain strict-codec allocation minima (#1735, #1806)")]
     public async Task Execute_OrdinaryWrites_ShouldRetainBaseAllocations()
     {
@@ -132,7 +148,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
         minima[2].ShouldBeLessThanOrEqualTo(53_264 + 128);
     }
 
-    private async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false, bool textIndexed = false)
+    private async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false, bool textIndexed = false, bool removeLabels = false)
     {
         string fixture = Path.Combine(AppContext.BaseDirectory, "GraphAllocationFixture", "Assimalign.Cohesion.Database.Graph.RecoveryFixture.dll");
         // PATH can select arm64 even when --arch x64 runs an x64 testhost.
@@ -146,7 +162,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
         start.Environment["DOTNET_TieredCompilation"] = "0";
         if (indexed) { start.Environment["T3_ALLOCATION_PROBE"] = "1"; }
         start.ArgumentList.Add(fixture);
-        start.ArgumentList.Add(textIndexed ? "text-indexed-allocations" : indexed ? "indexed-allocations" : typed ? "typed-allocations" : "allocations");
+        start.ArgumentList.Add(removeLabels ? "remove-label-allocations" : textIndexed ? "text-indexed-allocations" : indexed ? "indexed-allocations" : typed ? "typed-allocations" : "allocations");
         start.ArgumentList.Add(injectedKind.ToString(CultureInfo.InvariantCulture));
         start.ArgumentList.Add(injectedBytes.ToString(CultureInfo.InvariantCulture));
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start graph allocation fixture.");

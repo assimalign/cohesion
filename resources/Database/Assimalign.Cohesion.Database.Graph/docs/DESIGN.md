@@ -255,9 +255,13 @@ endpoints. A matching MERGE validates only its writes. Label additions do no edg
 one statement-local map selects declarations by identifying label and source/outgoing or target/incoming
 direction. Each selected type receives one stale check per statement; each seek consumes one work unit, even
 when empty. Validation reads only that node/direction/type range and its corresponding created-edge
-incident list, then checks final endpoint labels. The map is built on the first removal under the writer lock.
-Only labels selected by the map retain per-node removal state and its memory grant; untyped and unrelated
-removals perform one catalog read per statement and preserve ordinary write work. Untyped edges add no
+incident list, then checks final endpoint labels. Each REMOVE stage first checks the current-type marker
+without a memory or work charge. Without a current type, including after DROP, it allocates no map or
+write-index slot and lists or decodes no edge declarations. A typed statement builds its deterministically
+charged map on the first removal under the writer lock. Only selected labels retain per-node removal
+state and its memory grant. Untyped removals preserve base memory; untyped and unrelated removals
+preserve ordinary write work. Index probes test overlay entries rather than the shared slot's presence.
+Untyped edges add no
 endpoint read or expansion work. Missing endpoint membership is CG03013, distinct from CG03010
 for existing data during schema validation; property violations retain CG03003. Independent
 relationship key/constraint types are checked in both publication orders with CG03009. Closed
@@ -297,9 +301,11 @@ shifted CREATE by 144 bytes depending on an injected control allocation. The sha
 UTF-8 codec lowers ordinary CREATE/SET/DELETE minima to 38,552/65,944/49,568 bytes and
 typed-label minima to 39,896/67,272/49,568 bytes. Every ceiling is tightened to its new minimum
 plus exactly 128 bytes; the 129-byte/1-KiB regression controls remain unchanged.
-Typed and indexed measurement children reserve and verify a no-GC window so pool trimming cannot
+The untyped MATCH (a:U) REMOVE a:Extra allocation guard retains its base minimum of 63,480 bytes
+plus the same 128 bytes, with injected 129-byte and 1-KiB regression controls.
+Typed, indexed and untyped label-removal measurement children reserve and verify a no-GC window so pool trimming cannot
 discard a single minimum sample; production execution retains its normal GC policy.
-These fresh-process minima agree on win-arm64 and win-x64; typed writes have their
+The CREATE/SET/DELETE fresh-process minima agree on win-arm64 and win-x64; typed writes have their
 own allocation guard and injected control. Child measurement processes use the testhost's
 runtime root and assert the matching architecture, including under --arch x64.
 Publication reserves 512 bytes for the singleton type route and

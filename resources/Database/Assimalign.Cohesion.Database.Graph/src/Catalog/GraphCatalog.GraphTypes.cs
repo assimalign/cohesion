@@ -16,6 +16,13 @@ public sealed partial class GraphCatalog
     internal Action<string>? AfterGraphTypeMutation { get; set; }
     internal Action<string>? BeforeGraphTypeValidation { get; set; }
 
+    internal bool HasGraphTypeMarker()
+    {
+        lock (_sync) { return _versions.ContainsKey((6, Guid.Empty, "CURRENT")); }
+    }
+
+    internal bool HasGraphType(TransactionSnapshot snapshot) => Find(6, Guid.Empty, "CURRENT", snapshot) is not null;
+
     internal GraphTypeDeclaration? GetGraphType(TransactionSnapshot snapshot, Action<long>? reserve = null)
         => LoadGraphType(snapshot, reserve, out _);
 

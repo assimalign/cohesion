@@ -20,6 +20,9 @@ The exact-index minima are 42,256/71,760/53,264 bytes for CREATE/SET/DELETE, wit
 
 The typed-allocations mode takes the same arguments and publishes required Int64 properties
 for both measured labels before warmup. It uses the same measurement and injected controls.
+The remove-label-allocations mode measures untyped MATCH (a:U) REMOVE a:Extra without indexes,
+restoring Extra before each measured statement. It keeps the same warmup, sampling and injected
+controls, and reserves and verifies the existing no-GC window so warmed pools survive every sample.
 The fixture reports its process architecture alongside the minima; the test launches the
 matching runtime host and checks that architecture under native and --arch x64 execution.
 

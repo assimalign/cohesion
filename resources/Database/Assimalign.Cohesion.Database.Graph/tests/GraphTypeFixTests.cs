@@ -142,7 +142,9 @@ public sealed class GraphTypeFixTests
     public async Task Execute_UntypedWrite_ShouldMatchBaseCountersAsync(string query, long work, long records, long rangeSeeks, long peakBytes, bool typed)
     {
         // Arrange
-        // At 9973a4e36, work/decodes/memory are native metrics; test-only cursor-open instrumentation supplies seeks.
+        // At 9973a4e36, work/decodes/memory are native metrics; the test-only seek counter ran at method entry.
+        // Each pinned call opens one cursor (MERGE), or makes no call, so these are also per-cursor counts.
+        // Single-node REMOVE peaks in MATCH; this base-equality pin cannot detect a removal charge below about 9 KB.
         await using var engine = GraphDatabaseEngine.Create("base-counters", new());
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -161,28 +163,58 @@ public sealed class GraphTypeFixTests
         session.LastStatementMetrics.Memory.PeakRetainedBytes.ShouldBe(peakBytes);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Unrelated label removal: bulk writes retain the base memory envelope (#1806)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Execute_UnrelatedBulkLabelRemoval_ShouldFitBaseMemoryEnvelopeAsync(bool typed)
+    [Theory(DisplayName = "Cohesion Test [Graph] - Unrelated label removal: bulk writes pin exact base and typed-map memory (#1806)")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Execute_UnrelatedBulkLabelRemoval_ShouldPinExactMemoryAsync(bool typed, bool dropped)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create("type-removal-memory", new());
+        await using var engine = GraphDatabaseEngine.Create("type-removal-memory", new() { MaintenanceInterval = TimeSpan.FromHours(1) });
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        if (typed) { await GraphSchema.Open(database, session).SetGraphTypeAsync(Type(), CancellationToken.None); }
+        var schema = GraphSchema.Open(database, session);
+        if (typed || dropped) { await schema.SetGraphTypeAsync(Type(), CancellationToken.None); }
+        if (dropped) { await schema.DropGraphTypeAsync(CancellationToken.None); }
         await session.ExecuteAsync("UNWIND $rows AS i INSERT (:U:Extra)",
             new Dictionary<string, object?> { ["rows"] = Enumerable.Range(0, 100).Select(i => (object?)(long)i).ToArray() }, CancellationToken.None);
-        // The base peaks at 155,522 B; 4 KiB admits the statement's one catalog map.
-        var limits = new GraphQueryLimits { MemoryBytes = 155_522 + 4096 };
+        // 9973a4e36 peaks at 155,522 B at the end of the REMOVE binding loop. Untyped adds nothing, even after DROP.
+        // Type() adds 256 (map) + 128 (kind-8 name) + 512 + 32 * 60 (R's record) + 2 * (256 + 2) (A/B) = 3,332 B.
+        long expected = typed ? 155_522 + 3_332 : 155_522;
+        var limits = new GraphQueryLimits { MemoryBytes = expected };
         // Act
         await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (a:U) REMOVE a:Extra", null, limits), CancellationToken.None);
         var metrics = session.LastStatementMetrics!;
         // Assert
+        metrics.Memory.PeakRetainedBytes.ShouldBe(expected);
         metrics.Consumed.ShouldBe(100);
         metrics.Memory.ActiveLeases.ShouldBe(0);
         (await GraphCatalogIntrospectionTests.Rows(session, "MATCH (n:Extra) RETURN count(n)")).ShouldHaveSingleItem()[0].ShouldBe(0L);
         (await GraphCatalogIntrospectionTests.Rows(session, "MATCH (n:U) RETURN count(n)")).ShouldHaveSingleItem()[0].ShouldBe(100L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Label removal then indexed MATCH: only overlay entries add probe work (#1806)")]
+    [InlineData(false, 13_740)]
+    [InlineData(true, 17_072)]
+    public async Task Execute_LabelRemovalThenIndexedMatch_ShouldKeepBaseOverlayWorkAsync(bool typed, long expectedPeak)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("type-removal-overlay", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        if (typed) { await GraphSchema.Open(database, session).SetGraphTypeAsync(Type(), CancellationToken.None); }
+        await session.ExecuteAsync("CREATE INDEX i FOR (n:I) ON (n.k)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:U:Extra),(:I {k:1})", cancellationToken: CancellationToken.None);
+        // 9973a4e36 measures 2 work and 13,740 B. Type() retains only its 3,332 B map charge above that base.
+        // Act
+        await session.ExecuteAsync(GraphQueryRequest.FromGql(
+            "MATCH (a:U) REMOVE a:Extra DELETE a MATCH (b:I {k:1}) RETURN b.k", null,
+            new GraphQueryLimits { MemoryBytes = expectedPeak }), CancellationToken.None);
+        // Assert
+        var metrics = session.LastStatementMetrics!;
+        metrics.Consumed.ShouldBe(2);
+        metrics.Memory.PeakRetainedBytes.ShouldBe(expectedPeak);
+        metrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Label removal: one stale check serves every node and both endpoint directions (#1806)")]
@@ -201,8 +233,8 @@ public sealed class GraphTypeFixTests
         // Act
         try { await session.ExecuteAsync("MATCH (a:A) REMOVE a:A:B", cancellationToken: CancellationToken.None); }
         finally { database.Catalog.BeforeRecordRead = null; }
-        // Assert: two token reads, one map declaration, its type token and one stale check.
-        reads.ShouldBe(5);
+        // Assert: two token reads, the current-type marker, one map declaration, its type token and one stale check.
+        reads.ShouldBe(6);
         (database.Store.IncidentRangeSeeks - seeks).ShouldBe(6);
         (database.Store.IncidentRecordsDecoded - decoded).ShouldBe(0);
     }
@@ -225,6 +257,7 @@ public sealed class GraphTypeFixTests
         // Assert
         (database.Store.IncidentRangeSeeks - seeks).ShouldBe(0);
         (database.Store.IncidentRecordsDecoded - decoded).ShouldBe(0);
+        // Base-equality check: this single-node statement peaks in MATCH, before endpoint-map retention.
         session.LastStatementMetrics!.Memory.PeakRetainedBytes.ShouldBe(11718);
     }
 

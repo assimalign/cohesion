@@ -11,14 +11,16 @@ using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Graph.Protocol;
 using Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
-if (args.Length != 2 && !(args.Length == 3 && args[0] is "allocations" or "typed-allocations" or "indexed-allocations" or "text-indexed-allocations"))
+if (args.Length != 2 && !(args.Length == 3 && args[0] is "allocations" or "typed-allocations" or "indexed-allocations" or "text-indexed-allocations" or "remove-label-allocations"))
 { throw new ArgumentException("Usage: seed|verify directory; allocations injectedKind [injectedBytes]; typed-allocations|indexed-allocations|text-indexed-allocations injectedKind [injectedBytes]"); }
-if (args[0] is "allocations" or "typed-allocations" or "indexed-allocations" or "text-indexed-allocations")
+if (args[0] is "allocations" or "typed-allocations" or "indexed-allocations" or "text-indexed-allocations" or "remove-label-allocations")
 {
     int injectedKind = int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
     int injectedBytes = args.Length == 3 ? int.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 1024;
     Console.WriteLine("architecture=" + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
-    Console.WriteLine("allocations=" + string.Join(",", GraphWriteAllocations.Measure(injectedKind, injectedBytes, args[0] == "typed-allocations", args[0] is "indexed-allocations" or "text-indexed-allocations", args[0] == "text-indexed-allocations")));
+    Console.WriteLine("allocations=" + string.Join(",", GraphWriteAllocations.Measure(injectedKind, injectedBytes,
+        args[0] == "typed-allocations", args[0] is "indexed-allocations" or "text-indexed-allocations",
+        args[0] == "text-indexed-allocations", args[0] == "remove-label-allocations")));
     return;
 }
 if (args[0] is "index-receipt-text" or "index-receipt-exact" or "index-revision-text" or "index-revision-exact")

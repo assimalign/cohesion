@@ -325,7 +325,7 @@ internal sealed class GraphUpdates : IDisposable
     {
         token.ThrowIfCancellationRequested();
         // No overlay means no value lookup or extra work for ordinary indexed MATCH.
-        if (_nodes.Count == 0 && _nodeIndexes is null) { return null; }
+        if (_nodes.Count == 0 && _nodeIndexes is not { Count: > 0 }) { return null; }
         budget.Consume(); // One lookup per probe once the statement has index changes.
         if (_nodeIndexes is not null && _nodeIndexes.TryGetValue((label, key), out var existing)) { return existing; }
         _nodeIndexes ??= [];
@@ -523,6 +523,18 @@ internal sealed class GraphUpdates : IDisposable
     {
         var touchedNodes = new HashSet<ulong>();
         var touchedRelationships = new HashSet<ulong>();
+        bool canSelectLabelEndpoints = false;
+        if (stage is GqlRemoveStage removal)
+        {
+            for (int index = 0; index < removal.Items.Count; index++)
+            {
+                if (removal.Items[index] is not GqlRemoveLabelsItem) { continue; }
+                // A directory miss avoids allocating a latest snapshot for an always-untyped database.
+                canSelectLabelEndpoints = _database.Catalog.HasGraphTypeMarker() &&
+                    _database.Catalog.HasGraphType(_database.LatestSnapshot(_operation.Context));
+                break;
+            }
+        }
         foreach (var binding in bindings)
         {
             token.ThrowIfCancellationRequested();
@@ -549,7 +561,7 @@ internal sealed class GraphUpdates : IDisposable
                         GqlRemovePropertyItem property => SetProperty(value, property.Property, null),
                         GqlRemoveLabelsItem labels => SetLabels(value, labels.Labels, remove: true),
                         _ => throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location),
-                    }, item is GqlRemoveLabelsItem);
+                    }, canSelectLabelEndpoints && item is GqlRemoveLabelsItem);
                 }
             }
 
