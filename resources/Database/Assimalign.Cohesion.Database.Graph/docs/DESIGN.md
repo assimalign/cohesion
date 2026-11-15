@@ -251,12 +251,12 @@ a stale writer reports CG04007. The existing database writer lock serializes DDL
 commit or rollback. Edge properties and endpoints are persisted declarations only in GQ-T1;
 their enforcement, text ALTER and SHOW CURRENT GRAPH TYPE are GQ-T2. GQ-T2 must add the
 CG03009 cross-check against independent relationship keys/constraints, edge RequiresValidation
-selection, and the write-time selected-record reference check. Closedness is GQ-T3.
+selection, and the write-time selected-record reference check. Closed-type enforcement remains a separate feature.
 
 Before publication, structural comparison by identifying label selects only new or strengthened
 node declarations for owner-posting validation under latest visibility and the writer lock.
 Unchanged declarations, removed elements, nullable-property relaxations, removed property rules
-and removed implied labels scan no members for open types only. GQ-T3 closedness makes removal a
+and removed implied labels scan no members for open types only. Closed-type enforcement makes removal a
 tightening and must extend validation selection accordingly. Scalar declarations currently use exact types after
 CLR normalization, without scalar subtyping; changing the scalar type requires validation.
 Edge-only ALTER scans nothing in GQ-T1. Skipping these scans preserves deployment availability
@@ -2912,6 +2912,11 @@ records a checkpoint failure for a database whose page writes fail, closes it wi
 transaction's undo deferred behind a bracket that holds every page, and asserts that the
 checkpointer's failure ends and the engine runs again (before the checkpointer's skip it stayed
 `Faulted` for the test's 30 seconds).
+
+GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+this process has not opened is absent from health; a leftover directory cannot fail readiness.
+OpenDatabases retains offline open instances and excludes closing ones.
 
 Names are single path components, directory lookup is case insensitive, and enumeration includes
 persisted databases not yet open in memory. Root-builder `AddGraph` captures a deferred

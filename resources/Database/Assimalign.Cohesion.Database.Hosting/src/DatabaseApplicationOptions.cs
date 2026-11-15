@@ -39,8 +39,10 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     /// succeeds or the application stops; false leaves every offline database to the operator.
     /// </summary>
     /// <remarks>
-    /// The application's health is unhealthy, naming each offline database and its cause, either
-    /// way, until the database is open again. A database dropped meanwhile is never reopened.
+    /// The application's health is unhealthy while a database is open offline or pending in the
+    /// reopen service, naming it and its cause. With this option false, a manual reopen is absent
+    /// during recovery; if recovery fails, the database stays absent from health until opened again,
+    /// so check the reopen's own result. A database dropped meanwhile is never reopened.
     /// </remarks>
     public bool ReopenOfflineDatabases { get; set; } = true;
 

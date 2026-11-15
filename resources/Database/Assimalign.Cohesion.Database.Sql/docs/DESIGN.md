@@ -662,7 +662,7 @@ quota provides 32,768 pages x 8,160 B payload = 267,386,880 B:
 These payload capacities precede per-run tail-page rounding and assume no merge rewrite;
 these shapes fit at most 16 initial runs. Merge inputs and outputs both consume the existing
 physical-byte quota. The 50-ASCII-character shape previously used raw UTF-16 (188 B/row,
-8.3x); UTF-8 raises it to 11.3x. Three-byte scripts still fall below 10x; T3-2's quota is
+8.3x); UTF-8 raises it to 11.3x. Three-byte scripts still fall below 10x; the temporary-space quota is
 unchanged. Seeded differential pairs and row round trips cover every supported value family,
 JSONB keys and row values, mixed-domain composites, stable collations, wide keys, all direction/
 NULL combinations and stable multi-run merging. Non-text domains run under one collation;
@@ -1233,7 +1233,7 @@ NEXT VALUE FOR remains excluded from window inputs with existing CS03076; nextva
 retains per-call evaluation. Window inputs do not extend standard sequence row-sharing scopes.
 The brief's once-per-partition NTILE rule includes a NULL first argument, which fixes NULL
 for that partition. PostgreSQL windowfuncs.c:424-440 leaves initialization unset after NULL
-and can retry on a later row; this run follows the explicit SQ-W1 contract for that corner.
+and can retry on a later row; Cohesion keeps the first NULL for the whole partition.
 
 The WindowAgg stage groups equal partition/order specifications and processes longer orderings
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
@@ -2030,7 +2030,7 @@ Derived-first groups retain their association through canonical rendering, CREAT
 database reopen, including when nested aliased groups render as derived SELECTs.
 
 Direct RIGHT or grouped join trees in UPDATE FROM / DELETE USING fail CS05069 before reads
-or mutation: this run preserves the target-outer identity invariant. A derived SELECT source
+or mutation to preserve the target-outer identity invariant. A derived SELECT source
 containing RIGHT executes through the existing materialization path with the target pinned.
 FULL follows the physical and eligibility contract below.
 
@@ -6689,6 +6689,11 @@ them), and the window: with the close held in its shutdown checkpoint by a data 
 not answer, every worker's pass succeeds and skips the database, the lookup misses it, a create
 is refused, an open waits and then reopens it, and a drop waits and then drops it.
 
+GetDatabasesAsync enumerates open instances; health uses the lock-free OpenDatabases snapshot instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+this process has not opened is absent from health; a leftover directory cannot fail readiness.
+OpenDatabases retains offline open instances and excludes closing ones.
+
 For the window between the close and the forget every worker skips it:
 `SqlDatabaseEngine.IsOpen` is false for it (`SqlDatabase.IsClosed`), the flush, write-back and
 version-purge workers do not begin it, and the checkpointer never finds it due. Before phase 4
@@ -9248,8 +9253,8 @@ Regex and SIMILAR TO remain CK00001. SQ-O2 delivers bitwise operators above; ^ r
 
 The persisted-expression audit found unchanged canonical text and tree interpretation for
 existing views, CHECKs, column/domain defaults, SQL functions, generated declaration metadata
-and compiled-schema expressions, so SQL format 30 and compiled-schema v9 remain unchanged
-in this run. New :: trees use existing CAST text and ILIKE retains its own spelling;
+and compiled-schema expressions, so SQL format 30 and compiled-schema v9 remain unchanged.
+New :: trees use existing CAST text and ILIKE retains its own spelling;
 canonical/tree comparisons, renderer fixed points and durable reopen tests cover that
 contract without changing catalog fields, compiled codecs or value wire representation.
 
@@ -9359,7 +9364,7 @@ INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores 
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
 Earlier database formats are refused by the existing format gate; compiled-schema v12 is current.
 All new types and sequence entry points are internal, accessible to the owning Sql test assembly.
-There is no new SQL syntax, function, session state, public API or wire message in this run.
+These sequence internals add no SQL syntax, function, session state, public API or wire message.
 
 Sequences, tables and views share the case-insensitive relation namespace, checked again at
 publication (including CTAS and table rename). Schema RESTRICT includes sequences; CASCADE
@@ -9584,7 +9589,7 @@ clear. Recovery restores either no table plus reclamation
 work, or the entire table with no intent. SQL stays format 29: ordinary table records and kind 14
 already express this protocol. There is no public catalog seam, friend grant or new interface.
 CTAS follows existing self-committing DDL and is refused inside BEGIN with CS04003 (25001);
-commit-time transactional DDL needs broader catalog machinery and remains outside this run.
+commit-time transactional DDL requires catalog support that the engine does not provide.
 
 Tests cover metadata, renaming, no-data evaluation suppression, value/domain failures, pre-publication
 fault/cancellation cleanup, and both wire transports. Every captured storage crash boundary is reopened
@@ -10480,7 +10485,7 @@ whole rollback, including otherwise Safe steps; roll-forwards and never-seen sch
 
 A refused reversal runs no step, keeps the stored schema online, and reports CS03405 through
 Provisioning.Detail and Hosting health, naming both hashes and all refused steps. A never-seen
-destructive declaration without opt-in similarly holds with CS03105 (T3-4). New declarations and
+destructive declaration without opt-in similarly holds with CS03105 (#1779). New declarations and
 roll-forwards with opt-in retain their forward-migration policy. Build succeeds for holds;
 pipelines requiring failure on drift use Verify (CS03103). Explicit ApplySchemaAsync consults
 the same history and rollback policy, throws CS03105 naming every refused step, and changes
@@ -10496,7 +10501,7 @@ the hold progress while its stored hash is unchanged: offline/reopen republishes
 and steps, rewrite restores it on completion, and explicit refusal leaves it reported. Restarting
 with the stored or a successfully published newer declaration clears the hold. Old inserts use
 the stored NOT NULL/default rules. Unpublished mismatched intents are discarded with CS03402
-before classification. Ancestors never applied here count as new; lineage remains deferred (T3-5).
+before classification. Ancestors never applied here count as new; lineage remains deferred (#1779).
 SqlSchemaRollbackTests and SqlSchemaRollbackPolicyTests are the executable provisioning corpus.
 Constraint validation is also explicit in PostgreSQL src/backend/commands/tablecmds.c:13433-13450,
 which queues foreign-key, CHECK and NOT NULL scans; the hold policy here is the owner's

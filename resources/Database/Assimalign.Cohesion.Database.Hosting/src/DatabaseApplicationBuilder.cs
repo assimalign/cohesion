@@ -170,6 +170,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="engine">The borrowed engine.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
+    /// <exception cref="ArgumentException">The engine name is empty, white space or invalid UTF-16.</exception>
     /// <exception cref="InvalidOperationException">
     /// Registration is closed because Build has begun, or another engine of the application has the same name.
     /// </exception>
@@ -190,7 +191,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="factory">The ownership-transferring factory.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="factory"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, white space or invalid UTF-16.</exception>
     /// <exception cref="InvalidOperationException">
     /// Registration is closed because Build has begun, or another engine of the application has the same name.
     /// </exception>
@@ -346,7 +347,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 Services.AddSingleton<IHostService>(_ => new DatabaseAdminEndpointService(healthEndpoint, context!));
             }
 
-            ServiceProvider services = BuildServiceProvider(loggerFactory);
+            ServiceProvider services = BuildServiceProvider(loggerFactory, () => context!);
             ownership.Infrastructure.Add(services);
             DatabaseApplicationOptions options = SnapshotOptions(_options);
 
@@ -554,15 +555,17 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <summary>
     /// Closes service registration and builds the application's provider once: checks every
     /// registration, registers the environment, the configuration and the logger factory as
-    /// borrowed instances, makes the container read-only, and builds.
+    /// borrowed instances and the application context through concrete and interface factories,
+    /// makes the container read-only, and builds.
     /// </summary>
     /// <param name="loggerFactory">The application's logger factory.</param>
+    /// <param name="getContext">Returns the application's context once it has been constructed.</param>
     /// <returns>The provider, which the application owns.</returns>
     /// <exception cref="InvalidOperationException">
     /// A registration needs constructor activation or is open generic, or registers a reserved
     /// service type.
     /// </exception>
-    private ServiceProvider BuildServiceProvider(LoggerFactory loggerFactory)
+    private ServiceProvider BuildServiceProvider(LoggerFactory loggerFactory, Func<DatabaseApplicationContext> getContext)
     {
         var container = (ServiceContainer)Services.Container;
         try
@@ -577,6 +580,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
                 if (descriptor.ServiceType == typeof(IConfiguration)
                     || descriptor.ServiceType == typeof(IHostEnvironment)
+                    || descriptor.ServiceType == typeof(DatabaseApplicationContext)
+                    || descriptor.ServiceType == typeof(IDatabaseApplicationContext)
                     || descriptor.ServiceType == typeof(ILoggerFactory))
                 {
                     throw new InvalidOperationException(
@@ -592,6 +597,11 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             Services.AddSingleton<IHostEnvironment>(Environment);
             Services.AddSingleton<IConfiguration>(Configuration);
             Services.AddSingleton<ILoggerFactory>(loggerFactory);
+            // Created before engine factories run; lifecycle factories resolve it after registries freeze.
+            // The application owns the context, which is not disposable; the provider must never own it.
+            Func<IServiceProvider, DatabaseApplicationContext> contextFactory = _ => getContext();
+            Services.AddSingleton<DatabaseApplicationContext>(contextFactory);
+            Services.AddSingleton<IDatabaseApplicationContext>(contextFactory);
         }
         finally
         {
@@ -605,6 +615,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         static string Describe(Type reserved)
             => reserved == typeof(IConfiguration) ? "configuration"
                 : reserved == typeof(IHostEnvironment) ? "host environment"
+                : reserved == typeof(DatabaseApplicationContext) || reserved == typeof(IDatabaseApplicationContext) ? "application context"
                 : "logger factory";
     }
 
@@ -646,6 +657,15 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     private void ReserveName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        for (int index = 0; index < name.Length; index++)
+        {
+            if (!char.IsSurrogate(name[index])) { continue; }
+            if (!char.IsSurrogatePair(name, index))
+            {
+                throw new ArgumentException(ErrorMessages.EngineNameInvalidUtf16, nameof(name));
+            }
+            index++;
+        }
         if (_engines.Any(registration => string.Equals(registration.Name, name, StringComparison.Ordinal)))
         {
             throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ApplicationBuilderReserveNameFailure, name));

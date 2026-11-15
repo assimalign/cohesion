@@ -89,7 +89,10 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     private readonly TimeSpan _maximumDelay;
     private readonly TimeSpan _poll;
 
-    // Guards everything below. Health reads a snapshot.
+    // Published whole while holding _sync; health and discovery read without taking that monitor.
+    private IReadOnlyList<ReopenState> _pendingReopens = [];
+
+    // Guards the mutable scheduling state below.
     private readonly object _sync = new();
     private readonly List<OfflineDatabase> _offline = [];
     private readonly List<Task> _operations = [];
@@ -209,19 +212,18 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     /// failed reopen left it closed.
     /// </summary>
     /// <returns>A point-in-time snapshot.</returns>
-    internal IReadOnlyList<ReopenState> GetPendingReopens()
-    {
-        lock (_sync)
-        {
-            var states = new ReopenState[_offline.Count];
-            for (int index = 0; index < states.Length; index++)
-            {
-                var entry = _offline[index];
-                states[index] = new ReopenState(entry.Engine, entry.Name, entry.Cause, entry.Attempts, entry.LastFailure, entry.NextDelay);
-            }
+    internal IReadOnlyList<ReopenState> GetPendingReopens() => Volatile.Read(ref _pendingReopens);
 
-            return states;
+    // Every membership or reported-detail change publishes before releasing the scheduling monitor.
+    private void PublishPendingReopensLocked()
+    {
+        var states = new ReopenState[_offline.Count];
+        for (int index = 0; index < states.Length; index++)
+        {
+            var entry = _offline[index];
+            states[index] = new ReopenState(entry.Engine, entry.Name, entry.Cause, entry.Attempts, entry.LastFailure, entry.NextDelay);
         }
+        Volatile.Write(ref _pendingReopens, Array.AsReadOnly(states));
     }
 
     /// <summary>
@@ -445,6 +447,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
                     {
                         _offline.Remove(entry);
                     }
+                    PublishPendingReopensLocked();
                 }
             }
 
@@ -503,6 +506,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
                         NextDelay = delay,
                     };
                     _offline.Add(entry);
+                    PublishPendingReopensLocked();
                 }
 
                 // A carried-over entry is written once its check settled the delay.
@@ -599,6 +603,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
             }
 
             delay = entry.NextDelay;
+            PublishPendingReopensLocked();
         }
 
         DatabaseHostingEventSource.Log.OfflineDatabaseFound(entry.Engine, entry.Name, entry.Cause, delay);
@@ -639,6 +644,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
         lock (_sync)
         {
             attempt = ++entry.Attempts;
+            PublishPendingReopensLocked();
         }
 
         DatabaseHostingEventSource.Log.ReopenAttempted(entry.Engine, entry.Name, attempt);
@@ -684,6 +690,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
                 entry.LastFailure = exception;
                 entry.NextDelay = delay;
                 entry.NextAttemptAt = Stopwatch.GetTimestamp() + ToTimestampTicks(delay);
+                PublishPendingReopensLocked();
             }
 
             DatabaseHostingEventSource.Log.ReopenFailed(entry.Engine, entry.Name, attempt, exception, delay);
@@ -703,6 +710,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
             }
 
             _reopened.Add(new ReopenedDatabase(entry.Engine, entry.Name, instance, entry.Level + attempt, Stopwatch.GetTimestamp(), GetCarryOverWindow(entry.Engine)));
+            PublishPendingReopensLocked();
         }
 
         DatabaseHostingEventSource.Log.ReopenSucceeded(entry.Engine, entry.Name, attempt);
@@ -727,6 +735,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
         lock (_sync)
         {
             _offline.Remove(entry);
+            PublishPendingReopensLocked();
         }
     }
 
