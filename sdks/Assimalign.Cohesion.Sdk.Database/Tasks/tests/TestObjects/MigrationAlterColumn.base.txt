@@ -3,17 +3,35 @@ integer-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
 <irreversible>
 Reversible: False
+integer-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 integer-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
 Reversible: False
+integer-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 integer-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+integer-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
 Reversible: False
 integer-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
@@ -23,6 +41,12 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+integer-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 integer-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -31,6 +55,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 <irreversible>
 Reversible: False
+integer-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 integer-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -38,6 +72,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
+Reversible: False
+integer-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 integer-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -49,6 +93,14 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+integer-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
 integer-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -59,9 +111,185 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+integer-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+integer-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+integer-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+integer-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+integer-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+integer-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+Reversible: False
+integer-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+integer-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+integer-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+Reversible: False
+integer-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+integer-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+integer-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+integer-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+integer-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+integer-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+integer-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+integer-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+integer-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+integer-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+integer-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+integer-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE BIGINT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 varchar-widen-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
+Reversible: True
+varchar-widen-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
 Reversible: True
 varchar-widen-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL;
@@ -69,9 +297,21 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 Reversible: True
+varchar-widen-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
 varchar-widen-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
+Reversible: True
+varchar-widen-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
 Reversible: True
 varchar-widen-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL;
@@ -81,15 +321,33 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+varchar-widen-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
 varchar-widen-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 Reversible: True
+varchar-widen-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
 varchar-widen-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
+Reversible: True
+varchar-widen-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
 Reversible: True
 varchar-widen-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT '1';
@@ -99,13 +357,133 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+varchar-widen-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+Reversible: True
 varchar-widen-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
 Reversible: True
+varchar-widen-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+Reversible: True
+varchar-widen-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
+Reversible: True
+varchar-widen-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
+Reversible: True
+varchar-widen-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
+Reversible: True
+varchar-widen-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
+Reversible: True
+varchar-widen-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+Reversible: True
+varchar-widen-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+Reversible: True
+varchar-widen-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+Reversible: True
+varchar-widen-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+Reversible: True
+varchar-widen-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+Reversible: True
+varchar-widen-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+Reversible: True
+varchar-widen-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+Reversible: True
+varchar-widen-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+Reversible: True
+varchar-widen-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+Reversible: True
+varchar-widen-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+varchar-widen-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+varchar-widen-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+Reversible: True
+varchar-widen-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+varchar-widen-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+varchar-widen-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+varchar-widen-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(8) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
 varchar-narrow-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
 <irreversible>
+Reversible: False
+varchar-narrow-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 varchar-narrow-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
@@ -113,11 +491,23 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 <irreversible>
 Reversible: False
+varchar-narrow-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 varchar-narrow-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+varchar-narrow-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
 Reversible: False
 varchar-narrow-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
@@ -127,6 +517,12 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+varchar-narrow-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+Reversible: False
 varchar-narrow-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
@@ -135,6 +531,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 <irreversible>
 Reversible: False
+varchar-narrow-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 varchar-narrow-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
@@ -142,6 +548,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 <irreversible>
+Reversible: False
+varchar-narrow-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 varchar-narrow-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -153,6 +569,14 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+varchar-narrow-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
 varchar-narrow-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
@@ -163,9 +587,185 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+varchar-narrow-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+Reversible: False
+varchar-narrow-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+varchar-narrow-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+varchar-narrow-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+varchar-narrow-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+varchar-narrow-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+Reversible: False
+varchar-narrow-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+varchar-narrow-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+varchar-narrow-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+Reversible: False
+varchar-narrow-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+varchar-narrow-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+varchar-narrow-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+varchar-narrow-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+varchar-narrow-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+varchar-narrow-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+varchar-narrow-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+varchar-narrow-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+varchar-narrow-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+Reversible: False
+varchar-narrow-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+varchar-narrow-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+varchar-narrow-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE VARCHAR(4);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+Reversible: False
 varchar-unbound-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
+Reversible: True
+varchar-unbound-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
 Reversible: True
 varchar-unbound-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL;
@@ -173,9 +773,21 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 Reversible: True
+varchar-unbound-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
 varchar-unbound-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
+Reversible: True
+varchar-unbound-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
 Reversible: True
 varchar-unbound-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL;
@@ -185,15 +797,33 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+varchar-unbound-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
 varchar-unbound-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 Reversible: True
+varchar-unbound-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
 varchar-unbound-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
+Reversible: True
+varchar-unbound-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
 Reversible: True
 varchar-unbound-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT '1';
@@ -203,13 +833,131 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+varchar-unbound-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+Reversible: True
 varchar-unbound-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
 Reversible: True
+varchar-unbound-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+Reversible: True
+varchar-unbound-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
+Reversible: True
+varchar-unbound-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
+Reversible: True
+varchar-unbound-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL;
+Reversible: True
+varchar-unbound-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL;
+Reversible: True
+varchar-unbound-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+Reversible: True
+varchar-unbound-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+Reversible: True
+varchar-unbound-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+Reversible: True
+varchar-unbound-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+Reversible: True
+varchar-unbound-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+Reversible: True
+varchar-unbound-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+Reversible: True
+varchar-unbound-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+Reversible: True
+varchar-unbound-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+Reversible: True
+varchar-unbound-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+Reversible: True
+varchar-unbound-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+varchar-unbound-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+varchar-unbound-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+Reversible: True
+varchar-unbound-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+varchar-unbound-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+varchar-unbound-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+varchar-unbound-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARCHAR(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
 binary-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL;
+Reversible: True
+binary-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL;
 Reversible: True
 binary-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL;
@@ -217,9 +965,21 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 Reversible: True
+binary-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
 binary-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL;
+Reversible: True
+binary-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL;
 Reversible: True
 binary-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL;
@@ -229,15 +989,33 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+binary-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
 binary-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT '\x01';
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT '\x01';
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
 Reversible: True
+binary-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
 binary-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT '\x01';
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT '\x01';
+Reversible: True
+binary-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT '\x01';
 Reversible: True
 binary-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT '\x01';
@@ -247,13 +1025,133 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+binary-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+Reversible: True
 binary-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT '\x01';
 ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT '\x01';
 Reversible: True
+binary-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT '\x01';
+Reversible: True
+binary-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL;
+Reversible: True
+binary-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL;
+Reversible: True
+binary-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL;
+Reversible: True
+binary-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL;
+Reversible: True
+binary-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT NULL;
+Reversible: True
+binary-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT NULL;
+Reversible: True
+binary-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT NULL;
+Reversible: True
+binary-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT NULL;
+Reversible: True
+binary-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT NULL;
+Reversible: True
+binary-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT NULL;
+Reversible: True
+binary-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT NULL;
+Reversible: True
+binary-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT NULL;
+Reversible: True
+binary-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+Reversible: True
+binary-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+binary-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+binary-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+Reversible: True
+binary-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+binary-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+binary-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+binary-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(4) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value VARBINARY(8) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '\x01';
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
 character-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
 <irreversible>
+Reversible: False
+character-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 character-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
@@ -261,11 +1159,23 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 <irreversible>
 Reversible: False
+character-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 character-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+character-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
 Reversible: False
 character-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
@@ -275,6 +1185,12 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+character-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+Reversible: False
 character-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
@@ -283,6 +1199,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 <irreversible>
 Reversible: False
+character-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 character-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
@@ -290,6 +1216,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 <irreversible>
+Reversible: False
+character-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 character-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -301,6 +1237,14 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+character-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
 character-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
@@ -311,9 +1255,185 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+character-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+Reversible: False
+character-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+character-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+character-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+character-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+character-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+Reversible: False
+character-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+character-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+character-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+Reversible: False
+character-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+character-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+character-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+character-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+character-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+character-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+character-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+character-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+character-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+Reversible: False
+character-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+character-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+character-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE CHAR(8);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT '1';
+<irreversible>
+Reversible: False
 precision-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL;
+Reversible: True
+precision-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL;
 Reversible: True
 precision-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL;
@@ -321,9 +1441,21 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 Reversible: True
+precision-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
 precision-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL;
+Reversible: True
+precision-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL;
 Reversible: True
 precision-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL;
@@ -333,15 +1465,33 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+precision-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
 precision-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 Reversible: True
+precision-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
 precision-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT 1;
+Reversible: True
+precision-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT 1;
 Reversible: True
 precision-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT 1;
@@ -351,13 +1501,133 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+precision-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
 precision-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT 1;
 Reversible: True
+precision-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT 1;
+Reversible: True
+precision-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL;
+Reversible: True
+precision-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL;
+Reversible: True
+precision-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL;
+Reversible: True
+precision-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL;
+Reversible: True
+precision-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT NULL;
+Reversible: True
+precision-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT NULL;
+Reversible: True
+precision-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT NULL;
+Reversible: True
+precision-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT NULL;
+Reversible: True
+precision-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT NULL;
+Reversible: True
+precision-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT NULL;
+Reversible: True
+precision-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT NULL;
+Reversible: True
+precision-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT NULL;
+Reversible: True
+precision-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+precision-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+precision-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+precision-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+precision-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+precision-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+precision-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+precision-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(7,2) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL(8,2) NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
 scale-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
 <irreversible>
+Reversible: False
+scale-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 scale-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
@@ -365,11 +1635,23 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
 Reversible: False
+scale-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 scale-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+scale-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
 Reversible: False
 scale-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
@@ -379,6 +1661,12 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+scale-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 scale-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -387,6 +1675,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 <irreversible>
 Reversible: False
+scale-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 scale-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -394,6 +1692,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
+Reversible: False
+scale-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 scale-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -405,6 +1713,14 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+scale-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
 scale-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -415,9 +1731,187 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+scale-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+scale-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+scale-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+scale-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+scale-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+scale-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+Reversible: False
+scale-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+scale-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+scale-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+Reversible: False
+scale-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+scale-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+scale-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+scale-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+scale-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+scale-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+scale-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+scale-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+scale-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+scale-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+scale-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+scale-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8,2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 float-alias-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
 <irreversible>
+Reversible: False
+float-alias-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 float-alias-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
@@ -425,11 +1919,23 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
 Reversible: False
+float-alias-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 float-alias-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+float-alias-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
 Reversible: False
 float-alias-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
@@ -439,6 +1945,12 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+float-alias-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 float-alias-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -447,6 +1959,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 <irreversible>
 Reversible: False
+float-alias-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 float-alias-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -454,6 +1976,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
+Reversible: False
+float-alias-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 float-alias-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -465,6 +1997,14 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+float-alias-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
 float-alias-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -475,9 +2015,187 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+float-alias-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+float-alias-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+float-alias-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+float-alias-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+float-alias-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+float-alias-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+Reversible: False
+float-alias-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+float-alias-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+float-alias-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+Reversible: False
+float-alias-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+float-alias-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+float-alias-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+float-alias-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+float-alias-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+float-alias-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+float-alias-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+float-alias-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+float-alias-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+float-alias-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+float-alias-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+float-alias-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE FLOAT(53);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 numeric-alias-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
 <irreversible>
+Reversible: False
+numeric-alias-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 numeric-alias-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
@@ -485,11 +2203,23 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
 Reversible: False
+numeric-alias-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 numeric-alias-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+numeric-alias-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
 Reversible: False
 numeric-alias-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
@@ -499,6 +2229,12 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+numeric-alias-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 numeric-alias-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -507,6 +2243,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 <irreversible>
 Reversible: False
+numeric-alias-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 numeric-alias-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -514,6 +2260,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
+Reversible: False
+numeric-alias-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 numeric-alias-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -525,6 +2281,14 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+numeric-alias-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
 numeric-alias-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -535,9 +2299,187 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+numeric-alias-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+numeric-alias-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+numeric-alias-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+numeric-alias-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+numeric-alias-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+numeric-alias-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+Reversible: False
+numeric-alias-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+numeric-alias-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+numeric-alias-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+Reversible: False
+numeric-alias-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+numeric-alias-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+numeric-alias-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+numeric-alias-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+numeric-alias-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+numeric-alias-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+numeric-alias-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+numeric-alias-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+numeric-alias-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+numeric-alias-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+numeric-alias-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+numeric-alias-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE DECIMAL(8, 2);
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 domain-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
 <irreversible>
+Reversible: False
+domain-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 domain-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
@@ -545,11 +2487,23 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
 Reversible: False
+domain-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 domain-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
 Reversible: False
 domain-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
@@ -559,6 +2513,12 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+domain-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 domain-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -567,6 +2527,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 <irreversible>
 Reversible: False
+domain-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 domain-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -574,6 +2544,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
+Reversible: False
+domain-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 domain-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -585,6 +2565,14 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+domain-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
 domain-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -595,9 +2583,1075 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+domain-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+Reversible: False
+domain-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+Reversible: False
+domain-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-exit-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+Reversible: False
+domain-exit-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-exit-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-exit-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-exit-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-exit-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+Reversible: False
+domain-exit-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-exit-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-exit-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
+domain-exit-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-exit-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-exit-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-exit-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-exit-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
+domain-exit-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-exit-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-exit-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-exit-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-exit-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-exit-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-exit-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+Reversible: False
+domain-exit-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-exit-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-exit-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+Reversible: False
+domain-exit-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-exit-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-exit-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-exit-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-exit-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-exit-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-exit-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-exit-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-exit-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-exit-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-exit-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-exit-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE INT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-switch-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+Reversible: False
+domain-switch-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-switch-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-switch-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-switch-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-switch-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+Reversible: False
+domain-switch-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-switch-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-switch-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
+domain-switch-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-switch-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-switch-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-switch-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-switch-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
+domain-switch-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-switch-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-switch-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-switch-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-switch-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-switch-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-switch-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+Reversible: False
+domain-switch-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-switch-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-switch-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+Reversible: False
+domain-switch-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-switch-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-switch-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-switch-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-switch-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-switch-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-switch-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-switch-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-switch-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-switch-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-switch-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-switch-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE other_quantity;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-case-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL;
+Reversible: True
+domain-case-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL;
+Reversible: True
+domain-case-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
+domain-case-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+domain-case-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL;
+Reversible: True
+domain-case-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL;
+Reversible: True
+domain-case-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+domain-case-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
+domain-case-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+domain-case-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+domain-case-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL DEFAULT 1;
+Reversible: True
+domain-case-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL DEFAULT 1;
+Reversible: True
+domain-case-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+domain-case-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+domain-case-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL DEFAULT 1;
+Reversible: True
+domain-case-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL DEFAULT 1;
+Reversible: True
+domain-case-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL;
+Reversible: True
+domain-case-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL;
+Reversible: True
+domain-case-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL;
+Reversible: True
+domain-case-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL;
+Reversible: True
+domain-case-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL DEFAULT NULL;
+Reversible: True
+domain-case-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL DEFAULT NULL;
+Reversible: True
+domain-case-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL DEFAULT NULL;
+Reversible: True
+domain-case-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL DEFAULT NULL;
+Reversible: True
+domain-case-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL DEFAULT NULL;
+Reversible: True
+domain-case-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL DEFAULT NULL;
+Reversible: True
+domain-case-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NULL DEFAULT NULL;
+Reversible: True
+domain-case-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value Quantity NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value quantity NOT NULL DEFAULT NULL;
+Reversible: True
+domain-case-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+domain-case-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+domain-case-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+domain-case-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+domain-case-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+domain-case-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+domain-case-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+domain-case-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+integer-alias-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL;
+Reversible: True
+integer-alias-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL;
+Reversible: True
+integer-alias-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
+integer-alias-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+integer-alias-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL;
+Reversible: True
+integer-alias-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL;
+Reversible: True
+integer-alias-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+integer-alias-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
+integer-alias-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+integer-alias-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+integer-alias-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL DEFAULT 1;
+Reversible: True
+integer-alias-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL DEFAULT 1;
+Reversible: True
+integer-alias-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+integer-alias-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+integer-alias-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL DEFAULT 1;
+Reversible: True
+integer-alias-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL DEFAULT 1;
+Reversible: True
+integer-alias-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL;
+Reversible: True
+integer-alias-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL;
+Reversible: True
+integer-alias-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL;
+Reversible: True
+integer-alias-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL;
+Reversible: True
+integer-alias-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL DEFAULT NULL;
+Reversible: True
+integer-alias-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL DEFAULT NULL;
+Reversible: True
+integer-alias-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL DEFAULT NULL;
+Reversible: True
+integer-alias-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL DEFAULT NULL;
+Reversible: True
+integer-alias-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL DEFAULT NULL;
+Reversible: True
+integer-alias-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL DEFAULT NULL;
+Reversible: True
+integer-alias-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NULL DEFAULT NULL;
+Reversible: True
+integer-alias-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTEGER NOT NULL DEFAULT NULL;
+Reversible: True
+integer-alias-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+integer-alias-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+integer-alias-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+integer-alias-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+integer-alias-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+integer-alias-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: True
+integer-alias-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: True
+integer-alias-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
 domain-facets-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
 <irreversible>
+Reversible: False
+domain-facets-required-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 domain-facets-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
@@ -605,11 +3659,23 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
 Reversible: False
+domain-facets-required-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 domain-facets-2
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-facets-required-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
 Reversible: False
 domain-facets-3
 ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
@@ -619,6 +3685,12 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+domain-facets-required-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 domain-facets-4
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -627,6 +3699,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 <irreversible>
 Reversible: False
+domain-facets-required-4
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
 domain-facets-5
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -634,6 +3716,16 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
 <irreversible>
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 <irreversible>
+Reversible: False
+domain-facets-required-5
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: False
 domain-facets-6
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -645,6 +3737,14 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+domain-facets-required-6
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+<irreversible>
+Reversible: False
 domain-facets-7
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -655,25 +3755,219 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: False
+domain-facets-required-7
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-facets-null-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-facets-null-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-facets-null-0-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-facets-null-0-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-facets-null-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+Reversible: False
+domain-facets-null-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-facets-null-1-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-facets-null-1-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+Reversible: False
+domain-facets-null-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-facets-null-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-facets-null-2-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-facets-null-2-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-facets-null-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-facets-null-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-facets-null-3-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-facets-null-3-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+<irreversible>
+Reversible: False
+domain-facets-null-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
+domain-facets-null-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+Reversible: False
+domain-facets-null-4-2
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+Reversible: False
+domain-facets-null-4-3
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TYPE amount;
+<irreversible>
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+<irreversible>
+Reversible: False
 metadata-0-0-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
+Reversible: True
+metadata-required-0-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
 Reversible: True
 metadata-0-0-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
 Reversible: True
+metadata-required-0-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
+Reversible: True
 metadata-0-1-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
+Reversible: True
+metadata-required-0-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
 Reversible: True
 metadata-0-1-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
 Reversible: True
+metadata-required-0-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
+Reversible: True
 metadata-0-2-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
+metadata-required-0-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-0-2-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -681,9 +3975,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-0-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
 metadata-0-3-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
+metadata-required-0-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-0-3-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -691,9 +3995,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-0-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
 metadata-0-4-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
+metadata-required-0-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-0-4-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
@@ -701,25 +4015,51 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-0-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+Reversible: True
 metadata-1-0-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
+Reversible: True
+metadata-required-1-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
 Reversible: True
 metadata-1-0-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
 Reversible: True
+metadata-required-1-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
+Reversible: True
 metadata-1-1-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
+Reversible: True
+metadata-required-1-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
 Reversible: True
 metadata-1-1-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT NULL;
 Reversible: True
+metadata-required-1-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT NULL;
+Reversible: True
 metadata-1-2-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+metadata-required-1-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-1-2-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -727,9 +4067,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-1-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
 metadata-1-3-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+metadata-required-1-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-1-3-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -737,9 +4087,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-1-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
 metadata-1-4-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
+metadata-required-1-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-1-4-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
@@ -747,9 +4107,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-1-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+Reversible: True
 metadata-2-0-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+metadata-required-2-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-2-0-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -757,9 +4127,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-2-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
 metadata-2-1-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+metadata-required-2-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-2-1-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
@@ -767,25 +4147,51 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-2-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
 metadata-2-2-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+Reversible: True
+metadata-required-2-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
 Reversible: True
 metadata-2-2-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
 Reversible: True
+metadata-required-2-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+Reversible: True
 metadata-2-3-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+Reversible: True
+metadata-required-2-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
 Reversible: True
 metadata-2-3-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
 Reversible: True
+metadata-required-2-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+Reversible: True
 metadata-2-4-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+metadata-required-2-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-2-4-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
@@ -793,9 +4199,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-2-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
 metadata-3-0-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+metadata-required-3-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-3-0-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -803,9 +4219,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-3-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
 metadata-3-1-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+metadata-required-3-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-3-1-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
@@ -813,25 +4239,51 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-3-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
 metadata-3-2-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+Reversible: True
+metadata-required-3-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
 Reversible: True
 metadata-3-2-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
 Reversible: True
+metadata-required-3-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+Reversible: True
 metadata-3-3-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+Reversible: True
+metadata-required-3-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
 Reversible: True
 metadata-3-3-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 1;
 Reversible: True
+metadata-required-3-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 1;
+Reversible: True
 metadata-3-4-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
+metadata-required-3-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-3-4-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
@@ -839,9 +4291,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-3-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+Reversible: True
 metadata-4-0-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+Reversible: True
+metadata-required-4-0-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-4-0-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
@@ -849,9 +4311,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-4-0-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP DEFAULT;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+Reversible: True
 metadata-4-1-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+Reversible: True
+metadata-required-4-1-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-4-1-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
@@ -859,9 +4331,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-4-1-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+Reversible: True
 metadata-4-2-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+Reversible: True
+metadata-required-4-2-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-4-2-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -869,9 +4351,19 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-4-2-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+Reversible: True
 metadata-4-3-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+Reversible: True
+metadata-required-4-3-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 Reversible: True
 metadata-4-3-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
@@ -879,89 +4371,177 @@ ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SET NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DROP NOT NULL;
 Reversible: True
+metadata-required-4-3-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 1;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SET DEFAULT 2;
+Reversible: True
 metadata-4-4-0
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 2;
+Reversible: True
+metadata-required-4-4-0
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 2;
 Reversible: True
 metadata-4-4-1
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 2;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL DEFAULT 2;
 Reversible: True
+metadata-required-4-4-1
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 2;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL DEFAULT 2;
+Reversible: True
 storage-Boolean
 ALTER TABLE dbo.Orders ALTER COLUMN Value BOOLEAN NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value BOOLEAN NULL;
+Reversible: True
+storage-nullable-Boolean
+ALTER TABLE dbo.Orders ALTER COLUMN Value BOOLEAN NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value BOOLEAN NOT NULL;
 Reversible: True
 storage-Int8
 ALTER TABLE dbo.Orders ALTER COLUMN Value TINYINT NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value TINYINT NULL;
 Reversible: True
+storage-nullable-Int8
+ALTER TABLE dbo.Orders ALTER COLUMN Value TINYINT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TINYINT NOT NULL;
+Reversible: True
 storage-Int16
 ALTER TABLE dbo.Orders ALTER COLUMN Value SMALLINT NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value SMALLINT NULL;
+Reversible: True
+storage-nullable-Int16
+ALTER TABLE dbo.Orders ALTER COLUMN Value SMALLINT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value SMALLINT NOT NULL;
 Reversible: True
 storage-Int32
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
 Reversible: True
+storage-nullable-Int32
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INT NOT NULL;
+Reversible: True
 storage-Int64
 ALTER TABLE dbo.Orders ALTER COLUMN Value BIGINT NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value BIGINT NULL;
+Reversible: True
+storage-nullable-Int64
+ALTER TABLE dbo.Orders ALTER COLUMN Value BIGINT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value BIGINT NOT NULL;
 Reversible: True
 storage-Float32
 ALTER TABLE dbo.Orders ALTER COLUMN Value REAL NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value REAL NULL;
 Reversible: True
+storage-nullable-Float32
+ALTER TABLE dbo.Orders ALTER COLUMN Value REAL NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value REAL NOT NULL;
+Reversible: True
 storage-Float64
 ALTER TABLE dbo.Orders ALTER COLUMN Value DOUBLE NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DOUBLE NULL;
+Reversible: True
+storage-nullable-Float64
+ALTER TABLE dbo.Orders ALTER COLUMN Value DOUBLE NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DOUBLE NOT NULL;
 Reversible: True
 storage-Decimal
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL NULL;
 Reversible: True
+storage-nullable-Decimal
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DECIMAL NOT NULL;
+Reversible: True
 storage-String
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL;
+Reversible: True
+storage-nullable-String
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TEXT NOT NULL;
 Reversible: True
 storage-Binary
 ALTER TABLE dbo.Orders ALTER COLUMN Value BLOB NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value BLOB NULL;
 Reversible: True
+storage-nullable-Binary
+ALTER TABLE dbo.Orders ALTER COLUMN Value BLOB NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value BLOB NOT NULL;
+Reversible: True
 storage-Date
 ALTER TABLE dbo.Orders ALTER COLUMN Value DATE NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value DATE NULL;
+Reversible: True
+storage-nullable-Date
+ALTER TABLE dbo.Orders ALTER COLUMN Value DATE NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value DATE NOT NULL;
 Reversible: True
 storage-Time
 ALTER TABLE dbo.Orders ALTER COLUMN Value TIME NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value TIME NULL;
 Reversible: True
+storage-nullable-Time
+ALTER TABLE dbo.Orders ALTER COLUMN Value TIME NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TIME NOT NULL;
+Reversible: True
 storage-DateTime
 ALTER TABLE dbo.Orders ALTER COLUMN Value TIMESTAMP NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value TIMESTAMP NULL;
+Reversible: True
+storage-nullable-DateTime
+ALTER TABLE dbo.Orders ALTER COLUMN Value TIMESTAMP NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TIMESTAMP NOT NULL;
 Reversible: True
 storage-DateTimeOffset
 ALTER TABLE dbo.Orders ALTER COLUMN Value TIMESTAMPTZ NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value TIMESTAMPTZ NULL;
 Reversible: True
+storage-nullable-DateTimeOffset
+ALTER TABLE dbo.Orders ALTER COLUMN Value TIMESTAMPTZ NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value TIMESTAMPTZ NOT NULL;
+Reversible: True
 storage-TimeSpan
 ALTER TABLE dbo.Orders ALTER COLUMN Value INTERVAL NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value INTERVAL NULL;
+Reversible: True
+storage-nullable-TimeSpan
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTERVAL NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value INTERVAL NOT NULL;
 Reversible: True
 storage-Guid
 ALTER TABLE dbo.Orders ALTER COLUMN Value UUID NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value UUID NULL;
 Reversible: True
+storage-nullable-Guid
+ALTER TABLE dbo.Orders ALTER COLUMN Value UUID NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value UUID NOT NULL;
+Reversible: True
 storage-Json
 ALTER TABLE dbo.Orders ALTER COLUMN Value JSON NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value JSON NULL;
+Reversible: True
+storage-nullable-Json
+ALTER TABLE dbo.Orders ALTER COLUMN Value JSON NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value JSON NOT NULL;
 Reversible: True
 storage-JsonBinary
 ALTER TABLE dbo.Orders ALTER COLUMN Value JSONB NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value JSONB NULL;
 Reversible: True
+storage-nullable-JsonBinary
+ALTER TABLE dbo.Orders ALTER COLUMN Value JSONB NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value JSONB NOT NULL;
+Reversible: True
 storage-Character
 ALTER TABLE dbo.Orders ALTER COLUMN Value CHAR(1) NOT NULL;
 ALTER TABLE dbo.Orders ALTER COLUMN Value CHAR(1) NULL;
+Reversible: True
+storage-nullable-Character
+ALTER TABLE dbo.Orders ALTER COLUMN Value CHAR(1) NULL;
+ALTER TABLE dbo.Orders ALTER COLUMN Value CHAR(1) NOT NULL;
 Reversible: True
 keyword-domain
 Refused: Cannot render SQL migration operation 'AlterColumn' for 'Orders.Value': 'select' is a SQL keyword and cannot name a domain. (Parameter 'name')

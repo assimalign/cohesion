@@ -31,6 +31,26 @@
   <data name="SchemaIdentifierUnsupported" xml:space="preserve"><value>Schema identifier '{0}' cannot be represented by the SQL dialect.</value></data>
   <data name="MigrationDataMissing" xml:space="preserve"><value>Migration operation '{0}' for '{1}' omitted required data.</value></data>
   <data name="MigrationParentMissing" xml:space="preserve"><value>Migration operation '{0}' for '{1}' omitted its parent name.</value></data>
+  <data name="MigrationScriptGeneratorRenderFailure" xml:space="preserve"><value>Cannot render SQL migration operation '{0}' for '{1}': {2}</value></data>
+  <data name="ResolveAlterColumnTypeDatabase" xml:space="preserve"><value>Column '{0}' is declared with an invalid domain type '{1}'.</value></data>
+  <data name="GeneratorRequireMatchingNameFailure" xml:space="preserve"><value>Migration operation '{0}' names '{1}' but carries a {2} definition named '{3}'.</value></data>
+  <data name="ScriptGeneratorInvalidPayloadFailure" xml:space="preserve"><value>Migration operation '{0}' for '{1}' does not carry {2}.</value></data>
+  <data name="ProvisionerResolveColumnTypeDatabase2" xml:space="preserve"><value>Column '{0}' is declared with type '{1}', which is stored as {2}, but its member is stored as {3}; declare a type whose storage is the member's.</value></data>
+  <data name="StatementRendererTypeNameDatabase" xml:space="preserve"><value>Column '{0}' is declared with '{1}', which is not a SQL type name.</value></data>
+  <data name="StatementRendererTypeNameDatabase2" xml:space="preserve"><value>Column '{0}' uses database type '{1}', which cannot be emitted as SQL DDL.</value></data>
+  <data name="RendererDecimalTypeNameDatabase" xml:space="preserve"><value>Column '{0}' declares a decimal scale without a precision.</value></data>
+  <data name="StatementRendererIdentifierDatabase" xml:space="preserve"><value>Schema identifier '{0}' contains a null character or embedded double quote unsupported by the SQL dialect.</value></data>
+  <data name="TypeRulesValidateDomainNameArgument" xml:space="preserve"><value>Domain name '{0}' is not an identifier: it must start with an ASCII letter or an underscore.</value></data>
+  <data name="TypeRulesValidateDomainNameArgument2" xml:space="preserve"><value>Domain name '{0}' is not an identifier: it may hold only ASCII letters, digits and underscores.</value></data>
+  <data name="RulesValidateSqlDomainNameArgument" xml:space="preserve"><value>'{0}' is a SQL keyword and cannot name a domain.</value></data>
+  <data name="RulesValidateSqlDomainNameArgument2" xml:space="preserve"><value>'{0}' is reserved by the SQL dialect and cannot name a domain.</value></data>
+  <data name="RulesValidateSqlDomainNameArgument3" xml:space="preserve"><value>'{0}' is a pseudo-type's name and cannot name a domain.</value></data>
+  <data name="RulesValidateSqlDomainNameArgument4" xml:space="preserve"><value>'{0}' is a built-in SQL type name and cannot name a domain.</value></data>
+  <data name="ExpressionParseDeclarationFailure" xml:space="preserve"><value>Reading the declared SQL text needs more stack than the thread has left.</value></data>
+  <data name="ExpressionDeclarationInvalid" xml:space="preserve"><value>its SQL text '{0}' is not exactly one SQL expression ({1}).</value></data>
+  <data name="SequencePersistedUnsupported" xml:space="preserve"><value>Sequence operations in persisted DEFAULT, CHECK, view and SQL function expressions are not supported.</value></data>
+  <data name="MigrationScalarExpressionRequired" xml:space="preserve"><value>the text is not exactly one scalar expression</value></data>
+  <data name="ProvisionerCanonicalDefaultDatabase" xml:space="preserve"><value>Only literal DEFAULT values are supported.</value></data>
   <data name="MigrationOperationUnsupported" xml:space="preserve"><value>SQL migration operation '{0}' for '{1}' is unsupported: {2}.</value></data>
   <data name="RequiredColumnDefaultMissing" xml:space="preserve"><value>adding a non-nullable column requires a non-null literal default or a backfill</value></data>
   <data name="AlterMetadataUnsupported" xml:space="preserve"><value>ALTER metadata is not implemented by the SQL DDL dialect</value></data>

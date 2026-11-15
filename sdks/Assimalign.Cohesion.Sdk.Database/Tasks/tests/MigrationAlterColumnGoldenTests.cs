@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -16,7 +17,28 @@ public sealed class MigrationAlterColumnGoldenTests
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - ALTER COLUMN: engine scripts retain base bytes for every shape")]
     public void Generate_AlterColumnCorpus_ShouldRetainBaseBytes()
     {
-        // Arrange: captured against 73aeebff31f9fd437f27c20c0f2f2487e594e7b3 before extraction.
+        // Arrange: framework ArgumentException suffixes must not depend on the runner's locale.
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+            CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
+
+            // Act / Assert
+            CompareCorpus();
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+            CultureInfo.CurrentUICulture = previousUiCulture;
+        }
+    }
+
+    private static void CompareCorpus()
+    {
+        // Arrange: initial capture preceded extraction; expanded by replaying generator/renderer
+        // source from the same pinned base objects, 73aeebff31f9fd437f27c20c0f2f2487e594e7b3.
         var actual = new StringBuilder("Base: 73aeebff31f9fd437f27c20c0f2f2487e594e7b3\n");
         foreach (var item in MigrationAlterColumnCases.All())
         {

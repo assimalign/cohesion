@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 using Microsoft.Build.Framework;
@@ -234,7 +235,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or
-            InvalidOperationException or SqlSchemaValidationException or SqlSchemaMigrationException)
+            InvalidOperationException or InsufficientExecutionStackException or SqlSchemaValidationException or SqlSchemaMigrationException)
         {
             Log.LogError(null, "COHDBSDK206", null, null, 0, 0, 0, 0, exception.Message);
             return false;
@@ -320,6 +321,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             builder.Append("-- Cohesion database migration ").Append(migrationName).Append('\n');
             builder.Append("-- Source schema: ").Append(plan.SourceHash ?? "<empty>").Append('\n');
             builder.Append("-- Target schema: ").Append(plan.TargetHash).Append('\n');
+            builder.Append("-- Typed schema application publishes this migration jointly; this file applies per statement.\n");
             foreach (SqlSchemaMigrationOperation operation in plan.Operations)
             {
                 WriteOperation(builder, operation);
@@ -351,7 +353,9 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     builder.Append(";\n");
                     break;
                 case SqlSchemaMigrationOperationKind.AlterColumn:
-                    throw Unsupported(operation, ErrorMessages.AlterMetadataUnsupported);
+                    SqlMigrationLowering.RenderAlterColumns(operation,
+                        (_, statement, _) => builder.Append(statement).Append('\n'), SqlMigrationDefaultLiteral.CanonicalDefault);
+                    break;
                 case SqlSchemaMigrationOperationKind.DropColumn:
                     builder.Append("ALTER TABLE ").Append(QualifiedTable(Required(operation.ParentName, operation)))
                         .Append(" DROP COLUMN ").Append(Identifier(operation.ObjectName)).Append(";\n");

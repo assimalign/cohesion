@@ -281,8 +281,8 @@ atomically emits matching `NNNN_name.sql` and `NNNN_name.schema.json` files. The
 timestamps. Missing names, invalid schemas, unsupported/destructive operations, and path
 collisions fail without partial outputs. `KeyValuePair` fails explicitly because a SQL script is
 not a valid migration artifact for that model. SQL text uses the same guarded, `dbo`-qualified
-dialect as the runtime renderer; the current dialect explicitly rejects constraints,
-ALTER metadata, and required column additions that have no non-null literal default or backfill.
+dialect as the runtime renderer; the writer explicitly rejects constraint operations,
+ALTER TABLE metadata, and required column additions that have no non-null literal default or backfill.
 Every emitted column retains its DEFAULT. The literal carrier guard follows
 SqlSelectExpression.From's join-tree list (#1109): exactly one unaliased carrier table,
 with no joins or comma siblings. No new engine reference or visibility grant is needed. The migration writer validates it as exactly one SQL
@@ -293,6 +293,41 @@ conservative destructive-change opt-in; after that opt-in, a non-null default ma
 `COHDBSDK206` before either the SQL script or the new baseline is written. Engine-specific domain
 resolution and default value conversion remain runtime validation, as the SDK does not build an
 engine. SDK tests compare scripts for the same plans directly with `SqlMigrationScriptGenerator`.
+
+### ALTER COLUMN files (#1756)
+
+The writer and SqlMigrationScriptGenerator compile Sql.Schema's stateless
+`shared/MigrationLowering` module. It owns the per-statement lowering, rewrite classification,
+ALTER COLUMN and type/identifier text, and payload/type refusals. ALTER DEFAULT admission shares
+the engine's scalar carrier, literal-only and persisted-sequence checks, including precise parse
+and refusal reasons, including the normal declaration nesting limit and the higher ceiling for
+its grouping guard. Assembly-local bindings preserve the engine's exception carriers and final
+literal round-trip validation. The task keeps its Sql.Language
+parser and its generated diagnostic resources; it takes no engine reference or internal visibility
+grant. DEFAULT-only SET/DROP changes retain the planner's destructive-change opt-in requirement.
+For a physical rewrite, an old default is dropped before TYPE, then the target default is set and
+nullability changes last. Compatible length/precision changes keep the engine's full-definition
+ALTER, including its existing compensation text. Domain columns name the declared domain;
+registered domains, conversions, stored values and default bounds are validated by the engine.
+An unsupported change fails as COHDBSDK206 with the engine's lowering reason, before either file
+is written. ALTER TABLE metadata and constraint generation retain their existing refusals.
+
+Every generated migration has a header saying that typed schema application publishes jointly
+while the SQL file applies per statement: SQ-A6 routes all typed applications, including empty,
+inline and DEFAULT-only plans, through joint publication. The file does not reproduce that runtime
+publication or its receipts. SQ-A7's history-based rollback decision happens in the engine before
+rendering, so the forward writer needs no history access. Formats, runtime SQL statement text and
+the compiled schema contract remain unchanged.
+
+The golden corpus began with 170 shapes captured at
+73aeebff31f9fd437f27c20c0f2f2487e594e7b3 before extraction. Replaying the generator and renderer
+from those pinned base objects expanded it to 719 shapes under invariant culture, including both
+nullability directions and explicit NULL defaults around TYPE. It pins every storage type and
+TYPE/default/nullability combination, compatible
+facets, domains, absent/NULL/equivalent defaults, compensation and refusals. SDK parity covers the
+same shapes, and real-engine round trips compare catalog columns and values after the generated
+file with typed application on empty/populated tables in inline/worker modes. The shared-source
+guard checks every file in Defaults and MigrationLowering, including explicit consumer opt-ins.
 
 ## Verification
 

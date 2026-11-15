@@ -34,7 +34,7 @@ not an edge.
 | Library areas | 21 |
 | Resource areas | 18 |
 | Declared project references | 637 |
-| Declared shared-source links | 76 |
+| Declared shared-source links | 77 |
 
 ## Ambiguous project names
 
@@ -672,7 +672,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Memory` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Protocol` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Security` | — | — | — | — |
-| `Assimalign.Cohesion.Database.Sql` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Sql.Language`<br>`Assimalign.Cohesion.Database.Sql.Protocol`<br>`Assimalign.Cohesion.Database.Sql.Schema`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database.Execution/Parameters`<br>`Assimalign.Cohesion.Database.Indexing/Build`<br>`Assimalign.Cohesion.Database.Sql.Language/Types`<br>`Assimalign.Cohesion.Database.Storage/JournalFormat`<br>`Assimalign.Cohesion.Database/Engine` | — |
+| `Assimalign.Cohesion.Database.Sql` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Sql.Language`<br>`Assimalign.Cohesion.Database.Sql.Protocol`<br>`Assimalign.Cohesion.Database.Sql.Schema`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database.Execution/Parameters`<br>`Assimalign.Cohesion.Database.Indexing/Build`<br>`Assimalign.Cohesion.Database.Sql.Language/Types`<br>`Assimalign.Cohesion.Database.Sql.Schema/MigrationLowering`<br>`Assimalign.Cohesion.Database.Storage/JournalFormat`<br>`Assimalign.Cohesion.Database/Engine` | — |
 | `Assimalign.Cohesion.Database.Sql.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Sql.Protocol`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database.Client/Diagnostics` | — |
 | `Assimalign.Cohesion.Database.Sql.Language` | `Assimalign.Cohesion.Database.Language`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database.Execution/Parameters`<br>`Assimalign.Cohesion.Database.Sql.Language/Types` | — |
 | `Assimalign.Cohesion.Database.Sql.Protocol` | `Assimalign.Cohesion.Database.Protocol` | — | — | — |

@@ -23,6 +23,7 @@
 	<ItemGroup>
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" Module="Parameters" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" Module="Types" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Schema" Module="MigrationLowering" />
         <CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="JournalFormat" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Indexing" Module="Build" />

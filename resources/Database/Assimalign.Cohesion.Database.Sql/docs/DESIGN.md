@@ -9700,6 +9700,13 @@ A joint plan carries every final default, including changes to columns with no T
 The generator lowers type, default and nullability changes separately and never advertises
 a reverse TYPE statement as compensation. Same-name compiled domains are diffed through their
 effective storage facets so their referring columns cannot be skipped.
+The stateless Sql.Schema shared/MigrationLowering module owns that lowering and its ALTER/type
+text in both this engine and Sdk.Database.Tasks (#1756). It also shares ALTER DEFAULT admission,
+including scalar-carrier parsing, literal-only and persisted-sequence refusals. Assembly-local
+bindings retain exception carriers, diagnostic ownership and final literal round-trip validation;
+the SDK exports the per-statement sequence
+with a joint-publication header, without an engine reference. The base golden corpus pins the
+engine's forward and compensation SQL, including domains and DEFAULT-only changes.
 
 Deferred Build binds metadata and probes Storage.HasOwnerPages. It checks only a constant-time
 space floor in stored-table size; precise owner snapshots and tree walks run on the worker. Open does not scan data for joint
