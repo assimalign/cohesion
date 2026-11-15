@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -29,7 +30,8 @@ internal sealed partial class SqlRowCollector : IDisposable
     private long _visited;
     private int _comparisons;
     private bool _collationsInitialized;
-    private bool _isHeap;
+    // These states belong to mutually exclusive ordered and unordered collectors.
+    private bool _hasHeapOrWindowInput;
 
     internal SqlRowCollector(IReadOnlyList<SqlBoundOrdering> orderBy, SqlSubqueryValues? subqueries,
         SqlRowCount? limit, SqlRowCount? offset, CancellationToken cancellationToken, SqlStatementMetrics? metrics, long budget, bool publishPeak = true)
@@ -66,19 +68,26 @@ internal sealed partial class SqlRowCollector : IDisposable
     internal object?[]? Add(object?[] output, object?[] keys, SqlDatabaseSession? spillOwner = null)
     {
         _cancellationToken.ThrowIfCancellationRequested();
-        if (spillOwner is not null && _spills.TryGetValue(this, out var spill))
-        { AppendSpilled(spill, output, keys); _visited++; return output; }
         var windowMemory = SqlWindowMemory.For(_metrics);
-        windowMemory?.Retain(output);
+        if (windowMemory is null && spillOwner is not null && _spills.TryGetValue(this, out var spill))
+        { AppendSpilled(spill, output, keys); _visited++; return output; }
+        bool chargesPlainMemory = _budget != 0 && _metrics is not null && windowMemory is null;
+        if (_orderBy.Count == 0 && windowMemory is not null)
+        {
+            var input = _hasHeapOrWindowInput ? SqlWindowInputSpool.For(_rows) : null;
+            if (SqlWindowInputSpool.Retain(_rows, output, windowMemory, _metrics, _budget, spillOwner, _cancellationToken, ref input))
+            { _hasHeapOrWindowInput = true; _visited++; return output; }
+        }
+        if (_orderBy.Count > 0) { windowMemory?.Retain(output); }
         if (keys.Length > 0) { windowMemory?.Retain(keys); }
         long ordinal = _visited++;
         if (_orderBy.Count == 0)
         {
             if (ordinal >= _offset)
             {
-                if (spillOwner is not null && SqlOutputSpool.For(_rows) is { } spooled)
+                if (windowMemory is null && spillOwner is not null && SqlOutputSpool.For(_rows) is { } spooled)
                 { spooled.Append(output, _cancellationToken); return output; }
-                try { if (ChargesPlainMemory) { ReserveRow(output); } }
+                try { if (chargesPlainMemory) { ReserveRow(output); } }
                 catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
                     && spillOwner?.Database.Engine.TempSpace is not null)
                 { SqlOutputSpool.Add(_rows, output, ref _memory, _metrics!, _budget, spillOwner, _cancellationToken); return output; }
@@ -94,7 +103,7 @@ internal sealed partial class SqlRowCollector : IDisposable
         if (!_canBound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
-            if (ChargesPlainMemory && !AdmitEntry(entry, spillOwner)) { return output; }
+            if (chargesPlainMemory && !AdmitEntry(entry, spillOwner)) { return output; }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -105,12 +114,12 @@ internal sealed partial class SqlRowCollector : IDisposable
         if (_ordered.Count < Bound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
-            if (ChargesPlainMemory && !AdmitEntry(entry, spillOwner)) { return output; }
+            if (chargesPlainMemory && !AdmitEntry(entry, spillOwner)) { return output; }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
         }
-        if (!_isHeap)
+        if (!_hasHeapOrWindowInput)
         {
             // Build only when the bound is exceeded: LIMIT >= input pays for one sort,
             // without per-row sifting. Unlike tuplesort.c:1126-1144's 2x staging,
@@ -119,14 +128,14 @@ internal sealed partial class SqlRowCollector : IDisposable
             {
                 SiftDown(parent, _ordered[parent]);
             }
-            _isHeap = true;
+            _hasHeapOrWindowInput = true;
         }
         if (_ordered.Count > 0 && Compare(entry, _ordered[0]) < 0)
         {
             var replaced = _ordered[0];
             // Credit the replaced entry before admitting its replacement.
             bool wide = false;
-            long difference = ChargesPlainMemory
+            long difference = chargesPlainMemory
                 ? _memory.ReplacementBytes(entry.Output, entry.Keys, replaced.Output, replaced.Keys, out wide) : 0;
             if (difference > 0)
             {
@@ -135,7 +144,7 @@ internal sealed partial class SqlRowCollector : IDisposable
                 { if (TrySpill(entry, spillOwner)) { return output; } throw; }
             }
             SiftDown(0, entry);
-            if (ChargesPlainMemory && (_memory.HasWideCells || wide))
+            if (chargesPlainMemory && (_memory.HasWideCells || wide))
             { _memory.Replace(entry.Output, entry.Keys, replaced.Output, replaced.Keys); }
             if (difference < 0) { Release(-difference); }
             windowMemory?.ReleaseRow(replaced.Output);
@@ -180,6 +189,10 @@ internal sealed partial class SqlRowCollector : IDisposable
         return _rows;
     }
 
+    internal bool HasWindowInput => SqlWindowInputSpool.For(_rows) is not null;
+    internal SqlWindowInputSpool? TakeWindowInput(IReadOnlyList<DatabaseColumn> columns)
+        => SqlWindowInputSpool.For(_rows) is not null ? SqlWindowInputSpool.Take(_rows, columns) : null;
+
     private void ReserveRow(object?[] output)
     {
         long bytes = _memory.RowBytes(output, out bool wide);
@@ -193,8 +206,6 @@ internal sealed partial class SqlRowCollector : IDisposable
         Reserve(bytes);
         if (wide) { _memory.AddRow(entry.Output); _memory.AddRow(entry.Keys); }
     }
-
-    private bool ChargesPlainMemory => _budget != 0 && _metrics is not null && SqlWindowMemory.For(_metrics) is null;
 
     private void Reserve(long bytes)
     {
@@ -214,6 +225,7 @@ internal sealed partial class SqlRowCollector : IDisposable
     {
         try
         {
+            SqlWindowInputSpool.Release(_rows);
             try { SqlOutputSpool.Release(_rows); }
             catch (SqlExecutionException) { /* Preserve the initiating evaluator/cancellation failure. */ }
             if (_spills.TryGetValue(this, out var spill)) { _spills.Remove(this); try { spill.Dispose(); } catch (SqlExecutionException) { /* Storage counted cleanup; preserve the statement outcome during unwinding. */ } }

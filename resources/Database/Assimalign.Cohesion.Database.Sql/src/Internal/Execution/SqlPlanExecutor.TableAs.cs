@@ -59,6 +59,7 @@ internal sealed partial class SqlPlanExecutor
                 bool consumingSource = false;
                 try
                 {
+                    TableAsStage?.Invoke("Selecting", table.ObjectId);
                     await using var source = (DatabaseResultSet)await ExecuteRootAsync(
                         Cost(plan.Source, statement, cancellationToken), statement, cancellationToken, spillOwner).ConfigureAwait(false);
                     try

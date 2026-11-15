@@ -50,8 +50,10 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             input = (DatabaseResultSet)await (RecursiveState is null
-                ? spillOwner?.Database.Engine.TempSpace is not null && IsPlainRetentionInput(plan.Input) && CanPipelineSelectRetention()
-                    ? ExecuteSpillRootAsync(plan.Input, statement, cancellationToken, spillOwner, null, plan)
+                ? spillOwner?.Database.Engine.TempSpace is not null && IsPlainRetentionInput(plan.Input)
+                    && (CanPipelineSelectRetention() || SqlWindowMemory.For(_metrics) is not null)
+                    ? ExecuteSpillRootAsync(plan.Input, statement, cancellationToken, spillOwner, null,
+                        SqlWindowMemory.For(_metrics) is null ? plan : null)
                     : ExecuteAsync(plan.Input, statement, cancellationToken)
                 : RecursiveGroupInputAsync(plan, statement, cancellationToken)).ConfigureAwait(false);
             hashInput = input as HashGroupInput;
@@ -116,6 +118,7 @@ internal sealed partial class SqlPlanExecutor
                         }
                         catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode && CanSpillHashGroup(plan, spillOwner))
                         {
+                            if (SqlWindowMemory.For(_metrics) is { } window) { SqlWindowInputSpool.RecordRefusal(window, failure); }
                             if (keyBytes.Bytes != previousBytes)
                             {
                                 long bytes = keyBytes.RemoveRow(key); keyBytes.Bytes -= bytes;

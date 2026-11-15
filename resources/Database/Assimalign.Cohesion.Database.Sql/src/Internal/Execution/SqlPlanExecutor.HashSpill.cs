@@ -82,7 +82,7 @@ internal sealed partial class SqlPlanExecutor
     // before choosing the input-order collector, to preserve volatile evaluation boundaries.
     private bool CanSpillHashGroup(SqlGroupPlan plan, SqlDatabaseSession? owner)
     {
-        if (owner?.Database.Engine.TempSpace is null || !CanPipelineSelectRetention() ||
+        if (owner?.Database.Engine.TempSpace is null || !CanPipelineSelectRetention() && SqlWindowMemory.For(_metrics) is null ||
             plan is SqlGroupingSetsPlan || plan.IsDistinct || plan.Keys.Count == 0 ||
             !IsPlainRetentionInput(plan.Input) || !CanStreamRetentionTree(plan.Input) ||
             HasRetentionSubquery(plan.Input) || HasRetentionSubquery(plan.Having) ||
@@ -290,6 +290,13 @@ internal sealed partial class SqlPlanExecutor
         output.Seal(token);
         SqlRowCollector.ObserveSpill?.Invoke("output-spool");
         SqlSortSpillMetrics.RecordOutput(_metrics!, spill.Statement);
+        if (SqlWindowMemory.For(_metrics) is { } window)
+        {
+            var metrics = _metrics!;
+            var staged = new SqlWindowInputSpool(metrics, _definitions.StatementMemoryBudget, spill.Statement, output,
+                maximumDecoded, visited, SqlWindowInputSpool.RefusalFor(window) ?? SqlExecutionException.StatementMemoryBudget(_definitions.StatementMemoryBudget));
+            SqlHashSpillMetrics.Refresh(metrics, spill.Statement); spill.Transfer(); return staged;
+        }
         var result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns,
             spill.Statement, output, offset, plan.Limit?.Count ?? -1, spill.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, maximumDecoded,
             ownsStatement: !spill.SharedStatement);
@@ -362,8 +369,10 @@ internal sealed partial class SqlPlanExecutor
             _inputTypes = new DatabaseType[plan?.Aggregates.Sum(a => 1 + a.Arguments.Length) ?? 0];
             _outputTypes = new DatabaseType[plan?.Aggregates.Count ?? 0];
             _aggregateCollations = plan?.Aggregates.Select(a => a.Collation.Resolve(executor._subqueryValues)).ToArray() ?? [];
-            SqlSpillLifetime.CheckCapacity(owner);
-            _statement = shared ?? SqlHashSpillMetrics.For(executor._metrics!)?.JoinStatement ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
+            bool windowInput = SqlWindowMemory.For(executor._metrics) is not null;
+            if (!windowInput) { SqlSpillLifetime.CheckCapacity(owner); }
+            _statement = shared ?? (windowInput ? SqlHashSpillMetrics.JoinTemp(executor._metrics!, owner)
+                : SqlHashSpillMetrics.For(executor._metrics!)?.JoinStatement ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota));
             _sharedStatement = ReferenceEquals(_statement, SqlHashSpillMetrics.For(executor._metrics!)?.JoinStatement);
             try
             {

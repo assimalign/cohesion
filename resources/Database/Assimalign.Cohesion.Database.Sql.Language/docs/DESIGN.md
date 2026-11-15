@@ -27,6 +27,12 @@ projections in the staged-source sorter and runtime refusal of application-produ
 and cells; the dialect records decoded-row admission and preservation of fitting aliases. Cancellation belongs to an enumeration, while real
 temporary failures remain coded and terminal for the result.
 
+Partitioned window verification extends this corpus with partitioned window input/output runs, per-group key and
+ordinal sorts, shared-key evaluation order, existing frames and visit caps, grouped input,
+CTAS, quota-zero and exact grant boundaries, crash-image convergence and during-operation
+live-heap checks that reject retained partition rows and per-row boxes. Oversized single
+partitions retain the existing window refusal pending paged partition access.
+
 ## COPY table export grammar (#1724)
 
 SqlCopyToExpression retains the ordered table column list and immutable resolved SqlCopyOptions.

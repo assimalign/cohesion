@@ -148,6 +148,28 @@ public sealed class SqlRecordDecodeIntegrityTests
         failure.Message.ShouldContain("does not decode", Case.Sensitive);
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Record decode: eviction waits for a recorded pin release and restores the pool (#1789)")]
+    public async Task Evict_OverlappingPin_ShouldWaitForReleaseAndRestoreCapacity()
+    {
+        // Arrange: force the same transient all-pinned condition as a background reader.
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("evict-db");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1,10)");
+        var location = RowLocation(database, 1);
+        int capacity = database.DataStorage.BufferPoolCapacity, refusals = 0;
+        using var pinned = database.DataStorage.PageManager.GetPage(location.PageId);
+
+        // Act: the observed refusal releases the competing lease, without a timing window.
+        Evict(database, location.PageId, () => { if (refusals++ == 0) { pinned.Dispose(); } });
+
+        // Assert
+        refusals.ShouldBeGreaterThan(0);
+        database.DataStorage.BufferPoolCapacity.ShouldBe(capacity);
+        (await Ids(session, "SELECT id FROM t")).ShouldBe([1]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Record decode: a write's target scan and an index build over a row that does not decode fail without changing the table (#1362)")]
     public async Task UpdateAndCreateIndex_OverRowThatDoesNotDecode_ShouldFailWithStorageCorruption()
     {
@@ -484,18 +506,34 @@ public sealed class SqlRecordDecodeIntegrityTests
     /// Evicts a page from the data storage's buffer pool: the pool shrinks to one frame, which
     /// another page then takes, and grows back. A dirty page is written back first.
     /// </summary>
-    private static void Evict(SqlDatabase database, PageId pageId)
+    private static void Evict(SqlDatabase database, PageId pageId, Action? releaseCompetingPin = null)
     {
         var storage = database.DataStorage;
         var other = Enumerable.Range(1, (int)storage.PageManager.PageCount - 1)
             .Select(page => (PageId)(long)page)
             .First(page => page != pageId && storage.FreeSpaceMap.IsAllocated(page));
         int capacity = storage.BufferPoolCapacity;
-        storage.BufferPoolCapacity = 1;
-        using (storage.PageManager.GetPage(other))
+        try
         {
+            storage.BufferPoolCapacity = 1;
+            var timeout = TestTimeout.Token(30);
+            // Tolerate a page pin that outlives a statement on this in-memory engine.
+            var waiting = new SpinWait();
+            while (true)
+            {
+                timeout.ThrowIfCancellationRequested();
+                try
+                {
+                    using var loaded = storage.PageManager.GetPage(other);
+                    break;
+                }
+                catch (StorageIOException failure) when (failure.Message == "Buffer pool is full and all pages are pinned.")
+                {
+                    releaseCompetingPin?.Invoke();
+                    waiting.SpinOnce();
+                }
+            }
         }
-
-        storage.BufferPoolCapacity = capacity;
+        finally { storage.BufferPoolCapacity = capacity; }
     }
 }

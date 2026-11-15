@@ -87,6 +87,7 @@ internal sealed class SqlBoundTableCache
     internal SqlFunctionEnvironment NativeFunctions => _native;
 
     internal SqlFunctionEnvironment Functions => Volatile.Read(ref _state).Functions;
+    internal bool CanSpillWindowValues => Volatile.Read(ref _state).CanSpillWindowValues;
 
     // Metadata loading never executes application code. Body compilation happens per entry,
     // after publication, so a statement needing no such body never waits for its compiler.
@@ -725,6 +726,27 @@ internal sealed class SqlBoundTableCache
 
     private sealed record JsonWriteUsage(ulong Generation, bool Used);
 
+    private static bool WindowSpillValuesSafe(SqlFunctionEnvironment functions)
+    {
+        // SQL compares values. Opaque application code can additionally observe CLR
+        // reference identity, including through a later consumer of a window CTE.
+        // A value-only temp codec cannot promise that identity. Keep the base owner
+        // for such catalogs, rather than changing the callback's result on decoding.
+        if (functions.Types.HasApplicationCasts || functions.Types.HasDomainChecks) { return false; }
+        if (!functions.Catalog.HasApplicationFunctions) { return true; }
+        foreach (var function in functions.Catalog)
+        {
+            if (SqlStandardLibrary.Contains(function)) { continue; }
+            foreach (var parameter in function.Parameters)
+            { if (ReferenceParameter(parameter)) { return false; } }
+            if (function.VariadicParameter is { } variadic && ReferenceParameter(variadic)) { return false; }
+        }
+        return true;
+
+        static bool ReferenceParameter(SqlType parameter) => parameter.IsPseudo || parameter.Storage.Type is
+            DatabaseType.String or DatabaseType.Character or DatabaseType.Binary or DatabaseType.Json or DatabaseType.JsonBinary;
+    }
+
     // A refresh replaces the whole state. A slow binding retains its original environment and
     // table map and cannot publish an old result into the replacement generation.
     [global::System.Diagnostics.DebuggerDisplay("CacheState")]
@@ -735,6 +757,7 @@ internal sealed class SqlBoundTableCache
         internal readonly ConditionalWeakTable<SqlCatalogTable, SqlBindingEntry<SqlBoundTable>> Bound = new();
         internal readonly ConditionalWeakTable<SqlCatalogTable, ConditionalWeakTable<SqlCatalogIndex, SqlBindingEntry<SqlBoundExpression>>> IndexPredicates = new();
         internal readonly SqlFunctionEnvironment Functions;
+        internal readonly bool CanSpillWindowValues;
         internal ulong ValidatedGeneration;
         internal SqlBindingEntry<Validation>? Validation;
         internal bool HasUnresolvedIndexPredicates;
@@ -744,6 +767,7 @@ internal sealed class SqlBoundTableCache
         {
             _owner = owner;
             Functions = functions;
+            CanSpillWindowValues = WindowSpillValuesSafe(functions);
             // A new environment has no validated predicate bindings yet. Keep the DML
             // guard armed until validation proves this generation has no unresolved index.
             HasUnresolvedIndexPredicates = owner._catalog.Tables.Any(table =>

@@ -241,6 +241,9 @@ internal sealed class SqlStatementMetrics
     internal const long StatementWorkVisitLimit = 1_000_000;
     internal long WindowFrameWorkVisits => (_accessPath as JoinWork)?.ObservationState is WindowFrameWork work ? work.Visits : 0;
 
+    internal void RestoreWindowFrameWorkVisits(long visits)
+    { if ((_accessPath as JoinWork)?.ObservationState is WindowFrameWork work) { work.Visits = visits; } }
+
     internal void RecordWindowFrameRecomputation()
     {
         if (_accessPath is not JoinWork state) { state = new([]) { ScalarPath = _accessPath as string }; _accessPath = state; }
