@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -73,43 +72,86 @@ public sealed class MigrationSharedSourceTests
                 ConstructorDeclarationSyntax or EnumDeclarationSyntax or DelegateDeclarationSyntax) && IsInitializationFree(syntax);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Shared modules: linked copies have no static constructors or module initializers")]
-    [InlineData("Assimalign.Cohesion.Database.Sql.Schema")]
-    [InlineData("Assimalign.Cohesion.Database.Sql.Language")]
-    public void SharedSource_AllModules_ShouldHaveNoInitializers(string owner)
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Shared modules: every SDK and SQL link has no static constructors or module initializers")]
+    public void SharedSource_AllModules_ShouldHaveNoInitializers()
     {
-        // Arrange: Types may contain assembly-local reader instances; initializers are refused in every module.
-        var files = Directory.GetFiles(Path.Combine(RepositoryRoot(), "resources/Database", owner, "shared"), "*.cs", SearchOption.AllDirectories);
+        // Arrange: derive modules from both consumers so a new link cannot escape the guard.
+        string root = RepositoryRoot();
+        string[] consumers =
+        [
+            "sdks/Assimalign.Cohesion.Sdk.Database/Tasks/src/Assimalign.Cohesion.Sdk.Database.Tasks.csproj",
+            "resources/Database/Assimalign.Cohesion.Database.Sql/src/Assimalign.Cohesion.Database.Sql.csproj",
+        ];
+        var modules = consumers.SelectMany(consumer => XDocument.Load(Path.Combine(root, consumer)).Descendants("CohesionSharedSource"))
+            .Select(item => (Owner: (string?)item.Attribute("Include"), Module: (string?)item.Attribute("Module"))).Distinct().ToArray();
 
-        // Act / Assert
-        files.ShouldNotBeEmpty();
-        foreach (string file in files)
+        // Act / Assert: static field/property initializers are allowed outside the stricter schema modules.
+        modules.ShouldNotBeEmpty();
+        foreach (var module in modules)
         {
-            IsInitializationFree(CSharpSyntaxTree.ParseText(File.ReadAllText(file)).GetRoot()).ShouldBeTrue(file);
+            module.Owner.ShouldNotBeNullOrWhiteSpace();
+            module.Module.ShouldNotBeNullOrWhiteSpace();
+            var owners = new[] { "libraries", "resources" }.SelectMany(ownerRoot =>
+                Directory.EnumerateFiles(Path.Combine(root, ownerRoot), module.Owner + ".csproj", SearchOption.AllDirectories)).ToArray();
+            owners.Length.ShouldBe(1, module.Owner);
+            string directory = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(owners[0])!, "..", "shared", module.Module));
+            Directory.Exists(directory).ShouldBeTrue(directory);
+            var files = Directory.GetFiles(directory, "*.cs", SearchOption.AllDirectories);
+            files.ShouldNotBeEmpty(directory);
+            var sources = files.Select(file => CSharpSyntaxTree.ParseText(File.ReadAllText(file)).GetRoot()).ToArray();
+            IsInitializationFree(sources).ShouldBeTrue(directory);
         }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Initializer guard: static constructors and module initializers are refused")]
     [InlineData("internal static class Helper { static Helper() { } }")]
     [InlineData("using Init = System.Runtime.CompilerServices.ModuleInitializerAttribute; internal static class Helper { [Init] internal static void Run() { } }")]
+    [InlineData("using InitAttribute = System.Runtime.CompilerServices.ModuleInitializerAttribute; internal static class Helper { [Init] internal static void Run() { } }")]
     public void IsInitializationFree_InitializerSource_ShouldRefuse(string source)
     {
         // Arrange / Act / Assert
         IsInitializationFree(CSharpSyntaxTree.ParseText(source).GetRoot()).ShouldBeFalse();
     }
 
-    private static bool IsInitializationFree(SyntaxNode syntax)
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Initializer guard: aliases in another module file are refused")]
+    [InlineData("using Init = System.Runtime.CompilerServices.ModuleInitializerAttribute;")]
+    [InlineData("global using Init = System.Runtime.CompilerServices.ModuleInitializerAttribute;")]
+    [InlineData("using InitAttribute = System.Runtime.CompilerServices.ModuleInitializerAttribute;")]
+    [InlineData("global using InitAttribute = System.Runtime.CompilerServices.ModuleInitializerAttribute;")]
+    public void IsInitializationFree_CrossFileAlias_ShouldRefuse(string alias)
     {
-        var initializers = syntax.DescendantNodes().OfType<UsingDirectiveSyntax>()
-            .Where(item => item.Alias is not null && item.Name?.DescendantTokens().Any(token =>
-                token.ValueText is "ModuleInitializer" or "ModuleInitializerAttribute") == true)
-            .Select(item => item.Alias!.Name.Identifier.ValueText).Append("ModuleInitializer").Append("ModuleInitializerAttribute").ToHashSet(StringComparer.Ordinal);
-        return !syntax.DescendantNodes().OfType<ConstructorDeclarationSyntax>().Any(constructor => constructor.Modifiers.Any(SyntaxKind.StaticKeyword)) &&
-            !syntax.DescendantNodes().OfType<AttributeSyntax>().Any(attribute =>
-                attribute.Name.DescendantTokens().Any(token => initializers.Contains(token.ValueText)));
+        // Arrange: aliases belong to the module, including Attribute-suffix lookup across files.
+        var sources = new[] { alias, "internal static class Helper { [Init] internal static void Run() { } }" }
+            .Select(source => CSharpSyntaxTree.ParseText(source).GetRoot()).ToArray();
+
+        // Act / Assert
+        IsInitializationFree(sources).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Migration bindings: every referenced engine resource has identical SDK text")]
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Initializer guard: immutable field and property initialization stays allowed outside schema modules")]
+    [InlineData("internal static class Helper { private static readonly int[] _values = [1, 2]; }")]
+    [InlineData("internal static class Helper { internal static string Value { get; } = string.Empty; }")]
+    public void IsInitializationFree_StaticDataInitializer_ShouldAllow(string source)
+    {
+        // Arrange / Act / Assert
+        IsInitializationFree(CSharpSyntaxTree.ParseText(source).GetRoot()).ShouldBeTrue();
+        IsLinkSafe(source).ShouldBeFalse();
+    }
+
+    private static bool IsInitializationFree(params SyntaxNode[] sources)
+    {
+        var initializers = sources.SelectMany(syntax => syntax.DescendantNodes().OfType<UsingDirectiveSyntax>())
+            .Where(item => item.Alias is not null && item.Name?.DescendantTokens().Any(token =>
+                token.ValueText is "ModuleInitializer" or "ModuleInitializerAttribute") == true)
+            .Select(item => item.Alias!.Name.Identifier.ValueText)
+            .SelectMany(name => name.EndsWith("Attribute", StringComparison.Ordinal) ? new[] { name, name[..^9] } : new[] { name })
+            .Append("ModuleInitializer").Append("ModuleInitializerAttribute").ToHashSet(StringComparer.Ordinal);
+        return sources.All(syntax => !syntax.DescendantNodes().OfType<ConstructorDeclarationSyntax>().Any(constructor => constructor.Modifiers.Any(SyntaxKind.StaticKeyword)) &&
+            !syntax.DescendantNodes().OfType<AttributeSyntax>().Any(attribute =>
+                attribute.Name.DescendantTokens().Any(token => initializers.Contains(token.ValueText))));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Migration resources: binding and task parse keys have identical engine and SDK text")]
     public void ErrorMessages_MigrationBindings_ShouldMatchEngineResources()
     {
         // Arrange
@@ -122,11 +164,16 @@ public sealed class MigrationSharedSourceTests
             .ToDictionary(item => (string)item.Attribute("name")!, item => item.Element("value")!.Value);
 
         // Act: inspect both consumers so a new resource reference cannot escape the contract.
-        var keys = new[] { engine, sdk }.SelectMany(directory => new[] { "SqlMigrationLoweringErrorMessages", "SqlMigrationDefaultBindings" }
+        var bindingKeys = new[] { engine, sdk }.SelectMany(directory => new[] { "SqlMigrationLoweringErrorMessages", "SqlMigrationDefaultBindings" }
             .SelectMany(binding => Regex.Matches(File.ReadAllText(Path.Combine(directory, "Internal", binding + ".cs")),
-                @"ModelErrorMessages\.(\w+)").Select(match => match.Groups[1].Value))).Distinct().ToArray();
+                @"ModelErrorMessages\.(\w+)").Select(match => match.Groups[1].Value)));
+        var parse = Methods(Path.Combine(sdk, "Tasks/DatabaseTask.CreateMigration.cs"))
+            .Single(method => method.Identifier.ValueText == "ParseMigrationStatement");
+        var parseKeys = Regex.Matches(parse.Body!.ToString(), @"ErrorMessages\.(\w+)").Select(match => match.Groups[1].Value).ToArray();
+        var keys = bindingKeys.Concat(parseKeys).Distinct().ToArray();
 
         // Assert
+        parseKeys.ShouldNotBeEmpty();
         keys.ShouldNotBeEmpty();
         foreach (string key in keys)
         {
@@ -135,8 +182,8 @@ public sealed class MigrationSharedSourceTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Persisted walk: every concrete expression uses the engine's traversal structure")]
-    public void PersistedWalk_ConcreteExpressionSubtypes_ShouldMatchEngineStructure()
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Persisted walk: twelve traversal bodies and full parameter lists match the engine")]
+    public void PersistedWalk_TwelveTraversalBodies_ShouldMatchEngineStructure()
     {
         // Arrange: compare syntax, including fallback arms, rather than sampling parsed queries.
         string root = RepositoryRoot();
@@ -144,45 +191,20 @@ public sealed class MigrationSharedSourceTests
         var shared = Methods(Path.Combine(root, "resources/Database/Assimalign.Cohesion.Database.Sql.Schema/shared/MigrationLowering/SqlMigrationDefaultLiteral.cs"));
         var original = Methods(Path.Combine(sql, "Binding/SqlViewQuery.cs"))
             .Concat(Methods(Path.Combine(sql, "Planning/SqlPlanner.cs"))).ToArray();
-        string language = Path.Combine(root, "resources/Database/Assimalign.Cohesion.Database.Sql.Language/src");
-        var classes = Directory.EnumerateFiles(language, "*.cs", SearchOption.AllDirectories)
-            .Where(file => !file.Replace('\\', '/').Contains("/obj/", StringComparison.Ordinal) && !file.Replace('\\', '/').Contains("/bin/", StringComparison.Ordinal))
-            .SelectMany(file => CSharpSyntaxTree.ParseText(File.ReadAllText(file)).GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
-            .Where(type => type.Parent is FileScopedNamespaceDeclarationSyntax or NamespaceDeclarationSyntax).ToArray();
-        var expressions = new HashSet<string>(StringComparer.Ordinal) { "SqlExpression" };
-        bool added;
-        do
-        {
-            added = false;
-            foreach (var type in classes.Where(type => type.BaseList?.Types.Any(parent => expressions.Contains(parent.Type.ToString())) == true))
-            {
-                added |= expressions.Add(type.Identifier.ValueText);
-            }
-        } while (added);
-        var concrete = classes.Where(type => expressions.Contains(type.Identifier.ValueText) && !type.Modifiers.Any(SyntaxKind.AbstractKeyword)).ToArray();
-
-        // Act: every helper below the parser is part of the persisted traversal contract.
+        // Act: select the twelve traversal helpers below the parser.
         var walk = shared.Where(method => method.Identifier.ValueText is not "CanonicalDefault" and not "TryParse").ToArray();
         var pairs = walk.Select(method => (Shared: method, Engine: original.Single(candidate =>
             candidate.Identifier.ValueText == method.Identifier.ValueText &&
             candidate.ParameterList.Parameters.Select(parameter => parameter.Type!.ToString()).SequenceEqual(
                 method.ParameterList.Parameters.Select(parameter => parameter.Type!.ToString()))))).ToArray();
 
-        // Assert: complete bodies pin default arms and recursion for leaves as well as containers.
-        concrete.ShouldNotBeEmpty();
+        // Assert: all twelve bodies pin default arms and recursion; parameters include default values.
         walk.Length.ShouldBe(12);
         foreach (var pair in pairs)
         {
+            string.Concat(pair.Shared.ParameterList.DescendantTokens().Select(token => token.Text)).ShouldBe(
+                string.Concat(pair.Engine.ParameterList.DescendantTokens().Select(token => token.Text)), pair.Shared.Identifier.ValueText);
             Structure(pair.Shared).ShouldBe(Structure(pair.Engine), pair.Shared.Identifier.ValueText);
-        }
-        foreach (var type in concrete)
-        {
-            string name = type.Identifier.ValueText;
-            var sharedBranches = pairs.SelectMany(pair => pair.Shared.DescendantNodes().OfType<PatternSyntax>())
-                .Where(pattern => pattern.DescendantTokens().Any(token => token.ValueText == name)).Select(pattern => pattern.WithoutTrivia().ToString());
-            var engineBranches = pairs.SelectMany(pair => pair.Engine.DescendantNodes().OfType<PatternSyntax>())
-                .Where(pattern => pattern.DescendantTokens().Any(token => token.ValueText == name)).Select(pattern => pattern.WithoutTrivia().ToString());
-            sharedBranches.ShouldBe(engineBranches, name);
         }
     }
 

@@ -447,8 +447,10 @@ validates registrations, casts and stored values. The golden corpus pins forward
 and refusals, plus non-ALTER DDL using the shared type/identifier renderer. SDK files contain
 forward statements only and explain joint typed publication in their header (#1778).
 Applied-history rollback classification remains an engine responsibility before rendering (#1779).
-Separate engine helpers remain in use for CREATE/ADD and reconciliation; structural traversal,
-DEFAULT-reader and type-resolution comparisons fail if they drift from the shared lowering.
+Separate engine helpers remain in use for CREATE/ADD and reconciliation; #1861 removes those copies.
+Structural checks fail on any change to the compared traversal and domain-name bodies, and compare
+the traversal helpers' full parameter lists, including defaults. DEFAULT-reader and type-resolution
+checks compare sampled inputs and the corpus spellings.
 
 ## Temporal default text and schema identity (#1422)
 

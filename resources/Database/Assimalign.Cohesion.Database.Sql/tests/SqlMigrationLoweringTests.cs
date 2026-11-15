@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 using Shouldly;
@@ -30,9 +32,12 @@ public sealed class SqlMigrationLoweringTests
             {
                 if (!SqlTypeRules.TrySplit(declared, out string name, out int? first, out _) || first is not null)
                 {
-                    // Catalog resolution also refuses modifiers on an unknown domain. Script generation
-                    // has no registration and supplies its own invalid-domain explanation, pinned by the golden.
-                    Should.Throw<DatabaseException>(() => SqlMigrationLowering.ResolveAlterColumnType(column, out _));
+                    // Both paths refuse modifiers. The catalog-independent lowering has its own
+                    // explanation: pin that message to the unchanged engine corpus, not to itself.
+                    var catalogRefusal = Should.Throw<DatabaseException>(() => SqlSchemaProvisioner.ResolveColumnType(column, catalog, out _));
+                    var actualRefusal = Should.Throw<DatabaseException>(() => SqlMigrationLowering.ResolveAlterColumnType(column, out _));
+                    actualRefusal.GetType().ShouldBe(catalogRefusal.GetType());
+                    actualRefusal.Message.ShouldBe(GoldenDomainRefusal(column));
                     continue;
                 }
                 Exception? refusal = null;
@@ -71,6 +76,17 @@ public sealed class SqlMigrationLoweringTests
         }
     }
 
+    private static string GoldenDomainRefusal(CompiledSchemaColumn column, [CallerFilePath] string source = "")
+    {
+        string name = MigrationAlterColumnCases.InvalidDeclarations().Single(item => item.Column == column).Name;
+        string root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "../../../.."));
+        string path = Path.Combine(root, "sdks/Assimalign.Cohesion.Sdk.Database/Tasks/tests/TestObjects/MigrationAlterColumn.expected.txt");
+        string refusal = File.ReadLines(path).SkipWhile(line => line != name).Skip(1).First();
+        refusal.ShouldStartWith("Refused: ", Case.Sensitive);
+        // Strip the corpus marker and the operation context, leaving the original engine reason.
+        return refusal[(refusal.IndexOf(": ", "Refused: ".Length, StringComparison.Ordinal) + 2)..];
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Migration DEFAULT reader: shared admission preserves engine values and diagnostics")]
     [InlineData(null)]
     [InlineData("NULL")]
@@ -93,6 +109,10 @@ public sealed class SqlMigrationLoweringTests
     [InlineData("-(1 + 2)")]
     [InlineData("-'text'")]
     [InlineData("nextval('s')")]
+    [InlineData("currval('s')")]
+    [InlineData("setval('s', 1)")]
+    [InlineData("lastval()")]
+    [InlineData("CAST(1 AS BIGINT)")]
     [InlineData("1 + nextval('s')")]
     [InlineData("CAST('s' AS REGCLASS)")]
     [InlineData("NEXT VALUE FOR s")]
