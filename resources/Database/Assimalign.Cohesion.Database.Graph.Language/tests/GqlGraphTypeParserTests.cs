@@ -52,7 +52,7 @@ public sealed class GqlGraphTypeParserTests
         // Assert
         statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
         if (text == "ALTER GRAPH g")
-        { statement.Diagnostics.ShouldHaveSingleItem().Message.ShouldContain("The ALTER clause", Case.Sensitive); }
+        { statement.Diagnostics.ShouldHaveSingleItem().Message.ShouldNotBeNull().ShouldContain("The ALTER clause", Case.Sensitive); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Graph type DDL: malformed and nested bodies refuse with a code")]

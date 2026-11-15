@@ -55,7 +55,7 @@ returns declared metadata only; SHOW PROPERTY KEYS continues to report effective
 ## Schema DDL (#1738, GQ-D2; #1249)
 
 `ALTER CURRENT GRAPH TYPE (SET | ADD | ALTER | DROP) { ... }` operates on the database's
-open type (#1806, GQ-T2). Node declarations are `(:Label => :Implied & Other {p :: STRING NOT NULL})`;
+open type (#1806). Node declarations are `(:Label => :Implied & Other {p :: STRING NOT NULL})`;
 implied labels and property lists may be empty. Edge declarations are `(:Source)-[:TYPE => {p :: INT64}]->(:Target)`.
 `IMPLIES` aliases `=>`; `TYPED` or an omitted type separator aliases `::`. Optional node variables
 can name references within the same body, including forward references. Canonical rendering resolves
@@ -85,10 +85,11 @@ and per SET/REMOVE stage, so clause order matters: `REMOVE a:A DELETE r` refuses
 `DELETE r REMOVE a:A` succeeds for an otherwise matching declared edge. Neo4j checks at commit.
 Inline IS KEY / IS UNIQUE, element-level IS or REQUIRE and graph-type
 constraint specifications remain one CK00001. CLOSED/OPEN mode clauses and ISO CREATE [CLOSED]
-GRAPH TYPE also remain CK00001 for the later opt-in closed-mode run.
+GRAPH TYPE also remain CK00001; closed mode is not implemented.
 Property types accept only unquoted BOOLEAN/BOOL, INT8, INT16, INT32, INT64/INTEGER/INT,
 FLOAT32, FLOAT64/FLOAT, DECIMAL and STRING. Quoted spellings, unions and `!` nullability
 suffixes refuse with CK00001, including standalone `IS :: type` constraints.
+Unsupported identifier names also use CK00001; missing, numeric or punctuation type tokens use CG00002.
 
 `SHOW CURRENT GRAPH TYPE` returns DATABASE_NAME (STRING), MODE (STRING, OPEN), and DEFINITION
 (STRING, canonical complete ALTER CURRENT GRAPH TYPE SET DDL). All columns are non-nullable.

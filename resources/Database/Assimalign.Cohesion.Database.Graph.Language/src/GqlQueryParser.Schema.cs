@@ -106,7 +106,12 @@ public sealed partial class GqlQueryParser
             "STRING" => GqlSchemaPropertyType.String,
             _ => null,
         } : null;
-        if (type is null) { Unsupported(construct + " " + token.Text, token); }
+        if (type is null)
+        {
+            if (token.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function or TokenType.QuotedIdentifier)
+            { Unsupported(construct + " " + token.Text, token); }
+            else { Error("CG00002", ErrorMessages.GqlQueryParserIdentifierVoid2, token); }
+        }
         else { Advance(); }
         return type;
     }

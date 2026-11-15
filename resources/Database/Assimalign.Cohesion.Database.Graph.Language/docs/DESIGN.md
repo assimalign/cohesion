@@ -125,7 +125,7 @@ label scan after exact and relationship candidates compete. DIALECT records the 
 
 ## Schema DDL (#1738, GQ-D2)
 
-GQ-T2 (#1806) adds ALTER CURRENT GRAPH TYPE and SHOW CURRENT GRAPH TYPE. GqlSchemaCommand
+ALTER CURRENT GRAPH TYPE and SHOW CURRENT GRAPH TYPE use GqlSchemaCommand (#1806), which
 holds a GqlGraphTypeCommand with Kind GraphType in the existing query body slot, so ordinary query allocation size is
 unchanged. Its sealed node, edge and property records describe semantic fields; rendering never
 uses source text. The parser uses flat loops for type bodies and resolves optional node aliases
@@ -133,10 +133,11 @@ after the complete body, without nesting recursion. Unsupported constraint defin
 KEY/UNIQUE, element-level IS/REQUIRE and CLOSED/OPEN modes return one CK00001. DROP accepts
 identifier forms only, including optional declaration aliases; any partial or full body is CK00001.
 An explicit scalar-name table admits only unquoted supported names in both graph types and
-standalone constraints. Duplicate names and variables point at the offending name. The ALTER capability is advertised only as
+standalone constraints. Missing or non-name type tokens report CG00002; unsupported names retain CK00001.
+Duplicate names and variables point at the offending name. The ALTER capability is advertised only as
 ALTER CURRENT GRAPH TYPE; other ALTER positions retain the unsupported-vocabulary entry.
 The clause corpus grows by exactly one; no lexer keywords are added. Empty node types follow
-GQ-T1's model contract, deliberately broader than Neo4j's nonempty-node semantic check.
+the typed model contract, deliberately broader than Neo4j's nonempty-node semantic check.
 GraphTypeDdlTests, GqlGraphTypeParserTests and the InMemory/TCP GraphTypeWireTests pin execution,
 canonical reparse, refusal and availability. DIALECT defines SHOW columns and defaults. Catalog
 format 5 marks kind-8 declarations as enforced invariants and refuses v4 and earlier with CG06019
@@ -347,8 +348,23 @@ The executable grammar is:
 
 ```text
 statement    := (query | EXPLAIN query | catalog | schema-ddl) [';']
-schema-ddl   := ALTER CURRENT GRAPH TYPE (SET | ADD | ALTER | DROP) '{' graph-type-elements? '}'
-              | (CREATE | DROP) standalone-schema-object
+schema-ddl   := ALTER CURRENT GRAPH TYPE (SET | ADD | ALTER | DROP) '{' [graph-type-elements] '}'
+              | standalone-schema-object
+graph-type-elements := graph-type-element (',' graph-type-element)*
+graph-type-element := '(' [variable] ':' label ('=>' | IMPLIES) [':' label ('&' label)*] [type-properties] ')'
+              | type-endpoint '-[' [variable] ':' label ('=>' | IMPLIES) [type-properties] ']->' type-endpoint
+type-endpoint := '(' [variable] [':' label] ')'
+type-properties := '{' [type-property (',' type-property)*] '}'
+type-property := property [('::' | TYPED)] schema-type [NOT NULL]
+schema-type  := BOOLEAN | BOOL | INT8 | INT16 | INT32 | INT64 | INTEGER | INT
+              | FLOAT32 | FLOAT64 | FLOAT | DECIMAL | STRING
+standalone-schema-object := CREATE [TEXT] INDEX [name] [IF NOT EXISTS] FOR schema-node ON '(' variable '.' property ')'
+              | CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (schema-node | schema-edge) REQUIRE schema-rule
+              | CREATE (LABEL | RELATIONSHIP TYPE) name [IF NOT EXISTS]
+              | DROP (INDEX | CONSTRAINT | LABEL | RELATIONSHIP TYPE) name [IF EXISTS]
+schema-node  := '(' variable ':' label ')'
+schema-edge  := '()' ('-' | '<-') '[' variable ':' label ']' ('-' | '->') '()'
+schema-rule  := (variable '.' property | '(' variable '.' property ')') IS (NOT NULL | '::' schema-type)
 query        := segment (NEXT segment)*
 segment      := stage* [RETURN projections return-tail]
 stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]

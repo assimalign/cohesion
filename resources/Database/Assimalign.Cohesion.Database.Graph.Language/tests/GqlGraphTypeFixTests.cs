@@ -44,7 +44,7 @@ public sealed class GqlGraphTypeFixTests
         var diagnostic = result.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe("CG03011");
         diagnostic.Start.ShouldBe(text.IndexOf('"'));
-        diagnostic.Message.ShouldContain("non-whitespace", Case.Sensitive);
+        diagnostic.Message.ShouldNotBeNull().ShouldContain("non-whitespace", Case.Sensitive);
     }
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Graph type AST: kind identifies the command (#1806)")]
     public void Parse_GraphType_ShouldIdentifyKind()
@@ -76,6 +76,7 @@ public sealed class GqlGraphTypeFixTests
     [InlineData("ALTER CURRENT GRAPH TYPE DROP {(:Pet => :Resident)}")]
     [InlineData("ALTER CURRENT GRAPH TYPE DROP {(:Pet => {})}")]
     [InlineData("ALTER CURRENT GRAPH TYPE DROP {(:A)-[:R => {p :: STRING}]->(:B)}")]
+    [InlineData("ALTER CURRENT GRAPH TYPE DROP {(:A)-[:R =>]->(:B)}")]
     [InlineData("SHOW CURRENT USER")]
     [InlineData("SHOW CURRENT GRAPH TYPE AS GRAPH")]
     [InlineData("SHOW CURRENT GRAPH TYPE YIELD specification")]
@@ -86,12 +87,30 @@ public sealed class GqlGraphTypeFixTests
     [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A => {p :: \"string\"})}")]
     [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS :: \"3\"")]
     [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS :: \"Int8, Int16\"")]
+    [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS :: BOGUS")]
+    [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS :: COUNT")]
+    [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A => {p :: BOGUS})}")]
     public void Parse_UnsupportedForm_ShouldRefuseOnce(string text)
     {
         // Arrange / Act
         var result = new GqlQueryParser().Parse(text);
         // Assert
         result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Schema type syntax: missing and non-name tokens retain syntax diagnostics (#1806)")]
+    [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS ::")]
+    [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS :: 3")]
+    [InlineData("CREATE CONSTRAINT c FOR (n:A) REQUIRE n.p IS :: }")]
+    [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A => {p ::")]
+    [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A => {p :: 3})}")]
+    [InlineData("ALTER CURRENT GRAPH TYPE SET {(:A => {p :: })}")]
+    public void Parse_MissingOrNonNameType_ShouldReportSyntaxError(string text)
+    {
+        // Arrange / Act
+        var result = new GqlQueryParser().Parse(text);
+        // Assert
+        result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00002");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Embedded graph type command: later unsupported constructs are retained (#1806)")]
