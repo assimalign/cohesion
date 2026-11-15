@@ -129,6 +129,7 @@ public sealed class GraphUndoRoutingTests
             await using (var reader = await image.CreateSessionAsync(token))
             {
                 (await GraphCatalogIntrospectionTests.Rows(reader, "SHOW LABELS")).ShouldBeEmpty();
+                CatalogBytes(image).ShouldBeEmpty();
                 (await GraphCatalogIntrospectionTests.Rows(reader, "MATCH (n) RETURN count(n)")).ShouldHaveSingleItem()[0].ShouldBe(1L);
                 var node = (await image.GetNodeAsync(reader, kept.Id, token)).ShouldNotBeNull();
                 node.Labels.ShouldBeEmpty();
