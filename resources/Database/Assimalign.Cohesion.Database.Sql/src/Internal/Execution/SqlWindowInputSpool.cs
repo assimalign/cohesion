@@ -105,11 +105,21 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
         _inputs!.Remove(rows); input.Dispose();
     }
 
+    internal static void Release(List<object?[]> rows, SqlWindowInputSpool? input)
+    {
+        if (input is null) { return; }
+        _inputs!.Remove(rows); input.Dispose();
+    }
+
     internal void Append(object?[] row, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         _scratch ??= new byte[MaximumRecordBytes];
-        if (!SqlTempRowCodec.TryWrite(row, _scratch, out int size)) { throw EncodingRefusal(_budget); }
+        if (!SqlTempRowCodec.TryWrite(row, _scratch, out int size))
+        {
+            if (!SqlTempRowCodec.TryGetLength(row, out _)) { throw EncodingRefusal(_budget); }
+            throw SqlExecutionException.StatementMemoryBudget(_budget);
+        }
         long decoded = SqlTempRowCodec.DecodedBytes(row);
         if (StorageTempSpace.PageSize + size + 256L + 2 * decoded > _budget)
         { throw SqlExecutionException.StatementMemoryBudget(_budget); }

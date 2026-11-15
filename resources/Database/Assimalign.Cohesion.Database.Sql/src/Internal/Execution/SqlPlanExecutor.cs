@@ -381,6 +381,7 @@ internal sealed partial class SqlPlanExecutor
         spilled = null;
         SqlSelectMemory outputBytes = default, sourceBytes = default, sortedBytes = default;
         List<object?[]>? unorderedRows = null;
+        SqlWindowInputSpool? windowSpool = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -390,7 +391,6 @@ internal sealed partial class SqlPlanExecutor
                 // for an unordered query, including the unlimited single-row lookup path.
                 var projected = new List<object?[]>();
                 SqlOutputSpool? outputSpool = null;
-                SqlWindowInputSpool? windowSpool = null;
                 unorderedRows = projected;
                 long skip = offset?.Count ?? 0;
                 long remaining = limit?.Count ?? long.MaxValue;
@@ -429,7 +429,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
-                if (SqlWindowInputSpool.For(projected) is not null)
+                if (windowSpool is not null)
                 { spilled = SqlWindowInputSpool.Take(projected, ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns); return []; }
                 if (outputSpool is { } completed)
                 {
@@ -556,7 +556,7 @@ internal sealed partial class SqlPlanExecutor
         catch (Exception failure) { if (unorderedRows is not null) { SqlOutputSpool.Release(unorderedRows, failure); } throw; }
         finally
         {
-            try { if (unorderedRows is not null) { SqlWindowInputSpool.Release(unorderedRows); SqlOutputSpool.Release(unorderedRows); } }
+            try { if (unorderedRows is not null) { SqlWindowInputSpool.Release(unorderedRows, windowSpool); SqlOutputSpool.Release(unorderedRows); } }
             finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref outputBytes); }
         }
     }

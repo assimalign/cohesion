@@ -1490,7 +1490,7 @@ registrations; the bound function generation caches this eligibility at binding,
 remain eligible. Narrowing this exclusion requires an explicit value-only callback contract
 or an alias-preserving spill representation, not a change in observed callback results.
 
-Sequential stage records are capped at 16,384 B. Sort arenas consume only the grant remaining
+Sequential stage records are capped at 16,384 B. A record-cap refusal keeps the memory code without a codec-failure flag; only an unencodable cell sets that flag. Sort arenas consume only the grant remaining
 after the active reader and fixed stage charges, including 256 + 64 bytes per sort key and the retained 24 + 8 bytes per ordering entry, leaving 32,768 B for construction; their
 record bound also admits a two-way merge. Key encoding uses a capped buffer and rune-local collation fragments, so repeated wide keys cannot grow an unbounded encoding. One writer and capped record/key construction use
 at most 131,072 B of handoff scratch beyond the grant. During-operation live-heap tests use

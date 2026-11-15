@@ -39,7 +39,7 @@ internal sealed partial class SqlPlanExecutor
         // Input-built independent vectors still belong to the root frame. Transfer
         // them once before any sort; later resets leave that plain reservation live.
         _subqueryValues?.AdmitPendingStatementMemory(pendingBefore);
-        SqlRowCollector.ObserveBuffer?.Invoke("window-reset", _subqueryValues!);
+        if (_subqueryValues is not null) { SqlRowCollector.ObserveBuffer?.Invoke("window-reset", _subqueryValues); }
         using var prepared = new SqlWindowInputSpool(statement.Metrics, _definitions.StatementMemoryBudget, owner!, cancellationToken);
         long ordinal = 0;
         foreach (var raw in source.Read(cancellationToken))
