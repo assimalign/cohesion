@@ -164,10 +164,10 @@ bases serve their real variant sets: four typed models and three language models
 Model requests, parsers and servers belong in their model packages. Hosting composes
 any engine through the common root; execution callers use the concrete model session.
 
-The root is also the area's **rollup**: it references every child root — the
+The root is also the area's **rollup**: it references all nine child roots — the
 independently consumable base components a database is made of (`Database.Types`,
 `Database.Language`, `Database.Storage`, `Database.Transactions`,
-`Database.Execution`, `Database.Indexing`, `Database.Protocol`,
+`Database.Execution`, `Database.Indexing`, `Database.Text`, `Database.Protocol`,
 `Database.Security`) — so one reference to the root delivers the whole base
 surface. Child roots never reference the root.
 

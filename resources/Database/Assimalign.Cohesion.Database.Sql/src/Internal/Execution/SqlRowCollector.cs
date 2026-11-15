@@ -74,7 +74,16 @@ internal sealed partial class SqlRowCollector : IDisposable
         long ordinal = _visited++;
         if (_orderBy.Count == 0)
         {
-            if (ordinal >= _offset) { if (ChargesPlainMemory) { ReserveRow(output); } _rows.Add(output); return null; }
+            if (ordinal >= _offset)
+            {
+                if (spillOwner is not null && SqlOutputSpool.For(_rows) is { } spooled)
+                { spooled.Append(output, _cancellationToken); return output; }
+                try { if (ChargesPlainMemory) { ReserveRow(output); } }
+                catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                    && spillOwner?.Database.Engine.TempSpace is not null)
+                { SqlOutputSpool.Add(_rows, output, ref _memory, _metrics!, _budget, spillOwner, _cancellationToken); return output; }
+                _rows.Add(output); return null;
+            }
             windowMemory?.ReleaseRow(output);
             return output;
         }
@@ -203,7 +212,12 @@ internal sealed partial class SqlRowCollector : IDisposable
 
     public void Dispose()
     {
-        try { if (_spills.TryGetValue(this, out var spill)) { _spills.Remove(this); try { spill.Dispose(); } catch (SqlExecutionException) { /* Storage counted cleanup; preserve the statement outcome during unwinding. */ } } }
+        try
+        {
+            try { SqlOutputSpool.Release(_rows); }
+            catch (SqlExecutionException) { /* Preserve the initiating evaluator/cancellation failure. */ }
+            if (_spills.TryGetValue(this, out var spill)) { _spills.Remove(this); try { spill.Dispose(); } catch (SqlExecutionException) { /* Storage counted cleanup; preserve the statement outcome during unwinding. */ } }
+        }
         finally { _metrics?.ReleasePlainSelectMemory(_memory.Bytes); _memory.Clear(); }
     }
 

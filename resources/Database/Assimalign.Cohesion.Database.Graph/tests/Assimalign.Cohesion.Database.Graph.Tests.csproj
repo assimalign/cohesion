@@ -47,6 +47,20 @@
 		      DestinationFiles="@(GraphRecoveryFixtureOutput->'$(OutDir)GraphRecoveryFixture\%(RecursiveDir)%(Filename)%(Extension)')"
 		      SkipUnchangedFiles="true" />
 	</Target>
+	<Target Name="CopyGraphAllocationFixture" AfterTargets="Build">
+		<!-- Allocation ceilings describe optimized code, including when the test host is Debug. -->
+		<MSBuild Projects="$(MSBuildThisFileDirectory)..\fixtures\Assimalign.Cohesion.Database.Graph.RecoveryFixture\Assimalign.Cohesion.Database.Graph.RecoveryFixture.csproj"
+		         Targets="Build"
+		         Properties="Configuration=Release"
+		         RemoveProperties="RuntimeIdentifier;SelfContained"
+		         BuildInParallel="false" />
+		<ItemGroup>
+			<GraphAllocationFixtureOutput Include="$(MSBuildThisFileDirectory)..\fixtures\Assimalign.Cohesion.Database.Graph.RecoveryFixture\bin\Release\$(TargetFramework)\**\*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(GraphAllocationFixtureOutput)"
+		      DestinationFiles="@(GraphAllocationFixtureOutput->'$(OutDir)GraphAllocationFixture\%(RecursiveDir)%(Filename)%(Extension)')"
+		      SkipUnchangedFiles="true" />
+	</Target>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalTrackingStream.cs" Link="TestObjects\JournalTrackingStream.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\FormatProbeCrash.cs" Link="TestObjects\FormatProbeCrash.cs" />

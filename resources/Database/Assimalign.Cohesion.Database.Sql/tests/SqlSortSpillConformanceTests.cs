@@ -135,11 +135,9 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         await result.DisposeAsync(); TempBytes(engine.TempSpace!).ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Spill admission: missing directory, small grants and nested roots keep CS05067 (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Spill admission: missing directory, small grants and excluded owners keep CS05067 (#1789)")]
     [InlineData(0)]
     [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
     [InlineData(4)]
     [InlineData(6)]
     [InlineData(7)]
@@ -157,8 +155,6 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         await Seed(session);
         string sql = refusal switch
         {
-            2 => "SELECT COUNT(*) FROM (SELECT id,k FROM t ORDER BY k) d",
-            3 => "WITH d AS (SELECT id,k FROM t ORDER BY k) SELECT COUNT(*) FROM d",
             4 => "(SELECT id FROM t ORDER BY k) UNION ALL SELECT id FROM t",
             6 => "SELECT id,COUNT(*) OVER() FROM (SELECT id,k FROM t ORDER BY k) d",
             7 => "SELECT t.id,(SELECT u.id FROM u WHERE u.id=t.id) AS value FROM t ORDER BY t.k",
@@ -194,12 +190,12 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
     }
 
-    private async Task<SqlDatabaseEngine> Create(string name, long budget, List<long>? log = null)
+    private async Task<SqlDatabaseEngine> Create(string name, long budget, List<long>? log = null, long quota = 67108864)
     {
         var builder = SqlDatabaseEngine.CreateBuilder(name);
         builder.Options.RootPath = Path.Combine(_root, name);
         builder.Options.StatementMemoryBudget = budget;
-        builder.Options.StatementTempSpaceQuota = 64 * 1024 * 1024;
+        builder.Options.StatementTempSpaceQuota = quota;
         builder.Options.CheckpointJournalSize = 65536;
         builder.Functions.Add(SqlScalarFunction.Create("stamp", (long value) => { log?.Add(value); return value; }));
         builder.Functions.Add(SqlScalarFunction.Create("reader_payload", (long value) => new string((char)('a'+value%23),5500)));

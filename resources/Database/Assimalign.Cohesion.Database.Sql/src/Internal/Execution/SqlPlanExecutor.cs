@@ -92,6 +92,12 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (statement.Session is { } owner)
+        {
+            if (CanExecuteSpillSelect(plan, owner, cancellationToken))
+            { return ExecuteSpillRootAsync(plan, statement, cancellationToken, owner, null); }
+            statement = statement.WithoutSession();
+        }
         if (!SqlJsonPathExecution.IsStatement(statement.Metrics) && PlanUsesJson(plan, cancellationToken))
         { return ExecuteJsonStatementAsync(plan, statement, cancellationToken); }
         if (plan.ContainsRecursion && RecursiveState is null)
@@ -248,7 +254,7 @@ internal sealed partial class SqlPlanExecutor
                     throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlanNotExecutable, plan.GetType().Name));
             }
         }
-        finally { if (statementRoot && _materializedRelations is { } relations) { ReleaseSelectMemory(ref relations.Reserved); } }
+        finally { if (statementRoot && _materializedRelations is { } relations) { ReleaseRelations(relations); } }
     }
 
     // ── SELECT ─────────────────────────────────────────────────────────
@@ -374,6 +380,7 @@ internal sealed partial class SqlPlanExecutor
     {
         spilled = null;
         SqlSelectMemory outputBytes = default, sourceBytes = default, sortedBytes = default;
+        List<object?[]>? unorderedRows = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -382,6 +389,8 @@ internal sealed partial class SqlPlanExecutor
                 // The common scan needs only its output list. Avoid allocating sort state
                 // for an unordered query, including the unlimited single-row lookup path.
                 var projected = new List<object?[]>();
+                SqlOutputSpool? outputSpool = null;
+                unorderedRows = projected;
                 long skip = offset?.Count ?? 0;
                 long remaining = limit?.Count ?? long.MaxValue;
                 if (remaining == 0)
@@ -397,18 +406,41 @@ internal sealed partial class SqlPlanExecutor
                     SqlWindowMemory.For(_metrics)?.Retain(output);
                     if (retainRows is null || projected.Count < retainRows)
                     {
-                        try { RetainSelectRow(ref outputBytes, output); projected.Add(output); }
-                        catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
-                            && hashInput is not null && CanSpillHashGroup(hashInput, spillOwner))
+                        if (outputSpool is not null)
+                        { outputSpool.Append(output, cancellationToken); }
+                        else
                         {
-                            spilled = SpoolHashGroupInput(projected, output, inputs, projections, evaluator, ref outputBytes, spillOwner!, cancellationToken);
-                            return [];
+                            try { RetainSelectRow(ref outputBytes, output); projected.Add(output); }
+                            catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                                && hashInput is not null && CanSpillHashGroup(hashInput, spillOwner))
+                            {
+                                spilled = SpoolHashGroupInput(projected, output, inputs, projections, evaluator, ref outputBytes, spillOwner!, cancellationToken);
+                                return [];
+                            }
+                            catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                                && hashInput is null && spillOwner?.Database.Engine.TempSpace is not null && retainRows is null)
+                            { outputSpool = SqlOutputSpool.Add(projected, output, ref outputBytes, _metrics!, _definitions.StatementMemoryBudget, spillOwner, cancellationToken); }
                         }
                     }
                     if (--remaining == 0) { break; }
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
+                if (outputSpool is { } completed)
+                {
+                    var result = completed.Take(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns, cancellationToken,
+                        isDistinct ? resultOffset?.Count ?? 0 : 0, isDistinct ? resultLimit?.Count ?? -1 : -1);
+                    if (isDistinct)
+                    {
+                        var collations = new Collation[projections.Count];
+                        for (int i = 0; i < collations.Length; i++)
+                        { collations[i] = projections[i].Collation.Resolve(evaluator.SubqueryValues); }
+                        result.Deduplicate(new GroupKeyComparer(collations),
+                            _metrics!, _definitions.StatementMemoryBudget, cancellationToken);
+                        result.CaptureMetrics(_metrics!);
+                    }
+                    spilled = result; return [];
+                }
                 return projected;
             }
             if (HasSequenceProjection(projections) &&
@@ -516,7 +548,12 @@ internal sealed partial class SqlPlanExecutor
             { spilled = FinishCollected(rows, projections, resultLimit, resultOffset, isDistinct, evaluator, cancellationToken, resolveEmptyCollations: false); return []; }
             return rows.Finish(resolveEmptyCollations: false);
         }
-        finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref outputBytes); }
+        catch (Exception failure) { if (unorderedRows is not null) { SqlOutputSpool.Release(unorderedRows, failure); } throw; }
+        finally
+        {
+            try { if (unorderedRows is not null) { SqlOutputSpool.Release(unorderedRows); } }
+            finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref outputBytes); }
+        }
     }
 
     private static object?[] OrderingRow(object?[] source, IReadOnlyList<SqlProjection> projections,

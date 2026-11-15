@@ -148,14 +148,16 @@ public sealed partial class SqlSortSpillConformanceTests
         annotated.Cells.OfType<string>().ShouldNotContain(value => value.StartsWith("; ",StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Abrupt stop with a live SQL spilled result sweeps on reopen and preserves committed rows (#1789)")]
-    public async Task ExecuteAsync_AbruptStop_ShouldSweepAndReopenDatabase()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Abrupt stop with an ordered or unordered SQL result sweeps on reopen and preserves committed rows (#1789)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_AbruptStop_ShouldSweepAndReopenDatabase(bool unordered)
     {
         // Arrange
         string root = Path.Combine(_root,"abrupt");
         var start = new ProcessStartInfo("dotnet") { UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true };
         start.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory,"FormatProbeFixture","Assimalign.Cohesion.Database.Storage.FormatProbeFixture.dll"));
-        start.ArgumentList.Add("sql-spill-stop"); start.ArgumentList.Add(root);
+        start.ArgumentList.Add(unordered ? "sql-output-stop" : "sql-spill-stop"); start.ArgumentList.Add(root);
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var process = Process.Start(start)!;
         var error = process.StandardError.ReadToEndAsync(ceiling.Token);

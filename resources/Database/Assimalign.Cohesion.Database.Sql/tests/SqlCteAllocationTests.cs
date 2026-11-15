@@ -56,5 +56,36 @@ public sealed class SqlCteAllocationTests
             return GC.GetAllocatedBytesForCurrentThread() - before;
         }
     }
+    [Theory(DisplayName = "Cohesion Test [Sql] - Nested grouping and derived joins with temp space retain batch-base allocations (#1789)")]
+    [InlineData("WITH g AS (SELECT a,COUNT(*) FROM t GROUP BY a) SELECT * FROM g", 98120000L)]
+    [InlineData("SELECT d.a FROM (SELECT a FROM t) d JOIN t ON d.a=t.a", 100000000L)]
+    public async Task Execute_NestedSpillPermission_ShouldRetainBaseAllocations(string sql, long pin)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("nested-allocation", new() { TempDirectory = SqlAllocationTemp.Directory });
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t(a INT)"); await session.ExecuteAsync("INSERT INTO t VALUES(7)");
+        await using var transaction = await session.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        var request = SqlQueryRequest.FromSql(sql);
+        Measure(1000);
+        // Act
+        long minimum = long.MaxValue;
+        for (int round = 0; round < 3; round++) { minimum = Math.Min(minimum, Measure(5000)); }
+        // Assert: pins measured against c9ac0df64 on ARM64 and x64.
+        _output.WriteLine($"NESTED_ALLOC|sql={sql}|bytes={minimum}|perQuery={minimum / 5000d}");
+        minimum.ShouldBe(pin);
+        long Measure(int count)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < count; i++)
+            {
+                var pending = session.ExecuteAsync(request, CancellationToken.None);
+                pending.IsCompletedSuccessfully.ShouldBeTrue();
+                var result = pending.Result.ShouldBeAssignableTo<DatabaseResultSet>();
+                var disposal = result.DisposeAsync(); disposal.IsCompletedSuccessfully.ShouldBeTrue(); disposal.GetAwaiter().GetResult();
+            }
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+    }
 }
 #endif
