@@ -106,22 +106,27 @@ actions need an owner design follow-up rather than replaying catalog mutations a
 IApplicationInstanceHealthContributor per engine and open or pending-reopen database, followed
 by database.accepting. It resolves DatabaseApplicationContext once. HealthContributors reads
 Hosting's synchronous HealthComponentNames membership; discovery is cheap and live, never
-evaluates health, awaits work or waits for database lifecycle operations, and never throws on
-an engine inventory failure. Managed Build's control-plane validation therefore runs no health
+evaluates health, awaits work or waits for database lifecycle operations, and contains
+an engine inventory failure except OutOfMemoryException, which propagates. Managed Build's control-plane validation therefore runs no health
 pass and emits no health transition event. Build's token is irrelevant to discovery.
 
-Engines follow registration order, each followed by its databases in ordinal ignore-case name
-order, with database.accepting last. Names are `engine/<escaped engine>`,
+Engines follow registration order, each followed by its databases in ordinal ignore-case
+component-name order, with database.accepting last. Names are `engine/<escaped engine>`,
 `database/<escaped engine>/<escaped lowercase database>`, and `database.accepting`. Each segment
-is URI-escaped separately. Database identity uses the area's invariant lower-case storage-name
-fold; engine identity stays ordinal. Health reads only OpenDatabases and pending reopens in
+is URI-escaped separately. Database component names lower-case only ASCII letters before URI-escaping,
+using the same spelling for open, offline and pending-reopen entries; K and the Kelvin sign
+remain distinct. Engine identity stays ordinal and registration rejects invalid UTF-16. Health reads only OpenDatabases and pending reopens in
 every model. A stored database this process has not opened is absent; a leftover directory
-cannot fail readiness. Health never opens, reopens or waits for a database or takes an engine lock.
+cannot fail readiness. A reopen outside the reopen service is absent during recovery; failed
+recovery leaves it absent until opened again. With ReopenOfflineDatabases=false, check the manual
+reopen's own result because health keeps no failed-open record. Health never opens, reopens or
+waits for a database or takes an engine lock.
 
 Each CheckAsync uses Hosting's single-component GetHealthAsync and maps that observation's
 status, description and immutable invariant string data directly. It evaluates only the named
-engine; database.accepting evaluates only the host gate and reads no inventory. Non-cancellation
-evaluation exceptions fail closed for that engine's components with exception types only.
+engine; database.accepting evaluates only the host gate and reads no inventory. Evaluation
+exceptions other than caller cancellation and OutOfMemoryException fail closed for that engine's
+components with exception types only.
 Cancellation of the caller's token propagates. Other engines and the host gate are unaffected.
 Offline is Unhealthy, including pending reopen; pause, provisioning and held schemas are
 Degraded, retaining their codes and bounded refused-step detail. Engine data retains state,
@@ -150,6 +155,8 @@ reflection fallback. The package raises no events and needs no EventSource.
 2. **Readiness — owner: ApplicationModel.Gateway (G18).** The gateway counts the first publication as ready, in StartingAsync before Database servers listen, so a dependent can deploy before Database accepts connections.
 3. **Startup window — owner: gateway application.** Publication waits for Build's open, recovery and schema migration; the gateway's startup window must cover that work.
 4. **Database-owned actions — owner: Database.** Define management operations that fit instance snapshot restore and each instance's durable catalog before adding actions.
-5. **Instance health — owner: ApplicationModel.Hosting/Gateway.** Database now contributes health. Define gateway consumption and readiness mapping, live versus fixed membership, removal versus Unhealthy for vanished components, and batch evaluation (ApplicationModel.Hosting open questions 2 and 7; Gateway G18).
+5. **Instance health — owner: ApplicationModel.Hosting/Gateway.** Database now contributes health. Define gateway consumption and readiness mapping, live versus fixed membership, removal versus Unhealthy for vanished components, and batch evaluation. ApplicationModel.Hosting open question 2 covers health aggregation,
+   question 7 covers the publication window, and Gateway G18 covers readiness; membership and
+   batch semantics need a separate owner decision.
 6. **Publication-to-open window — owner: ApplicationModel.Hosting/Database.** AddService services always start after publication and restore but before the control plane opens. A slow service widens Hosting open question 7's window, and Database users cannot reorder these services as Web and EmailHub users can.
 7. **Read-only actions — owner: Database, #1790.** HTTP health and instance contributors now share Hosting's observations. Read-only databases and health actions remain a separate feature; this integration still exposes only application-added actions.

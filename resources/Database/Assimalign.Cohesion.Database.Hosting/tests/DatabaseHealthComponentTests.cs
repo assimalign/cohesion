@@ -117,8 +117,10 @@ public sealed class DatabaseHealthComponentTests
         unrelatedCancellation.Description.ShouldNotBeNull().ShouldContain("OperationCanceledException", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Disposal during component inventory fails closed without a timing race (#1790)")]
-    public async Task GetHealthAsync_DisposedDuringInventory_ShouldFailClosed()
+    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Disposal during inventory fails closed for components and HTTP without a timing race (#1790)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetHealthAsync_DisposedDuringInventory_ShouldFailClosed(bool aggregate)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -133,7 +135,20 @@ public sealed class DatabaseHealthComponentTests
         await using var application = builder.Build();
 
         // Act
-        var check = Task.Run(() => application.Context.GetHealthAsync("engine/racing", guard.Token).AsTask(), guard.Token);
+        IHealthChecksBuilder healthBuilder = new HealthChecksBuilder();
+        healthBuilder.AddCheck("database", (_, token) => application.Context.CheckAsync(token));
+        var health = healthBuilder.Build();
+        var check = Task.Run(async () =>
+        {
+            if (aggregate)
+            {
+                var report = await health.CheckHealthAsync(cancellationToken: guard.Token);
+                var entry = report.Entries["database"];
+                return (Status: (int)report.Status, entry.Description, Failure: entry.Exception);
+            }
+            var component = await application.Context.GetHealthAsync("engine/racing", guard.Token);
+            return (Status: (int)component.Status, component.Description, Failure: (Exception?)null);
+        }, guard.Token);
         try
         {
             await entered.Task.WaitAsync(guard.Token);
@@ -143,8 +158,9 @@ public sealed class DatabaseHealthComponentTests
         var result = await check.WaitAsync(guard.Token);
 
         // Assert
-        result.Status.ShouldBe(DatabaseHealthStatus.Unhealthy);
-        result.Description.ShouldNotBeNull().ShouldContain("ObjectDisposedException", Case.Sensitive);
+        result.Status.ShouldBe((int)DatabaseHealthStatus.Unhealthy);
+        if (aggregate) { result.Failure.ShouldBeOfType<ObjectDisposedException>(); }
+        else { result.Description.ShouldNotBeNull().ShouldContain("ObjectDisposedException", Case.Sensitive); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Empty component evaluation observes caller cancellation (#1790)")]

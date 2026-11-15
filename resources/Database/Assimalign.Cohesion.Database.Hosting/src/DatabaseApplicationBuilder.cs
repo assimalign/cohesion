@@ -170,6 +170,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="engine">The borrowed engine.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
+    /// <exception cref="ArgumentException">The engine name is empty, white space or invalid UTF-16.</exception>
     /// <exception cref="InvalidOperationException">
     /// Registration is closed because Build has begun, or another engine of the application has the same name.
     /// </exception>
@@ -190,7 +191,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="factory">The ownership-transferring factory.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="factory"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, white space or invalid UTF-16.</exception>
     /// <exception cref="InvalidOperationException">
     /// Registration is closed because Build has begun, or another engine of the application has the same name.
     /// </exception>
@@ -656,6 +657,15 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     private void ReserveName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        for (int index = 0; index < name.Length; index++)
+        {
+            if (!char.IsSurrogate(name[index])) { continue; }
+            if (!char.IsSurrogatePair(name, index))
+            {
+                throw new ArgumentException(ErrorMessages.EngineNameInvalidUtf16, nameof(name));
+            }
+            index++;
+        }
         if (_engines.Any(registration => string.Equals(registration.Name, name, StringComparison.Ordinal)))
         {
             throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ApplicationBuilderReserveNameFailure, name));

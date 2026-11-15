@@ -16,18 +16,17 @@ internal sealed class DatabaseHealthObservations
     private readonly Dictionary<string, DatabaseHealthObservation> _databases = new(StringComparer.Ordinal);
     private readonly List<string> _databaseNames = [];
     private readonly string? _componentName;
-    private readonly string? _databaseFilter;
+    private readonly bool _databaseComponent;
     private HealthCheckResult? _failure;
 
     internal DatabaseHealthObservations(string? componentName = null)
     {
         _componentName = componentName;
-        _databaseFilter = componentName?.StartsWith("database/", StringComparison.Ordinal) == true
-            ? componentName[(componentName.LastIndexOf('/') + 1)..] : null;
+        _databaseComponent = componentName?.StartsWith("database/", StringComparison.Ordinal) == true;
     }
 
-    internal bool WantsDatabase(string name)
-        => _componentName is null || _databaseFilter is not null && string.Equals(_databaseFilter, name, StringComparison.OrdinalIgnoreCase);
+    internal bool WantsDatabase(string engine, string name)
+        => _componentName is null || _databaseComponent && string.Equals(_componentName, DatabaseName(engine, name), StringComparison.Ordinal);
 
     internal void Engine(string name, EngineState state, Dictionary<string, object> data, string prefix)
     {
@@ -144,9 +143,19 @@ internal sealed class DatabaseHealthObservations
 
     internal static string DatabasePrefix(string engine) => $"database/{Uri.EscapeDataString(engine)}/";
 
-    // DatabaseFileNames.GetStorageName uses this one fold; valid database names are ASCII.
+    // Match the storage fold for ASCII letters without folding distinct custom names such as K and the Kelvin sign.
     internal static string DatabaseName(string engine, string database)
-        => DatabasePrefix(engine) + Uri.EscapeDataString(database.ToLowerInvariant());
+    {
+        string folded = string.Create(database.Length, database, static (characters, name) =>
+        {
+            for (int index = 0; index < name.Length; index++)
+            {
+                char character = name[index];
+                characters[index] = char.IsAsciiLetterUpper(character) ? (char)(character + ('a' - 'A')) : character;
+            }
+        });
+        return DatabasePrefix(engine) + Uri.EscapeDataString(folded);
+    }
 
     private sealed class DebugView
     {

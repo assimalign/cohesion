@@ -112,9 +112,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// <summary>Gets live health membership without evaluating health or waiting for database lifecycle work.</summary>
     /// <remarks>
     /// Engines follow registration order; each engine is followed by its open or pending-reopen
-    /// databases in ordinal ignore-case name order, then database.accepting follows all engines.
+    /// databases in ordinal ignore-case component-name order, then database.accepting follows all engines.
     /// A faulty inventory contributes its engine name. Re-read this member to follow opens and drops.
     /// </remarks>
+    /// <exception cref="OutOfMemoryException">An engine inventory reports an out-of-memory failure.</exception>
     public IReadOnlyList<string> HealthComponentNames
     {
         get
@@ -126,16 +127,16 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                 IReadOnlyList<DatabaseInstance> databases;
                 // Discovery must survive a custom engine's broken inventory; evaluation fails closed.
                 try { databases = engine.OpenDatabases; }
-                catch (Exception) { databases = []; }
+                catch (Exception failure) when (failure is not OutOfMemoryException) { databases = []; }
                 var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var database in databases) { names.Add(database.Name.ToString()); }
                 foreach (var pending in ReopenService?.GetPendingReopens() ?? [])
                 {
                     if (ReferenceEquals(pending.Engine, engine)) { names.Add(pending.Name); }
                 }
-                var ordered = new List<string>(names);
+                var ordered = names.Select(name => DatabaseHealthObservations.DatabaseName(engine.Name, name)).ToList();
                 ordered.Sort(StringComparer.OrdinalIgnoreCase);
-                foreach (string name in ordered) { result.Add(DatabaseHealthObservations.DatabaseName(engine.Name, name)); }
+                result.AddRange(ordered);
             }
             result.Add("database.accepting");
             return result.AsReadOnly();
@@ -149,10 +150,13 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// <param name="cancellationToken">Signals that the evaluation should be abandoned.</param>
     /// <returns>Immutable component observations, with invariant string data and bounded provisioning detail.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    /// <exception cref="OutOfMemoryException">An engine evaluation reports an out-of-memory failure.</exception>
     /// <remarks>
-    /// Non-cancellation evaluation failures become Unhealthy for that engine's components, with
-    /// exception types only. Other engines and the accepting gate remain independent.
-    /// Stored databases this process has not opened are absent.
+    /// Evaluation failures other than caller cancellation and OutOfMemoryException become Unhealthy
+    /// for that engine's components, with exception types only. Other engines and the accepting gate remain independent.
+    /// Stored databases this process has not opened are absent. A reopen outside the reopen service
+    /// is absent during recovery; failed recovery leaves it absent until opened again. With
+    /// ReopenOfflineDatabases=false, check the manual reopen's own result because health keeps no failed-open record.
     /// </remarks>
     public async ValueTask<IReadOnlyList<DatabaseHealthObservation>> GetHealthAsync(CancellationToken cancellationToken = default)
     {
@@ -168,9 +172,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// <returns>An immutable observation; a database no longer open or pending is Unhealthy, "not open".</returns>
     /// <exception cref="ArgumentException"><paramref name="componentName"/> is null, empty or white space.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    /// <exception cref="OutOfMemoryException">The engine evaluation reports an out-of-memory failure.</exception>
     /// <remarks>
-    /// Non-cancellation evaluation failures become Unhealthy with exception types only. Cancellation
-    /// of the caller's token propagates. The accepting gate reads no engine inventory. Re-read
+    /// Evaluation failures other than caller cancellation and OutOfMemoryException become Unhealthy
+    /// with exception types only. Cancellation of the caller's token propagates. The accepting gate reads no engine inventory. Re-read
     /// <see cref="HealthComponentNames"/> to follow membership changes.
     /// </remarks>
     public async ValueTask<DatabaseHealthObservation> GetHealthAsync(string componentName, CancellationToken cancellationToken = default)
@@ -340,7 +345,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     int databaseIndex = 0;
                     IReadOnlyList<DatabaseInstance> databases = engine.OpenDatabases;
                     IReadOnlyList<ReopenState> reopening = ReopenService?.GetPendingReopens() ?? [];
-                    foreach (var database in databases)
+                    IEnumerable<DatabaseInstance> orderedDatabases = engine.Model is EngineModel.Document or EngineModel.Graph or EngineModel.Blob
+                        ? databases.OrderBy(database => database.Name.ToString(), StringComparer.OrdinalIgnoreCase) : databases;
+                    foreach (var database in orderedDatabases)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         var progress = database.Provisioning;
@@ -349,7 +356,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                         if (paused) { pausedDatabases.Add($"{engine.Name}/{database.Name}"); }
                         if (progress is null)
                         {
-                            if (components?.WantsDatabase(database.Name.ToString()) == true)
+                            if (components?.WantsDatabase(engine.Name, database.Name.ToString()) == true)
                             {
                                 components.Database(engine.Name, database.Name.ToString(), paused, null, null);
                             }
@@ -381,7 +388,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                             (progress.RowsProcessed is { } rows ? $"{rows} of {progress.TotalRows?.ToString() ?? "unknown"} rows" : "pending") +
                             (progress.FailureCode is { } failed ? $", {failed}" : string.Empty) +
                             (detail is not null ? $", {detail}" : string.Empty));
-                        if (components?.WantsDatabase(database.Name.ToString()) == true)
+                        if (components?.WantsDatabase(engine.Name, database.Name.ToString()) == true)
                         {
                             var progressData = new Dictionary<string, object>(StringComparer.Ordinal);
                             string progressDataPrefix = progressPrefix + ".";
@@ -444,7 +451,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                         offlineDatabases.Add(detail.Count == 0
                             ? $"{engine.Name}/{database}"
                             : $"{engine.Name}/{database} ({string.Join("; ", detail)})");
-                        if (components?.WantsDatabase(database) == true)
+                        if (components?.WantsDatabase(engine.Name, database) == true)
                         {
                             var offlineData = new Dictionary<string, object>(StringComparer.Ordinal);
                             string offlineDataPrefix = prefix + ".";
@@ -460,13 +467,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     }
                 }
                 components?.Engine(engine.Name, state, data, $"engine.{engineIndex}.");
-                if (components is not null && state != EngineState.Disposed && engine.State == EngineState.Disposed)
-                {
-                    components.Failure(engine.Name, nameof(ObjectDisposedException));
-                }
+                ObjectDisposedException.ThrowIf(state != EngineState.Disposed && engine.State == EngineState.Disposed, engine);
             }
             // Component consumers fail closed per engine. HTTP retains its throwing-check policy.
-            catch (Exception failure) when (components is not null)
+            catch (Exception failure) when (components is not null && failure is not OutOfMemoryException)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 components.Failure(engine.Name, DescribeFault(failure));
