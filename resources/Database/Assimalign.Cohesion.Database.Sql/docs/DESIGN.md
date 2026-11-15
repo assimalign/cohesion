@@ -1498,6 +1498,8 @@ uses 131,072 B slack and rejects one box per input row as well as the larger ret
 Window-input subquery vectors transfer to the plain statement ledger at the first reset and
 stay charged in every subsequent sort and partition grant. Opaque application accumulator state remains application-owned.
 
+Release allocation guards cover fitting windows over joins and grouping, plus CTAS sources on file engines with temp space, with architecture-specific pins. CTAS measurement begins after target binding and transaction setup and ends after source admission, keeping the target-table weak cache's capacity changes outside the source span.
+
 The new temp boundaries are input seal, key-sort completion, partition-output seal and
 ordinal-sort completion. They add no durable write or flush boundary. Fault-injecting CTAS
 images at each boundary and every existing reservation/copy/publication write, flush and

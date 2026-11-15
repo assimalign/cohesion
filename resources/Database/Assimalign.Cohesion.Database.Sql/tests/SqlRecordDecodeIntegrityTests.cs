@@ -517,6 +517,7 @@ public sealed class SqlRecordDecodeIntegrityTests
         {
             storage.BufferPoolCapacity = 1;
             var timeout = TestTimeout.Token(30);
+            // Tolerate a page pin that outlives a statement on this in-memory engine.
             var waiting = new SpinWait();
             while (true)
             {
