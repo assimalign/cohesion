@@ -13,6 +13,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)sdks\Assimalign.Cohesion.Sdk.Database\Tasks\tests\TestObjects\MigrationAlterColumnCases.cs" Link="TestObjects\MigrationAlterColumnCases.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\SavepointUndoFault.cs" Link="TestObjects\SavepointUndoFault.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Transactions\tests\TestObjects\UndoMarkerDriver.cs" Link="TestObjects\UndoMarkerDriver.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DedicatedTestTask.cs" Link="TestObjects\DedicatedTestTask.cs" />

@@ -22,5 +22,28 @@ internal static class SqlMigrationDefaultBindings
         return new DatabaseException(ModelErrorMessages.SequencePersistedUnsupported);
     }
     internal static void ObserveNode(SqlExpression expression) => _ = expression;
-    internal static string CanonicalizeLiteral(SqlExpression expression) => SqlExpressionRenderer.Render(expression);
+    internal static string CanonicalizeLiteral(SqlExpression expression)
+    {
+        string text;
+        try { text = SqlExpressionRenderer.Render(expression); }
+        catch (NotSupportedException exception)
+        {
+            throw new DatabaseException(string.Format(CultureInfo.CurrentCulture, ModelErrorMessages.ExpressionStoreUnsupported,
+                ModelErrorMessages.CompiledDefaultSubject, exception.Message), exception);
+        }
+        bool parsed = SqlMigrationDefaultLiteral.TryParse(text, out var reloaded, out string? problem, out bool outOfStack, useCeiling: true);
+        if (outOfStack)
+        {
+            throw new InsufficientExecutionStackException(string.Format(CultureInfo.CurrentCulture,
+                ModelErrorMessages.ExpressionCanonicalizeFailure, ModelErrorMessages.CompiledDefaultSubject));
+        }
+        // Sql.Language exposes no tree equivalence API. Literal rendering must reach a fixed
+        // point after reparsing; the engine additionally compares its expression trees.
+        if (!parsed || !string.Equals(SqlExpressionRenderer.Render(reloaded!), text, StringComparison.Ordinal))
+        {
+            throw new DatabaseException(string.Format(CultureInfo.CurrentCulture, ModelErrorMessages.ExpressionRoundTripFailed,
+                ModelErrorMessages.CompiledDefaultSubject, text, problem is null ? string.Empty : $" ({problem})"));
+        }
+        return text;
+    }
 }

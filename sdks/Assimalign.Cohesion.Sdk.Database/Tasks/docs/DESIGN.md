@@ -297,37 +297,48 @@ engine. SDK tests compare scripts for the same plans directly with `SqlMigration
 ### ALTER COLUMN files (#1756)
 
 The writer and SqlMigrationScriptGenerator compile Sql.Schema's stateless
-`shared/MigrationLowering` module. It owns the per-statement lowering, rewrite classification,
-ALTER COLUMN and type/identifier text, and payload/type refusals. ALTER DEFAULT admission shares
-the engine's scalar carrier, literal-only and persisted-sequence checks, including precise parse
-and refusal reasons, including the normal declaration nesting limit and the higher ceiling for
-its grouping guard. Assembly-local bindings preserve the engine's exception carriers and final
-literal round-trip validation. The task keeps its Sql.Language
-parser and its generated diagnostic resources; it takes no engine reference or internal visibility
-grant. DEFAULT-only SET/DROP changes retain the planner's destructive-change opt-in requirement.
-For a physical rewrite, an old default is dropped before TYPE, then the target default is set and
-nullability changes last. Compatible length/precision changes keep the engine's full-definition
-ALTER, including its existing compensation text. Domain columns name the declared domain;
-registered domains, conversions, stored values and default bounds are validated by the engine.
-An unsupported change fails as COHDBSDK206 with the engine's lowering reason, before either file
-is written. ALTER TABLE metadata and constraint generation retain their existing refusals.
+`shared/MigrationLowering` module. It owns ALTER COLUMN statement text, phase order, rewrite
+classification and payload/type refusals. The writer's other statements keep their own type,
+identifier and DEFAULT helpers: one file can spell a type two ways or refuse a bad DEFAULT
+with two reasons. Converging CREATE TABLE and ADD COLUMN rendering with the engine, including
+their DEFAULT guard limits and keyword quoting, is follow-up work outside #1756.
 
-Every generated migration has a header saying that typed schema application publishes jointly
-while the SQL file applies per statement: SQ-A6 routes all typed applications, including empty,
-inline and DEFAULT-only plans, through joint publication. The file does not reproduce that runtime
-publication or its receipts. SQ-A7's history-based rollback decision happens in the engine before
-rendering, so the forward writer needs no history access. Formats, runtime SQL statement text and
-the compiled schema contract remain unchanged.
+ALTER DEFAULT admission shares the engine's scalar carrier, literal-only and persisted-sequence
+checks, with the normal declaration nesting limit and the higher ceiling for its grouping guard.
+The SDK binding raises DatabaseException with the engine's message text, without structured CS diagnostic
+codes. It reparses rendered literals at the ceiling and requires a render fixed point;
+Sql.Language exposes no tree equivalence API, so the engine retains its stronger tree comparison.
+The task parses both forward and rollback statements at the engine's ceiling before accepting
+each lowered step, mapping the first parse error and parser stack refusal to the engine's reason.
+The shared lowering adds the operation context, and the task reports COHDBSDK206 before either
+file is written. The task takes no engine reference or internal visibility grant.
 
-The golden corpus began with 170 shapes captured at
-73aeebff31f9fd437f27c20c0f2f2487e594e7b3 before extraction. Replaying the generator and renderer
-from those pinned base objects expanded it to 719 shapes under invariant culture, including both
-nullability directions and explicit NULL defaults around TYPE. It pins every storage type and
-TYPE/default/nullability combination, compatible
-facets, domains, absent/NULL/equivalent defaults, compensation and refusals. SDK parity covers the
-same shapes, and real-engine round trips compare catalog columns and values after the generated
-file with typed application on empty/populated tables in inline/worker modes. The shared-source
-guard checks every file in Defaults and MigrationLowering, including explicit consumer opt-ins.
+DEFAULT-only SET/DROP changes retain the planner's destructive-change opt-in requirement.
+Physical rewrites drop an old default before TYPE, set the target default next and change
+nullability last. Compatible facets keep the engine's full-definition ALTER. Files carry forward
+statements only, with no compensation text; the rollback text is validated but never written.
+Domain columns name the declared domain; registrations, conversions, stored values and default
+bounds remain engine validation. ALTER TABLE metadata and constraints keep their existing refusals.
+
+Every generated migration has a header explaining that typed schema application publishes jointly
+while the SQL file applies per statement (#1778). This includes empty, inline and DEFAULT-only
+plans. Files do not reproduce runtime publication or receipts. Applied-history rollback
+classification happens in the engine before rendering (#1779), so the forward writer needs no
+history access. Formats, runtime SQL statement text and compiled schema contracts are unchanged.
+
+The golden corpus pins engine forward and compensation SQL and refusals for every storage type,
+TYPE/DEFAULT/nullability combinations, compatible facets, domains, absent/NULL/equivalent defaults,
+parse failures, invalid payloads and type spellings. It also pins CREATE TABLE, ADD COLUMN,
+CREATE INDEX and constraint text for keyword, reserved, mixed-case, non-ASCII and quote-bearing
+identifiers. SDK parity covers every declaration-reachable ALTER shape, including refusal reasons;
+separate boundary checks pin raw metadata that declarations reject. Real-engine round trips compare
+catalog columns and values on empty/populated tables with inline migration enabled or disabled.
+The populated deferred variant asserts ProvisioningStop's Deferred outcome and DeferredStepBound, proving that the
+provisioning worker claimed the migration. Structural traversal, DEFAULT-reader and type-resolution
+checks pin the engine's separate helpers against the shared module. Resource equality checks cover
+every key used by both migration bindings. The shared-source guard checks all schema module files
+for static classes, const fields, expression-bodied static properties, locks, events, constructors
+and module initializers, alongside explicit consumer opt-ins.
 
 ## Verification
 

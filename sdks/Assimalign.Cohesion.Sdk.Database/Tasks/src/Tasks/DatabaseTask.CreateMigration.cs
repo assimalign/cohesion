@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
@@ -354,7 +355,12 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     break;
                 case SqlSchemaMigrationOperationKind.AlterColumn:
                     SqlMigrationLowering.RenderAlterColumns(operation,
-                        (_, statement, _) => builder.Append(statement).Append('\n'), SqlMigrationDefaultLiteral.CanonicalDefault);
+                        (_, statement, rollback) =>
+                        {
+                            ParseMigrationStatement(statement);
+                            if (rollback is not null) { ParseMigrationStatement(rollback); }
+                            builder.Append(statement).Append('\n');
+                        }, SqlMigrationDefaultLiteral.CanonicalDefault);
                     break;
                 case SqlSchemaMigrationOperationKind.DropColumn:
                     builder.Append("ALTER TABLE ").Append(QualifiedTable(Required(operation.ParentName, operation)))
@@ -379,6 +385,24 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                 default:
                     throw Unsupported(operation, ErrorMessages.MigrationKindUnknown);
             }
+        }
+
+        private static void ParseMigrationStatement(string text)
+        {
+            // Match SqlMigrationScriptStep: validate both directions at the dialect's ceiling,
+            // even though a migration file carries forward statements only.
+            var statement = new SqlQueryParser(new SqlQueryParserOptions
+            {
+                ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit,
+            }).Parse(text);
+            var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+            if (error is null) { return; }
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExecuteStatementCoreAsyncFailure, error.Code, error.Message);
+            if (error.Code == "CS00007")
+            {
+                throw new DatabaseException(ErrorMessages.StatementStackInsufficient, new InsufficientExecutionStackException(message));
+            }
+            throw new DatabaseException(message);
         }
 
         private static void WriteAddTable(StringBuilder builder, CompiledSchemaTable table)

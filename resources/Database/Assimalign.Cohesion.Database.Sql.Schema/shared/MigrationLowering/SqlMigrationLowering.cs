@@ -74,7 +74,7 @@ internal static class SqlMigrationLowering
         }
         else if (changesType)
         {
-            // Preserve 49a's reversible full-definition lowering for compatible
+            // Preserve reversible full-definition lowering for compatible
             // facets, including when a separate default change is also requested.
             typed = column with { IsNullable = previous.IsNullable, DefaultLiteral = previous.DefaultLiteral };
             RenderAlterColumn(new SqlSchemaMigrationOperation(operation.Kind, operation.Safety,
@@ -115,7 +115,7 @@ internal static class SqlMigrationLowering
         => emit(operation, AlterColumn(RequireParent(operation), operation.Column!, canonicalDefault),
             AlterColumn(RequireParent(operation), operation.PreviousColumn!, canonicalDefault));
 
-    private static DatabaseTypeInfo ResolveAlterColumnType(CompiledSchemaColumn column, out string? domain)
+    internal static DatabaseTypeInfo ResolveAlterColumnType(CompiledSchemaColumn column, out string? domain)
     {
         domain = null;
         if (column.CustomType is not { } declared)
@@ -173,7 +173,7 @@ internal static class SqlMigrationLowering
     {
         if (column.CustomType is { } declared)
         {
-            // A domain's name or a built-in type name as declared (phase E3), which the engine's DDL
+            // A domain's name or a built-in type name as declared, which the engine's DDL
             // resolves as it resolves any type name. Only the name's shape is checked here: rewritten
             // from its parts, so the text written into the statement is nothing but a type name.
             if (!SqlTypeModifiers.TrySplit(declared, out string name, out int? first, out int? second) ||
@@ -327,7 +327,7 @@ internal static class SqlMigrationLowering
         }
     }
 
-    private static string DiagnosticTypeName(DatabaseType type)
+    internal static string DiagnosticTypeName(DatabaseType type)
         => type switch
         {
             DatabaseType.Int32 => "INTEGER",

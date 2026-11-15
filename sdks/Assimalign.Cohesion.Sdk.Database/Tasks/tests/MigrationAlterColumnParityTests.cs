@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Tracing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -15,12 +16,24 @@ using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Sdk.Database.Tasks;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
+[CollectionDefinition(nameof(MigrationAlterColumnParityTests), DisableParallelization = true)]
+[Collection(nameof(MigrationAlterColumnParityTests))]
 public sealed class MigrationAlterColumnParityTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - ALTER COLUMN: every golden shape matches per-step engine lowering and refusals")]
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - ALTER payloads: invalid raw type metadata cannot enter a validated declaration")]
+    public void Schema_InvalidTypeMetadata_ShouldRefuseBeforePlanning()
+    {
+        // Arrange / Act / Assert: direct-plan golden shapes that cannot reach the SDK writer.
+        foreach (var item in MigrationAlterColumnCases.InvalidDeclarations())
+        {
+            Should.Throw<SqlSchemaValidationException>(() => MigrationAlterColumnCases.Schema(item.Column), item.Name);
+        }
+    }
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - ALTER COLUMN: every declaration shape matches per-step engine lowering and refusals")]
     public void Execute_AlterColumnCorpus_ShouldMatchEngine()
     {
         // Arrange
@@ -240,6 +253,8 @@ public sealed class MigrationAlterColumnParityTests
         {
             await sdkSession.ExecuteAsync(statement, cancellationToken: timeout.Token);
         }
+        using var recorder = new EventSourceRecorder(EventSource.GetSources().Single(source =>
+            source.Name == "Assimalign.Cohesion.Database.Sql"), EventLevel.Informational);
         await using var typedEngine = await Builder(directory.File("typed"), desired, inline).BuildAsync(timeout.Token);
         var typedDatabase = await typedEngine.OpenDatabaseAsync("orders", timeout.Token);
         await using var typedSession = await typedDatabase.CreateSessionAsync(timeout.Token);
@@ -260,6 +275,16 @@ public sealed class MigrationAlterColumnParityTests
         await Should.ThrowAsync<DatabaseException>(async () => await typedSession.ExecuteAsync(
             "INSERT INTO Orders (Id, Value) VALUES (3, NULL)", cancellationToken: timeout.Token));
         typedDatabase.Provisioning?.FailureCode.ShouldBeNull();
+        // DeferredStepBound also fires inline. The public Deferred outcome distinguishes the
+        // worker handoff; together these signals prove both handoff and execution entry.
+        recorder.Events.Any(item => item.EventName == "ProvisioningStop" &&
+            item.Payload is { Count: >= 6 } payload && (string?)payload[0] == "typed" &&
+            (string?)payload[1] == "orders" && (string?)payload[5] == "Deferred").ShouldBe(populated && !inline);
+        if (populated && !inline)
+        {
+            recorder.Events.Any(item => item.EventName == "DeferredStepBound" &&
+                item.Payload is { Count: >= 2 } payload && (string?)payload[0] == "typed" && (string?)payload[1] == "orders").ShouldBeTrue();
+        }
     }
 
     private static SqlDatabaseEngineBuilder Builder(string root, SqlSchema schema, bool inline)

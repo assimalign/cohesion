@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
@@ -80,7 +81,84 @@ internal static class MigrationAlterColumnCases
         yield return ("pseudo-domain", integer, integer with { CustomType = "ANYELEMENT" });
         yield return ("storage-mismatch", integer, integer with { CustomType = "BIGINT" });
         yield return ("nonliteral-default", integer, integer with { DefaultLiteral = "1 + 2" });
+        foreach (string domain in new[] { "type", "TYPE", "Type" })
+        {
+            var column = integer with { CustomType = domain };
+            yield return ($"{domain}-make-nullable", column with { IsNullable = false }, column);
+            yield return ($"{domain}-make-required", column, column with { IsNullable = false });
+            yield return ($"{domain}-with-default", column with { DefaultLiteral = "1" }, column with { IsNullable = false, DefaultLiteral = "1" });
+        }
+        yield return ("type-case-nullable", integer with { CustomType = "type" }, integer with { CustomType = "Type" });
+        yield return ("sequence-default", integer, integer with { DefaultLiteral = "nextval('s')" });
+        yield return ("malformed-default", integer, integer with { DefaultLiteral = "'unterminated" });
+        yield return ("trailing-comment-default", integer, integer with { DefaultLiteral = "1; --" });
+        yield return ("unreadable-previous-default", integer with { DefaultLiteral = "'unterminated" }, integer with { DefaultLiteral = "1" });
+        yield return ("varchar-max", new("Value", DatabaseType.String, true, CustomType: "VARCHAR(MAX)"), new("Value", DatabaseType.String, false, CustomType: "VARCHAR(MAX)"));
+        yield return ("decimal-spacing", new("Value", DatabaseType.Decimal, true, CustomType: "DECIMAL(8,2)"), new("Value", DatabaseType.Decimal, false, CustomType: "DECIMAL(8,2)"));
+        yield return ("char-on-string", new("Value", DatabaseType.String, true, CustomType: "CHAR(3)"), new("Value", DatabaseType.String, false, CustomType: "CHAR(3)"));
+        (string Name, DatabaseType Type, string Literal)[] literals =
+        [
+            ("string", DatabaseType.String, "'it''s ready'"), ("integer", DatabaseType.Int32, "-1"),
+            ("float", DatabaseType.Float64, "-1.25"), ("null", DatabaseType.Int32, "NULL"),
+            ("boolean", DatabaseType.Boolean, "true"), ("date", DatabaseType.Date, "DATE '2026-01-02'"),
+            ("time", DatabaseType.Time, "TIME '12:34:56'"), ("timestamp", DatabaseType.DateTime, "TIMESTAMP '2026-01-02 12:34:56'"),
+            ("timestamptz", DatabaseType.DateTimeOffset, "TIMESTAMPTZ '2026-01-02 12:34:56+00:00'"),
+            ("interval", DatabaseType.TimeSpan, "INTERVAL 'PT1S'"), ("binary", DatabaseType.Binary, "X'0102'"),
+        ];
+        foreach (var literal in literals)
+        {
+            yield return ($"literal-{literal.Name}", new("Value", literal.Type, true), new("Value", literal.Type, true, DefaultLiteral: literal.Literal));
+        }
     }
+
+    // Raw operations cover payloads and metadata the validated declaration/planner cannot produce.
+    internal static IEnumerable<(string Name, SqlSchemaMigrationPlan Plan)> RawPlans()
+    {
+        CompiledSchemaColumn integer = new("Value", DatabaseType.Int32, true);
+        yield return ("payload-name-mismatch", Wrap(new(SqlSchemaMigrationOperationKind.AlterColumn, SqlSchemaMigrationSafety.Destructive,
+            "Other", "Orders", column: integer, previousColumn: integer)));
+        yield return ("payload-missing-parent", Wrap(new(SqlSchemaMigrationOperationKind.AlterColumn, SqlSchemaMigrationSafety.Destructive,
+            "Value", column: integer, previousColumn: integer)));
+        yield return ("payload-missing-previous", Wrap(new(SqlSchemaMigrationOperationKind.AlterColumn, SqlSchemaMigrationSafety.Destructive,
+            "Value", "Orders", column: integer)));
+        foreach (var item in InvalidDeclarations()) { yield return (item.Name, Plan(integer, item.Column)); }
+    }
+
+    internal static IEnumerable<(string Name, CompiledSchemaColumn Column)> InvalidDeclarations()
+    {
+        yield return ("quoted-domain", new("Value", DatabaseType.Int32, false, CustomType: "\"quantity\""));
+        yield return ("domain-modifiers", new("Value", DatabaseType.Int32, true, CustomType: "quantity(3)"));
+        yield return ("non-ascii-domain", new("Value", DatabaseType.Int32, true, CustomType: "quantité"));
+        yield return ("scale-without-precision", new("Value", DatabaseType.Decimal, true, Scale: 2));
+    }
+
+    internal static IEnumerable<(string Name, SqlSchemaMigrationPlan Plan)> DdlPlans()
+    {
+        var columns = All().SelectMany(item => new[] { item.Previous, item.Desired }).Concat(InvalidDeclarations().Select(item => item.Column))
+            .Select(column => column with { Name = "Value", IsNullable = true, DefaultLiteral = null }).Distinct().ToArray();
+        string[] names = ["select", "LOCALTIME", "MixedCase", "café", "quote\"name"];
+        for (int index = 0; index < columns.Length; index++)
+        {
+            foreach (string name in names)
+            {
+                var column = columns[index] with { Name = name };
+                var table = new CompiledSchemaTable(name, "Tests:Row", [column], null, [], []);
+                yield return ($"ddl-create-{index}-{name}", Wrap(new(SqlSchemaMigrationOperationKind.AddTable,
+                    SqlSchemaMigrationSafety.Safe, name, table: table)));
+                yield return ($"ddl-add-{index}-{name}", Wrap(new(SqlSchemaMigrationOperationKind.AddColumn,
+                    SqlSchemaMigrationSafety.Safe, name, name, column: column)));
+            }
+        }
+        foreach (string name in names)
+        {
+            yield return ($"ddl-index-{name}", Wrap(new(SqlSchemaMigrationOperationKind.AddIndex, SqlSchemaMigrationSafety.Safe,
+                name, name, index: new(name, [name], false))));
+            yield return ($"ddl-constraint-{name}", Wrap(new(SqlSchemaMigrationOperationKind.AddConstraint, SqlSchemaMigrationSafety.Safe,
+                name, name, constraint: new(name, CompiledSchemaConstraintKind.Check, [], null, [], new("1 = 1")))));
+        }
+    }
+
+    private static SqlSchemaMigrationPlan Wrap(SqlSchemaMigrationOperation operation) => new(null, "target", [operation]);
 
     internal static SqlCompiledSchema Schema(CompiledSchemaColumn column, bool destructive = true)
         => new(SqlCompiledSchema.CurrentFormat, "orders", destructive, [],

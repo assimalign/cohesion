@@ -47,7 +47,7 @@ internal static class SqlMigrationDefaultLiteral
             ? null : SqlMigrationDefaultBindings.CanonicalizeLiteral(expression);
     }
 
-    private static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SqlExpression? expression,
+    internal static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SqlExpression? expression,
         out string? problem, out bool outOfStack, bool useCeiling = false)
     {
         expression = null;

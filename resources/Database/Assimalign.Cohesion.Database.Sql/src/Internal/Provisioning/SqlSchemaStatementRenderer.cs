@@ -68,18 +68,6 @@ internal static class SqlSchemaStatementRenderer
     internal static string DropColumn(string tableName, string columnName)
         => $"ALTER TABLE {QualifiedTable(tableName)} DROP COLUMN {Identifier(columnName)};";
 
-    internal static string AlterColumn(string tableName, CompiledSchemaColumn column)
-        => SqlMigrationLowering.AlterColumn(tableName, column, SqlMigrationDefaultLiteral.CanonicalDefault);
-
-    internal static string AlterColumnType(string tableName, CompiledSchemaColumn column)
-        => SqlMigrationLowering.AlterColumnType(tableName, column);
-
-    internal static string SetNullability(string tableName, CompiledSchemaColumn column)
-        => SqlMigrationLowering.SetNullability(tableName, column);
-
-    internal static string SetDefault(string tableName, CompiledSchemaColumn column)
-        => SqlMigrationLowering.SetDefault(tableName, column, SqlMigrationDefaultLiteral.CanonicalDefault);
-
     internal static string AddConstraint(string tableName, CompiledSchemaConstraint constraint)
     {
         var builder = new StringBuilder($"ALTER TABLE {QualifiedTable(tableName)} ADD ");

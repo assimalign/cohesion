@@ -58,4 +58,10 @@
   <data name="CompiledModelUnsupported" xml:space="preserve"><value>Database model '{0}' has no model-specific compiled-schema package.</value></data>
   <data name="CompiledClrTypeUnsupported" xml:space="preserve"><value>CLR type '{0}' is not supported by the compiled-schema contract.</value></data>
   <data name="PortableTypeIdentityUnsupported" xml:space="preserve"><value>CLR type '{0}' has no portable metadata identity.</value></data>
+  <data name="ExecuteStatementCoreAsyncFailure" xml:space="preserve"><value>SQL parse error {0}: {1}</value></data>
+  <data name="StatementStackInsufficient" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce the nesting of its expressions or run it on a thread with a larger stack.</value></data>
+  <data name="ExpressionStoreUnsupported" xml:space="preserve"><value>{0} cannot be stored: {1}</value></data>
+  <data name="CompiledDefaultSubject" xml:space="preserve"><value>Compiled column DEFAULT</value></data>
+  <data name="ExpressionCanonicalizeFailure" xml:space="preserve"><value>{0} cannot be stored on this thread: reading its canonical text back needs more stack than the thread has left.</value></data>
+  <data name="ExpressionRoundTripFailed" xml:space="preserve"><value>{0} cannot be stored: its canonical text '{1}' does not reproduce the declared expression{2}. This is an engine defect; nothing was changed.</value></data>
 </root>
