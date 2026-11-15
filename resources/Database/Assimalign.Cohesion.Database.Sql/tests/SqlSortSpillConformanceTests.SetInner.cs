@@ -18,6 +18,24 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Fitting mixed joins preserve the base EXPLAIN hash policy without spill fields (#1789)")]
+    public async Task ExecuteAsync_FittingMixedExplain_ShouldKeepBasePolicy()
+    {
+        // Arrange: the archived planner/dispatcher excludes a tree with a non-hash
+        // sibling from hash permission. Actual spill status can still report a spill.
+        await using var engine = await Create("mixed-fitting-explain", 67108864);
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session);
+        await session.ExecuteAsync("CREATE TABLE p(id INT)"); await session.ExecuteAsync("INSERT INTO p VALUES(0),(1),(4001)");
+        // Act
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(
+            "EXPLAIN ANALYZE SELECT u.id,t.id,p.id FROM (u CROSS JOIN t) FULL JOIN p ON t.id=p.id");
+        var description = string.Join('\n', (await Rows(result)).SelectMany(row => row.Cells.OfType<string>()));
+        // Assert
+        description.ShouldContain("hash_budget=no_spill; hash_status=fitting");
+        description.ShouldNotContain("spilled_bytes="); description.ShouldNotContain("spill_runs=");
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+    }
+
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_distinct")]
     private static extern ref StorageTempRun? SetOperandRun(SqlSpilledResultSet result);
 

@@ -131,7 +131,7 @@ internal sealed partial class SqlPlanExecutor
     private void RecordJoinSpillPolicies(SqlJoinPlan plan, SqlStatementMetrics metrics, SqlDatabaseSession? spillOwner)
     {
         if (!metrics.IsAnalyzing) { return; }
-        bool allowed = _definitions.StatementMemoryBudget >= 262144 && CanSpillMixedJoinBuild(plan, spillOwner);
+        bool allowed = _definitions.StatementMemoryBudget >= 262144 && CanSpillJoinRows(plan, spillOwner);
         foreach (var step in plan.Steps)
         { if (step.Hash is not null) { metrics.RecordHashSpillPolicy(step, allowed); } }
     }

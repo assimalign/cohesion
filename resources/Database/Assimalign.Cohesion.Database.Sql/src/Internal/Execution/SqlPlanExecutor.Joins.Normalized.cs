@@ -67,7 +67,7 @@ internal sealed partial class SqlPlanExecutor
                 if (next.Phase == 0)
                 {
                     if (statement.Metrics.IsAnalyzing && step.Hash is not null)
-                    { statement.Metrics.RecordHashSpillPolicy(step, _definitions.StatementMemoryBudget >= 262144 && (mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillMixedJoinBuild(plan, statement.Session)); }
+                    { statement.Metrics.RecordHashSpillPolicy(step, _definitions.StatementMemoryBudget >= 262144 && (mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session)); }
                     pending.Push((node, 1));
                     pending.Push((node.Left!, 0));
                     continue;

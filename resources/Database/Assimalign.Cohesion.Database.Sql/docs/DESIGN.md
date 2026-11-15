@@ -54,7 +54,8 @@ with the temp cause in Data. Existing temp failures reached before a new handoff
 their original code. Final set sorting/output has its own narrow refusal translation;
 it never reclassifies an earlier operand failure. Stage cleanup never replaces success, cancellation or an evaluator
 error. Stage runs belong to the statement and share its quota; final client results retain
-their existing lifetime and cap. EXPLAIN ANALYZE reports bytes and runs only after spilling.
+their existing lifetime and cap. Fitting EXPLAIN ANALYZE keeps the base hash policy;
+actual spills update the status and append byte/run fields.
 
 No durable boundary is added: stage append/seal, partition append/seal and ordinal merge
 are disposable temp operations, as in PostgreSQL tuplestore.c:842-882. CTAS retains table
