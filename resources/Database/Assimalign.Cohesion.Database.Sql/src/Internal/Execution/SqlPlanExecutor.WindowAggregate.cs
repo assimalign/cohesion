@@ -38,7 +38,7 @@ internal sealed partial class SqlPlanExecutor
                 ? ExecuteAsync(plan.Input, statement, cancellationToken)
                 : ExecuteSpillRootAsync(plan.Input, statement, cancellationToken, spillOwner, null)).ConfigureAwait(false);
         }
-        catch (SqlExecutionException failure) when (spillOwner is not null && !failure.Data.Contains(nameof(SqlTempRowCodec)) && (SqlWindowInputSpool.IsMemoryRefusal(failure)
+        catch (SqlExecutionException failure) when (spillOwner is not null && (SqlWindowInputSpool.IsMemoryRefusal(failure)
             || failure.Diagnostics[0].Code is StorageTempException.EngineQuotaCode or StorageTempException.StatementQuotaCode or StorageTempException.FreeSpaceCode))
         {
             var original = SqlWindowInputSpool.RefusalFor(memory);
@@ -179,9 +179,14 @@ internal sealed partial class SqlPlanExecutor
             _subqueryValues?.AdmitPendingStatementMemory(previousPending);
             return result;
         }
-        catch (SqlExecutionException failure) when (spillOwner is not null && SqlWindowInputSpool.IsMemoryRefusal(failure)
-            && (!expressionsStarted || CanRestartWindow(plan)))
+        catch (SqlExecutionException failure) when (spillOwner is not null && SqlWindowInputSpool.IsMemoryRefusal(failure))
         {
+            var original = SqlWindowInputSpool.RefusalFor(memory) ?? failure;
+            if (expressionsStarted && !CanRestartWindow(plan))
+            {
+                if (!ReferenceEquals(original, failure)) { original.Data[nameof(SqlWindowInputSpool)] = failure; }
+                ExceptionDispatchInfo.Throw(original); throw;
+            }
             try
             {
                 // No input expression is re-run. A safe retry discards only stage-local
@@ -201,13 +206,13 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
                 return await PreserveWindowRefusalAsync(SpillWindowStageAsync(source, plan, previousPending, width, spillOwner,
-                    statement, cancellationToken, memory, evaluator, rows, frameOffsets, ComputePartitionAsync, FrameOffsetAsync, BindPartition), failure).ConfigureAwait(false);
+                    statement, cancellationToken, memory, evaluator, rows, frameOffsets, ComputePartitionAsync, FrameOffsetAsync, BindPartition), original).ConfigureAwait(false);
             }
-            catch (SqlExecutionException refused) when (!ReferenceEquals(refused, failure) && SqlWindowInputSpool.IsMemoryRefusal(refused) && !refused.Data.Contains(nameof(SqlTempRowCodec)))
-            { failure.Data[nameof(SqlWindowInputSpool)] = refused; ExceptionDispatchInfo.Throw(failure); throw; }
+            catch (SqlExecutionException refused) when (!ReferenceEquals(refused, original) && SqlWindowInputSpool.IsMemoryRefusal(refused))
+            { original.Data[nameof(SqlWindowInputSpool)] = refused; ExceptionDispatchInfo.Throw(original); throw; }
             catch (StorageTempException temp) when (temp.Code is StorageTempException.EngineQuotaCode or
                 StorageTempException.StatementQuotaCode or StorageTempException.FreeSpaceCode)
-            { failure.Data[nameof(SqlWindowInputSpool)] = temp; ExceptionDispatchInfo.Throw(failure); throw; }
+            { original.Data[nameof(SqlWindowInputSpool)] = temp; ExceptionDispatchInfo.Throw(original); throw; }
         }
 
         void ReserveKeys(long bytes) { memory.Reserve(bytes); keyBytes += bytes; }

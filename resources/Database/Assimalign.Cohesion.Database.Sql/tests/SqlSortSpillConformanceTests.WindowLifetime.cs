@@ -122,10 +122,16 @@ public sealed partial class SqlSortSpillConformanceTests
         // Arrange
         await using var engine = await CreateWindowAsync("window-cancel", 262144);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session);
-        using var cancellation = new CancellationTokenSource(); bool exercised = false;
+        using var cancellation = new CancellationTokenSource(); bool exercised = false, sorting = false;
         void Cancel() { exercised = true; cancellation.Cancel(); cancellation.Token.ThrowIfCancellationRequested(); }
-        SqlRowCollector.ObserveSpill = phase => { if (phase == point) { Cancel(); } };
-        SqlRowCollector.ObserveBuffer = (phase, _) => { if (point == "partition" && phase == "window-partition") { Cancel(); } };
+        SqlRowCollector.ObserveSpill = phase =>
+        {
+            if (point == "window-keys" && phase == "window-key-sorting" || point == "window-ordinal" && phase == "window-ordinal-sorting")
+            { sorting = true; }
+            if (point is not ("window-keys" or "window-ordinal") && phase == point) { Cancel(); }
+        };
+        SqlRowCollector.ObserveBuffer = (phase, _) =>
+        { if (sorting && phase == "window-decoded" || point == "partition" && phase == "window-partition") { Cancel(); } };
         if (point == "read") { BeforeRead(engine.TempSpace!, Cancel); }
         if (point == "write") { BeforeWrite(engine.TempSpace!, Cancel); }
         try

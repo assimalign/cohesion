@@ -40,7 +40,7 @@ HAVING and DISTINCT/ORDER BY/pagination, with named windows and shared compatibl
 with FILTER and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute over their frames. Native moving
 aggregates use inverse transitions or monotonic queues; NULL treatment is supported.
 Eligible partitioned stages spool input/output and sort one charged partition at a time
-on the existing grant refusal (#1789, SQ-L4b). Group/encounter order and evaluation are
+on the existing grant refusal (#1789). Group/encounter order and evaluation are
 preserved; an oversized single partition and reference-observing application catalogs keep
 the existing owner. DESIGN.md records the exact eligibility and capacity limits.
 

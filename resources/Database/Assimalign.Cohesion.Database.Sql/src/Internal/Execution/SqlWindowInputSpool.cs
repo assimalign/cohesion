@@ -24,6 +24,7 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
     private readonly StorageTempRun? _run;
     private readonly StorageTempSortReader? _sorted;
     private readonly StorageTempStatement _statement;
+    private byte[]? _scratch;
     private long _maximumDecoded;
     private bool _sealed;
     private IReadOnlyList<DatabaseColumn> _columns = [];
@@ -58,12 +59,11 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
 
     // Keep the fitting admission exactly where it was. Retain is atomic, so a
     // refused row owns no partial references when the handoff drains the list.
-    internal static bool Retain(List<object?[]> rows, object?[] row, SqlStatementMetrics? metrics,
-        long budget, SqlDatabaseSession? owner, CancellationToken token)
+    internal static bool Retain(List<object?[]> rows, object?[] row, SqlWindowMemory? memory, SqlStatementMetrics? metrics,
+        long budget, SqlDatabaseSession? owner, CancellationToken token, ref SqlWindowInputSpool? input)
     {
-        var memory = SqlWindowMemory.For(metrics);
         if (memory is null) { return false; }
-        if (owner is not null && For(rows) is { } existing) { existing.Append(row, token); return true; }
+        if (input is not null) { input.Append(row, token); return true; }
         try { memory.Retain(row); return false; }
         catch (SqlExecutionException failure) when (owner is not null && IsMemoryRefusal(failure))
         {
@@ -72,10 +72,12 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
             try
             {
                 spool = new SqlWindowInputSpool(metrics!, budget, owner, token) { Refusal = RefusalFor(memory) };
-                foreach (var buffered in rows) { spool.Append(buffered, token); memory.ReleaseRow(buffered); }
+                foreach (var buffered in rows)
+                { spool.Append(buffered, token); SqlRowCollector.ObserveBuffer?.Invoke("window-drain", buffered); memory.ReleaseRow(buffered); }
                 rows.Clear(); rows.Capacity = 0;
                 spool.Append(row, token);
                 LazyInitializer.EnsureInitialized(ref _inputs).Add(rows, spool);
+                input = spool;
                 return true;
             }
             catch (StorageTempException temp) when (temp.Code is StorageTempException.EngineQuotaCode or StorageTempException.StatementQuotaCode or StorageTempException.FreeSpaceCode)
@@ -105,11 +107,14 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
 
     internal void Append(object?[] row, CancellationToken token)
     {
-        if (!SqlTempRowCodec.TryGetLength(row, out int size)) { throw EncodingRefusal(_budget); }
-        if (size > MaximumRecordBytes) { throw SqlExecutionException.StatementMemoryBudget(_budget); }
-        if (!SqlTempRowCodec.TryEncode(row, out var encoded)) { throw EncodingRefusal(_budget); }
-        _maximumDecoded = Math.Max(_maximumDecoded, SqlTempRowCodec.DecodedBytes(row));
-        _run!.Append(encoded, token); Count++;
+        token.ThrowIfCancellationRequested();
+        _scratch ??= new byte[MaximumRecordBytes];
+        if (!SqlTempRowCodec.TryWrite(row, _scratch, out int size)) { throw EncodingRefusal(_budget); }
+        long decoded = SqlTempRowCodec.DecodedBytes(row);
+        if (StorageTempSpace.PageSize + size + 256L + 2 * decoded > _budget)
+        { throw SqlExecutionException.StatementMemoryBudget(_budget); }
+        _run!.Append(_scratch.AsSpan(0, size), token);
+        _maximumDecoded = Math.Max(_maximumDecoded, decoded); Count++;
     }
 
     internal void Seal(CancellationToken token)
@@ -126,7 +131,8 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
     internal IEnumerable<object?[]> Read(CancellationToken token)
     {
         Seal(token);
-        _metrics.ReservePlainSelectMemory(ReadBytes, _budget);
+        long readBytes = ReadBytes;
+        _metrics.ReservePlainSelectMemory(readBytes, _budget);
         try
         {
             if (_sorted is not null)
@@ -140,7 +146,13 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
                 while (reader.TryRead(buffer, out int size, token)) { yield return Decode(buffer.AsSpan(0, size)); }
             }
         }
-        finally { _metrics.ReleasePlainSelectMemory(ReadBytes); }
+        finally
+        {
+            // A stage run is consumed once. Its merge workspace must die while its
+            // reservation is still held, before a successor sort or DISTINCT reserves.
+            try { Dispose(); }
+            finally { _metrics.ReleasePlainSelectMemory(readBytes); }
+        }
     }
 
     private static object?[] Decode(ReadOnlySpan<byte> encoded)
@@ -161,6 +173,7 @@ internal sealed class SqlWindowInputSpool : DatabaseResultSet, IDisposable
     // cannot turn an already computed outcome into a cleanup failure.
     public void Dispose()
     {
+        _scratch = null;
         try { _run?.Dispose(); _sorted?.Dispose(); }
         catch (AggregateException) { }
         catch (StorageTempException) { }

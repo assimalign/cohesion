@@ -12,6 +12,25 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - SQL functions and checked SQL domains conservatively keep the window owner (#1789)")]
+    [InlineData("CREATE FUNCTION norm(s TEXT) RETURNS TEXT IMMUTABLE RETURN s")]
+    [InlineData("CREATE DOMAIN positive AS INT CHECK(VALUE>0)")]
+    public async Task ExecuteAsync_WindowSqlDefinitions_ShouldKeepBaseOwner(string definition)
+    {
+        // Arrange
+        await using var engine = await CreateWindowAsync("window-sql-definitions", 262144);
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(); await Seed(session);
+        await session.ExecuteAsync(definition);
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            "SELECT id,ROW_NUMBER() OVER(PARTITION BY id%100 ORDER BY id) FROM t"));
+        // Assert
+        database.Definitions.CanSpillWindowValues.ShouldBeFalse();
+        failure.Diagnostics[0].Code.ShouldBe("CS05079");
+        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Reference-observing application callbacks keep the base window owner and fitting aliases (#1789)")]
     public async Task ExecuteAsync_WindowReferenceCallback_ShouldKeepBaseCapabilityAndIdentity()
     {

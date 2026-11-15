@@ -390,6 +390,7 @@ internal sealed partial class SqlPlanExecutor
                 // for an unordered query, including the unlimited single-row lookup path.
                 var projected = new List<object?[]>();
                 SqlOutputSpool? outputSpool = null;
+                SqlWindowInputSpool? windowSpool = null;
                 unorderedRows = projected;
                 long skip = offset?.Count ?? 0;
                 long remaining = limit?.Count ?? long.MaxValue;
@@ -403,7 +404,8 @@ internal sealed partial class SqlPlanExecutor
                 {
                     var output = ProjectRow(inputs.Current, projections, evaluator, cancellationToken);
                     if (skip > 0) { skip--; continue; }
-                    if (SqlWindowInputSpool.Retain(projected, output, _metrics, _definitions.StatementMemoryBudget, spillOwner, cancellationToken))
+                    if (SqlWindowInputSpool.Retain(projected, output, SqlWindowMemory.For(_metrics), _metrics,
+                        _definitions.StatementMemoryBudget, spillOwner, cancellationToken, ref windowSpool))
                     { if (--remaining == 0) { break; } continue; }
                     if (retainRows is null || projected.Count < retainRows)
                     {

@@ -48,14 +48,17 @@ internal sealed partial class SqlPlanExecutor
         if (grant < 65536 || bound < 16) { throw SqlExecutionException.StatementMemoryBudget(budget); }
         long maximumDecoded = 0;
         statement.Metrics.ReservePlainSelectMemory(grant + metadata, budget);
-        StorageTempSortReader reader;
+        StorageTempSortReader? reader = null;
+        StorageTempSorter? sorter = null;
+        Exception? sortFailure = null;
         try
         {
             var columns = ordering?.Select(key => new SqlTempSortKeyCodec.Column(key.IsDescending, key.NullsFirst,
                 key.Collation.Resolve(_subqueryValues))).ToArray() ?? [];
             var families = new byte[columns.Length];
             var keyScratch = new byte[bound - 8];
-            using var sorter = StorageTempSorter.Create(input.Statement, grant, bound, 64);
+            sorter = StorageTempSorter.Create(input.Statement, grant, bound, 64);
+            SqlRowCollector.ObserveSpill?.Invoke(ordering is null ? "window-ordinal-sorting" : "window-key-sorting");
             foreach (var record in input.Read(token))
             {
                 token.ThrowIfCancellationRequested();
@@ -106,7 +109,31 @@ internal sealed partial class SqlPlanExecutor
             SqlWindowSpillMetrics.Record(statement.Metrics, group, input.Statement, sorter);
             SqlRowCollector.ObserveSpill?.Invoke(ordering is null ? "window-ordinal" : "window-keys");
         }
-        finally { statement.Metrics.ReleasePlainSelectMemory(grant + metadata); }
-        return new SqlWindowInputSpool(statement.Metrics, budget, input.Statement, reader, maximumDecoded, input.Count);
+        // A sorter can fail while unwinding flushed runs. Keep the initiating error,
+        // and close an untransferred reader if an observation fails after Complete.
+        catch (Exception failure) { sortFailure = failure; throw; }
+        finally
+        {
+            try
+            {
+                if (sortFailure is not null) { CloseReader(sortFailure); }
+                try { sorter?.Dispose(); }
+                catch (AggregateException cleanup)
+                {
+                    var failure = SqlSpilledResultSet.TranslateCleanup(cleanup);
+                    if (sortFailure is null) { CloseReader(failure); throw failure; }
+                    sortFailure.Data[nameof(StorageTempSorter)] = failure;
+                }
+            }
+            finally { statement.Metrics.ReleasePlainSelectMemory(grant + metadata); }
+        }
+        return new SqlWindowInputSpool(statement.Metrics, budget, input.Statement, reader!, maximumDecoded, input.Count);
+
+        void CloseReader(Exception original)
+        {
+            try { reader?.Dispose(); }
+            catch (AggregateException cleanup) { original.Data[nameof(StorageTempSortReader)] = SqlSpilledResultSet.TranslateCleanup(cleanup); }
+            catch (StorageTempException cleanup) { original.Data[nameof(StorageTempSortReader)] = SqlSpilledResultSet.Translate(cleanup); }
+        }
     }
 }

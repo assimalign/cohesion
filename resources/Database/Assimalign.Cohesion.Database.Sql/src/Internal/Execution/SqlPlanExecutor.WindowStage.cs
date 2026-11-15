@@ -17,7 +17,7 @@ internal sealed partial class SqlPlanExecutor
     private static async Task<DatabaseResult> PreserveWindowRefusalAsync(Task<DatabaseResult> execution, SqlExecutionException refusal)
     {
         try { return await execution.ConfigureAwait(false); }
-        catch (SqlExecutionException failure) when (!ReferenceEquals(failure, refusal) && SqlWindowInputSpool.IsMemoryRefusal(failure) && !failure.Data.Contains(nameof(SqlTempRowCodec)))
+        catch (SqlExecutionException failure) when (!ReferenceEquals(failure, refusal) && SqlWindowInputSpool.IsMemoryRefusal(failure))
         { refusal.Data[nameof(SqlWindowInputSpool)] = failure; ExceptionDispatchInfo.Throw(refusal); throw; }
         catch (StorageTempException failure) when (failure.Code is StorageTempException.EngineQuotaCode or
             StorageTempException.StatementQuotaCode or StorageTempException.FreeSpaceCode)
@@ -36,6 +36,10 @@ internal sealed partial class SqlPlanExecutor
         Collation[] collations = [];
         object?[][]? keys = null;
         ResetMemory(spilledPlan);
+        // Input-built independent vectors still belong to the root frame. Transfer
+        // them once before any sort; later resets leave that plain reservation live.
+        _subqueryValues?.AdmitPendingStatementMemory(pendingBefore);
+        SqlRowCollector.ObserveBuffer?.Invoke("window-reset", _subqueryValues!);
         using var prepared = new SqlWindowInputSpool(statement.Metrics, _definitions.StatementMemoryBudget, owner!, cancellationToken);
         long ordinal = 0;
         foreach (var raw in source.Read(cancellationToken))
