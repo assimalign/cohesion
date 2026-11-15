@@ -87,7 +87,7 @@ internal sealed class SqlBoundTableCache
     internal SqlFunctionEnvironment NativeFunctions => _native;
 
     internal SqlFunctionEnvironment Functions => Volatile.Read(ref _state).Functions;
-    internal bool CanSpillWindowValues => Volatile.Read(ref _state).CanSpillWindowValues;
+    internal bool CanSpillValues => Volatile.Read(ref _state).CanSpillValues;
 
     // Metadata loading never executes application code. Body compilation happens per entry,
     // after publication, so a statement needing no such body never waits for its compiler.
@@ -726,7 +726,7 @@ internal sealed class SqlBoundTableCache
 
     private sealed record JsonWriteUsage(ulong Generation, bool Used);
 
-    private static bool WindowSpillValuesSafe(SqlFunctionEnvironment functions)
+    private static bool SpillValuesSafe(SqlFunctionEnvironment functions)
     {
         // SQL compares values. Opaque application code can additionally observe CLR
         // reference identity, including through a later consumer of a window CTE.
@@ -757,7 +757,7 @@ internal sealed class SqlBoundTableCache
         internal readonly ConditionalWeakTable<SqlCatalogTable, SqlBindingEntry<SqlBoundTable>> Bound = new();
         internal readonly ConditionalWeakTable<SqlCatalogTable, ConditionalWeakTable<SqlCatalogIndex, SqlBindingEntry<SqlBoundExpression>>> IndexPredicates = new();
         internal readonly SqlFunctionEnvironment Functions;
-        internal readonly bool CanSpillWindowValues;
+        internal readonly bool CanSpillValues;
         internal ulong ValidatedGeneration;
         internal SqlBindingEntry<Validation>? Validation;
         internal bool HasUnresolvedIndexPredicates;
@@ -767,7 +767,7 @@ internal sealed class SqlBoundTableCache
         {
             _owner = owner;
             Functions = functions;
-            CanSpillWindowValues = WindowSpillValuesSafe(functions);
+            CanSpillValues = SpillValuesSafe(functions);
             // A new environment has no validated predicate bindings yet. Keep the DML
             // guard armed until validation proves this generation has no unresolved index.
             HasUnresolvedIndexPredicates = owner._catalog.Tables.Any(table =>

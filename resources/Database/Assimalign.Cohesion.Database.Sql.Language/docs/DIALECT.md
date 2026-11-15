@@ -1,5 +1,43 @@
 # The Declared SQL Dialect
 
+## Set-operation and nested-loop spooling (#1789)
+
+UNION ALL, UNION, INTERSECT and EXCEPT, including ALL, can spill on their existing
+statement-memory refusal. Operands finish in order and convert to the common type before
+comparison. UNION ALL keeps operand order; UNION keeps the first occurrence. INTERSECT
+and EXCEPT keep left order and the original qualifying spelling under the common collation.
+INTERSECT ALL keeps the first min(m,n) left copies; EXCEPT ALL keeps the copies after the
+first n. NULL keys compare equal. ORDER BY, DISTINCT, LIMIT, CTAS and CTE consumers retain
+their existing semantics and capacity requirements; ordered DISTINCT's seen set must fit.
+
+Nested-loop inners spool their pushed-filter rows once and reread in the same order for
+each outer row. Filters, volatile calls, sequences, ON pair order and stored-record visit
+counts are unchanged. RIGHT joins retain their existing loop direction. FULL requires its
+existing safe hash key; its nested-loop subtrees may spool, with charged match state and
+unchanged unmatched-row order. A non-equi FULL retains CS05070.
+
+File engines use their configured temporary space; in-memory engines need an explicit
+TempDirectory. Fitting statements keep their original charges and allocations. Internal
+stages share the statement quota and release at operator or statement exit, including
+error, cancellation and disconnect. They do not consume the eight live client-result slots.
+A final spilled result still does. Startup sweeping removes crash leftovers. EXPLAIN
+ANALYZE adds spill bytes and runs only when a stage actually spills.
+
+| State | Capacity |
+| --- | --- |
+| UNION ALL and operand-order runs | At most 16,384 encoded bytes per row, including an internal ordinal where present |
+| UNION duplicate keys | Shared hash partitions, eight partitions per level and at most eight levels, then ordinal ordering |
+| INTERSECT/EXCEPT counts and representatives | Both sides partition by comparison hash; bounded local counts/seen sets; survivors return to left ordinal order |
+| Nested-loop reader | One live allowance of 8,192 + L + 256 + 2D bytes per staged buffer, for largest record L and decoded row cost D; each pass opens a fresh independent page and record destination |
+| Stage handoff | Fixed workspace; at most 65,536 bytes beyond the statement grant |
+| Excluded values and contexts | Deferred collations, mixed comparison families per set column, unsupported codec cells or record capacity, reference-observing catalogs, correlated/lateral inputs, recursive or window ledgers, SQL/JSON and joined DML keep their existing refusals |
+
+The value-identity exclusion covers catalogs with reference-bearing or pseudo-type
+application/SQL parameters, application casts or checked domains, including unused
+registrations. Such callbacks can observe aliases that a value-only codec cannot preserve.
+A temp failure following a new operator handoff retains the original CS05067 and message,
+with its cause attached as exception data. No diagnostic identity or persistent format changes.
+
 ## Retained SELECT output spooling (#1789; #1838)
 
 Unordered root SELECTs, ordered index scans (primary or secondary), unordered CTAS source roots and
@@ -8,7 +46,7 @@ SELECTs inherit the outer statement's spill permission; derived/view/CTE caches 
 their runs and decode rows in encounter order. Fitting results, observed unordered order,
 volatile calls, sequence values, the first expression error and RecordsExamined are
 unchanged. File engines use their configured temporary space; in-memory engines require
-an explicit TempDirectory. Oversized or excluded window, recursive, set, every membership vector (IN, = ANY, > ALL and NOT IN), and joined-DML owners retain
+an explicit TempDirectory. Oversized or excluded window, recursive, every membership vector (IN, = ANY, > ALL and NOT IN), and joined-DML owners retain
 their existing paths. INSERT SELECT does not spill and keeps its source uncharged (#1828); CREATE TABLE AS is the only table-writing statement whose source spools.
 
 | Retained output | Capacity |
@@ -47,12 +85,12 @@ and non-FULL builds in multi-join plans,
 can vary by process. Rows, order, JoinCandidatePairs, RecordsExamined, calls and the first
 evaluation error retain fitting semantics.
 ON, WHERE and projections remain in the caller. Computed keys, correlated/lateral inputs,
-non-hash steps, deferred collations, SQL/JSON, application binary build cells, joined DML
+deferred collations, SQL/JSON, application binary build cells, joined DML
 and join-output DISTINCT receive no join-spill permission. Probing does not encode payloads;
 retained buffers of a normalized join tree (left inputs and intermediate outputs) can stage under SQ-L2's exact row codec and
 grant-derived record bound. This applies to probe payloads too: application-produced binary
 probe cells refuse CS05067 when that input must stage; fitting inputs keep their existing admission.
-Final result spooling is described above. A single window partition larger than the remaining grant (including OVER ()), excluded window families, recursion, set owners and NOT IN retain their existing refusals.
+Final result spooling is described above. A single window partition larger than the remaining grant (including OVER ()), excluded window families, recursion and every membership vector retain their existing refusals.
 
 Sorting shares the exact temporary statement and physical quota. FULL can stage already
 evaluated output/key records until its unmatched sort releases the grant. Top-N ties keep
@@ -3489,8 +3527,8 @@ writes, and retain existing INSERT atomicity and scalar-cardinality checks.
 Compatible same-quantifier UNION chains flatten to one N-way materialization with O(total input)
 time and memory before sorting; no accumulated prefix is copied per link. Other set nodes
 materialize both operands and a hash membership/count table in O(L+R). Every remaining recursive
-execution level checks the stack and reports CS05004. Sorting adds O(N log N); streaming
-and spilling remain excluded.
+execution level checks the stack and reports CS05004. Sorting adds O(N log N). Execution
+remains blocking; eligible set owners may spill as described above.
 CORRESPONDING (including BY forms) remains T2 and reports one contextual CK00001.
 Nested WITH, LATERAL and outer ORDER BY keys bound to derived outputs retain their
 existing exclusions.
@@ -3733,7 +3771,7 @@ immutable ranges of that buffer. This avoids duplicate payload storage while
 preserving PostgreSQL's iteration boundaries. An outer LIMIT, EXISTS or scalar
 subquery can stop production early, including when a CTE has multiple readers.
 ORDER BY, grouping and INTERSECT/EXCEPT still need their complete inputs.
-Windows, sorts and set operations consume completed inputs; an unbounded
+Within recursive statements, windows, sorts and set operations consume completed inputs; an unbounded
 blocking input exhausts StatementMemoryBudget with CS05067. Grouping of native
 COUNT, SUM and AVG consumes rows as they arrive and retains keys and aggregate
 state; other aggregates keep their accounted, completed inputs. Infinite pipelines
@@ -5867,7 +5905,7 @@ the statement. When plain bytes fill the grant first, refusal reports CS05067, i
 earlier ledger would later refuse with CS05079 or CS05094. With no plain bytes live, window
 and SQL/JSON grant refusals retain their specific code. Statement memory refusal aborts input
 immediately, including input with a later error, except when an eligible root sort, hash join, normalized join buffer,
-or plain hash aggregation/DISTINCT hands retained state to temp storage under the same grant. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
+plain hash aggregation/DISTINCT, set operation or nested-loop inner hands retained state to temp storage under the same grant. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
 buffer owner by reference identity, plus a fixed 64 B per distinct wide-cell map entry
 (#1776, SQ-L1c). Further references pay their array slots; smaller cells still pay per
 reference. Equal but separate objects, including binary clones, each pay. Output and ordering

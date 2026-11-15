@@ -21,7 +21,12 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.DebugView))]
 internal sealed class SqlStatementMetrics
 {
-    private bool _capturedCatalogSnapshot;
+    // Bit zero records the catalog image; upper bits count internal operand results.
+    // Reuse the existing flag slot so fitting statement objects do not grow.
+    private uint _contextFlags;
+    internal bool IsStageResult => _contextFlags >= 2;
+    internal void BeginStageResult() => _contextFlags += 2;
+    internal void EndStageResult() => _contextFlags -= 2;
 
     // One slot for a scalar path or ordered join paths: plain stored queries pay no extra field.
     private object _accessPath = string.Empty;
@@ -30,14 +35,14 @@ internal sealed class SqlStatementMetrics
     internal SqlCatalogSnapshot? CatalogSnapshot { get; set; }
 
     /// <summary>Catalog images captured by binding; zero when using a BEGIN-time image.</summary>
-    internal int CatalogSnapshotCaptures => _capturedCatalogSnapshot ? 1 : 0;
+    internal int CatalogSnapshotCaptures => (int)(_contextFlags & 1);
 
     internal void CaptureCatalogSnapshot(SqlCatalog catalog)
     {
         if (CatalogSnapshot is null)
         {
             CatalogSnapshot = catalog.CaptureSnapshot();
-            _capturedCatalogSnapshot = true;
+            _contextFlags |= 1;
         }
     }
 

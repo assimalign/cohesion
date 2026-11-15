@@ -14,6 +14,11 @@ corpora retain their existing behavior.
 
 ## Root sort spill conformance (#1789)
 
+Set-operation and nested-loop conformance covers input-order stages, partition-local bag
+counts and representatives, common-type conversion, CTE/CTAS consumers, quota-zero and
+archived-base grant sweeps, fitting allocation pins on ARM64/x64, callback identity gates,
+stage lifetime, crash-image convergence and heap bounds with real-path retention mutants.
+
 SqlSortSpillConformanceTests extends the executable SQL corpus with root ORDER BY and ordered
 DISTINCT spill, stable evaluation and representative selection, lazy repeatable delivery,
 located CK05 failures and retained-grant refusals. Grammar and wire formats are unchanged.

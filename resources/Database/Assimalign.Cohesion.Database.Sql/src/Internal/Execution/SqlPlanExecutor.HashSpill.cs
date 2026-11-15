@@ -299,7 +299,7 @@ internal sealed partial class SqlPlanExecutor
         }
         var result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns,
             spill.Statement, output, offset, plan.Limit?.Count ?? -1, spill.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, maximumDecoded,
-            ownsStatement: !spill.SharedStatement);
+            ownsStatement: !spill.SharedStatement, stageResult: _metrics!.IsStageResult);
         result.CaptureMetrics(_metrics); SqlHashSpillMetrics.Refresh(_metrics, spill.Statement); spill.Transfer();
         return result;
     }
@@ -354,7 +354,7 @@ internal sealed partial class SqlPlanExecutor
         internal static Action<string, long>? Observe { get => _observe.Value; set => _observe.Value = value; }
 
         internal HashSpill(SqlPlanExecutor executor, SqlDatabaseSession owner, Collation[] collations,
-            SqlGroupPlan? plan = null, SqlStatementContext? context = null, StorageTempStatement? shared = null)
+            SqlGroupPlan? plan = null, SqlStatementContext? context = null, StorageTempStatement? shared = null, bool stage = false)
         {
             _executor = executor; Owner = owner; _plan = plan; _context = context;
             _budget = executor._definitions.StatementMemoryBudget;
@@ -369,7 +369,7 @@ internal sealed partial class SqlPlanExecutor
             _inputTypes = new DatabaseType[plan?.Aggregates.Sum(a => 1 + a.Arguments.Length) ?? 0];
             _outputTypes = new DatabaseType[plan?.Aggregates.Count ?? 0];
             _aggregateCollations = plan?.Aggregates.Select(a => a.Collation.Resolve(executor._subqueryValues)).ToArray() ?? [];
-            bool windowInput = SqlWindowMemory.For(executor._metrics) is not null;
+            bool windowInput = stage || executor._metrics!.IsStageResult || SqlWindowMemory.For(executor._metrics) is not null;
             if (!windowInput) { SqlSpillLifetime.CheckCapacity(owner); }
             _statement = shared ?? (windowInput ? SqlHashSpillMetrics.JoinTemp(executor._metrics!, owner)
                 : SqlHashSpillMetrics.For(executor._metrics!)?.JoinStatement ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota));
@@ -648,7 +648,7 @@ internal sealed partial class SqlPlanExecutor
             var output = Complete(token);
             var columns = ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns;
             var result = new SqlSpilledResultSet(columns, _statement, output, offset?.Count ?? 0, limit?.Count ?? -1, Owner,
-                _budget - _executor._metrics!.HashMemoryBytes, MaximumDecodedBytes, ownsStatement: !_sharedStatement);
+                _budget - _executor._metrics!.HashMemoryBytes, MaximumDecodedBytes, ownsStatement: !_sharedStatement, stageResult: _executor._metrics.IsStageResult);
             result.CaptureMetrics(_executor._metrics);
             _disposed = true;
             return result;

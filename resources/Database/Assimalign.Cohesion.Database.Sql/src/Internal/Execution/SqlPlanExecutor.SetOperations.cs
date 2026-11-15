@@ -31,46 +31,90 @@ internal sealed partial class SqlPlanExecutor
                 {
                     int start = rows.Count;
                     await MaterializeSetOperandAsync(operand.Query, operand.Values, plan, statement, cancellationToken, rows, seen).ConfigureAwait(false);
-                    for (int i = start; i < rows.Count; i++)
-                    { RetainSelectRow(ref retainedBytes, rows[i], includeWindow: true); if (seen is not null) { RetainSelectRow(ref seenBytes, rows[i], includeWindow: true, overhead: 64); } }
+                    if (SetOperandPending.For(rows) is not null)
+                    {
+                        ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes);
+                        StartSetUnionSpill(rows, seen, plan, statement, cancellationToken);
+                        rows = await ResumeSetOperandAsync(rows, plan, statement, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        try
+                        {
+                            for (int i = start; i < rows.Count; i++)
+                            { RetainSelectRow(ref retainedBytes, rows[i], includeWindow: true); if (seen is not null) { RetainSelectRow(ref seenBytes, rows[i], includeWindow: true, overhead: 64); } }
+                        }
+                        catch (SqlExecutionException failure) when (CanSpillSetOperation(plan, statement, failure))
+                        {
+                            ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes);
+                            StartSetUnionSpill(rows, seen, plan, statement, cancellationToken, failure);
+                        }
+                    }
                 }
             }
             else
             {
                 var left = await MaterializeSetOperandAsync(plan.Operands[0].Query, plan.Operands[0].Values, plan, statement, cancellationToken).ConfigureAwait(false);
-                operandBytes += AdmitSelectRows(left, cancellationToken, includeWindow: true);
-                var right = await MaterializeSetOperandAsync(plan.Operands[1].Query, plan.Operands[1].Values, plan, statement, cancellationToken).ConfigureAwait(false);
-                operandBytes += AdmitSelectRows(right, cancellationToken, includeWindow: true);
-                var counts = new Dictionary<object?[], int>(comparer);
-                foreach (var row in right)
+                TryAdmitSetLeft(left, ref operandBytes, plan, statement, cancellationToken);
+                var right = SetOperandPending.For(left) is not null ? null : await MaterializeSetOperandAsync(plan.Operands[1].Query, plan.Operands[1].Values, plan, statement, cancellationToken).ConfigureAwait(false);
+                if (SetOperandPending.For(left) is not null || right is not null && SetOperandPending.For(right) is not null)
+                { ReleaseSelectMemory(ref operandBytes); rows = await SpillSetSidesAsync(left, right, plan, statement, cancellationToken).ConfigureAwait(false); }
+                else
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (!counts.TryGetValue(row, out int count))
-                    { recursiveScratch?.Reserve(64); RetainSelectRow(ref countsBytes, row, includeWindow: true, overhead: 64); }
-                    counts[row] = count + 1;
-                }
-                var seen = plan.IsAll ? null : new HashSet<object?[]>(comparer);
-                // PostgreSQL src/backend/executor/nodeSetOp.c:128-160: INTERSECT ALL
-                // emits min(m,n); EXCEPT ALL emits max(m-n,0). NULL keys compare equal.
-                foreach (var row in left)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    counts.TryGetValue(row, out int count);
-                    if (plan.IsAll && count > 0) { counts[row] = count - 1; }
-                    bool include = plan.Operator == SqlSetOperator.Intersect ? count > 0 : count == 0;
-                    if (include && (seen is null || !seen.Contains(row)))
+                    try
                     {
-                        if (seen is not null) { RetainSelectRow(ref seenBytes, row, includeWindow: true, overhead: 64); seen.Add(row); }
-                        recursiveScratch?.Reserve(64); RetainSelectRow(ref retainedBytes, row, includeWindow: true); rows.Add(row);
+                        operandBytes += AdmitSelectRows(right!, cancellationToken, includeWindow: true);
+                        var counts = new Dictionary<object?[], int>(comparer);
+                        foreach (var row in right!)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (!counts.TryGetValue(row, out int count))
+                            { recursiveScratch?.Reserve(64); RetainSelectRow(ref countsBytes, row, includeWindow: true, overhead: 64); }
+                            counts[row] = count + 1;
+                        }
+                        var seen = plan.IsAll ? null : new HashSet<object?[]>(comparer);
+                        // PostgreSQL src/backend/executor/nodeSetOp.c:128-160: INTERSECT ALL
+                        // emits min(m,n); EXCEPT ALL emits max(m-n,0). NULL keys compare equal.
+                        foreach (var row in left)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            counts.TryGetValue(row, out int count);
+                            if (plan.IsAll && count > 0) { counts[row] = count - 1; }
+                            bool include = plan.Operator == SqlSetOperator.Intersect ? count > 0 : count == 0;
+                            if (include && (seen is null || !seen.Contains(row)))
+                            {
+                                if (seen is not null) { RetainSelectRow(ref seenBytes, row, includeWindow: true, overhead: 64); seen.Add(row); }
+                                recursiveScratch?.Reserve(64); RetainSelectRow(ref retainedBytes, row, includeWindow: true); rows.Add(row);
+                            }
+                        }
+                    }
+                    catch (SqlExecutionException failure) when (CanSpillSetOperation(plan, statement, failure))
+                    {
+                        ReleaseSelectMemory(ref operandBytes); ReleaseSelectMemory(ref retainedBytes);
+                        ReleaseSelectMemory(ref seenBytes); ReleaseSelectMemory(ref countsBytes);
+                        rows.Clear(); rows.Capacity = 0;
+                        rows = await SpillSetSidesAsync(left, right, plan, statement, cancellationToken, failure).ConfigureAwait(false);
                     }
                 }
             }
-            return MaterializeSelect(rows, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset, false, evaluator, null, cancellationToken);
+            return MaterializeSelect(ReadSetRows(rows, cancellationToken), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset, false, evaluator, null, cancellationToken, spillOwner: statement.Session);
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); ReleaseSelectMemory(ref countsBytes); ReleaseSelectMemory(ref operandBytes); }
+        catch (Exception failure) when (statement.Session is not null
+            && SqlHashSpillMetrics.For(statement.Metrics)?.JoinStatement is not null && SqlOperatorSpillRefusal.IsTemporary(failure))
+        { throw SqlOperatorSpillRefusal.Preserve(statement.Metrics, failure, _definitions.StatementMemoryBudget); }
+        catch (Exception failure) { RecordSetStageFailure(statement.Metrics, plan, failure); throw; }
+        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); ReleaseSelectMemory(ref countsBytes); ReleaseSelectMemory(ref operandBytes); ReleaseSetStages(statement.Metrics, plan); }
     }
 
-    private async Task<List<object?[]>> MaterializeSetOperandAsync(SqlPlan operand,
+    private Task<List<object?[]>> MaterializeSetOperandAsync(SqlPlan operand,
+        IReadOnlyList<SqlBoundExpression> conversions, SqlSetOperationPlan plan,
+        SqlStatementContext statement, CancellationToken cancellationToken,
+        List<object?[]>? destination = null, HashSet<object?[]>? seen = null)
+        => statement.Session is null
+            ? MaterializeSetOperandBaseAsync(operand, conversions, plan, statement, cancellationToken, destination, seen)
+            : MaterializePermittedSetOperandAsync(operand, conversions, plan, statement, cancellationToken, destination, seen);
+
+    private async Task<List<object?[]>> MaterializeSetOperandBaseAsync(SqlPlan operand,
         IReadOnlyList<SqlBoundExpression> conversions, SqlSetOperationPlan plan,
         SqlStatementContext statement, CancellationToken cancellationToken,
         List<object?[]>? destination = null, HashSet<object?[]>? seen = null)

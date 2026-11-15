@@ -66,7 +66,7 @@ internal sealed partial class SqlPlanExecutor
                 if (next.Phase == 0)
                 {
                     if (statement.Metrics.IsAnalyzing && step.Hash is not null)
-                    { statement.Metrics.RecordHashSpillPolicy(step, _definitions.StatementMemoryBudget >= 262144 && (mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session)); }
+                    { statement.Metrics.RecordHashSpillPolicy(step, _definitions.StatementMemoryBudget >= 262144 && (mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillMixedJoinBuild(plan, statement.Session)); }
                     pending.Push((node, 1));
                     pending.Push((node.Left!, 0));
                     continue;
@@ -74,7 +74,7 @@ internal sealed partial class SqlPlanExecutor
                 var outer = results[node.Left!];
                 if (next.Phase == 1)
                 {
-                    if (outer.Rows.Count == 0 && SqlStagedSortSource.For(outer.Rows) is null && step.Kind != SqlJoinType.FullOuter)
+                    if (outer.Rows.Count == 0 && SqlStagedSortSource.For(outer.Rows) is null && SqlJoinInnerSpool.For(outer.Rows) is null && step.Kind != SqlJoinType.FullOuter)
                     {
                         var leaves = node.Leaves().ToArray();
                         var last = plan.Bindings[leaves.Max()];
@@ -182,7 +182,7 @@ internal sealed partial class SqlPlanExecutor
                             foreach (int entry in hash.ProbeEntries(left, cancellationToken)) { yield return (hash.RowAt(entry), entry); }
                             yield break;
                         }
-                        IEnumerable<object?[]> candidates = inner.Rows;
+                        IEnumerable<object?[]> candidates = ReadNestedLoopInner(inner.Rows, cancellationToken);
                         if (seek)
                         {
                             var access = step.Access!;
@@ -223,12 +223,14 @@ internal sealed partial class SqlPlanExecutor
 
         void ReleaseSpool(SelectJoinBuffer buffer)
         {
+            SqlJoinInnerSpool.Release(buffer);
             try { SqlStagedSortSource.Release(buffer); }
             catch (SqlExecutionException cleanup) when (cleanup.Diagnostics[0].Code == "CK05005")
             { SqlHashSpillMetrics.JoinCleanup(statement.Metrics, cleanup); }
         }
         SelectJoinRows ReadRows(SelectJoinBuffer buffer)
         {
+            if (SqlJoinInnerSpool.For(buffer) is { } innerSpool) { return new(innerSpool.Read(cancellationToken).GetEnumerator()); }
             if (SqlStagedSortSource.For(buffer) is not { } source) { return new(buffer); }
             source.Seal(cancellationToken); return new(source.Read(cancellationToken).GetEnumerator());
         }
@@ -242,7 +244,8 @@ internal sealed partial class SqlPlanExecutor
             if (sinks.TryGetValue(node, out var sink))
             {
                 try { sink.Add(row, cancellationToken); }
-                catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session, error))
+                catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0
+                    && error.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode && CanSpillMixedJoinBuild(plan, statement.Session))
                 { sink.Spill(statement.Session!, row, cancellationToken, error); }
                 FullJoinProgress?.Invoke("build", statement.Metrics, cancellationToken);
             }
@@ -253,12 +256,19 @@ internal sealed partial class SqlPlanExecutor
                     memory.Retain(row);
                     memory.Reserve(32); // list storage, including growth
                 }
+                if (SqlJoinInnerSpool.For(buffer) is { } spool) { spool.Append(row, cancellationToken); return; }
                 if (buffer.Count == 0 && SqlStagedSortSource.For(buffer) is { } source) { source.Append(row, cancellationToken); return; }
                 try { RetainSelectRow(ref buffer.Memory, row, includeWindow: true); buffer.Add(row); }
-                catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0 && CanSpillJoinRows(plan, statement.Session, error))
+                catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0
+                    && error.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                    && (CanSpillJoinRows(plan, statement.Session) || CanSpillNestedLoopRows(plan, statement.Session)))
                 {
-                    _ = SqlHashSpillMetrics.JoinTemp(statement.Metrics, statement.Session!);
-                    SqlStagedSortSource.Add(buffer, row, ref buffer.Memory, statement.Metrics, _definitions.StatementMemoryBudget, statement.Session!, cancellationToken);
+                    if (CanSpillJoinRows(plan, statement.Session))
+                    {
+                        _ = SqlHashSpillMetrics.JoinTemp(statement.Metrics, statement.Session!);
+                        SqlStagedSortSource.Add(buffer, row, ref buffer.Memory, statement.Metrics, _definitions.StatementMemoryBudget, statement.Session!, cancellationToken);
+                    }
+                    else { SqlJoinInnerSpool.Add(buffer, row, ref buffer.Memory, statement.Metrics, _definitions.StatementMemoryBudget, statement.Session!, error, cancellationToken); }
                 }
             }
         }

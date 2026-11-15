@@ -118,7 +118,6 @@ public sealed partial class SqlSortSpillConformanceTests
     [Theory(DisplayName = "Cohesion Test [Sql] - CTAS source roots retain root SELECT's unsupported spill refusals (#1789)")]
     [InlineData("SELECT DISTINCT id FROM t ORDER BY k", "CS05067")]
     [InlineData("SELECT id,COUNT(*) OVER() AS n FROM t ORDER BY id", "CS05079")]
-    [InlineData("SELECT id FROM t UNION ALL SELECT id FROM t ORDER BY id", "CS05067")]
     [InlineData("SELECT id,COUNT(*) AS n FROM t GROUP BY GROUPING SETS ((id)) ORDER BY id", "CS05067")]
     [InlineData("SELECT id,(SELECT u.id FROM u WHERE u.id=t.id) AS n FROM t ORDER BY id", "CS05067")]
     [InlineData("SELECT nextval('s') AS n,id FROM t ORDER BY k", "CS05067")]

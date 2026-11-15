@@ -107,7 +107,7 @@ internal sealed partial class SqlPlanExecutor
             try
             { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
                 source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, owner, grant, maximumDecodedRowBytes,
-                ownsStatement: !source.SharedStatement); }
+                ownsStatement: !source.SharedStatement, stageResult: _metrics!.IsStageResult); }
             catch (Exception exception) { if (!source.SharedStatement) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); } throw; }
             try
             {

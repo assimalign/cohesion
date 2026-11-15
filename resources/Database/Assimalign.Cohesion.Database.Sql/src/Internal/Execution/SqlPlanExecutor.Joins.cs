@@ -131,7 +131,7 @@ internal sealed partial class SqlPlanExecutor
     private void RecordJoinSpillPolicies(SqlJoinPlan plan, SqlStatementMetrics metrics, SqlDatabaseSession? spillOwner)
     {
         if (!metrics.IsAnalyzing) { return; }
-        bool allowed = _definitions.StatementMemoryBudget >= 262144 && CanSpillJoinRows(plan, spillOwner);
+        bool allowed = _definitions.StatementMemoryBudget >= 262144 && CanSpillMixedJoinBuild(plan, spillOwner);
         foreach (var step in plan.Steps)
         { if (step.Hash is not null) { metrics.RecordHashSpillPolicy(step, allowed); } }
     }
@@ -294,6 +294,7 @@ internal sealed partial class SqlPlanExecutor
                             if (buffered[level].Rows is null)
                             {
                                 var buffer = new List<object?[]>();
+                                buffered[level].Rows = buffer;
                                 foreach (var item in ReadInput(innerBinding))
                                 {
                                     if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
@@ -301,13 +302,12 @@ internal sealed partial class SqlPlanExecutor
                                         memory.Retain(item);
                                         memory.Reserve(32); // list storage, including growth
                                     }
-                                    RetainSelectRow(ref buffered[level].Memory, item, includeWindow: true);
-                                    buffer.Add(item);
+                                    RetainNestedLoopInner(buffer, item, ref buffered[level].Memory, plan, spillOwner, cancellationToken);
                                 }
-                                buffered[level].Rows = buffer;
+                                SqlJoinInnerSpool.For(buffer)?.Seal(cancellationToken);
                                 SqlRowCollector.ObserveBuffer?.Invoke("join-inner", buffer);
                             }
-                            candidates = buffered[level].Rows!;
+                            candidates = ReadNestedLoopInner(buffered[level].Rows!, cancellationToken);
                         }
                         else
                         {
@@ -351,7 +351,8 @@ internal sealed partial class SqlPlanExecutor
         {
             foreach (var cursor in cursors) { cursor?.Dispose(); }
             foreach (var hash in hashes) { hash?.Dispose(); }
-            for (int index = 0; index < buffered.Length; index++) { ReleaseSelectMemory(ref buffered[index].Memory); }
+            for (int index = 0; index < buffered.Length; index++)
+            { SqlJoinInnerSpool.Release(buffered[index].Rows); ReleaseSelectMemory(ref buffered[index].Memory); }
         }
 
         IEnumerable<object?[]> ReadInput(int binding)
