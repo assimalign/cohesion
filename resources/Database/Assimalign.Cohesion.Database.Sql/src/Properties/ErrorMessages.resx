@@ -307,6 +307,7 @@
   <data name="DefaultLoadNotLiteral" xml:space="preserve"><value>{0} cannot be loaded: its persisted definition '{1}' is not a literal value. {2}</value></data>
   <data name="PersistedRowExpressionInvalid" xml:space="preserve"><value>Parameters, subqueries and * have no value in a persisted row expression.</value></data>
   <data name="PersistedAggregateInvalid" xml:space="preserve"><value>Aggregate function '{0}' has no value in a persisted row expression.</value></data>
+  <data name="MigrationScalarExpressionRequired" xml:space="preserve"><value>the text is not exactly one scalar expression</value></data>
   <data name="ExpressionDeclarationInvalid" xml:space="preserve"><value>its SQL text '{0}' is not exactly one SQL expression ({1}).</value></data>
   <data name="CatalogStackInsufficient" xml:space="preserve"><value>{0} Open the database on a thread with a larger stack.</value></data>
   <data name="MissingValueNotLiteral" xml:space="preserve"><value>Missing value of column '{0}' must be a literal.</value></data>

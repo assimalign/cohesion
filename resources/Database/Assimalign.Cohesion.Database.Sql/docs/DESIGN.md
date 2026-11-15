@@ -8038,6 +8038,23 @@ The single function guard in each engine's execution-conformance suite requires 
 for every declared name and rejects evidence for undeclared names. OQL's
 [temporary exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
 
+## Shared ALTER COLUMN migration text (#1756)
+
+Database.Sql compiles Sql.Schema's stateless shared/MigrationLowering module and Sql.Language's
+shared Types module; the shared Defaults module is compiled by Sql.Schema and SDK Tasks.
+MigrationLowering owns ALTER COLUMN phase order, rewrite classification and statement text in
+this engine and SDK Tasks, and type/identifier rendering for all engine DDL. ALTER DEFAULT
+admission shares scalar-carrier parsing, literal-only and persisted-sequence refusals. The engine
+binding keeps its exception carriers, diagnostics and literal tree round trip. The SDK binding
+raises DatabaseException without structured CS diagnostics and requires a render fixed point after ceiling
+reparsing. Both consumers parse forward and rollback statements at the ceiling. SDK files contain
+forward statements only and a joint-publication header, without an engine reference.
+The golden corpus pins forward/compensation SQL and refusals, including domains, DEFAULT-only
+changes and non-ALTER DDL. Differential readers, type resolution and structural persisted-node
+walk checks pin the engine's separate helpers to the shared rules. The shared-source guard checks
+schema modules for static classes, const fields, expression-bodied static properties, locks,
+events, constructors and module initializers, alongside explicit consumer opt-ins.
+
 ## Error model
 
 Execution and DDL refusals carry structured diagnostics at their source (#1653). The internal
