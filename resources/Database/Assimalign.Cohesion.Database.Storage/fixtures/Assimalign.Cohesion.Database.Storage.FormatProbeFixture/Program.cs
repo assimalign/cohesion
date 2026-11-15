@@ -281,7 +281,7 @@ internal static class Program
         else
         {
             dataSet = model == "Documents" ? "document" : model.ToLowerInvariant();
-            byte current = model == "Graph" ? (byte)4 : (byte)1;
+            byte current = model == "Graph" ? (byte)5 : (byte)1;
             byte[] record = Metadata(legacy ? (model == "Graph" ? (byte)3 : (byte)0) : current);
             if (model == "Graph")
             {
