@@ -158,10 +158,15 @@ public sealed class GraphTypeDdlTests
         { await session.ExecuteAsync("INSERT (:A)-[:R {p:1}]->(:B)", cancellationToken: CancellationToken.None); }
         var previous = (await GraphCatalogIntrospectionTests.Rows(session, "SHOW CURRENT GRAPH TYPE"))[0][2];
         var before = await Counts(session);
+        int writes = 0;
+        database.Store.AfterApply = () => writes++;
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(text, cancellationToken: CancellationToken.None));
+        DatabaseException error;
+        try { error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(text, cancellationToken: CancellationToken.None)); }
+        finally { database.Store.AfterApply = null; }
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+        if (text == "CREATE (a:A)-[:R {p:1}]->(b:B) REMOVE a:A") { writes.ShouldBe(0); }
         (await Counts(session)).ShouldBe(before);
         (await GraphCatalogIntrospectionTests.Rows(session, "SHOW CURRENT GRAPH TYPE")).ShouldHaveSingleItem()[2].ShouldBe(previous);
         await session.ExecuteAsync("INSERT (:A)-[:R {p:2,extra:TRUE}]->(:B)", cancellationToken: CancellationToken.None);
