@@ -181,6 +181,9 @@ public sealed partial class SqlSortSpillConformanceTests
         await Seed(session, count);
         const string sql = "SELECT fresh_key(id),COUNT(*) FROM t GROUP BY fresh_key(id)";
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
+        // Keep pre-existing pool images from disappearing during either population.
+        using var images = new WindowPoolLease();
+        images.Drain(pool); await QuiesceWindowPoolAsync(pool);
         long minimumReplay = long.MaxValue;
         var smallMutant = new long[3];
         try
@@ -190,6 +193,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 for (int execution = 1; execution <= (mode == 1 ? 1 : 3); execution++)
                 {
                     weak.Clear(); retained.Clear(); mutant = mode;
+                    images.Drain(pool);
                     long before = LiveHeap.Read(), peak = 0, replayPeak = 0, replayDepth = 0;
                     long trimmedBefore = pool.Trimmed, rentedBefore = pool.Rented, allocatedBefore = pool.Allocated, droppedBefore = pool.Dropped, unknownBefore = pool.Unknown;
                     bool replaySampled = false;
