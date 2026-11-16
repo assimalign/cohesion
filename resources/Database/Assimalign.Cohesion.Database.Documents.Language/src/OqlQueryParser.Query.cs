@@ -10,9 +10,24 @@ public sealed partial class OqlQueryParser
     // Each operator has equal precedence; the loop builds the left-associated tree.
     private OqlQueryExpression ParseQuery()
     {
+        int enclosingDepth = _selectOperationDepth;
+        _selectOperationDepth = 0;
+        try
+        {
+            var query = ParseQueryCore();
+            // SELECT tails parse outside ParseSelect; include subqueries in their ordering too.
+            int depth = System.Math.Max(_selectOperationDepth, _queryOperationDepths.GetValueOrDefault(query));
+            _queryOperationDepths[query] = depth;
+            _selectOperationDepth = depth;
+            return query;
+        }
+        finally { _selectOperationDepth = System.Math.Max(enclosingDepth, _selectOperationDepth); }
+    }
+
+    private OqlQueryExpression ParseQueryCore()
+    {
         var start = Current;
         var query = ParseQueryTerm();
-        List<(string Name, Lexeme Start, Lexeme End)> deferred = [];
         int operations = 0;
         while (!Failed && IsSetOperator())
         {
@@ -27,12 +42,10 @@ public sealed partial class OqlQueryParser
             };
             Advance();
             bool all = Take("ALL");
-            if (operation != OqlSetOperation.Union)
-            { deferred.Add((operatorToken.Text.ToUpperInvariant(), operatorToken, Previous)); }
             // The final grammar admits only ALL; explicit DISTINCT is not SQL++ syntax.
             var right = ParseQueryTerm();
-            // Leaves have zero operators. Include parenthesized subtrees without counting
-            // their leaf as another level, and locate the operator that exceeds the bound.
+            // A SELECT leaf contributes its deepest nested compound. Include that depth
+            // across subqueries and locate the operator that exceeds the path bound.
             int depth = 1 + System.Math.Max(_queryOperationDepths.GetValueOrDefault(query), _queryOperationDepths.GetValueOrDefault(right));
             if (!Failed && depth > 128)
             { Error("CD00005", ErrorMessages.OqlQueryParserParseExpressionVoid, operatorToken); break; }
@@ -86,8 +99,6 @@ public sealed partial class OqlQueryParser
             if (isLimit) { limit = count; }
             else { offset = count; }
         }
-        foreach (var refused in deferred)
-        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(refused.Name, Profile.Language, Span(refused.Start, refused.End))); }
         if (ordering.Count == 0 && limit is null && offset is null) { return query; }
         if (query.OrderBy.Count > 0 || query.Limit is not null || query.Offset is not null)
         {
@@ -102,15 +113,28 @@ public sealed partial class OqlQueryParser
             return result;
         }
         var select = (OqlSelectExpression)query;
-        return new OqlSelectExpression(select.Collection, select.Alias, select.Projections, select.Predicate,
+        var pagedSelect = new OqlSelectExpression(select.Collection, select.Alias, select.Projections, select.Predicate,
             select.GroupBy, select.Having, ordering.AsReadOnly(), select.IsDistinct, select.IsValue, limit, offset,
             Span(start, Previous), select.Unnest, source: select.Source,
             bindings: select.Bindings == select.Unnest ? null : select.Bindings, isAliasImplicit: select.IsAliasImplicit);
+        _queryOperationDepths[pagedSelect] = _queryOperationDepths.GetValueOrDefault(select);
+        return pagedSelect;
     }
 
     private OqlQueryExpression ParseQueryTerm()
     {
-        if (Is("SELECT")) { return ParseSelect(); }
+        if (Is("SELECT"))
+        {
+            int enclosingDepth = _selectOperationDepth;
+            _selectOperationDepth = 0;
+            try
+            {
+                var select = ParseSelect();
+                _queryOperationDepths[select] = _selectOperationDepth;
+                return select;
+            }
+            finally { _selectOperationDepth = enclosingDepth; }
+        }
         var start = Current;
         if (Take(TokenType.LeftParen))
         {
@@ -127,12 +151,6 @@ public sealed partial class OqlQueryParser
         }
         Expect("SELECT");
         return EmptyExpression();
-    }
-
-    private void RefuseNestedCompound(OqlQueryExpression query)
-    {
-        if (!Failed && query is OqlSetOperationExpression)
-        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("compound query in a nested query position", Profile.Language, query.Location!)); }
     }
 
     private bool IsParenthesizedQuery(bool expressionOperand = false, bool requireQueryContinuation = false)

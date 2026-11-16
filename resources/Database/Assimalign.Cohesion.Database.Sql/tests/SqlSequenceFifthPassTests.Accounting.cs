@@ -12,11 +12,19 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSequenceFifthPassTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Sequence sorting: LIMIT and deep OFFSET have the ordinary sort's uncharged accounting")]
-    [InlineData(0, 0)][InlineData(0, 1)][InlineData(0, 2)]
-    [InlineData(1, 0)][InlineData(1, 1)][InlineData(1, 2)]
-    [InlineData(2, 0)][InlineData(2, 1)][InlineData(2, 2)]
-    [InlineData(3, 0)][InlineData(3, 1)][InlineData(3, 2)]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Sequence sorting: LIMIT and deep OFFSET have the unchanged DML source accounting")]
+    [InlineData(0, 0)]
+    [InlineData(0, 1)]
+    [InlineData(0, 2)]
+    [InlineData(1, 0)]
+    [InlineData(1, 1)]
+    [InlineData(1, 2)]
+    [InlineData(2, 0)]
+    [InlineData(2, 1)]
+    [InlineData(2, 2)]
+    [InlineData(3, 0)]
+    [InlineData(3, 1)]
+    [InlineData(3, 2)]
     public async Task Execute_BoundedSequenceSortCorpus_ShouldMatchOrdinaryAccounting(int shape, int window)
     {
         // Arrange: low budgets reproduce the large default-budget failure with 256 rows.
@@ -46,7 +54,12 @@ public sealed partial class SqlSequenceFifthPassTests
             // Act
             await Exec(session, "INSERT INTO dim SELECT nextval('s'), k" + clauses + page);
             var metrics = session.LastStatementMetrics!;
-            var rows = await Rows(session, "SELECT id,k FROM dim ORDER BY k");
+            // Verification reads are now budgeted too. Check the count, then fetch
+            // one expected key at a time; the tested INSERT SELECT keeps its 8 KiB grant.
+            (await Rows(session, "SELECT COUNT(*) FROM dim"))[0][0].ShouldBe((long)delivered);
+            var rows = new object?[delivered][];
+            for (int i = 0; i < delivered; i++)
+            { rows[i] = (await Rows(session, "SELECT id,k FROM dim WHERE k=" + (offset + i + 1))).ShouldHaveSingleItem(); }
 
             // Assert: grouping-set state retains its own preexisting charge; sort adds none.
             rows.Length.ShouldBe(delivered);

@@ -81,7 +81,7 @@ public enum StorageOfflineCause : byte
     /// </summary>
     JournalSizeLimit,
 
-    /// <summary>A required provisioning step failed; recovery must precede a retry.</summary>
+    /// <summary>In-memory publication failed after a catalog commit; recovery must decide its state.</summary>
     ProvisioningFailure,
 
     /// <summary>Open-time recovery was interrupted; closing must retain the journal for retry.</summary>

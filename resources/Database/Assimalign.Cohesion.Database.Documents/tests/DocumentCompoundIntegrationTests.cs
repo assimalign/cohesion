@@ -56,7 +56,7 @@ public sealed class DocumentCompoundIntegrationTests
         string.Join(';', rows.Select(row => row.GetValue(0)?.ToString())).ShouldBe("10;20;30;40");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Destination capture keeps CD01036 beside the deferred compound boundary (#1767, #1803)")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Destination capture keeps CD01036 with compound support (#1767, #1803)")]
     [InlineData("INSERT")]
     [InlineData("UPSERT")]
     public async Task ExecuteAsync_ValuesDestinationCapture_ShouldRefuseWithoutWrites(string verb)
@@ -81,24 +81,37 @@ public sealed class DocumentCompoundIntegrationTests
         string.Join(';', rows.Select(row => row.GetValue(0)?.ToString())).ShouldBe("1;2;9;8");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Nested and DML-source compounds retain OQ-S1's CK00001 boundary (#1803)")]
-    [InlineData("SELECT RAW (SELECT RAW items.g FROM items UNION ALL SELECT RAW items.g FROM items) FROM items")]
-    [InlineData("INSERT INTO items (KEY id, VALUE doc) SELECT 'new' AS id, {g:3} AS doc FROM items UNION ALL SELECT 'other' AS id, {g:4} AS doc FROM items")]
-    [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('new', {v:(SELECT RAW items.g FROM [1] AS s UNION ALL SELECT RAW items.g FROM [1] AS t)})")]
-    public async Task ExecuteAsync_DeferredCompoundPosition_ShouldRefuseBeforeExecution(string query)
+    [Fact(DisplayName = "Cohesion Test [Documents] - Nested compounds execute and cache independent collection operands (#1803)")]
+    public async Task ExecuteAsync_NestedCompound_ShouldCacheIndependentOperands()
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("compound-boundary", new());
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await SeedAsync(session);
+        // Act
+        var rows = await DocumentSubqueryTests.RowsAsync(session,
+            "SELECT RAW (SELECT RAW items.g FROM items UNION ALL SELECT RAW items.g FROM items) FROM items");
+        // Assert
+        rows.Select(row => row.GetValue(0)?.ToString()).ShouldBe(new[] { "[1,2,1,2]", "[1,2,1,2]" });
+        session.LastQuerySubqueriesExecuted.ShouldBe(1);
+    }
 
+    [Theory(DisplayName = "Cohesion Test [Documents] - DML compounds retain duplicate-key and destination-capture validation (#1803)")]
+    [InlineData("INSERT INTO items (KEY id, VALUE doc) SELECT 'new' AS id, {g:3} AS doc FROM items UNION ALL SELECT 'other' AS id, {g:4} AS doc FROM items", "CD03012")]
+    [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('new', {v:(SELECT RAW items.g FROM [1] AS s UNION ALL SELECT RAW items.g FROM [1] AS t)})", "CD01036")]
+    public async Task ExecuteAsync_InvalidCompoundWrite_ShouldRefuseBeforeMutation(string query, string code)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("compound-boundary", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session);
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(query, cancellationToken: CancellationToken.None));
-
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         session.LastQuerySubqueriesExecuted.ShouldBe(0);
         (await DocumentSubqueryTests.RowsAsync(session, "SELECT RAW META().id FROM items ORDER BY META().id"))
             .Select(row => row.GetString(0)).ShouldBe(["a", "b"]);

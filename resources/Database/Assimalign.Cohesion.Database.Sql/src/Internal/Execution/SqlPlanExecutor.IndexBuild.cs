@@ -29,14 +29,16 @@ internal sealed partial class SqlPlanExecutor
             total++;
         }
         statement.ProvisioningProgress?.Invoke(0, total);
+        statement.ObserveCopyJournalStart(_storage.JournalLength);
         statement.CheckCopySpace(1);
         long journalStart = 0;
         var index = await statement.Coordinator.ApplyStatementAsync(statement.Transaction,
             async bracket =>
             {
+                statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
                 statement.CheckCopySpace(1);
                 long allocationStart = statement.CaptureCopyAllocations();
-                journalStart = _storage.Journal.Length - 38;
+                journalStart = _storage.JournalLength - 38;
                 var createdIndex = physicalOwner == 0
                     ? await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId, definition, cancellationToken).ConfigureAwait(false)
                     : await _indexManager.CreatePreparedAsync(statement.Transaction, table.ObjectId, physicalOwner, definition, cancellationToken).ConfigureAwait(false);
@@ -69,13 +71,15 @@ internal sealed partial class SqlPlanExecutor
                 if (free < included.Length * entryBytes) { height += SqlSchemaProvisioner.JointTreeGrowth(included.Length, entryBytes); }
                 touches = included.Length * (4L * height + 3);
                 allocations = included.Length * 2L * height;
+                statement.ObserveCopyJournalStart(_storage.JournalLength);
                 statement.CheckCopySpace(touches, allocations);
             }
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
+                statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
                 statement.CheckCopySpace(touches, allocations);
                 long allocationStart = statement.CaptureCopyAllocations();
-                journalStart = _storage.Journal.Length - 38;
+                journalStart = _storage.JournalLength - 38;
                 foreach (var version in included)
                 {
                     cancellationToken.ThrowIfCancellationRequested();

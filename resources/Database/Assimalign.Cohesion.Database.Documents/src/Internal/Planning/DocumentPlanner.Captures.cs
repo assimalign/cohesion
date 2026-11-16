@@ -52,7 +52,7 @@ internal sealed partial class DocumentPlanner
             EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth);
     }
 
-    private static bool EquivalentNestedBindings(OqlSelectExpression query, DocumentBindingScope? left,
+    private static bool EquivalentNestedBindings(OqlQueryExpression query, DocumentBindingScope? left,
         DocumentBindingScope? right, int localDepth)
     {
         if (ReferenceEquals(left, right)) { return true; }
@@ -66,8 +66,12 @@ internal sealed partial class DocumentPlanner
             return ReferenceEquals(a, b) || a is not null && b is not null && aDistance < localDepth && aDistance == bDistance;
         }
 
-        bool SameQuery(OqlSelectExpression select, DocumentBindingScope? local)
+        bool SameQuery(OqlQueryExpression queryExpression, DocumentBindingScope? local)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (queryExpression is OqlSetOperationExpression compound)
+            { return SameQuery(compound.Left, local) && SameQuery(compound.Right, local); }
+            var select = (OqlSelectExpression)queryExpression;
             // FROM resolves before its own alias; later clauses see only bindings
             // introduced so far. Local declarations mask the enclosing scopes being
             // compared, including in transitive captures and nested ORDER BY.
@@ -93,7 +97,7 @@ internal sealed partial class DocumentPlanner
         bool Same(OqlExpression expression, DocumentBindingScope? local, DocumentBindingScope? nestedOrder = null)
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (expression is OqlSubqueryExpression subquery) { return SameQuery(RequireQueryBlock(subquery.Query), nestedOrder ?? local); }
+            if (expression is OqlSubqueryExpression subquery) { return SameQuery(subquery.Query, nestedOrder ?? local); }
             if (expression is OqlPathExpression { Segments.Count: > 0 } path) { return SameName(path.Segments[0].Name, local); }
             if (expression is OqlComprehensionExpression comprehension)
             {
@@ -114,7 +118,7 @@ internal sealed partial class DocumentPlanner
     // do not restore this query's hidden source; an aggregate in this query already
     // exempts its own row inputs before reaching this visitor. PostgreSQL's analogous
     // level-aware grouping check is src/backend/parser/parse_agg.c:1427-1514.
-    private static void ValidateGroupedCaptures(OqlSelectExpression nested, OqlSelectExpression query,
+    private static void ValidateGroupedCaptures(OqlQueryExpression nested, OqlSelectExpression query,
         IReadOnlySet<string>? variables, DocumentBindingScopes scopes, DocumentFunctionCatalog functions,
         DocumentBindingScope? bound, IReadOnlySet<string>? outerNames, bool groupArrayInput = false)
     {
@@ -123,8 +127,12 @@ internal sealed partial class DocumentPlanner
         bool SourceName(string? name) => groupArrayInput ? name == query.GroupAs :
             name == DocumentSourceName.Of(query) || name is not null && variables?.Contains(name) == true;
 
-        void VisitQuery(OqlSelectExpression select, DocumentBindingScope? local)
+        void VisitQuery(OqlQueryExpression queryExpression, DocumentBindingScope? local)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (queryExpression is OqlSetOperationExpression compound)
+            { VisitQuery(compound.Left, local); VisitQuery(compound.Right, local); return; }
+            var select = (OqlSelectExpression)queryExpression;
             if (select.Source is not null) { Visit(select.Source, local); }
             else if (!DocumentSourceName.IsImplicitCollection(query, select.Collection))
             {
@@ -158,7 +166,7 @@ internal sealed partial class DocumentPlanner
             // inner binding's identity so shadowed names cannot prove a group key.
             if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes,
                 rightScope: expression is OqlSubqueryExpression ? nestedOrder ?? local : local))) { return; }
-            if (expression is OqlSubqueryExpression subquery) { VisitQuery(RequireQueryBlock(subquery.Query), nestedOrder ?? local); return; }
+            if (expression is OqlSubqueryExpression subquery) { VisitQuery(subquery.Query, nestedOrder ?? local); return; }
             if (expression is OqlMetaExpression meta)
             {
                 if (meta.Arguments.Count == 1 && meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } receiver &&

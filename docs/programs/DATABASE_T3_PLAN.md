@@ -214,7 +214,9 @@ The largest risk in the tier is IX-V3, HNSW repair under MVCC. Every index kind 
 |---|---|---|
 | B1 | EN-G1, SQ-T4, SQ-A4, OQ-K1, EN-C1 | SQL 35 (A4), after EN-G1 |
 | B2 | SQ-K4, OQ-S1, GQ-T1, EN-A1 | SQL 36 (K4), Graph catalog (T1) |
-| B3 | SQ-L1 (moved from B2), SQ-A5, EN-X1, SQ-H3, OQ-S2, GQ-N1, EN-P1 | SQL (A5) |
+| B3 | SQ-L1a, SQ-L1b, SQ-L1c (moved from B2), SQ-A5, EN-X1, SQ-H3, OQ-S2, GQ-N1, EN-P1 | SQL (A5) |
+
+The split held "results never change" against the pre-change commit.
 
 SQ-L1 left batch 2 after four review rounds. Each round closed the previous round's findings and
 introduced new ones; the last one left a crash in joined DML over a wide GROUP BY key and two result

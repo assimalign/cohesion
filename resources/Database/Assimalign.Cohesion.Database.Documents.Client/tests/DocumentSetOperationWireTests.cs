@@ -14,14 +14,26 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentSetOperationWireTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents.Client] - UNION: TCP runs the generated RAW document and typed-column first-representative oracle")]
-    [InlineData(false, "raw")]
-    [InlineData(true, "raw")]
-    [InlineData(false, "document")]
-    [InlineData(true, "document")]
-    [InlineData(false, "columns")]
-    [InlineData(true, "columns")]
-    public async Task QueryAsync_GeneratedValues_ShouldMatchOracleOverTcpAsync(bool all, string mode)
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Set operations: TCP runs the generated multiset first-representative oracle")]
+    [InlineData(false, "raw", "UNION")]
+    [InlineData(true, "raw", "UNION")]
+    [InlineData(false, "document", "UNION")]
+    [InlineData(true, "document", "UNION")]
+    [InlineData(false, "columns", "UNION")]
+    [InlineData(true, "columns", "UNION")]
+    [InlineData(false, "raw", "INTERSECT")]
+    [InlineData(true, "raw", "INTERSECT")]
+    [InlineData(false, "document", "INTERSECT")]
+    [InlineData(true, "document", "INTERSECT")]
+    [InlineData(false, "columns", "INTERSECT")]
+    [InlineData(true, "columns", "INTERSECT")]
+    [InlineData(false, "raw", "EXCEPT")]
+    [InlineData(true, "raw", "EXCEPT")]
+    [InlineData(false, "document", "EXCEPT")]
+    [InlineData(true, "document", "EXCEPT")]
+    [InlineData(false, "columns", "EXCEPT")]
+    [InlineData(true, "columns", "EXCEPT")]
+    public async Task QueryAsync_GeneratedValues_ShouldMatchOracleOverTcpAsync(bool all, string mode, string operation)
     {
         // Arrange: the first 16 trials of the engine's 64-trial generator, with the same seed.
         await using var harness = await DocumentClientTestHarness.StartAsync(tcp: true);
@@ -46,9 +58,24 @@ public sealed class DocumentSetOperationWireTests
             using var projected = JsonDocument.Parse("[" + string.Join(",", a.RootElement.EnumerateArray().Select(value => Project(value, named, false))
                 .Concat(b.RootElement.EnumerateArray().Select(value => Project(value, named, mode == "document")))) + "]");
             IEnumerable<JsonElement> expected = projected.RootElement.EnumerateArray();
-            if (!all) { expected = expected.DistinctBy(Canonical, StringComparer.Ordinal); }
-            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a UNION " + (all ? "ALL " : "") + (mode == "columns" ? "SELECT b.a AS a,b.b AS b FROM @b AS b" : "SELECT b.b AS b,b.a AS a FROM @b AS b")
-                : "SELECT RAW a FROM @a AS a UNION " + (all ? "ALL " : "") + "SELECT RAW b FROM @b AS b";
+            if (operation != "UNION")
+            {
+                var values = expected.ToArray();
+                var counts = values.Skip(left.Length).GroupBy(Canonical).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+                var kept = new List<JsonElement>();
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var value in values.Take(left.Length))
+                {
+                    string key = Canonical(value);
+                    bool present = counts.GetValueOrDefault(key) > 0;
+                    if (all && present) { counts[key]--; }
+                    if (present == (operation == "INTERSECT") && (all || seen.Add(key))) { kept.Add(value); }
+                }
+                expected = kept;
+            }
+            else if (!all) { expected = expected.DistinctBy(Canonical, StringComparer.Ordinal); }
+            string text = named ? "SELECT a.a AS a,a.b AS b FROM @a AS a " + operation + " " + (all ? "ALL " : "") + (mode == "columns" ? "SELECT b.a AS a,b.b AS b FROM @b AS b" : "SELECT b.b AS b,b.a AS a FROM @b AS b")
+                : "SELECT RAW a FROM @a AS a " + operation + " " + (all ? "ALL " : "") + "SELECT RAW b FROM @b AS b";
             // Act
             var result = await connection.QueryAsync(text, new Dictionary<string, object?> { ["a"] = a.RootElement, ["b"] = b.RootElement }, harness.Token);
             // Assert: canonical keys choose equality; JSON keeps member order and numeric cells compare by value.
@@ -59,7 +86,7 @@ public sealed class DocumentSetOperationWireTests
                 result.Columns.Select(column => column.Type).ShouldBe(expected.Any()
                     ? new[] { DatabaseType.Json, DatabaseType.Decimal } : new[] { DatabaseType.Null, DatabaseType.Null });
                 cells.ShouldBe(expected.Select(value => (value.GetProperty("a").GetRawText(), value.GetProperty("b").GetDecimal())));
-                if (trial == 0 && !all)
+                if (trial == 0 && !all && operation == "UNION")
                 {
                     cells.ShouldBe(new[] { ("{\"z\":1,\"a\":2}", 3m), ("{\"r\":4,\"q\":5}", 4.5m) });
                     result.Select(row => ((decimal)row[1]!).ToString(CultureInfo.InvariantCulture)).ShouldBe(new[] { "3.00", "4.50" });
@@ -117,8 +144,8 @@ public sealed class DocumentSetOperationWireTests
         foreach (var test in new[] {
             ("SELECT RAW 1 FROM [1] AS a UNION SELECT RAW 2 FROM [1] AS b ORDER BY n", "CD01037"),
             ("SELECT 1 AS n FROM [1] AS a UNION SELECT 2 AS n FROM [1] AS b ORDER BY absent", "CD01038"),
-            ("SELECT RAW 1 FROM [1] AS a INTERSECT ALL SELECT RAW 2 FROM [1] AS b", "CK00001"),
-            ("SELECT RAW 1 FROM [1] AS a EXCEPT SELECT RAW 2 FROM [1] AS b", "CK00001") })
+            ("SELECT RAW 1 FROM [1] AS a INTERSECT DISTINCT SELECT RAW 2 FROM [1] AS b", "CK00001"),
+            ("SELECT 1 AS n FROM [1] AS a EXCEPT SELECT 2 AS n FROM [1] AS b ORDER BY (SELECT RAW 1 FROM [0] AS z)", "CK00001") })
         {
             var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync(test.Item1, cancellationToken: harness.Token));
             error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(test.Item2);
@@ -126,6 +153,55 @@ public sealed class DocumentSetOperationWireTests
         }
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("SELECT RAW 1 FROM [1] AS x UNION SELECT RAW 1 FROM [1] AS y", cancellationToken: harness.Token)).Count.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Multisets: all query positions preserve values headers atomic writes and session reuse")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_MultisetPositions_ShouldPreserveValuesAndReuseAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("dest", harness.Token);
+        // Act / Assert
+        var intersect = await connection.QueryAsync("SELECT RAW x FROM [1.00,2,1.0,3,2] AS x INTERSECT ALL SELECT RAW y FROM [1,2.0,2] AS y", cancellationToken: harness.Token);
+        intersect.Columns.Single().Name.ShouldBe("value");
+        intersect.Documents.Select(value => value.GetRawText()).ShouldBe(new[] { "1.00", "2", "2" });
+        var except = await connection.QueryAsync("SELECT x AS n FROM [1,1,2,3] AS x EXCEPT ALL SELECT y AS n FROM [1,3] AS y ORDER BY n DESC", cancellationToken: harness.Token);
+        except.Select(row => row[0]).ShouldBe(new object?[] { 2m, 1m });
+        var rawUnknown = await connection.QueryAsync("SELECT RAW MISSING FROM [0,1] AS x INTERSECT ALL SELECT VALUE NULL FROM [0] AS y", cancellationToken: harness.Token);
+        rawUnknown.Documents.ShouldHaveSingleItem().ValueKind.ShouldBe(JsonValueKind.Null);
+        var missingUnknown = await connection.QueryAsync("SELECT MISSING AS a FROM [0] AS x EXCEPT SELECT NULL AS a FROM [0] AS y", cancellationToken: harness.Token);
+        missingUnknown.ShouldHaveSingleItem().IsMissing(0).ShouldBeTrue();
+        var structural = await connection.QueryAsync("SELECT RAW {b:2,a:1.00} FROM [0] AS x INTERSECT SELECT RAW {a:1,b:2.0} FROM [0] AS y", cancellationToken: harness.Token);
+        structural.Documents.ShouldHaveSingleItem().GetRawText().ShouldBe("{\"b\":2,\"a\":1.00}");
+        var correlated = await connection.QueryAsync("SELECT RAW (SELECT RAW i.n FROM o AS i INTERSECT SELECT RAW o.n FROM [0] AS y) FROM [{n:1},{n:2}] AS o", cancellationToken: harness.Token);
+        correlated.Documents.Select(value => value.GetRawText()).ShouldBe(new[] { "[1]", "[2]" });
+        var derived = await connection.QueryAsync("SELECT RAW q FROM (SELECT 1 AS a FROM [0] AS x EXCEPT SELECT 1 AS b FROM [0] AS y) AS q", cancellationToken: harness.Token);
+        derived.Documents.Single().GetRawText().ShouldBe("{\"a\":1}");
+        var namedArray = await connection.QueryAsync("SELECT RAW (SELECT MISSING AS a FROM [0] AS x UNION SELECT NULL AS b FROM [0] AS y) FROM [0] AS seed", cancellationToken: harness.Token);
+        namedArray.Documents.Single().GetRawText().ShouldBe("[{},{\"b\":null}]");
+        var orderedScope = await connection.QueryAsync("SELECT RAW (SELECT x AS n FROM [2,1] AS x INTERSECT SELECT y AS n FROM [1,2] AS y ORDER BY n) FROM [0] AS n", cancellationToken: harness.Token);
+        orderedScope.Documents.Single().GetRawText().ShouldBe("[{\"n\":1},{\"n\":2}]");
+        var missingScope = await connection.QueryAsync("SELECT RAW (SELECT x AS n FROM [1,2] AS x EXCEPT ALL SELECT y AS m FROM [] AS y ORDER BY m - n) FROM [0] AS m", cancellationToken: harness.Token);
+        missingScope.Documents.Single().GetRawText().ShouldBe("[{\"n\":1},{\"n\":2}]");
+        var membership = await connection.QueryAsync("SELECT RAW x FROM [1,2] AS x WHERE x IN ((SELECT RAW 1 FROM [0] AS a) UNION SELECT RAW 2 FROM [0] AS b)", cancellationToken: harness.Token);
+        membership.Count.ShouldBe(2);
+        (await connection.QueryAsync("SELECT RAW x FROM [1,2] AS x WHERE x IN ((SELECT RAW 1 FROM [0] AS a))", cancellationToken: harness.Token)).ShouldBeEmpty();
+        var inserted = await connection.QueryAsync("INSERT INTO dest (KEY k,VALUE v) SELECT 'a' AS k,{n:1} AS v FROM [0] AS x INTERSECT ALL SELECT {n:1} AS v,'a' AS k FROM [0] AS y RETURNING RAW dest.n", cancellationToken: harness.Token);
+        inserted.AffectedCount.ShouldBe(1);
+        inserted.Documents.Single().GetInt32().ShouldBe(1);
+        var upserted = await connection.QueryAsync("UPSERT INTO dest (KEY k) SELECT 'a' AS k,2 AS n FROM [0] AS x EXCEPT SELECT 'b' AS other FROM [0] AS y RETURNING RAW dest.n", cancellationToken: harness.Token);
+        upserted.AffectedCount.ShouldBe(1);
+        upserted.Documents.Single().GetInt32().ShouldBe(2);
+        var invalid = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync("INSERT INTO dest (KEY k,VALUE v) SELECT 'safe' AS k,{n:1} AS v FROM [0] AS x UNION ALL SELECT 'bad' AS other,{n:2} AS v FROM [0] AS y", cancellationToken: harness.Token));
+        invalid.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02008");
+        (await connection.GetAsync("dest", "safe", harness.Token)).ShouldBeNull();
+        var explain = await connection.QueryAsync("EXPLAIN UPSERT INTO dest (KEY k) SELECT 'a' AS k FROM [1/0] AS x EXCEPT ALL SELECT 'b' AS k FROM [1/0] AS y", cancellationToken: harness.Token);
+        explain.Documents.Select(value => value.GetProperty("operator").GetString()).ShouldBe(new[] { "UpsertSelect", "ExceptAll", "Select", "Project", "ExpressionSource", "Select", "Project", "ExpressionSource" });
+        connection.IsOpen.ShouldBeTrue();
+        (await connection.QueryAsync("SELECT RAW x FROM [1/0] AS x INTERSECT ALL SELECT RAW y FROM [1/0] AS y LIMIT 0", cancellationToken: harness.Token)).ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - UNION: memory and work refusals preserve structured identities and rollback reuse")]
@@ -150,6 +226,15 @@ public sealed class DocumentSetOperationWireTests
         string values = "[" + string.Join(",", Enumerable.Range(0, 500)) + "]";
         var work = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync("SELECT RAW x FROM " + values + " AS x UNION ALL SELECT RAW 1 FROM [1] AS y OFFSET 1000", cancellationToken: harness.Token));
         work.Diagnostics.Single().Code.ShouldBe("CD05020");
+        foreach (string operationName in new[] { "INTERSECT", "INTERSECT ALL", "EXCEPT", "EXCEPT ALL" })
+        {
+            await connection.QueryAsync("BEGIN", cancellationToken: harness.Token);
+            var retained = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync("SELECT RAW 1 FROM [] AS x " + operationName + " SELECT RAW v FROM items", cancellationToken: harness.Token));
+            retained.Diagnostics.Single().Code.ShouldBe("CD05018");
+            await connection.QueryAsync("ROLLBACK", cancellationToken: harness.Token);
+            var counted = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync("SELECT RAW 1 FROM [] AS x " + operationName + " SELECT RAW y FROM " + values + " AS y", cancellationToken: harness.Token));
+            counted.Diagnostics.Single().Code.ShouldBe("CD05020");
+        }
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("SELECT RAW 1 FROM [1] AS x UNION SELECT RAW 1 FROM [1] AS y", cancellationToken: harness.Token)).Count.ShouldBe(1);
     }

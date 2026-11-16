@@ -10,20 +10,33 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementReferences.DebugView))]
 internal sealed class SqlStatementReferences
 {
-    internal Dictionary<ulong, IReadOnlyList<SqlBoundReference>> Incoming { get; } = [];
-    internal Dictionary<SqlCatalogConstraint, SqlCatalogTable> Parents { get; } = [];
-    internal Dictionary<SqlCatalogConstraint, SqlBoundReference> Bindings { get; } = [];
-    internal Dictionary<SqlBoundConstraintKey, SqlConstraintLookup> Lookups { get; } = [];
-    internal Dictionary<SqlCatalogTable, List<SqlLiveIndex>> LiveIndexes { get; } = [];
-    internal HashSet<ulong> IncomingLocks { get; } = [];
-    internal HashSet<ulong> OutgoingLocks { get; } = [];
+    internal long ReferenceCatalogTableVisits;
+    internal int IncomingReferenceBuilds;
+    internal int ReferenceIntentLockBatches;
+    internal int ConstraintLookupBuilds;
+    internal int LiveIndexBuilds;
+
+    private Dictionary<ulong, IReadOnlyList<SqlBoundReference>>? _incoming;
+    internal Dictionary<ulong, IReadOnlyList<SqlBoundReference>> Incoming => _incoming ??= [];
+    private Dictionary<SqlCatalogConstraint, SqlCatalogTable>? _parents;
+    internal Dictionary<SqlCatalogConstraint, SqlCatalogTable> Parents => _parents ??= [];
+    private Dictionary<SqlCatalogConstraint, SqlBoundReference>? _bindings;
+    internal Dictionary<SqlCatalogConstraint, SqlBoundReference> Bindings => _bindings ??= [];
+    private Dictionary<SqlBoundConstraintKey, SqlConstraintLookup>? _lookups;
+    internal Dictionary<SqlBoundConstraintKey, SqlConstraintLookup> Lookups => _lookups ??= [];
+    private Dictionary<SqlCatalogTable, List<SqlLiveIndex>>? _liveIndexes;
+    internal Dictionary<SqlCatalogTable, List<SqlLiveIndex>> LiveIndexes => _liveIndexes ??= [];
+    private HashSet<ulong>? _incomingLocks;
+    internal HashSet<ulong> IncomingLocks => _incomingLocks ??= [];
+    private HashSet<ulong>? _outgoingLocks;
+    internal HashSet<ulong> OutgoingLocks => _outgoingLocks ??= [];
 
     // Every definition/lock-coverage claim was made while grants that may have just
     // been released were held. Rebuild all attempt-local caches after a wait.
     internal void ClearAfterCascadeRetry()
     {
-        Incoming.Clear(); Parents.Clear(); Bindings.Clear(); Lookups.Clear();
-        LiveIndexes.Clear(); IncomingLocks.Clear(); OutgoingLocks.Clear();
+        _incoming?.Clear(); _parents?.Clear(); _bindings?.Clear(); _lookups?.Clear();
+        _liveIndexes?.Clear(); _incomingLocks?.Clear(); _outgoingLocks?.Clear();
     }
 
     private sealed class DebugView

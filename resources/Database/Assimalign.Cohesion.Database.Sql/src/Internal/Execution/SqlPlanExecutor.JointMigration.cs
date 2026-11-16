@@ -42,11 +42,25 @@ internal sealed partial class SqlPlanExecutor
         foreach (var table in dropped) { EnsureNoViewReads(table); }
         var all = image.Tables.Where(table => !IsTarget(table)).Concat(shapes).ToArray();
         var indexes = new List<SqlCatalogIndex>();
+        var scripted = _catalog.Scripts.SelectMany(receipt => receipt.Objects).ToHashSet(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < shapes.Length; i++)
         {
             var table = shapes[i];
             if (table.PrimaryKeyColumns.Count != 0)
-            { indexes.Add(new SqlCatalogIndex(table.ObjectId, $"PrimaryKey_{table.Name}", table.PrimaryKeyColumns, true, table.Owner, table.OwningSchema, isPrimaryKey: true)); }
+            {
+                // The marker and columns identify the key tree. Inherit its generated
+                // name so both kept heaps and rewrites retain the statement-visible name.
+                var stored = image.TryGetTable(table.Schema, table.Name, out var keyed)
+                    ? image.GetIndexes(keyed.ObjectId).FirstOrDefault(index => index.IsPrimaryKey &&
+                        index.ColumnNames.SequenceEqual(table.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase))
+                    : null;
+                var declared = plans[i].Plan.Constraints.Select((definition, ordinal) => (definition, ordinal))
+                    .FirstOrDefault(item => item.definition.Kind == SqlConstraintKind.PrimaryKey);
+                string name = stored?.Name ?? (declared.definition is not null
+                    ? ConstraintName(table, declared.definition, declared.ordinal) : $"PrimaryKey_{table.Name}");
+                indexes.Add(new SqlCatalogIndex(table.ObjectId, name, table.PrimaryKeyColumns, true,
+                    table.Owner, table.OwningSchema, isPrimaryKey: true));
+            }
             foreach (var index in plans[i].Declaration.Indexes)
             {
                 var predicate = index.Predicate is null ? null : SqlPartialIndexPredicate.Declare(table, index.Name, index.Columns,
@@ -57,16 +71,22 @@ internal sealed partial class SqlPlanExecutor
                     predicateFunctionCalls: predicate?.PredicateFunctionCalls,
                     keyOrders: index.KeyOrders.Select(order => (SqlCatalogIndexKeyOrder)order).ToArray()));
             }
-            // Ad-hoc indexes are outside the typed document. Preserve them, or refuse
+            // Ad-hoc and script indexes are outside the typed document. Preserve them, or refuse
             // their invalidated dependency before reserving any physical work.
             if (image.TryGetTable(table.Schema, table.Name, out var old))
             {
-                foreach (var index in image.GetIndexes(old.ObjectId).Where(index => index.Owner != DatabaseObjectOwner.Schema))
+                foreach (var index in image.GetIndexes(old.ObjectId).Where(index => index.Owner != DatabaseObjectOwner.Schema ||
+                    scripted.Contains(SqlObjectIdentity.Index(old.Schema, old.Name, index.Name)) &&
+                    !plans[i].Declaration.Indexes.Any(declared => declared.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase)) &&
+                    !script.Plan.Operations.Any(operation => operation.Kind == SqlSchemaMigrationOperationKind.DropIndex &&
+                        string.Equals(operation.ParentName, old.Name, StringComparison.OrdinalIgnoreCase) &&
+                        operation.ObjectName.Equals(index.Name, StringComparison.OrdinalIgnoreCase))))
                 {
                     foreach (var column in index.ColumnNames.Concat(index.PredicateColumns))
                     {
                         if (table.FindColumn(column) is null)
-                        { throw new DatabaseObjectLockedException(column, schema.Name, "ALTER TABLE DROP COLUMN"); }
+                        { throw new SqlCatalogException("CS03056", string.Format(CultureInfo.CurrentCulture,
+                            ErrorMessages.CatalogDropColumnCoreAsyncSqlCatalog3, column, index.Name, old.Schema, old.Name)); }
                         if (index.PredicateColumns.Contains(column, StringComparer.OrdinalIgnoreCase) &&
                             old.FindColumn(column)!.Type.Type != table.FindColumn(column)!.Type.Type)
                         { throw new SqlPlanningException("CS03083", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateTypeChange, column, index.Name)); }
@@ -117,6 +137,16 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             var tableIndexes = indexes.Where(index => index.TableObjectId == table.ObjectId).ToArray();
+            if (old is not null)
+            {
+                // GetIndexes follows the durable registration vector, including after
+                // Load; physical catalog slots and declared/preserved lists need not.
+                // Preserve surviving names' relative order, then append additions in
+                // plan order. Selection and declared/drop precedence remain unchanged.
+                var order = _catalog.GetIndexes(old.ObjectId).Select((index, ordinal) => (index.Name, ordinal))
+                    .ToDictionary(item => item.Name, item => item.ordinal, StringComparer.OrdinalIgnoreCase);
+                tableIndexes = tableIndexes.OrderBy(index => order.GetValueOrDefault(index.Name, int.MaxValue)).ToArray();
+            }
             bool keepsOwner = old is not null && old.Columns.Count == table.Columns.Count &&
                 table.Columns.Select((column, ordinal) =>
                     column.Name.Equals(old.Columns[ordinal].Name, StringComparison.OrdinalIgnoreCase) &&
@@ -150,14 +180,36 @@ internal sealed partial class SqlPlanExecutor
             }
             result.Add(new SqlJointMigrationTable(old, table, tableIndexes, values, keepsOwner));
         }
-        // Include both ends of old and new FKs, even when the old parent is dropped
-        // or a constraint is re-pointed. Stable adjacent tables keep their owners.
+        bool KeepsReference(SqlCatalogTable child, SqlCatalogConstraint reference)
+        {
+            var childPlan = result.FirstOrDefault(item => item.Shape.Schema.Equals(child.Schema, StringComparison.OrdinalIgnoreCase) &&
+                item.Shape.Name.Equals(child.Name, StringComparison.OrdinalIgnoreCase));
+            var parentPlan = result.FirstOrDefault(item => item.Shape.Schema.Equals(reference.ReferencedSchema, StringComparison.OrdinalIgnoreCase) &&
+                item.Shape.Name.Equals(reference.ReferencedTable, StringComparison.OrdinalIgnoreCase));
+            if (IsTarget(child) && childPlan?.KeepsOwner != true ||
+                IsTargetName(reference.ReferencedSchema!, reference.ReferencedTable!) && parentPlan?.KeepsOwner != true) { return false; }
+            if (!image.TryGetTable(child.Schema, child.Name, out var oldChild) ||
+                !oldChild.Constraints.Any(old => SameJointConstraint(reference, old))) { return false; }
+            var finalChild = childPlan?.Shape ?? oldChild;
+            var finalParent = parentPlan?.Shape ?? all.FirstOrDefault(table =>
+                table.Schema.Equals(reference.ReferencedSchema, StringComparison.OrdinalIgnoreCase) &&
+                table.Name.Equals(reference.ReferencedTable, StringComparison.OrdinalIgnoreCase));
+            return finalParent is not null && finalChild.Constraints.Any(current => SameJointConstraint(reference, current)) &&
+                !NeedsJointReferenceValidation(finalChild, reference, finalParent, indexes);
+        }
+        // Plan targets always reserve X. An omitted neighbour has the identical FK,
+        // kept identities at both ends and unchanged matching parent key trees, so
+        // every writable row still enforces the old/new constraint. FK probes acquire
+        // adjacent IS before selecting a lookup tree (Constraints.cs); a wait releases
+        // new grants and rediscovers incoming bindings/parents, and BindReference gives
+        // changed descriptions new lookup keys. No retired handle survives that retry.
         var touched = image.Tables.Where(IsTarget).ToDictionary(table => table.ObjectId);
         foreach (var child in image.Tables.Concat(result.Select(table => table.Shape)))
         {
             foreach (var reference in child.Constraints.Where(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference))
             {
                 if (!IsTarget(child) && !IsTargetName(reference.ReferencedSchema!, reference.ReferencedTable!)) { continue; }
+                if (KeepsReference(child, reference)) { continue; }
                 if (image.TryGetTable(child.Schema, child.Name, out var liveChild)) { touched.TryAdd(liveChild.ObjectId, liveChild); }
                 if (image.TryGetTable(reference.ReferencedSchema!, reference.ReferencedTable!, out var parent)) { touched.TryAdd(parent.ObjectId, parent); }
             }
@@ -211,6 +263,8 @@ internal sealed partial class SqlPlanExecutor
             // Identity columns need no conversion or scan for an index-only change.
             foreach (var item in keeping.Where(item => NeedsJointRowValidation(item.Previous!, item.Shape)))
             {
+                long processed = 0;
+                statement.ProvisioningProgress?.Invoke(0, null);
                 foreach (var row in Scan(item.Shape, statement, cancellationToken, ConstraintCurrentSnapshot(statement)))
                 {
                     for (int ordinal = 0; ordinal < row.Values.Length; ordinal++)
@@ -219,7 +273,9 @@ internal sealed partial class SqlPlanExecutor
                         { _ = CoerceForColumn(row.Values[ordinal], item.Shape.Columns[ordinal]); }
                     }
                     ValidateRows(item.Shape, [row.Values], statement, cancellationToken, checksOnly: true);
+                    statement.ProvisioningProgress?.Invoke(++processed, null);
                 }
+                statement.ProvisioningProgress?.Invoke(processed, processed);
             }
             _catalog.ReserveStorageReplacement(previous, null, (table, id) =>
             {
@@ -249,13 +305,15 @@ internal sealed partial class SqlPlanExecutor
                     LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
                 _definitions.Get(table, cancellationToken);
             }
+            statement.ObserveCopyJournalStart(_storage.JournalLength);
             statement.CheckCopySpace(roots.Length);
             long journalStart = 0;
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
             {
+                statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
                 statement.CheckCopySpace(roots.Length);
                 long allocationStart = statement.CaptureCopyAllocations();
-                journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
+                journalStart = _storage.JournalLength - 38; // Include this bracket's already appended Begin frame.
                 foreach (var index in roots)
                 {
                     await _indexManager.CreateIndexAsync(statement.Transaction, index.TableObjectId,

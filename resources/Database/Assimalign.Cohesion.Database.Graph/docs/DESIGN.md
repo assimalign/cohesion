@@ -1161,6 +1161,13 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 
 ## Planning, execution and bounds
 
+GraphQueryRow supplies protected typed cores behind DatabaseRow's non-virtual ordinal
+guards (#1264). Valid-ordinal invariant conversions, JSON/string UTF-8 and CK02001/CK02002
+type/NULL failures retain their existing results. Out-of-range value access now throws
+ArgumentOutOfRangeException from the base instead of the array's IndexOutOfRangeException.
+The wrapper layout and GetRowsAsync remain unchanged. IsMissing retains its capability-first
+NotSupportedException for every ordinal.
+
 ### Correlated pattern subplans (#1537, GQ-E1)
 
 GraphCorrelatedSubplan owns the planned inner MATCH stream and its lexical argument contract.
@@ -1198,6 +1205,82 @@ Deterministic counters verify first-match work and complete iterator cleanup, wh
 consumers collect every inner row through the same boundary. Generated recommendations agree
 with an independent brute-force oracle; see the language design for grammar and the local
 Neo4j references followed. No public interface, disk or wire contract changes are required.
+
+### Inline CALL planning and execution (#1807, GQ-N1)
+
+[OPTIONAL] CALL [(a, b) | (*) | ()] { query } runs a read-only query with RETURN for each
+incoming row. An omitted scope imports nothing; () explicitly imports nothing; (*) imports
+all current bindings; a name list imports exactly those names. Imports retain their binding kinds
+and remain visible across inner WITH, NEXT and composite boundaries. Inner declarations stay
+inside the call. Returned bare variables or aliased expressions add bindings to the outer row;
+computed results require aliases (CG05001). Every returned name, including RETURN * expansions,
+must be absent from the outer scope (CG01024), even when it names an import. This strict rule
+follows the owner requirement rather than Neo4j's exemption for imported star results.
+RETURN * still expands imports after an inner WITH, so a body with imports conservatively
+refuses that form with CG01024 even when WITH projects only local names.
+
+For omitted scopes only, a leading importing WITH translates to a scope clause when it contains
+only bare variables without aliases, or star, and no DISTINCT, GROUP BY, ORDER BY, paging or
+WHERE. Explicit ALL is harmless. After the importing WITH, no later WITH, NEXT or composite
+stage may occur: its scope lifetime must map exactly to one scope clause. Composite operands
+must import the same set (order may differ); otherwise the translation is CK00001. With an
+explicit scope, WITH is an ordinary inner projection. Imports cannot be rebound (CG03003);
+a missing import is CG05001, and importing a deleted variable is CG03003. Variables
+introduced inside one invocation cannot escape except through its final RETURN.
+
+The existing read-only UNION, EXCEPT, INTERSECT, OTHERWISE and NEXT rules apply inside the
+braces, including validation of operands that will be empty or skipped. CALL joins every result
+row; zero results remove the input row. OPTIONAL CALL instead emits exactly one row with NULL
+for each returned binding when the invocation is empty; an existing NULL result is a real row.
+Empty outer input invokes nothing. Inner grouping, DISTINCT, ordering and paging apply separately
+to each invocation. A returning CALL cannot conclude the enclosing query by itself (CG05001);
+existing RETURN or mutation conclusions apply. Uncorrelated bodies are
+also evaluated per input row, without caching.
+
+The inner query shares the GraphOperation, snapshot, parameters, transaction clock, cancellation,
+physical-work budget and retained-memory budget. Each invocation and emitted CALL row consumes
+one work unit in addition to its inner operators. Borrowed arguments/results, grouping state,
+composite state and cursors release their grants on completion, early exit, refusal or cancellation.
+EXPLAIN describes Apply or OptionalApply and their nested plans without executing them.
+A read-only body can follow an outer write and sees that statement's update overlay.
+
+Writes and bodies without RETURN remain CK00001 at GraphPlanner.ValidateCallReadOnly, the single
+admission boundary GQ-N2 will lift. Named CALL proc(...) YIELD, FOREACH and CALL ... IN TRANSACTIONS
+remain CK00001. There is no wire or disk-format change.
+
+Behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j:
+community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:2501-2530,2663-2750
+checks isolated imported scope and outer output collisions;
+community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Query.scala:698-711
+requires a returning subquery to be followed by a concluding clause.
+community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Query.scala:876-911
+refuses rebinding scope-clause imports;
+community/cypher/front-end/frontend-tests/src/test/scala/org/neo4j/cypher/internal/frontend/ScopeTreeTest.scala:307-320
+and scoping/checker/GQL_42N44_InaccessibleVariableTest.scala:66-73 in that same frontend directory
+pin scope-clause import persistence across WITH.
+scoping/checker/GQL_42N62_VariableNotDefinedTest.scala:89-99,858-868 in that directory
+pins the different lifetime and permitted rebinding of legacy importing WITH.
+The Cypher 25 grammar is
+community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:320-357.
+ISO GQL inline-call clause numbers remain unverified; this is no claim of full ISO conformance.
+
+GraphCallStagePlan owns the child plan or composite tree and imported-name contract. Child
+planning uses the same snapshot and token resolver, with isolated lexical/function caches and
+shared reduction work. Output binding shapes retain entities, paths, composite values and
+nullability; optional outputs become nullable before admission, including ExecutePaths checks.
+Imports are invocation constants after grouping, available without adding extra grouping keys.
+The executor restores the parent function registry before downstream evaluation and in finally.
+CALL composes with ordinary read streams and already-materialized outer mutation inputs; each
+invocation releases state before advancing the outer cursor. No new public seam or interface is
+needed. GqlCallSubqueryTests covers generated rewrites, empty input admission, snapshot sharing,
+registered functions and deterministic budget/cancellation cleanup; GraphCallSubqueryWireTests
+uses both transports and retains the exact authenticated session after a coded refusal.
+Unknown output kinds remain unknown when OPTIONAL adds nullability, and literal NULL retains
+the ordinary strict-function admission used by LET. Child planners preserve parsed provenance
+through NEXT, composite operands and importing-WITH normalization, avoiding programmatic AST
+rebinding passes and depth caps for parsed text. CALL builds shapes only for imported names;
+sequential empty-scope CALL planning therefore allocates linearly. Small explicit-stack tests
+pin CG05008 at parse, plan and execution with session reuse after each refusal.
 
 ### Pattern comprehensions (#1736, GQ-C3)
 
@@ -2417,6 +2500,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG01018` | Reduce/list-predicate iterator declaration is missing/empty, or a reduce accumulator is missing/empty or equals its iterator |
 | `CG01019` | Binding/names — outer binding has a proven incompatible correlated pattern kind |
 | `CG01020` | Composite operand column names, order or count differ |
+| `CG01024` | A CALL result name is already declared in the outer scope, including imported names and RETURN * |
 | `CG00012` | List slice omits both bounds; refused during planning, including EXPLAIN |
 | `CG00013` | Language/syntax — EXISTS omits its nonempty braced pattern |
 | `CG00014` | Language — pattern comprehension requires a nonempty path and projection |

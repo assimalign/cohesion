@@ -36,19 +36,43 @@ The public names are `DatabaseResult`, `DatabaseResultSet`, `DatabaseResultStatu
 or compatibility shims. Model-specific language results retain names such as `SqlQueryResult`,
 `DocumentQueryResult` and `GraphPathsQueryResult`.
 
+## Row access contract (#1264)
+
+DatabaseRow is the NVI seam for six sealed leaves: SqlMaterializedRow,
+KeyValueMaterializedRow, DocumentQueryRow, GraphQueryRow, the remote DocumentRow and
+DatabasePlanDescriptionRow. FieldCount remains abstract because each leaf owns its shape.
+Public ordinal accessors validate 0 <= ordinal < FieldCount before calling their protected
+cores. IsMissing first checks its capability: unsupported rows throw NotSupportedException
+for every ordinal. On supporting rows it uses the same framework ArgumentOutOfRangeException
+guards as the value accessors. No diagnostic identity or new value kind is introduced.
+
+The typed cores retain each leaf's conversions, NULL/MISSING behavior and conversion
+failures; GetValue retains the original boxed value or model-specific output mapping.
+Calls between cores reuse the already validated ordinal rather than repeat public checks.
+Typed access does not allocate a new box. SQL's materialized wrapper keeps its instance
+layout, and the per-row allocation guard compares construction with all typed accessors
+and GetValue through a DatabaseRow reference. The wrapper is pinned to exactly 32 bytes on
+64-bit runtimes (16 bytes for header and method table, 8 for the SupportsMissing field slot,
+8 for the values reference), using the minimum of five measurement attempts. Existing Release
+allocation guards cover Graph and Documents client encoders. SQL's EncodeRow/MeasureRow and
+the KeyValuePair session encoding loop still lack allocation guards. These checks make no
+wall-clock or dispatch-throughput claim.
+DatabaseResultSet.GetRowsAsync keeps its existing shape: the paused benchmark suite
+provides no per-row dispatch evidence to justify replacing it.
+
 ## DatabaseRow MISSING exposure (#1126)
 
 MISSING is an optional capability (owner ruling, 2026-10-16). The protected constructor's
 `supportsMissing = false` value backs non-virtual `SupportsMissing`. The non-virtual
-`IsMissing(int)` throws NotSupportedException while unsupported, validates the ordinal,
-then calls protected virtual `IsMissingCore(int)`. The default core throws too, following
+`IsMissing(int)` throws NotSupportedException while unsupported, then validates the ordinal
+and calls protected virtual `IsMissingCore(int)`. The default core throws too, following
 database-area.md rules 4 and 6. This capability is the authorized shared boundary change;
 no public sentinel or model-specific type enters Execution.
 
 Only embedded and client Documents rows opt in. Their MISSING fields have IsMissing true,
 IsNull false, and GetValue null. Explicit NULL has IsMissing false and IsNull true. Every
 other model retains SupportsMissing false and IsMissing throws; it does not return false.
-Existing row members' NVI conversion remains #1264's work. Deviates from interface-first
+Every other ordinal member uses a protected abstract core. Deviates from interface-first
 (database-area.md): the existing abstract row family remains the concrete-first seam.
 
 ## Plan descriptions (#1104)
@@ -83,8 +107,9 @@ and requires a mapping. An item adding a plan record also adds its mapping and a
 whichever item lands second owns that hand-off, including collection DDL and SQL definition and
 column-alteration plans. No public interface or shipped assembly visibility grant is added.
 
-The sequencing default is T1 before #1264 (P8). P8 folds this result into its per-row result
-shape; this item retains today's result bases and introduces no P8 row contract.
+DatabasePlanDescriptionRow follows the same ordinal NVI contract as model and client rows;
+its invariant conversions, UTF-8 bytes and InvalidOperationException for required NULL values
+remain unchanged.
 
 ## Session capabilities
 
@@ -106,7 +131,7 @@ KeyValuePair's command parser is an internal wire entry, not a public language c
 ## Decisions and remaining work
 
 - `Diagnostic`, `DiagnosticSeverity` and `DiagnosticLocation` moved unchanged to
-  `Database.Types`. Diagnostics are non-null; further result NVI work remains with #1264.
+  `Database.Types`. Diagnostics are non-null; DatabaseRow owns ordinal validation.
 - There is no shared execution pipeline. The unused pipeline, transaction-scope and executor
   abstractions were deleted under #1257. Models own their execution and transaction brackets.
 - There is no exception root here. Model failures use the root assembly's `DatabaseException`

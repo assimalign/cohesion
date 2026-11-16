@@ -10,17 +10,16 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 public sealed class OqlSetOperationParserTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Set operations: every operator has equal left-associative precedence")]
-    [InlineData("UNION", "UNION", OqlSetOperation.Union, OqlSetOperation.Union, 0)]
-    [InlineData("UNION ALL", "INTERSECT ALL", OqlSetOperation.Union, OqlSetOperation.Intersect, 1)]
-    [InlineData("EXCEPT", "UNION ALL", OqlSetOperation.Except, OqlSetOperation.Union, 1)]
-    [InlineData("INTERSECT", "EXCEPT", OqlSetOperation.Intersect, OqlSetOperation.Except, 2)]
-    public void Parse_OperatorChain_ShouldAssociateLeft(string first, string second, OqlSetOperation leftKind, OqlSetOperation rootKind, int refusals)
+    [InlineData("UNION", "UNION", OqlSetOperation.Union, OqlSetOperation.Union)]
+    [InlineData("UNION ALL", "INTERSECT ALL", OqlSetOperation.Union, OqlSetOperation.Intersect)]
+    [InlineData("EXCEPT", "UNION ALL", OqlSetOperation.Except, OqlSetOperation.Union)]
+    [InlineData("INTERSECT", "EXCEPT", OqlSetOperation.Intersect, OqlSetOperation.Except)]
+    public void Parse_OperatorChain_ShouldAssociateLeft(string first, string second, OqlSetOperation leftKind, OqlSetOperation rootKind)
     {
         // Arrange / Act
         var statement = Parse($"SELECT a FROM c {first} SELECT b FROM d {second} SELECT e FROM f");
         // Assert
-        statement.Diagnostics.Count().ShouldBe(refusals);
-        statement.Diagnostics.ShouldAllBe(diagnostic => diagnostic.Code == "CK00001");
+        statement.Diagnostics.ShouldBeEmpty();
         var root = statement.OqlExpression.ShouldBeOfType<OqlSetOperationExpression>();
         root.Operation.ShouldBe(rootKind);
         root.Right.ShouldBeOfType<OqlSelectExpression>().Collection.ShouldBe("f");
@@ -67,9 +66,7 @@ public sealed class OqlSetOperationParserTests
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CD00002");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - UNION: nested and DML positions retain the next-run capability gate")]
-    [InlineData("(SELECT a FROM c LIMIT 1) LIMIT 2")]
-    [InlineData("(SELECT a FROM c UNION SELECT b FROM d LIMIT 1) OFFSET 2")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Set operations: nested and DML positions admit complete queries")]
     [InlineData("SELECT RAW (SELECT a FROM c UNION SELECT b FROM d) FROM c")]
     [InlineData("SELECT * FROM (SELECT a FROM c UNION SELECT b FROM d) AS q")]
     [InlineData("INSERT INTO c (KEY k) SELECT k FROM c UNION SELECT k FROM d")]
@@ -85,12 +82,12 @@ public sealed class OqlSetOperationParserTests
     [InlineData("SELECT * FROM (SELECT a FROM c INTERSECT SELECT b FROM d) AS q")]
     [InlineData("INSERT INTO c (KEY k) SELECT k FROM d INTERSECT SELECT k FROM e")]
     [InlineData("UPSERT INTO c (KEY k) SELECT k FROM d INTERSECT SELECT k FROM e")]
-    public void Parse_DeferredCompoundPosition_ShouldReportOneCapability(string text)
+    public void Parse_CompoundPosition_ShouldAdmitQuery(string text)
     {
         // Arrange / Act
         var statement = Parse(text);
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        statement.Diagnostics.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Write sources: a lone parenthesized query is a query term")]
@@ -188,7 +185,7 @@ public sealed class OqlSetOperationParserTests
         subquery.Location.End.ShouldBe(text.LastIndexOf(')'));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: a parenthesis-led compound retains membership and the nested capability gate")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: a parenthesis-led compound retains query membership")]
     [InlineData(1, "IN")]
     [InlineData(2, "IN")]
     [InlineData(3, "IN")]
@@ -202,7 +199,7 @@ public sealed class OqlSetOperationParserTests
         // Act
         var statement = Parse(text);
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        statement.Diagnostics.ShouldBeEmpty();
         var membership = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Predicate.ShouldBeOfType<OqlInExpression>();
         membership.Values.ShouldBeEmpty();
         membership.Negated.ShouldBe(operation == "NOT IN");
@@ -235,13 +232,13 @@ public sealed class OqlSetOperationParserTests
         subquery.Location.End.ShouldBe(text.LastIndexOf(')') + 1);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: direct named queries require RAW and compounds retain the nested capability gate")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - IN: named queries and compounds require RAW")]
     [InlineData("IN", "SELECT a FROM d", "CD00014")]
     [InlineData("NOT IN", "SELECT a FROM d", "CD00014")]
-    [InlineData("IN", "SELECT a FROM d UNION SELECT b FROM e", "CK00001")]
-    [InlineData("NOT IN", "SELECT a FROM d UNION SELECT b FROM e", "CK00001")]
-    [InlineData("IN", "(SELECT a FROM d) UNION SELECT b FROM e", "CK00001")]
-    [InlineData("NOT IN", "(SELECT a FROM d) UNION SELECT b FROM e", "CK00001")]
+    [InlineData("IN", "SELECT a FROM d UNION SELECT b FROM e", "CD00014")]
+    [InlineData("NOT IN", "SELECT a FROM d UNION SELECT b FROM e", "CD00014")]
+    [InlineData("IN", "(SELECT a FROM d) UNION SELECT b FROM e", "CD00014")]
+    [InlineData("NOT IN", "(SELECT a FROM d) UNION SELECT b FROM e", "CD00014")]
     public void Parse_NamedMembership_ShouldRetainDiagnostic(string operation, string query, string code)
     {
         // Arrange / Act
@@ -283,6 +280,7 @@ public sealed class OqlSetOperationParserTests
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Query tails: an outer refusal locates only its tail")]
     [InlineData("(SELECT a FROM c LIMIT 1) LIMIT 2", "LIMIT 2")]
     [InlineData("(SELECT a FROM c ORDER BY a) ORDER BY a", "ORDER BY a")]
+    [InlineData("(SELECT a FROM c UNION SELECT b FROM d LIMIT 1) OFFSET 2", "OFFSET 2")]
     public void Parse_DuplicateOuterTail_ShouldLocateTail(string text, string tail)
     {
         // Arrange / Act

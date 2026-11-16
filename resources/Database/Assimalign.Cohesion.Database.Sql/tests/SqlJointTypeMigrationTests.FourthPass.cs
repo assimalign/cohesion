@@ -30,14 +30,16 @@ public sealed partial class SqlJointTypeMigrationTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint reserve: engine dirty capacity and reclamation survive an exactly admitted publication")]
-    public async Task ApplyAsync_ExactlyAdmittedVolume_ShouldReclaimOldOwnersOnline()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint reserve: capacity stays held through reclamation at small and default pool budgets (#1778)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApplyAsync_ExactlyAdmittedVolume_ShouldReclaimOldOwnersOnline(bool defaultBudget)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         var storage = new CrashCaptureSqlStorageStrategy();
         var builder = Builder(storage);
-        builder.Options.BufferPoolCapacity = 1024 * 1024;
+        if (!defaultBudget) { builder.Options.BufferPoolCapacity = 1024 * 1024; }
         await using var engine = await builder.BuildAsync(guard.Token);
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
         SqlCompiledSchema Declare(bool changed) => Compiled(new CompiledSchemaTable("items", "row",

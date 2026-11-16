@@ -102,6 +102,10 @@ internal static partial class GraphPlanExecutor
                             StreamBindingsAsync(bindings, token), layout, budget, parameters, token)).ConfigureAwait(false);
                     }
                     break;
+                case GqlCallStage:
+                    await ReplaceBindingsAsync(StreamCallAsync(database, operation, (GraphCallStagePlan)plan.Stages[stageIndex],
+                        StreamBindingsAsync(bindings, token), layout, budget, token)).ConfigureAwait(false);
+                    break;
                 case GqlLetStage or GqlFilterStage or GqlForStage:
                     await ReplaceBindingsAsync(StreamStageAsync(plan.Stages[stageIndex], StreamBindingsAsync(bindings, token),
                         layout, budget, operation, parameters, token)).ConfigureAwait(false);

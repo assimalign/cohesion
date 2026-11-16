@@ -15,9 +15,45 @@ CTS, timer or task list and ignores AnalyzerTimeout, including zero. After a tim
 observes a late aggregate fault so it cannot become an unobserved task exception.
 `QueryStatement.AddDiagnostic` rejects null before adding to its concurrent bag;
 diagnostic enumeration retains severity and source-end ordering. The mutable analyzer list and
-public virtual surface remain for the separate #1264 API audit. `QueryAnalyzerContext` is a
+non-virtual entry points are described by the #1264 audit below. `QueryAnalyzerContext` is a
 sealed leaf constructed internally by the parser; its existing read-only `Statement` member and
-analyzer behavior are unchanged. No new overridable analyzer or parser member is introduced.
+analyzer behavior are unchanged. The parser owns analyzer orchestration; model grammar remains in protected cores.
+
+## Parser and analyzer type-shape audit (#1264)
+
+QueryParser remains an abstract base: SQL, OQL and GQL supply real grammar variants in
+other shipped assemblies, so its constructor stays protected. Parse is non-virtual and
+owns lexer construction, the chosen serialization policy and analyzer orchestration.
+CreateLexer is private because profiles already determine lexing and leaves receive the
+configured lexer. Protected abstract ParseCore also receives the borrowed source span.
+Each model retains and stamps its root source text inside ParseCore, before analyzers run;
+SQL now matches OQL and GQL, including empty and diagnostic-only statements. No completion
+hook is needed on the public base.
+
+Serialization is a constructor policy, defaulting to false to retain SQL and application
+parser behavior. OQL and GQL opt in, moving their existing gate into the base and keeping
+analysis inside that gate. The no-analyzer path still creates no analyzer context, CTS,
+timer or task list. Null options now fail at construction through a framework guard.
+
+QueryAnalyzer remains an abstract inverted seam implemented by applications. Its explicit
+protected constructor permits those external leaves. Non-virtual AnalyzeAsync rejects a
+null context before checking cancellation, then returns AnalyzeCoreAsync's task unchanged;
+it adds no async wrapper or allocation. Pre-canceled calls never enter the protected
+abstract core. Parser-owned dispatch calls the core through an internal member: every
+registered analyzer starts even if a synchronous predecessor runs past the timer. The timeout
+applies to the wait for their tasks; an analyzer that finishes past the timer does not fail
+the parse when all tasks have completed. A zero timeout still checks cancellation before
+dispatch. Asynchronous failures and late-fault observation remain in QueryParser. If a later
+analyzer throws during startup, dispatch cancels earlier analyzers and observes their tasks,
+then rethrows the original startup exception. A cancellation callback exception cannot
+replace that failure.
+
+QueryParserOptions stays a concrete, unsealed configuration base because the shipped
+sealed SqlQueryParserOptions derives from it to add the SQL expression nesting limit.
+It has no virtual members. The mutable analyzer registration list, five-second default
+timeout and live configuration behavior remain unchanged; freezing or replacing that
+surface is a separate API decision. No reflection, interface, diagnostic identity or
+language grammar changes are needed.
 
 ## Left-arrow configuration (#1647)
 

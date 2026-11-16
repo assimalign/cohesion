@@ -55,13 +55,37 @@ public sealed class SqlDatabaseEngineOptions
     /// </summary>
     public TimeSpan LockTimeout { get; set; }
 
-    /// <summary>Gets or sets the maximum accounted bytes retained by hash builds, joined DML and CREATE TABLE AS copying in one statement.</summary>
-    /// <remarks>Defaults to 64 MiB. Must be positive. Joined DML charges retained inputs, associations and selected writes. CREATE TABLE AS charges retained query output and batch buffers. Grouping sets charge group and aggregate state. Ordered sequence deferral uses ordinary uncharged sorting, including LIMIT and OFFSET; it adds no charge on plain, correlated, grouped or grouping-set paths. Unordered sequence projection streams without retaining inputs.
+    /// <summary>Gets or sets the maximum accounted bytes retained by query buffers and writes in one statement.</summary>
+    /// <remarks>Defaults to 64 MiB. Must be positive. Joined DML charges retained inputs, associations and selected writes. CREATE TABLE AS charges retained query output and batch buffers. Grouping sets charge group and aggregate state. Plain SELECT charges nested-loop and normalized join buffers, staged matches, group keys and aggregate state, sorting and top-N entries, output rows, DISTINCT state, relation and subquery caches, and set operands and state. Each buffer reserves before retaining a row and releases when consumed or its owning scope ends. Consumers re-admit materialized results after child execution releases its charge. Charges follow retained rows, never collection capacity. A cell of at least 256 bytes charges its payload once per buffer owner by reference identity plus a fixed 64-byte entry; further references pay only array slots. Smaller cells pay per reference. Two live buffers each charge their retained wide identities, so payload overcharge is bounded by live buffers rather than row count. Hash builds still charge each reference. Ordered sequence deferral retains its source buffers. CTAS sources charge like any SELECT; CTAS itself admits only output rows kept after pagination. Window buffers outside its ledger also charge, while ledger-owned rows and subquery vectors retain that owner. Independent caches created in a window remain charged for the statement. When plain bytes fill the grant first, refusal reports CS05067, even where the earlier ledger would later refuse with CS05079 or CS05094. Without plain bytes live, those grants retain their specific diagnostic. INSERT SELECT and DML subquery sources keep their existing policy. Unordered sequence projection streams without retaining inputs.
     /// Plain ON DELETE CASCADE closures charge about 840 bytes per two-column row: the default
     /// 64 MiB grant caps such a closure at about 79,900 rows, less when other work retains memory.
     /// A 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget.
-    /// Exceeding the budget fails before writes or publication; hash joins never spill.</remarks>
+    /// Budget exhaustion refuses the statement. CTAS publishes only after all copying succeeds; query buffers do not spill yet.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
+
+    /// <summary>Gets or sets a dedicated spill directory. File engines default to RootPath/.cohesion-temp;
+    /// an override must remain below RootPath, with a first segment no database could take (a leading dot is safe) and without
+    /// link components. In-memory engines have no spill space unless set.</summary>
+    /// <remarks>One directory belongs to one spilling engine; choose a different TempDirectory for
+    /// each engine. A lease conflict warns at startup and refuses a later spill with CK05005.
+    /// Unix directories are created 0700, files 0600; group/other-writable directories are refused.
+    /// On Windows an explicit directory keeps its inherited ACL. Data is unencrypted. Unix runs survive a kill until the next sweep; Windows
+    /// deletes runs on process exit. Power loss can leave runs on every OS. OS backups of RootPath can capture live temp files.
+    /// File engines reserve 2.54 GiB per open database at defaults. For N = max(1, open databases),
+    /// C = 1 MiB + N * (BufferPoolCapacity + 128 * 8192 + 2 * (JournalSizeLimit +
+    /// reclamation bracket bytes for 32 rows)), the floor is C + max(1 MiB, ceil(C / 4)).
+    /// An in-memory engine reserves only 1 MiB on this volume.</remarks>
+    public FileSystemPath? TempDirectory { get; set; }
+
+    /// <summary>Gets or sets the engine's physical temporary-byte quota. Null fixes the quota at
+    /// min(10 GiB, 25% of available volume bytes), measured after startup sweeping; an unavailable probe uses zero until the first run retries.
+    /// Zero refuses all growth. Must be nonnegative. The live free-space floor always applies.</summary>
+    public long? TempSpaceQuota { get; set; }
+
+    /// <summary>Gets or sets the statement's physical temporary-byte quota. Null uses four times
+    /// StatementMemoryBudget, saturating at Int64.MaxValue. Zero refuses growth. Must be nonnegative.
+    /// SQL operators retain their existing CS05067 memory-budget refusal.</summary>
+    public long? StatementTempSpaceQuota { get; set; }
 
     /// <summary>
     /// Gets or sets the checkpoint time backstop: the longest a file set (data or catalog) whose
@@ -249,6 +273,9 @@ public sealed class SqlDatabaseEngineOptions
         StatementTimeout = StatementTimeout,
         LockTimeout = LockTimeout,
         StatementMemoryBudget = StatementMemoryBudget,
+        TempDirectory = TempDirectory,
+        TempSpaceQuota = TempSpaceQuota,
+        StatementTempSpaceQuota = StatementTempSpaceQuota,
         CheckpointInterval = CheckpointInterval,
         CheckpointJournalSize = CheckpointJournalSize,
         WorkerFailureWindow = WorkerFailureWindow,
@@ -279,6 +306,9 @@ public sealed class SqlDatabaseEngineOptions
         public global::System.TimeSpan StatementTimeout => _target.StatementTimeout;
         public global::System.TimeSpan LockTimeout => _target.LockTimeout;
         public long StatementMemoryBudget => _target.StatementMemoryBudget;
+        public global::System.IO.FileSystemPath? TempDirectory => _target.TempDirectory;
+        public long? TempSpaceQuota => _target.TempSpaceQuota;
+        public long? StatementTempSpaceQuota => _target.StatementTempSpaceQuota;
         public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
         public long CheckpointJournalSize => _target.CheckpointJournalSize;
         public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;

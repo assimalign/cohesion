@@ -13,6 +13,6 @@ internal sealed class DelegateQueryAnalyzer : QueryAnalyzer
         _analyze = analyze;
     }
 
-    public override Task AnalyzeAsync(QueryAnalyzerContext context, CancellationToken cancellationToken = default)
+    protected override Task AnalyzeCoreAsync(QueryAnalyzerContext context, CancellationToken cancellationToken)
         => _analyze(context, cancellationToken);
 }

@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Parser entry contract (#1264)
+
+SQL uses the shared non-virtual QueryParser.Parse template. The model supplies protected
+grammar core; the base constructs the profile lexer and runs analyzers.
+SQL retains source before grammar work and stamps the root text before returning from ParseCore,
+including empty and diagnostic-only expressions. Analyzers now read that text, matching OQL
+and GQL; SQL keeps its existing caller-managed threading policy.
+The [Language audit](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parser-and-analyzer-type-shape-audit-1264)
+records the constructor, options and analyzer decisions. Grammar, diagnostics and conformance
+corpora retain their existing behavior.
+
+
 ## COPY table export grammar (#1724)
 
 SqlCopyToExpression retains the ordered table column list and immutable resolved SqlCopyOptions.
@@ -11,6 +23,8 @@ formatting differences, parenthesized-only option grammar and deliberate refusal
 invalid option; CS01071 is an invalid output-column selection. No persisted syntax changes.
 The execution corpus also verifies table-scoped COPY scan cost, byte-sized delivery batches,
 deferred migration admission and shared embedded-session admission; DIALECT records these contracts.
+Deferred admission includes new table names before binding and reserves FK neighbours only when
+their constraints, either owner or matching parent key trees change (#1778).
 
 ## Savepoint grammar and rendering (#1726, XT-4)
 
@@ -36,11 +50,11 @@ directions and zero retained sort rows (see DIALECT). NULL placement is ignored 
 keys proven non-NULL by declarations, equality prefixes, mandatory local NULL rejection or a
 proven partial predicate. Strict comparison NULL rejection shares SQ-P2's rule, including
 parameter operands; OR/NOT and outer NULL extension provide no proof. The live corpus also
-covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 36 and compiled v12 fence the
+covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 37 and compiled v12 fence the
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
-The current record-space format is 36; index predicates are persisted by Sql, independently
+The current record-space format is 37; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -168,7 +182,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 36's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 37's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -535,9 +549,12 @@ SqlFunctionCallExpression.Filter retains the optional condition, including depth
 extent. Rendering, semantic child walks, aggregate-level correlation and persisted equality
 include it. FILTER adds one named clause and nine function names join the executable profile.
 The profile has 59 declared clauses, or 64 including the five documented exclusions.
-Aggregate windows and their FILTER execute; window calls inside FILTER fail placement binding. The catalog owns aggregate
+Aggregate windows and their FILTER execute; window calls inside a plain aggregate's FILTER fail
+with CS05076 and inside a window aggregate's FILTER with CS05077 (both 42P20). The catalog owns aggregate
 admission (CS05072 for FILTER on scalar calls); a same-scope aggregate in the condition is
-CS05073. Child queries bind independently. See DIALECT.md for types, NULLs and rounding.
+CS05073. Child queries bind independently. DIALECT.md also records whole aggregate-key reuse's
+alias, child-query and window-expression limits, and the separate scalar-key rule for equal
+window specifications or shared sort prefixes (#1763). See DIALECT.md for types, NULLs and rounding.
 
 SqlFunctionCallExpression retains a SqlSetQuantifier and ordered input keys for every call;
 the engine catalog decides which calls are aggregates. Depth measurement, rendering and

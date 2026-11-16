@@ -113,7 +113,7 @@ internal sealed partial class SqlPlanExecutor
         using var sortMemory = ordering.Count == 0 ? null : new SqlWindowMemory(statement.Metrics,
             _definitions.StatementMemoryBudget, statementBudgetOnly: true);
         var collector = ordering.Count == 0 ? null : new SqlRowCollector(ordering, frame,
-            distinct ? null : limit, distinct ? null : offset, cancellationToken, statement.Metrics);
+            distinct ? null : limit, distinct ? null : offset, cancellationToken, statement.Metrics, SelectBufferBudget);
         bool deferred = collector is not null && !distinct &&
             (HasSequenceProjection(projections) && !OrderingUsesSequence(projections, outputSlots?.Values) ||
                 outputSlots is not { Count: > 0 } && projections.Any(projection => ContainsVolatileCall(projection.Value)));

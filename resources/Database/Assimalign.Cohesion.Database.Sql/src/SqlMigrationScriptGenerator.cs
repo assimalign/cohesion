@@ -241,8 +241,8 @@ public static class SqlMigrationScriptGenerator
         }
     }
 
-    // Precision and widening length bounds retain 49a's validation-only
-    // path. They must not turn a non-TYPE migration into a physical rewrite.
+    // Precision and widening length bounds retain 49a's validation-only path
+    // outside deferred plans. Joint plans rewrite these tables until SQ-A6.
     internal static bool RequiresTypeRewrite(DatabaseTypeInfo previous, string? previousDomain, DatabaseTypeInfo type, string? domain)
         => type.Type != previous.Type || type.Scale != previous.Scale ||
             !string.Equals(domain, previousDomain, StringComparison.OrdinalIgnoreCase) ||

@@ -58,6 +58,15 @@ hook. SQL supplies its early-statement policy; other model behavior remains unch
 is root state, manager registration, context end latch; coordinator tracking follows manager
 release. End cores run outside root state. Identity remains fixed throughout configuration. This intentionally deviates from database-area.md rule 6 (state fixed at construction): SQL SET TRANSACTION may change isolation before the first data statement (#1012), signed off by the owner on 2026-11-02 as rule 6's one exception (#1769). The protected seam stays non-virtual and field-backed; other construction state remains fixed.
 
+## Shared row and language bases (#1264)
+
+Database.Execution owns the non-virtual ordinal row guards and protected typed cores used by
+all six sealed row leaves, including plan descriptions and the remote Documents row.
+Database.Language owns non-virtual parser/analyzer entry points; its DESIGN records source
+retention, model serialization and the real SqlQueryParserOptions subtype. Existing conversions,
+result streaming, grammar, wire and disk formats remain unchanged. The remaining public
+interface inventory is exactly the three application composition seams and the Testing factory.
+
 ## Shared plan-description contract (#1522)
 
 SQL, Documents and Graph retain the same eight-column DatabasePlanDescription contract owned by

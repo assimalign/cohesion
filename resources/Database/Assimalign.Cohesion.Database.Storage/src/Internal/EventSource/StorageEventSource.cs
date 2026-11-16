@@ -26,10 +26,11 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 /// <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>, every <c>ToString</c> runs
 /// inside it, and a duration's first timestamp is taken only when the event that reports it is
 /// enabled (the methods returning a timestamp return zero otherwise, and the matching write is
-/// skipped). The counters are maintained whatever the listeners, but only on paths that already
+/// skipped). The durable counters are maintained whatever the listeners, but only on paths that already
 /// write to or wait on a device (rule 10; plan D6): a checkpoint, a durable journal flush, a page
 /// read on a pool miss, a page write-back, a grouped commit that flushed inline, a pre-image
 /// spilled to the journal. Nothing is counted per pin, per record or per statement.
+/// Temporary page reservations, releases and refusals have their own exact counters before I/O.
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Storage")]
@@ -54,6 +55,9 @@ internal sealed class StorageEventSource : EventSource
 
         /// <summary>Foreground evictions of dirty pages.</summary>
         public const EventKeywords BufferPool = (EventKeywords)0x8;
+
+        /// <summary>Disposable query storage.</summary>
+        public const EventKeywords TempSpace = (EventKeywords)0x10;
     }
 
     private PollingCounter? _currentStoragesCounter;
@@ -73,6 +77,59 @@ internal sealed class StorageEventSource : EventSource
     private long _foregroundPageWrites;
     private long _groupCommitSelfFlushes;
     private long _preImagesSpilled;
+    private long _tempBytes;
+    private long _tempPagesWritten;
+    private long _tempRefusals;
+    private long _tempDamage;
+    private IncrementingPollingCounter? _tempDamageCounter;
+    internal long TempDamage => Interlocked.Read(ref _tempDamage);
+    private PollingCounter? _tempBytesCounter;
+    private IncrementingPollingCounter? _tempWritesCounter;
+    private IncrementingPollingCounter? _tempRefusalsCounter;
+
+    internal long TempBytes => Interlocked.Read(ref _tempBytes);
+    internal long TempPagesWritten => Interlocked.Read(ref _tempPagesWritten);
+    internal long TempRefusals => Interlocked.Read(ref _tempRefusals);
+
+    [NonEvent]
+    internal void TempBytesChanged(long delta)
+    {
+        long current = Interlocked.Add(ref _tempBytes, delta);
+        if (IsEnabled(EventLevel.Verbose, Keywords.TempSpace)) { TempSpaceBytes(delta, current); }
+    }
+
+    [NonEvent]
+    internal void TempPageWritten() => Interlocked.Increment(ref _tempPagesWritten);
+
+    [NonEvent]
+    internal void TempRefused(string code)
+    {
+        Interlocked.Increment(ref _tempRefusals);
+        // A refusal is statement detail, deliberately Verbose: the exact counter counts all.
+        if (IsEnabled(EventLevel.Verbose, Keywords.TempSpace)) { TempSpaceRefused(code); }
+    }
+
+    [Event(21, Level = EventLevel.Verbose, Keywords = Keywords.TempSpace, Message = "Temporary storage changed by {0} bytes; {1} bytes reserved.")]
+    private void TempSpaceBytes(long deltaBytes, long currentBytes) => WriteEvent(21, deltaBytes, currentBytes);
+
+    [Event(22, Level = EventLevel.Verbose, Keywords = Keywords.TempSpace, Message = "Temporary storage operation refused: {0}.")]
+    private void TempSpaceRefused(string code) => WriteEvent(22, code);
+
+    [NonEvent]
+    internal void TempUnavailable(string code, Exception cause)
+    {
+        if (IsEnabled(EventLevel.Warning, Keywords.TempSpace)) { TempSpaceUnavailable(code, cause.GetType().FullName ?? cause.GetType().Name); }
+    }
+    [NonEvent]
+    internal void TempDamaged(string code)
+    {
+        Interlocked.Increment(ref _tempDamage);
+        if (IsEnabled(EventLevel.Error, Keywords.TempSpace)) { TempSpaceDamaged(code); }
+    }
+    [Event(23, Level = EventLevel.Warning, Keywords = Keywords.TempSpace, Message = "Temporary storage unavailable: {0}; {1}.")]
+    private void TempSpaceUnavailable(string code, string exceptionType) => WriteEvent(23, code, exceptionType);
+    [Event(24, Level = EventLevel.Error, Keywords = Keywords.TempSpace, Message = "Temporary storage integrity failed: {0}.")]
+    private void TempSpaceDamaged(string code) => WriteEvent(24, code);
 
     private StorageEventSource()
     {
@@ -545,6 +602,15 @@ internal sealed class StorageEventSource : EventSource
         {
             return;
         }
+
+        _tempDamageCounter ??= new IncrementingPollingCounter("temp-damage-per-second", this, () => TempDamage)
+        { DisplayName = "Temporary Integrity Failure Rate", DisplayRateTimeScale = TimeSpan.FromSeconds(1) };
+        _tempBytesCounter ??= new PollingCounter("current-temp-bytes", this, () => TempBytes)
+        { DisplayName = "Current Temporary Physical Bytes" };
+        _tempWritesCounter ??= new IncrementingPollingCounter("temp-pages-written-per-second", this, () => TempPagesWritten)
+        { DisplayName = "Temporary Page Write Rate", DisplayRateTimeScale = TimeSpan.FromSeconds(1) };
+        _tempRefusalsCounter ??= new IncrementingPollingCounter("temp-refusals-per-second", this, () => TempRefusals)
+        { DisplayName = "Temporary Space Refusal Rate", DisplayRateTimeScale = TimeSpan.FromSeconds(1) };
 
         // Created on the first enable command, as the runtime's own sources do, and kept for the
         // source's lifetime. The backing fields are maintained whether or not anyone listens, so a

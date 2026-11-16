@@ -111,6 +111,20 @@ public sealed class OqlExecutionConformanceTests
                 new("(SELECT 1 AS n FROM items LIMIT 1) UNION ALL (SELECT 2 AS n FROM items LIMIT 1) ORDER BY n", [[1m], [2m]]),
                 new("SELECT MISSING AS a FROM items UNION SELECT NULL AS a FROM items", [[null], [null]], Missing: [(0, 0)]),
             ],
+            [OqlClauses.Intersect] =
+            [
+                new("SELECT 1 AS n FROM items INTERSECT SELECT 1.0 AS n FROM items", [[1m]]),
+                new("SELECT 1 AS n FROM items INTERSECT ALL SELECT 1 AS n FROM items LIMIT 2", [[1m], [1m]]),
+                new("SELECT RAW q.n FROM (SELECT 1 AS n FROM items INTERSECT SELECT 1 AS n FROM items) AS q", [[1m]]),
+                new("SELECT RAW (SELECT x AS n FROM [2,1] AS x INTERSECT SELECT y AS n FROM [1,2] AS y ORDER BY n) FROM [0] AS n", [[Json("[{\"n\":1},{\"n\":2}]")]]),
+            ],
+            [OqlClauses.Except] =
+            [
+                new("SELECT 1 AS n FROM items EXCEPT SELECT 2 AS n FROM items", [[1m]]),
+                new("SELECT 1 AS n FROM items EXCEPT ALL (SELECT 1 AS n FROM items LIMIT 3)", [[1m]]),
+                new("SELECT RAW ARRAY_LENGTH((SELECT RAW 1 FROM items EXCEPT SELECT RAW 2 FROM items)) FROM items LIMIT 1", [[1L]]),
+                new("SELECT RAW (SELECT x AS n FROM [1,2] AS x EXCEPT ALL SELECT y AS m FROM [] AS y ORDER BY m - n) FROM [0] AS m", [[Json("[{\"n\":1},{\"n\":2}]")]]),
+            ],
             [OqlClauses.Select] =
             [
                 new("SELECT RAW g FROM items ORDER BY items.g", [[1m], [2m], [3m]],
@@ -622,6 +636,24 @@ public sealed class OqlExecutionConformanceTests
         _cases.Keys.Except(profile.Clauses, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty("Retired capabilities must not remain positive conformance cases.");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents] - Conformance: set-operation coverage requires the actual nested operator")]
+    [InlineData(OqlClauses.Intersect, "INTERSECT")]
+    [InlineData(OqlClauses.Except, "EXCEPT")]
+    public void ContainsClause_NestedCompound_ShouldRequireOperator(string clause, string operation)
+    {
+        // Arrange
+        var parser = new OqlQueryParser();
+        var plain = (OqlQueryStatement)parser.Parse("SELECT RAW 1 FROM [0] AS x");
+        var nested = (OqlQueryStatement)parser.Parse("SELECT RAW (SELECT RAW 1 FROM [0] AS x " + operation + " SELECT RAW 1 FROM [0] AS y) FROM [0] AS z");
+        // Act / Assert
+        ContainsClause(plain.OqlExpression, clause).ShouldBeFalse();
+        ContainsClause(nested.OqlExpression, clause).ShouldBeTrue();
+    }
+
+    private static bool ContainsOperation(OqlExpression expression, OqlSetOperation operation)
+        => expression is OqlSetOperationExpression compound && compound.Operation == operation ||
+            Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.NestedChildren(expression).Any(child => ContainsOperation(child, operation));
+
     private static bool ContainsClause(OqlExpression expression, string clause) => clause switch
     {
         OqlClauses.Returning => expression is OqlInsertExpression { Returning: not null } or OqlUpsertExpression { Returning: not null }
@@ -639,7 +671,9 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Update => expression is OqlUpdateExpression,
         OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
-        OqlClauses.Union => expression is OqlSetOperationExpression { Operation: OqlSetOperation.Union },
+        OqlClauses.Union => ContainsOperation(expression, OqlSetOperation.Union),
+        OqlClauses.Intersect => ContainsOperation(expression, OqlSetOperation.Intersect),
+        OqlClauses.Except => ContainsOperation(expression, OqlSetOperation.Except),
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
         OqlClauses.Subquery => Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.HasSubquery(expression),
         OqlClauses.Exists => expression is OqlSelectExpression exists && exists.Projections.Any(p => p.Expression is OqlUnaryExpression { Operator: "EXISTS" }),

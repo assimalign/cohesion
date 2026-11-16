@@ -72,6 +72,7 @@ public sealed partial class GqlQueryParser
         {
             if (!HasStackToNest(start)) { return EmptyExpression(); }
             var query = ParseNextQuery(hasInput);
+            query.SetStatementText(_source);
             Expect(TokenType.RightParen, "')'");
             return query;
         }
@@ -83,7 +84,7 @@ public sealed partial class GqlQueryParser
             return EmptyExpression();
         }
         var operand = ParseQuery(hasInput);
-        if (!Failed) { operand.SetStatementText(_source[start.Start..Previous.End]); }
+        if (!Failed) { operand.SetStatementText(_callDepth == 0 ? _source[start.Start..Previous.End] : _source); }
         return operand;
     }
 }

@@ -187,9 +187,9 @@ public class SqlLanguageProfileTests
     {
         public bool SawUnsupportedClause { get; private set; }
 
-        public override Task AnalyzeAsync(
+        protected override Task AnalyzeCoreAsync(
             QueryAnalyzerContext context,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken)
         {
             SawUnsupportedClause = context.Statement.Diagnostics
                 .Any(item => item.Code == "CK00001");

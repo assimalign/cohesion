@@ -128,9 +128,19 @@ internal static partial class DocumentPlanExecutor
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
                 object? Read(int ordinal) => row.IsMissing(ordinal) ? DocumentMissing.Instance : row.GetValue(ordinal);
-                object? value = sourcePlan.ValueOrdinal is int valueOrdinal ? Read(valueOrdinal) :
+                object? Member(int ordinal, string? name)
+                {
+                    if (ordinal >= 0) { return Read(ordinal); }
+                    return row.GetValue(0) is JsonElement { ValueKind: JsonValueKind.Object } document &&
+                        name is not null && document.TryGetProperty(name, out var member)
+                        ? DocumentExpressionEvaluator.Normalize(member) : DocumentMissing.Instance;
+                }
+                string? keyName = statement is OqlInsertExpression insert ? insert.KeyName : ((OqlUpsertExpression)statement).KeyName;
+                string? valueName = statement is OqlInsertExpression insertion ? insertion.ValueName : ((OqlUpsertExpression)statement).ValueName;
+                object? value = sourcePlan.ValueOrdinal is int valueOrdinal ? Member(valueOrdinal, valueName) :
+                    sourcePlan.Source is DocumentSetOperationPlan { Shape: not DocumentSetResultShape.Columns } ? Read(0) :
                     DocumentJsonValue.Object(result.Columns.Select(column => new KeyValuePair<string, object?>(column.Name, Read(column.Ordinal))), writeVerb: verb);
-                Add(Read(sourcePlan.KeyOrdinal), value);
+                Add(Member(sourcePlan.KeyOrdinal, keyName), value);
             }
         }
         else

@@ -15,10 +15,10 @@ explicit SNAPSHOT and READ COMMITTED are supported. Wire sessions negotiate tran
 pool return rolls back open or failed work and discards peers that cannot certify a clean session.
 OQL collection/index DDL is refused in an explicit transaction (CD04105). See DIALECT.md for
 exact spellings, fault recovery and named savepoint scope semantics.
-Top-level UNION [ALL] combines query values with Couchbase's equal, left-associative set precedence.
+UNION/INTERSECT/EXCEPT [ALL] combine query values with Couchbase's equal, left-associative set precedence.
 Parentheses own operand ordering and paging; the compound owns its final ORDER BY/LIMIT/OFFSET.
-The closed query-expression family covers SELECT and compounds. INTERSECT/EXCEPT and compound
-subquery/DML positions retain CK00001 until OQ-S2; DIALECT records T3-30 headers and diagnostics.
+The closed query-expression family covers SELECT and compounds in expression subqueries, derived FROM
+and INSERT/UPSERT SELECT, including correlated operands. DIALECT records T3-30 headers and diagnostics.
 SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
 Int64 values and CD00007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
 or a preceding dot keeps them usable, and AS labels still accept them.

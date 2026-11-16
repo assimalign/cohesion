@@ -69,10 +69,10 @@ internal static class OqlUnsupportedVocabulary
         new("LETTING", "LETTING", OqlWordPosition.Clause),
         new("JOIN", "JOIN", OqlWordPosition.Clause),
         new("NEST", "NEST", OqlWordPosition.Clause),
-        // Enabled by OqlClauses.Union; the other set operators retain CK00001.
+        // Enabled set clauses; explicit DISTINCT still retains CK00001.
         new("UNION", OqlClauses.Union, OqlWordPosition.Clause),
-        new("INTERSECT", "INTERSECT", OqlWordPosition.Clause),
-        new("EXCEPT", "EXCEPT", OqlWordPosition.Clause),
+        new("INTERSECT", OqlClauses.Intersect, OqlWordPosition.Clause),
+        new("EXCEPT", OqlClauses.Except, OqlWordPosition.Clause),
         // OQL uses LIMIT/OFFSET; the SQL FETCH spelling remains deferred.
         new("FETCH", "FETCH", OqlWordPosition.Clause),
         // SQL++ statement words.

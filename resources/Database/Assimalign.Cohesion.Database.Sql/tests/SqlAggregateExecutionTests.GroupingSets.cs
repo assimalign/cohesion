@@ -135,7 +135,7 @@ public sealed partial class SqlAggregateExecutionTests
         // Assert
         CheckRows(rows, [[4m, null, 11m, 2L], [null, null, 11m, 1L], [null, null, 13m, 3L]]);
         CheckRows(await RowsAsync(session, "SELECT a,COUNT(*) AS n FROM t GROUP BY ROLLUP(a) ORDER BY GROUPING(a)+n DESC,a NULLS LAST;"),
-            [[null,3L],[1,2L],[null,1L]]);
+            [[null, 3L], [1, 2L], [null, 1L]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Grouping sets: masks never evaluate arguments and correlated reads use completed keys")]
@@ -159,10 +159,10 @@ public sealed partial class SqlAggregateExecutionTests
         // Assert
         calls.ShouldBe(2);
         masks.Count.ShouldBe(3);
-        CheckRows(rows, [[1,2,1,2,0],[2,3,2,3,0],[null,2,null,2,2],[null,3,null,3,2],[null,null,null,null,3]]);
+        CheckRows(rows, [[1, 2, 1, 2, 0], [2, 3, 2, 3, 0], [null, 2, null, 2, 2], [null, 3, null, 3, 2], [null, null, null, null, 3]]);
         const string queryKey = "(SELECT MAX(x.a) FROM t x,t y)";
         CheckRows(await RowsAsync(session, $"SELECT {queryKey},GROUPING({queryKey}),COUNT(*) FROM t GROUP BY GROUPING SETS (({queryKey}),()) ORDER BY GROUPING({queryKey});"),
-            [[2,0,2L],[null,1,2L]]);
+            [[2, 0, 2L], [null, 1, 2L]]);
         CheckRows(await RowsAsync(session, "SELECT GROUPING(1/(a-a)) FROM t WHERE FALSE GROUP BY ROLLUP(1/(a-a));"), [[1]]);
     }
 
@@ -187,7 +187,7 @@ public sealed partial class SqlAggregateExecutionTests
         // Assert
         filters.ShouldBe(6);
         arguments.ShouldBe(4);
-        CheckRows(rows, [[0,0,0L,null],[1,0,1L,6m],[2,0,1L,3m],[null,1,2L,9m]]);
+        CheckRows(rows, [[0, 0, 0L, null], [1, 0, 1L, 6m], [2, 0, 1L, 3m], [null, 1, 2L, 9m]]);
         arguments = 0;
         await RowsAsync(session, "SELECT SUM(argument(a)),SUM(argument(a)) FROM t WHERE a>0 GROUP BY CUBE(a);");
         arguments.ShouldBe(4); // volatile logical calls are never merged
@@ -265,20 +265,26 @@ public sealed partial class SqlAggregateExecutionTests
         arity.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01063");
         string maximumArguments = string.Join(',', Enumerable.Repeat("1+0", 31));
         CheckRows(await RowsAsync(session, $"SELECT GROUPING({maximumArguments}) AS mask GROUP BY GROUPING SETS ((1+0),()) ORDER BY mask;"),
-            [[0],[int.MaxValue]]);
+            [[0], [int.MaxValue]]);
         (await RowsAsync(session, "SELECT COUNT(*) GROUP BY DISTINCT CUBE(" + string.Join(',', Enumerable.Repeat("1+0", 12)) + ");")).Count.ShouldBe(2);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Grouping sets: state and buffered inputs consume the shared statement grant")]
-    [InlineData("COUNT(*)", "CUBE(a)")]
-    [InlineData("GROUPING(a),COUNT(*)", "a")]
-    [InlineData("COUNT(DISTINCT v)", "GROUPING SETS ((),())")]
-    [InlineData("STRING_AGG(label,',' ORDER BY v)", "GROUPING SETS ((),())")]
-    [InlineData("STRING_AGG(label,',')", "GROUPING SETS ((),())")]
-    public async Task GroupingSets_StateMemory_ShouldRefuseAndReleaseGrant(string aggregate, string grouping)
+    [InlineData("COUNT(*)", "CUBE(a)", 4096L, 4048L)]
+    [InlineData("COUNT(*)", "CUBE(a)", 22496L, 22380L)]
+    [InlineData("GROUPING(a),COUNT(*)", "a", 4096L, 4048L)]
+    [InlineData("GROUPING(a),COUNT(*)", "a", 22496L, 22264L)]
+    [InlineData("COUNT(DISTINCT v)", "GROUPING SETS ((),())", 4096L, 4048L)]
+    [InlineData("COUNT(DISTINCT v)", "GROUPING SETS ((),())", 22496L, 22464L)]
+    [InlineData("STRING_AGG(label,',' ORDER BY v)", "GROUPING SETS ((),())", 4096L, 4048L)]
+    [InlineData("STRING_AGG(label,',' ORDER BY v)", "GROUPING SETS ((),())", 22496L, 22472L)]
+    [InlineData("STRING_AGG(label,',')", "GROUPING SETS ((),())", 4096L, 4048L)]
+    [InlineData("STRING_AGG(label,',')", "GROUPING SETS ((),())", 22496L, 22480L)]
+    public async Task GroupingSets_StateMemory_ShouldRefuseAndReleaseGrant(string aggregate, string grouping, long budget, long expectedPeak)
     {
-        // Arrange
-        await using var engine = SqlDatabaseEngine.Create("group-memory", new() { StatementMemoryBudget = 4096 });
+        // Arrange: 100 retained input rows cost 18400 B. The 4096 B case
+        // refuses during input; 22496 B leaves the original 4096 B for state.
+        await using var engine = SqlDatabaseEngine.Create("group-memory", new() { StatementMemoryBudget = budget });
         var database = await engine.CreateDatabaseAsync("memory");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t(a INT,v INT,label TEXT);");
@@ -292,9 +298,12 @@ public sealed partial class SqlAggregateExecutionTests
         // Assert
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
         metrics.HashMemoryBytes.ShouldBe(0);
-        metrics.PeakHashMemoryBytes.ShouldBeInRange(1, 4096);
-        (await RowsAsync(session, "SELECT COUNT(*) FROM t GROUP BY ();"))[0][0].ShouldBe(100L);
-        CheckRows(await RowsAsync(session, "SELECT COUNT(*) FROM t GROUP BY GROUPING SETS ((),());"), [[100L],[100L]]);
+        metrics.PeakHashMemoryBytes.ShouldBe(expectedPeak);
+        metrics.RecordsExamined.ShouldBe(budget == 4096 ? 23 : 100);
+        // Verification must also fit the grant: stream the full count and use
+        // empty input for the staged duplicate-global-group check.
+        (await RowsAsync(session, "SELECT COUNT(*) FROM t;"))[0][0].ShouldBe(100L);
+        CheckRows(await RowsAsync(session, "SELECT COUNT(*) FROM t WHERE FALSE GROUP BY GROUPING SETS ((),());"), [[0L], [0L]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Grouping sets: empty groups charge per-state ordering metadata before allocating it")]

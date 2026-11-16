@@ -37,7 +37,8 @@ public sealed partial class SqlJointTypeMigrationTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var storage = new CrashCaptureSqlStorageStrategy();
         var builder = Builder(storage);
-        builder.Options.CheckpointJournalSize = 0;
+        // Rewritten jobs retain the 16 MiB copy bound even with a larger engine budget.
+        builder.Options.CheckpointJournalSize = 256L * 1024 * 1024;
         builder.Options.CheckpointInterval = TimeSpan.FromDays(1);
         await using var engine = await builder.BuildAsync(guard.Token);
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
@@ -73,6 +74,12 @@ public sealed partial class SqlJointTypeMigrationTests
             database.Coordinator.TryCheckpoint(TimeSpan.Zero, guard.Token).ShouldBeFalse();
             recorder.Events.ShouldContain(e => e.EventId == 21 && Equals(e.Payload![1], "SqlTableReclamation"));
             release.Set();
+            database.SchemaProvisioner.JointStage = stage =>
+            {
+                if (stage != "CatalogPublished") { return; }
+                storage.DurableStorageChanged?.Invoke(false);
+                storage.DurableStorageChanged = null;
+            };
             SqlPlanExecutor.RewriteStage = (stage, _) =>
             {
                 if (stage == "CheckpointBusy") { Interlocked.Increment(ref busy); }
@@ -98,6 +105,7 @@ public sealed partial class SqlJointTypeMigrationTests
             release.Set();
             SqlPlanExecutor.RewriteStage = null;
             storage.DurableStorageChanged = null;
+            database.SchemaProvisioner.JointStage = null;
             database.TableReclamation.BeforeBatchCommit = null;
         }
     }
@@ -126,6 +134,12 @@ public sealed partial class SqlJointTypeMigrationTests
         long peak = 0;
         storage.DurableStorageChanged = catalog =>
         { if (!catalog) { peak = Math.Max(peak, database.DataStorage.Journal.Length); } };
+        database.SchemaProvisioner.JointStage = stage =>
+        {
+            if (stage != "CatalogPublished") { return; }
+            storage.DurableStorageChanged?.Invoke(false);
+            storage.DurableStorageChanged = null;
+        };
         SqlPlanExecutor.RewriteStage = (stage, _) =>
         {
             if (stage == "CheckpointBusy" && Interlocked.Increment(ref busy) == 1)
@@ -153,6 +167,7 @@ public sealed partial class SqlJointTypeMigrationTests
         {
             SqlPlanExecutor.RewriteStage = null;
             storage.DurableStorageChanged = null;
+            database.SchemaProvisioner.JointStage = null;
             if (outside.IsActive) { outside.Rollback(); }
         }
     }

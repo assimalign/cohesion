@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 internal sealed partial class GraphPlanner
 {
     internal GraphCompositePlan PlanComposite(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters,
-        bool paths, CancellationToken token, IReadOnlyDictionary<string, GraphBindingShape>? inputShapes = null, GraphReductionWork? sharedWork = null, GraphTokenResolver? tokens = null)
+        bool paths, CancellationToken token, IReadOnlyDictionary<string, GraphBindingShape>? inputShapes = null, GraphReductionWork? sharedWork = null, GraphTokenResolver? tokens = null, IReadOnlyDictionary<string, GraphBindingShape>? callImports = null)
     {
         ValidateCompositeReadOnly(query, token);
         using var ownedTokens = tokens is null ? new GraphTokenResolver(_database.Catalog, _snapshot) : null;
@@ -74,9 +74,10 @@ internal sealed partial class GraphPlanner
             // Each planner owns its lexical and correlated caches; operands never import bindings.
             var shapes = new List<GraphBindingShape>();
             var planner = new GraphPlanner(_database, _snapshot)
-            { _nativeExpressions = new ReductionPlanningState(null) { SharedWork = reductionWork } };
+            { _parsed = query.Text is not null || _parsed,
+                _nativeExpressions = new ReductionPlanningState(null) { SharedWork = reductionWork } };
             var plan = planner.Plan(operand, normalized, paths, token,
-                normalizedParameters: true, resultShapes: shapes, inputShapes: inputShapes, tokens: tokens);
+                normalizedParameters: true, resultShapes: shapes, inputShapes: inputShapes, tokens: tokens, callImports: callImports);
             if (plan.Projections.Count == 0)
             { throw new GraphPlanningException("CG05001", ErrorMessages.UnionOperandMalformed, operand.Location); }
             if (plans.Count == 0)

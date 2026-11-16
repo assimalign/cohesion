@@ -87,7 +87,7 @@ public sealed class SqlSchemaModifierMigrationTests
         script.Steps.ShouldHaveSingleItem().StatementText.ShouldBe("ALTER TABLE dbo.items ALTER COLUMN Value email NOT NULL;");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Bound tightening: precision uses 49a and VARCHAR uses joint publication on the worker")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Bound tightening: precision and VARCHAR publish jointly on the worker")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task BuildAsync_CodeFirstBoundTightening_ShouldDeferAndEnforceResolvedBounds(bool numeric)
@@ -152,8 +152,8 @@ public sealed class SqlSchemaModifierMigrationTests
             await Task.Delay(1, timeout.Token);
         }
         result.OfflineError.ShouldBeNull();
-        applied.ShouldBe(numeric ? 1 : 0);
-        if (!numeric) { result.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1); }
+        applied.ShouldBe(0);
+        result.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
         result.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
         await using var writer = await result.CreateSessionAsync(timeout.Token);
         await Should.ThrowAsync<DatabaseException>(async () => await writer.ExecuteAsync(

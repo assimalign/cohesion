@@ -92,6 +92,30 @@ internal static class Program
 
     private static async Task RunSetOperationsAsync(DocumentConnection connection, CancellationToken cancellationToken = default)
     {
+        var intersect = await connection.QueryAsync("SELECT RAW x FROM [1.00,2,1.0,3,2] AS x INTERSECT ALL SELECT RAW y FROM [1,2.0,2] AS y", cancellationToken: cancellationToken);
+        Check(intersect.Columns.Single().Name == "value" && intersect.Documents.Select(value => value.GetRawText()).SequenceEqual(new[] { "1.00", "2", "2" }), "INTERSECT ALL minimum counts and left representatives");
+        var distinctIntersection = await connection.QueryAsync("SELECT RAW x FROM [1.00,2,1.0] AS x INTERSECT SELECT RAW y FROM [2,1] AS y", cancellationToken: cancellationToken);
+        Check(distinctIntersection.Documents.Select(value => value.GetRawText()).SequenceEqual(new[] { "1.00", "2" }), "INTERSECT distinct preserves left order");
+        var except = await connection.QueryAsync("SELECT x AS n FROM [1,1,2,3] AS x EXCEPT ALL SELECT y AS n FROM [1,3] AS y ORDER BY n DESC", cancellationToken: cancellationToken);
+        Check(except.Columns.Single().Name == "n" && except.Select(row => row[0]).SequenceEqual(new object?[] { 2m, 1m }), "EXCEPT ALL subtraction typed header and order");
+        var distinctExcept = await connection.QueryAsync("SELECT RAW x FROM [1,1,2,3] AS x EXCEPT SELECT RAW y FROM [2] AS y", cancellationToken: cancellationToken);
+        Check(distinctExcept.Documents.Select(value => value.GetRawText()).SequenceEqual(new[] { "1", "3" }), "EXCEPT distinct preserves first left values");
+        var correlated = await connection.QueryAsync("SELECT RAW (SELECT RAW i.n FROM o AS i INTERSECT SELECT RAW o.n FROM [0] AS y) FROM [{n:1},{n:2}] AS o", cancellationToken: cancellationToken);
+        Check(correlated.Documents.Select(value => value.GetRawText()).SequenceEqual(new[] { "[1]", "[2]" }), "compound correlated operands return arrays");
+        var derived = await connection.QueryAsync("SELECT RAW q FROM (SELECT 1 AS a FROM [0] AS x EXCEPT SELECT 1 AS b FROM [0] AS y) AS q", cancellationToken: cancellationToken);
+        Check(derived.Documents.Single().GetRawText() == "{\"a\":1}", "compound derived heterogeneous value");
+        var orderedScope = await connection.QueryAsync("SELECT RAW (SELECT x AS n FROM [2,1] AS x INTERSECT SELECT y AS n FROM [1,2] AS y ORDER BY n) FROM [0] AS n", cancellationToken: cancellationToken);
+        Check(orderedScope.Documents.Single().GetRawText() == "[{\"n\":1},{\"n\":2}]", "compound ordering binds result members before enclosing aliases");
+        var multisetEmpty = await connection.QueryAsync("SELECT RAW x FROM [1/0] AS x INTERSECT ALL SELECT RAW y FROM [1/0] AS y LIMIT 0", cancellationToken: cancellationToken);
+        Check(multisetEmpty.Count == 0, "multiset zero limit opens no operands");
+        await connection.CreateCollectionAsync("set_aot", cancellationToken);
+        var inserted = await connection.QueryAsync("INSERT INTO set_aot (KEY k,VALUE v) SELECT 'a' AS k,{n:1} AS v FROM [0] AS x INTERSECT ALL SELECT {n:1} AS v,'a' AS k FROM [0] AS y RETURNING RAW set_aot.n", cancellationToken: cancellationToken);
+        Check(inserted.AffectedCount == 1 && inserted.Documents.Single().GetInt32() == 1, "compound INSERT SELECT document member bindings");
+        var upserted = await connection.QueryAsync("UPSERT INTO set_aot (KEY k) SELECT 'a' AS k,2 AS n FROM [0] AS x EXCEPT SELECT 'b' AS other FROM [0] AS y RETURNING RAW set_aot.n", cancellationToken: cancellationToken);
+        Check(upserted.AffectedCount == 1 && upserted.Documents.Single().GetInt32() == 2, "compound UPSERT SELECT default row value");
+        var multisetPlan = await connection.QueryAsync("EXPLAIN SELECT RAW q FROM (SELECT RAW 1 FROM [1/0] AS x INTERSECT SELECT RAW 1 FROM [1/0] AS y EXCEPT ALL SELECT RAW 2 FROM [1/0] AS z) AS q", cancellationToken: cancellationToken);
+        Check(multisetPlan.Documents.Any(value => value.GetProperty("operator").GetString() == "Intersect") && multisetPlan.Documents.Any(value => value.GetProperty("operator").GetString() == "ExceptAll"), "nested multiset EXPLAIN operands");
+        await connection.DropCollectionAsync("set_aot", cancellationToken);
         var raw = await connection.QueryAsync("SELECT RAW x FROM [1,1,NULL] AS x UNION SELECT VALUE y FROM [1.0,2,NULL] AS y", cancellationToken: cancellationToken);
         Check(raw.Columns.Single().Name == "value" && raw.Documents.Select(value => value.GetRawText()).SequenceEqual(new[] { "1", "null", "2" }), "UNION value equality and header");
         var typed = await connection.QueryAsync("SELECT LENGTH('x') AS n FROM [1] AS x UNION ALL SELECT 2 AS n FROM [1] AS y ORDER BY n DESC LIMIT 1", cancellationToken: cancellationToken);

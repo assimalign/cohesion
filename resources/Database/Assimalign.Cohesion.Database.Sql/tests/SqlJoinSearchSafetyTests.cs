@@ -50,7 +50,8 @@ public sealed class SqlJoinSearchSafetyTests
 
         // Assert
         rows.ShouldBe(32);
-        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(8240);
+        // Two existing hash builds (8240 B) overlap 32 retained outputs (5632 B).
+        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(13872);
         session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
     }
 
@@ -244,13 +245,15 @@ public sealed class SqlJoinSearchSafetyTests
         SqlPlanner.HashKeys(condition, plan.Bindings, plan.Columns, 0, fullFrame: true, innerMask: 3).ShouldBeNull();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: unproven hash builds keep the old budget-free loop plan (#1629)")]
-    [InlineData(0)]
-    [InlineData(8)]
-    public async Task ExecuteAsync_UnprovenHashBuilds_ShouldKeepOldLoopPlan(int singletonInputs)
+    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: unproven hash builds keep the written loop plan with charged buffers (#1629)")]
+    [InlineData(0, 5000L, true)]
+    [InlineData(8, 5000L, true)]
+    [InlineData(0, 11904L, false)]
+    [InlineData(8, 12672L, false)]
+    public async Task ExecuteAsync_UnprovenHashBuilds_ShouldKeepOldLoopPlan(int singletonInputs, long budget, bool refuses)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create("search-bushy-width", new() { StatementMemoryBudget = 5000 });
+        await using var engine = SqlDatabaseEngine.Create("search-bushy-width", new() { StatementMemoryBudget = budget });
         var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         foreach (string table in new[] { "a", "b", "c", "d" })
@@ -261,7 +264,19 @@ public sealed class SqlJoinSearchSafetyTests
         await session.ExecuteAsync("CREATE TABLE singleton(id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO singleton VALUES(1)", cancellationToken: CancellationToken.None);
 
-        // Act
+        // Act: the original 5000 B grant stops on the thirteenth row of the second
+        // retained inner. Sufficient grants also preserve all sixteen output rows.
+        string sql = "SELECT a.id,b.id,c.id,d.id FROM a,b,c,d" + string.Concat(Enumerable.Range(0, singletonInputs).Select(i => $",singleton s{i}")) +
+            " WHERE a.k=c.k AND b.k=d.k AND a.v=b.v";
+        if (refuses)
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+            failure.Diagnostics.ShouldContain(item => item.Code == "CS05067");
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(4928);
+            session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
+            session.LastStatementMetrics.RecordsExamined.ShouldBe(30);
+            return;
+        }
         int rows = 0;
         try
         {
@@ -274,7 +289,7 @@ public sealed class SqlJoinSearchSafetyTests
 
         // Assert
         rows.ShouldBe(16);
-        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(0);
+        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(singletonInputs == 0 ? 11904 : 12672);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Join search: an empty old prefix avoids activating later hash builds (#1629)")]

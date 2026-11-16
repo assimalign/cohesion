@@ -89,16 +89,16 @@ public sealed partial class SqlJointTypeMigrationTests
         database.IsOffline.ShouldBeFalse();
     }
 
-    private sealed record OptionalDomainItem(decimal? V, decimal? W, decimal? X);
-    private sealed record RequiredDomainItem(decimal V, decimal? W, decimal? X);
+    private sealed record OptionalDomainItem(decimal? V, decimal? W, decimal? X, int Id);
+    private sealed record RequiredDomainItem(decimal V, decimal? W, decimal? X, int Id);
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Same-hash ordinary and joint intents replan after domain registration changes (#1777)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Same-hash kept and rewritten intents replan after domain registration changes (#1777)")]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(true, true)]
     public async Task BuildAsync_DomainMigrationKindChanged_ShouldReplanAndKeepRows(bool initiallyJoint, bool staleSnapshot)
     {
-        // Arrange: NOT NULL is ordinary at scale 2 and joint at scale 1.
+        // Arrange: NOT NULL keeps its owner at scale 2 and rewrites at scale 1.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         using var release = new ManualResetEventSlim();
         var captured = new TaskCompletionSource<CrashCaptureSqlStorageStrategy>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -107,8 +107,8 @@ public sealed partial class SqlJointTypeMigrationTests
         SqlSchema Declaration(bool changed) => SqlSchema.Create("typed", schema =>
         {
             schema.AllowDestructiveChanges();
-            if (changed) { schema.Table<RequiredDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); }); }
-            else { schema.Table<OptionalDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); }); }
+            if (changed) { schema.Table<RequiredDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); table.Key(row => row.Id); }); }
+            else { schema.Table<OptionalDomainItem>("items", table => { table.Column(row => row.V, "native_value"); table.Column(row => row.W, "native_value"); table.Column(row => row.X, "native_value"); table.Key(row => row.Id); }); }
         });
         var targetDeclaration = Declaration(true);
         var target = targetDeclaration.Compile();
@@ -120,7 +120,7 @@ public sealed partial class SqlJointTypeMigrationTests
             var database = await seed.CreateDatabaseAsync("typed", guard.Token);
             await database.ApplySchemaAsync(Declaration(false).Compile(), guard.Token);
             await using var writer = await database.CreateSessionAsync(guard.Token);
-            await writer.ExecuteAsync("INSERT INTO items VALUES(12,13,14)", cancellationToken: guard.Token);
+            await writer.ExecuteAsync("INSERT INTO items VALUES(12,13,14,1)", cancellationToken: guard.Token);
             storage = storage.CaptureDurableImages();
         }
         var first = Builder(storage);
@@ -128,12 +128,14 @@ public sealed partial class SqlJointTypeMigrationTests
         await using (var engine = await first.BuildAsync(guard.Token))
         {
             var database = await engine.OpenDatabaseAsync("typed", guard.Token);
+            database.SchemaProvisioner.DeferredFailed = failure => captured.TrySetException(failure);
             ulong firstPreparedOwner = database.Catalog.NextReservedIdentity;
             void CaptureIntent(CancellationToken token)
             {
                 var intent = database.Catalog.PendingMigration.ShouldNotBeNull();
-                intent.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)).ShouldBe(initiallyJoint);
-                recordedSteps = intent.StepCount;
+                intent.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)).ShouldBeTrue();
+                intent.Steps.ShouldContain(step => step.Kind == (initiallyJoint ? "Joint/RewriteOwner" : "Joint/KeepOwner"));
+                recordedSteps = database.SchemaProvisioner.Deferred!.ProvisioningStepCount;
                 if (initiallyJoint)
                 {
                     abandonedOwners = Enumerable.Range(0, checked((int)(database.Catalog.NextReservedIdentity - firstPreparedOwner)))
@@ -181,17 +183,33 @@ public sealed partial class SqlJointTypeMigrationTests
         // Assert.
         var trace = recorder.Events.Where(e => e.EventId is 13 or 14).ToArray();
         int restarted = Array.FindIndex(trace, e => e.EventId == 14 && Equals(e.Payload![5], "Restarted"));
-        restarted.ShouldBeGreaterThan(0);
-        trace[restarted - 1].EventId.ShouldBe(13);
-        trace[restarted - 1].Payload![4].ShouldBe("Apply");
-        trace[restarted - 1].Payload![5].ShouldBe(-1);
-        trace[restarted].Payload![4].ShouldBeOfType<int>().ShouldBeGreaterThan(0);
-        trace[restarted + 1].EventId.ShouldBe(13);
-        trace[restarted + 1].Payload![4].ShouldBe("Replan");
-        trace[restarted + 1].Payload![5].ShouldBe(-1);
-        trace[restarted + 2].EventId.ShouldBe(14);
-        trace[restarted + 2].Payload![4].ShouldBe(trace[restarted].Payload![4]);
-        trace[restarted + 2].Payload![5].ShouldBe(initiallyJoint ? "Deferred" : "Applied");
+        if (staleSnapshot)
+        {
+            // With every deferred plan joint, precision widening no longer commits
+            // early. Both preparations must rewrite the unchanged old heap, so the
+            // recorded RewriteOwner route still matches and needs no discard.
+            restarted.ShouldBe(-1);
+            trace.Length.ShouldBe(2);
+            trace[0].Payload![4].ShouldBe("Apply");
+            trace[1].Payload![5].ShouldBe("Deferred");
+            // The fresh script has three precision changes plus NOT NULL. Its four
+            // executable steps replace the interrupted script's smaller total.
+            trace[1].Payload![4].ShouldBe(4);
+        }
+        else
+        {
+            restarted.ShouldBeGreaterThan(0);
+            trace[restarted - 1].EventId.ShouldBe(13);
+            trace[restarted - 1].Payload![4].ShouldBe("Apply");
+            trace[restarted - 1].Payload![5].ShouldBe(-1);
+            trace[restarted].Payload![4].ShouldBeOfType<int>().ShouldBeGreaterThan(0);
+            trace[restarted + 1].EventId.ShouldBe(13);
+            trace[restarted + 1].Payload![4].ShouldBe("Replan");
+            trace[restarted + 1].Payload![5].ShouldBe(-1);
+            trace[restarted + 2].EventId.ShouldBe(14);
+            trace[restarted + 2].Payload![4].ShouldBe(trace[restarted].Payload![4]);
+            trace[restarted + 2].Payload![5].ShouldBe(initiallyJoint ? "Deferred" : "Applied");
+        }
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
         current.OfflineError.ShouldBeNull();
         current.Catalog.PendingMigration.ShouldBeNull();

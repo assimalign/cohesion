@@ -73,6 +73,7 @@ public static class GqlLanguageProfile
         GqlClauses.Otherwise,
         GqlClauses.Next,
         GqlClauses.With,
+        GqlClauses.Call,
         GqlClauses.GroupBy,
         GqlClauses.OrderBy,
         GqlClauses.Offset,

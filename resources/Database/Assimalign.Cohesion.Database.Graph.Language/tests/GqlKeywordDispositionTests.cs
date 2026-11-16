@@ -94,7 +94,7 @@ public sealed class GqlKeywordDispositionTests
         ["COALESCE"] = Parses("RETURN COALESCE(NULL, 1)"),
         ["NULLIF"] = Parses("RETURN NULLIF(1, 1)"),
         ["GRAPH"] = Rejects("CREATE GRAPH g", "GRAPH"),
-        ["CALL"] = Rejects("CALL db.labels() YIELD label", "CALL"),
+        ["CALL"] = Parses("CALL () { RETURN 1 AS x } RETURN x"),
         ["YIELD"] = Rejects("MATCH (a)-[]->(b) YIELD a RETURN a", "YIELD"),
         ["FILTER"] = Parses("MATCH (a) FILTER a.x = 1 RETURN a"),
         // Server, session, catalog and transaction scope

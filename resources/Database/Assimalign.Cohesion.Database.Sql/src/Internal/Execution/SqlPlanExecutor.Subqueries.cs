@@ -16,7 +16,9 @@ internal sealed partial class SqlPlanExecutor
         var parent = _subqueryValues;
         bool deferred = false;
         for (int index = 0; index < queries.Count; index++) { deferred |= queries[index].IsDeferred; }
-        var frame = new SqlSubqueryValues(parent, queries[0].ScopeId, queries, lazy: deferred);
+        var frame = ChargesAdditionalSelectBuffers
+            ? SqlSubqueryValues.WithMemory(parent, queries[0].ScopeId, queries, deferred, statement.Metrics, _definitions.StatementMemoryBudget)
+            : new SqlSubqueryValues(parent, queries[0].ScopeId, queries, lazy: deferred);
         _subqueryValues = frame;
         try
         {
@@ -26,13 +28,14 @@ internal sealed partial class SqlPlanExecutor
                 if (!frame.StatementValues.TryGetValue(query.Slot, out var values))
                 {
                     values = await MaterializeSubqueryAsync(query, statement, cancellationToken).ConfigureAwait(false);
+                    frame.Admit(values, correlated: false);
                     frame.StatementValues.Add(query.Slot, values);
                 }
                 frame.Set(query.Slot, values);
             }
             return await ExecuteAsync(input, statement, cancellationToken).ConfigureAwait(false);
         }
-        finally { frame.ClearCorrelated(RecursiveState?.Memory); _subqueryValues = parent; }
+        finally { frame.ClearCorrelated(RecursiveState?.Memory); frame.ReleaseMemory(); _subqueryValues = parent; }
     }
 
     private Task<object?[]> MaterializeSubqueryAsync(SqlSubqueryBinding query, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -44,42 +47,62 @@ internal sealed partial class SqlPlanExecutor
     private async Task<object?[]> MaterializePlainSubqueryAsync(SqlSubqueryBinding query, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        var parent = _subqueryValues;
-        // A child without subqueries still has its own execution frame, so its row
-        // evaluation cannot replace the row retained by the enclosing frame.
-        _subqueryValues = new SqlSubqueryValues(parent);
+        long resultBytes = 0;
+        SqlSelectMemory retainedBytes = default, vectorBytes = default;
         try
         {
-            await using var result = (DatabaseResultSet)await ExecuteAsync(query.Query, statement, cancellationToken).ConfigureAwait(false);
-            var rows = new List<object?>();
-            bool found = false;
-            await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            cancellationToken.ThrowIfCancellationRequested();
+            var parent = _subqueryValues;
+            // A child without subqueries still has its own execution frame, so its row
+            // evaluation cannot replace the row retained by the enclosing frame.
+            _subqueryValues = new SqlSubqueryValues(parent);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (query.Kind == SqlSubqueryKind.Scalar && found)
+                bool boundedBody = CanBoundSubqueryBody(query);
+                _definitions.ObserveSelectRetention?.Invoke("subquery-body", boundedBody, 0);
+                await using var result = (DatabaseResultSet)await (boundedBody
+                    ? ExecuteBoundedSubqueryBodyAsync(query.Query, statement, cancellationToken, 2)
+                    : ExecuteAsync(query.Query, statement, cancellationToken)).ConfigureAwait(false);
+                resultBytes += AdmitSelectResult(result, cancellationToken);
+                if (!boundedBody && result is SqlMaterializedResultSet body)
+                { _definitions.ObserveSelectRetention?.Invoke("subquery-body", false, body.Rows.Count); }
+                var rows = new List<object?>();
+                bool found = false;
+                await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    throw new SqlExecutionException(SqlExecutionException.CardinalityCode, ErrorMessages.ScalarSubqueryCardinality);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (query.Kind == SqlSubqueryKind.Scalar && found)
+                    {
+                        throw new SqlExecutionException(SqlExecutionException.CardinalityCode, ErrorMessages.ScalarSubqueryCardinality);
+                    }
+                    found = true;
+                    if (query.Kind == SqlSubqueryKind.Exists) { break; }
+                    var value = SqlCharacter.Input(row.GetValue(0), result.Columns[0].Type);
+                    RetainSelectValue(ref retainedBytes, value, 8);
+                    rows.Add(value);
                 }
-                found = true;
-                if (query.Kind == SqlSubqueryKind.Exists) { break; }
-                rows.Add(SqlCharacter.Input(row.GetValue(0), result.Columns[0].Type));
+                if (query.Kind == SqlSubqueryKind.Exists) { rows.Add(query.IsNegated ? !found : found); }
+                else if (query.Kind == SqlSubqueryKind.Scalar && !found) { rows.Add(null); }
+                // Completed async frames can retain a disposed child, especially when
+                // EXISTS stopped enumeration early. Only the copied values belong to
+                // the statement cache; drop the child's owned source cells and buffer
+                // before a subsequent window acquires its grant.
+                if (result is SqlMaterializedResultSet materialized)
+                {
+                    for (int index = 0; index < materialized.Rows.Count; index++)
+                    {
+                        Array.Clear(materialized.Rows[index]);
+                    }
+                    materialized.ClearRows();
+                    ReleaseSelectMemory(ref resultBytes);
+                }
+                ReserveSelectMemory(ref vectorBytes, 24L + 8L * rows.Count);
+                foreach (var value in rows) { RetainSelectValue(ref vectorBytes, value); }
+                return rows.ToArray();
             }
-            if (query.Kind == SqlSubqueryKind.Exists) { rows.Add(query.IsNegated ? !found : found); }
-            else if (query.Kind == SqlSubqueryKind.Scalar && !found) { rows.Add(null); }
-            // Completed async frames can retain a disposed child, especially when
-            // EXISTS stopped enumeration early. Only the copied values belong to
-            // the statement cache; drop the child's owned source cells and buffer
-            // before a subsequent window acquires its grant.
-            if (result is SqlMaterializedResultSet materialized)
-            {
-                for (int index = 0; index < materialized.Rows.Count; index++)
-                { Array.Clear(materialized.Rows[index]); }
-                materialized.ClearRows();
-            }
-            return rows.ToArray();
+            finally { _subqueryValues = parent; }
         }
-        finally { _subqueryValues = parent; }
+        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref vectorBytes); ReleaseSelectMemory(ref resultBytes); }
     }
 
     // This separate state machine charges child result buffers only inside a window.

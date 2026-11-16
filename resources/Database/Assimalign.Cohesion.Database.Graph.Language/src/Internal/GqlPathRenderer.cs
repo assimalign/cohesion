@@ -49,6 +49,11 @@ internal static class GqlPathRenderer
                     break;
                 case GqlFilterStage filter: Push("FILTER ", filter.Predicate); break;
                 case GqlForStage loop: Push("FOR ", Name(loop.Variable), " IN ", loop.List); break;
+                case GqlCallStage call:
+                    Push(call.Optional ? "OPTIONAL CALL" : "CALL",
+                        call.ImportAll ? " (*)" : call.Imports is null ? null : " (" + string.Join(", ", call.Imports.Select(Name)) + ")",
+                        " { ", call.Body, " }");
+                    break;
                 case GqlCompositeStage stage: Push("(", stage.Query, ")"); break;
                 case GqlNextStage: builder.Append("NEXT"); break;
                 case GqlReturnStage result:

@@ -211,7 +211,7 @@ public sealed class SqlFullJoinTests
     public async Task Join_FullBudget_ShouldReleaseEveryReservation(string right)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create("full-budget", new() { StatementMemoryBudget = 1024 });
+        await using var engine = SqlDatabaseEngine.Create("full-budget", new() { StatementMemoryBudget = right == "b" ? 1024 : 8400 });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecAsync(session, "CREATE TABLE a(id INT); CREATE TABLE b(id INT); CREATE TABLE c(id INT); INSERT INTO c VALUES(1);");
@@ -224,7 +224,7 @@ public sealed class SqlFullJoinTests
         error.Diagnostics.ShouldContain(item => item.Code == "CS05067");
         var metrics = session.LastStatementMetrics!;
         metrics.HashMemoryBytes.ShouldBe(0);
-        metrics.PeakHashMemoryBytes.ShouldBeInRange(1, 1024);
+        metrics.PeakHashMemoryBytes.ShouldBe(right == "b" ? 992 : 8208);
         if (right == "b") { metrics.RecordsExamined.ShouldBeLessThan(100); }
         else { metrics.RecordsExamined.ShouldBe(101); } // The child's preserved outer is buffered before its bounded inner build.
         Check(await RowsAsync(session, "SELECT COUNT(*) FROM b"), [[100L]]);

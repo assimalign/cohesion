@@ -108,7 +108,7 @@ public sealed class SqlJoinSearchFixTests
                 heuristic.CandidateMemory.ShouldBe((count - 1) * 248d); // one decoded row and list/growth storage per inner
             }
             (await DrainAsync(executor, selected, context)).ShouldBe(new[] { "1" });
-            context.Metrics.PeakHashMemoryBytes.ShouldBe(0);
+            context.Metrics.PeakHashMemoryBytes.ShouldBe((count - 1) * 136L + 96L);
             _output.WriteLine($"relations={count}; big_rows={bigRows}; probe={selected.InputEstimates![0]}; pairs={context.Metrics.JoinCandidatePairs}; examined={context.Metrics.RecordsExamined}; retained_inner_rows={count - 1}; retained_payload_bytes={(count - 1) * 104}; estimated_peak_retained_bytes={(count - 1) * 248}; peak_hash={context.Metrics.PeakHashMemoryBytes}");
         }
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
@@ -150,7 +150,7 @@ public sealed class SqlJoinSearchFixTests
             selected.CandidateMemory.ShouldBe(selected.BoundMemory);
             (await DrainAsync(executor, selected, context)).ShouldBe(new[] { "1" });
             context.Metrics.JoinCandidatePairs.ShouldBe(800000);
-            context.Metrics.PeakHashMemoryBytes.ShouldBe(0);
+            context.Metrics.PeakHashMemoryBytes.ShouldBe(1184);
             _output.WriteLine($"probe={selected.InputEstimates![0]}; retained_estimate={selected.CandidateMemory:R}; pairs={context.Metrics.JoinCandidatePairs}; examined={context.Metrics.RecordsExamined}; peak_hash={context.Metrics.PeakHashMemoryBytes}");
         }
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }

@@ -152,6 +152,7 @@ internal sealed partial class SqlSchemaProvisioner
             // Lock/latch order: fail-fast apply admission -> owned sequence X (ascending)
             // -> every old/touched table X (ascending) BEFORE queueing -> prepared owners X
             // -> coordinator apply gate -> tree/page latches. No queue monitor spans work.
+            // Every deferred job uses this order, including its cheap-step tables and required FK neighbours.
             // Non-definition metadata admission is retained from Build; publication takes snapshot gate
             // -> coordinator snapshot pin -> catalog monitor -> catalog storage bracket.
             // No data apply gate or page/tree latch spans publication. All waiting uses this
@@ -207,10 +208,32 @@ internal sealed partial class SqlSchemaProvisioner
     private async ValueTask DiscardMismatchedIntentAsync(SqlCompiledSchema schema, int stepCount, CancellationToken cancellationToken)
     {
         await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false);
+        TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: stepCount);
+        TraceFailure(CodedMigrationFailure(SqlProvisioningCodes.JointFailed, ErrorMessages.JointIntentDiscarded));
         TraceOutcome("Restarted", stepCount);
         EndTrace();
         BeginTrace(schema, "Replan");
         TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: stepCount);
+    }
+
+    // Open runs before Build's apply, without a live migration reservation. Reuse the
+    // same discard commit and trace vocabulary for an old/different/no-target Build.
+    internal async ValueTask DiscardUnpublishedIntentAsync(SqlCompiledSchema? target, CancellationToken cancellationToken)
+    {
+        if (_catalog.PendingMigration is null) { return; }
+        // A discarded target is untrusted and need not be parsed to keep the stored
+        // schema available. A declared target already passed Build's schema validation.
+        if (target is not null) { BeginTrace(target, "Resume"); }
+        try
+        {
+            if (target is null) { await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false); }
+            else { await DiscardMismatchedIntentAsync(target, 0, cancellationToken).ConfigureAwait(false); }
+            TraceOutcome("Discarded", 0);
+            if (target is not null)
+            { _database.ReportProvisioning(new DatabaseProvisioningProgress("JointMigration", _database.Name.ToString(), 1, 1,
+                false, failureCode: SqlProvisioningCodes.JointFailed)); }
+        }
+        finally { EndTrace(); }
     }
 
     private async Task RunJointMigrationAsync(SqlDeferredMigration migration, CancellationToken cancellationToken)
@@ -233,7 +256,7 @@ internal sealed partial class SqlSchemaProvisioner
                 }, checkpointCopy: true);
             JointMetrics = statement.Metrics;
             BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken);
-            AdmitJointSpace(migration.JointPlan!, migration.Intent, cancellationToken);
+            AdmitJointSpace(migration.JointPlan, migration.Intent, cancellationToken);
             bool sparseGrowth = _database.Engine.SparseDataGrowth(_database.Name);
             statement.ConfigureCopySpace((touches, allocations, unflushed, prepared) =>
             {
@@ -244,20 +267,21 @@ internal sealed partial class SqlSchemaProvisioner
                 long pending = sparseGrowth ? Math.Min(checked(unflushed * Page.Size), _database.Engine.EngineOptions.BufferPoolCapacity) : 0;
                 CheckJointSpace(checked(JointBracketBytes(touches, allocations - reused) + pending + JointSpaceDiscardBytes));
             }, unflushed => CheckJointSpace(checked(JointSpacePublicationBytes + JointSpaceDiscardBytes +
-                (sparseGrowth ? Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity) : 0))), _database.TableReclamation.CaptureAllocationCount);
+                (sparseGrowth ? Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity) : 0))), _database.TableReclamation.CaptureAllocationCount,
+                JointCopyCheckpointThreshold);
             var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
-            await executor.ExecuteJointMigrationAsync(migration.JointPlan!, migration.Schema, statement,
+            await executor.ExecuteJointMigrationAsync(migration.JointPlan, migration.Schema, statement,
                 phase => JointStage?.Invoke(phase), cancellationToken).ConfigureAwait(false);
             _formatCheckedStateDocument = migration.Schema.CanonicalDocument;
-            _database.ReportProvisioning(null);
             EndDeferredTrace(migration, 0, "Applied");
+            _database.ReportProvisioning(null);
         }
         catch (Exception) when (JointMetrics?.SelfCommits > 0)
         {
             // The complete new schema is already durable. Deliver that success even
             // if late cancellation or an observer throws after publication.
-            _database.ReportProvisioning(null);
             EndDeferredTrace(migration, 0, "Applied");
+            _database.ReportProvisioning(null);
         }
         catch (Exception failure)
         {

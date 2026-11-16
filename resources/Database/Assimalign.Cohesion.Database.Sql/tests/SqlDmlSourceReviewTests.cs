@@ -373,8 +373,10 @@ public sealed class SqlDmlSourceReviewTests
         using var waits = new LockWaitListener(database.Name);
         string prefix = reference ? "WITH q AS (SELECT s.id FROM s JOIN t AS z ON z.id=s.id) " : string.Empty;
         string input = reference ? "q" : "s";
+        // #1778 skips incoming child intents for non-key UPDATE. Assign the key
+        // when this case must exercise the reference wait and grant-release path.
         var pending = session.ExecuteAsync(prefix + (delete ? $"DELETE FROM t USING {input} WHERE t.id={input}.id"
-            : $"UPDATE t SET v={input}.id FROM {input} WHERE t.id={input}.id"), cancellationToken: timeout.Token).AsTask();
+            : $"UPDATE t SET {(reference ? "id" : "v")}={input}.id FROM {input} WHERE t.id={input}.id"), cancellationToken: timeout.Token).AsTask();
 
         // Act
         try

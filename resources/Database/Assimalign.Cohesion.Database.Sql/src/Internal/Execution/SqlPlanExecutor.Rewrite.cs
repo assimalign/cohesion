@@ -250,14 +250,16 @@ internal sealed partial class SqlPlanExecutor
                     touches += batch.Count * (4L * height + 3);
                     allocations += batch.Count * 2L * height;
                 }
+                statement.ObserveCopyJournalStart(_storage.JournalLength);
                 statement.CheckCopySpace(touches, allocations);
             }
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
+                statement.ObserveCopyJournalStart(_storage.JournalLength - 38);
                 statement.CheckCopySpace(touches, allocations);
                 long allocationStart = statement.CaptureCopyAllocations();
                 if (statement.CheckpointCopy) { RewriteStage?.Invoke("CopyAllocationsCaptured", allocationStart); }
-                journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
+                journalStart = _storage.JournalLength - 38; // Include this bracket's already appended Begin frame.
                 for (int i = 0; i < batch.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -302,25 +304,39 @@ internal sealed partial class SqlPlanExecutor
     private async Task CheckpointReplacementCopyAsync(SqlStatementContext statement, long journalStart, CancellationToken token)
     {
         if (!statement.CheckpointCopy) { return; }
-        // Sample at commit, before checkpoint truncation; include only deltas across
-        // our brackets, never untouched writers' WAL accumulated between brackets.
-        long length = _storage.Journal.Length;
-        long added = statement.AddCopyJournalBytes(length - journalStart);
-        RewriteStage?.Invoke("CopyCommitted", length);
-        if (added < SqlSchemaProvisioner.JointCopyCheckpointBytes) { return; }
-        while (true)
+        try
         {
-            token.ThrowIfCancellationRequested();
-            try { statement.Coordinator.Checkpoint(token); break; }
-            catch (StorageTransactionException busy) when (busy.Code != StorageTransactionErrorCode.ForeignStorage)
+            // Size-due checkpoints run at gate release, before this sample, so a
+            // truncated bracket's delta can clamp to zero. A length below its own
+            // start proves every copy allocation so far was flushed by that checkpoint.
+            long length = _storage.JournalLength;
+            if (length < journalStart) { statement.ClearUnflushedCopyPages(); }
+            long added = statement.AddCopyJournalBytes(length - journalStart);
+            RewriteStage?.Invoke("CopyCommitted", length);
+            if (added < statement.CopyCheckpointBytes) { return; }
+            if (length < statement.CopyCheckpointBytes)
             {
-                // Reclamation waits at the apply gate. Only ungated brackets (open-time
-                // scrubs, dispose-time adoption or raw tests) can refuse this checkpoint.
-                RewriteStage?.Invoke("CheckpointBusy", length);
-                await Task.Delay(1, token).ConfigureAwait(false);
+                // Only truncation can put the journal below our accumulated deltas.
+                // Re-base on the whole remaining journal, including other writers.
+                statement.SetCopyJournalBytes(length);
+                RewriteStage?.Invoke("CopyCheckpointObserved", length);
+                return;
             }
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                try { statement.Coordinator.Checkpoint(token); break; }
+                catch (StorageTransactionException busy) when (busy.Code != StorageTransactionErrorCode.ForeignStorage)
+                {
+                    // Reclamation waits at the apply gate. Only ungated brackets (open-time
+                    // scrubs, dispose-time adoption or raw tests) can refuse this checkpoint.
+                    RewriteStage?.Invoke("CheckpointBusy", length);
+                    await Task.Delay(1, token).ConfigureAwait(false);
+                }
+            }
+            statement.ResetCopyJournalBytes();
+            RewriteStage?.Invoke("CopyCheckpointed", length);
         }
-        statement.ResetCopyJournalBytes();
-        RewriteStage?.Invoke("CopyCheckpointed", length);
+        finally { statement.RememberCopyJournalEnd(_storage.JournalLength); }
     }
 }

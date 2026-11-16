@@ -307,6 +307,12 @@ internal static partial class DocumentPlanExecutor
         DocumentStatementPlan plan, IReadOnlyDictionary<string, object?>? parameters, DocumentNestedExecutionContext nested,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        if (plan is DocumentSetOperationPlan compound)
+        {
+            await foreach (var row in StreamQueryRowsAsync(database, operation, compound, parameters, nested, true, cancellationToken).ConfigureAwait(false))
+            { yield return row.Value; }
+            yield break;
+        }
         var logical = SourceLogical(plan);
         // A derived input can have its own empty window even when the outer query has none.
         if (logical.Limit == 0) { yield break; }

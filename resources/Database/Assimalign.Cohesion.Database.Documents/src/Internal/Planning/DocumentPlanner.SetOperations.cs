@@ -12,21 +12,14 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentPlanner
 {
-    private static OqlSelectExpression RequireQueryBlock(OqlQueryExpression query)
-        => query as OqlSelectExpression ?? throw new DocumentPlanningException("CK00001", ErrorMessages.NestedCompoundUnsupported, query.Location);
-
     private DocumentSetOperationPlan PlanSetOperation(OqlSetOperationExpression query,
-        IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested, IReadOnlySet<string>? outerNames)
+        IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested, IReadOnlySet<string>? outerNames,
+        IReadOnlyDictionary<OqlQueryExpression, IReadOnlySet<string>>? queryOuterNames)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         _cancellationToken.ThrowIfCancellationRequested();
-        if (query.Operation != OqlSetOperation.Union)
-        {
-            var diagnostic = QueryDiagnostics.UnsupportedClause(query.Operation.ToString().ToUpperInvariant(), "OQL", query.Location ?? Location.Create(1, 1, 0, 0));
-            throw new DocumentPlanningException("CK00001", diagnostic.Message!, query.Location);
-        }
-        var left = PlanCore(query.Left, nested, outerNames);
-        var right = PlanCore(query.Right, nested, outerNames);
+        var left = PlanCore(query.Left, nested, queryOuterNames?.GetValueOrDefault(query.Left) ?? outerNames, queryOuterNames);
+        var right = PlanCore(query.Right, nested, queryOuterNames?.GetValueOrDefault(query.Right) ?? outerNames, queryOuterNames);
         var leftColumns = SetColumns(left);
         var rightColumns = SetColumns(right);
         var names = new HashSet<string>(StringComparer.Ordinal);

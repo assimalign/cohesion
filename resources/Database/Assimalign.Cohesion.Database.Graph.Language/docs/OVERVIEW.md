@@ -25,6 +25,7 @@ core element/string/math functions, CAST, Cypher conversions, transaction-start 
 CASE, COALESCE, NULLIF, correlated EXISTS/NOT EXISTS braced patterns, list/map literals and parameters, lexical list comprehensions, correlated pattern collections, ordered reduce, ALL/ANY/NONE/SINGLE list predicates, open-ended list slices,
 subscripts and map/entity property access,
 LET and FILTER, FOR (Cypher UNWIND), RETURN ... NEXT and Cypher WITH,
+read-only CALL and OPTIONAL CALL subqueries with explicit imports and returned bindings,
 read-only UNION, EXCEPT and INTERSECT (DISTINCT or ALL), whole-result lazy OTHERWISE,
 with isolated operands; composite conjunctions bind more tightly than NEXT,
 RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,

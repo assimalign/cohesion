@@ -99,7 +99,7 @@ public sealed class SqlBoundedExecutionTests
         // Arrange
         var ordering = new SqlBoundOrdering(new SqlBoundSlot(0), false, false, new SqlBoundCollation(Collation.Binary));
         var collector = new SqlRowCollector([ordering], null,
-            new SqlRowCount(null, "LIMIT", null, 10), new SqlRowCount(null, "OFFSET", null, 7), CancellationToken.None);
+            new SqlRowCount(null, "LIMIT", null, 10), new SqlRowCount(null, "OFFSET", null, 7), CancellationToken.None, null, 0);
         int peak = 0;
 
         // Act
@@ -123,7 +123,7 @@ public sealed class SqlBoundedExecutionTests
         using var cancellation = new CancellationTokenSource();
         var ordering = new SqlBoundOrdering(new SqlBoundSlot(0), false, false, new SqlBoundCollation(Collation.Binary));
         var collector = new SqlRowCollector([ordering], null, null,
-            new SqlRowCount(null, "OFFSET", null, long.MaxValue), cancellation.Token);
+            new SqlRowCount(null, "OFFSET", null, long.MaxValue), cancellation.Token, null, 0);
         collector.Add([1], [new CancelingKey(cancellation)]);
         collector.Add([2], [new CancelingKey(cancellation)]);
 

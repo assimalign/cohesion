@@ -24,7 +24,7 @@ public sealed class SqlBoundedSelectionRegressionTests
         // Arrange
         int comparisons = 0;
         var ordering = new SqlBoundOrdering(new SqlBoundSlot(0), false, false, new SqlBoundCollation(Collation.Binary));
-        var collector = new SqlRowCollector([ordering], null, new SqlRowCount(null, "LIMIT", null, limit), null, CancellationToken.None);
+        var collector = new SqlRowCollector([ordering], null, new SqlRowCount(null, "LIMIT", null, limit), null, CancellationToken.None, null, 0);
 
         // Act
         for (int value = 3; value > 0; value--)
@@ -65,7 +65,7 @@ public sealed class SqlBoundedSelectionRegressionTests
         var collation = new SqlBoundCollation(new SqlDeferredCollation(
             SqlCollationCandidate.Deferred(new SqlCollationFailureTerm(() => throw failure)), default, Collation.Binary));
         var collector = new SqlRowCollector([new SqlBoundOrdering(new SqlBoundSlot(0), false, false, collation)],
-            null, new SqlRowCount(null, "LIMIT", null, 1), null, CancellationToken.None);
+            null, new SqlRowCount(null, "LIMIT", null, 1), null, CancellationToken.None, null, 0);
 
         // Act
         var actual = Should.Throw<DatabaseException>(() => collector.Finish());

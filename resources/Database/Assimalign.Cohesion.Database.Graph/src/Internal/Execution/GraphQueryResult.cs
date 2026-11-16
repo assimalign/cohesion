@@ -64,25 +64,25 @@ internal sealed class GraphQueryResult : DatabaseResultSet
         }
 
         public override int FieldCount => _values.Length;
-        public override bool IsNull(int ordinal) => _values[ordinal] is null;
-        public override object? GetValue(int ordinal) => _values[ordinal];
-        public override string? GetString(int ordinal) => _values[ordinal] switch
+        protected override bool IsNullCore(int ordinal) => _values[ordinal] is null;
+        protected override object? GetValueCore(int ordinal) => _values[ordinal];
+        protected override string? GetStringCore(int ordinal) => _values[ordinal] switch
         {
             null => null,
             JsonElement json => json.GetRawText(),
             var value => Convert.ToString(value, CultureInfo.InvariantCulture),
         };
-        public override ReadOnlyMemory<byte> GetBytes(int ordinal) => _values[ordinal] switch
+        protected override ReadOnlyMemory<byte> GetBytesCore(int ordinal) => _values[ordinal] switch
         {
             null => ReadOnlyMemory<byte>.Empty,
             JsonElement json => Encoding.UTF8.GetBytes(json.GetRawText()),
             string text => Encoding.UTF8.GetBytes(text),
             _ => throw DatabaseException.CreateGraphFailure("CK02001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowGetBytesDatabase, ordinal)),
         };
-        public override int GetInt32(int ordinal) => Convert.ToInt32(Required(ordinal), CultureInfo.InvariantCulture);
-        public override long GetInt64(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
-        public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
-        public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
+        protected override int GetInt32Core(int ordinal) => Convert.ToInt32(Required(ordinal), CultureInfo.InvariantCulture);
+        protected override long GetInt64Core(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
+        protected override double GetDoubleCore(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
+        protected override bool GetBooleanCore(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
         private object Required(int ordinal) => _values[ordinal] ?? throw DatabaseException.CreateGraphFailure("CK02002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowRequiredDatabase, ordinal));
 
         private sealed class DebugView

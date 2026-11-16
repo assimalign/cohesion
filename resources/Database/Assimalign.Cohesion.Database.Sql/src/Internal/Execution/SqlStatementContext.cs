@@ -83,12 +83,16 @@ internal readonly struct SqlStatementContext
     // sizes and allocation budgets stay unchanged, including nonzero lock timeouts.
     internal bool CheckpointCopy => _names is JointProvisioningNames;
 
-    internal void ConfigureCopySpace(Action<long, long, long, long> check, Action<long> publication, Func<long> allocations)
+    internal long CopyCheckpointBytes => ((JointProvisioningNames)_names).CheckpointBytes;
+
+    internal void ConfigureCopySpace(Action<long, long, long, long> check, Action<long> publication, Func<long> allocations,
+        long checkpointBytes = SqlSchemaProvisioner.JointCopyCheckpointBytes)
     {
         var joint = (JointProvisioningNames)_names;
         joint.CheckSpace = check;
         joint.CheckPublication = publication;
         joint.CountAllocations = allocations;
+        joint.CheckpointBytes = checkpointBytes;
     }
 
     internal void CheckCopySpace(long touches, long? allocations = null)
@@ -122,6 +126,21 @@ internal readonly struct SqlStatementContext
         var joint = (JointProvisioningNames)_names;
         return joint.JournalBytes = checked(joint.JournalBytes + Math.Max(0, bytes));
     }
+
+    internal void SetCopyJournalBytes(long bytes) => ((JointProvisioningNames)_names).JournalBytes = bytes;
+
+    internal void ObserveCopyJournalStart(long length)
+    {
+        if (_names is not JointProvisioningNames joint) { return; }
+        // A checkpoint between brackets flushes all earlier allocations. Regrowth
+        // by other writers past the previous end can hide truncation; that only
+        // over-charges pending pages and can conservatively refuse a space check.
+        if (joint.PreviousJournalLength is { } previous && length < previous) { joint.UnflushedPages = 0; }
+    }
+
+    internal void RememberCopyJournalEnd(long length) => ((JointProvisioningNames)_names).PreviousJournalLength = length;
+
+    internal void ClearUnflushedCopyPages() => ((JointProvisioningNames)_names).UnflushedPages = 0;
 
     internal void ResetCopyJournalBytes()
     {
@@ -198,8 +217,10 @@ internal readonly struct SqlStatementContext
         internal Action<long>? CheckPublication { get; set; }
         internal Func<long>? CountAllocations { get; set; }
         internal long JournalBytes { get; set; }
+        internal long? PreviousJournalLength { get; set; }
         internal long UnflushedPages { get; set; }
         internal long PreparedPages { get; set; }
+        internal long CheckpointBytes { get; set; } = SqlSchemaProvisioner.JointCopyCheckpointBytes;
         internal JointProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
             : base(schema, database, lockTimeout)
         {

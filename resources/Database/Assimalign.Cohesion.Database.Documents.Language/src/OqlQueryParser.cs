@@ -13,7 +13,6 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser.DebugView))]
 public sealed partial class OqlQueryParser : QueryParser
 {
-    private readonly object _gate = new();
     private readonly bool _allowUnregisteredFunctions;
     private string _source = string.Empty;
     private readonly List<Lexeme> _tokens = [];
@@ -23,6 +22,7 @@ public sealed partial class OqlQueryParser : QueryParser
     private bool[] _comprehensionTails = [];
     private int _position;
     private int _depth;
+    private int _selectOperationDepth;
 
     /// <summary>Initializes an OQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
@@ -31,7 +31,7 @@ public sealed partial class OqlQueryParser : QueryParser
     /// <summary>Initializes a parser which can defer named function resolution to an engine.</summary>
     /// <param name="allowUnregisteredFunctions">Defers unknown function binding to an engine catalog; the default keeps standalone unknown-name diagnostics.</param>
     /// <param name="options">Optional shared analyzer configuration.</param>
-    public OqlQueryParser(bool allowUnregisteredFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions())
+    public OqlQueryParser(bool allowUnregisteredFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions(), serializeCalls: true)
     {
         _allowUnregisteredFunctions = allowUnregisteredFunctions;
     }
@@ -40,24 +40,16 @@ public sealed partial class OqlQueryParser : QueryParser
     protected override QueryLanguageProfile Profile => OqlLanguageProfile.Instance;
 
     /// <inheritdoc />
-    public override QueryStatement Parse(ReadOnlySpan<char> query)
+    protected override QueryStatement ParseCore(TokenLexer lexer, ReadOnlySpan<char> query)
     {
-        lock (_gate)
-        {
-            _source = query.ToString();
-            return base.Parse(query);
-        }
-    }
-
-    /// <inheritdoc />
-    protected override QueryStatement ParseCore(TokenLexer lexer)
-    {
+        _source = query.ToString();
         _tokens.Clear();
         _diagnostics.Clear();
         _parameterFormPositions.Clear();
         _queryOperationDepths.Clear();
         _position = 0;
         _depth = 0;
+        _selectOperationDepth = 0;
         int line = 1;
         int scanned = 0;
         while (lexer.MoveNext())
@@ -270,7 +262,7 @@ public sealed partial class OqlQueryParser : QueryParser
             else if (token.Type == TokenType.RightParen)
             {
                 parentheses--;
-                if (selectScopes is { Count: > 0 } && selectScopes.Peek().Depth > parentheses)
+                while (selectScopes is { Count: > 0 } && selectScopes.Peek().Depth > parentheses)
                 {
                     var enclosing = selectScopes.Pop();
                     inSelectList = enclosing.InSelectList;
@@ -318,7 +310,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 index > 1 && IsWord(_tokens[index - 1], "NOT") && IsWord(_tokens[index - 2], "IS"))) { continue; }
             if (IsDistinctFromToken(index)) { continue; }
 
-            // Set clauses are parsed even while INTERSECT/EXCEPT execution is deferred.
+            // Set clauses are parsed at their shared query-expression precedence.
             // Their modifier belongs to the same construct, including refused DISTINCT.
             if (value is "UNION" or "INTERSECT" or "EXCEPT" && index > 0 && EndsOperand(index - 1))
             {
@@ -547,15 +539,7 @@ public sealed partial class OqlQueryParser : QueryParser
             if (value is "JOIN" or "NEST")
             { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + " in UPDATE or DELETE", Profile.Language, Span(token, token))); break; }
 
-            // UNION ALL and UNION DISTINCT are one set operation, not a set operation plus the
-            // ALL or DISTINCT word.
             var reported = token;
-            if (value is "UNION" or "INTERSECT" or "EXCEPT" && index + 1 < _tokens.Count &&
-                (IsWord(_tokens[index + 1], "ALL") || IsWord(_tokens[index + 1], "DISTINCT")))
-            {
-                var modifier = _tokens[++index];
-                reported = new Lexeme(token.Type, token.Text, token.Start, modifier.End, token.Line);
-            }
 
             result.Add((word.Construct, reported));
             if (value == "FETCH") { fetchHead = index; }

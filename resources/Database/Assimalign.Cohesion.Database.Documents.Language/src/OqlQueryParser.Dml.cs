@@ -148,7 +148,6 @@ public sealed partial class OqlQueryParser
         else if (Is("SELECT") || IsParenthesizedQuery())
         {
             select = ParseQuery();
-            RefuseNestedCompound(select);
         }
         else
         {

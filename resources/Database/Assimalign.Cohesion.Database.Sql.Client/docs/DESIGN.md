@@ -1,5 +1,8 @@
 # Database.Sql.Client — Design
 
+A runtime stack refusal crosses TCP as CS05004/ExecutionFailure. The failed statement leaves the
+connection usable, and the exact authenticated server session accepts the next query (#1151).
+
 ## Typed TYPE migration publication (#1447, SQ-A3)
 
 InMemory and TCP code-first server tests reopen populated typed tables with a changed column
@@ -497,6 +500,12 @@ result failures and size refusals use CS05045 (size refusals: SQLSTATE 54000). E
 has a 16 MiB frame limit; there is no aggregate result cap. Writes retain prepared payloads until
 delivery; reads retain only the current encoded frame. Transport failures during delivery are
 terminal. ParseFailure after result frames and terminal errors still invalidate the rental.
+Server SELECT buffers separately share StatementMemoryBudget (default 64 MiB); CS05067 can
+precede frame encoding when retained rows exhaust that grant (#1776, SQ-L1b). Wire-limit tests
+use an explicit 256 MiB SELECT grant to reach the 16 MiB frame refusal. A wide cell (at least
+256 B) now charges once per retaining buffer by reference identity plus a fixed 64 B entry
+(SQ-L1c), so a response above 64 MiB sharing one payload succeeds at the default grant.
+RETURNING keeps its existing DML accounting and test grants.
 
 Application function cancellation follows the statement token (#1419): an
 `OperationCanceledException` from a scalar, any aggregate phase or a domain CHECK is

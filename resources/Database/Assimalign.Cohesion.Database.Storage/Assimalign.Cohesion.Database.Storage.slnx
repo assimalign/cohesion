@@ -5,4 +5,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Assimalign.Cohesion.Database.Storage.Tests.csproj" />
   </Folder>
+  <Folder Name="/fixtures/">
+    <Project Path="fixtures/Assimalign.Cohesion.Database.Storage.TempFixture/Assimalign.Cohesion.Database.Storage.TempFixture.csproj" />
+  </Folder>
 </Solution>

@@ -36,6 +36,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache.DebugView))]
 internal sealed class SqlBoundTableCache
 {
+    // Per-database test seams: no public option, global state, or ordinary-statement counters.
+    internal bool ForceSelectRetentionBasePath { get; set; }
+    internal Action<string, bool, int>? ObserveSelectRetention { get; set; }
+
     internal long StatementMemoryBudget { get; init; } = 64L * 1024 * 1024;
     private readonly SqlCatalog _catalog;
     private readonly SqlFunctionEnvironment _native;
@@ -308,7 +312,7 @@ internal sealed class SqlBoundTableCache
         }
     }
 
-    private Validation ValidateCatalog(CacheState state, CancellationToken cancellationToken)
+    private Validation ValidateCatalog(CacheState state, CancellationToken cancellationToken, SqlJointMigrationPlan? preparation = null)
     {
         SqlUnresolvedDefinition? definition = null;
         SqlUnresolvedDomain? unresolvedDomain = null;
@@ -321,7 +325,14 @@ internal sealed class SqlBoundTableCache
         {
             if (type.Check is SqlExpressionFunction { Unresolved: { } reason }) { definition ??= new SqlUnresolvedDefinition("SQL domain '" + type.Name + "'", type.Name, reason); }
         }
-        foreach (var table in _catalog.Tables)
+        // A reserved joint job keeps its old definitions published. Build checks the
+        // complete target plus untouched objects; sessions still bind the live catalog.
+        // Never store target validation in the live-generation cache.
+        var tables = preparation is null ? _catalog.Tables : _catalog.Tables.Where(table =>
+            !preparation.Tables.Any(item => item.Previous?.ObjectId == table.ObjectId) &&
+            !preparation.Dropped.Any(dropped => dropped.ObjectId == table.ObjectId))
+            .Concat(preparation.Tables.Select(item => item.Shape));
+        foreach (var table in tables)
         {
             var bound = state.Get(table, cancellationToken);
             foreach (var column in table.Columns)
@@ -344,7 +355,8 @@ internal sealed class SqlBoundTableCache
             {
                 definition ??= check.Unresolved;
             }
-            foreach (var index in _catalog.GetIndexes(table.ObjectId))
+            foreach (var index in preparation?.Tables.FirstOrDefault(item => ReferenceEquals(item.Shape, table))?.Indexes
+                ?? _catalog.GetIndexes(table.ObjectId))
             {
                 if (index.Predicate is not null && GetIndexPredicate(table, index, cancellationToken) is SqlBoundFailure failure)
                 {
@@ -358,8 +370,15 @@ internal sealed class SqlBoundTableCache
             }
         }
 
-        Volatile.Write(ref state.HasUnresolvedIndexPredicates, unresolvedIndexes is not null);
+        if (preparation is null) { Volatile.Write(ref state.HasUnresolvedIndexPredicates, unresolvedIndexes is not null); }
         return new Validation(definition, unresolvedDomain, unresolvedIndexes);
+    }
+
+    internal (SqlUnresolvedDefinition? Definition, SqlUnresolvedDomain? Domain) FindUnresolvedPreparation(
+        SqlJointMigrationPlan preparation, CancellationToken cancellationToken)
+    {
+        var validation = ValidateCatalog(GetState(cancellationToken), cancellationToken, preparation);
+        return (validation.Definition, validation.Domain);
     }
 
     private Validation GetValidation(CancellationToken cancellationToken, bool countWalk = true)

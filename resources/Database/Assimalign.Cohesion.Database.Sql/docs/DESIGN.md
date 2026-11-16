@@ -1,5 +1,52 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Temporary space options and lifetime (#1789, EN-X1)
+
+SqlDatabaseEngine owns and disposes an internal nullable StorageTempSpace. A file engine defaults
+to RootPath/.cohesion-temp; the leading dot avoids collision with a valid database name.
+TempDirectory overrides must be dedicated descendants of RootPath; option checks reject a
+first segment a database could take (a leading dot is safe) and link components below the root.
+A default RootPath is refused with its own message; an empty RootPath remains in-memory. An in-memory engine has no
+space unless TempDirectory is explicitly set. The options snapshot includes TempDirectory,
+TempSpaceQuota and StatementTempSpaceQuota. They are configuration for the substrate only:
+SQL operators still refuse with CS05067 as before. No DIALECT or conformance behavior changes.
+
+TempSpaceQuota is nullable: an explicit nonnegative physical-byte cap, or min(10 GiB, 25% of
+available bytes) measured after startup sweeping. An unavailable probe uses zero until CreateRun
+retries successfully. Zero refuses page growth. StatementTempSpaceQuota is nullable: an explicit nonnegative cap, or four times
+StatementMemoryBudget (saturating at Int64.MaxValue). Quotas include 8 KiB framing and both
+input and output files during a merge, and are released when the run/statement is disposed.
+
+The floor delegate uses a lock-free published database snapshot, so the temp monitor cannot
+invert the engine registry/storage lock order. File engines reserve at least one database, even before
+publication; an in-memory engine reserves only the 1 MiB minimum on that volume. For N = max(1, published database count), its components are 1 MiB +
+N * (BufferPoolCapacity + 128 * 8192 + 2 * (JournalSizeLimit +
+JointBracketBytes(32, 0))). The floor adds max(1 MiB, ceil(components / 4)); overflow saturates at
+Int64.MaxValue. This conservatively applies JointEngineReserve's dirty-pool, reclamation bracket
+and 25% headroom shape using both file sets' journal caps, rather than a migration-specific row
+estimate. Pool reserves apply even when physical data growth is nonsparse. It can refuse earlier
+than a particular migration's estimate. File defaults retain a 2.54 GiB floor per open database. Storage probes free space outside the
+accounting monitor after 128 reserved pages or a sample age above one second, subtracting
+reservations since the sample and pending unwritten pages present at the sample. Before CK05003
+it re-measures once and accepts the fresh value even if a release races it, treating that release
+as already reflected. Concurrent releases invalidate ordinary samples. A close reflected in a
+sample before its release accounting can be credited twice until the next accepted sample.
+Ordinary refresh does not wait on a contended probe gate; while stalled, the estimate still
+subtracts the engine's own reservations but has no page-count or age bound on staleness.
+It does not reserve blocks against unrelated writers.
+
+One directory belongs to one spilling engine. Two engines over one root start and can open
+different databases; the second spill refuses with CK05005 and names TempDirectory as the way out.
+Lease, probe and sweep I/O failures (including overlong optional paths) warn at startup when
+present, or at first failed use for a previously absent directory, and are retried by CreateRun, preserving
+database availability. All temporary I/O failures have CK05005 and retain their original cause.
+Unix directories are created 0700 and run/lease files 0600; group/other-writable directories refuse.
+On Windows explicit directories keep their inherited ACL. Temp bytes are unencrypted. On Unix
+after a kill, and on every OS after power loss, runs can remain until the next directory sweep.
+Windows process exit deletes delete-on-close runs; OS backups of RootPath can capture live temp files.
+No durable data, catalog, journal, record-space or wire format changes.
+
+
 ## Refused opens preserve every file (#1744)
 
 The catalog preflight loads catalog metadata, checks the record-space marker and recorded schema
@@ -173,11 +220,12 @@ storage type. Non-NULL ascending values keep their previous bytes, except floati
 zero and NaN: SQL canonicalizes signed zeros and moves NaN below negative infinity to match
 SqlValueComparer. The shared Indexing/Types encodings and page layouts are unchanged, so their
 format versions do not change. Row storage retains the original values. SQL catalog/record-space
-format 36 and mandatory index extension 3 fence these SQL-specific keys and metadata. Compiled
+format 36 introduced the default key order (#1787); current format 37 and mandatory index
+extension 3 fence these SQL-specific keys and metadata. Compiled
 schema v12 carries the same effective orders. All three enums use AscendingNullsFirst = 0,
 AscendingNullsLast = 1, DescendingNullsFirst = 2 and DescendingNullsLast = 3; bit 0 means NULLS
 LAST and bit 1 means DESC. Null and zero-filled key vectors, PRIMARY KEY and UNIQUE-constraint
-indexes use ASC NULLS FIRST. Format 35 and earlier databases and v11 and earlier artifacts are
+indexes use ASC NULLS FIRST. Format 36 and earlier databases and v11 and earlier artifacts are
 refused through the existing recovered read-only gate before any write; no upgrade is added.
 A format-35 refusal preserves every file byte for byte on both clean and crash opens,
 including repeated refusals after disposing the engine (#1744).
@@ -299,7 +347,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Current catalog/record-space format 36 refuses all earlier files before writable data recovery;
+extension 3. Current catalog/record-space format 37 refuses all earlier files before writable data recovery;
 compiled-schema v12 retains CompiledSchemaIndex.Predicate (introduced in v10) and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
@@ -570,7 +618,7 @@ The WindowAgg stage groups equal partition/order specifications and processes lo
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
 functions and sort_shared for each group. Window inputs, augmented result rows, sort indexes,
 key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
-an excess and every reservation unwinds on success, error or cancellation. Whole input and
+an excess of window bytes, and CS05067 refuses when concurrently retained plain SELECT bytes fill the grant first. Every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
 Reference-identity ownership avoids duplicate payload charges; consumed input rows and
 partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
@@ -753,8 +801,9 @@ not a claim that GC heap measurements equal the grant. The ownership ledger itse
 Final ordered collectors remove discarded outputs and keys from the partition cleanup owner
 before releasing their ledger charges, including bounded LIMIT heaps. Cleanup uses counted
 reference-identity membership with bounded dictionary-capacity allowances and O(1) removal.
-Previously materialized statement subquery vectors and CTE/relation rows are admitted when
-the window owner starts (CS05067 on failed admission); payload aliases remain charged once.
+In DML and recursion, previously materialized statement subquery vectors and CTE/relation rows
+are admitted when the window owner starts (CS05067 on failed admission); payload aliases remain
+charged once. Plain SELECT caches keep their separate statement reservations.
 Scalar, EXISTS and IN/quantified subquery caches share this admission path. Plain children
 clear their owned source cells and buffers after copying the cached values, including unread
 EXISTS rows, so completed async frames cannot keep discarded payloads alive across admission. Computed IN-list
@@ -980,12 +1029,12 @@ projects and returns each qualifying pair as its Limit node pulls it, and stops 
 nodeLimit.c:153-159). With two rows in t, the four-pair query
 `SELECT nextval('s') FROM t a CROSS JOIN t b WHERE nextval('s') > 0 LIMIT 1` returns 2 in
 PostgreSQL and 5 here.
-Ordered deferral keeps filtering before retention and uses the ordinary uncharged sort collector
+Ordered deferral keeps filtering before retention and uses the ordinary budgeted sort collector
 on plain, correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages.
 Plain and correlated top-N retention stays bounded by OFFSET + LIMIT when ordering collations are
 fixed; grouped and grouping-set deferral retains every group that passes HAVING, as the
 sequence-free grouped sort does, and deferred ordering collations require full retention.
-Neither form adds a StatementMemoryBudget charge. Grouping-set group/aggregate state retains its
+Both forms charge the buffers they retain to StatementMemoryBudget. Grouping-set group/aggregate state retains its
 existing charge for both sequence and sequence-free queries. Ordinary collectors retain their instance layout.
 Cached sort aliases retain the declared output type, including numeric CASE promotion.
 DISCARD ALL clears sequence state and restores the timeout values configured before the first
@@ -1176,6 +1225,15 @@ Large-definition reclamation stress retains every operationally failed visit and
 request. A slow-lane regression allows a stuck advisory and requires it to clear after draining.
 No public type, visibility grant, project reference or storage format changed. Storage exposes
 its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
+
+## Row access contract (#1264)
+
+SqlMaterializedRow supplies protected typed cores behind DatabaseRow's non-virtual ordinal
+guards. Valid-ordinal invariant conversions, padded CHAR output, binary borrowing and NULL/type
+failures retain their existing results. Out-of-range value access now throws ArgumentOutOfRangeException
+from the base instead of the array's IndexOutOfRangeException. Only override names change in
+the leaf; its instance layout and GetRowsAsync are unchanged. IsMissing retains its capability-first
+NotSupportedException for every ordinal.
 
 ## Result diagnostics (#1264)
 
@@ -1632,6 +1690,146 @@ The unreleased data-storage format advances 18 -> 19: new PERCENT/TIES unsupport
 vocabulary now quotes those identifier names in canonical persisted expressions.
 SqlT1StorageFormatTests demonstrates the format-18 CHECK drift and pins refusal on reopen.
 There is no upgrade reader. SQL-visible grammar and limits live in DIALECT.md.
+
+## What SELECT retains
+
+Plain GROUP BY and global aggregates consume eligible scan, seek, system-view, constant and
+join inputs one row at a time; groups, aggregate DISTINCT tuples and ordered aggregate inputs
+keep their existing state. Plain SELECT joins pass filtered rows to projection or the ordered
+collector without a matches list. Flat nested loops keep each unindexed, unhashed inner
+buffer; normalized joins stream only their root output, keeping child buffers and hash builds
+unchanged. Unordered, non-DISTINCT scan/join EXISTS and scalar bodies
+retain at most two result rows, with an explicit per-plan retention argument. Plain unordered
+DISTINCT with fixed collations keeps the first projected occurrence in input order. It still
+consumes all input before pagination. CHAR cells cross the same output/input normalization as a
+materialized row, and retained binary cells are detached from reusable producers.
+
+Each pipeline keeps the materialized path for recursive evaluation, every DML source, a current
+window owner, a SQL/JSON statement grant, a frame with correlated/deferred queries, or a subquery
+in its own expressions. SQL/JSON keeps staging so scalar grants never acquire a new overlap
+with a live input hash build. Scalar grants can overlap retained output and sort buffers;
+only newly charged plain bytes causing refusal report CS05067, while an exhausted scalar
+grant with those bytes excluded keeps CS05079 (window) or CS05094 (SQL/JSON). A plain-byte
+overflow can therefore report CS05067 where the earlier ledger would later report a specific
+code. A window over an independent vector can also succeed where earlier vector adoption
+refused, because the vector costs less at rest.
+Grouping also checks keys, arguments, FILTER, inner ordering, HAVING and output expressions,
+and keeps deferred key/aggregate collations on the original path.
+Application aggregates, volatile/sequence group transitions and join outputs keep the staged path: a later input error
+must not observe consumer calls that base never reached. Consumer failures drain remaining
+input predicates before surfacing, preserving their calls and work. Statement memory refusal
+(CS05067) and cancellation abort input immediately. Join and DISTINCT consumers also abort
+immediately on out-of-memory. If later input would also
+have failed, CS05067 now wins; that statement was going to fail either way. Tree joins keep volatile
+WHERE predicates on the staged path; a nonvolatile WHERE failure drains all remaining ON work.
+Bounded bodies and plain DISTINCT also fall back when both input and output are volatile,
+preserving the staged call order.
+DISTINCT hash/collation failures preserve all preceding projection-stage evaluation before surfacing.
+Ordered and grouped DISTINCT and deferred collations keep their original collectors. A DISTINCT
+whose own frame has correlated queries or whose expressions contain a subquery stays on base.
+A DISTINCT in the body of a correlated subquery runs once per invocation and may pipeline;
+results match either way. Independent volatile ordered join projections
+keep the full source sort, which is required to evaluate those projections in sorted order.
+Derived tables, views and CTE caches retain their existing statement lifetime and materialization.
+An eligibility walk reaching its stack guard also selects the original path.
+
+On success these pipelines never stop evaluation early: joins drain all candidates and WHERE predicates even
+at LIMIT 0 or after the output window fills; bounded subquery bodies run every projection that
+the original body ran, and scalar cardinality is checked afterwards. Existing stored-scan early
+stops remain unchanged. Every retained plain SELECT buffer now reserves statement memory before adding an entry
+(#1776, SQ-L1b). Newly charged buffers refuse with CS05067. CTAS sources use the same
+pipelines and charge like any SELECT; CTAS itself admits only rows kept after pagination,
+independent of list capacity (#1762). Per-database internal test seams
+force the original collectors, observe operator entry and count retained DISTINCT/subquery rows.
+The separate forced-GC regression proves streamed group/join inputs retain no growing list.
+
+Each buffer has one reservation owner at these code boundaries. A child releases its result
+charge before returning; the consumer admits the materialized rows for its own retention scope.
+All operator reservations unwind in finally or collector disposal, including refusal, other
+failures, cancellation and abandoned enumeration. Cache reservations hold no row references.
+
+| Pipeline | Reservation owner and release | Retention boundary |
+|---|---|---|
+| Group input | Group method owns separate key and completed-match maps; buffered aggregates own DISTINCT and ordered-input maps, released in finally; staged input has a separate result reservation. | `EnumerateGroupInputAsync` delivers `GroupInputRow` directly to `ExecutePipelinedGroupAsync`; keys and aggregate state survive at its accumulation step, including aggregate DISTINCT tuples and ordered-input buffers. `groups` and their accumulators live until `ExecutePipelinedGroupAsync` returns. The base counterpart is `ExecuteMaterializedPlainGroupAsync`'s input result, held until that method returns; its groups have the same method lifetime. |
+| Join output | Projection method and enumerator locals; normalized child charges release when the parent drops those lists, all remaining charges in finally. | `ProjectJoinRowsAsync` retains outputs at `rows.Add` or `SqlRowCollector.Add`; `rows` passes to the result set. `EnumerateJoinRowsAsync` retains each flat step with no index or hash in `buffered[level]` until the enumerator finishes. `EnumerateNormalizedJoinRowsAsync` retains child buffers at `Retain`; `outer.Rows` and `results[...]` live until the parent node finishes; on the materialized fallback, the root output also stays in `results[plan.Tree]` until enumeration finishes. Hash builds keep their existing admission; normalized builds are disposed after their parent consumes them, and flat builds in the enumerator's `finally`. The base counterpart is `ExecuteJoinAsync`'s matches list, held through projection until that method returns. |
+| Bounded body | Projection method until return, then subquery materializer until copying finishes. | `ExecuteBoundedSubqueryBodyAsync` passes its explicit retention argument to `ProjectAndSortRows` or `ProjectJoinRowsAsync`; their output-list additions retain at most two rows. The unordered `ProjectAndSortRows` addition is shared by every unordered SELECT using the materialized projection path, including unbounded scans and fallbacks. `rows` passes to the result set; bounded-body rows are cleared in `MaterializePlainSubqueryAsync` after copying values into the existing statement/frame cache. |
+| Unordered DISTINCT | Projection method owns both seen and rows until return; Deduplicate owns base seen until it returns. | `ProjectUnorderedDistinct` and the DISTINCT branch in `ProjectJoinRowsAsync` retain the same first output in `seen.Add` and `rows.Add`; `seen` lives until the pipeline returns, and `rows` passes to the result set after pagination following the full drain. The base counterpart is `Deduplicate` over the full projected list; its `seen` lives until `Deduplicate` returns. |
+| Ordering and output | Collector until Finish/disposal; explicit sources, selected lists and outputs until their consumer returns; SortRows owns evaluated keys until sorting returns. | All plain scan, system-view, constant, join and group outputs retain lists in `ProjectAndSortRows`, `ProjectJoinRowsAsync` or `SqlRowCollector.Add`. The collector keeps output rows, ordering-key arrays and stable-sort entries in `_rows`/`_ordered` until `Finish`, which clears entries and transfers output rows to the result set; the collector's backing-array capacity lives until its consumer returns. Unbounded or deferred-collation sorts keep every entry; bounded sorts keep at most OFFSET + LIMIT. Volatile and sequence fallbacks also retain source/completed-group lists (`sources`, `selected`, `matches`) through projection. `SortRows` keeps evaluated keys and LINQ stable-sort scratch until the sort returns; its sorted list lives through its consumer. Output list capacity survives pagination but is never an admission cost; only the kept row count is charged. |
+| Correlated and sequence output | Each materialization method until return; collector entries until Finish/disposal. | `MaterializeOrdinaryCorrelatedSelectAsync` and `MaterializeSequenceSelectAsync` retain the same collector rows/keys; the latter keeps augmented source rows until its final projection completes. Their output lists, and `MaterializeUnorderedSequenceSelectAsync`'s `returned`, pass to the result set. The enclosing frame's current `Row` and prepared-expression `Evaluated` values survive until the next row or frame release. |
+| Materialized relations and subqueries | RelationRows.Reserved until executor exit (nested view scope until restoration); frame value reservations until frame release, correlated vectors until BeginRow. | `MaterializeRelationAsync` copies derived/view rows into lists cached in `_materializedRelations`; independent relation and CTE caches live for the statement executor, with catalog-view scopes restored after materialization. Join-local `derivedRows` references last through the join consumer. `MaterializePlainSubqueryAsync` copies scalar/EXISTS/IN values into statement/frame arrays: independent values live for the statement, correlated values until the frame advances or clears; child result rows and temporary copy lists also overlap during materialization. |
+| Set operands | Operand method until return, then set consumer until it returns; seen/counts have the set consumer lifetime. | `MaterializeSetOperandAsync` retains converted operand rows; `ExecuteSetOperationAsync` retains output `rows`, a UNION DISTINCT `seen`, or INTERSECT/EXCEPT `left`, `right`, `counts` and optional `seen` through the set consumer. Its final `MaterializeSelect` can overlap these with projected/sorted output; that output passes to the result set. |
+
+The two retention paths have these charge relationships; successful results and evaluation
+order remain the same. A pipelined peak can exceed base when group state overlaps a live
+hash input, or when a later projection failure prevents base from reaching DISTINCT state.
+
+| Shape | Charge comparison between pipelined and forced base |
+|---|---|
+| Unordered scan and ordered collector | Equal for the same retained rows, keys and identities within each owner; a wide output/key alias charges once. Finish transfers kept output without a second row charge. |
+| Plain groups | Equal keys, state, native payload and aggregate inputs; base also holds the complete projected input. Pipeline state can overlap an input hash build. DISTINCT/ordered state includes its comparer and ordering records. |
+| Join projection and DISTINCT join | Equal inner/child/hash buffers and output costs; base additionally stages all qualifying matches. |
+| Unordered DISTINCT scan | Equal per retained output and seen entry; base holds every projected input, including duplicates. A failing projection can make its peak lower before DISTINCT runs. |
+| Correlated and sequence materialization | Equal charges for the same collector, selected sources, final returned rows and current correlated vectors. Derived inputs charge before a sibling materializes. |
+| Relations and subquery caches | Equal retained rows/vectors and distinct wide identities per owner for the same child paths; child pipelines may retain less scratch. Cache and collector payloads each charge. Independent caches remain charged through the statement. |
+| Set operations | Equal converted operands, seen/count state and outputs for the same operand paths; child pipelines may retain less scratch. |
+| Window, recursion and grouping sets | Their fallback paths and ledger charges agree across the switch. Window buffers outside its ledger and completed grouping-set matches add separate plain charges. |
+| CTAS | Equal admission for equal kept output, after pagination; source charges follow the selected path and sequence source width. Sequence deferral keeps its sources and can peak above a sequence-free form. |
+
+Ordered peaks publish only after input succeeds, before a deferred consumer failure is surfaced.
+Eligibility caches only static plan inspection in a lazily created, reference-keyed executor map
+for correlated statements. It uses a subtype in the existing optional relation-state slot so
+ordinary statements and CTEs pay no extra allocation. The window owner, DML flag,
+recursive state, current frame's correlated queries, SQL/JSON scope and forced-base switch are
+read on every check. LIMIT/OFFSET execution copies keep their original static plan as the map key.
+Join consumers defer stack-guard failures until input drains; cancellation, out-of-memory
+and statement memory failures abort immediately. The group path drains
+other consumer failures, preserving the original input evaluation.
+
+The cursor/normalized traversal stacks, current joined-row frames, shared-column flags and
+collation arrays also live through their enumerator or consumer; their size follows the plan,
+not input cardinality. Recursive, window, grouping-set and SQL/JSON ledgers keep their existing charges and
+fallback paths. A window statement additionally charges join buffers, groups, relation copies
+and set state absent from its ledger. Collector/projected rows, Deduplicate scratch and
+subquery vectors remain exclusive to the window ledger. Independent vectors created there
+transfer a byte-only reservation to the enclosing registration frame when their owning
+window ends; an inner stage transfers only its additions, preserving parent-ledger ownership; relation copies keep a statement reservation from creation. Every SELECT outside DML and recursive evaluation
+uses this rule for registration frames and relation caches, so a later charged cache cannot suppress
+adoption of an earlier uncharged SELECT cache. Below the relational operators, `ScanVersions` keeps its
+owner-scoped storage iterator
+(page-id vector: a 24-byte array header plus 8 bytes per table page; one page pin and copied
+current record) until enumeration/disposal, and
+`SeekRows` keeps its index cursor's copied entry batch and key bounds until cursor disposal.
+System-view enumeration reads the statement's retained catalog snapshot and can retain
+`SystemKeyConstraints` name sets or referenced-key ordering scratch until that enumeration
+finishes. These lower-level owners remain live alongside consumer buffers; their size follows
+the storage or catalog structure being read, not the rows a statement retains. SQ-L1b charges
+simultaneously live buffers and unwinds every acquired charge on failure and cancellation. A
+cell whose SqlHashJoinTable.ValueBytes is at least 256 B charges its payload once per buffer
+owner, by reference identity (#1776, SQ-L1c). For strings the threshold is 113 UTF-16
+characters; 112 characters still cost 248 B per reference. Each distinct wide cell adds a
+fixed 64 B map-entry charge, independent of map capacity; the fixed map header is uncharged.
+Further references cost only their array slots. Equal values in different objects charge
+separately, including detached binary clones and separately constructed CHAR cells. A collector
+uses one map across output and ordering keys. A narrow buffer never allocates the dictionary.
+Each live buffer charges independently, including a relation cache and its collector; the
+remaining payload overcharge is bounded by simultaneously live buffer owners, rather than row
+count or repeated columns. Maps never lend values or transfer with byte-only reservations.
+Admission reserves before recording references. Sequential release removes the last holder's
+payload and entry charge immediately, then clears consumed normalized child lists so an async
+iterator cannot keep their cells alive after release; heap replacement reserves only a positive net change
+after crediting the leaving entry. Empty maps keep capacity until wholesale release, which
+drops the map and all bytes. Window, DML, recursive scratch and hash-build ledgers keep their
+existing accounting; repeated wide hash-build cells can still charge per reference.
+Aggregate maps span every group at the same aggregate position: DISTINCT tuples, ordered
+inputs and native extrema each have an owner, so group count does not multiply one shared
+payload. Extrema preserve the fixed state's existing 32-byte value-ABI allowance; narrow extrema
+allocate no identity-owner array. STRING_AGG
+builder growth represents real copies and keeps its existing charge. All-distinct wide values
+add 64 B per identity, which can reduce capacity at an admission boundary.
+
+The group post-input body deliberately duplicates the base body, and `PrepareJoinInputsAsync`
+duplicates the base join prologue. SQ-L1b must keep both copies aligned when adding charges;
+this retention pass preserves the reference collectors and their staging.
 
 ## Ordering output values (#1024)
 
@@ -2595,8 +2793,9 @@ flowchart LR
   Every set identity enters its hash key, so duplicate sets and subtotal NULLs never
   share state with other sets or stored NULLs.
   A logical transition evaluates FILTER, arguments and input ordering once per row
-  before feeding all sets, as execExpr.c:3708–3740 does. Volatile calls never share
-  a logical transition. Immutable input tuples may alias, while mutable ordered
+  before feeding all sets, as execExpr.c:3708–3740 does. Separate volatile aggregate occurrences
+  never share a logical transition; equal whole keys reuse the matched occurrence as described below.
+  Immutable input tuples may alias, while mutable ordered
   representatives are copied per set to keep DISTINCT replacement independent.
   Completed rows contain masked keys, independent aggregate results and GROUPING masks before HAVING,
   projection, ordering or correlated reads. The rightmost argument is bit zero
@@ -2634,8 +2833,32 @@ flowchart LR
   before argument or ordering subqueries, evaluation, coercion, DISTINCT retention or transition
   calls. Only TRUE admits a row. Independent children inside a filtered call are deferred until
   demanded and then cached per statement; correlated children retain their row lifetime.
-  Filtered calls containing volatile inputs have independent states, following PostgreSQL
-  prepagg.c:388-389. Child queries conservatively prevent sharing as their bodies bind separately.
+  Separate calls containing volatile arguments, FILTER conditions or inner ORDER BY keys (including
+  WITHIN GROUP) have independent states in plain grouping and grouping sets (#1763, SQ-H3): SELECT
+  duplicates, every HAVING occurrence and aggregates inside larger unmatched keys remain independent.
+  Whole query ORDER BY and inline/named window PARTITION BY / ORDER BY keys structurally equal
+  (SameGroupExpression) to a select-list expression or an earlier whole key reuse that occurrence's
+  aggregate slots before allocation. One parallel tree walk maps the calls; the executor adds no reuse.
+  Select-list aggregates bind before window keys, including targets following the window expression.
+  Inline window keys register GROUPING masks (parse_agg.c:423-428) before an enclosing scalar expression validates;
+  registration is idempotent and leaves aggregate binding after the select list.
+  Scalar output evaluation is unchanged; ORDER BY aliases and ordinals still read completed outputs.
+  Stable and Immutable inputs retain sharing. Separate child-query occurrences never share states:
+  PostgreSQL expands each child to a separate SubPlan before prepagg.c, so equal() fails
+  (optimizer/plan/planner.c:1475-1477,1880-1881; optimizer/prep/prepagg.c:416). Equal complete child
+  queries can still match inside a whole key during target matching. Window calls each bind a separate
+  aggregate and result slot. Keys naming output aliases never match; child-query bodies and window
+  expressions compare by spelling. A matched key's independent child still runs once during eager
+  preparation with its value unread. The rule covers aggregate slots only; a window call's own volatile
+  input evaluates per call, including in a whole ORDER BY window expression.
+  Partition/sort matching also compares grouped aggregate slots, including inside scalar key expressions,
+  as a guard on the whole-key reuse invariant.
+  Equal whole window keys receive equal slots and merge without executor changes. Repeated visits
+  to one named-window key syntax node retain its one slot. PostgreSQL performs whole-key target
+  matching in parser/parse_clause.c:2205-2206,2815-2826 and merges equal windows in
+  parser/parse_agg.c:1103-1112; optimizer/prep/prepagg.c:387-389 refuses remaining volatile sharing.
+  The volatility walker also treats NextValueExpr as volatile (optimizer/util/clauses.c:635-639);
+  Cohesion refuses NEXT VALUE FOR within aggregates before this sharing check.
   Bare calls keep the existing execution path and object sizes; optional FILTER payloads
   allocate only for filtered calls. EVERY uses the BOOL_AND transition; Boolean
   aggregates are strict and return NULL without non-NULL input. Statistical signatures choose
@@ -3369,8 +3592,8 @@ recording a false applied hash. Foreign keys and checks now render into provisio
 DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
 the engine and the database. A plan the planner refuses (a destructive step the schema does not
 allow) and a schema that would adopt a table or index it did not create lead with `CS03105`,
-before any step runs; a failed step leads with `CS03104` and names "step k of n" and its
-operation. A failed apply whose token was canceled throws `OperationCanceledException` once its
+before any step runs; an inline per-step failure leads with `CS03104` and names "step k of n" and its
+operation. Deferred preparation uses `CS03402` and the joint boundary below. A failed inline apply whose token was canceled throws `OperationCanceledException` once its
 completed steps are compensated: a canceled commit surfaces as the aborted transaction of the step
 it interrupted, so the token decides, not the failure's type. The skip checks the cached declaration hash and catalog DDL generation. When either differs,
 `Verify` describes the first live object that differs (a missing table, column, constraint or
@@ -3415,7 +3638,7 @@ DDL forces this path; a zero-step plan refreshes the marker. Verify mode reports
 without writing it. After all statements, the live catalog is checked once more against the
 declaration, so a concurrent name collision cannot be recorded as convergence. The marker is
 saved last with the generation captured before that check, which the catalog checks
-under its metadata lock. For plans without a TYPE rewrite, a failed or crashed multi-statement apply leaves earlier committed steps
+under its metadata lock. For inline plans without a TYPE rewrite, a failed or crashed multi-statement apply leaves earlier committed steps
 visible; recovery restores their counter atomically with their DDL, and the next Build plans only
 the uncommitted tail. That per-step path makes no multi-statement atomicity claim.
 
@@ -3471,22 +3694,22 @@ composite primary key, which the retained builder does not declare.
 
 ### Deferred data-scaling steps (B2, decision 49a)
 
-If cancellation interrupts the handoff after cheap-step locks were released, compensation owns a
-fresh transaction. An ended reservation is never reused to acquire compensation locks.
-Hosting's existing offline-reopen policy still applies, including its backoff when the same
-database fails again. The provisioning worker itself makes one attempt per scheduled migration.
-The invalid-row test observes the original instance through the storage's offline hook: opening
-it after Build can reopen the crash fixture's seed image and lose the migration under test.
+SQ-A5 (#1778) supersedes per-step deferred publication. The provisioning worker makes one attempt
+per joint job. Cancellation or preparation failure discards unpublished work, releases its
+reservations and reports CS03402 with the old schema online; storage-safety latches retain their
+existing offline/reopen policy. There is no compensation of published steps in a deferred job.
 
 Build probes each affected table's physical allocation through `Storage.HasOwnerPages`, a
-constant-time query that does not copy the owner page directory. It runs creation, nullable column
-addition, drops, and work on empty tables inline. Populated-table index creation, constraint
+constant-time query that does not copy the owner page directory. Populated-table index creation, constraint
 validation, required-column addition, additions of columns whose domains carry checks, and validation-only column tightening run on the engine's
-`SqlProvisioningWorker`. `SqlDatabaseBuilder.RunMigrationsInline = true` keeps all work in Build.
-Imperative `ApplySchemaAsync` remains inline. Nullable additions validate their immutable missing
-value once; existing rows continue to resolve that value from the catalog without a rewrite.
-Column additions on the same table retain declaration order: once an addition is deferred,
-every later addition to that table follows it on the worker, including nullable additions.
+`SqlProvisioningWorker`. If any such step defers, its complete plan prepares jointly, including
+creation, nullable additions and drops. Otherwise cheap and empty-table work remains inline.
+`SqlDatabaseBuilder.RunMigrationsInline = true` keeps all work in Build.
+Imperative `ApplySchemaAsync` remains inline. Outside a deferred joint plan, nullable additions validate their immutable missing
+value once and existing rows resolve it from the catalog without a rewrite. In a deferred plan,
+nullable append, DROP COLUMN and facet-only changes rewrite until SQ-A6; space admission counts
+that rewrite, which re-evaluates every CHECK and domain on every row.
+Column additions retain declaration order in the jointly prepared target.
 
 Decision 77 (#1443) makes every `DROP TABLE` unpublish inline and reclaim afterwards. The
 statement, typed migration, compensation and declared-script paths all use the catalog's single
@@ -3582,31 +3805,35 @@ check exact FSM accounting and physical file-length stability when the freed pag
 The Release/NativeAOT `Q8D` benchmark records both full Build (including open/recovery) and its
 provisioning DROP phase; decision 77 in the program design records the measurements.
 
-The catalog's format-9 pending intent contains the complete target document/hash, operation kind,
-table, object name, original one-based execution position and total. Its transaction commits
-before the first cheap step, so a crash after any publication can resume by database name alone.
-Cancellation and compensation retain that target for retry; a different target is refused until
-the recorded migration completes. The prior applied marker stays untrusted while an
-intent exists; only the transaction recording the fully reconciled target clears the intent,
-except a route conversion (#1777).
+Catalog kind 9 contains the complete target document/hash, Joint/ operation identities, ordered
+positions and per-table KeepOwner/RewriteOwner choices. Its transaction commits before any
+preparation. Format 37 fences the former per-step meaning. After a crash only a matching target
+Build may resume; a different-target Build discards it with CS03402 and uses the stored schema.
+A no-target open discards without a provisioning report or trace.
+The old applied marker stays trusted. One publication commit installs the complete new schema,
+applied marker and registrations and removes the intent. Failure discards unpublished preparation.
+
+The deferred lifecycle retains old objects until that single publication:
 
 ```mermaid
 stateDiagram-v2
     state "Pending: durable target and ordered steps; table locks reserved" as Pending
-    state "Running: DDL with row progress" as Running
+    state "Running: unpublished preparation with row progress" as Running
     state "Done: applied marker and pending removal commit together" as Done
-    state "Failed: database offline; CS03104; intent retained" as Failed
+    state "Failed: old schema online; CS03402; intent discarded" as Failed
     [*] --> Pending
     Pending --> Running
     Running --> Done
     Running --> Failed
-    Running --> Pending: "Restart or cancellation"
-    Failed --> Pending: "Next open retries"
+    Running --> Pending: "Crash with matching target"
+    Pending --> Failed: "Different target or cancellation"
+    Failed --> [*]
     Done --> [*]
 ```
 
 Before Build returns, one read-only transaction reserves exclusive lock-manager table locks for
-the pending tables and any FK parent needed by their DDL. The worker keeps that transaction until
+all plan tables and FK neighbours whose reference, either owner or matching parent key trees
+change. Stable neighbours remain available; FK probes that need a reserved table wait on its IS lock. The worker keeps that transaction until
 completion or cancellation. Reservations cover the remaining migration as a set: a later table
 cannot accept work ahead of its pending step. Tables outside that set continue to serve reads,
 writes and DDL. The request admission walk uses those same lock-manager locks before planning
@@ -3614,16 +3841,14 @@ or capturing an automatic transaction snapshot, including joins, subqueries and 
 CREATE TABLE and ALTER ADD COLUMN/CONSTRAINT. Parent unique-key binding therefore observes the
 completed migration. PostgreSQL likewise locks the referenced relation before checking its key
 (`src/backend/commands/tablecmds.c:10171-10177,10304`); no implementation is copied. Admission introduces
-no second waiting graph. The final marker uses the catalog's generation check and retries a
-concurrent unrelated DDL change; it never waits for the global DDL interlock while holding tables.
+no second waiting graph. Joint publication merges the prepared objects under the catalog lock;
+it never waits for the global DDL interlock while holding tables.
 
 Index population commits bounded 64-version brackets, releasing the coordinator's statement apply gate between
 batches. Counts and scans run on the worker. Unpublished trees never enter a catalog directory,
 including through checkpoints or another table's DDL. Restart discards their in-memory identity
-and rebuilds from scratch; abandoned pages follow ordinary DROP INDEX reclamation (future vacuum),
-as `BTreeIndexManager.DropIndexAsync` does. Completed steps survive a later failure and are omitted
-by B2's complete-catalog reconciliation. A failed step takes only its database offline with
-`CS03104` and keeps the intent for the next open, even without a fresh schema declaration.
+and rebuilds from scratch; abandoned pages follow the existing kind-14 reclamation path. Failed
+preparation retains every old table, constraint and published index online with CS03402.
 Catalog publication merges only affected registrations under its metadata lock. Independently
 finished trees therefore cannot erase one another through stale full-directory snapshots.
 Every new description requires its matching registration in the same catalog commit.
@@ -4694,7 +4919,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 36 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 37 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -6534,7 +6759,13 @@ conflicting locks on the **parent row** deliver it:
 Table-grain locks stay intent-only: `IntentShared` on the adjacent tables a
 statement reads for constraint purposes, which is compatible with other writers'
 `IntentExclusive` and blocks only table-grain DDL, keeping parent definitions
-stable for the life of the statement. A cascade walks the closure locking as it
+stable for the life of the statement. A parent's plain or joined non-key UPDATE takes no child
+intent lock, on every parent and every execution, inside or outside a provisioning job; it also
+proceeds while session DDL holds the child. Assigning a referenced column still takes child
+intents. A child's non-FK UPDATE, a child DELETE, MERGE UPDATE and ON CONFLICT DO UPDATE
+retain their adjacent-table waits. PostgreSQL likewise skips the parent check when the referenced
+key is unchanged (src/backend/utils/adt/ri_triggers.c:1611-1613).
+A cascade walks the closure locking as it
 descends — a row is exclusively locked before its children are read — because a
 transitive closure cannot be pre-sorted (the walk itself is described under
 [The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion)).
@@ -7659,15 +7890,15 @@ bounded peer-sent names) are in the area's
 | 10 | `StatementPlanned` | Verbose | `Statements` | `database`, `accessPath` (cut to 256 characters), `recordsExamined` |
 | 11 | `StatementTooComplex` | Warning | — | `database`, `depth` (-1 when an execution stack backstop has no measured depth) |
 | 12 | `DdlSelfCommitted` | Verbose | `Statements` | `database`, `commandType` |
-| 13 | `ProvisioningStart` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `mode` (`Apply`/`Verify`/`Replan`), `stepCount` (-1 before planning) |
-| 14 | `ProvisioningStop` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `stepCount`, `outcome` (`Applied`, `Skipped`, `Deferred`, `Verified`, `Restarted`, `Error`, `Cancelled`), `durationMilliseconds` |
+| 13 | `ProvisioningStart` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `mode` (`Apply`/`Verify`/`Resume`/`Replan`), `stepCount` (-1 before planning) |
+| 14 | `ProvisioningStop` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `stepCount`, `outcome` (`Applied`, `Skipped`, `Deferred`, `Verified`, `Restarted`, `Discarded`, `Error`, `Cancelled`), `durationMilliseconds` |
 | 15 | `ProvisioningFailed` | Error | — | `engineName`, `database`, `schema`, `position`, `kind`, `code`, `exceptionType` (no message) |
 | 16 | `ExtensionRegistered` | Verbose | — | `kind` (`Scalar`, `Aggregate`, `Type`, `Cast`), `name` (cut to 256 characters per identifier; a cast is `source -> target`) |
 | 17 | *(retired)* | — | — | `IndexRegistrationsSaved` reported a separate registration save; B2 publishes an index's registration atomically with its description (#1355), so the id is retired, never reused |
 | 18 | `DeferredStepBound` | Informational | — | `engineName`, `database`, `table`, `objectName`, `kind`, `position`, `stepCount`, `rowsProcessed`, `totalRows` |
 | 19 | `DeferredStepProgress` | Verbose | — | same as 18 |
-| 20 | `DeferredStepCompleted` | Informational | — | same as 18, `outcome` (`Applied`, `Error`, `Cancelled`), `durationMilliseconds` |
-| 21 | `DeferredStepFailed` | Error | — | same as 18, `code` (the provisioning failure code: `CS03402` or `CS03403` for a joint TYPE migration, `CS03104` otherwise), `exceptionType` (no message) |
+| 20 | `DeferredStepCompleted` | Informational | — | same as 18, `outcome` (`Applied`, `Error`, `Unconfirmed`), `durationMilliseconds` |
+| 21 | `DeferredStepFailed` | Error | — | same as 18, `code` (`CS03402` before publication or `CS03403` for unconfirmed publication, for every deferred migration), `exceptionType` (no message) |
 | 22 | `ScriptApplied` | Informational | — | `engineName`, `database`, `script`, `hash`; never the script body |
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
@@ -8303,7 +8534,7 @@ two questions for the planner: *what objects exist* (with stable identities) and
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
 SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
-format **29** introduced kind 18 ownership; current format **36** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+format **29** introduced kind 18 ownership; current format **37** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
 Earlier database formats are refused by the existing format gate; compiled-schema v12 is current.
@@ -8515,7 +8746,7 @@ unchanged; a BEGIN queued there does not block admission of ordinary statements.
 survives reopen, so no persisted creation marker or format change is needed.
 
 Query operators keep their existing materialization policy, as INSERT SELECT does. Before copying,
-the retained child result (row arrays, scalar/text/binary payloads and result-list capacity) is
+the retained child result (row arrays, scalar/text/binary payloads and a fixed slot per kept row) is
 charged to the statement memory grant. The encoded batch and its reference buffer share that
 grant. CS05067 refuses an over-budget build before publication. Source disposal, flush completion
 and every exception/cancellation path release the corresponding reservations.
@@ -8630,7 +8861,7 @@ Typed-schema worker handoff and joint crash/wire convergence are described in SQ
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 36); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 37); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -8646,9 +8877,9 @@ through copy checkpoints and cleanup.
 
 Every compiled-schema apply containing a physical TYPE rewrite uses one joint executor:
 empty-table Build, RunMigrationsInline, ApplySchemaAsync and populated-table worker work.
-Other migrations retain decision 49a's per-step executor; single-statement TYPE retains SQ-A2.
-Precision and widening length changes keep 49a's existing path unless another operation in
-the migration requires TYPE. Every VARCHAR narrowing can trim assignment values and uses
+Every deferred migration also uses this executor (#1778, SQ-A5); single-statement TYPE retains SQ-A2.
+Non-TYPE inline applications keep the per-step executor until SQ-A6.
+Every VARCHAR narrowing can trim assignment values and uses
 TYPE, even if the current values already fit; CHAR width changes also require a rewrite.
 This classification reads metadata only. Without a TYPE rewrite anywhere in the plan, a
 changed default retains the base generator's CS03105 refusal before intent save. A joint
@@ -8749,16 +8980,47 @@ row; the charge is rows plus allocated pages. Retained
 trees use their measured heights in the admission WAL estimate. C is the maximum 64-row
 page-touch bound, T the root count, Q the sum of all row-touch bounds plus T, and K the
 number of copy/root brackets. Copy-owned WAL is accumulated from journal-length deltas across
-its brackets, including their begin/commit frames; existing WAL and writes between brackets
-never trigger its checkpoint. J = min(Q*2(B+46)+152K, 16 MiB + max(C,T)*2(B+46)+152).
-The 16 MiB threshold is 1/16 of the engine's default 256 MiB: twice the previous copy allowance,
-while bounding the WAL reserve independently of a large database. Checkpoints flush the shared
+its brackets, including their begin/commit frames. Existing WAL and writes between brackets
+are excluded from those deltas. An observed truncation re-bases the counter on the whole
+remaining journal, including other writers' bytes, which can force a little earlier. J = min(Q*2(B+46)+152K, H + max(C,T)*2(B+46)+152).
+H is 16 MiB for any job that rewrites an existing table. When every plan table keeps its owner or is new, H may
+instead use the engine's larger nonzero CheckpointJournalSize if this same admission formula
+fits the available space; otherwise H falls back to 16 MiB without refusing the job.
+The 16 MiB rewrite threshold bounds copy-owned WAL at that threshold plus one committed
+bracket (J above), independently of the engine checkpoint budget. Checkpoints flush the shared
 pool and stall every database writer under the apply gate, including untouched tables; they
 can also increase subsequent full-page images. This deliberate stall cost buys bounded copy
 WAL. The copy checkpoint waits for reclamation's bounded batch at the apply gate. Ungated
 storage brackets retry the same checkpoint after a cancellation-aware delay until it succeeds.
-No checkpoint is skipped. Peak-WAL tests sample at durable commit, before truncation, and assert
-the stated J overshoot; a checkpoint-disabled negative control must violate the bound.
+Bracket deltas use logical journal length, including buffered Begin frames exactly once.
+When accumulated copy bytes reach H but the logical journal length is below H, a storage
+checkpoint has truncated the journal: exact deltas cannot exceed an untruncated journal.
+The copy counter then retains that remaining length. Independently, a post-bracket sample
+below that bracket's own journal start proves a checkpoint flushed every copy allocation
+counted so far, including that bracket's, and clears their pending-page charge. Size-due
+checkpoints run at gate release before this sample. Each exit also retains the current journal
+length, including after a forced checkpoint. Before the next bracket's space checks, a length
+below that previous end (excluding an already appended 38-byte Begin frame) proves an interval
+checkpoint flushed all earlier allocations and clears their pending-page charge. The current
+bracket's allocations are added afterwards and remain charged. A first bracket has no previous
+end. A truncation followed by other writers regrowing the journal past the previous end goes
+undetected: it can only over-charge pending pages, which can conservatively refuse a space
+check until the next proven flush. A forced copy checkpoint resets both counters. Peak-WAL
+tests sample both journal length and the bracket delta at durable commit before truncation;
+a post-release sample can miss the largest threshold-crossing bracket. Their asserted window
+runs from job start through the CatalogPublished stage, immediately after the publication
+commit and before old-owner reclamation is released. This applies to the wide keyed rewrite,
+narrow rewrite, kept-owner fallback, wide-copy and reclamation-backlog tests. J covers the
+job's copy-owned WAL through publication; it does not bound post-publication reclamation or
+unrelated writers. Reclamation after publication uses the ordinary engine checkpoint budget
+and reserve E below; its later sampled peak is diagnostic only.
+Engine-disabled narrow keyless and keyed rewrites, including one keyed run with an injected
+checkpoint above 8 MiB, assert H plus the largest observed bracket. The injected run requires
+one observed truncation and further forced checkpoints, binding the retained journal length.
+The kept-owner fallback asserts the same peak bound with engine size checkpoints disabled
+or above the job total. A real-engine-checkpoint rewrite requires a completed storage
+checkpoint before each observed-checkpoint callback. Sparse exact-admission tests cover a
+wide rewrite with a 1 MiB engine budget and a kept-owner additive index at the engine threshold.
 Reclamation-backlog tests prove event-21 SqlTableReclamation deferral at the gate, release the
 batch, then require zero CheckpointBusy callbacks, a completed copy checkpoint and the peak bound,
 including after failed preparation and cancellation after a completed copy checkpoint.
@@ -8807,8 +9069,11 @@ N=R+J+ceil((R+J)/4)+V+E. Before every root/copy bracket the watchdog requires
 D+E, where D=(A-min(A,FreePageCount))*B+touches*2(B+46)+152, plus copy-owned
 unflushed allocation bytes only for sparse data growth, capped at the data pool capacity because eviction or an engine
 checkpoint may already have flushed earlier allocations. It rechecks under the apply gate before the first mutation.
-Copy-owned allocation counts accumulate until a successful forced checkpoint flushes them;
-that checkpoint resets both the pending allocation and WAL counters. PageCount/FreePageCount
+Copy-owned allocation counts accumulate until a successful forced checkpoint or a
+post-bracket journal sample below that bracket's own start proves they were flushed, or
+the next bracket's start falls below the previous bracket's recorded end.
+The forced checkpoint also resets the WAL counter; the proven engine flush clears only
+pending allocations. PageCount/FreePageCount
 deltas plus reclamation frees are sampled at both ends of each copy/root bracket, under its
 apply gate. A private reclamation accounting monitor pairs its allocator releases at commit
 with the reclaimed-page counter update, making each sample exact across concurrent frees.
@@ -8862,8 +9127,8 @@ Every failure before publication discards the kind-9 intent while leaving each u
 owner's durable kind-14 record eligible for reclamation. No step is compensated, no old object
 or committed row is removed, all reservations are released and the old applied marker remains
 trusted. CS03402 reports this failure through Provisioning, Hosting health and DeferredStepFailed.
-The database remains online at its old schema; this deliberately differs from 49a's CS03104
-step failure/offline contract. It does not retry automatically. Explicit apply or a subsequent
+The database remains online at its old schema, superseding 49a's CS03104 deferred
+step failure/offline contract (#1778). It does not retry automatically. Explicit apply or a subsequent
 Build declaring the new target may try again. Late cancellation cannot reverse a publication.
 
 Read errors, conversion/constraint failures, cancellation and prepared data-page write errors
@@ -8874,8 +9139,8 @@ data-file flushes (DataFlush), and failures after issuing a checkpoint header-sl
 (HeaderWrite) take the file sets offline. Engine-wide failure windows for page write-back,
 checkpoints, write-ahead flushing and version purge retain PageWriteBackFailures,
 CheckpointFailures, WriteAheadFlushFailures and VersionPurgeFailures. A second consecutive
-failed checkpoint at the journal size cap retains JournalSizeLimit. 49a step failure still
-uses ProvisioningFailure; interrupted open-time recovery still uses RecoveryInterrupted.
+failed checkpoint at the journal size cap retains JournalSizeLimit; interrupted open-time
+recovery still uses RecoveryInterrupted.
 These are the existing StorageOfflineCause conditions. Pre-publication joint failures never request
 ProvisioningFailure; a failure of in-memory publication after the catalog commit does, fencing both
 file sets until recovery. If taking storage offline itself throws, Environment.FailFast terminates
@@ -8893,8 +9158,12 @@ Provisioning and the thrown diagnostic. It leaves all new trees and directory re
 place; recovery alone decides the schema. Joint cleanup never turns it into "schema unchanged".
 
 After a crash, recovery reclaims abandoned owners. A matching Build retains the kind-9 target
-and replans preparation from the old marker. An old/different/no-target Build or plain open
-discards the intent and opens the current catalog without fencing. After publication it opens the
+and replans preparation from the old marker. An old/different/no-target Build discards the intent
+and opens the current catalog without fencing. An in-process reopen after Build also discards a
+matching intent and reports CS03402 because it cannot schedule a job. With no surviving intent,
+that reopen also reports CS03402 when its declared schema differs from the stored applied hash;
+a completed job stays Healthy. A no-target open sets no provisioning observation or provisioning
+trace. Successful Verify clears a prior observation. After publication it opens the
 new schema. Rollback after success plans an ordinary reverse migration: every unproven conversion,
 length/precision/scale narrowing and rounding requires destructive opt-in, refused with CS03105
 before any step otherwise. The planner's conservative exact whitelist includes integer widening,
@@ -8903,7 +9172,7 @@ domain conversions require opt-in because application casts are unknown to the s
 existing metadata-only gating stays unchanged.
 
 Kind 9 identifies joint jobs with Joint/ step kinds; kind 6 and kind 14 keep their encodings.
-SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 36
+SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 37
 also fences the separate tree owners and classification steps described below; every earlier
 format is refused by the existing read-only gate, with no upgrade reader.
 Compiled-schema v12 stays current. There is no new public interface, reference or wire message.
@@ -8922,18 +9191,36 @@ rewrite locks; tablecmds.c:15618-15624 refuses dependent views. No reference cod
 
 #### Joint tables that keep their physical owner (#1777, SQ-A4)
 
-Within a joint TYPE migration, classification is per table. Additive indexes and constraint
+Within every joint migration, classification is per table. Additive indexes and constraint
 changes (CHECK, NOT NULL, UNIQUE and either end of a foreign key) can keep the heap owner.
 Every column must be an identity conversion at the same ordinal, with equal counts and names;
 only IsNullable changes on the old physical column facets. Native-domain storage or facet
-changes, defaults, column order and primary-key changes rewrite. Dropping or replacing any
+changes, defaults, column order and primary-key changes rewrite. A stored primary-key tree is
+identified by its primary-key marker and columns; joint planning inherits its generated name
+across both keep and rewrite. A new joint table uses the per-step constraint definition and
+ordinal to generate that same name. TABLE_CONSTRAINTS, violation messages and ON CONFLICT
+ON CONSTRAINT therefore retain the name that applications originally observed (#1820).
+Script receipts preserve their named indexes alongside ad-hoc indexes, including uniqueness,
+unless the declaration has that index name or the plan drops it. A declared name wins over
+a script claim, including a stale receipt. Publication refuses duplicate index names with
+CS05060 before opening its catalog transaction. Dropping a preserved index dependency column
+refuses before intent save with CS03105, naming the blocking index through CS03056 (#1821).
+Dropping or replacing any
 heap-owned tree also forces RewriteOwner so its pages are reclaimed. Drops and replacements
 of alternate trees can keep the heap because kind 14 reclaims their separate owners. General
 heap-owned DROP INDEX page reclamation remains #1808. Kind 9 records Joint/KeepOwner or
 Joint/RewriteOwner for each existing target. Empty Build, RunMigrationsInline, ApplySchemaAsync
 and the worker use this same metadata classification. The joint X-lock protocol is unchanged:
 owned sequences, then every touched table, in ascending identity order, through publication.
-The existing 49a index build also takes table X; SQ-A5 should retain this lock matrix.
+Unchanged FK neighbours stay outside the reservation only when both ends keep their owners,
+the FK is identical and the matching parent unique trees are unchanged. Their reads, parent
+inserts and a parent's plain or joined non-key UPDATE proceed; parent deletes and child inserts
+wait when their FK probe needs a reserved table. Those probes rediscover bindings after waiting
+before selecting trees. This parent UPDATE rule applies engine-wide, inside and outside jobs,
+including while session DDL holds the child. A child's non-FK UPDATE, a child DELETE, MERGE
+UPDATE and ON CONFLICT DO UPDATE retain their adjacent-table waits.
+PostgreSQL likewise omits the parent FK check when the referenced key did not change
+(`src/backend/utils/adt/ri_triggers.c:1611-1613`); no reference code is copied.
 
 Index comparison includes every effective key-order value. A direction-only or NULL-placement-only
 change rebuilds an independently owned tree while retaining its heap; joint TYPE rewrites use
@@ -8969,15 +9256,14 @@ Kept columns retain their declared spelling while preserving physical ordinals a
 Before commit, the index directory refuses any prepared
 key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
 Registered domains are outside the schema hash. A matching interrupted intent is discarded and
-replanned when registration changes switch between ordinary deferred and joint migration, or switch
-an existing joint table between KeepOwner and RewriteOwner. The old schema remains online until the
-new plan publishes. An ordinary deferred intent that now needs a joint migration is converted.
-Its committed inline steps stay. From then on the job follows joint-intent policy: a failure,
-a plain open or an old-target Build discards it, and nothing resumes it by name. Discard before
-saving the joint intent preserves availability: retaining the ordinary intent through a persistent
-pre-save refusal would otherwise fail every open. An ordinary replan uses its new script's step
-total, even when unrelated DDL
-invalidated the stored schema snapshot and the new script is longer than the recorded joint job.
+replanned when registration changes switch an existing joint table between KeepOwner and
+RewriteOwner, or an inline replan no longer needs a joint job. The old schema remains online until
+the new plan publishes. Joint copy uses its bounded DML memory ledger and direct scans; neither
+copy nor deferred index build uses plain SELECT buffers. A declared script CTAS still charges
+StatementMemoryBudget and can refuse with CS05067 while the database stays online; its next Build
+resumes at the refused statement when given a larger budget. Optional temp-space setup failures
+do not affect joint intent resume or discard. Format 37 fences the per-step kind-9 meaning; no old partially published
+job resumes. A fresh replan uses its new script's executable step total.
 Discard ends the current provisioning trace with outcome Restarted and starts mode Replan.
 Joint intents with malformed ownership choices still fail CS06059 when the replan is joint.
 The lock order is table X -> apply gate -> tree/page latches for building, and snapshot gate -> catalog monitor
@@ -9004,8 +9290,11 @@ gap is covered here). Durable boundaries are tree-owner reservation (BeforeTreeB
 each 64-version bracket, completed tree (AfterTreeBuild), Publishing and Published. Crash images
 include every storage write/flush boundary and those named phases, converging to exactly the old
 or new catalog while preserving the heap. Space admission charges new trees only for a kept
-table; it charges no heap copy and no retained tree. The bracket watchdog, 16 MiB copy checkpoint
+table; it charges no heap copy and no retained tree. The bracket watchdog, per-job copy checkpoint
 and engine reserve also cover these builds and the retirement of separate tree owners.
+A job whose every plan table keeps its owner or is new uses the engine CheckpointJournalSize when larger
+than 16 MiB and measured admission can afford it; otherwise it falls back to 16 MiB. Jobs that
+rewrite any table retain 16 MiB. Admission and the copier use the same per-job threshold.
 
 SQL format 35 fences the changed logical-registration/physical-owner relationship and the
 classification records. These metadata choices are excluded from provisioning, trace and event
@@ -9020,6 +9309,85 @@ That fixture reduces indexed-table rewrites from 32,768 rows to zero and total p
 from 275 to 137: 136 index pages plus one page for the other table's single rewritten row.
 The index builder decodes 65,536 versions (count plus build); the index-only table needs zero
 additional validation decodes. The other table's single copied row adds one decode.
+
+#### Every deferred migration publishes jointly (#1778, SQ-A5)
+
+Before any inline DDL commits, the provisioner classifies the complete rendered plan. If any
+49a data-scaling step would defer, the entire plan goes to joint preparation: indexes, CHECK,
+UNIQUE, FK and NOT NULL validation, bounded facet changes and required/domain column backfills.
+Cheap additions, drops and other steps in that plan remain unpublished too. Additive index
+changes and changes to alternate trees keep their heaps using SQ-A4; dropping or replacing a
+heap-owned tree rewrites its table until #1808. One catalog commit publishes every change and
+the applied marker.
+Non-TYPE RunMigrationsInline, empty-table Build and ApplySchemaAsync retain their per-step
+behavior until SQ-A6. Default-only changes still refuse CS03105 in this run.
+
+Build reserves every plan table and the required FK neighbours before returning. The original 49a path held
+X on each deferred table from reservation through its steps, but cheap steps had already committed
+and released their locks. The joint window covers those cheap-step tables through all preparation
+and publication; their reads wait too. FK neighbours, including reads, also wait when the FK
+is added, dropped or re-pointed, either end rewrites, or matching parent key trees change. Stable
+neighbours keep serving reads, parent inserts and a parent's plain or joined non-key UPDATE. Definition metadata admission
+also spans that window. Untouched DML remains available; the existing lock-manager admission and
+lock/latch order above govern every wait. Build validates registered definitions against the
+prepared target plus untouched objects, without caching that result as validation of the live
+catalog. Session writes continue to bind the live schema under the table reservations.
+
+| Statement on a stable neighbour | Reservation needed by its FK probe | Admission |
+|---|---|---|
+| Neighbour SELECT, parent INSERT | None | Proceeds |
+| A parent's plain or joined non-key UPDATE | None | Proceeds, including outside a job during child session DDL |
+| Parent DELETE or referenced-key UPDATE | Reserved child | Waits |
+| Child INSERT | Reserved parent | Waits |
+| A child's non-FK UPDATE | Reserved parent | Waits, same as base |
+| A child DELETE | Reserved parent | Waits, same as base |
+| MERGE UPDATE | Reserved adjacent table | Waits, same as base |
+| ON CONFLICT DO UPDATE | Reserved adjacent table | Waits, same as base |
+
+Joint jobs retain existing indexes in their durable registration order, regardless of whether
+their final descriptions are declared or preserved; added indexes follow in plan order. This
+preserves the first duplicate-key diagnostic through publication and catalog Load on restart.
+
+Every job reuses JointSpace's metadata floor, measured admission, engine reserve and per-bracket
+watchdog, including index-only jobs. Constraint-only validation reports an unknown total while
+scanning and the exact count on completion; it adds no counting scan. Provisioning and DeferredStep
+events describe the complete joint job using Joint/ kinds. Cancellation reports CS03402 and Error
+after discarding unpublished work; inline per-step CS03104 remains unchanged. A different-target
+Build discards kind 9, reports CS03402, and replans from the stored schema. Discard ends the prior
+trace with Restarted and uses Replan; recovery completes that trace with Discarded. A no-target
+open discards without parsing the abandoned target and sets no provisioning report or trace.
+Successful Verify, apply or skip clears the discard observation for a declared target.
+Progress retains the job's first executable operation throughout preparation; Kind, Table and
+Position do not identify later table work. Row counts restart at each table and phase. Accurate
+labels for unrendered layout changes and FK-validation neighbours need a separate progress model;
+ownership records remain excluded from executable StepCount. The event payload shape is unchanged.
+
+No new durable boundary or reclamation mechanism is added. The newly routed corpus captures
+IntentDurable, LocksReserved, Handoff, OwnersDurable, TreesDurable, BeforeTreeBuild,
+AfterTreeBuild, TablePrepared, Validated, Publishing, CatalogPublished and Published, plus every
+storage write, flush and length change. Reopening converges to the exact old or complete new
+catalog; repeated drains reclaim abandoned owners once while retaining kept heaps and trees.
+The deferred corpus also checks rollback Builds, cancellation admission counters, space refusal
+and the retained 49a index builder's page-write and row-rewrite costs.
+Every recorded A5 image reopens with no declaration, the matching target, a third target and the
+old rollback declaration. Each convergence clears Provisioning. The third target adds an index
+and a distinct CHECK so it reserves a job on every populated image, including already-published
+images. Kept primary-key heaps participate in the corpus.
+Failed-preparation discard/drain images cover all three durability modes; a separate wide-copy
+fixture crosses a copy checkpoint over multiple 64-version brackets.
+For 32,768 rows on a primary-key table the retained 49a builder writes 201 pages and joint
+publication writes 202; both rewrite zero rows and decode 65,536 versions. Column and composite
+primary-key tables with three columns measure 227 to 228 pages; adding a new keyed table in
+that plan measures 228 to 230. At the measured 64 MiB engine budget, the ten-percent page-write
+bound covers additive index builds, including plans that add a table. Page-write costs for
+changes to alternate trees remain unmeasured. The bound excludes drops or replacements of
+heap-owned trees until #1808. Shuffled-key measurements
+count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
+already completed by the engine must not be followed by a redundant forced copy checkpoint.
+
+SQL record-space format 37 requires this joint kind-9 meaning for every deferred job and refuses
+36 before any write through the existing format gate. Compiled-schema v12 and wire messages
+are unchanged; no upgrade reader or new public boundary is added.
 
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
@@ -9156,8 +9524,8 @@ The #1443 review kept record-space format 11 unchanged. #1437 advances it to 12 
 #### Catalog: Durable pending migrations (49a)
 
 Catalog kind 9 is a chunked UTF-8, source-generated JSON `SqlCatalogPendingMigration` envelope.
-It carries the complete target document/hash, ordered immutable step identities and their
-one-based positions after inline steps. It uses the same strict chunk assembly and one storage
+It carries the complete target document/hash, ordered immutable Joint/ step identities and their
+one-based positions plus per-table owner choices. It uses the same strict chunk assembly and one storage
 transaction as applied-schema records (kind 6). The SQL engine gates this addition with data
 format 9; no legacy reader or upgrade path is added. Persisting intent does not advance DDL
 generation or replace the old applied marker. Saving the completed applied marker deletes every
@@ -9192,7 +9560,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 36 requires the complete table extension 8 record,
+after the existing constraints. Current format 37 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -9270,7 +9638,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 36 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
+  which this catalog always writes. Current format 37 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -9468,7 +9836,7 @@ recognizes the old shape to refuse it; it does not load an older catalog. A curr
 malformed or ambiguous marker, duplicate counter or unknown record kind preserves
 the original catalog error; successful opens require no additional traversal.
 
-There is no transaction across provisioning statements. A crash after a committed step
+The retained inline per-step path has no transaction across provisioning statements. A crash after a committed step
 leaves the previous recorded generation behind the live counter. The SQL provisioner
 then takes a complete snapshot of owned objects and plans only the remaining work;
 the state is recorded last. The catalog keeps types and their bounds, domain names,
@@ -9476,10 +9844,10 @@ nullability, canonical defaults, primary keys, unique and foreign-key constraint
 checks and indexes so that reconciliation can represent each provisionable kind.
 Engine-registered domains remain code and are represented by their column references.
 
-Owner decision 49a's pending-step record attaches between planning and step execution
-in the SQL provisioner. Successful deferred DDL uses the same catalog commit path, and
-the applied state is recorded only after all steps complete. The pending envelope lives
-here; worker execution and progress remain SQL engine responsibilities.
+The pending record attaches between planning and preparation in the SQL provisioner.
+Every deferred job now uses joint publication: its applied state and all object changes
+share one catalog commit. The pending envelope lives here; worker execution and progress
+remain SQL engine responsibilities.
 
 #### Catalog: Object ownership
 
@@ -10326,18 +10694,37 @@ SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default
 statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
-Ordered sequence deferral uses the same uncharged collector as sequence-free sorting (#1717),
-including bounded top-N selection and deep OFFSET pages on plain, correlated, grouped and
-grouping-set paths. LIMIT controls retention, without introducing a separate accounting rule.
-Unordered grouped/correlated sequence projection streams without retaining inputs. Plain grouping
-remains uncharged; grouping-set group/aggregate state retains its existing charge on both paths.
-The limit governs accounted live hash-build memory, joined-DML retention and CTAS retention described above. General
-result materialization, planning and transient scalar hashing remain outside this grant. Hash-build
-reservation precedes retained allocation; CTAS admits the completed query output before copying.
+Plain SELECT uses per-buffer reservations and lazy wide-cell identity maps, without lending or eviction.
+Before wide-cell deduplication, a retained row R costs 32 + SqlHashJoinTable.RowBytes(R): a fixed list slot plus
+its array and conservative boxed/text/binary/CHAR payload. DISTINCT/seen/count entries cost
+64 + RowBytes(key). A group costs 128 plus its retained key and 128 per ordinary
+aggregate; each DISTINCT or ordered aggregate instead costs 320 + 128 per ordering key +
+32 per argument collation, matching the grouping-set per-aggregate allowance;
+aggregate DISTINCT tuples and ordered inputs reserve their own rows and entry slots. Native
+variable-width extrema and string aggregate state also charge retained payload growth.
+A collector entry costs 32 + RowBytes(output) + RowBytes(keys), including bounded top-N heaps;
+its slot covers kept output through Finish, without a second row charge. Full SortRows key
+scratch costs 64 + RowBytes(keys) per row, plus 32 + RowBytes(row) for its sorted list. Each concurrently retained
+buffer pays independently. Within one buffer, each wide identity replaces all of its payload
+references with one payload plus 64 B; narrow references keep the formulas above.
+
+Unordered output lists, staged join matches, flat nested-loop inners, normalized child lists,
+volatile source sorts, completed group lists, result consumers, relation caches, independent
+subquery values, correlated vectors, set operands and set hash state all share this grant.
+Charges follow retained rows, never capacity or growth history. CTAS admits only the rows
+kept after pagination. Sequence deferral retains its original source shape and evaluation;
+sorting charges can therefore differ with source width, while CTAS admission of equal kept
+outputs is equal. CTAS sources charge like every SELECT, including group/sort state and
+relation caches. Both forms of the 1,001-key grouped OFFSET CTAS refuse at 8 KiB; at a
+sufficient grant they each admit 136 B of kept output. INSERT SELECT and DML subquery
+sources retain their existing uncharged policy; recursive state uses its existing ledger.
+Planning, traversal stacks, current row/evaluated frames, collation arrays and storage-level
+scan/seek/system-view scratch remain outside the grant. COUNT(*) and low-cardinality GROUP BY
+can consume input much larger than the budget on the pipelined path.
 Every exit releases reservations, including cancellation, failed decoding and budget refusal.
 CS05067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
-message and one diagnostic code. There is no partitioning or spill. Persisted statistics,
-standalone ANALYZE and spill remain post-T2 Hardening work under D3.
+message and one diagnostic code. These operators do not partition or spill yet; the T3 spill
+family adds that support. Standalone ANALYZE remains later work.
 
 Joined UPDATE FROM, DELETE USING and MERGE also reserve retained decoded target identities,
 non-hash input buffers, derived-source copies, normalized intermediate frames, associations,
@@ -10348,7 +10735,7 @@ releases every reservation on success, refusal, constraint failure and cancellat
 WITH/subquery work and cascade retries. Plain UPDATE, DELETE and ON CONFLICT retain their
 existing allocation paths and do not create this owner.
 
-The join-only metrics state lazily owns a reference-identity ledger. Arrays and shared
+The joined-DML metrics state lazily owns its existing reference-identity ledger. Arrays and shared
 boxed/text/binary/CHAR cells use the hash table's conservative size rules; each retained object
 is charged once. The ledger reserves 320 bytes for its owner/promoted metrics/headers and 160 per tracked slot
 for entries/buckets, including simultaneous arrays during growth; vacated hash-only slots are reused.
@@ -10361,7 +10748,7 @@ disposing the hash releases its charge and transfers surviving retained payload 
 Unselected hash objects leave the ledger when their last hash owner releases them. Thus hash
 storage is never charged a second time merely because an association aliases it. The existing
 HashMemoryBytes/PeakHashMemoryBytes internal metrics report the combined statement grant.
-General query-result materialization and transient expression values remain outside the grant;
+Transient expression values remain outside the grant;
 derived-source copies and selected write values are admitted as they are retained.
 
 Plain EXPLAIN never executes the SELECT/DML. Probes can read indexes; actual_rows stays NULL.

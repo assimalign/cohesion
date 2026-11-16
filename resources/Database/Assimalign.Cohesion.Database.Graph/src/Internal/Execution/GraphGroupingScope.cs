@@ -17,7 +17,7 @@ internal sealed class GraphGroupingScope
     private readonly GraphFunctionCatalog? _functions;
 
     internal GraphGroupingScope(IReadOnlyList<GqlExpression> keys, IReadOnlyList<GqlExpression> aggregates,
-        GraphExpressionShape shape, CancellationToken token, GraphFunctionCatalog? functions = null)
+        GraphExpressionShape shape, CancellationToken token, GraphFunctionCatalog? functions = null, IEnumerable<string>? constants = null)
     {
         _keys = new HashSet<GqlExpression>(shape);
         _aggregates = new HashSet<GqlExpression>(shape);
@@ -29,6 +29,7 @@ internal sealed class GraphGroupingScope
             _keys.Add(key);
             if (key is GqlVariableExpression variable) { _variables.Add(variable.Variable); }
         }
+        if (constants is not null) { foreach (string name in constants) { token.ThrowIfCancellationRequested(); _variables.Add(name); } }
         foreach (var aggregate in aggregates) { token.ThrowIfCancellationRequested(); _aggregates.Add(aggregate); }
     }
 

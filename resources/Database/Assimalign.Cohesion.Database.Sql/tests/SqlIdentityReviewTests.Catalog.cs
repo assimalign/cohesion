@@ -15,7 +15,9 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed partial class SqlIdentityReviewTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - Identity DDL race: stale lookup is retryable")]
-    [InlineData("ALTER TABLE t ALTER id DROP IDENTITY")][InlineData("DROP TABLE t")][InlineData("TRUNCATE t")]
+    [InlineData("ALTER TABLE t ALTER id DROP IDENTITY")]
+    [InlineData("DROP TABLE t")]
+    [InlineData("TRUNCATE t")]
     [InlineData("ALTER TABLE t ALTER id TYPE BIGINT")]
     public async Task IdentitySequence_ChangedAfterTableRead_ShouldReportRetryableFailure(string ddl)
     {
@@ -59,7 +61,8 @@ public sealed partial class SqlIdentityReviewTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Backfill: account chunks and release on refusal")]
-    [InlineData(1L, true)][InlineData(400000L, false)]
+    [InlineData(1L, true)]
+    [InlineData(400000L, false)]
     public async Task ExecuteAsync_BackfillBudget_ShouldAccountAndKeepOldTableOnRefusal(long budget, bool refuses)
     {
         // Arrange
@@ -89,14 +92,31 @@ public sealed partial class SqlIdentityReviewTests
             db.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
             table.Columns.Count.ShouldBe(refuses ? 1 : 2);
             if (refuses) { table.ShouldBeSameAs(original); }
-            (await Rows(session, "SELECT COUNT(*) FROM t"))[0][0].ShouldBe(130L);
+            if (refuses)
+            {
+                // A one-byte SQL grant cannot admit a COUNT result. Verify the
+                // unchanged, committed owner directly, then reuse the session with
+                // an empty SELECT whose plan-sized header needs no row reservation.
+                int count = 0;
+                using (var rows = db.DataStorage.GetUnitIterator(table.ObjectId))
+                { while (rows.MoveNext()) { count++; } }
+                count.ShouldBe(130);
+                await Exec(session, "SELECT v FROM t LIMIT 0");
+            }
+            else { (await Rows(session, "SELECT COUNT(*) FROM t"))[0][0].ShouldBe(130L); }
         }
         finally { SqlPlanExecutor.RewriteStage = null; }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Sequence visibility: failed backfill releases names")]
-    [InlineData(0)][InlineData(1)][InlineData(2)][InlineData(3)]
-    [InlineData(4)][InlineData(5)][InlineData(6)][InlineData(7)]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
     public async Task ExecuteAsync_AbandonedBackfill_ShouldReleaseSequenceName(int action)
     {
         // Arrange: the active reader pins abandoned owners until this test ends.

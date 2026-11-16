@@ -83,6 +83,14 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         lock (_sync) { return _live[Key(databaseName, false)].Journal.FlushCount; }
     }
 
+    internal long PageWrites(string databaseName)
+    {
+        lock (_sync)
+        {
+            return _live[Key(databaseName, false)].Data.PageWrites + _live[Key(databaseName, true)].Data.PageWrites;
+        }
+    }
+
     /// <summary>
     /// Captures the durable byte image of every storage this strategy has created
     /// or opened — the state a process crash would leave on disk — and returns a
@@ -406,6 +414,8 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         internal long ChargedBytes => _sparse() ? _writtenHighWater : Length;
 
         internal int FlushCount { get; private set; }
+        private long _pageWrites;
+        internal long PageWrites => Interlocked.Read(ref _pageWrites);
 
         internal GatedStream(bool writeThrough, Action onDurableChange, Action onWriteStarting, Action<long> onGrowing, Func<bool> sparse)
         {
@@ -482,6 +492,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         public override void Write(byte[] buffer, int offset, int count)
         {
             _onWriteStarting();
+            Interlocked.Add(ref _pageWrites, count / 8192);
             _onGrowing(Math.Max(0, _liveBuffer.Position + count - ChargedBytes));
             _writtenHighWater = Math.Max(_writtenHighWater, _liveBuffer.Position + count);
             int position = checked((int)_liveBuffer.Position);

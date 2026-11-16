@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>Retains completed outputs and keys, bounded by OFFSET + LIMIT when ordered.</summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlRowCollector")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlRowCollector.DebugView))]
-internal sealed class SqlRowCollector
+internal sealed class SqlRowCollector : IDisposable
 {
     private readonly IReadOnlyList<SqlBoundOrdering> _orderBy;
     private readonly Collation[] _collations;
@@ -18,36 +18,40 @@ internal sealed class SqlRowCollector
     private readonly bool _canBound;
     private readonly CancellationToken _cancellationToken;
     private readonly SqlStatementMetrics? _metrics;
-    private readonly long? _limit;
+    private readonly long _limit; // -1 means unbounded; SQL row counts are nonnegative.
     private readonly long _offset;
-    private readonly long _bound;
+    private long Bound => _limit >= 0 && _limit <= long.MaxValue - _offset ? _limit + _offset : long.MaxValue;
     private readonly List<Entry> _ordered = [];
     private readonly List<object?[]> _rows = [];
+    private readonly long _budget;
+    private readonly bool _publishPeak;
+    private SqlSelectMemory _memory;
     private long _visited;
     private int _comparisons;
     private bool _collationsInitialized;
     private bool _isHeap;
 
     internal SqlRowCollector(IReadOnlyList<SqlBoundOrdering> orderBy, SqlSubqueryValues? subqueries,
-        SqlRowCount? limit, SqlRowCount? offset, CancellationToken cancellationToken, SqlStatementMetrics? metrics = null)
+        SqlRowCount? limit, SqlRowCount? offset, CancellationToken cancellationToken, SqlStatementMetrics? metrics, long budget, bool publishPeak = true)
     {
         _orderBy = orderBy;
         _subqueries = subqueries;
         _cancellationToken = cancellationToken;
         _metrics = metrics;
-        _limit = limit?.Count;
+        _budget = budget;
+        _publishPeak = publishPeak;
+        _limit = limit?.Count ?? -1;
         _offset = offset?.Count ?? 0;
         // Do not size an allocation or narrow a count from user input. A sum beyond
         // Int64.MaxValue is indistinguishable from an unbounded materialized input.
-        _bound = _limit is { } count && count <= long.MaxValue - _offset ? count + _offset : long.MaxValue;
         _collations = new Collation[orderBy.Count];
-        _canBound = _limit.HasValue;
+        _canBound = _limit >= 0;
         // Deferred collations follow the last qualifying row, so retain full sorting.
         for (int i = 0; i < orderBy.Count; i++) { _canBound &= orderBy[i].Collation.IsFixed; }
         cancellationToken.ThrowIfCancellationRequested();
     }
 
-    internal bool IsComplete => _limit == 0 || _orderBy.Count == 0 && _limit.HasValue && _visited >= _bound;
+    internal bool IsComplete => _limit == 0 || _orderBy.Count == 0 && (_limit >= 0) && _visited >= Bound;
 
     internal int RetainedCount => _orderBy.Count == 0 ? _rows.Count : _ordered.Count;
 
@@ -68,7 +72,7 @@ internal sealed class SqlRowCollector
         long ordinal = _visited++;
         if (_orderBy.Count == 0)
         {
-            if (ordinal >= _offset) { _rows.Add(output); return null; }
+            if (ordinal >= _offset) { if (ChargesPlainMemory) { ReserveRow(output); } _rows.Add(output); return null; }
             windowMemory?.ReleaseRow(output);
             return output;
         }
@@ -79,6 +83,7 @@ internal sealed class SqlRowCollector
         if (!_canBound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
+            if (ChargesPlainMemory) { ReserveEntry(entry); }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -86,9 +91,10 @@ internal sealed class SqlRowCollector
         // Max-heap: the worst retained key (latest input on ties) is at the root.
         // PostgreSQL src/backend/utils/sort/tuplesort.c:2482-2523 uses the same reversed-order bound;
         // this implementation keeps the stable input ordinal explicitly.
-        if (_ordered.Count < _bound)
+        if (_ordered.Count < Bound)
         {
             windowMemory?.Reserve(24); // stable-sort entry capacity and growth
+            if (ChargesPlainMemory) { ReserveEntry(entry); }
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -107,7 +113,15 @@ internal sealed class SqlRowCollector
         if (_ordered.Count > 0 && Compare(entry, _ordered[0]) < 0)
         {
             var replaced = _ordered[0];
+            // Credit the replaced entry before admitting its replacement.
+            bool wide = false;
+            long difference = ChargesPlainMemory
+                ? _memory.ReplacementBytes(entry.Output, entry.Keys, replaced.Output, replaced.Keys, out wide) : 0;
+            if (difference > 0) { Reserve(difference); }
             SiftDown(0, entry);
+            if (ChargesPlainMemory && (_memory.HasWideCells || wide))
+            { _memory.Replace(entry.Output, entry.Keys, replaced.Output, replaced.Keys); }
+            if (difference < 0) { Release(-difference); }
             windowMemory?.ReleaseRow(replaced.Output);
             windowMemory?.ReleaseRow(replaced.Keys);
             return replaced.Output;
@@ -120,7 +134,7 @@ internal sealed class SqlRowCollector
     internal List<object?[]> Finish(bool resolveEmptyCollations = true, bool includeOffset = false)
     {
         _cancellationToken.ThrowIfCancellationRequested();
-        if (_orderBy.Count == 0) { return _rows; }
+        if (_orderBy.Count == 0) { Dispose(); return _rows; }
         if (_ordered.Count > 0 || resolveEmptyCollations) { ResolveCollations(); }
         try { _ordered.Sort(Compare); }
         catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException or OperationCanceledException)
@@ -130,8 +144,8 @@ internal sealed class SqlRowCollector
         }
         _cancellationToken.ThrowIfCancellationRequested();
         int start = includeOffset ? 0 : (int)Math.Min(_offset, _ordered.Count);
-        int count = includeOffset ? (int)Math.Min(_bound, _ordered.Count)
-            : (int)Math.Min(_limit ?? _ordered.Count, _ordered.Count - start);
+        int count = includeOffset ? (int)Math.Min(Bound, _ordered.Count)
+            : (int)Math.Min((_limit >= 0 ? _limit : _ordered.Count), _ordered.Count - start);
         for (int i = start; i < start + count; i++)
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -146,12 +160,49 @@ internal sealed class SqlRowCollector
             }
         }
         _ordered.Clear();
+        Dispose();
         return _rows;
+    }
+
+    private void ReserveRow(object?[] output)
+    {
+        long bytes = _memory.RowBytes(output, out bool wide);
+        Reserve(bytes);
+        if (wide) { _memory.AddRow(output); }
+    }
+
+    private void ReserveEntry(Entry entry)
+    {
+        long bytes = _memory.EntryBytes(entry.Output, entry.Keys, out bool wide);
+        Reserve(bytes);
+        if (wide) { _memory.AddRow(entry.Output); _memory.AddRow(entry.Keys); }
+    }
+
+    private bool ChargesPlainMemory => _budget != 0 && _metrics is not null && SqlWindowMemory.For(_metrics) is null;
+
+    private void Reserve(long bytes)
+    {
+        if (_budget == 0 || _metrics is null || SqlWindowMemory.For(_metrics) is not null) { return; }
+        _metrics.ReservePlainSelectMemory(bytes, _budget);
+        _memory.Bytes += bytes;
+    }
+
+    private void Release(long bytes)
+    {
+        if (_memory.Bytes == 0) { return; }
+        _metrics!.ReleasePlainSelectMemory(bytes);
+        _memory.Bytes -= bytes;
+    }
+
+    public void Dispose()
+    {
+        _metrics?.ReleasePlainSelectMemory(_memory.Bytes);
+        _memory.Clear();
     }
 
     private void RecordRetainedCount()
     {
-        if (_metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, _ordered.Count); }
+        if (_publishPeak && _metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, _ordered.Count); }
     }
 
     private void SiftDown(int parent, Entry entry)

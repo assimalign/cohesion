@@ -90,6 +90,12 @@ public sealed partial class SqlJointTypeMigrationTests
         CrashCaptureSqlStorageStrategy? checkpointImage = null;
         storage.DurableStorageChanged = catalog =>
         { if (!catalog) { peak = Math.Max(peak, database.DataStorage.Journal.Length); } };
+        database.SchemaProvisioner.JointStage = stage =>
+        {
+            if (stage != "CatalogPublished") { return; }
+            storage.DurableStorageChanged?.Invoke(false);
+            storage.DurableStorageChanged = null;
+        };
         SqlPlanExecutor.RewriteStage = (stage, _) =>
         {
             if (stage == "CopyCommitted") { peak = Math.Max(peak, database.DataStorage.Journal.Length); return; }
@@ -125,7 +131,7 @@ public sealed partial class SqlJointTypeMigrationTests
             await using var oldReader = await old.CreateSessionAsync(guard.Token);
             (await RowsAsync(oldReader, "SELECT COUNT(*) FROM items", guard.Token)).Single()[0].ShouldBe(8192L);
         }
-        finally { SqlPlanExecutor.RewriteStage = null; storage.DurableStorageChanged = null; }
+        finally { SqlPlanExecutor.RewriteStage = null; storage.DurableStorageChanged = null; database.SchemaProvisioner.JointStage = null; }
     }
 
     private sealed record WideOldRow(int Value, string Payload);

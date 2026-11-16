@@ -64,6 +64,8 @@ public static class OqlLanguageProfile
         OqlClauses.Values,
         OqlClauses.Select,
         OqlClauses.Union,
+        OqlClauses.Intersect,
+        OqlClauses.Except,
         OqlClauses.Subquery,
         OqlClauses.Distinct,
         OqlClauses.SelectValue,

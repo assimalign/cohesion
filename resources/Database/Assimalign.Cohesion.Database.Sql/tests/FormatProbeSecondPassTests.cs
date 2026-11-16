@@ -16,17 +16,19 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(FormatProbeFixTests))]
 public sealed class FormatProbeSecondPassTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Format 35 refuses clean and recovered crash views without changing any file (#1744, #1787)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Open_Format35_ShouldRefuseRepeatedlyWithoutWrites(bool clean)
+    [Theory(DisplayName = "Cohesion Test [Sql] - Formats 35 and 36 refuse clean and recovered crash views without changing any file (#1744, #1787, #1778)")]
+    [InlineData(false, 35)]
+    [InlineData(true, 35)]
+    [InlineData(false, 36)]
+    [InlineData(true, 36)]
+    public async Task Open_EarlierFormat_ShouldRefuseRepeatedlyWithoutWrites(bool clean, int format)
     {
         // Arrange: the crash fixture includes committed changes and uncommitted
         // full page images in both file sets. Clean mode checkpoints those sets.
-        string root = Path.Combine(Path.GetTempPath(), "cohesion-sql-format35-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-sql-format" + format + "-" + Guid.NewGuid().ToString("N"));
         try
         {
-            await FormatProbeCrash.SeedAsync("Sql", root, legacy: false, clean ? "clean-format35" : "format35");
+            await FormatProbeCrash.SeedAsync("Sql", root, legacy: false, (clean ? "clean-" : "") + "format" + format);
             if (!clean) { FormatProbeCrash.AssertUncommittedImages(root); }
             var before = FormatProbeCrash.Snapshot(root);
 
@@ -38,8 +40,8 @@ public sealed class FormatProbeSecondPassTests
                     var failure = await Should.ThrowAsync<DatabaseException>(async () =>
                         await engine.OpenDatabaseAsync("probe", CancellationToken.None));
                     failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
-                    failure.Message.ShouldContain("uses data-storage format 35", Case.Sensitive);
-                    failure.Message.ShouldContain("supports only format 36", Case.Sensitive);
+                    failure.Message.ShouldContain($"uses data-storage format {format}", Case.Sensitive);
+                    failure.Message.ShouldContain("supports only format 37", Case.Sensitive);
                 }
                 FormatProbeCrash.AssertUnchanged(root, before);
             }
@@ -68,7 +70,7 @@ public sealed class FormatProbeSecondPassTests
                     // Assert: physical-owner attachment would report corruption instead.
                     failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
                     failure.Message.ShouldContain("34", Case.Sensitive);
-                    failure.Message.ShouldContain("supports only format 36", Case.Sensitive);
+                    failure.Message.ShouldContain("supports only format 37", Case.Sensitive);
                 }
                 FormatProbeCrash.AssertUnchanged(root, before);
             }

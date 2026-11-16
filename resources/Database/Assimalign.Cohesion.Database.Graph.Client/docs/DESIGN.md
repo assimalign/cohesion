@@ -42,6 +42,17 @@ create type/existence rules locally, verify metadata, exercise rejected CREATE/I
 drop independent rules and indexes, and retain one authenticated session. Enforcement failures
 carry structured CG03003. No client production source, capability or wire version changes.
 
+## Inline returning CALL subqueries (#1807, GQ-N1)
+
+Read-only CALL and OPTIONAL CALL use the existing Execute and ExecutePaths exchanges. InMemory
+and TCP conformance cases cover explicit imports, per-row fan-out, composite bodies, nullable
+optional results, entity delivery, structured CG01024 collisions and capability refusals. The
+same authenticated session remains usable after refusal. No client API, capability, protocol
+version or encoding changes are needed; only final columns govern scalar/path admission.
+CALL regressions pin Int64 result-header types for both required values and optional NULL rows
+on InMemory and TCP. The current header contains only names and type bytes; it carries no
+nullability field. Static column nullability remains an in-process engine metadata contract.
+
 ## Schema text DDL (#1738, GQ-D2)
 
 Read-only unknown entity properties (#1249, GQ-D3) arrive as CG01023 Warning entries in the

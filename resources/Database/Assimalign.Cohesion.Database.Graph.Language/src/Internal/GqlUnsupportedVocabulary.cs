@@ -19,6 +19,7 @@ internal static class GqlUnsupportedVocabulary
         // Clauses, statements and predicates outside the executable subset.
         new("MANDATORY", GqlClauses.MandatoryMatch, GqlWordPosition.Clause),
         new("FOREACH", "FOREACH", GqlWordPosition.Clause),
+        // Inline CALL bodies are scanned separately; named procedures retain this refusal.
         new("CALL", "CALL", GqlWordPosition.Clause),
         new("YIELD", "YIELD", GqlWordPosition.Clause),
         // MATCH selector prefixes are parsed; these retain refusals in other positions.

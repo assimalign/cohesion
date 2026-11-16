@@ -95,12 +95,12 @@ internal static partial class GraphPlanExecutor
     private static async IAsyncEnumerable<object?[]> StreamCompositeRowsAsync(GraphDatabase database, GraphOperation operation,
         GraphCompositePlan composite, [EnumeratorCancellation] CancellationToken token,
         IReadOnlyList<IReadOnlyDictionary<string, object?>>? incoming = null, DatabaseType[]? metadataTypes = null,
-        bool[]? dynamicTypes = null, bool[]? nullable = null)
+        bool[]? dynamicTypes = null, bool[]? nullable = null, IReadOnlyDictionary<string, object?>? globals = null)
     {
         if (!composite.HomogeneousUnion)
         {
             await foreach (var row in StreamCompositeTreeRowsAsync(database, operation, composite, token, incoming,
-                metadataTypes, dynamicTypes, nullable).ConfigureAwait(false)) { yield return row; }
+                metadataTypes, dynamicTypes, nullable, globals).ConfigureAwait(false)) { yield return row; }
             yield break;
         }
         var budget = operation.QueryBudget!;
@@ -112,7 +112,7 @@ internal static partial class GraphPlanExecutor
         {
             foreach (var plan in composite.Operands)
             {
-                await using var source = StreamCompositeOperandAsync(database, operation, plan, token, incoming).GetAsyncEnumerator(token);
+                await using var source = StreamCompositeOperandAsync(database, operation, plan, token, incoming, globals).GetAsyncEnumerator(token);
                 while (true)
                 {
                     token.ThrowIfCancellationRequested(); operation.EnsureActive();
@@ -140,7 +140,7 @@ internal static partial class GraphPlanExecutor
     private static async IAsyncEnumerable<object?[]> StreamCompositeInputRowsAsync(GraphDatabase database,
         GraphOperation operation, GraphCompositePlan composite, IAsyncEnumerable<IReadOnlyDictionary<string, object?>> source,
         [EnumeratorCancellation] CancellationToken token, DatabaseType[]? metadataTypes = null,
-        bool[]? dynamicTypes = null, bool[]? nullable = null)
+        bool[]? dynamicTypes = null, bool[]? nullable = null, IReadOnlyDictionary<string, object?>? globals = null)
     {
         var budget = operation.QueryBudget!;
         using var memory = new GraphMemoryOwner(budget.Memory);
@@ -152,16 +152,16 @@ internal static partial class GraphPlanExecutor
             memory.Add(64); memory.RetainValue(copy, token); incoming.Add(copy);
         }
         await foreach (var values in StreamCompositeRowsAsync(database, operation, composite, token, incoming,
-            metadataTypes, dynamicTypes, nullable).ConfigureAwait(false))
+            metadataTypes, dynamicTypes, nullable, globals).ConfigureAwait(false))
         { yield return values; }
     }
 
     private static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamCompositeBindingsAsync(GraphDatabase database,
         GraphOperation operation, GraphCompositePlan composite, IAsyncEnumerable<IReadOnlyDictionary<string, object?>> source,
-        [EnumeratorCancellation] CancellationToken token)
+        [EnumeratorCancellation] CancellationToken token, IReadOnlyDictionary<string, object?>? globals = null)
     {
         using var rowMemory = new GraphMemoryOwner(operation.QueryBudget!.Memory);
-        await foreach (var values in StreamCompositeInputRowsAsync(database, operation, composite, source, token).ConfigureAwait(false))
+        await foreach (var values in StreamCompositeInputRowsAsync(database, operation, composite, source, token, globals: globals).ConfigureAwait(false))
         {
             var binding = new Dictionary<string, object?>(StringComparer.Ordinal);
             for (int i = 0; i < values.Length; i++)
@@ -174,10 +174,10 @@ internal static partial class GraphPlanExecutor
         }
     }
 
-    // Only composite queries use this cursor. Ordinary read allocation and dispatch stay intact.
+    // CALL and composite queries share this projected-row cursor. Ordinary read dispatch stays intact.
     private static async IAsyncEnumerable<object?[]> StreamCompositeOperandAsync(GraphDatabase database, GraphOperation operation,
         GraphPlan plan, [EnumeratorCancellation] CancellationToken token,
-        IReadOnlyList<IReadOnlyDictionary<string, object?>>? incoming = null)
+        IReadOnlyList<IReadOnlyDictionary<string, object?>>? incoming = null, IReadOnlyDictionary<string, object?>? globals = null)
     {
         var budget = operation.QueryBudget!;
         using var executionMemory = budget.Memory.Reserve(512);
@@ -191,24 +191,32 @@ internal static partial class GraphPlanExecutor
             token.ThrowIfCancellationRequested();
             var stage = plan.Stages[i];
             if (stage is GraphCompositeStagePlan nested)
-            { input = StreamCompositeBindingsAsync(database, operation, nested.Composite, input, token); }
+            { input = StreamCompositeBindingsAsync(database, operation, nested.Composite, input, token, globals); }
+            else if (stage is GraphCallStagePlan call)
+            { input = StreamCallAsync(database, operation, call, input, layout, budget, token); }
             else if (stage.Stage is GqlMatchStage)
             {
                 foreach (var clause in stage.Plan.MatchClauses)
                 { input = StreamMatchClauseAsync(database, operation, clause, input, layout, budget, parameters, token); }
             }
             else if (stage.Stage is GqlReturnStage projection)
-            { input = StreamBoundaryAsync(stage.Plan, projection, input, layout, budget, operation, parameters, token); }
+            { input = StreamBoundaryAsync(stage.Plan, projection, input, layout, budget, operation, parameters, token, globals); }
             else if (stage.Stage is not GqlNextStage)
             { input = StreamStageAsync(stage, input, layout, budget, operation, parameters, token); }
+            if (globals is not null && stage is GraphCompositeStagePlan)
+            { input = RestoreCallImportsAsync(input, globals, layout, budget, token); }
         }
         if (plan.Stages[^1] is GraphCompositeStagePlan finalComposite)
         {
-            await foreach (var row in StreamCompositeInputRowsAsync(database, operation, finalComposite.Composite, input, token).ConfigureAwait(false))
+            await foreach (var row in StreamCompositeInputRowsAsync(database, operation, finalComposite.Composite, input, token, globals: globals).ConfigureAwait(false))
             { yield return row; }
             yield break;
         }
-        if (plan.Grouping is { } grouping) { input = StreamGroupsAsync(grouping, input, operation, parameters, token); }
+        if (plan.Grouping is { } grouping)
+        {
+            input = StreamGroupsAsync(grouping, input, operation, parameters, token);
+            if (globals is not null) { input = RestoreCallImportsAsync(input, globals, layout, budget, token); }
+        }
         var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
         bool ordered = plan.SortPage is { Keys.Count: > 0 };
         using var top = ordered ? new GraphTopRows(budget.Memory, plan.SortPage, token) : null;

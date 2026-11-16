@@ -169,7 +169,8 @@ internal sealed partial class SqlPlanExecutor
     // refusal to the statement's bounded release/retry policy; from its third refusal
     // it retains closure grants and queues with ordinary deadlock detection.
     private async ValueTask AcquireReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement,
-        CancellationToken cancellationToken, bool incoming = true, bool outgoing = true, bool cascade = false)
+        CancellationToken cancellationToken, bool incoming = true, bool outgoing = true, bool cascade = false,
+        IReadOnlyList<(int Ordinal, SqlBoundExpression Value)>? assignments = null)
     {
         var references = statement.References;
         incoming &= !references.IncomingLocks.Contains(table.ObjectId);
@@ -199,6 +200,9 @@ internal sealed partial class SqlPlanExecutor
             {
                 foreach (var reference in IncomingReferences(table, statement, cancellationToken))
                 {
+                    // A non-key UPDATE cannot release a parent key. Discover under
+                    // the same generation retry and own IX as the full FK path.
+                    if (!AssignsReferenceColumn(table, reference.Constraint, assignments)) { continue; }
                     adjacent.Add(reference.Child.ObjectId);
                 }
             }
@@ -243,9 +247,12 @@ internal sealed partial class SqlPlanExecutor
             {
                 foreach (var reference in IncomingReferences(table, statement, cancellationToken))
                 {
+                    if (!AssignsReferenceColumn(table, reference.Constraint, assignments)) { continue; }
                     EnsureCurrentDefinition(reference.Child);
                 }
-                references.IncomingLocks.Add(table.ObjectId);
+                // Filtered UPDATE grants do not claim the full coverage a later
+                // referential-action retry may need after a generation change.
+                if (assignments is null) { references.IncomingLocks.Add(table.ObjectId); }
                 statement.Metrics.ReferenceIntentLockBatches++;
             }
             if (outgoing)
@@ -255,6 +262,18 @@ internal sealed partial class SqlPlanExecutor
             }
             return;
         }
+    }
+
+    private static bool AssignsReferenceColumn(SqlCatalogTable table, SqlCatalogConstraint constraint,
+        IReadOnlyList<(int Ordinal, SqlBoundExpression Value)>? assignments)
+    {
+        if (assignments is null) { return true; }
+        for (int i = 0; i < assignments.Count; i++)
+        {
+            if (constraint.ReferencedColumns!.Contains(table.Columns[assignments[i].Ordinal].Name,
+                StringComparer.OrdinalIgnoreCase)) { return true; }
+        }
+        return false;
     }
 
     /// <summary>

@@ -139,6 +139,11 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             Directory.CreateDirectory(root);
         }
 
+        var tempDirectory = options.TempDirectory ?? (options.RootPath is { IsEmpty: false } tempRoot
+            ? (FileSystemPath?)Path.Combine(tempRoot, ".cohesion-temp") : null);
+        if (tempDirectory is { } directory)
+        { TempSpace = StorageTempSpace.Create(directory, options.TempSpaceQuota, TempFreeSpaceFloor); }
+
         // Attach the built-in workers last, after every field they observe is initialized: the
         // base starts each one's pump on a dedicated background thread as it attaches it, alive
         // until disposal. Embedded and hosted consumers get identical durability behavior because
@@ -192,6 +197,34 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// Gets the engine options, for the engine's background workers.
     /// </summary>
     internal SqlDatabaseEngineOptions EngineOptions => _options;
+
+    /// <summary>Gets this engine's disposable query space, or null for an in-memory engine without
+    /// an explicit directory.</summary>
+    internal StorageTempSpace? TempSpace { get; }
+
+    internal long StatementTempSpaceQuota => _options.StatementTempSpaceQuota ??
+        (_options.StatementMemoryBudget > long.MaxValue / 4 ? long.MaxValue : _options.StatementMemoryBudget * 4);
+
+    private long TempFreeSpaceFloor()
+    {
+        if (_strategy is InMemorySqlStorageStrategy) { return 1024 * 1024; }
+        // Lock-free snapshot: the temp-space monitor must never enter the engine registry or a
+        // storage latch. Conservatively reserve both file sets' journal caps, dirty pools, one
+        // reclamation bracket and JointEngineReserve's 25% (at least 1 MiB) headroom. Count at
+        // least one database, including before the first database publishes.
+        try
+        {
+            checked
+            {
+                long databases = Math.Max(1, GetInstanceSnapshot().Length);
+                long perDatabase = _options.BufferPoolCapacity + CatalogBufferPoolPages * (long)Page.Size +
+                    2 * (JournalSizeLimit + SqlSchemaProvisioner.JointBracketBytes(SqlTableReclamation.BatchSize, 0));
+                long components = 1024 * 1024 + databases * perDatabase;
+                return components + Math.Max(1024 * 1024, components / 4 + (components % 4 == 0 ? 0 : 1));
+            }
+        }
+        catch (OverflowException) { return long.MaxValue; }
+    }
 
     /// <summary>
     /// Gets the journal size limit the checkpointer applies, resolved from
@@ -301,6 +334,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <see cref="SqlDatabaseEngineOptions.WorkerFailureWindow"/> is not positive or is longer than
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>;
     /// <see cref="SqlDatabaseEngineOptions.WorkerFailureMinimumPasses"/> is less than one; or
+    /// <see cref="SqlDatabaseEngineOptions.TempSpaceQuota"/> or <see cref="SqlDatabaseEngineOptions.StatementTempSpaceQuota"/> is negative;
+    /// <see cref="SqlDatabaseEngineOptions.RootPath"/> is default or <see cref="SqlDatabaseEngineOptions.TempDirectory"/> is empty/default,
+    /// outside the root, below a first segment a database could take, or contains a link below the root; or
     /// <see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
     /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
@@ -370,6 +406,37 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         {
             throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.StatementMemoryBudget),
                 options.StatementMemoryBudget, ErrorMessages.OptionPositiveRequirement);
+        }
+
+        if (options.TempSpaceQuota is { } tempQuota) { DatabaseEngineOptionChecks.ThrowIfNegative(tempQuota, engine, nameof(options.TempSpaceQuota)); }
+        if (options.StatementTempSpaceQuota is { } statementQuota) { DatabaseEngineOptionChecks.ThrowIfNegative(statementQuota, engine, nameof(options.StatementTempSpaceQuota)); }
+        if (options.RootPath is { } configuredRoot && configuredRoot == default)
+        { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.RootPath), configuredRoot, ErrorMessages.TempRootInvalid); }
+        if (options.TempDirectory is { } directory)
+        {
+            if (directory == default || directory.IsEmpty)
+            { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
+            if (options.RootPath is { IsEmpty: false } tempRoot)
+            {
+                try
+                {
+                    string relative = Path.GetRelativePath(Path.GetFullPath(tempRoot), Path.GetFullPath(directory));
+                    if (Path.IsPathRooted(relative) || relative == "." || relative == ".." ||
+                        relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                    { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
+                    string[] segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (DatabaseFileNames.IsStorageName(segments[0].ToLowerInvariant()))
+                    { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
+                    string component = Path.GetFullPath(tempRoot);
+                    foreach (string segment in segments)
+                    {
+                        component = Path.Combine(component, segment);
+                        if (new DirectoryInfo(component).LinkTarget is not null)
+                        { throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.TempDirectory), directory, ErrorMessages.TempDirectoryInvalid); }
+                    }
+                }
+                catch (PathTooLongException) { } // Optional setup warns through StorageTempSpace; databases remain available.
+            }
         }
 
         if (options.ExpressionNestingLimit is < SqlQueryParserOptions.MinimumExpressionNestingLimit
@@ -1163,6 +1230,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         _commitPendingSignal.Dispose();
         _checkpointNeededSignal.Dispose();
         _undoDeferredSignal.Dispose();
+
+        try { TempSpace?.Dispose(); }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        { (failures ??= []).Add(failure); }
 
         // An in-memory engine's files go with it: nothing opens them again (#1272).
         (_strategy as InMemorySqlStorageStrategy)?.Release();
