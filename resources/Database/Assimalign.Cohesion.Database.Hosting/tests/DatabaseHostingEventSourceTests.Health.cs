@@ -23,6 +23,53 @@ public sealed partial class DatabaseHostingEventSourceTests
 {
     private static readonly string[] _healthPayload = ["hostId", "engineName", "database", "reason", "cause", "operation", "objectName", "position", "stepCount", "rowsProcessed", "totalRows", "failureCode", "detail"];
 
+    [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Method, Name = "set_BeforeProvisioning")]
+    private static extern void SetFailedOpenHook(SqlDatabaseEngine engine, Action<SqlDatabase>? action);
+
+    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Failed-open observation writes the existing transition events once (#1790)")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Health_FailedOpenThenCleared_ShouldReportExistingTransitions(int clearing)
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.CreateBuilder("failed-open-trace").Build();
+        await (await engine.CreateDatabaseAsync("stored", guard.Token)).DisposeAsync();
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = false });
+        builder.AddEngine(engine);
+        await using var application = builder.Build(guard.Token);
+        SetFailedOpenHook(engine, _ => throw new IOException("SECRET-sentinel"));
+        await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync("stored", guard.Token));
+        using var recorder = new HostingEventRecorder(EventLevel.Informational);
+
+        // Act
+        await application.Context.CheckAsync(guard.Token);
+        await application.Context.CheckAsync(guard.Token);
+        SetFailedOpenHook(engine, null);
+        if (clearing == 0) { await engine.OpenDatabaseAsync("stored", guard.Token); }
+        if (clearing == 1) { await engine.DropDatabaseAsync("stored", guard.Token); }
+        if (clearing == 2)
+        {
+            SetFailedOpenHook(engine, _ => throw new DatabaseNotFoundException("stored"));
+            await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("stored", guard.Token));
+        }
+        if (clearing == 3) { await engine.DisposeAsync(); }
+        await application.Context.CheckAsync(guard.Token);
+        await application.Context.CheckAsync(guard.Token);
+
+        // Assert
+        var degraded = Event(recorder, 16, "HealthDegraded", _healthPayload);
+        var restored = Event(recorder, 17, "HealthRestored", _healthPayload);
+        degraded.Payload![1].ShouldBe(engine.Name);
+        degraded.Payload[2].ShouldBe("stored");
+        degraded.Payload[3].ShouldBe("Open failed");
+        restored.Payload!.Skip(1).ShouldBe(degraded.Payload.Skip(1));
+        recorder.Events.ShouldNotContain(value => value.EventId == 0);
+        recorder.Events.SelectMany(value => value.Payload ?? []).OfType<string>().Any(text => text.Contains("SECRET", StringComparison.Ordinal)).ShouldBeFalse();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Health tracing: real provisioning transitions survive concurrent polls")]
     [InlineData(false)]
     [InlineData(true)]

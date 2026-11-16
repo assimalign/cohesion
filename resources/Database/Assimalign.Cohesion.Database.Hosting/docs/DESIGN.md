@@ -101,24 +101,29 @@ DatabaseApplicationContext.GetHealthAsync returns immutable DatabaseHealthObserv
 same evaluation core as HTTP health. Every model reads DatabaseEngine.OpenDatabases: health
 never opens, reopens or waits for a database, and takes no engine lock. It excludes closing
 instances, keeps offline open instances, and reads pending reopens after each engine's snapshot.
-A stored database this process has not opened is absent in every model; a leftover directory
-therefore cannot fail readiness. A reopen outside the reopen service is absent during recovery
-and, if recovery fails, stays absent until opened again. With ReopenOfflineDatabases=false,
-check the manual reopen's own result: health keeps no record of that failed open.
+A stored database never attempted by this process is absent in every model. FailedOpens retains
+a failed stored open, including manual reopen with ReopenOfflineDatabases=false, as Unhealthy.
+Each record supplies reason, failureCode when present, reopenFault (exception type only), failedAt
+(invariant UTC round-trip string) and reopenAttempts (consecutive failures). Exception messages
+never enter health detail. Successful open/create/drop, absence or disposal clears the record.
+Open instances outrank pending reopens, which outrank failed-open records: one component per name.
+An offline instance keeps its cause and merges pending reopen attempts and fault; an online
+instance stays Healthy despite a stale pending entry.
 GetDatabasesAsync retains each model's enumeration semantics,
 including opening stored Documents, Graph and Blob databases through recovery.
 
 HealthComponentNames builds live membership synchronously from the registry frozen at Build,
-each engine's OpenDatabases and its pending reopens. Discovery evaluates no health, awaits no
+each engine's OpenDatabases, its pending reopens and FailedOpens. Discovery evaluates no health, awaits no
 work, blocks on no database lifecycle operation and tolerates a custom inventory failure by
 keeping that engine's name. Managed Build therefore runs no health pass, emits no health
 transition event, and needs no discovery cancellation token.
 Pending reopens are published as immutable snapshots when membership or reported detail changes,
-so discovery and health never acquire the reopen service's scheduling monitor.
+so discovery and health never acquire the reopen service's scheduling monitor. FailedOpens likewise
+publishes immutable snapshots on change; health and discovery take no engine completion gate.
 Engines follow registration order; within each engine, databases follow ordinal ignore-case
 component-name order in both discovery and complete observations; database.accepting is last.
 Consumers re-read membership to follow opens and drops. A retained database component that is
-no longer open or pending answers Unhealthy, "not open".
+no longer open, pending or recorded answers Unhealthy, "not open".
 
 The public names are `engine/<escaped engine>`,
 `database/<escaped engine>/<escaped lowercase database>`, and `database.accepting`.
@@ -127,8 +132,8 @@ rejects invalid UTF-16. Only ASCII database letters are lower-cased, matching th
 fold on the built-in models' ASCII names while preserving custom names such as K and the Kelvin
 sign as distinct components. Open snapshots, offline entries and pending reopens use this same
 component spelling. Single-component lookup compares the complete component name ordinally.
-Engine observations retain engine-scoped state, workers and counts, excluding provisioning.*
-and offline.* database detail. Running is Healthy, Faulted is Degraded, and Disposed or unknown
+Engine observations retain engine-scoped state, workers and counts, excluding provisioning.*,
+offline.* and failedOpen.* database detail. Running is Healthy, Faulted is Degraded, and Disposed or unknown
 is Unhealthy. Database status preserves Offline over journal admission pause over provisioning
 over Healthy. Pending reopens remain Unhealthy with cause, attempts and last exception type.
 Held schemas are Degraded with failureCode, hashes and refused steps. Diagnostic values are
@@ -308,7 +313,20 @@ The application permits one start lifecycle. Repeated Start while started is a h
 
 Health observes distinct engines, states and workers from the frozen runtime registry.
 
-Health also reports offline databases (#1243). A database whose journal or data fsync failed, whose journal's append buffer failed to drain (#1252), whose header slot write failed (#1268), or whose engine gave up on it after a background worker kept failing on it or its journal passed the engine's cap (owner decision 25) refuses every request until it is reopened, while its engine stays `Running`, so the engine state alone left health `Healthy`. The contribution reads each engine's `OfflineDatabases`, adds the databases the reopen service is still reopening (below), records `engine.N.offlineDatabaseCount`, `engine.N.offlineDatabases`, the total `offlineDatabaseCount` and `reopenOfflineDatabases`, and for each offline database `engine.N.offline.M.name`, its `cause` (the `StorageOfflineCause` name, read through `DatabaseEngine.GetOfflineError`) and, once a reopen failed, `reopenAttempts` and `reopenFault` (the exception type). It is `Unhealthy` while any database is offline, naming each as `engine/database (cause; n failed reopen attempt(s), last ExceptionType)`, and turns healthy again once every one is open. Like the worker faults, the output carries exception types only, never messages, because the endpoint is unauthenticated. Without the reopen service it turns healthy once the database is reopened (`OpenDatabaseAsync`, in process) or the process restarts and opens it again; a manual reopen that fails recovery leaves no health entry until another open, so its caller must check the reopen result; an orchestrator that restarts an unhealthy process recovers it the way PostgreSQL's postmaster does after a `PANIC` (`restart_after_crash`, on by default, `src/backend/postmaster/postmaster.c:248`; the "reinitializing" restart at `3245-3252`). Hosting has no remote reopen command (an open owner decision, recorded with the #1243 review).
+Health also reports offline databases (#1243). Failed fsync, journal drain, header slot write,
+worker give-up or journal-cap enforcement refuses requests until reopen while the engine stays
+Running. Health merges an offline instance's cause with its pending reopen's attempts and fault
+into one component. An online instance outranks a stale pending reopen. Aggregate keys
+engine.N.offlineDatabaseCount, engine.N.offlineDatabases and offlineDatabaseCount count only
+offline databases, including pending reopens; engine.N.offline.M carries name, cause and, after a
+failed reopen, reopenAttempts and reopenFault (exception type only). Failed-open records have
+separate engine.N.failedOpenDatabases and engine.N.failedOpenDatabaseCount keys and a total
+failedOpenDatabaseCount, emitted when records exist. Their engine.N.failedOpen.M detail and
+component description say the open failed; the aggregate says each needs repair and an explicit
+open (OpenDatabaseAsync). The reopen service discovers offline instances and does not retry these
+records. A failed manual reopen, including with ReopenOfflineDatabases=false, retains its record
+until successful open/create/drop, absence or disposal clears it. Exception messages never enter
+health. Hosting has no remote reopen command (the #1243 owner decision remains open).
 
 Held SQL declarations (#1779) remain online with Degraded health. Provisioning.Detail carries
 both schema hashes and every refused step; health includes it in the description and the
@@ -326,7 +344,7 @@ observer starts fresh and does not invent a restoration event for an earlier pro
 
 ## Reopening offline databases (owner decision 22 of 2026-10-06)
 
-A running application reopens a database its engine reports offline by itself, with exponential backoff and jitter, until the reopen succeeds or the application stops. It is the module's own lifecycle service, `Internal/DatabaseReopenService`, registered at Build after the other services and before the servers (so it starts before them and stops after they drained), and owned by the application. `DatabaseApplicationOptions` configures it: `ReopenOfflineDatabases` (on by default; off leaves every offline database to the operator and composes no service; a manual reopen that fails recovery then disappears from health until opened again, so check its own result), `ReopenInitialDelay` (one second, the engines' worker failure backoff) and `ReopenMaximumDelay` (one minute), validated at Build (the initial delay positive, the maximum at least the initial delay and at most `DatabaseApplicationOptions.MaximumReopenDelay`, the longest a timer waits) and copied with the other host settings.
+A running application reopens a database its engine reports offline by itself, with exponential backoff and jitter, until the reopen succeeds or the application stops. It is the module's own lifecycle service, `Internal/DatabaseReopenService`, registered at Build after the other services and before the servers (so it starts before them and stops after they drained), and owned by the application. `DatabaseApplicationOptions` configures it: `ReopenOfflineDatabases` (on by default; off leaves every offline database to the operator and composes no service; a failed manual reopen retains its Unhealthy failed-open record until successful open/create/drop, absence or disposal clears it), `ReopenInitialDelay` (one second, the engines' worker failure backoff) and `ReopenMaximumDelay` (one minute), validated at Build (the initial delay positive, the maximum at least the initial delay and at most `DatabaseApplicationOptions.MaximumReopenDelay`, the longest a timer waits) and copied with the other host settings.
 
 - **It reopens through the engine's own path.** The service polls each engine of the frozen registry (the server-fronted ones included) for `DatabaseEngine.OfflineDatabases`, at most once a second, or once per initial delay when that is shorter. A database it finds is reopened through `DatabaseEngine.OpenDatabaseAsync`: the engine closes the offline instance, which writes nothing, and opens the database again from its files, so the open's recovery decides every commit that was not confirmed (#1243), the decision-33 path a caller of `OpenDatabaseAsync` takes. The reopen returns the engine's new instance to the engine's registry; servers resolve databases by name, so their next session gets it.
 - **Backoff and jitter.** The first attempt waits a random time between half the initial delay and the initial delay; after the n-th failed attempt the next waits between half and all of `min(maximum, initial × 2^n)`. A reopen that keeps failing is tried less and less often, and two databases that failed together do not retry in lockstep. RavenDB's database landlord retries a database whose start failed after a randomized delay the same way (`src/Raven.Server/Documents/DatabasesLandlord.cs:1504-1510`), and lets the next access load a database whose load faulted (`:831-835`).
@@ -360,13 +378,13 @@ The module raises its own events through one internal event source, named for th
 | 11 | `ApplicationStopped` | Informational | `hostId`, `durationMilliseconds` |
 | 12 | `ApplicationDisposeFailed` | Error | `hostId`, `failureCount`, `exceptionType`, `exceptionMessage` (first collected failure) |
 | 15 | `AdminEndpointFailed` | Error | `endpoint` (scheme and authority only), `operation` (`Start`, `Stop`, `Dispose`), `exceptionType`, `exceptionMessage` |
-| 16 | `HealthDegraded` | Warning | `hostId`, `engineName`, `database`, `reason` (`Provisioning`/`Offline`), `cause` (offline cause or empty), `operation`, `objectName`, `position`, `stepCount`, `rowsProcessed`, `totalRows`, `failureCode`, `detail` (4,096 characters) |
+| 16 | `HealthDegraded` | Warning | `hostId`, `engineName`, `database`, `reason` (`Provisioning`/`Offline`/`Open failed`), `cause` (offline cause or empty), `operation`, `objectName`, `position`, `stepCount`, `rowsProcessed`, `totalRows`, `failureCode`, `detail` (4,096 characters) |
 | 17 | `HealthRestored` | Informational | same as 16; the condition and last observed progress that cleared |
 | 18 | `HealthEndpointAssignmentSkipped` | Informational | `assignment` (`http`), `endpoint` (scheme and authority only), `scheme` |
 | 19 | `HealthEndpointOverridden` | Informational | `explicitEndpoint`, `platformEndpoint` (scheme and authority only) |
 
-Health transition tracing (#1349) observes database health through the open-instance inventory and
-provisioning state, with no SQL dependency or new public seam. The first enabled observation
+Health transition tracing (#1349, #1790) observes database health through the open-instance inventory,
+failed-open records and provisioning state, with no SQL dependency or new public seam. The first enabled observation
 of an unhealthy condition writes 16. Later observations write only on a change of reason or
 offline cause or database instance, or write 17 when the database is observed healthy again.
 Pending-to-running,
@@ -376,8 +394,10 @@ Provisioning observation (CS03402). Independent storage-safety latches retain Of
 `ProvisioningFailure` denotes only an in-memory publication fault after the catalog commit.
 Joint row counts restart at each table and phase. Operation, object name and position retain the
 job's first operation throughout preparation and do not identify later table work. Reopen-service pending entries
-remain Offline through recovery. A dropped/closed database or disposed engine is forgotten,
-never reported as restored. Healthy first observations write nothing.
+remain Offline through recovery. A failed-open record writes 16 with reason "Open failed" and
+empty cause/progress fields, using the existing payload. Its clearing writes 17 on the next
+observation, including after drop, absence or disposal. Other dropped/closed databases or disposed
+engines are forgotten, never reported as restored. Healthy first observations write nothing.
 
 This is Hosting's observed transition stream: a condition that begins and ends between health
 observations cannot be reported without a new model subscription seam, which this change does

@@ -20,6 +20,64 @@ public sealed class JournalAdmissionPauseTests
 {
     private sealed record PendingRow(int Id);
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - Caller cancellation translated during pending-intent reopen is excluded from failed opens (#1790)")]
+    public async Task OpenDatabaseAsync_CancelledProvisioningAdmission_ShouldNotRecordTimeout()
+    {
+        // Arrange: resume an unpublished intent through the real open and discard path.
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var caller = new CancellationTokenSource();
+        var strategy = new TestObjects.CrashCaptureSqlStorageStrategy();
+        TestObjects.CrashCaptureSqlStorageStrategy crash;
+        await using (var seed = SqlDatabaseEngine.Create("seed-cancel", new() { StorageStrategy = strategy }))
+        {
+            var database = await seed.CreateDatabaseAsync("pending", guard.Token);
+            await using var session = await database.CreateSessionAsync(guard.Token);
+            await session.ExecuteAsync("BEGIN", cancellationToken: guard.Token);
+            await session.ExecuteAsync("ROLLBACK", cancellationToken: guard.Token);
+            var target = Schema.SqlSchema.Create("pending", schema =>
+                schema.Table<PendingRow>("future", table => table.Key(row => row.Id))).Compile();
+            await database.Catalog.SavePendingMigrationAsync(new Catalog.SqlCatalogPendingMigration(
+                target.Hash, target.CanonicalDocument, [new("Joint/AddTable", "future", "future", 1)], 1), guard.Token);
+            crash = strategy.CaptureDurableImages();
+        }
+        await using var engine = SqlDatabaseEngine.Create("reopen-cancel", new()
+        { StorageStrategy = crash, CheckpointJournalSize = 0, CheckpointInterval = TimeSpan.FromHours(1) });
+        TransactionCheckpointInterlock? admission = null;
+        engine.BeforeProvisioning = database =>
+        {
+            using (var bracket = database.CatalogStorage.BeginTransaction()) { bracket.Commit(); }
+            database.CatalogStorage.CheckpointJournalSize = 1;
+            admission = TransactionCheckpointInterlock.ForStorage(database.CatalogStorage);
+            admission.JournalSizeLimit = 2;
+            admission.ObserveAdmissionPause().ShouldBeTrue();
+        };
+        var source = EventSource.GetSources().Single(value => value.Name == "Assimalign.Cohesion.Database.Transactions");
+        using var recorder = new EventSourceRecorder(source, EventLevel.Verbose);
+        var opening = Task.Factory.StartNew(() => engine.OpenDatabaseAsync("pending", caller.Token).AsTask(),
+            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+        try
+        {
+            while (!recorder.Events.Any(value => value.EventId == 25 && Equals(value.Payload?[1], "SqlMigration")))
+            { await Task.Delay(1, guard.Token); }
+
+            // Act: migration admission wraps the caller's cancellation as SqlTimeoutException.
+            caller.Cancel();
+            var failure = await Should.ThrowAsync<SqlTimeoutException>(async () => await opening.WaitAsync(guard.Token));
+
+            // Assert
+            failure.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
+            engine.OpenDatabases.ShouldBeEmpty();
+            engine.FailedOpens.ShouldBeEmpty();
+        }
+        finally
+        {
+            caller.Cancel();
+            if (admission is not null) { admission.JournalSizeLimit = 0; }
+            engine.BeforeProvisioning = null;
+            try { await opening.WaitAsync(guard.Token); } catch (SqlTimeoutException) { }
+        }
+    }
+
     internal static async Task ReadRowsAsync(SqlDatabaseSession session, string sql, int expectedCount, CancellationToken token)
     {
         await using var result = (await session.ExecuteAsync(sql, cancellationToken: token)).ShouldBeAssignableTo<DatabaseResultSet>();

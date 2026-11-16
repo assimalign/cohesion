@@ -138,6 +138,8 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // drop and create again, since create refuses a name whose storage
         // exists; version 1 (no marker) also covers an interrupted creation...
         refusal.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
+        engine.FailedOpens.ShouldHaveSingleItem().FailureCode.ShouldBe("CS06041");
+        engine.FailedOpens[0].ExceptionType.ShouldBe(refusal.GetType().Name);
         refusal.Message.ShouldContain($"Database '{testDatabase}' uses data-storage format {version}");
         refusal.Message.ShouldContain("this engine supports only format 39");
         refusal.Message.ShouldContain("drop the database (DropDatabaseAsync) and create it again");
