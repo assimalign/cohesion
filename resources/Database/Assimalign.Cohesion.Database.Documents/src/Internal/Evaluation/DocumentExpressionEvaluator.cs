@@ -45,8 +45,7 @@ internal sealed partial class DocumentExpressionEvaluator
     /// <param name="resultClause">The result clause named by constructor-depth diagnostics.</param>
     /// <param name="operation">The executing statement that owns retained-value accounting, or null during planning.</param>
     /// <param name="nested">The nested statement context, or null on the ordinary evaluator path.</param>
-    /// <param name="sourceName">The local source binding name used when exporting a correlated scope.</param>
-    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null, DocumentFunctionCatalog? functions = null, DatabaseName databaseName = default, string resultClause = "SELECT", DocumentOperation? operation = null, DocumentNestedExecutionContext? nested = null, string? sourceName = null)
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null, DocumentFunctionCatalog? functions = null, DatabaseName databaseName = default, string resultClause = "SELECT", DocumentOperation? operation = null, DocumentNestedExecutionContext? nested = null)
     {
         _functions = functions ?? DocumentFunctionCatalog.Standard;
         _databaseName = databaseName;
@@ -54,7 +53,7 @@ internal sealed partial class DocumentExpressionEvaluator
         _starSourceName = starSourceName;
         _writeVerb = writeVerb;
         _resultClause = resultClause;
-        _state = nested is not null ? new NestedEvaluationState(operation, nested.Bindings, sourceName ?? alias) :
+        _state = nested is not null ? new NestedEvaluationState(operation, nested.Bindings) :
             operation is null ? null : new EvaluationState(operation);
         _transactionStart = transactionStart;
         _cancellationToken = cancellationToken;
@@ -308,7 +307,7 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private object? ReadPath(OqlPathExpression path, DocumentEvaluationContext document)
     {
-        int start = path.Segments.Count > 0 && (_alias ?? (_state as NestedEvaluationState)?.SourceName) is string alias &&
+        int start = path.Segments.Count > 0 && _alias is string alias &&
             string.Equals(path.Segments[0].Name, alias, StringComparison.Ordinal) ? 1 : 0;
         var current = document.Content;
         DocumentVariableBinding? found = null;
@@ -350,11 +349,10 @@ internal sealed partial class DocumentExpressionEvaluator
     private object? ReadMetadata(OqlMetaExpression expression, DocumentEvaluationContext document)
     {
         var source = document;
-        // With no nested scope or alias, planning has already checked the implicit
-        // collection receiver. There is no outer binding to resolve on this path.
+        // Planning validates local receivers against the same resolved source name.
+        // Only a different receiver needs a joined or captured identity lookup.
         if (expression.Arguments.Count == 1 && expression.Arguments[0] is OqlPathExpression { Segments.Count: 1 } path &&
-            path.Segments[0].Name is string name && name != (_alias ?? (_state as NestedEvaluationState)?.SourceName) &&
-            (_alias is not null || _state is NestedEvaluationState))
+            path.Segments[0].Name is string name && name != _alias)
         {
             DocumentVariableBinding? found = null;
             for (var frame = document.Bindings; frame is not null; frame = frame.Parent)

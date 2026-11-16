@@ -1,0 +1,50 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+using Xunit.Abstractions;
+
+using Assimalign.Cohesion.Database.Tests;
+
+namespace Assimalign.Cohesion.Database.Documents.Tests;
+
+[Collection(nameof(DocumentWorkerResilienceTests))]
+public sealed class CheckpointBracketLoadTests
+{
+    private readonly ITestOutputHelper _output;
+    public CheckpointBracketLoadTests(ITestOutputHelper output) { _output = output; }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Checkpoint: four continuous writers on three Windows cores (#1283)")]
+    public async Task Checkpoint_FourContinuousWriters_ShouldRecordBoundedProgress()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("bracket-load", new()
+        {
+            CheckpointJournalSize = CheckpointLoad.JournalSize,
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = await engine.CreateDatabaseAsync("load-" + Guid.NewGuid().ToString("N"), CancellationToken.None);
+        await using var setup = await database.CreateSessionAsync();
+        await setup.CreateCollectionAsync("items");
+        var sessions = new DocumentDatabaseSession[4];
+        try
+        {
+            for (int i = 0; i < sessions.Length; i++) { sessions[i] = await database.CreateSessionAsync(); }
+            // Act / Assert: the shared harness records progress, bytes and checkpoint outcomes.
+            await CheckpointLoad.RunAsync(database.DataStorage, database.Coordinator.Checkpoint, async (writer, next, token) =>
+            {
+                var session = sessions[writer];
+                var items = await session.GetCollectionAsync("items", token);
+                await items.PutAsync(session, $"{writer}-{next}", System.Text.Encoding.UTF8.GetBytes("{\"value\":\"payload\"}"), cancellationToken: token);
+            }, _output.WriteLine);
+        }
+        finally
+        {
+            foreach (var session in sessions) { if (session is not null) { await session.DisposeAsync(); } }
+        }
+    }
+}

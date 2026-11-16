@@ -64,7 +64,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     private readonly SqlStorage _catalogStorage;
     private readonly SqlCatalog _catalog;
     private readonly TransactionCoordinator _coordinator;
-    private readonly BTreeIndexManager _indexManager;
+    private readonly SqlIndexManager _indexManager;
     private readonly SqlSchemaProvisioner _schemaProvisioner;
 
     // Internal diagnostics/fault-injection seam for this project's own tests.
@@ -215,14 +215,15 @@ public sealed partial class SqlDatabase : DatabaseInstance
         // them by the time the manager attaches.
         try
         {
-            _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+            _indexManager = SqlIndexManager.Create(new BTreeIndexManagerOptions
             {
                 Storage = storage,
                 TransactionSource = ResolveStatementBracket,
                 PruneBound = () => _coordinator.PruneBound,
                 LockManager = _coordinator.LockManager,
                 ExistingIndexes = _catalog.GetIndexRegistrations(),
-            });
+            }, _catalog.Tables.Select(table => table.ObjectId).Concat(_catalog.Sequences.Select(sequence => sequence.ObjectId))
+                .Concat(_catalog.GetPendingTableReclamations()).ToHashSet(), _catalog.NextReservedIdentity);
         }
         catch (IndexFormatException exception)
         {
@@ -235,6 +236,14 @@ public sealed partial class SqlDatabase : DatabaseInstance
             throw new SqlDataStorageFormatException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseFailure, name, _catalog.RecordSpaceFormatVersion, exception.Message), exception);
         }
+        catch
+        {
+            // Physical-owner validation and root reads can fail before attachment
+            // completes too; no recovery context may outlive the refused open.
+            _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw;
+        }
+        _catalog.IndexPageOwner = _indexManager.PageOwner;
         TableReclamation = new SqlTableReclamation(this);
         _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
         engine.BeforeProvisioning?.Invoke(this);
@@ -270,17 +279,25 @@ public sealed partial class SqlDatabase : DatabaseInstance
         }
     }
 
+    internal static void EnsureIndexFormats(string name, SqlStorage storage, SqlCatalog catalog)
+    {
+        try { BTreeIndexManager.EnsureFormat(storage, catalog.GetIndexRegistrations()); }
+        catch (IndexFormatException exception)
+        {
+            throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.SqlDatabaseFailure, name, catalog.RecordSpaceFormatVersion, exception.Message), exception);
+        }
+    }
+
     /// <summary>
     /// Refuses an existing database on any data-storage format but this engine's
     /// own. The engine has no upgrade path (owner decision of 2026-10-01; upgrades
     /// are #1152): an older database must be dropped and recreated, and a newer one
     /// belongs to the engine that wrote it. The engine calls this on the catalog
     /// alone, before it opens the data file set, so a refused open never touches
-    /// the data files. The catalog file set gets only what opening any storage
-    /// does: a cleanly closed one is left byte-identical, and a crashed one gets
-    /// the storage layer's format-agnostic physical recovery and keeps its journal
-    /// (an untouched storage closes without writing), so the engine that wrote the
-    /// database can still open it.
+    /// the data files. When replay is needed, the catalog reads Storage's recovered read-only view (#1744),
+    /// leaving every original file byte-identical for clean and crashed databases,
+    /// so the engine that wrote the database can still recover and open it.
     /// </summary>
     /// <param name="name">The database name, for the message.</param>
     /// <param name="version">The format version recorded in the database's catalog.</param>
@@ -378,7 +395,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// Gets the database's index manager (the live B+Tree directory over the data
     /// file set), for the executor, the engine's background workers, and tests.
     /// </summary>
-    internal BTreeIndexManager IndexManager => _indexManager;
+    internal SqlIndexManager IndexManager => _indexManager;
 
     /// <summary>
     /// Gets the database's bound table versions — every persisted CHECK and DEFAULT, parsed

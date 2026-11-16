@@ -18,8 +18,9 @@ exact spellings, fault recovery and named savepoint scope semantics.
 SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
 Int64 values and CD00007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
 or a preceding dot keeps them usable, and AS labels still accept them.
-Key-only INNER/LEFT JOIN and NEST use right-hand META(alias).id equality and require explicit
-aliases on every source. They compose with subqueries, grouping, paging and synthetic/qualified
+Key-only INNER/LEFT JOIN and NEST use right-hand META(alias).id equality with explicit or implicit
+aliases. Unaliased collections bind their names everywhere; system sources bind their last segment
+as written. They compose with subqueries, grouping, paging and synthetic/qualified
 stars. Bindings retains the ordered OqlUnnestExpression/OqlJoinExpression AST family; DIALECT
 records the lookup-NEST unknown-key table and deferred general predicates.
 Chainable INNER/LEFT UNNEST, ANY/SOME/EVERY ... SATISFIES ... END and array-value IN execute.

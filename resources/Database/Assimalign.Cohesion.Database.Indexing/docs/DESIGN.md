@@ -562,19 +562,17 @@ upgrades are #1152). How each model surfaces the refusal:
 
 | Model | Where its open checks | Error |
 |---|---|---|
-| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 34, #1447; format 32 introduced directed keys, #1631), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 34"; a marker that does not describe its trees, the attach check's `CK06101` |
+| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 35, #1777; format 32 introduced directed keys, #1631), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 35"; a marker that does not describe its trees, the attach check's `CK06101` |
 | Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. CK06101: …" |
 | Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. CK06101: …" |
 | Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |
 
-Every refusal comes before the model's own recovery — its scrub, index purge and
-checkpoint — writes anything. A cleanly closed database is therefore left
-byte-identical. A crashed one has already had the storage layer's physical redo
-and undo when an attach check refuses it (the storage open replays its journal
-before any model code runs; SQL's marker gate alone runs before the data files
-open), but that replay is format-agnostic, and the journal is kept because the
-open-time checkpoint is deferred, so the engine that wrote the database still
-recovers it. Each model's test pins the clean case.
+Every engine runs its format checks against Storage's shared recovered read-only view (#1744).
+The view uses the same commit selection, page-image decoder and LSN-chain checks as physical
+recovery. Catalog and data sets, metadata, registrations and roots pass before writable handles
+open. Refusal preserves every original file, including an unclean journal; acceptance discards
+the probe and runs normal recovery. Torn current-format pages are reconstructed before checking
+the tree format. Each engine has process-exit refusal and current-format recovery tests.
 
 **The fence against older engines is the model markers.** An engine before #1194
 reads neither the page stamp nor the format-2 layout, so it can be stopped only by

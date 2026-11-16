@@ -130,7 +130,7 @@ internal sealed partial class SqlPlanExecutor
                     if (marker is not null)
                     {
                         await statement.Coordinator.RollbackAsync(marker, CancellationToken.None).ConfigureAwait(false);
-                        if (published) { _catalog.ReleaseTruncatePublication(previous); }
+                        if (published) { _catalog.ReleaseTruncatePublication(previous, marker.Sequence); }
                     }
                 }
                 finally { _catalog.TruncateSnapshotGate.Release(); }
@@ -314,8 +314,8 @@ internal sealed partial class SqlPlanExecutor
             try { statement.Coordinator.Checkpoint(token); break; }
             catch (StorageTransactionException busy) when (busy.Code != StorageTransactionErrorCode.ForeignStorage)
             {
-                // Reclamation uses bounded storage brackets outside the apply gate.
-                // Like the engine checkpoint worker, retry busy; never skip the bound.
+                // Reclamation waits at the apply gate. Only ungated brackets (open-time
+                // scrubs, dispose-time adoption or raw tests) can refuse this checkpoint.
                 RewriteStage?.Invoke("CheckpointBusy", length);
                 await Task.Delay(1, token).ConfigureAwait(false);
             }

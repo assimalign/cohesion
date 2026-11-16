@@ -184,7 +184,7 @@ public sealed partial class SqlJointTypeMigrationTests
             await using var seed = await Builder(storage).BuildAsync(guard.Token);
             var db = await seed.OpenDatabaseAsync("typed", guard.Token);
             await db.Catalog.SavePendingMigrationAsync(new(target.Hash, target.CanonicalDocument,
-                [new("Joint/AlterColumn", "items", "Value", 1)], 1), guard.Token);
+                [new("Joint/AlterColumn", "items", "Value", 1), new("Joint/RewriteOwner", "items", "items", 2)], 2), guard.Token);
             storage = storage.CaptureDurableImages();
         }
         storage.MigrationAvailableBytes = need - (below ? 1 : 0);

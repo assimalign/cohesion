@@ -131,7 +131,7 @@ internal sealed class DatabaseMemoryFiles
     /// <returns>False when the database has no such file set; nothing was opened.</returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> breaks the database-name rule.</exception>
     /// <exception cref="InvalidOperationException">The file set's last storage has not closed.</exception>
-    internal bool TryOpen(string name, string fileSet, out StorageStream data, out StorageStream journal, out StorageStream backup)
+    internal bool TryOpen(string name, string fileSet, out StorageStream data, out StorageStream journal, out StorageStream backup, bool readOnly = false)
     {
         var key = Key(name, fileSet);
         Files? closed;
@@ -144,6 +144,11 @@ internal sealed class DatabaseMemoryFiles
             }
 
             ThrowIfOpen(key, closed);
+            if (readOnly)
+            {
+                data = ReadOnly(closed.Data); journal = ReadOnly(closed.Journal); backup = ReadOnly(closed.Backup);
+                return true;
+            }
         }
 
         // Copied outside the lock, so the copy of a large database never blocks a lookup or a
@@ -234,6 +239,12 @@ internal sealed class DatabaseMemoryFiles
             throw new InvalidOperationException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.DatabaseMemoryFilesThrowIfOpenFailure, Describe(key)));
         }
+    }
+
+    internal static StorageStream ReadOnly(MemoryStream source, long? length = null)
+    {
+        if (!source.TryGetBuffer(out var bytes)) { bytes = source.ToArray(); }
+        return new StorageStream(new MemoryStream(bytes.Array!, bytes.Offset, checked((int)(length ?? bytes.Count)), writable: false));
     }
 
     // A closed stream's bytes in a new, growable stream positioned at its start. A closed

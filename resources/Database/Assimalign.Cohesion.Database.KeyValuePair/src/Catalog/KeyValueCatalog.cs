@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 
 /// <summary>
@@ -49,6 +51,9 @@ public sealed class KeyValueCatalog
     private const int entrySpaceFormatKind = 2;
 
     private readonly KeyValueStorage _storage;
+    // Catalog monitor -> its storage's independent checkpoint interlock -> storage/page
+    // latches. Checkpoints take no catalog monitor or data apply gate; no model-lock wait
+    // or callback into data storage is permitted inside the catalog interlock.
     private readonly object _sync = new();
     private int _entrySpaceFormatVersion = 1;
     private (PageId PageId, int SlotIndex)? _registrationsLocation;
@@ -127,7 +132,8 @@ public sealed class KeyValueCatalog
             writer.AppendInt32(entrySpaceFormatKind).AppendInt32(version);
             byte[] record = writer.ToArray();
 
-            using (var transaction = _storage.BeginTransaction())
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("KeyValuePairCatalog", cancellationToken: cancellationToken);
+            using (var transaction = _storage.BeginTransaction("KeyValuePairCatalog"))
             {
                 _formatLocation = UpsertRecord(transaction, _formatLocation, record);
                 transaction.Commit();
@@ -156,7 +162,8 @@ public sealed class KeyValueCatalog
         {
             byte[] record = EncodeRegistrations(registrations);
 
-            using (var transaction = _storage.BeginTransaction())
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("KeyValuePairCatalog", cancellationToken: cancellationToken);
+            using (var transaction = _storage.BeginTransaction("KeyValuePairCatalog"))
             {
                 _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, record);
                 transaction.Commit();

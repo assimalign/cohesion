@@ -42,14 +42,14 @@ internal sealed partial class DocumentPlanner
             meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } path && path.Segments[0].Name == alias;
 
     private static bool EquivalentMetadataSource(OqlMetaExpression left, OqlMetaExpression right, OqlSelectExpression query,
-        IReadOnlySet<string>? variables, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth, bool captured)
+        IReadOnlySet<string>? variables, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth)
     {
-        bool Local(OqlMetaExpression meta, DocumentBindingScope? scope) => IsLocalMetadata(meta, query.Alias ?? query.Collection) &&
-            (meta.Arguments.Count == 0 || DocumentBindingScope.Resolve(scope, query.Alias ?? query.Collection, out _) is null);
+        bool Local(OqlMetaExpression meta, DocumentBindingScope? scope) => IsLocalMetadata(meta, DocumentSourceName.Of(query)) &&
+            (meta.Arguments.Count == 0 || DocumentBindingScope.Resolve(scope, DocumentSourceName.Of(query), out _) is null);
         if (Local(left, leftScope) && Local(right, rightScope)) { return true; }
         return left.Arguments.Count == 1 && right.Arguments.Count == 1 &&
             left.Arguments[0] is OqlPathExpression a && right.Arguments[0] is OqlPathExpression b &&
-            EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth, captured);
+            EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth);
     }
 
     private static bool EquivalentNestedBindings(OqlSelectExpression query, DocumentBindingScope? left,
@@ -72,7 +72,7 @@ internal sealed partial class DocumentPlanner
             // introduced so far. Local declarations mask the enclosing scopes being
             // compared, including in transitive captures and nested ORDER BY.
             if (select.Source is not null ? !Same(select.Source, local) : !SameName(select.Collection, local)) { return false; }
-            var source = new DocumentBindingScope(select.Alias ?? select.Collection, local);
+            var source = new DocumentBindingScope(DocumentSourceName.Of(select), local);
             foreach (var binding in select.Bindings)
             {
                 if (!Same(binding.Expression, source)) { return false; }
@@ -121,19 +121,19 @@ internal sealed partial class DocumentPlanner
         VisitQuery(nested, bound);
 
         bool SourceName(string? name) => groupArrayInput ? name == query.GroupAs :
-            name == (query.Alias ?? query.Collection) || name is not null && variables?.Contains(name) == true;
+            name == DocumentSourceName.Of(query) || name is not null && variables?.Contains(name) == true;
 
         void VisitQuery(OqlSelectExpression select, DocumentBindingScope? local)
         {
             if (select.Source is not null) { Visit(select.Source, local); }
-            else if (select.Collection != query.Collection || query.Alias is not null)
+            else if (!DocumentSourceName.IsImplicitCollection(query, select.Collection))
             {
                 // Bare explicit aliases are expression sources, resolved before the
                 // inner row alias is introduced. An implicit keyspace stays a keyspace.
                 if (SourceName(select.Collection) && DocumentBindingScope.Resolve(local, select.Collection, out _) is null)
                 { Visit(new OqlPathExpression([new OqlPathSegment(select.Collection, null)], select.Location), local); }
             }
-            var source = new DocumentBindingScope(select.Alias ?? select.Collection, local);
+            var source = new DocumentBindingScope(DocumentSourceName.Of(select), local);
             foreach (var binding in select.Bindings)
             {
                 Visit(binding.Expression, source);
@@ -157,7 +157,7 @@ internal sealed partial class DocumentPlanner
             // Match complete keys before their components, while retaining every
             // inner binding's identity so shadowed names cannot prove a group key.
             if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes,
-                rightScope: expression is OqlSubqueryExpression ? nestedOrder ?? local : local, captured: true))) { return; }
+                rightScope: expression is OqlSubqueryExpression ? nestedOrder ?? local : local))) { return; }
             if (expression is OqlSubqueryExpression subquery) { VisitQuery(subquery.Query, nestedOrder ?? local); return; }
             if (expression is OqlMetaExpression meta)
             {

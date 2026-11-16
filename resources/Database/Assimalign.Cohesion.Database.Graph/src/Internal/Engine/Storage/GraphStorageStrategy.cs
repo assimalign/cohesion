@@ -37,7 +37,8 @@ internal abstract class GraphStorageStrategy
     /// <param name="databaseName">The logical database name.</param>
     /// <param name="durability">The requested commit policy, or null for the storage default.</param>
     /// <returns>The storage whose ownership transfers to the engine.</returns>
-    public abstract GraphStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability);
+    /// <param name="readOnly">True to open only read-only source streams for the recovered format preflight; false for normal recovery.</param>
+    public abstract GraphStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability, bool readOnly = false);
 
     /// <summary>Drops all storage assets for a logical database.</summary>
     /// <param name="databaseName">The logical database name.</param>

@@ -18,8 +18,8 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// <summary>
 /// Attribution probe and deterministic controls for #1283, not a journal-cap regression test.
 /// Set COHESION_DB_PROBES=1 to run the load probe, with detailed console logging.
-/// Peak includes checkpoint-start events and lengths after each commit/trigger; it is a lower
-/// bound on the instantaneous peak, not an estimate of bytes appended or of checkpoint counts.
+/// The final checkpoint collects the append-locked journal high-water mark; intermediate reads
+/// also include checkpoint-start events and lengths after each commit and size trigger.
 /// </summary>
 [Collection(nameof(BlobDatabaseEventSourceCollection))]
 public sealed class BlobCheckpointGrowthTests
@@ -121,10 +121,23 @@ public sealed class BlobCheckpointGrowthTests
                 }
             }
 
-            // Assert: report overshoot and busy-storage counts; the growth cause remains open.
-            measured = probe.Read();
+            // Assert: collect the exact append-locked high-water mark after joining writers.
+            // Autonomous checkpoint progress was already required before this final collection.
+            database.Coordinator.Checkpoint(ceiling.Token);
+            System.Collections.Generic.KeyValuePair<string, long>[] attribution;
+            while (true)
+            {
+                measured = probe.Read();
+                attribution = probe.BlockingBrackets.ToArray();
+                if (attribution.Where(pair => !pair.Key.StartsWith("busy:", StringComparison.Ordinal))
+                    .Sum(pair => pair.Value) == measured.Deferred) { break; }
+                await Task.Delay(1, ceiling.Token); // Deferral and holder attribution are separate events.
+            }
             string report = $"round={round + 1}, competitors={competitors}, affinity={affinity.Description}; " + measured.Describe(journalSize);
             _output.WriteLine(report);
+            _output.WriteLine("bracket attribution: " + string.Join(", ", attribution.OrderBy(pair => pair.Key).Select(pair => pair.Key + "=" + pair.Value)));
+            attribution.Where(pair => !pair.Key.StartsWith("busy:", StringComparison.Ordinal))
+                .Sum(pair => pair.Value).ShouldBe(measured.Deferred, report);
             counts.ShouldAllBe(count => count >= 32, report);
             measured.Triggers.ShouldBeGreaterThan(0, report);
             measured.Checkpoints.ShouldBeGreaterThanOrEqualTo(4, report);

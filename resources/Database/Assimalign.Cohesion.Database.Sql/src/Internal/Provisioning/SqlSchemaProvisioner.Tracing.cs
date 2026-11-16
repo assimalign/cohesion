@@ -150,7 +150,7 @@ internal sealed partial class SqlSchemaProvisioner
         return new SqlProvisioningTrace(migration.Schema)
         {
             Kind = step.Kind, Table = step.Table, ObjectName = step.ObjectName,
-            Position = step.Position, StepCount = migration.Intent.StepCount,
+            Position = step.Position, StepCount = migration.ProvisioningStepCount,
             RowsProcessed = progress?.RowsProcessed ?? -1,
             TotalRows = progress?.TotalRows ?? -1,
         };
@@ -210,7 +210,7 @@ internal sealed partial class SqlSchemaProvisioner
             Table = index < migration.Steps.Count ? migration.Intent.Steps[index].Table : string.Empty,
             ObjectName = index < migration.Steps.Count ? migration.Intent.Steps[index].ObjectName : string.Empty,
             Position = index < migration.Steps.Count ? migration.Intent.Steps[index].Position : 0,
-            StepCount = migration.Intent.StepCount,
+            StepCount = migration.ProvisioningStepCount,
             RowsProcessed = _database.Provisioning?.RowsProcessed ?? -1,
             TotalRows = _database.Provisioning?.TotalRows ?? -1,
         }, failure);

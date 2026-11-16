@@ -125,9 +125,10 @@ public sealed partial class SqlCreateTableAsTests
         complete.ShouldBeGreaterThan(0);
         passes.ShouldBeGreaterThan(0);
         builds.ShouldBeGreaterThan(1);
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         await ReclaimAsync(database, timeout.Token);
         database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         _output.WriteLine($"CTAS builds={builds}; hidden observations={hidden}; complete reads={complete}; concurrent reclamation passes={passes}");
     }
 }

@@ -15,6 +15,7 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -57,8 +58,10 @@ public sealed partial class SqlJointTypeMigrationTests
         });
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Sixth pass: due batch commit wakes a refused checkpoint once per cycle")]
-    public async Task RunBatch_RefusedCheckpoint_ShouldWakeRetryOncePerCycle()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Due batch release checkpoints immediately or wakes an ungated busy retry (#1283)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunBatch_DueRelease_ShouldCheckpointOrWakeBusyRetry(bool outsideBusy)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -78,42 +81,80 @@ public sealed partial class SqlJointTypeMigrationTests
             database.CatalogStorage.Checkpoint();
             database.DataStorage.CheckpointJournalSize = 64 * 1024;
             var worker = engine.Workers.OfType<SqlCheckpointWorker>().Single();
-            int refusals = 0, commits = 0;
+            int deferrals = 0, commits = 0;
+            StorageTransaction? outside = null;
             database.TableReclamation.BeforeBatchCommit = (_, _) =>
             {
-                engine.CheckpointNeededSignal.IsSet.ShouldBeTrue(); // Original crossing wake.
-                engine.CheckpointNeededSignal.Reset(); // Worker iteration starts.
-                Should.Throw<StorageTransactionException>(() => PollCheckpoint(worker, database, TimeSpan.FromDays(1), guard.Token));
-                refusals++;
+                engine.CheckpointNeededSignal.IsSet.ShouldBeTrue();
+                engine.CheckpointNeededSignal.Reset(); // Worker consumed the crossing wake.
+                if (outsideBusy)
+                {
+                    // The worker cannot checkpoint a gated reclamation bracket. Only the
+                    // deliberately ungated bracket below can make the releasing attempt busy.
+                    Task.Factory.StartNew(() => PollCheckpoint(worker, database, TimeSpan.FromDays(1), guard.Token),
+                        CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).GetAwaiter().GetResult().ShouldBeFalse();
+                    deferrals++;
+                    outside = database.DataStorage.BeginTransaction("OutsideTest");
+                }
             };
             database.TableReclamation.AfterBatch = (_, _) => commits++;
-            using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+            using var recorder = new Assimalign.Cohesion.Testing.EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+            var source = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Storage");
+            using var checkpoints = new Assimalign.Cohesion.Testing.EventSourceRecorder(source, EventLevel.Verbose);
             try
             {
-                // Act / Assert: a successful retry is driven by the commit wake, never a timeout.
+                // Act / Assert: normal release needs no worker request. Busy release preserves
+                // exactly one retry wake; idle polls cannot open another bracket or add WAL.
                 for (int cycle = 0; cycle < 2; cycle++)
                 {
+                    engine.CheckpointNeededSignal.Reset();
                     database.TableReclamation.Request();
                     database.TableReclamation.RunBatch(guard.Token);
-                    engine.CheckpointNeededSignal.IsSet.ShouldBeTrue();
-                    engine.CheckpointNeededSignal.Reset();
-                    long length = database.DataStorage.JournalLength;
-                    for (int poll = 0; poll < 8; poll++) { database.TableReclamation.RunBatch(guard.Token); }
-                    engine.CheckpointNeededSignal.IsSet.ShouldBeFalse();
-                    database.DataStorage.JournalLength.ShouldBe(length);
                     commits.ShouldBe(cycle + 1);
-                    PollCheckpoint(worker, database, TimeSpan.FromDays(1), guard.Token).ShouldBeTrue();
-                    engine.CheckpointNeededSignal.Reset();
+                    if (outsideBusy)
+                    {
+                        engine.CheckpointNeededSignal.IsSet.ShouldBeTrue();
+                        engine.CheckpointNeededSignal.Reset();
+                        long length = database.DataStorage.JournalLength;
+                        for (int poll = 0; poll < 8; poll++) { database.TableReclamation.RunBatch(guard.Token); }
+                        engine.CheckpointNeededSignal.IsSet.ShouldBeFalse();
+                        database.DataStorage.JournalLength.ShouldBe(length);
+                        commits.ShouldBe(cycle + 1);
+                        outside!.Rollback(); outside = null;
+                        PollCheckpoint(worker, database, TimeSpan.FromDays(1), guard.Token).ShouldBeTrue();
+                    }
+                    else
+                    {
+                        engine.CheckpointNeededSignal.IsSet.ShouldBeFalse();
+                        long lsn = database.DataStorage.WriteAheadJournal.LastLsn;
+                        using (TransactionCheckpointInterlock.ForStorage(database.DataStorage).Enter("Probe")) { }
+                        database.DataStorage.WriteAheadJournal.LastLsn.ShouldBe(lsn);
+                    }
+                    database.DataStorage.IsCheckpointDue(TimeSpan.MaxValue).ShouldBeFalse();
                 }
-                refusals.ShouldBe(2);
+                deferrals.ShouldBe(outsideBusy ? 2 : 0);
+                checkpoints.Events.Count(e => e.EventId == 6 && Equals(e.Payload![0], (string)database.DataStorage.Name)
+                    && Equals(e.Payload![1], "Success")).ShouldBe(2);
+                var busyBrackets = checkpoints.Events.Where(e => e.EventId == 19 && Equals(e.Payload![0], (string)database.DataStorage.Name)).ToArray();
+                busyBrackets.Length.ShouldBe(outsideBusy ? 2 : 0);
+                busyBrackets.ShouldAllBe(e => Equals(e.Payload![1], "OutsideTest"));
                 var yields = recorder.Events.Where(e => e.EventId == 27).ToArray();
-                yields.Length.ShouldBe(16);
+                yields.Length.ShouldBe(outsideBusy ? 16 : 0);
                 yields.ShouldAllBe(e => e.EventName == "TableReclamationYielded");
-                yields[0].PayloadNames.ShouldBe(["engineName", "database", "objectId"]);
-                yields[0].Payload.ShouldBe([engine.Name, "typed", table.ObjectId]);
+                if (outsideBusy)
+                {
+                    yields[0].PayloadNames.ShouldBe(["engineName", "database", "objectId"]);
+                    yields[0].Payload.ShouldBe([engine.Name, "typed", table.ObjectId]);
+                }
                 recorder.Events.ShouldNotContain(e => e.EventId == 0);
+                checkpoints.Events.ShouldNotContain(e => e.EventId == 0);
             }
-            finally { database.TableReclamation.BeforeBatchCommit = null; database.TableReclamation.AfterBatch = null; }
+            finally
+            {
+                outside?.Rollback();
+                database.TableReclamation.BeforeBatchCommit = null;
+                database.TableReclamation.AfterBatch = null;
+            }
         });
     }
 

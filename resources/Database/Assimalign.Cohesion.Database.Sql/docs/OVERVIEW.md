@@ -181,7 +181,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 34). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 35). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -332,7 +332,9 @@ physical index registrations exported by `Database.Indexing`.
   (#1241).
 - **Atomic index publication** — `CreateIndexAsync` and `PublishTableAsync` require
   each new index description and its matching physical registration together.
-  `GetIndexRegistrations` returns the committed directory for re-attachment on reopen;
+  `GetIndexRegistrations` returns the committed logical directory. Physical tree owners live
+  in root headers; these registrations alone cannot re-attach trees safely. SQL reads those owners
+  before attaching trees on reopen;
   checkpoint and shutdown cannot replace it with an independently captured snapshot.
 - **Applied-schema state** — `SchemaState` / `SaveSchemaStateAsync` atomically
   retain the canonical `SqlCompiledSchema` document, deterministic hash and DDL

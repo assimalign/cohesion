@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
@@ -240,7 +242,8 @@ public sealed partial class SqlCatalog
             var slot = GetSlot(expected.Schema, expected.Name);
             if (!ReferenceEquals(slot.Table, expected)) { throw new SqlCatalogException("CS04064", ErrorMessages.SequenceChanged); }
             ValidateColumns(updated.Schema, updated.Name, updated.Columns, updated.PrimaryKeyColumns);
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)expected.ObjectId));
             ulong next = _nextObjectId;
             var owned = StageOwnedSequences(transaction, expected, updated, ref next);
             var location = UpsertRecord(transaction, slot.Location, EncodeTable(updated));

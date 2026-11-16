@@ -48,6 +48,24 @@ internal sealed class SqlTableReclamation
     internal Action<ulong, CancellationToken>? BeforeBatchCommit { get; set; }
     internal Action<ulong, int>? AfterBatch { get; set; }
 
+    // Tests wait for an in-flight discovery pin to roll back and capture while
+    // still excluding the next discovery. Waiting for HasWork alone leaves a
+    // gap before enumeration and can wait forever behind a leaked builder.
+    // Call without a data apply gate or catalog monitor: reclamation holds this
+    // run lock while waiting for the data gate and later accesses the catalog.
+    // The snapshot excludes reclamation pins, not other background/application work.
+    internal IReadOnlyList<TransactionContext> CaptureOpenContextsForTesting(Action? waiting = null)
+    {
+        if (!Monitor.TryEnter(_runLock))
+        {
+            waiting?.Invoke();
+            if (!Monitor.TryEnter(_runLock, TimeSpan.FromSeconds(30)))
+            { throw new TimeoutException(ErrorMessages.ReclamationContextBarrierTimeout); }
+        }
+        try { return _database.Coordinator.GetOpenContexts(); }
+        finally { Monitor.Exit(_runLock); }
+    }
+
     internal void Request()
     {
         Volatile.Write(ref _discover, 1);
@@ -124,19 +142,35 @@ internal sealed class SqlTableReclamation
                         return;
                     }
                     int reclaimed;
-                    // No coordinator apply gate or catalog/table lock covers the page walk.
+                    long commitLsn;
+                    // Lock/latch order: reclamation run lock -> data checkpoint interlock ->
+                    // allocation accounting -> storage transaction/page latches. No catalog,
+                    // table or row lock is acquired or awaited inside this interlock.
                     // These identities can never acquire new writers or be reused by CREATE.
-                    using (var bracket = _database.DataStorage.BeginTransaction())
+                    using (TransactionCheckpointInterlock.ForStorage(_database.DataStorage)
+                        .Enter("SqlTableReclamation", unchecked((long)pending.ObjectId), token))
                     {
+                        // Admission may have waited behind a writer that crossed the trigger.
+                        // Disposal services a size-due checkpoint before the next admission.
+                        if (_database.DataStorage.IsCheckpointDue(TimeSpan.MaxValue))
+                        {
+                            SqlDatabaseEventSource.Log.TableReclamationYielded(_database, pending.ObjectId);
+                            return;
+                        }
+                        using var bracket = _database.DataStorage.BeginTransaction("SqlTableReclamation", unchecked((long)pending.ObjectId));
                         reclaimed = _database.DataStorage.FreeOwnerPages(bracket, pending.ObjectId, BatchSize);
                         BeforeBatchCommit?.Invoke(pending.ObjectId, token);
                         token.ThrowIfCancellationRequested();
                         lock (_allocationCountLock)
                         {
-                            bracket.Commit();
+                            bracket.Commit(awaitDurability: false);
+                            commitLsn = _database.DataStorage.WriteAheadJournal.LastLsn;
                             Interlocked.Add(ref _reclaimedPages, reclaimed);
                         }
                     }
+                    // Statements can join the durability group after gate release. Only
+                    // intent removal requires the reclaimed pages to be durable.
+                    _database.DataStorage.EnsureCommitDurable(commitLsn);
                     // The crossing append can wake a checkpoint while this bracket is
                     // still active. Retry after it closes. Due persists until checkpoint,
                     // so the next bracket check yields: exactly one retry wake per cycle.

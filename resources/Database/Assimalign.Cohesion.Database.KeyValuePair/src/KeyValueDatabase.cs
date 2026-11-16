@@ -229,6 +229,17 @@ public sealed class KeyValueDatabase : DatabaseInstance
         return index;
     }
 
+    internal static void EnsureIndexFormats(string name, KeyValueStorage storage, KeyValueCatalog catalog)
+    {
+        try { BTreeIndexManager.EnsureFormat(storage, catalog.GetIndexRegistrations()); }
+        catch (IndexFormatException exception)
+        {
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueDatabaseDatabase, name, exception.Message);
+            throw new DatabaseException(message, [new Types.Diagnostic
+            { Code = IndexFormatException.ErrorCode, Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+        }
+    }
+
     /// <summary>
     /// The format gate: refuses a database whose catalog marker is not this engine's
     /// entry-space format (<see cref="KeyValueRecordCodec.EntrySpaceFormatVersion"/>),

@@ -292,7 +292,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default)
+    public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default, bool readOnly = false)
     {
         string key = Key(databaseName, catalog);
         lock (_sync)
@@ -302,6 +302,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
                 throw new DatabaseException($"Crash-capture storage for '{key}' does not exist.");
             }
 
+            if (readOnly) { return ProbeStorage(databaseName, catalog)!.Open(); }
             Action changed = () => OnDurableChange(catalog);
             Action writing = () => OnWriteStarting(catalog);
             var streams = (Data: new GatedStream(image.Data, writeThrough: true, changed, writing, OnGrowing, () => UnixSparseGrowth),

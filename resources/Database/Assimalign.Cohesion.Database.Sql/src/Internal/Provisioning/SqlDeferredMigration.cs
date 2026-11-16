@@ -36,6 +36,7 @@ internal sealed class SqlDeferredMigration
     internal SqlCompiledSchema Schema { get; }
     internal IReadOnlyList<SqlMigrationScriptStep> Steps { get; }
     internal SqlCatalogPendingMigration Intent { get; }
+    internal int ProvisioningStepCount => JointPlan is null ? Intent.StepCount : Steps.Count;
     internal TransactionContext Locks { get; }
     internal IReadOnlySet<ulong> Tables { get; }
     internal SqlJointMigrationPlan? JointPlan { get; init; }

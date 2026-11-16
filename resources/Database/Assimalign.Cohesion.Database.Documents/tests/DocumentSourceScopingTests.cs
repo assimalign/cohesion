@@ -11,15 +11,15 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentSourceScopingTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents] - Source scope: own paths distinguish collection fields from explicit aliases")]
-    [InlineData("SELECT items.g FROM items GROUP BY g", "CD05001", null)]
-    [InlineData("SELECT RAW (SELECT RAW items.g FROM [1] AS s) FROM items GROUP BY items.g", "CD05001", null)]
-    [InlineData("SELECT DISTINCT g FROM items ORDER BY items.g", "CD01014", null)]
-    [InlineData("SELECT RAW g FROM items ORDER BY items.g", null, "[3,2,1]")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Source scope: own paths use the explicit or implicit source alias")]
+    [InlineData("SELECT items.g FROM items GROUP BY g", null, "[1,2,3]")]
+    [InlineData("SELECT RAW (SELECT RAW items.g FROM [1] AS s) FROM items GROUP BY items.g", null, "[[1],[2],[3]]")]
+    [InlineData("SELECT DISTINCT g FROM items ORDER BY items.g", null, "[1,2,3]")]
+    [InlineData("SELECT RAW g FROM items ORDER BY items.g", null, "[1,2,3]")]
     [InlineData("SELECT d.g FROM items d GROUP BY g", null, "[1,2,3]")]
     [InlineData("SELECT DISTINCT g FROM items d ORDER BY d.g", null, "[1,2,3]")]
     [InlineData("SELECT RAW g FROM items d ORDER BY d.g", null, "[1,2,3]")]
-    public async Task ExecuteAsync_OwnSourcePaths_ShouldPreserveFieldAndAliasScopeAsync(string query, string? code, string? expected)
+    public async Task ExecuteAsync_OwnSourcePaths_ShouldUseOneAliasScopeAsync(string query, string? code, string? expected)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("source-scope", new());
@@ -36,7 +36,8 @@ public sealed class DocumentSourceScopingTests
         }
         var rows = await DocumentSubqueryTests.RowsAsync(session, query);
         using var values = JsonDocument.Parse(expected!);
-        rows.Select(row => row.GetValue(0)).ShouldBe(values.RootElement.EnumerateArray().Select(value => (object?)value.GetDecimal()));
+        rows.Select(row => row.GetValue(0) is JsonElement json ? json.GetRawText() : row.GetValue(0))
+            .ShouldBe(values.RootElement.EnumerateArray().Select(value => value.ValueKind == JsonValueKind.Array ? (object?)value.GetRawText() : value.GetDecimal()));
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - META scope: collection receivers remain equivalent in own grouped and distinct expressions")]

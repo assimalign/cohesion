@@ -460,6 +460,28 @@ internal sealed class StorageEventSource : EventSource
     private void JournalTailLost(string database, long strayLsn, long redoLsn)
         => WriteEvent(4, database, strayLsn, redoLsn);
 
+    [NonEvent]
+    internal void CheckpointBusy(Storage storage, string bracketClass, long owner, long transactionSequence, long refusal)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        { CheckpointBusy(storage.Name, bracketClass, owner, transactionSequence, refusal); }
+    }
+
+    [NonEvent]
+    internal void CheckpointJournalPeak(Storage storage, long peakLength)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        { CheckpointJournalPeak(storage.Name, peakLength); }
+    }
+
+    [Event(19, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Storage '{0}' checkpoint {4} blocked by {1} owner {2}, bracket {3}.")]
+    private void CheckpointBusy(string database, string bracketClass, long owner, long transactionSequence, long refusal)
+        => WriteEvent(19, database, bracketClass, owner, transactionSequence, refusal);
+
+    [Event(20, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Storage '{0}' journal peak since open: {1} bytes.")]
+    private void CheckpointJournalPeak(string database, long peakLength)
+        => WriteEvent(20, database, peakLength);
+
     [Event(5, Level = EventLevel.Informational, Keywords = Keywords.Checkpoints, Message = "Storage '{0}' checkpoint started: {1} transaction(s) in flight, {2} journal byte(s).")]
     private void CheckpointStart(string database, int activeTransactions, long journalLength)
         => WriteEvent(5, database, activeTransactions, journalLength);

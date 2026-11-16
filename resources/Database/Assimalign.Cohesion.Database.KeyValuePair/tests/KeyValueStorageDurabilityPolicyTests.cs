@@ -82,7 +82,7 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
     public async Task NonDurableBacking_WithExplicitDurability_ShouldRejectOpenAndReleaseStorage(
         StorageCommitDurability durability, bool openExisting)
     {
-        var strategy = new NonDurableStorageStrategy();
+        var strategy = new NonDurableStorageStrategy(openExisting);
         await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions
         {
             StorageStrategy = strategy,
@@ -124,6 +124,8 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
 
     private sealed class NonDurableStorageStrategy : KeyValueStorageStrategy
     {
+        private readonly bool _exists;
+        internal NonDurableStorageStrategy(bool exists) { _exists = exists; }
         internal List<MemoryStream> Streams { get; } = [];
 
         public override KeyValueStorage CreateStorage(string databaseName, bool catalog)
@@ -135,9 +137,20 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
             return KeyValueStorage.Create(data, journal, backup, GetLabel(databaseName, catalog));
         }
 
-        public override KeyValueStorage OpenStorage(string databaseName, bool catalog) => CreateStorage(databaseName, catalog);
+        public override KeyValueStorage OpenStorage(string databaseName, bool catalog, bool readOnly = false)
+        {
+            if (!readOnly) { return CreateStorage(databaseName, catalog); }
+            using var data = new MemoryStream();
+            using var journal = new MemoryStream();
+            using var backup = new MemoryStream();
+            using (var source = KeyValueStorage.Create(data, journal, backup, GetLabel(databaseName, catalog)))
+            {
+            }
+            return KeyValueStorage.Open(new MemoryStream(data.ToArray(), writable: false),
+                new MemoryStream(journal.ToArray(), writable: false), new MemoryStream(backup.ToArray(), writable: false), checkpointOnOpen: false);
+        }
 
-        public override bool StorageExists(string databaseName, bool catalog) => true;
+        public override bool StorageExists(string databaseName, bool catalog) => _exists;
 
         public override void DropStorage(string databaseName) { }
     }

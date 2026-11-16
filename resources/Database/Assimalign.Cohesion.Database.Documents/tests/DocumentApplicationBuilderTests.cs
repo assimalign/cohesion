@@ -257,11 +257,11 @@ public sealed class DocumentApplicationBuilderTests
             return DocumentStorage.Create(Open(databaseName, "dat", FileMode.CreateNew), Open(databaseName, "log", FileMode.CreateNew), Open(databaseName, "bak", FileMode.CreateNew), databaseName, durability);
         }
 
-        public override DocumentStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+        public override DocumentStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability, bool readOnly = false)
         {
-            Opens++;
+            if (!readOnly) { Opens++; }
             LastDurability = durability;
-            return DocumentStorage.Open(Open(databaseName, "dat", FileMode.Open), Open(databaseName, "log", FileMode.Open), Open(databaseName, "bak", FileMode.Open), checkpointOnOpen: false, durability);
+            return DocumentStorage.Open(Open(databaseName, "dat", FileMode.Open, readOnly), Open(databaseName, "log", FileMode.Open, readOnly), Open(databaseName, "bak", FileMode.Open, readOnly), checkpointOnOpen: false, readOnly ? null : durability);
         }
 
         public override void DropStorage(DatabaseName databaseName)
@@ -272,6 +272,6 @@ public sealed class DocumentApplicationBuilderTests
         public override bool StorageExists(DatabaseName databaseName) => File.Exists(Path.Combine(_directory, databaseName + ".dat"));
         public override IEnumerable<DatabaseName> GetDatabaseNames() => Directory.EnumerateFiles(_directory, "*.dat").Select(file => new DatabaseName(Path.GetFileNameWithoutExtension(file)));
         public void Dispose() => Disposed = true;
-        private StorageStream Open(DatabaseName name, string suffix, FileMode mode) => StorageStream.FromFile(Path.Combine(_directory, name + "." + suffix), mode, FileShare.Read);
+        private StorageStream Open(DatabaseName name, string suffix, FileMode mode, bool readOnly = false) => readOnly ? new StorageStream(new FileStream(Path.Combine(_directory, name + "." + suffix), FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(Path.Combine(_directory, name + "." + suffix), mode, FileShare.Read);
     }
 }

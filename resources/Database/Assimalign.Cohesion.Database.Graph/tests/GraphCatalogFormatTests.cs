@@ -26,7 +26,7 @@ public sealed class GraphCatalogFormatTests
         // Arrange / Act
         var failure = await RefuseUncheckpointedCatalogAsync(kind);
 
-        // Assert: physical redo precedes this gate until Storage #1744; file equality is not asserted.
+        // Assert: the recovered read-only gate refuses before physical redo (#1744).
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
         failure.Message.ShouldContain("supports only format 2", Case.Sensitive);
     }
@@ -85,10 +85,12 @@ public sealed class GraphCatalogFormatTests
                 File.WriteAllBytes(Path.Combine(directory, "graph.bak"), backup.ToArray());
                 journal.Length.ShouldBeGreaterThan(0);
             }
+            var before = Directory.GetFiles(directory).ToDictionary(path => path, File.ReadAllBytes);
             await using var reopened = GraphDatabaseEngine.Create("format", new() { RootPath = root });
             var failure = await Should.ThrowAsync<DatabaseException>(async () =>
                 await reopened.OpenDatabaseAsync("LegacyGraph", timeout.Token));
             reopened.TryGetDatabase("LegacyGraph", out _).ShouldBeFalse();
+            foreach (var (path, bytes) in before) { File.ReadAllBytes(path).ShouldBe(bytes, path); }
             return failure;
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }

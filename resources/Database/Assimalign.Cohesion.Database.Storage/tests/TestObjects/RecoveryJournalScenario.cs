@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 internal static class RecoveryJournalScenario
 {
-    internal static byte[] Create(int seed)
+    internal static byte[] Create(int seed, int replayMode = 0)
     {
         var random = new Random(seed);
         var records = new List<JournalRecord>();
@@ -59,6 +59,13 @@ internal static class RecoveryJournalScenario
         }
         // This uncommitted FPI follows committed changes on the shared page in every seed.
         Add(21, JournalRecordType.FullPageImage, 1);
+        if (replayMode == 2)
+        {
+            // A contiguous page-one run exceeds 256 KiB without an inter-frame gap,
+            // so coalescing must split on its span limit rather than its 4 KiB gap rule.
+            for (int index = 0; index < 6000; index++) { Add(30, JournalRecordType.PageDelta, 1); }
+            Add(30, JournalRecordType.CommitTransaction);
+        }
 
         var committed = records.Where(record => record.Type == JournalRecordType.CommitTransaction)
             .Select(record => record.TransactionSequence).ToHashSet();
@@ -116,6 +123,18 @@ internal static class RecoveryJournalScenario
             payload.CopyTo(body[26..]);
             BinaryPrimitives.WriteUInt32LittleEndian(frame.AsSpan(frame.Length - sizeof(uint)), Crc32C.Compute(body));
             encoded.Write(frame);
+            if (replayMode == 1)
+            {
+                // More than 4 KiB between relevant frames forces exact single-frame reads.
+                byte[] gap = new byte[5038];
+                BinaryPrimitives.WriteInt32LittleEndian(gap, gap.Length - 12);
+                BinaryPrimitives.WriteInt32LittleEndian(gap.AsSpan(4), 0x324C4157);
+                frame.AsSpan(8, 26).CopyTo(gap.AsSpan(8));
+                gap[25] = (byte)JournalRecordType.Operation;
+                BinaryPrimitives.WriteInt64LittleEndian(gap.AsSpan(26), 0);
+                BinaryPrimitives.WriteUInt32LittleEndian(gap.AsSpan(gap.Length - 4), Crc32C.Compute(gap.AsSpan(8, gap.Length - 12)));
+                encoded.Write(gap);
+            }
         }
         return encoded.ToArray();
     }

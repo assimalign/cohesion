@@ -50,9 +50,9 @@ public sealed class SqlIsolationReviewTests
         result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04072");
         transaction.IsolationLevel.ShouldBe(IsolationLevel.ReadCommitted);
         transaction.RunningStatements.ShouldBe(0);
-        database.Coordinator.GetOpenContexts().ShouldHaveSingleItem().ShouldBeSameAs(transaction.Context);
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldHaveSingleItem().ShouldBeSameAs(transaction.Context);
         await transaction.RollbackAsync(CancellationToken.None);
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Isolation: parse errors precede DDL interlocks and leave configuration open")]
@@ -91,14 +91,14 @@ public sealed class SqlIsolationReviewTests
         {
             beginning = session.BeginTransactionAsync(IsolationLevel.ReadCommitted, ceiling.Token).AsTask();
             beginning.IsCompleted.ShouldBeFalse();
-            database.Coordinator.GetOpenContexts().ShouldHaveSingleItem();
+            database.TableReclamation.CaptureOpenContextsForTesting().ShouldHaveSingleItem();
         }
         finally
         {
             database.Catalog.TruncateSnapshotGate.Release();
             if (beginning is not null) { await (await beginning.WaitAsync(ceiling.Token)).RollbackAsync(ceiling.Token); }
         }
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Isolation: a pin before TRUNCATE uses the context and catalog captured after publication")]
@@ -129,7 +129,7 @@ public sealed class SqlIsolationReviewTests
             database.TableReclamation.Request();
             database.TableReclamation.RunBatch(ceiling.Token);
             beginning = reader.BeginTransactionAsync(IsolationLevel.ReadCommitted, ceiling.Token).AsTask();
-            database.Coordinator.GetOpenContexts().Count.ShouldBe(2);
+            database.TableReclamation.CaptureOpenContextsForTesting().Count.ShouldBe(2);
         }
         finally
         {
@@ -148,7 +148,7 @@ public sealed class SqlIsolationReviewTests
         await foreach (var _ in rows.GetRowsAsync(ceiling.Token)) { count++; }
         count.ShouldBe(0);
         await reader.CurrentTransaction.ShouldNotBeNull().RollbackAsync(ceiling.Token);
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Isolation: read committed releases its begin catalog at the first attempted statement")]
@@ -171,7 +171,7 @@ public sealed class SqlIsolationReviewTests
 
         // Assert
         field.GetValue(transaction).ShouldBeNull();
-        database.Coordinator.GetOpenContexts().ShouldHaveSingleItem();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldHaveSingleItem();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Isolation: outside SET succeeds with one warning and leaves the default unchanged")]
@@ -192,7 +192,7 @@ public sealed class SqlIsolationReviewTests
         diagnostic.Code.ShouldBe("CS04071");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Warning);
         session.CurrentTransaction.ShouldBeNull();
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
         await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
         transaction.IsolationLevel.ShouldBe(IsolationLevel.Snapshot);
     }

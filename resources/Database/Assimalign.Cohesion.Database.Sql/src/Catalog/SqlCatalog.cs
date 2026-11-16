@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>
@@ -96,6 +98,10 @@ public sealed partial class SqlCatalog
     private readonly Dictionary<(string Schema, string Name), TableSlot> _tables = new(TableNameComparer.Instance);
     private readonly Dictionary<(ulong TableObjectId, string Name), IndexSlot> _indexes = new(IndexNameComparer.Instance);
     private readonly Dictionary<ulong, SqlReclamationIntent> _pendingReclamations = new();
+    // Lock/latch order: engine object grants and (when applicable) the data apply gate,
+    // then catalog _sync -> the independent catalog checkpoint interlock -> storage/page
+    // latches. Catalog checkpoints never take _sync or the data gate. Catalog bodies
+    // acquire no model lock and never enter data storage while holding this interlock.
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
     private ulong _ddlGeneration;
@@ -226,7 +232,8 @@ public sealed partial class SqlCatalog
             if (!_pendingReclamations.TryGetValue(objectId, out var location)) { return default; }
             if (_truncateRetirementsPublishing.Contains(objectId) ||
                 (intent is null ? _preparedTruncateOwners.Contains(objectId) : !ReferenceEquals(intent, location))) { return default; }
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)objectId), cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)objectId));
             _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
             DefinitionSlot<SqlCatalogSequence>[] orphaned = _sequences.Count == 0 ? [] : _sequences.Values.Where(slot => slot.Value.OwnerTableId == objectId).ToArray();
             foreach (var sequence in orphaned) { DeleteSequence(transaction, sequence); }
@@ -288,7 +295,8 @@ public sealed partial class SqlCatalog
 
             var writer = new DatabaseKeyWriter();
             writer.AppendInt32(defaultCollationRecordKind).AppendInt8((sbyte)collation.Id);
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog");
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             var location = UpsertRecord(transaction, _defaultCollationLocation, writer.ToArray());
             CommitCatalogChange(transaction);
             _defaultCollationLocation = location;
@@ -489,7 +497,8 @@ public sealed partial class SqlCatalog
             var table = new SqlCatalogTable(_nextObjectId, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
             ValidateConstraints(table);
 
-            using (var transaction = _storage.BeginTransaction())
+            using var checkpointAdmission3 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)table.ObjectId), cancellationToken: cancellationToken);
+            using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)table.ObjectId)))
             {
                 var location = _storage.InsertRow(transaction, EncodeTable(table));
                 ulong next = checked(_nextObjectId + 1);
@@ -596,13 +605,15 @@ public sealed partial class SqlCatalog
                 }
             }
 
-            using (var transaction = _storage.BeginTransaction())
+            using var checkpointAdmission4 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)slot.Table.ObjectId), cancellationToken: cancellationToken);
+            using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)slot.Table.ObjectId)))
             {
                 // The intent and unpublication share this commit. Each retired identity owns
                 // its intent page, so maintenance never edits a live metadata page. The worker
                 // retires this record only after the data-file frees are durable.
                 var reclamationLocation = _storage.InsertRow(transaction, slot.Table.ObjectId,
                     SqlReclamationRecord.Encode(slot.Table.ObjectId, schema, name));
+                var retireTrees = StageIndexRetirements(transaction, _registrations.Where(registration => registration.ObjectId == slot.Table.ObjectId), 1);
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
                 ulong next = _nextObjectId;
                 var owned = StageOwnedSequences(transaction, slot.Table, null, ref next);
@@ -619,6 +630,7 @@ public sealed partial class SqlCatalog
                 }
 
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(schema, name));
+                retireTrees();
                 owned();
                 _registrationsLocation = registrationsLocation;
                 _pendingReclamations.Add(slot.Table.ObjectId, new SqlReclamationIntent(reclamationLocation.PageId, reclamationLocation.SlotIndex));
@@ -1014,7 +1026,8 @@ public sealed partial class SqlCatalog
             }
 
             var mergedRegistrations = MergePublishedRegistrations(registrations, [index]);
-            using (var transaction = _storage.BeginTransaction())
+            using var checkpointAdmission5 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)index.TableObjectId), cancellationToken: cancellationToken);
+            using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)index.TableObjectId)))
             {
                 var location = _storage.InsertRow(transaction, EncodeIndex(index));
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
@@ -1105,11 +1118,15 @@ public sealed partial class SqlCatalog
             var remainingRegistrations = _registrations.Where(registration =>
                 registration.ObjectId != tableObjectId ||
                 !string.Equals(registration.Definition.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
-            using (var transaction = _storage.BeginTransaction())
+            using var checkpointAdmission6 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)tableObjectId), cancellationToken: cancellationToken);
+            using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)tableObjectId)))
             {
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remainingRegistrations));
+                var retireTrees = StageIndexRetirements(transaction, _registrations.Where(registration => registration.ObjectId == tableObjectId &&
+                    registration.Definition.Name.Equals(name, StringComparison.OrdinalIgnoreCase)));
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Index(table.Schema, table.Name, slot.Index.Name));
+                retireTrees();
                 _registrationsLocation = registrationsLocation;
             }
 
@@ -1142,9 +1159,14 @@ public sealed partial class SqlCatalog
     }
 
     /// <summary>
-    /// Loads the persisted index registrations.
+    /// Loads the persisted logical index registrations.
     /// </summary>
-    /// <returns>The stored registrations, empty when none were saved.</returns>
+    /// <remarks>
+    /// ObjectId identifies the logical table. A tree's physical page owner lives in its root
+    /// header and can differ from that table identity. These registrations alone are not safe
+    /// inputs for re-attaching trees: the SQL engine resolves physical owners before attachment.
+    /// </remarks>
+    /// <returns>The stored logical registrations, empty when none were saved.</returns>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public IReadOnlyList<BTreeIndexRegistration> GetIndexRegistrations()
     {
@@ -1212,7 +1234,8 @@ public sealed partial class SqlCatalog
             writer.AppendInt32(kind).AppendInt32(version);
             byte[] record = writer.ToArray();
 
-            using (var transaction = _storage.BeginTransaction())
+            using var checkpointAdmission7 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using (var transaction = _storage.BeginTransaction("SqlCatalog"))
             {
                 var formatLocation = UpsertRecord(transaction, _formatLocation, record);
                 CommitCatalogChange(transaction);
@@ -1289,7 +1312,8 @@ public sealed partial class SqlCatalog
 
             var locations = new List<(PageId PageId, int SlotIndex)>(records.Count);
 
-            using (var transaction = _storage.BeginTransaction())
+            using var checkpointAdmission8 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using (var transaction = _storage.BeginTransaction("SqlCatalog"))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 foreach (var location in pending is null ? _schemaStateLocations : _pendingMigrationLocations)
@@ -1569,7 +1593,8 @@ public sealed partial class SqlCatalog
         ValidateColumns(updated.Schema, updated.Name, updated.Columns, updated.PrimaryKeyColumns);
         byte[] record = EncodeTable(updated);
 
-        using (var transaction = _storage.BeginTransaction())
+        using var checkpointAdmission9 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)updated.ObjectId));
+        using (var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)updated.ObjectId)))
         {
             var location = UpsertRecord(transaction, slot.Location, record);
             IReadOnlyList<BTreeIndexRegistration>? remaining = null;
@@ -1580,9 +1605,12 @@ public sealed partial class SqlCatalog
                 foreach (var index in droppedIndexes) { _storage.DeleteRow(transaction, index.Location.PageId, index.Location.SlotIndex); }
             }
             var registrationsLocation = remaining is null ? _registrationsLocation : UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remaining));
+            var retireTrees = StageIndexRetirements(transaction, remaining is null ? [] : _registrations.Where(registration =>
+                !remaining.Any(current => current.RootPageId == registration.RootPageId)));
             ulong next = _nextObjectId;
             var owned = StageOwnedSequences(transaction, slot.Table, updated, ref next);
             CommitCatalogChange(transaction, next, publication: publication, actualObject: SqlObjectIdentity.Table(updated.Schema, updated.Name));
+            retireTrees();
             owned();
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
             if (remaining is not null)
@@ -2311,7 +2339,8 @@ public sealed partial class SqlCatalog
             // leave unused trees, but can never reuse their identity for a table.
             // Refuse an unstorable definition before reserving an owner or evaluating CTAS.
             _ = EncodeTable(table);
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission10 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)table.ObjectId), cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)table.ObjectId));
             var intent = prepareOwner ? _storage.InsertRow(transaction, table.ObjectId,
                 SqlReclamationRecord.Encode(table.ObjectId, schema, name)) : ((PageId PageId, int SlotIndex)?)null;
             CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, reservationOnly: true, actualObject: SqlObjectIdentity.Table(schema, name));
@@ -2467,7 +2496,8 @@ public sealed partial class SqlCatalog
                 }
             }
             var mergedRegistrations = MergePublishedRegistrations(registrations, indexes);
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission11 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)table.ObjectId), cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)table.ObjectId));
             var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
             var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
             var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
@@ -2537,7 +2567,7 @@ public sealed partial class SqlCatalog
         if (!kept)
         {
             throw new SqlCatalogException("CS05060",
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog3, table.Schema, table.Name));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeptTableLayoutMismatch, table.Schema, table.Name));
         }
     }
 

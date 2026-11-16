@@ -121,6 +121,7 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <returns>The opened storage.</returns>
     /// <param name="cancellationToken">Cancels physical recovery between journal records and pages.</param>
     /// <exception cref="OperationCanceledException">Recovery was canceled; streams were disposed and the journal retained.</exception>
+    /// <remarks>A read-only data stream opens a recovered probe: original bytes never change and mutations are refused (#1744).</remarks>
     public static SqlStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability,
         CancellationToken cancellationToken = default)
     {

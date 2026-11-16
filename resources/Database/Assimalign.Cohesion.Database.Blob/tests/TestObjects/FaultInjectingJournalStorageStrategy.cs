@@ -172,7 +172,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : BlobStorageStrategy
     /// </summary>
     internal Exception? OpenFailure { get; set; }
 
-    public override BlobStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    public override BlobStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability, bool readOnly = false)
     {
         if (OpenFailure is { } failure) { throw failure; }
         Files files;
@@ -181,6 +181,13 @@ internal sealed class FaultInjectingJournalStorageStrategy : BlobStorageStrategy
             if (!_databases.TryGetValue(databaseName.ToString(), out var closed))
             {
                 throw new DatabaseNotFoundException($"Database '{databaseName}' does not exist.");
+            }
+
+            if (readOnly)
+            {
+                return BlobStorage.Open(DatabaseMemoryFiles.ReadOnly(closed.Data),
+                    DatabaseMemoryFiles.ReadOnly(closed.Journal, LoseUnconfirmedJournalOnReopen ? closed.Journal.ConfirmedLength : null),
+                    DatabaseMemoryFiles.ReadOnly(closed.Backup), checkpointOnOpen: false);
             }
 
             var journal = Copy(closed.Journal, new FaultInjectingStream());

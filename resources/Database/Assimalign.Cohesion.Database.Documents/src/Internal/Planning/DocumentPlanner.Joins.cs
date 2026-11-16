@@ -12,8 +12,6 @@ internal sealed partial class DocumentPlanner
     private DocumentJoinPlan PlanJoins(OqlSelectExpression query,
         IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested, IReadOnlySet<string>? outerNames)
     {
-        if (string.IsNullOrEmpty(query.Alias))
-        { throw new DocumentPlanningException("CD01035", ErrorMessages.JoinBindingInvalid, query.Location); }
         var collections = new Dictionary<OqlJoinExpression, DocumentCollectionMetadata>();
         foreach (var join in query.Bindings.OfType<OqlJoinExpression>())
         {
@@ -31,10 +29,10 @@ internal sealed partial class DocumentPlanner
         IReadOnlySet<string>? outerNames, OqlSourceBindingExpression? before = null)
     {
         if (query.Bindings == query.Unnest)
-        { ValidateMetadata(expression, query.Alias ?? query.Collection, DocumentSystemCollections.Find(query.Collection) is null, outerNames); return; }
+        { ValidateMetadata(expression, DocumentSourceName.Of(query), DocumentSystemCollections.Find(query.Collection) is null, outerNames); return; }
         var sources = new HashSet<string>(StringComparer.Ordinal);
         if (outerNames is not null) { sources.UnionWith(outerNames); }
-        sources.Add(query.Alias!);
+        sources.Add(DocumentSourceName.Of(query));
         foreach (var binding in query.Bindings)
         {
             if (ReferenceEquals(binding, before)) { break; }

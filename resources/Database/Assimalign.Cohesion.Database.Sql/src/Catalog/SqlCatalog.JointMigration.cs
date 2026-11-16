@@ -1,15 +1,105 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
 {
     internal Action? BeforeJointDiscard { get; set; }
+    internal Func<BTreeIndexRegistration, ulong>? IndexPageOwner { get; set; }
+    internal ulong NextReservedIdentity { get { lock (_sync) { return _nextObjectId; } } }
+    // Old snapshot descriptions can still read the same physical layout. Weak
+    // keys avoid retaining one description per owner-keeping publication forever.
+    private readonly ConditionalWeakTable<SqlCatalogTable, object> _keptReadVersions = new();
+    private readonly Dictionary<TransactionSequence, ulong[]> _indexRetirementsPublishing = new();
+
+    private SqlCatalogTable[] PrepareKeptReadVersions(IReadOnlyList<SqlCatalogTable> kept)
+    {
+        if (kept.Count == 0) { return []; }
+        var added = kept.Select(table => _tables[(table.Schema, table.Name)].Table)
+            .Where(previous => !_keptReadVersions.TryGetValue(previous, out _)).ToArray();
+        try
+        {
+            foreach (var previous in added)
+            { _keptReadVersions.Add(previous, new object()); }
+            return added;
+        }
+        catch
+        {
+            foreach (var previous in added) { _keptReadVersions.Remove(previous); }
+            throw;
+        }
+    }
+
+    private bool IsKeptReadVersion(SqlCatalogTable table)
+        => _keptReadVersions.TryGetValue(table, out _) &&
+            (_tables.TryGetValue((table.Schema, table.Name), out var live) && live.Table.ObjectId == table.ObjectId ||
+                _pendingReclamations.ContainsKey(table.ObjectId));
+
+    internal ulong ReserveJointTreeOwner(SqlCatalogTable table, CancellationToken token)
+    {
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            token.ThrowIfCancellationRequested();
+            ulong owner = _nextObjectId;
+            using var admission = TransactionCheckpointInterlock.ForStorage(_storage)
+                .Enter("SqlCatalog", unchecked((long)owner), token);
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)owner));
+            var location = _storage.InsertRow(transaction, owner, SqlReclamationRecord.Encode(owner, table.Schema, table.Name));
+            var counter = PersistCounter(transaction, checked(owner + 1), _ddlGeneration);
+            var intent = new SqlReclamationIntent(location.PageId, location.SlotIndex);
+            _pendingReclamations.EnsureCapacity(_pendingReclamations.Count + 1);
+            _preparedTruncateOwners.EnsureCapacity(_preparedTruncateOwners.Count + 1);
+            transaction.Commit();
+            _pendingReclamations.Add(owner, intent);
+            _preparedTruncateOwners.Add(owner);
+            _counterLocation = counter;
+            _nextObjectId = owner + 1;
+            return owner;
+        }
+    }
+
+    // Alternate tree owners use kind 14 unchanged. Stage retirement in exactly the
+    // same transaction that removes their registration, for every SQL DDL path.
+    private Action StageIndexRetirements(StorageTransaction transaction, IEnumerable<BTreeIndexRegistration> removed, int additionalOwners = 0,
+        TransactionSequence? publicationMarker = null)
+    {
+        var owners = removed.Select(registration => (Registration: registration,
+            Owner: IndexPageOwner?.Invoke(registration) ?? registration.ObjectId))
+            .Where(item => item.Owner != item.Registration.ObjectId).ToArray();
+        var intents = owners.Select(item =>
+        {
+            var table = _tables.Values.Single(slot => slot.Table.ObjectId == item.Registration.ObjectId).Table;
+            var location = _storage.InsertRow(transaction, item.Owner, SqlReclamationRecord.Encode(item.Owner, table.Schema, table.Name));
+            return (item.Owner, Intent: new SqlReclamationIntent(location.PageId, location.SlotIndex));
+        }).ToArray();
+        _pendingReclamations.EnsureCapacity(_pendingReclamations.Count + intents.Length + additionalOwners);
+        ulong[] hidden = publicationMarker is null ? [] : intents.Select(item => item.Owner).ToArray();
+        if (hidden.Length != 0)
+        {
+            _truncateRetirementsPublishing.EnsureCapacity(_truncateRetirementsPublishing.Count + hidden.Length + additionalOwners);
+            _indexRetirementsPublishing.EnsureCapacity(_indexRetirementsPublishing.Count + 1);
+        }
+        return () =>
+        {
+            foreach (var item in intents) { _pendingReclamations.Add(item.Owner, item.Intent); }
+            if (hidden.Length != 0)
+            {
+                foreach (ulong owner in hidden) { _truncateRetirementsPublishing.Add(owner); }
+                _indexRetirementsPublishing.Add(publicationMarker!.Value, hidden);
+            }
+        };
+    }
 
     // Called under the catalog monitor, including by implicit identity naming.
     // Compiled tables live in dbo. Kind 9 carries new-table names for the whole job.
@@ -45,7 +135,7 @@ public sealed partial class SqlCatalog
     }
 
     internal ValueTask DiscardJointIntentAsync(CancellationToken cancellationToken,
-        IReadOnlyList<SqlCatalogTable>? prepared = null)
+        IReadOnlyList<SqlCatalogTable>? prepared = null, IReadOnlyList<ulong>? preparedTrees = null)
     {
         BeforeJointDiscard?.Invoke();
         lock (_sync)
@@ -53,7 +143,8 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             if (_pendingMigration is null && prepared is not { Count: > 0 }) { return default; }
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             foreach (var location in _pendingMigrationLocations)
             { _storage.DeleteRow(transaction, location.PageId, location.SlotIndex); }
             transaction.Commit();
@@ -65,9 +156,16 @@ public sealed partial class SqlCatalog
                 for (int index = 0; index < prepared.Count; index++)
                 { _preparedTruncateOwners.Remove(prepared[index].ObjectId); }
             }
+            if (preparedTrees is not null)
+            { foreach (ulong owner in preparedTrees) { _preparedTruncateOwners.Remove(owner); } }
             _pendingMigrationLocations = [];
             _pendingMigration = null;
             return default;
         }
+    }
+
+    internal void AbandonJointTreeOwners(IReadOnlyList<ulong> owners)
+    {
+        lock (_sync) { foreach (ulong owner in owners) { _preparedTruncateOwners.Remove(owner); } }
     }
 }

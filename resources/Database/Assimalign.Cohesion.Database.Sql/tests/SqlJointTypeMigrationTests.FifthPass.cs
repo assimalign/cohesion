@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -97,66 +98,48 @@ public sealed partial class SqlJointTypeMigrationTests
             database.DataStorage.CheckpointJournalSize = threshold;
             database.CatalogStorage.CheckpointJournalSize = 0;
             long reclaimed = database.TableReclamation.ReclaimedPages;
-            long peak = 0, peakCycle = 0;
-            int refused = 0, refusedCycle = 0, checkpoints = 0, batches = 0;
-            var worker = engine.Workers.OfType<SqlCheckpointWorker>().Single();
+            long peak = 0;
+            int batches = 0;
+            var source = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Storage");
+            using var checkpoints = new Assimalign.Cohesion.Testing.EventSourceRecorder(source, EventLevel.Verbose);
             database.TableReclamation.BeforeBatchCommit = (_, _) =>
-            {
-                peak = Math.Max(peak, database.DataStorage.JournalLength);
-                if (database.DataStorage.JournalLength >= threshold)
-                {
-                    Should.Throw<StorageTransactionException>(() => PollCheckpoint(worker, database, TimeSpan.FromDays(1), guard.Token));
-                    refused++;
-                    refusedCycle++;
-                }
-            };
+            { peak = Math.Max(peak, database.DataStorage.JournalLength); };
             database.TableReclamation.AfterBatch = (_, _) =>
             { batches++; peak = Math.Max(peak, database.DataStorage.JournalLength); };
             try
             {
-                // Act: a pending attempt below the size threshold must also get an idle poll.
+                // Act: a pending wake below the size threshold still yields before admission.
                 if (pendingOnly)
                 {
                     engine.CheckpointNeededSignal.Set();
                     database.TableReclamation.Request();
                     database.TableReclamation.RunBatch(guard.Token);
                     batches.ShouldBe(0);
-                    engine.CheckpointNeededSignal.Reset();
                 }
                 database.TableReclamation.Request();
                 while (database.TableReclamation.HasWork)
                 {
                     guard.Token.ThrowIfCancellationRequested();
-                    database.TableReclamation.RunBatch(guard.Token);
-                    if (database.DataStorage.JournalLength < threshold) { continue; }
-                    long before = database.DataStorage.JournalLength;
-                    int beforeBatches = batches;
-                    engine.CheckpointNeededSignal.Reset(); // Worker consumed the crossing wake.
-                    // Repeated requests/polls cannot add even another owner's bracket.
-                    for (int poll = 0; poll < 8; poll++)
-                    {
-                        database.TableReclamation.Request();
-                        database.TableReclamation.RunBatch(guard.Token);
-                    }
-                    database.DataStorage.JournalLength.ShouldBe(before);
-                    batches.ShouldBe(beforeBatches);
-                    refusedCycle.ShouldBeLessThanOrEqualTo(1);
-                    PollCheckpoint(worker, database, TimeSpan.FromDays(1), guard.Token).ShouldBeTrue();
+                    // The worker is deliberately paused. Acknowledge each crossing wake;
+                    // release itself must have checkpointed before another bracket can run.
                     engine.CheckpointNeededSignal.Reset();
-                    checkpoints++;
-                    peakCycle = Math.Max(peakCycle, refusedCycle);
-                    refusedCycle = 0;
+                    database.TableReclamation.RunBatch(guard.Token);
+                    database.DataStorage.IsCheckpointDue(TimeSpan.MaxValue).ShouldBeFalse();
                 }
 
-                // Assert: one in-flight bracket, independent of owners or requests.
+                // Assert: sample each actual checkpoint BEFORE truncation, including commit WAL.
+                var completed = checkpoints.Events.Where(e => e.EventId == 6 && Equals(e.Payload![0], (string)database.DataStorage.Name)
+                    && Equals(e.Payload![1], "Success")).ToArray();
+                foreach (var checkpoint in checkpoints.Events.Where(e => e.EventId == 5 && Equals(e.Payload![0], (string)database.DataStorage.Name)))
+                { peak = Math.Max(peak, (long)checkpoint.Payload![2]!); }
                 long overshoot = 32L * 2 * (Page.Size + 46) + 152;
                 peak.ShouldBeLessThanOrEqualTo(threshold + overshoot);
-                peakCycle.ShouldBeLessThanOrEqualTo(1);
-                refused.ShouldBeGreaterThan(0);
-                checkpoints.ShouldBeGreaterThan(0);
+                completed.Length.ShouldBeGreaterThan(0);
+                checkpoints.Events.ShouldNotContain(e => e.EventId == 0);
+                batches.ShouldBeGreaterThan(0);
                 database.TableReclamation.ReclaimedPages.ShouldBe(reclaimed + pages);
                 database.IsOffline.ShouldBeFalse();
-                _output.WriteLine($"reclaim pages={pages}; peak={peak}; bound={threshold + overshoot}; refused={refused}; cycles={checkpoints}; max refused/cycle={peakCycle}");
+                _output.WriteLine($"reclaim pages={pages}; peak={peak}; bound={threshold + overshoot}; release checkpoints={completed.Length}; batches={batches}");
             }
             finally { database.TableReclamation.BeforeBatchCommit = null; database.TableReclamation.AfterBatch = null; }
         });
@@ -372,21 +355,22 @@ public sealed partial class SqlJointTypeMigrationTests
                 engine.CheckpointNeededSignal.Reset();
                 long reclaimed = database.TableReclamation.ReclaimedPages;
                 long peak = 0;
-                int checkpoints = 0;
+                var checkpointSource = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Storage");
+                using var drainCheckpoints = new Assimalign.Cohesion.Testing.EventSourceRecorder(checkpointSource, EventLevel.Verbose);
                 database.TableReclamation.Request();
                 while (database.TableReclamation.HasWork)
                 {
                     guard.Token.ThrowIfCancellationRequested();
+                    engine.CheckpointNeededSignal.Reset();
                     database.TableReclamation.RunBatch(guard.Token);
                     peak = Math.Max(peak, database.DataStorage.JournalLength);
-                    if (database.DataStorage.JournalLength < 1024 * 1024) { continue; }
-                    // Let several reclamation polls run before the next checkpoint.
-                    for (int poll = 0; poll < 8; poll++) { database.TableReclamation.RunBatch(guard.Token); }
-                    peak = Math.Max(peak, database.DataStorage.JournalLength);
-                    PollCheckpoint(worker, database, TimeSpan.FromDays(1), guard.Token).ShouldBeTrue();
-                    engine.CheckpointNeededSignal.Reset();
-                    checkpoints++;
+                    database.DataStorage.IsCheckpointDue(TimeSpan.MaxValue).ShouldBeFalse();
                 }
+                var completed = drainCheckpoints.Events.Where(e => e.EventId == 6 && Equals(e.Payload![0], (string)database.DataStorage.Name)
+                    && Equals(e.Payload![1], "Success")).ToArray();
+                int checkpoints = completed.Length;
+                foreach (var checkpoint in drainCheckpoints.Events.Where(e => e.EventId == 5 && Equals(e.Payload![0], (string)database.DataStorage.Name)))
+                { peak = Math.Max(peak, (long)checkpoint.Payload![2]!); }
                 database.Coordinator.Checkpoint(guard.Token);
 
                 // Assert

@@ -13,6 +13,7 @@ Each `CohesionSharedSource` declaration selects one named subfolder of its owner
 | `Database.Graph.Protocol` | `Encoding` | Graph value encoding and local message contracts |
 | `Database.Sql.Language` | `Types` | SQL type modifiers, namespace names and temporal readers |
 | `Database.Sql.Schema` | `Defaults` | SQL default literal rendering |
+| `Database.Storage` | `JournalFormat` | Journal frame codec, CRC-32C and recovery analysis, compiled into Storage and the five model engines so each can pre-scan a journal before its format gate (#1744) |
 
 Owners use their full `Assimalign.Cohesion.` project names in declarations. The Database SDK
 also selects the `Types` and `Defaults` modules. Moving these files preserves their namespaces

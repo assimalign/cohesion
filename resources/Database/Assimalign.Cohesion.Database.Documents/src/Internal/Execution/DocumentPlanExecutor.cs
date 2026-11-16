@@ -52,8 +52,8 @@ internal static partial class DocumentPlanExecutor
         // including when blocking stages or dynamic column types prevent early paging.
         if (plan.Logical.Limit == 0) { return CreateResult(plan.Logical, [], cancellationToken); }
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
-            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);
+        var evaluator = new DocumentExpressionEvaluator(DocumentSourceName.Of(query), parameters, cancellationToken, writeVerb, operation.TransactionStart,
+            query.Unnest.Count > 0 ? DocumentSourceName.Of(query) : null, database.Engine.Functions, database.Name, operation: operation);
         if (plan.Access is DocumentOrderingPath { Consumed: { } consumed })
         { return await ExecuteOrderedSelectAsync(database, operation, plan, consumed, evaluator, cancellationToken).ConfigureAwait(false); }
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access is DocumentOrderingPath ordering ? ordering.Input : plan.Access, cancellationToken).ConfigureAwait(false);
@@ -144,8 +144,8 @@ internal static partial class DocumentPlanExecutor
     {
         if (plan.Logical.Limit == 0) { return CreateResult(plan.Logical, [], cancellationToken); }
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
-            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);
+        var evaluator = new DocumentExpressionEvaluator(DocumentSourceName.Of(query), parameters, cancellationToken, writeVerb, operation.TransactionStart,
+            query.Unnest.Count > 0 ? DocumentSourceName.Of(query) : null, database.Engine.Functions, database.Name, operation: operation);
         var matches = new List<DocumentEvaluationContext>();
         using var sourceMemory = evaluator.Memory.Reserve();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))

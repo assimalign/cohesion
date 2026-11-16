@@ -45,7 +45,7 @@ internal sealed partial class SqlPlanExecutor
 
     private readonly SqlStorage _storage;
     private readonly SqlCatalog _catalog;
-    private readonly BTreeIndexManager _indexManager;
+    private readonly SqlIndexManager _indexManager;
     private readonly SqlBoundTableCache _definitions;
 
     /// <summary>
@@ -71,7 +71,7 @@ internal sealed partial class SqlPlanExecutor
     /// into the plan's expressions (<see cref="SqlBoundParameter"/>), so nothing looks one up by
     /// name while the statement runs.
     /// </remarks>
-    internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions)
+    internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, SqlIndexManager indexManager, SqlBoundTableCache definitions)
     {
         _storage = storage;
         _catalog = catalog;
@@ -1317,11 +1317,11 @@ internal sealed partial class SqlPlanExecutor
         var manager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = _storage,
-            ExistingIndexes = [registration],
+            ExistingIndexes = [registration with { ObjectId = _indexManager.PageOwner(registration) }],
             TransactionSource = context => coordinator.TryGetStorageTransaction(context, out var bracket) ? bracket
                 : throw new DatabaseException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResolveStatementBracketDatabase, context.Sequence)),
         });
-        manager.TryGetIndex(objectId, name, out var index);
+        manager.TryGetIndex(_indexManager.PageOwner(registration), name, out var index);
         return index!;
     }
 

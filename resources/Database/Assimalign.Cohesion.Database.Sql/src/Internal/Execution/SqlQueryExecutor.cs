@@ -31,10 +31,10 @@ internal sealed partial class SqlQueryExecutor
 
     private readonly SqlStorage _storage;
     private readonly SqlCatalog _catalog;
-    private readonly BTreeIndexManager _indexManager;
+    private readonly SqlIndexManager _indexManager;
     private readonly SqlBoundTableCache _definitions;
 
-    internal SqlQueryExecutor(SqlStorage storage, SqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions)
+    internal SqlQueryExecutor(SqlStorage storage, SqlCatalog catalog, SqlIndexManager indexManager, SqlBoundTableCache definitions)
     {
         _storage = storage;
         _catalog = catalog;

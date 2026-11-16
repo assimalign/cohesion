@@ -365,7 +365,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
 | New (#1731, OQ-Q1) | CD00014 | Language/syntax — direct IN subquery requires SELECT RAW or SELECT VALUE |
 | New (#1731, OQ-Q2) | CD00015 | Language/syntax — derived FROM subquery has no alias |
-| New (#1732) | CD00016 | Language/syntax — a statement containing JOIN/NEST has a SELECT source without an explicit alias |
+| Retired (#1767) | CD00016 | Reserved — former JOIN/NEST statement-wide explicit-alias requirement |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |
@@ -383,7 +383,8 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1730) | CD01032 | Binding/names — invalid null placement in a direct ordering AST |
 | New (#1731, OQ-Q2) | CD01033 | Binding/names — FROM expression has no explicit alias or implicit field name |
 | New (#1731, OQ-Q2) | CD01034 | Binding/names — unbound variable in a FROM expression without an input-row scope |
-| New (#1732) | CD01035 | Binding/names — unbound/self/forward key source reference, missing joined alias, or ambiguous/invalid joined META receiver |
+| New (#1732) | CD01035 | Binding/names — unbound/self/forward key source reference or ambiguous/invalid joined META receiver |
+| New (#1767) | CD01036 | Binding/names — VALUES references its destination binding without a source row or local declaration |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |

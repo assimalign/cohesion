@@ -71,7 +71,7 @@ column names, types, order, nullability and SQL's measured SELECT/TableScan coun
 
 Each `CohesionSharedSource` declaration names its owner and required `Module`. Database's engine
 helpers live in `shared/Engine/`, with the model projects selecting `Module="Engine"`. Other
-Database owners expose `Diagnostics`, `Parameters`, `Encoding`, `Types` and `Defaults` modules.
+Database owners expose `Diagnostics`, `Parameters`, `Encoding`, `Types`, `Defaults` and Storage's `JournalFormat` modules. JournalFormat owns the only journal frame codec and analysis; its conservative pre-scan stops at the first in-file full image before delegating to a recovered probe.
 The move preserves helper contents and their internal, assembly-local type identities. Test-only
 linked support remains ordinary Compile items. Every project ItemGroup contains one item type,
 preserving declaration metadata and evaluation order when groups split during integration.
@@ -365,7 +365,10 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   releases every file set, so a disposed engine still referenced holds none of its databases), and
   an open copies the closed streams' bytes into new streams outside its lock, each allocated once
   at its final size (a `MemoryStream` keeps its buffer after it closes), and runs the same
-  recovery a file reopen runs; it refuses a file set whose storage still has a stream open. The
+  recovery a file reopen runs; it refuses a file set whose storage still has a stream open.
+  Format preflight (#1744) instead borrows the closed buffers through non-writable streams,
+  without replacing the stored set or copying database/journal bytes; accepted opens then use
+  the existing writable copy and recovery path. The
   root suite pins the base's part with a test leaf (`TestEngine`) whose close a gate holds: an
   open, a canceled open, a drop and the engine's disposal during a holder's close, the refusal
   of a leaf that never forgets, and a second disposal that waits.
@@ -1422,7 +1425,9 @@ Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPage
 ## Cross-model index-purge conformance (#1195)
 
 The root integration suite proves SQL, KeyValuePair, Documents and Graph compose the shared
-coordinator's bounded index-prune callback against real storage. Documents and Graph tests
+coordinator's bounded index-prune callback against real storage. SQL's probe attaches to a
+published SQL index's physical pages, preserving coverage when its internal logical directory
+composes separately owned trees (#1777). Documents and Graph tests
 reattach their index managers before the pass, covering replacement after DDL rollback.
 The coordinator owns the horizon/apply gate; models supply their current manager without new
 interfaces, model-specific vacuum loops or root access to index-page internals. Blob has no

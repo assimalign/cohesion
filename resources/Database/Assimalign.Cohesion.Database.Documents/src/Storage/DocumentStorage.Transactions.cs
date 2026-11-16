@@ -40,6 +40,7 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
     /// <param name="checkpointOnOpen">Whether to checkpoint immediately.</param>
     /// <param name="durability">The requested durability, or null to derive it from the backing store.</param>
     /// <returns>The recovered storage.</returns>
+    /// <remarks>A read-only data stream opens a recovered probe: original bytes never change and mutations are refused (#1744).</remarks>
     public static DocumentStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability)
     {
         var storage = new DocumentStorage(data, journal, backup);

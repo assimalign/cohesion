@@ -45,7 +45,7 @@ internal static partial class DocumentPlanExecutor
 
         IEnumerable<KeyValuePair<string, object?>> Members(DocumentEvaluationContext member)
         {
-            yield return new(query.Alias ?? query.Collection, member.Content);
+            yield return new(DocumentSourceName.Of(query), member.Content);
             // Bindings are distinct by planning, so their reverse linked-list order
             // affects only JSON member order, which is not part of object equality.
             for (var binding = member.Bindings; binding is not null; binding = binding.Parent)

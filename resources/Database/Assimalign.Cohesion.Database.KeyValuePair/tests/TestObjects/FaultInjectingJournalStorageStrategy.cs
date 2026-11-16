@@ -179,7 +179,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     /// bytes after disposal, so this works for a storage the engine closed.
     /// </summary>
     /// <inheritdoc />
-    public override KeyValueStorage OpenStorage(string databaseName, bool catalog)
+    public override KeyValueStorage OpenStorage(string databaseName, bool catalog, bool readOnly = false)
     {
         if (OpenFailure?.Invoke(catalog) is { } failure) { throw failure; }
         string key = Key(databaseName, catalog);
@@ -189,6 +189,13 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
             if (!_storages.TryGetValue(key, out var closed))
             {
                 throw new DatabaseNotFoundException($"Database '{databaseName}' does not exist.");
+            }
+
+            if (readOnly)
+            {
+                return KeyValueStorage.Open(DatabaseMemoryFiles.ReadOnly(closed.Data),
+                    DatabaseMemoryFiles.ReadOnly(closed.Journal, LoseUnconfirmedJournalOnReopen ? closed.Journal.ConfirmedLength : null),
+                    DatabaseMemoryFiles.ReadOnly(closed.Backup), checkpointOnOpen: false);
             }
 
             var journal = Copy(closed.Journal, new FaultInjectingStream());

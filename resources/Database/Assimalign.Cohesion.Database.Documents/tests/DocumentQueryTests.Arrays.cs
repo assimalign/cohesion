@@ -89,8 +89,8 @@ public sealed partial class DocumentQueryTests
             Encoding.UTF8.GetString(rows[0].GetBytes(0).Span).ShouldContain("\"t\":\"blue\"", Case.Sensitive);
         }
         Encoding.UTF8.GetString((await RowsAsync(session, "SELECT * FROM items WHERE META().id = 'a'")).Single().GetBytes(0).Span).ShouldBe(json);
-        // An unaliased source still reads an actual field named items, not an implicit variable.
-        (await RowsAsync(session, "SELECT items.tags FROM items UNNEST tags t")).ShouldAllBe(row => row.IsMissing(0));
+        // The unaliased collection name is the source binding in every path.
+        (await RowsAsync(session, "SELECT items.tags FROM items UNNEST tags t")).ShouldAllBe(row => row.GetValue(0).ShouldBeOfType<JsonElement>().GetArrayLength() == 2);
         var collision = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("SELECT * FROM items LEFT UNNEST tags items", cancellationToken: CancellationToken.None));
         collision.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00010");
@@ -466,7 +466,7 @@ public sealed partial class DocumentQueryTests
         (await RowsAsync(session, "SELECT t FROM COHESION_SCHEMA.INDEXES s UNNEST s.PATHS t WHERE t = 'tags'"))
             .ShouldHaveSingleItem().GetValue(0).ShouldBe("tags");
         var systemStar = (await RowsAsync(session, "SELECT * FROM COHESION_SCHEMA.INDEXES UNNEST PATHS t")).ShouldHaveSingleItem();
-        systemStar.GetValue(0).ShouldBeOfType<JsonElement>().GetProperty("COHESION_SCHEMA.INDEXES").GetProperty("INDEX_NAME").GetString().ShouldBe("by_tags");
+        systemStar.GetValue(0).ShouldBeOfType<JsonElement>().GetProperty("INDEXES").GetProperty("INDEX_NAME").GetString().ShouldBe("by_tags");
         var explained = await RowsAsync(session, "EXPLAIN SELECT t FROM COHESION_SCHEMA.INDEXES s UNNEST s.PATHS t");
         explained.Select(row => row.GetValue(2)).ShouldBe(new object?[] { "SystemCollection", "Project", "Unnest", "SystemCollectionScan" });
         await session.ExecuteAsync("INSERT INTO copies (KEY k, VALUE v) SELECT t AS k, {tag:t} AS v FROM items d UNNEST d.tags t", cancellationToken: CancellationToken.None);

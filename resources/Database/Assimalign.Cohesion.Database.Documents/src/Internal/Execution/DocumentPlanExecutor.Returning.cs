@@ -43,7 +43,7 @@ internal static partial class DocumentPlanExecutor
             _limit = database.Engine.EngineOptions.StatementMemoryBudget;
             _memory = operation.GetStatementMemory(cancellationToken);
             _wholeDocument = plan.Projections.Count == 1 && plan.Projections[0].Expression is OqlStarExpression;
-            _evaluator = new DocumentExpressionEvaluator(plan.Query.Alias, parameters, cancellationToken,
+            _evaluator = new DocumentExpressionEvaluator(DocumentSourceName.Of(plan.Query), parameters, cancellationToken,
                 transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name,
                 resultClause: "RETURNING", operation: nested is null ? null : operation, nested: nested);
             Charge(128L + plan.Projections.Count * 64L);

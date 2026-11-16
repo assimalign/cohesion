@@ -52,8 +52,8 @@ internal static partial class DocumentPlanExecutor
         DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb, DocumentNestedExecutionContext nested)
     {
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
-            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation, nested: nested, sourceName: query.Alias ?? query.Collection);
+        var evaluator = new DocumentExpressionEvaluator(DocumentSourceName.Of(query), parameters, cancellationToken, writeVerb, operation.TransactionStart,
+            query.Unnest.Count > 0 ? DocumentSourceName.Of(query) : null, database.Engine.Functions, database.Name, operation: operation, nested: nested);
         if (plan.Access is DocumentOrderingPath { Consumed: { } consumed })
         { return await ExecuteNestedOrderedSelectAsync(database, operation, plan, consumed, evaluator, cancellationToken, nested).ConfigureAwait(false); }
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access is DocumentOrderingPath ordering ? ordering.Input : plan.Access, cancellationToken).ConfigureAwait(false);
@@ -104,8 +104,8 @@ internal static partial class DocumentPlanExecutor
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb, DocumentNestedExecutionContext nested)
     {
         var query = plan.Logical.Query;
-        var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
-            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation, nested: nested, sourceName: query.Alias ?? query.Collection);
+        var evaluator = new DocumentExpressionEvaluator(DocumentSourceName.Of(query), parameters, cancellationToken, writeVerb, operation.TransactionStart,
+            query.Unnest.Count > 0 ? DocumentSourceName.Of(query) : null, database.Engine.Functions, database.Name, operation: operation, nested: nested);
         var matches = new List<DocumentEvaluationContext>();
         using var sourceMemory = evaluator.Memory.Reserve();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))

@@ -84,7 +84,12 @@ public sealed class StorageEventSourceTests
 
         // Assert
         recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
-        var events = recorder.For(name);
+        var peaks = recorder.For(name).Where(e => e.EventId == 20).ToArray();
+        peaks.Length.ShouldBe(2);
+        peaks.ShouldAllBe(e => e.PayloadNames!.SequenceEqual(new[] { "database", "peakLength" }));
+        peaks.ShouldAllBe(e => e.Level == EventLevel.Verbose && SourceKeywords(e) == StorageEventSource.Keywords.Checkpoints);
+        peaks.ShouldAllBe(e => e.Payload!.SequenceEqual(new object[] { name, journalLength }));
+        var events = recorder.For(name).Where(e => e.EventId != 20).ToArray();
         events.Select(e => e.EventName).ShouldBe(
         [
             "StorageCreated",
@@ -138,6 +143,36 @@ public sealed class StorageEventSourceTests
         journalFlushesForCommit.ShouldBe(1);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint: attribute every active bracket, including untouched and adopted brackets (#1283)")]
+    public void Checkpoint_ActiveBrackets_ShouldAttributeEachPhysicalIdentity()
+    {
+        // Arrange: equal adopted sequences must remain distinct physical brackets.
+        string name = UniqueName();
+        using var storage = TornStorage.Create(name: name);
+        using var recorder = new StorageEventRecorder(EventLevel.Verbose);
+        using var catalog = storage.BeginTransaction("SqlCatalog", 17);
+        using var first = storage.BeginTransaction(91);
+        using var second = storage.BeginTransaction(91);
+
+        // Act
+        Should.Throw<StorageTransactionException>(() => storage.Checkpoint());
+        catalog.Rollback();
+        first.Rollback();
+        second.Rollback();
+        storage.Checkpoint();
+
+        // Assert: one event per blocking bracket, grouped under the same refusal identity.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+        var busy = recorder.For(name).Where(e => e.EventId == 19).ToArray();
+        busy.Length.ShouldBe(3);
+        busy.ShouldAllBe(e => e.PayloadNames!.SequenceEqual(new[] { "database", "bracketClass", "owner", "transactionSequence", "refusal" }));
+        busy.Select(e => (long)e.Payload![4]!).Distinct().Count().ShouldBe(1);
+        busy.Count(e => Equals(e.Payload![1], "Adopted") && Equals(e.Payload[3], 91L)).ShouldBe(2);
+        busy.ShouldContain(e => Equals(e.Payload![1], "SqlCatalog") && Equals(e.Payload[2], 17L)
+            && Equals(e.Payload[3], catalog.Sequence));
+        storage.ActiveTransactions.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - StorageEventSource: Should close a failed checkpoint's activity with a zero LSN")]
     public void Checkpoint_JournalFlushFails_ShouldWriteStopWithZeroLsn()
     {
@@ -157,7 +192,8 @@ public sealed class StorageEventSourceTests
         // Assert: the stop follows the offline transition the failure caused, once, with LSN zero;
         // the failed checkpoint is not counted.
         recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
-        var events = recorder.For(name);
+        recorder.For(name).Count(e => e.EventId == 20).ShouldBe(1);
+        var events = recorder.For(name).Where(e => e.EventId != 20).ToArray();
         events.Select(e => e.EventName).ShouldBe(
             ["StorageCreated", "CheckpointStart", "StorageOffline", "CheckpointStop", "ShutdownFlushSkipped", "StorageClosed"]);
 

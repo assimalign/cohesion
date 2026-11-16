@@ -61,6 +61,9 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
         _durability = durability;
     }
 
+    internal override bool RequiresRecovery(string databaseName, bool catalog, CancellationToken cancellationToken = default)
+        => DatabaseRecoveryPreflight.Required(DatabaseFileNames.GetDirectory(_rootPath, databaseName), null, databaseName, GetFileSet(catalog), cancellationToken);
+
     /// <inheritdoc />
     public override SqlStorage CreateStorage(string databaseName, bool catalog)
         => CreateStorage(databaseName, catalog, restarting: false);
@@ -106,7 +109,7 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default)
+    public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default, bool readOnly = false)
     {
         var files = DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog));
 
@@ -120,18 +123,18 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
             throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
                 ErrorMessages.CreationSidecarMissing, databaseName), "CS03401");
         }
-        var dataStream = StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
+        var dataStream = readOnly ? new StorageStream(new FileStream(files.Data, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
 
         StorageStream? journalStream = null;
         StorageStream? backupStream = null;
         try
         {
-            journalStream = StorageStream.FromFile(files.Journal, FileMode.Open, FileShare.Read);
-            backupStream = StorageStream.FromFile(files.Backup, FileMode.Open, FileShare.Read);
+            journalStream = readOnly ? new StorageStream(new FileStream(files.Journal, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Journal, FileMode.Open, FileShare.Read);
+            backupStream = readOnly ? new StorageStream(new FileStream(files.Backup, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Backup, FileMode.Open, FileShare.Read);
 
             // Defer the open-time checkpoint: the engine's transaction coordinator
             // analyzes the recovered journal before checkpoint truncates its records.
-            return SqlStorage.Open(dataStream, journalStream, backupStream, checkpointOnOpen: false, _durability, cancellationToken);
+            return SqlStorage.Open(dataStream, journalStream, backupStream, checkpointOnOpen: false, readOnly ? null : _durability, cancellationToken);
         }
         catch
         {
@@ -177,26 +180,26 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
         {
             JournalLength = journalLength,
             BackupLength = backupLength,
-            // All file sizes use overlays. Recovery changes only private blocks; the
-            // catalog format gate cannot redo or truncate the real files.
+            // Every file size uses Storage's lazy recovered read-only view (#1744).
+            // The catalog gate cannot redo or truncate the original files.
             OpenReadOnly = () => OpenProbe(files.Data, files.Journal, files.Backup),
         };
     }
 
     private static SqlStorage OpenProbe(string dataPath, string journalPath, string backupPath)
     {
-        var copy = new SqlProbeStream(dataPath);
+        var data = new FileStream(dataPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         Stream? journal = null;
         Stream? backup = null;
         try
         {
-            journal = new SqlProbeStream(journalPath);
-            backup = new SqlProbeStream(backupPath);
-            return SqlStorage.Open(copy, journal, backup, checkpointOnOpen: false);
+            journal = new FileStream(journalPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            backup = new FileStream(backupPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return SqlStorage.Open(data, journal, backup, checkpointOnOpen: false);
         }
         catch
         {
-            copy.Dispose();
+            data.Dispose();
             journal?.Dispose();
             backup?.Dispose();
             throw;

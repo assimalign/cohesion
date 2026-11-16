@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Transactions;
@@ -138,7 +139,8 @@ public sealed partial class SqlCatalog
             var replacements = expected.Select(table => describe is not null ? describe(table, checked(next++)) : new SqlCatalogTable(checked(next++), table.Schema, table.Name,
                 table.Columns, table.PrimaryKeyColumns, table.Owner, table.OwningSchema, table.Constraints,
                 table.DroppedColumnOrdinals)).ToArray();
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             // Reuse kind 14 for unreachable prepared owners too. A failed build or crash
             // leaves durable reclamation work. The active statement pins these owners until
             // publication/cleanup has finished; successful publication removes these intents.
@@ -183,14 +185,39 @@ public sealed partial class SqlCatalog
         IReadOnlyList<BTreeIndexRegistration> registrations, Dictionary<SqlCatalogIndex, BTreeIndex> retiredIndexes,
         bool restartIdentity, TransactionSequence marker, string actualObject, SqlCatalogScriptPublication? publication, CancellationToken cancellationToken,
         bool definitionChange = false, SqlCatalogSchemaState? appliedSchema = null,
-        IReadOnlyList<SqlCatalogTable>? dropped = null, Action? beforeTransaction = null)
+        IReadOnlyList<SqlCatalogTable>? dropped = null, Action? beforeTransaction = null,
+        IReadOnlyList<SqlCatalogTable>? kept = null, IReadOnlyList<ulong>? treeOwners = null, Action? publishTrees = null,
+        IReadOnlyList<SqlCatalogTable>? expectedKept = null)
     {
         lock (_sync)
         {
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             ValidateStorageReplacement(expected, named);
+            ValidateStorageReplacement(expectedKept ?? [], null);
             dropped ??= [];
+            kept ??= [];
+            treeOwners ??= [];
+            foreach (var table in kept)
+            {
+                var previous = _tables[(table.Schema, table.Name)].Table;
+                string? mismatch = previous.ObjectId != table.ObjectId ? nameof(SqlCatalogTable.ObjectId)
+                    : previous.Columns.Count != table.Columns.Count ? nameof(SqlCatalogTable.Columns) + ".Count" : null;
+                for (int ordinal = 0; mismatch is null && ordinal < previous.Columns.Count; ordinal++)
+                {
+                    var column = previous.Columns[ordinal];
+                    var keptColumn = table.Columns[ordinal];
+                    mismatch = column.Type != keptColumn.Type ? nameof(SqlCatalogColumn.Type)
+                        : column.Collation != keptColumn.Collation ? nameof(SqlCatalogColumn.Collation)
+                        : !string.Equals(column.DomainName, keptColumn.DomainName, StringComparison.OrdinalIgnoreCase) ? nameof(SqlCatalogColumn.DomainName) : null;
+                    if (mismatch is not null) { mismatch = nameof(SqlCatalogTable.Columns) + "[" + column.Name + "]." + mismatch; }
+                }
+                if (mismatch is not null)
+                { throw new SqlCatalogException("CS05060", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.KeptTableShapeMismatch, table.Schema, table.Name, mismatch)); }
+                EnsurePhysicalLayoutKept(previous, table);
+            }
+            var allReplacements = replacements.Concat(kept).ToArray();
             ValidateStorageReplacement(dropped, null);
             foreach (var table in replacements)
             {
@@ -205,10 +232,13 @@ public sealed partial class SqlCatalog
             var retiring = expected.Concat(dropped).ToArray();
             ulong bindingGeneration = checked(_storageBindingGeneration + 1);
             var ids = retiring.Select(table => table.ObjectId).ToHashSet();
+            var keptIds = kept.Select(table => table.ObjectId).ToHashSet();
+            var changedIds = ids.Concat(keptIds).ToHashSet();
             var mapping = expected.Select((table, index) => (table.ObjectId, Replacement: replacements[index]))
                 .ToDictionary(pair => pair.ObjectId, pair => pair.Replacement);
             var merged = MergePublishedRegistrations(registrations, indexes)
-                .Where(registration => !ids.Contains(registration.ObjectId)).ToArray();
+                .Where(registration => !ids.Contains(registration.ObjectId) && (!keptIds.Contains(registration.ObjectId) ||
+                    indexes.Any(index => index.TableObjectId == registration.ObjectId && index.Name.Equals(registration.Definition.Name, StringComparison.OrdinalIgnoreCase)))).ToArray();
             var columns = expected.SelectMany(table => table.Columns.Select(column =>
                 (Old: SqlObjectIdentity.Column(table.ObjectId, column.Name),
                  New: SqlObjectIdentity.Column(mapping[table.ObjectId].ObjectId, column.Name))))
@@ -229,99 +259,138 @@ public sealed partial class SqlCatalog
             var before = new SqlCatalogSnapshot(retiring, _indexes.Values.Select(slot => slot.Index).Where(index => ids.Contains(index.TableObjectId)),
                 views: _views.Values.Select(slot => slot.Value).Where(view => view.TableDependencies.Any(ids.Contains)))
                 { Sequences = _sequences.Count == 0 ? [] : Array.AsReadOnly(_sequencesById.Values.Where(sequence => ids.Contains(sequence.OwnerTableId)).ToArray()) };
-            var tableRecords = replacements.Select(EncodeTable).ToArray();
+            var tableRecords = allReplacements.Select(EncodeTable).ToArray();
             var indexRecords = indexes.Select(EncodeIndex).ToArray();
             beforeTransaction?.Invoke();
-            using var transaction = _storage.BeginTransaction();
-            var tableSlots = replacements.Select((table, index) => new TableSlot(table,
-                UpsertRecord(transaction, _tables.TryGetValue((table.Schema, table.Name), out var existing) ? existing.Location : null, tableRecords[index]))).ToArray();
-            foreach (var table in dropped)
+            // Admission first: a canceled wait must not leave the kept-read markers behind.
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            var addedReadVersions = PrepareKeptReadVersions(kept);
+            bool committed = false;
+            try
             {
-                var location = _tables[(table.Schema, table.Name)].Location;
-                _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                using var transaction = _storage.BeginTransaction("SqlCatalog");
+                var tableSlots = allReplacements.Select((table, index) => new TableSlot(table,
+                    UpsertRecord(transaction, _tables.TryGetValue((table.Schema, table.Name), out var existing) ? existing.Location : null, tableRecords[index]))).ToArray();
+                foreach (var table in dropped)
+                {
+                    var location = _tables[(table.Schema, table.Name)].Location;
+                    _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                }
+                var indexSlots = indexes.Select((index, ordinal) => new IndexSlot(index,
+                    _storage.InsertRow(transaction, indexRecords[ordinal]))).ToArray();
+                var viewSlots = views.Select(view => (view.Key, Slot: new DefinitionSlot<SqlCatalogView>(view.View,
+                    UpsertRecord(transaction, view.Old.Location, view.Record)))).ToArray();
+                var oldIndexes = _indexes.Values.Where(slot => changedIds.Contains(slot.Index.TableObjectId)).ToArray();
+                var retireTrees = StageIndexRetirements(transaction, _registrations.Where(old => changedIds.Contains(old.ObjectId) &&
+                    !merged.Any(current => current.RootPageId == old.RootPageId)), retiring.Length, marker);
+                foreach (var slot in oldIndexes) { _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex); }
+                var retired = retiring.Select(table => (table.ObjectId, Location: _storage.InsertRow(transaction, table.ObjectId,
+                    SqlReclamationRecord.Encode(table.ObjectId, table.Schema, table.Name)))).ToArray();
+                ulong next = _nextObjectId;
+                Action[] owned = _sequences.Count == 0 ? [] : retiring.Select(table => StageOwnedSequences(transaction, table, mapping.GetValueOrDefault(table.ObjectId), ref next, restartIdentity))
+                    .Concat(replacements.Where(table => !mapping.Values.Contains(table)).Select(table => StageOwnedSequences(transaction, null, table, ref next))).ToArray();
+                foreach (var table in replacements)
+                {
+                    var location = _pendingReclamations[table.ObjectId];
+                    _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                }
+                foreach (ulong owner in treeOwners)
+                {
+                    var location = _pendingReclamations[owner];
+                    _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                }
+                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(merged));
+                var stateLocations = appliedSchema is null ? null : StageJointSchemaState(transaction, appliedSchema);
+                var appliedState = appliedSchema is null ? null : new SqlCatalogSchemaState(appliedSchema.ContentHash,
+                    appliedSchema.CanonicalDocument, checked(_ddlGeneration + 1));
+                // Allocate every publication directory/vector before the irrevocable commit.
+                // The monitor excludes readers; the post-commit section only assigns/removes
+                // preconstructed entries, including during memory pressure.
+                var planningIndexes = indexes.GroupBy(index => index.TableObjectId).Select(group =>
+                    (Id: group.Key, Indexes: group.OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase).ToArray())).ToArray();
+                var retirements = retired.Select(item => new SqlReclamationIntent(item.Location.PageId, item.Location.SlotIndex)).ToArray();
+                var ordered = new (ulong ObjectId, ulong ReplacementObjectId, TransactionSequence Marker)[_orderedTruncations.Length + retiring.Length];
+                _orderedTruncations.CopyTo(ordered, 0);
+                for (int index = 0; index < retiring.Length; index++)
+                { ordered[_orderedTruncations.Length + index] = (retiring[index].ObjectId, mapping.GetValueOrDefault(retiring[index].ObjectId)?.ObjectId ?? 0, marker); }
+                _tables.EnsureCapacity(_tables.Count + replacements.Count);
+                _indexes.EnsureCapacity(_indexes.Count + indexes.Count);
+                _planningIndexes.EnsureCapacity(_planningIndexes.Count + planningIndexes.Length);
+                _pendingReclamations.EnsureCapacity(_pendingReclamations.Count + retiring.Length);
+                _truncateRetirementsPublishing.EnsureCapacity(_truncateRetirementsPublishing.Count + retiring.Length);
+                _truncatedTables.EnsureCapacity(_truncatedTables.Count + retiring.Length);
+                _truncatedIndexes.EnsureCapacity(_truncatedIndexes.Count + retiredIndexes.Count);
+                _identitySequences.EnsureCapacity(_identitySequences.Count + replacements.Count);
+                DefinitionSlot<SqlCatalogScript>? receipt = null;
+                if (!definitionChange && publication is not null)
+                {
+                    ValidateScriptPublication(publication, actualObject);
+                    receipt = StageScript(transaction, CreateScriptReceipt(publication, _ddlGeneration, actualObject, false, false));
+                }
+                if (definitionChange) { CommitCatalogChange(transaction, publication: publication, actualObject: actualObject); }
+                else { transaction.Commit(); }
+                committed = true;
+                retireTrees();
+                publishTrees?.Invoke();
+                if (receipt is not null) { _scripts[receipt.Value.Name] = receipt; }
+                foreach (var slot in tableSlots) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
+                for (int index = 0; index < dropped.Count; index++)
+                { _tables.Remove((dropped[index].Schema, dropped[index].Name)); }
+                if (appliedSchema is not null)
+                {
+                    _schemaState = appliedState;
+                    _schemaStateLocations = stateLocations!;
+                    _pendingMigration = null;
+                    _pendingMigrationLocations = [];
+                }
+                foreach (var slot in oldIndexes) { _indexes.Remove((slot.Index.TableObjectId, slot.Index.Name)); }
+                foreach (ulong owner in changedIds) { _planningIndexes.Remove(owner); }
+                foreach (var slot in indexSlots) { _indexes[(slot.Index.TableObjectId, slot.Index.Name)] = slot; }
+                foreach (var item in planningIndexes) { _planningIndexes[item.Id] = item.Indexes; }
+                foreach (var view in viewSlots) { _views[view.Key] = view.Slot; }
+                foreach (var publish in owned) { publish(); }
+                for (int index = 0; index < replacements.Count; index++)
+                {
+                    var table = replacements[index];
+                    _pendingReclamations.Remove(table.ObjectId);
+                    _preparedTruncateOwners.Remove(table.ObjectId);
+                }
+                foreach (ulong owner in treeOwners)
+                {
+                    _pendingReclamations.Remove(owner);
+                    _preparedTruncateOwners.Remove(owner);
+                }
+                for (int index = 0; index < retired.Length; index++)
+                {
+                    _pendingReclamations.Add(retired[index].ObjectId, retirements[index]);
+                    _truncateRetirementsPublishing.Add(retired[index].ObjectId);
+                }
+                foreach (var table in retiring) { _truncatedTables.Add(table.ObjectId, (mapping.GetValueOrDefault(table.ObjectId)?.ObjectId ?? 0, marker, before)); }
+                foreach (var pair in retiredIndexes) { _truncatedIndexes.Add(pair.Key, pair.Value); }
+                Volatile.Write(ref _orderedTruncations, ordered);
+                _registrations = merged;
+                _registrationsLocation = registrationsLocation;
+                Volatile.Write(ref _storageBindingGeneration, bindingGeneration);
+                _snapshot = null;
+                return default;
             }
-            var indexSlots = indexes.Select((index, ordinal) => new IndexSlot(index,
-                _storage.InsertRow(transaction, indexRecords[ordinal]))).ToArray();
-            var viewSlots = views.Select(view => (view.Key, Slot: new DefinitionSlot<SqlCatalogView>(view.View,
-                UpsertRecord(transaction, view.Old.Location, view.Record)))).ToArray();
-            var oldIndexes = _indexes.Values.Where(slot => ids.Contains(slot.Index.TableObjectId)).ToArray();
-            foreach (var slot in oldIndexes) { _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex); }
-            var retired = retiring.Select(table => (table.ObjectId, Location: _storage.InsertRow(transaction, table.ObjectId,
-                SqlReclamationRecord.Encode(table.ObjectId, table.Schema, table.Name)))).ToArray();
-            ulong next = _nextObjectId;
-            Action[] owned = _sequences.Count == 0 ? [] : retiring.Select(table => StageOwnedSequences(transaction, table, mapping.GetValueOrDefault(table.ObjectId), ref next, restartIdentity))
-                .Concat(replacements.Where(table => !mapping.Values.Contains(table)).Select(table => StageOwnedSequences(transaction, null, table, ref next))).ToArray();
-            foreach (var table in replacements)
+            catch (Exception failure) when (committed)
             {
-                var location = _pendingReclamations[table.ObjectId];
-                _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                // The durable publication cannot be dismantled after an in-memory failure.
+                // Fence both file sets and let recovery rebuild the catalog and directory.
+                try { _storage.TakeOffline(StorageOfflineCause.ProvisioningFailure, ErrorMessages.StoragePublicationFailed, failure); }
+                catch (Exception fence)
+                {
+                    // If fencing itself fails, no caller may continue against the committed storage.
+                    Environment.FailFast(nameof(PublishStorageReplacementAsync), fence);
+                }
+                throw new TransactionCommitUnconfirmedException(ErrorMessages.StoragePublicationFailed, _storage.OfflineError ?? failure);
             }
-            var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(merged));
-            var stateLocations = appliedSchema is null ? null : StageJointSchemaState(transaction, appliedSchema);
-            var appliedState = appliedSchema is null ? null : new SqlCatalogSchemaState(appliedSchema.ContentHash,
-                appliedSchema.CanonicalDocument, checked(_ddlGeneration + 1));
-            // Allocate every publication directory/vector before the irrevocable commit.
-            // The monitor excludes readers; the post-commit section only assigns/removes
-            // preconstructed entries, including during memory pressure.
-            var planningIndexes = indexes.GroupBy(index => index.TableObjectId).Select(group =>
-                (Id: group.Key, Indexes: group.OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase).ToArray())).ToArray();
-            var retirements = retired.Select(item => new SqlReclamationIntent(item.Location.PageId, item.Location.SlotIndex)).ToArray();
-            var ordered = new (ulong ObjectId, ulong ReplacementObjectId, TransactionSequence Marker)[_orderedTruncations.Length + retiring.Length];
-            _orderedTruncations.CopyTo(ordered, 0);
-            for (int index = 0; index < retiring.Length; index++)
-            { ordered[_orderedTruncations.Length + index] = (retiring[index].ObjectId, mapping.GetValueOrDefault(retiring[index].ObjectId)?.ObjectId ?? 0, marker); }
-            _tables.EnsureCapacity(_tables.Count + replacements.Count);
-            _indexes.EnsureCapacity(_indexes.Count + indexes.Count);
-            _planningIndexes.EnsureCapacity(_planningIndexes.Count + planningIndexes.Length);
-            _pendingReclamations.EnsureCapacity(_pendingReclamations.Count + retiring.Length);
-            _truncateRetirementsPublishing.EnsureCapacity(_truncateRetirementsPublishing.Count + retiring.Length);
-            _truncatedTables.EnsureCapacity(_truncatedTables.Count + retiring.Length);
-            _truncatedIndexes.EnsureCapacity(_truncatedIndexes.Count + retiredIndexes.Count);
-            _identitySequences.EnsureCapacity(_identitySequences.Count + replacements.Count);
-            DefinitionSlot<SqlCatalogScript>? receipt = null;
-            if (!definitionChange && publication is not null)
+            finally
             {
-                ValidateScriptPublication(publication, actualObject);
-                receipt = StageScript(transaction, CreateScriptReceipt(publication, _ddlGeneration, actualObject, false, false));
+                if (!committed)
+                { foreach (var previous in addedReadVersions) { _keptReadVersions.Remove(previous); } }
             }
-            if (definitionChange) { CommitCatalogChange(transaction, publication: publication, actualObject: actualObject); }
-            else { transaction.Commit(); }
-            if (receipt is not null) { _scripts[receipt.Value.Name] = receipt; }
-            foreach (var slot in tableSlots) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
-            for (int index = 0; index < dropped.Count; index++)
-            { _tables.Remove((dropped[index].Schema, dropped[index].Name)); }
-            if (appliedSchema is not null)
-            {
-                _schemaState = appliedState;
-                _schemaStateLocations = stateLocations!;
-                _pendingMigration = null;
-                _pendingMigrationLocations = [];
-            }
-            foreach (var slot in oldIndexes) { _indexes.Remove((slot.Index.TableObjectId, slot.Index.Name)); }
-            foreach (var table in retiring) { _planningIndexes.Remove(table.ObjectId); }
-            foreach (var slot in indexSlots) { _indexes[(slot.Index.TableObjectId, slot.Index.Name)] = slot; }
-            foreach (var item in planningIndexes) { _planningIndexes[item.Id] = item.Indexes; }
-            foreach (var view in viewSlots) { _views[view.Key] = view.Slot; }
-            foreach (var publish in owned) { publish(); }
-            for (int index = 0; index < replacements.Count; index++)
-            {
-                var table = replacements[index];
-                _pendingReclamations.Remove(table.ObjectId);
-                _preparedTruncateOwners.Remove(table.ObjectId);
-            }
-            for (int index = 0; index < retired.Length; index++)
-            {
-                _pendingReclamations.Add(retired[index].ObjectId, retirements[index]);
-                _truncateRetirementsPublishing.Add(retired[index].ObjectId);
-            }
-            foreach (var table in retiring) { _truncatedTables.Add(table.ObjectId, (mapping.GetValueOrDefault(table.ObjectId)?.ObjectId ?? 0, marker, before)); }
-            foreach (var pair in retiredIndexes) { _truncatedIndexes.Add(pair.Key, pair.Value); }
-            Volatile.Write(ref _orderedTruncations, ordered);
-            _registrations = merged;
-            _registrationsLocation = registrationsLocation;
-            Volatile.Write(ref _storageBindingGeneration, bindingGeneration);
-            _snapshot = null;
-            return default;
         }
     }
 
@@ -329,11 +398,11 @@ public sealed partial class SqlCatalog
     // still retains that exact owner. Statement/transaction pins protect the caller's use.
     internal bool IsTruncatedTable(SqlCatalogTable table)
     {
-        if (Volatile.Read(ref _orderedTruncations).Length == 0) { return false; }
+        if (Volatile.Read(ref _orderedTruncations).Length == 0 && !_keptReadVersions.TryGetValue(table, out _)) { return false; }
         lock (_sync)
         {
             ThrowIfOffline();
-            return IsTruncatedTableCore(table);
+            return IsTruncatedTableCore(table) || IsKeptReadVersion(table);
         }
     }
 
@@ -425,11 +494,16 @@ public sealed partial class SqlCatalog
 
     // Readers admitted while the marker is active can still need the old owner. A worker
     // must allocate its fence after the marker ends, not merely after the catalog swap.
-    internal void ReleaseTruncatePublication(IReadOnlyList<SqlCatalogTable> retired)
+    internal void ReleaseTruncatePublication(IReadOnlyList<SqlCatalogTable> retired, TransactionSequence marker)
     {
         lock (_sync)
         {
             foreach (var table in retired) { _truncateRetirementsPublishing.Remove(table.ObjectId); }
+            // Readers admitted after the catalog commit but before the marker
+            // ends can still bind retired heaps AND their separate index owners.
+            // Discovery must take every retirement fence after that window closes.
+            if (_indexRetirementsPublishing.Remove(marker, out var owners))
+            { foreach (ulong owner in owners) { _truncateRetirementsPublishing.Remove(owner); } }
         }
     }
 

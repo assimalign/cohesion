@@ -89,17 +89,8 @@ public sealed class DocumentDatabase : DatabaseInstance
         // the recovery scrub has written to the database, so the check runs here
         // first: a database whose indexes this engine cannot read is refused before
         // anything is written to it.
-        try
-        {
-            DocumentCatalog.EnsureIndexFormat(storage);
-        }
-        catch (Exception exception) when (exception is Indexing.IndexFormatException or DocumentCatalogException)
-        {
-            Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogOpenFailed, name, exception.Message);
-            throw new DatabaseException(message, [new Types.Diagnostic
-            { Code = "CD06105", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
-        }
+        try { EnsureFormats(name, storage); }
+        catch { Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); throw; }
 
         if (recover)
         {
@@ -121,6 +112,21 @@ public sealed class DocumentDatabase : DatabaseInstance
             }
         }
         else { Catalog = DocumentCatalog.Open(storage, Coordinator); }
+    }
+
+    internal static void EnsureFormats(DatabaseName name, DocumentStorage storage)
+    {
+        try
+        {
+            DocumentCatalog.EnsureIndexFormat(storage);
+        }
+        catch (Exception exception) when (exception is Indexing.IndexFormatException or DocumentCatalogException)
+        {
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogOpenFailed, name, exception.Message);
+            throw new DatabaseException(message, [new Types.Diagnostic
+            { Code = "CD06105", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+        }
+
     }
 
     /// <summary>

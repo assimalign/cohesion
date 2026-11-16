@@ -100,8 +100,11 @@ Direct references are Database.Client, Documents.Protocol, Database.Types, Datab
 
 INNER/LEFT document-key JOIN and NEST use existing request text, JSON result cells and MISSING
 bits. DocumentKeyJoinWireTests checks per-source metadata, synthetic and qualified stars, correlated
-joins, unknown-key NEST arrays, EXPLAIN and located CD00016/CD01035/CD02028 refusals over InMemory
-and TCP. The NativeAOT consumer exercises both transports. No client API, capability, frame or version
+joins, unknown-key NEST arrays, EXPLAIN and located CD00010/CD01035/CD02028 refusals over InMemory
+and TCP. The generated implicit-alias corpus additionally compares 48 result-and-write digests per transport
+over SELECT and every DML form, including RETURNING, with and without unrelated subqueries
+and with scan/indexed self-named-field fixtures (#1767). The NativeAOT consumer exercises both
+transports. No client API, capability, frame or version
 changes are needed; ordinary RAW numeric roots keep their existing JSON value shape.
 
 ## FROM source results (#1731, OQ-Q2)

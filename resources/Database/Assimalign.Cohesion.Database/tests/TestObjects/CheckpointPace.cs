@@ -479,3 +479,175 @@ internal static class CheckpointPace
         }
     }
 }
+
+
+internal static class CheckpointLoad
+{
+    internal const long JournalSize = 64 * 1024;
+
+    internal static async Task RunAsync(Assimalign.Cohesion.Database.Storage.Storage storage,
+        Action<CancellationToken> checkpoint, Func<int, long, CancellationToken, Task> write, Action<string> report)
+    {
+        // Arrange: Windows process affinity includes every writer and checkpoint lane.
+        // Linux affinity is per thread; no workload-affinity claim is made there.
+        using var affinity = new LoadAffinity();
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var stop = new CancellationTokenSource();
+        using var observation = new Observation(storage.Name);
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var counts = new long[4];
+        var watch = Stopwatch.StartNew();
+        var writers = new List<Task>(4);
+        try
+        {
+            for (int writer = 0; writer < 4; writer++)
+            {
+                int index = writer;
+                writers.Add(DedicatedTestTask.Run(async () =>
+                {
+                    await ready.Task;
+                    long next = 0;
+                    while (!stop.IsCancellationRequested)
+                    {
+                        await write(index, next++, ceiling.Token);
+                        Interlocked.Increment(ref counts[index]);
+                        observation.Observe(storage.JournalLength);
+                    }
+                }, CancellationToken.None));
+            }
+            // Act: a minimum exposure followed by counter-driven progress, with a hang guard.
+            ready.SetResult();
+            do
+            {
+                await Task.Delay(10, ceiling.Token);
+                foreach (var writer in writers.Where(writer => writer.IsCompleted)) { await writer; }
+            }
+            while (watch.Elapsed < TimeSpan.FromSeconds(2) || Interlocked.Read(ref observation.Checkpoints) < 4 ||
+                Enumerable.Range(0, counts.Length).Any(index => Volatile.Read(ref counts[index]) < 32));
+        }
+        finally
+        {
+            stop.Cancel();
+            ready.TrySetResult(); // Also joins writers after a partial setup failure.
+            await Task.WhenAll(writers);
+        }
+        // Read the append-locked high-water mark after all four writers have ended.
+        // Autonomous checkpoint progress was already required above.
+        checkpoint(ceiling.Token);
+        long checkpoints = Interlocked.Read(ref observation.Checkpoints);
+        long deferred;
+        long attributed;
+        System.Collections.Generic.KeyValuePair<string, long>[] classes;
+        while (true)
+        {
+            deferred = Interlocked.Read(ref observation.Deferred);
+            classes = observation.Classes.ToArray();
+            attributed = Interlocked.Read(ref observation.Attributed);
+            if (deferred == Interlocked.Read(ref observation.Deferred) && deferred == attributed
+                && classes.Sum(pair => pair.Value) == attributed) { break; }
+            await Task.Delay(1, ceiling.Token); // A deferral and its attribution are separate events.
+        }
+        long busy = Interlocked.Read(ref observation.Busy);
+        // Assert: journal bytes and attribution, never a wall-clock rate, decide the outcome.
+        long writes = counts.Sum();
+        string measured = $"{storage.Name}: writes={writes}, checkpoints={checkpoints}, " +
+            $"checkpoints/write={(double)checkpoints / writes:F6}, " +
+            $"checkpoints/s={checkpoints / watch.Elapsed.TotalSeconds:F2}, " +
+            $"peak={observation.Peak} ({(double)observation.Peak / JournalSize:F2}x), " +
+            $"deferred={deferred}, attributed={attributed}, busy={busy}, " +
+            $"classes={string.Join(",", classes.OrderBy(pair => pair.Key).Select(pair => pair.Key + "=" + pair.Value))}, seconds={watch.Elapsed.TotalSeconds:F2}";
+        report(measured);
+        counts.ShouldAllBe(count => count >= 32, measured);
+        checkpoints.ShouldBeGreaterThanOrEqualTo(4, measured);
+        observation.Errors.ShouldBe(0, measured);
+        attributed.ShouldBe(deferred, measured);
+        observation.Peak.ShouldBeLessThanOrEqualTo(4 * JournalSize, measured);
+        storage.IsOffline.ShouldBeFalse(measured);
+    }
+
+    private sealed class LoadAffinity : IDisposable
+    {
+        private readonly Process _process = Process.GetCurrentProcess();
+        private readonly IntPtr _previous;
+        internal LoadAffinity()
+        {
+            try
+            {
+                if (!OperatingSystem.IsWindows()) { return; }
+                _previous = _process.ProcessorAffinity;
+                long selected = 0;
+                int cores = 0;
+                for (int bit = 0; bit < 64 && cores < 3; bit++)
+                {
+                    long mask = 1L << bit;
+                    if ((_previous.ToInt64() & mask) == 0) { continue; }
+                    selected |= mask;
+                    cores++;
+                }
+                _process.ProcessorAffinity = (IntPtr)selected;
+            }
+            catch { _process.Dispose(); throw; }
+        }
+        public void Dispose()
+        {
+            try { if (OperatingSystem.IsWindows()) { _process.ProcessorAffinity = _previous; } }
+            finally { _process.Dispose(); }
+        }
+    }
+
+    private sealed class Observation : EventListener
+    {
+        private readonly string _database;
+        private long _peak;
+        internal Observation(string database)
+        {
+            _database = database;
+            foreach (var source in EventSource.GetSources().Where(source => source.Name is
+                "Assimalign.Cohesion.Database.Storage" or "Assimalign.Cohesion.Database.Transactions"))
+            { EnableEvents(source, EventLevel.Verbose, (EventKeywords)(source.Name.EndsWith(".Storage", StringComparison.Ordinal) ? 1 : 4)); }
+        }
+        protected override void OnEventSourceCreated(EventSource source)
+        {
+            if (source.Name is "Assimalign.Cohesion.Database.Storage" or "Assimalign.Cohesion.Database.Transactions")
+            { EnableEvents(source, EventLevel.Verbose, (EventKeywords)(source.Name.EndsWith(".Storage", StringComparison.Ordinal) ? 1 : 4)); }
+        }
+        internal long Peak => Interlocked.Read(ref _peak);
+        internal long Checkpoints;
+        internal long Deferred;
+        internal long Busy;
+        internal long Attributed;
+        internal readonly ConcurrentDictionary<string, long> Classes = new();
+        internal long Errors;
+        internal void Observe(long value)
+        {
+            long current = Interlocked.Read(ref _peak);
+            while (value > current)
+            {
+                long before = Interlocked.CompareExchange(ref _peak, value, current);
+                if (before == current) { break; }
+                current = before;
+            }
+        }
+        protected override void OnEventWritten(EventWrittenEventArgs data)
+        {
+            if (data.EventId == 0) { Interlocked.Increment(ref Errors); return; }
+            if (data.Payload is not { Count: > 0 } payload || !Equals(payload[0], _database)) { return; }
+            if (data.EventSource.Name == "Assimalign.Cohesion.Database.Storage")
+            {
+                if (data.EventId == 5) { Observe((long)payload[2]!); }
+                if (data.EventId == 20) { Observe((long)payload[1]!); }
+                if (data.EventId == 19) { Interlocked.Increment(ref Busy); }
+                if (data.EventId == 6 && Equals(payload[1], "Success")) { Interlocked.Increment(ref Checkpoints); }
+            }
+            else
+            {
+                if (data.EventId == 15) { Interlocked.Increment(ref Deferred); }
+                if (data.EventId == 21)
+                {
+                    Interlocked.Increment(ref Attributed);
+                    Classes.AddOrUpdate((string)payload[1]!, 1, static (_, count) => count + 1);
+                }
+            }
+        }
+    }
+}

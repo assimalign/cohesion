@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
@@ -61,7 +63,8 @@ public sealed partial class SqlCatalog
             if (RelationExists(schema, name)) { throw RelationNameCollision(schema, name); }
             var sequence = new SqlCatalogSequence(_nextObjectId, schema, name, options, ownerTableId, ownerColumn);
             byte[] record = EncodeSequence(sequence);
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)sequence.ObjectId), cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)sequence.ObjectId));
             var orphan = StageOrphanSequenceName(transaction, schema, name);
             var location = _storage.InsertRow(transaction, record);
             CommitCatalogChange(transaction, checked(_nextObjectId + 1));
@@ -117,7 +120,8 @@ public sealed partial class SqlCatalog
             options.ValidateRestart(reserved);
             var updated = new SqlCatalogSequence(expected.ObjectId, expected.Schema, expected.Name, options, ownership?.Table ?? expected.OwnerTableId, ownership is null ? expected.OwnerColumn : ownership.Value.Column, expected.IsIdentity);
             byte[] record = EncodeSequence(updated);
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)expected.ObjectId));
             var location = UpsertRecord(transaction, previous.Location, record);
             var counterLocation = oldCounter?.Location;
             if (!ownershipOnly) { counterLocation = UpsertRecord(transaction, oldCounter?.Location,
@@ -142,7 +146,8 @@ public sealed partial class SqlCatalog
             cancellationToken.ThrowIfCancellationRequested();
             var slot = RequireSequence(expected);
             EnsureSequenceDroppable(expected);
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission3 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)expected.ObjectId), cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)expected.ObjectId));
             StageSequenceDefaults(transaction, [expected], false);
             DeleteSequence(transaction, slot);
             CommitCatalogChange(transaction);
@@ -196,7 +201,8 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             foreach (var sequence in sequences) { RequireSequence(sequence); EnsureSequenceDroppable(sequence); }
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission4 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var transaction = _storage.BeginTransaction("SqlCatalog");
             var changed = StageSequenceDefaults(transaction, sequences, cascade);
             foreach (var sequence in sequences) { DeleteSequence(transaction, RequireSequence(sequence)); }
             CommitCatalogChange(transaction);
@@ -217,7 +223,8 @@ public sealed partial class SqlCatalog
             if (value < sequence.Options.Minimum || value > sequence.Options.Maximum)
             { throw new SqlCatalogException("CS03075", ErrorMessages.SequenceSetvalBounds); }
             _sequenceCounters.TryGetValue(sequence.ObjectId, out var counter);
-            using var transaction = _storage.BeginTransaction();
+            using var checkpointAdmission5 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", owner: unchecked((long)sequence.ObjectId));
+            using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)sequence.ObjectId));
             var location = UpsertRecord(transaction, counter?.Location,
                 EncodeAllocation(sequenceCounterRecordKind, sequence.ObjectId, value, isCalled));
             ReservationCommitting?.Invoke();

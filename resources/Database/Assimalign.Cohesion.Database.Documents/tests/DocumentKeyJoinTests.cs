@@ -21,8 +21,8 @@ public sealed class DocumentKeyJoinTests
     private readonly ITestOutputHelper _output;
     public DocumentKeyJoinTests(ITestOutputHelper output) { _output = output; }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Key joins: direct AST requests require aliases on every SELECT scope")]
-    public async Task ExecuteAsync_UnaliasedOuterAst_ShouldRefuseBeforeReadingAsync()
+    [Fact(DisplayName = "Cohesion Test [Documents] - Key joins: direct AST requests accept an implicit outer alias")]
+    public async Task ExecuteAsync_UnaliasedOuterAst_ShouldExecuteAsync()
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("join-ast-aliases", new());
@@ -34,10 +34,12 @@ public sealed class DocumentKeyJoinTests
         var query = new OqlSelectExpression(original.Collection, null, original.Projections, original.Predicate,
             original.GroupBy, original.Having, original.OrderBy, original.IsDistinct, original.IsValue, location: original.Location);
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new DocumentQueryRequest(new OqlQueryStatement(query)), CancellationToken.None));
+        await using var result = (await session.ExecuteAsync(new DocumentQueryRequest(new OqlQueryStatement(query)), CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD01035");
-        session.LastQueryDocumentsRead.ShouldBe(0);
+        int count = 0;
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        { row.GetValue(0).ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("[1]"); count++; }
+        count.ShouldBe(3);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Key joins: generated collections match a nested-loop oracle")]
