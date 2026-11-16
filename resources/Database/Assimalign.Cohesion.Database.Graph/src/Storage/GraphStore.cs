@@ -140,7 +140,7 @@ public sealed partial class GraphStore
     /// <param name="storage">Graph file set.</param><param name="coordinator">Coordinator bound to the same file set.</param><returns>The graph store.</returns>
     /// <exception cref="ArgumentNullException">A required dependency is null.</exception>
     /// <exception cref="IndexFormatException">An index tree is in another B-tree page format.</exception>
-    /// <exception cref="StorageCorruptionException">A graph record is malformed or uses an unsupported format.</exception>
+    /// <exception cref="StorageCorruptionException">A graph record is malformed, uses an unsupported format, or an unknown index-owner page fails checksum verification.</exception>
     public static GraphStore Open(GraphStorage storage, TransactionCoordinator coordinator)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -410,7 +410,7 @@ public sealed partial class GraphStore
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        if (!Enum.IsDefined(direction)) { throw new ArgumentOutOfRangeException(nameof(direction)); }
+        if (!(direction is GraphIncidentDirection.Both or GraphIncidentDirection.Outgoing or GraphIncidentDirection.Incoming)) { throw new ArgumentOutOfRangeException(nameof(direction)); }
         cancellationToken.ThrowIfCancellationRequested();
         if (typeIds is { Count: 0 } || !_indexes.TryGetIndex(adjacencyId, treeName, out var index)) { yield break; }
         // Copy the caller's selection once; duplicate type ids must not duplicate visits.
@@ -745,6 +745,19 @@ public sealed partial class GraphStore
         try
         {
             var result = await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+            AfterApply?.Invoke();
+            return result;
+        }
+        catch { OpenIndexes(); throw; }
+    }
+
+    // Keep the ordinary-write helper's signature and state machine unchanged. Builds alone
+    // need durable intermediate brackets; carrying that flag through every write affects JIT code.
+    private async ValueTask<T> ApplyIndexBuildAsync<T>(TransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _coordinator.ApplyStatementAsync(context, apply, durable: true, cancellationToken: cancellationToken).ConfigureAwait(false);
             AfterApply?.Invoke();
             return result;
         }

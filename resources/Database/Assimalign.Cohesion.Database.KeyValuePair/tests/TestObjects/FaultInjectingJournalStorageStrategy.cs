@@ -62,6 +62,9 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     /// </summary>
     internal bool LoseUnconfirmedJournalOnReopen { get; set; }
 
+    internal bool RecoveryRequired { get; set; } = true;
+    internal override bool RequiresRecovery(string databaseName, bool catalog) => RecoveryRequired;
+
     /// <summary>
     /// Fails <paramref name="writes"/> journal writes made on the calling flow, after letting the
     /// next <paramref name="skip"/> writes through, until the returned scope is disposed.
@@ -140,16 +143,16 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     }
 
     /// <summary>
-    /// Gets the bytes a file set's data and journal streams hold right now.
+    /// Gets the bytes a file set's data, journal and backup streams hold right now.
     /// </summary>
     /// <param name="databaseName">The database name.</param>
     /// <param name="catalog">True for the database's catalog file set; false for its data set.</param>
-    internal (byte[] Data, byte[] Journal) Capture(string databaseName, bool catalog = false)
+    internal (byte[] Data, byte[] Journal, byte[] Backup) Capture(string databaseName, bool catalog = false)
     {
         lock (_sync)
         {
             var files = _storages[Key(databaseName, catalog)];
-            return (files.Data.ToArray(), files.Journal.ToArray());
+            return (files.Data.ToArray(), files.Journal.ToArray(), files.Backup.ToArray());
         }
     }
 
@@ -169,8 +172,12 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
             }
         }
 
-        return KeyValueStorage.Create(DataStream(files, key), JournalStream(files, key), new StorageStream(files.Backup), GetLabel(databaseName, catalog));
+        var storage = KeyValueStorage.Create(DataStream(files, key), JournalStream(files, key), new StorageStream(files.Backup), GetLabel(databaseName, catalog));
+        StorageCreated?.Invoke(catalog);
+        return storage;
     }
+
+    internal Action<bool>? StorageCreated { get; set; }
 
     internal Func<bool, Exception?>? OpenFailure { get; set; }
 

@@ -28,7 +28,7 @@ public sealed class SqlStoredQueryAllocationTests
         // 5,000-query rounds: 21,466,480 bytes (4,293.296/query). Parsing and setup
         // stay outside measurement, as do the engine's worker-thread allocations.
         SqlDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
-        await using var engine = SqlDatabaseEngine.Create("allocation-regression", new());
+        await using var engine = SqlDatabaseEngine.Create("allocation-regression", new() { TempDirectory = SqlAllocationTemp.Directory });
         var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t (a INT)", cancellationToken: CancellationToken.None);

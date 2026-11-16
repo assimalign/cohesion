@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
@@ -7,8 +8,17 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlExpressionEvaluator
 {
+    /// <summary>Window arguments use scalar alternatives while retaining completed grouping slots.</summary>
+    internal SqlExpressionEvaluator ForWindowArguments()
+        => _typing?.GroupedOutput != true ? this : new SqlExpressionEvaluator(_columns, _parameters,
+            _relations as IReadOnlyList<SqlRelationBinding>, _valueOrdinals,
+            _defaultCollation, _projectionSources, _subquerySlots, _subqueryValues, _functions, _cancellationToken,
+            _typing.SlotScope, _bindingContext, relation: _relations as SqlRelationReference,
+            outerScope: _typing.OuterScope, outerDependencies: _typing.OuterDependencies, foldConstants: _foldConstants);
+
     internal DatabaseType WindowType(SqlWindowExpression window)
     {
+        if (_typing?.GroupedOutput == true) { return ForWindowArguments().WindowType(window); }
         string name = window.Function.FunctionName.ToUpperInvariant();
         if (_functions.Catalog.IsAggregate(name)) { return StaticCallType(window.Function); }
         if (name is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE")

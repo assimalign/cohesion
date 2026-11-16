@@ -31,7 +31,7 @@ public sealed class SqlDirectedKeyAllocationTests
     public async Task BuildIndexKeyUnchecked_AscendingIntegers_ShouldRetainBaseAllocation(int columns)
     {
         // Arrange: the pre-SQ-K1 builder needs no component boundary workspace.
-        await using var engine = SqlDatabaseEngine.Create("directed-key-allocation", new());
+        await using var engine = SqlDatabaseEngine.Create("directed-key-allocation", new() { TempDirectory = SqlAllocationTemp.Directory });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         string[] names = Enumerable.Range(0, columns).Select(i => "c" + i).ToArray();

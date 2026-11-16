@@ -32,10 +32,10 @@ public sealed partial class SqlAggregateExecutionTests
         var database = await engine.CreateDatabaseAsync("statistics");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
 
-        // Act / Assert: the reported nesting keeps ordinary scalar alternative behavior.
+        // Act / Assert: ordinary scalar alternatives now convert at each boundary too (#1788).
         var ordinary = await RowsAsync(session, $"SELECT COALESCE({realStatisticsChoice}, CAST(0 AS DOUBLE PRECISION)) " +
             "FROM (SELECT 1 AS id UNION ALL SELECT 2) s ORDER BY id;");
-        ordinary.Select(row => Convert.ToDouble(row[0])).ShouldBe(new[] { 16777217d, 16777216d });
+        ordinary.Select(row => Convert.ToDouble(row[0])).ShouldBe(new[] { 16777216d, 16777216d });
 
         foreach (string filter in new[] { "", " FILTER (WHERE id > 0)" })
         {

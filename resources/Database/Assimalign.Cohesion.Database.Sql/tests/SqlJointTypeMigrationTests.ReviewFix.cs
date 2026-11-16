@@ -41,30 +41,31 @@ public sealed partial class SqlJointTypeMigrationTests
         }
     });
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Review fix: deferred Build keeps first-Build heap-owned drops at exact admission and every crash boundary (#1778)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Review fix: deferred Build reclaims first-Build index drops at exact admission and every crash boundary (#1778)")]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
     public async Task BuildAsync_ReviewHeapDrop_ShouldKeepRowsPagesAndReclaimOnce(bool dropColumn, bool retireByType)
     {
-        // Arrange: the declared secondary trees, including the removed one, share the heap.
+        // Arrange: every declared tree has a separate physical owner.
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(4));
         var source = ReviewDropDeclaration(dropColumn, false);
         var target = ReviewDropDeclaration(dropColumn, true);
         var storage = new CrashCaptureSqlStorageStrategy();
-        ulong owner; long treePages; long droppedRoot;
+        ulong owner; ulong droppedOwner; long treePages; long droppedRoot;
         await using (var seed = await Builder(storage).AddDatabase(source).BuildAsync(guard.Token))
         {
             var db = await seed.OpenDatabaseAsync("typed", guard.Token);
             owner = Table(db).ObjectId;
             var removed = db.IndexManager.ExportRegistrations().Single(index => index.Definition.Name.Contains("Legacy", StringComparison.Ordinal));
-            db.IndexManager.PageOwner(removed).ShouldBe(owner);
+            droppedOwner = db.IndexManager.PageOwner(removed);
+            droppedOwner.ShouldNotBe(owner);
             droppedRoot = removed.RootPageId;
             await using var writer = await db.CreateSessionAsync(guard.Token);
             await writer.ExecuteAsync("INSERT INTO items VALUES " + string.Join(',', Enumerable.Range(1, 128).Select(id => $"({id},99,{id + 10},{id})")), cancellationToken: guard.Token);
-            treePages = IndexOwnerPages(db, owner);
-            treePages.ShouldBe(3); // Three one-page trees, so the removed root is one stranded page.
+            treePages = db.IndexManager.ExportRegistrations().Sum(index => IndexOwnerPages(db, db.IndexManager.PageOwner(index)));
+            treePages.ShouldBe(3);
             db.Coordinator.Checkpoint(guard.Token); db.CatalogStorage.Checkpoint();
             storage = storage.CaptureDurableImages();
         }
@@ -110,10 +111,10 @@ public sealed partial class SqlJointTypeMigrationTests
                 db.SchemaProvisioner.JointSpaceNeed.ShouldBe(need);
                 Table(db).ObjectId.ShouldBe(owner);
                 await DrainReclamationAsync(db, guard.Token);
-                IndexOwnerPages(db, owner).ShouldBe(treePages);
-                (IndexOwnerPages(db, owner) - db.Catalog.GetIndexes(owner).Count).ShouldBe(1);
-                db.DataStorage.FreeSpaceMap.IsAllocated((PageId)droppedRoot).ShouldBeTrue();
-                using (var page = db.DataStorage.PageManager.GetPage((PageId)droppedRoot)) { page.Page.OwnerId.ShouldBe(owner); }
+                IndexOwnerPages(db, owner).ShouldBe(0);
+                IndexOwnerPages(db, droppedOwner).ShouldBe(0);
+                db.IndexManager.ExportRegistrations().Sum(index => IndexOwnerPages(db, db.IndexManager.PageOwner(index))).ShouldBe(treePages - 1);
+                db.DataStorage.FreeSpaceMap.IsAllocated((PageId)droppedRoot).ShouldBeFalse();
                 await ReviewAssertRowsAsync(db, dropColumn, guard.Token);
                 if (admission == 0)
                 {

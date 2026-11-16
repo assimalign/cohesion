@@ -1182,8 +1182,9 @@ internal sealed partial class SqlPlanExecutor
         SqlFunctionEnvironment functions, SqlBindingContext bindingContext = SqlBindingContext.Table, bool validateQualifiers = true)
     {
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions,
-            bindingContext: bindingContext);
+            bindingContext: bindingContext, foldConstants: false);
         SqlPlanner.ValidateExpression(expression, scope);
+        _ = scope.BindPredicate(expression);
         new SqlCheckSyntax(table, scope, declaring: true, validateQualifiers).Validate(expression, requireBoolean: true);
         return SqlDefinitionBinder.FunctionCalls(expression, scope);
     }

@@ -326,3 +326,5 @@ buffers and distinct slices remain separate. Thus owned payload bytes follow uni
 ranges plus the argument slots, rather than multiplying a payload by its alias count. Typed
 `byte[]` delegate access still returns a defensive copy, and binary results remain detached.
 No arity limit, message limit, public API, disk format or wire version is added by this ownership rule.
+
+Every open checks primary-tree owner and registration shape before attachment or orphan cleanup. Cleanup enumerates bounded owner-directory batches, observes cancellation and checkpoint admission, and requires progress while pages remain.

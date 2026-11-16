@@ -15,13 +15,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private DatabaseResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken,
-        SqlPlan? retentionPlan = null, SqlDatabaseSession? spillOwner = null)
+        SqlPlan? retentionPlan = null, SqlDatabaseSession? spillOwner = null, SqlGroupPlan? hashInput = null)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         statement.Metrics.AccessPath = "system-view";
         return MaterializeSelect(Matches(), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
             plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken,
-            incrementalDistinct: CanPipelinePlainDistinct(retentionPlan ?? plan), spillOwner: spillOwner);
+            incrementalDistinct: CanPipelinePlainDistinct(retentionPlan ?? plan), spillOwner: spillOwner, hashInput: hashInput);
 
         IEnumerable<object?[]> Matches()
         {

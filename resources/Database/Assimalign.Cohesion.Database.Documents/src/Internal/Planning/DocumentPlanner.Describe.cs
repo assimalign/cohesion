@@ -30,6 +30,7 @@ internal sealed partial class DocumentPlanner
         DocumentUpsertPlan => "Upsert",
         DocumentDeletePlan => "Delete",
         DocumentUpdatePlan => "Update",
+        DocumentMergePlan => "Merge",
         DocumentInsertSelectPlan => "InsertSelect",
         DocumentCreateCollectionPlan => "CreateCollection",
         DocumentDropCollectionPlan => "DropCollection",
@@ -37,6 +38,43 @@ internal sealed partial class DocumentPlanner
         DocumentDropIndexPlan => "DropIndex",
         _ => throw new UnreachableException(),
     };
+
+    private static string WindowDetail(OqlSelectExpression query)
+    {
+        var definitions = WindowDefinitions(query);
+        var groups = new List<(OqlWindowSpecification Specification, List<string> Functions)>();
+        foreach (var window in Windows(query).Distinct())
+        {
+            var specification = ResolveWindow(window, definitions);
+            int group = groups.FindIndex(g => EquivalentWindowSpecifications(g.Specification, specification, query));
+            if (group < 0) { groups.Add((specification, [window.Call.Name])); }
+            else { groups[group].Functions.Add(window.Call.Name); }
+        }
+        return "functions=" + string.Join(",", Windows(query).Select(w => w.Call.Name).Distinct()) +
+            "; partitions=complete; spill=False; sort_groups=" + groups.Count + "; " +
+            string.Join("; ", groups.Select((group, index) => "group" + (index + 1) + "={partition=[" +
+                string.Join(", ", group.Specification.PartitionBy.Select(WindowKeyDetail)) + "]; order=[" +
+                string.Join(", ", group.Specification.OrderBy.Select(order => WindowKeyDetail(order.Expression) +
+                    (order.Descending ? " DESC" : " ASC") + (order.NullPlacement == OqlNullPlacement.First ||
+                        order.NullPlacement == OqlNullPlacement.Default && !order.Descending ? " NULLS FIRST" : " NULLS LAST"))) +
+                "]; functions=" + string.Join(",", group.Functions) + "}"));
+    }
+
+    private static string WindowKeyDetail(OqlExpression expression)
+    {
+        // Reuse the public canonical expression renderer without adding a language/engine seam.
+        const string prefix = "MERGE INTO \"_\" USING \"_\" ON KEY ";
+        const string suffix = " WHEN MATCHED THEN DELETE";
+        var wrapper = new OqlMergeExpression("_", null, new OqlMergeSource("_", null), expression, true,
+            delete: new OqlMergeDeleteAction());
+        try
+        {
+            string text = wrapper.ToString();
+            return text.Substring(prefix.Length, text.Length - prefix.Length - suffix.Length);
+        }
+        // Wrapping a key already at the statement depth bound adds one rendering level.
+        catch (InvalidOperationException) { return "expression"; }
+    }
 
     internal static DatabasePlanDescription Describe(DocumentStatementPlan plan, IEnumerable<Diagnostic>? diagnostics = null)
     {
@@ -47,6 +85,28 @@ internal sealed partial class DocumentPlanner
     private static IReadOnlyList<DatabasePlanNode> DescribeNodes(DocumentStatementPlan plan)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (plan is DocumentMergePlan merge)
+        {
+            var mergeNodes = new List<DatabasePlanNode>
+            {
+                new() { NodeId = 0, Operator = "Merge", Target = merge.Collection.Name,
+                    Detail = "source=" + merge.SourceName + "; target=" + merge.TargetName + "; execution=deferred" },
+                new() { NodeId = 1, ParentId = 0, Operator = merge.Statement.IsLookup ? "KeyLookup" : "KeyJoin", Target = merge.Collection.Name,
+                    Detail = "key_scope=" + (merge.Statement.IsLookup ? "source" : "source,target") },
+            };
+            if (merge.Statement.Update is { } mergeUpdate)
+            { Action("MergeUpdate", mergeUpdate.Predicate, "set=" + mergeUpdate.Assignments.Count + "; unset=" + mergeUpdate.Unset.Count + "; scope=source,target"); }
+            if (merge.Statement.Delete is { } mergeDelete) { Action("MergeDelete", mergeDelete.Predicate, "scope=source,target"); }
+            if (merge.Statement.Insert is { } insert) { Action("MergeInsert", insert.Predicate, "scope=source; target=MISSING"); }
+            if (merge.Returning is { } mergeReturning)
+            { mergeNodes.Add(new DatabasePlanNode { NodeId = mergeNodes.Count, ParentId = 0, Operator = mergeReturning.Query.IsValue ? "ReturningValue" : "Returning",
+                Target = merge.Collection.Name, Detail = "columns=" + mergeReturning.Projections.Count }); }
+            return mergeNodes;
+
+            void Action(string name, OqlExpression? predicate, string detail)
+                => mergeNodes.Add(new DatabasePlanNode { NodeId = mergeNodes.Count, ParentId = 0, Operator = name, Target = merge.Collection.Name,
+                    Detail = "filter=" + (predicate is not null) + "; " + detail });
+        }
         if (plan is DocumentSetOperationPlan compound)
         {
             var compoundNodes = new List<DatabasePlanNode>
@@ -109,7 +169,7 @@ internal sealed partial class DocumentPlanner
         if (plan is DocumentFromPlan from)
         {
             int projection = nodes.Count;
-            Add(DescribeOperator(from.Logical), 0, detail: AggregateDetail(from.Logical));
+            projection = AddLogical(from.Logical, 0);
             Add(from.Input is null ? "ExpressionSource" : "DerivedSource", AddBindings(from.Logical, projection),
                 detail: "alias=" + from.Logical.Query.Alias + "; " + (from.Input is null ? "evaluate_once" : "streamed") + "; sort=outer");
         }
@@ -163,7 +223,7 @@ internal sealed partial class DocumentPlanner
                 sourceParent = distinctId;
             }
             int projectionId = nodes.Count;
-            Add(DescribeOperator(select.Logical), sourceParent, detail: AggregateDetail(select.Logical));
+            projectionId = AddLogical(select.Logical, sourceParent);
             projectionId = AddBindings(select.Logical, projectionId);
             AddAccess(select.Access, projectionId);
         }
@@ -176,10 +236,30 @@ internal sealed partial class DocumentPlanner
                 Add("Distinct", sourceParent);
             }
             int projectionId = nodes.Count;
-            Add(DescribeOperator(systemSelect.Logical), parent, detail: AggregateDetail(systemSelect.Logical));
+            projectionId = AddLogical(systemSelect.Logical, parent);
             Add("SystemCollectionScan", AddBindings(systemSelect.Logical, projectionId));
         }
+        if (systemSelect is not null && systemSelect.Logical.Query.Unnest.Count == 0 && HasWindows(systemSelect.Logical.Query))
+        { AddLogical(systemSelect.Logical, 0); }
         return nodes;
+
+        int AddLogical(DocumentLogicalPlan sourceLogical, int parent)
+        {
+            if (!HasWindows(sourceLogical.Query))
+            {
+                int id = nodes.Count;
+                Add(DescribeOperator(sourceLogical), parent, detail: AggregateDetail(sourceLogical));
+                return id;
+            }
+            int projection = nodes.Count;
+            Add(sourceLogical.Query.IsValue ? "ProjectValue" : "Project", parent);
+            int window = nodes.Count;
+            Add("WindowAggregate", projection, detail: WindowDetail(sourceLogical.Query));
+            if (!sourceLogical.IsGrouped) { return window; }
+            int group = nodes.Count;
+            Add("Group", window, detail: AggregateDetail(sourceLogical));
+            return group;
+        }
 
         int AddBindings(DocumentLogicalPlan sourceLogical, int parent)
         {

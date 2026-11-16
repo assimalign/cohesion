@@ -346,3 +346,5 @@ participate in the existing statement memory budget. Unexpected callback failure
 while native error behavior and infrastructure exception identity remain intact. Registrations
 are engine-local composition only; disk and wire formats are unchanged. Named-call planning
 maps are allocated lazily; native enum-only statements share immutable empty binding maps.
+
+Direct GraphStore index builds keep caller-owned accounting without fixed work or memory caps. GQL builds retain their configured grants. Both use durable bounded chunks; open discovers orphan owners from Storage's recovered directory, without scanning all allocated pages again.

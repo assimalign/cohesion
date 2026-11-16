@@ -2,14 +2,14 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
-/// <summary>Describes a document query, INSERT, UPSERT, UPDATE or DELETE without executing it.</summary>
+/// <summary>Describes a document query, INSERT, UPSERT, UPDATE, DELETE or MERGE without executing it.</summary>
 [global::System.Diagnostics.DebuggerDisplay("OqlExplainExpression")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlExplainExpression.DebugView))]
 public sealed class OqlExplainExpression : OqlExpression
 {
     internal OqlExplainExpression(OqlExpression statement, Location? location) : base(location) => Statement = statement;
 
-    /// <summary>Gets the query, INSERT, UPSERT, UPDATE or DELETE statement to plan.</summary>
+    /// <summary>Gets the query, INSERT, UPSERT, UPDATE, DELETE or MERGE statement to plan.</summary>
     public OqlExpression Statement { get; }
 
     private sealed class DebugView

@@ -213,6 +213,20 @@ internal static class Program
                 }
             }
             Check("spilled ORDER BY releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
+            foreach (string sql in new[] { "SELECT id,COUNT(*) FROM t GROUP BY id", "SELECT DISTINCT id FROM t" })
+            {
+                await using var hash = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                Check("hash spill has files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length > 0, true);
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    int count = 0; bool ordered = true;
+                    await foreach (var row in hash.GetRowsAsync())
+                    { ordered &= row.GetInt32(0) == count++; }
+                    Check("hash spill first-seen order", ordered, true);
+                    Check("hash spill repeatable count", count, 4000);
+                }
+            }
+            Check("hash spill releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
             Check("spilled CTAS completion", (await session.ExecuteAsync("CREATE TABLE archive AS SELECT * FROM t ORDER BY id DESC")).AffectedCount, 4000L);
             Check("spilled CTAS physical order", await RowsAsync(session, "SELECT id,k FROM archive LIMIT 3", CancellationToken.None), [[3999, 0], [3998, 1], [3997, 2]]);
             Check("spilled DISTINCT CTAS completion", (await session.ExecuteAsync("CREATE TABLE distinct_archive AS SELECT DISTINCT k%3 AS n FROM t ORDER BY id DESC")).AffectedCount, 3L);
@@ -494,7 +508,10 @@ internal static class Program
             new SqlFunctionContext(default, null, CancellationToken.None, DateTimeOffset.UnixEpoch).TransactionTimestamp, DateTimeOffset.UnixEpoch);
         Check<DateTimeOffset?>("in process: absent function timestamp (#1373)", default(SqlFunctionContext).TransactionTimestamp, null);
         CheckFailure("in process: non-Boolean WHERE (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE 1")), "CS02003");
-        CheckFailure("in process: mixed Boolean alternatives (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE COALESCE(TRUE, 1)")), "CS02003");
+        CheckFailure("in process: mixed Boolean alternatives (#1788)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE COALESCE(TRUE, 1)")), "CS02080");
+        Check("in process: common alternative conversions (#1788)", await RowsAsync(session,
+            "SELECT CASE WHEN FALSE THEN 1 ELSE 2.5 END, COALESCE(NULL::INT, '3'), COALESCE(CASE WHEN TRUE THEN 16777217 ELSE NULL::REAL END, 0::DOUBLE PRECISION)"), [[2.5m, 3, 16777216d]]);
+        CheckFailure("in process: skipped unknown alternative (#1788)", await FailureAsync(() => RowsAsync(session, "SELECT COALESCE(1, 'x')")), "CS02022");
         Check("in process: Boolean string literal (#1190)", await RowsAsync(session, "SELECT 1 WHERE 'YeS'"), [[1L]]);
         Check("in process: Boolean UNKNOWN (#1190)", await RowsAsync(session, "SELECT NULL AND TRUE, NULL OR FALSE, CASE WHEN NULL THEN 1 END"), [[null, null, null]]);
         Check("in process: FROM-less aggregate (#1373)", await RowsAsync(session, "SELECT COUNT(*) WHERE FALSE"), [[0L]]);

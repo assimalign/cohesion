@@ -52,13 +52,14 @@ public sealed partial class DocumentCatalog
         _coordinator = coordinator;
     }
 
-    /// <summary>Loads the metadata directory after the coordinator's recovery scrub.</summary>
+    /// <summary>Loads recovered metadata and durably detaches abandoned index registrations or inserts orphan receipts before admitting operations.</summary>
     /// <param name="storage">The same storage that holds chunk records.</param>
     /// <param name="coordinator">The coordinator bound to that storage and its record space.</param>
     /// <returns>The database's metadata catalog.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="DocumentCatalogException">Persisted catalog metadata is malformed or unsupported.</exception>
     /// <exception cref="IndexFormatException">An index tree is in another B-tree page format.</exception>
+    /// <exception cref="StorageCorruptionException">A registration or unknown index-owner page fails integrity verification.</exception>
     public static DocumentCatalog Open(DocumentStorage storage, TransactionCoordinator coordinator)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -75,6 +76,7 @@ public sealed partial class DocumentCatalog
         }
         foreach (var versions in catalog._maintenance) { versions.RebuildPublicationOrder(); }
         catalog.OpenIndexes();
+        catalog.CollectAbandonedIndexOwners();
         storage.UndoScopesChanged = catalog.UndoScopesChanged;
         storage.CreatedVersionUndone = catalog.CreatedVersionUndone;
         return catalog;
@@ -124,16 +126,27 @@ public sealed partial class DocumentCatalog
     public static void EnsureIndexFormat(DocumentStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
+        var registrations = ReadRegistrations(storage);
+        var retiring = registrations.Where(entry => entry.Registration.RootPageId < 0)
+            .Select(entry => entry.Registration.ObjectId).ToHashSet();
+        var aborted = retiring.Count == 0 ? null : TransactionRecovery.Analyze(storage.WriteAheadJournal, storage.CheckpointActiveTransactions).Aborted;
         using (var iterator = storage.GetUnitIterator(0))
         {
             while (iterator.MoveNext())
             {
-                // Open decodes payloads after recovery; the fence needs only kind and version.
                 var unit = iterator.Current;
                 DocumentCatalogCodec.EnsureHeader(unit.Data.Span, unit.PageId, unit.SlotIndex);
+                if (retiring.Count != 0 && unit.Data.Span[16] == 4)
+                {
+                    var record = DocumentCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex);
+                    var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
+                    if (retiring.Contains(record.Index!.Value.ObjectId) && !aborted!.Contains(writer) &&
+                        (deleter == TransactionSequence.None || aborted.Contains(deleter)))
+                    { throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationInvalid); }
+                }
             }
         }
-        BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
+        BTreeIndexManager.EnsureFormat(storage, registrations.Where(entry => entry.Registration.RootPageId > 0).Select(entry => entry.Registration));
     }
 
     /// <summary>Finds a collection visible through a snapshot.</summary>
@@ -403,6 +416,7 @@ public sealed partial class DocumentCatalog
                 _indexDefinitions[key] = versions = new Versions();
                 Track(versions, value => value.Index is { } index && index.CollectionId == key.CollectionId && index.Name == key.Name, () => _indexDefinitions.Remove(key));
             }
+            _indexOwners[index.ObjectId] = versions;
         }
         else
         {

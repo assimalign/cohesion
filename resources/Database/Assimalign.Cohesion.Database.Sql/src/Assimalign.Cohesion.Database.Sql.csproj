@@ -25,6 +25,7 @@
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" Module="Types" />
         <CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="JournalFormat" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Indexing" Module="Build" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionValueType Include="ValueObjects\SqlObjectName.cs" ObjectRuntimeType="String"

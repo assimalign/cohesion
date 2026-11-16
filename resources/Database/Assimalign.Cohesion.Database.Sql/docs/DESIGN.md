@@ -25,7 +25,7 @@ a test. Transactions DESIGN records the lock order, events and exact counters. N
 
 SQL catalog writes use non-waiting admission under _sync. Ordinary sequence/identity reservations
 release that monitor, wait with the statement token, then retry and revalidate the incarnation.
-Session catalog mutations retain validated metadata and refuse immediately with CK04014. Migration
+Session catalog mutations retain validated metadata and refuse immediately with CK04014. Physical index-owner identity reservations release the catalog monitor and wait, per refusal, up to the caller's LockTimeout (no limit at 0) and report CK04014 on expiry. Migration
 copy, index, validation, publication and cleanup boundaries retry transient admission refusals:
 the same job retains its table/name/definition reservations and prepared work, releases the schema
 apply semaphore, catalog monitor and publication snapshot gate before waiting with its token,
@@ -50,7 +50,7 @@ TempDirectory overrides must be dedicated descendants of RootPath; option checks
 first segment a database could take (a leading dot is safe) and link components below the root.
 A default RootPath is refused with its own message; an empty RootPath remains in-memory. An in-memory engine has no
 space unless TempDirectory is explicitly set. The options snapshot includes TempDirectory,
-TempSpaceQuota and StatementTempSpaceQuota. Root plain SELECT sorts, including CTAS source roots, consume this substrate as described below; other operators retain their current memory policy.
+TempSpaceQuota and StatementTempSpaceQuota. Root plain SELECT sorts, including CTAS source roots, eligible plain hash aggregation/DISTINCT, hash joins and normalized join buffers consume this substrate as described below; other operators retain their current memory policy.
 
 TempSpaceQuota is nullable: an explicit nonnegative physical-byte cap, or min(10 GiB, 25% of
 available bytes) measured after startup sweeping. An unavailable probe uses zero until CreateRun
@@ -87,6 +87,283 @@ after a kill, and on every OS after power loss, runs can remain until the next d
 Windows process exit deletes delete-on-close runs; OS backups of RootPath can capture live temp files.
 No durable data, catalog, journal, record-space or wire format changes.
 
+
+## Indexed hash join spilling (#1789, SQ-L3b)
+
+An eligible root hash build hands off on its original CS05067 reservation boundary,
+including exhaustion of the grant remaining after other operators. Fitting tables retain
+all ten fields, arrays and charges. The filtered RIGHT/FULL iterator and suspending root
+state machine retain their base layouts. Explicit spill permission travels through the
+existing statement-context identity slot; nested bodies gain no permission. Fitting rows
+perform no join-spill sidecar lookup. One StorageTempStatement coordinates joins, staged
+sources, aggregation and collectors. The statement root is its sole owner during execution.
+Shared group inputs, aggregation, collectors, staged sources and undelivered results close
+only their own runs. Root delivery transfers ownership to a live result using that exact
+statement, under the result's disposal gate. If session disposal closes the result first,
+adoption fails and the root disposes the statement. Every other root outcome also disposes
+it. Draining a producer preserves the first error.
+Every failure releases
+its reservations and temporary owner.
+
+Every build record, including the resident prefix and FULL NULL keys, enters SQ-L2's
+external sorter in ordinal order. The prefix first drains to an input run, releasing
+the retiring table before the arena is allocated. The sort key is the unsigned 32-bit
+composed hash followed by its 32-bit build ordinal, both big-endian. The sorter stores
+these only in its key. Indexed records use a 13-byte hash/ordinal/NULL/padding header and
+the exact SQ-L2 row codec; leading/trailing NULL slots are restored to the original width.
+A managed byte frame packs repeated four-byte patterns, escaping its marker and using raw
+bytes when packing would grow the record. Decode is bounded by B and validates commands
+before decoding the exact row codec. Packing helps compressible frames. During Seal the
+sorter's runs and the index coexist: a spilled build needs up to about twice its packed
+size of temporary space, plus page framing, a small chunk-metadata run and any staged probe-side input of the statement. With the default
+quota of four grants, an incompressible build larger than about two grants refuses located
+CK05002 at Seal. Probe-heavy joins use less temporary space than partitioned probe spooling.
+A yield's consolidation can also raise CK05002. In a nested FULL tree the yield temporarily retains the parent's old build runs, its consolidated run, the child's index and any staged left inputs; that yield can be the statement's temp peak. Build-heavy incompressible joins have about half that former build capacity.
+Sorted output is written
+once to one indexed run. A charged directory records each chunk's first/last hash, opaque
+start position, sorted range and first/last ordinal. Chunks target 8,192 encoded bytes,
+also bounded by the decoded cache target. One large record occupies its own chunk.
+Chunk metadata saves positions from Position while writing the index. Its bounded writer
+uses the released sorter's overhead. The charged directory grows after the sorter and its
+final reader retire, paying for both old and new arrays.
+
+A probe never writes to temp. Binary search locates only chunks covering its hash. A
+charged LRU cache decodes those chunks. Groups spanning several chunks stream backwards,
+with descending ordinal order inside each chunk. Evicted arrays are dropped before the
+next allocation. The original caller evaluates ON, WHERE and projections and counts each
+candidate once, preserving streaming call interleaving and the first error. Hash planning
+already excludes volatile/throwing ON expressions. Joins have no repartitioning, depth
+limit or skew refusal; aggregation retains its eight-level limit.
+
+Decoded chunks validate that the width fits; omitted trailing cells restore as NULL.
+Page CRCs detect truncation. An operator-held hash of all 48-byte directory entries is compared before probing,
+including ranges for chunks no probe loads. The readers also validate ordinal range, non-decreasing unsigned hashes, increasing
+ordinals within each hash, directory endpoints, key families, recomputed hash and NULL
+flag. Damage retains located CK05004. Quotas, the free-space floor and I/O retain CK0500x.
+Computed keys, correlated/lateral inputs, non-hash steps, deferred collations, SQL/JSON,
+joined DML, application binary build cells and join-output DISTINCT receive no join-spill permission.
+The probe operation itself never encodes payloads. Retained buffers of a normalized join tree,
+including left inputs and intermediate outputs, can stage when their original reservation refuses. This source applies SQ-L2's
+exact row codec and grant-derived record bound to every cell, including probe payloads;
+application-produced binary probe cells refuse CS05067 when staging is required.
+
+FULL uses an aligned byte-array bitmap indexed by build ordinal. After probes, an ordinal
+sort of unmatched records restores build insertion order, NULL keys included. This is the
+chosen unmatched method; no second build spool is retained during probing. The exhausted
+outer source is released first. The unmatched sort releases its grant before output.
+A downstream collector can stage already evaluated output/key records while FULL owns
+that grant. It sorts its top-N heap by Compare before draining, preserving ordinal ties.
+Each spilled FULL increments one open unmatched debt and retires it exactly once when its
+unmatched grant is released or the join is disposed. Buffer spills never change this count.
+Deferred mode lasts while any debt remains, ending on the next append after the count reaches
+zero, or at completion when no further output arrives. Neither sort calls an expression.
+
+The minimum statement grant is 262,144 B. B is
+min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192), including framing.
+The sorter's minimum M = max(65,536, 32,768 + 2 * (8,192 + B)) supports a two-way merge.
+At handoff the minimum working set is the operator, keys, M and scratch for rows seen so far.
+Above that minimum the arena takes up to half the available grant A, with no fixed cap,
+leaving the actual scratch charged. When a request exceeds currently free memory, registered optional
+join arenas give way only if at least one has S > M and free memory plus the sum of their
+extras (S - M) is at least the requested reservation;
+hopeless requests refuse CS05067 without temp writes. Staged readers and nested FULL unmatched sorts can trigger this yield:
+the old sorter consolidates to a run under its existing charge, then drains that run before
+allocating M. A row refuses only if the minimum plus its scratch cannot fit. Seal builds
+the directory after releasing the arena. FULL's unmatched phase uses its own minimum M,
+independent of the former arena grant. The build sorter's open-run limit is 32, including
+one merge-output slot; fan-in is derived from its workspace and B.
+Remainder-derived staged-source, collector, deferred-sort, root-sort and group-output-sort
+admissions run only when no optional arena is registered. Current plans have at most one
+registered arena, between handoff and Seal; AdoptBuild and Seal reservations therefore
+cannot trigger a yield, and arena ordering is immaterial.
+Admission checks the complete original build row plus 48 B before NULL trimming or
+packing. Admission also refuses CS05067 immediately if that decoded record plus its
+per-chunk overhead can never fit the largest possible cache G/4.
+Build codec scratch charges 32,768 + 2B + 2D; D bounds a decoded build row. Probe reader
+and decode overlap charge 8,704 + B + 2D. Decoded chunks, including LRU objects, target
+min(G/4, M + 24,064 + B). A larger admissible record occupies its own chunk. The FULL bitmap
+and old/new directory arrays also consume the available grant; the target alone does not
+guarantee that a chunk can be admitted after these charges. Their minimum working set must fit.
+The cache targets G/4, reduced by other operators'
+reservations, and must admit one decoded chunk with its LRU objects. Its reservation stays
+live through probes so downstream sorting leaves room for the next probe. Directory slots
+charge 48 B (actual struct 40 B), plus array headers. Per-operator objects, small arrays,
+file and owner residue are charged separately; the original table keeps its 104 B charge. Staged sources sharing the join statement charge 1,280 B of fixed
+objects; collectors using that statement or deferring charge 1,280 B plus their actual ordering-column and family arrays.
+Staged sources (including GROUP BY inputs) outside the join statement, and non-deferred
+collectors outside that statement, retain base's exact grant arithmetic; their residue uses
+the single statement allowance.
+The FULL bitmap pays its aligned real size. Shared staged readers pay their complete page,
+frame, 256 B objects and 2D overlap; the consuming sorter subtracts that entire reservation.
+Shared staged and deferred writers pay 8,704 B. Deferred encoding retains one aligned
+B-byte frame buffer, charged after prefix drain and before later encodes. Its transient
+key/row codec arrays use the single allowance below, during both prefix and later encodes.
+
+There is one statement-wide uncharged allowance of 262,144 B, shared with SQ-L3a.
+It covers sequential prefix handoff writers, bounded codec frames,
+one prefix writer page, iterator frames and temporary sorter file/handle/registry objects
+(32 open runs for a join build sorter; 64 for other sorters). Deferred encoding uses this same allowance for at most
+32,768 + 4B of transient codec scratch; its prefix writer and frame buffer use the
+allowance until drained rows release their charges. These are alternative sequential handoff phases, not allowances multiplied by
+operator count. Persistent join objects, directories, bitmaps, caches and readers/writers
+are charged. Combined joins, GROUP BY and ORDER BY use G plus this single allowance.
+
+EXPLAIN ANALYZE reports spilled_bytes (largest physical snapshot), spill_peak_bytes (owner
+high-water mark), spill_runs (sorter runs written, including a consolidated prefix after the arena gives way), spill_merge_passes (sum of sorter merge
+depths) and hash_join_probe_chunk_reads (decoded cache misses during probes, excluding build
+and unmatched scans). With separate sort metrics, hash owner byte/run/merge names have a
+hash_ prefix. Internal ProbeBytesRead counts encoded bytes and framing decoded by probes.
+Physical fields are not cumulative I/O. Joins never increment hash_spill_batches or
+hash_spill_passes; these keep aggregation's meanings when aggregation also spills.
+
+Under ANALYZE, JoinStep reports its executed permission as hash_budget=spill_on_refusal or no_spill and
+hash_status=fitting or spilled for that build. Policy is recorded when a plan starts, separately
+from candidate work, so an unbuilt step has its real policy and zero-candidate actuals remain NULL.
+The policy dictionary is allocated only when a hash step records permission or status;
+join-free analysis scopes retain only the optional field, without an eager dictionary.
+Non-hash steps retain hash_budget=no_spill. Fitting descriptions keep base text apart from the hash_budget value, which reports the step's permission, and the added hash_status field. A spilled JoinPlan uses "bounded hash" in place of "bounded in-memory hash".
+Plain EXPLAIN describes configured spilling
+as spill_on_refusal_if_eligible. Near a refusal boundary the process hash
+seed can affect directory growth, admission against the actual largest cache chunk and
+FULL's unmatched sorter layout near CK05002. EXPLAIN's hash_join_probe_chunk_reads and
+spill_runs/spill_merge_passes for FULL and for non-FULL builds in multi-join plans can vary by process. Rows, order, JoinCandidatePairs,
+RecordsExamined, calls and the first evaluation error retain fitting semantics.
+
+No durable format or write boundary is added. PostgreSQL's batch alternative is at
+src/backend/executor/nodeHashjoin.c:1279 (ExecHashJoinNewBatch) and :1571
+(ExecHashJoinSaveTuple). A future batch-at-a-time path with ordinal merging needs proof
+that probe expressions are non-volatile and in the planner's non-throwing allowlist.
+
+## Plain hash aggregation and hash DISTINCT spilling (#1789, SQ-L3a)
+
+An explicitly permitted root GROUP BY or unordered SELECT DISTINCT hands off on the
+existing CS05067 reservation boundary. There is no new public API, diagnostic identity,
+durable format or event. PostgreSQL's design is followed at
+`src/backend/executor/nodeAgg.c:1864-1928` (hash_agg_check_limits and spill mode) and
+`:3027-3080` (hashagg_spill_tuple): existing groups continue accumulating; evaluated
+inputs that would create new groups go to eight lazy hash partitions. Each replay
+uses another three hash bits, keeps its new groups in memory and partitions its new
+keys again. Eight partition levels is the limit. Exhaustion retains CS05067 with the
+specific eight-level repartitioning message; an individual group that grows past its
+live grant also retains CS05067. One repeated key creates one group and never spills.
+
+Keys, FILTER and accepted aggregate arguments execute once, at their original input
+boundary and in their original order. A staged volatile consumer first finishes its
+input predicates into a bounded list or an input-order spool. FILTER rejection skips
+arguments. Partitions contain values and acceptance flags, never expression trees;
+replay makes no application, sequence, predicate or expression call. Only native fixed
+state transitions are eligible. SUM/AVG also require a static magnitude proof: argument
+magnitude times the statement's physical temp quota must fit Decimal. Every spilled
+row consumes at least one physical byte and all root partition files coexist before
+replay, making that quota a conservative cardinality bound. This prevents replay from
+delaying a checked-sum overflow until after later volatile calls or input errors.
+The proof accepts exactly these expression forms; every other form has no bound:
+
+| Expression | Absolute bound and justification |
+| --- | --- |
+| Stored signed integer column, cast or non-pseudo declared call result | 128, 32,768, 2,147,483,648 or 9,223,372,036,854,775,808 for Int8/16/32/64 respectively. Storage assignment, checked casts and function result type checks enforce the CLR range, including the negative endpoint. A call's precision/scale modifiers supply no bound: its fast result check validates the storage family only. |
+| Stored NUMERIC(p,s) column or NUMERIC(p,s) cast, 1 <= p <= 28 and 0 <= s <= p | 10^(p-s), strictly above every admitted magnitude. Assignment and cast modifier checks enforce precision and scale. Derived-column metadata alone does not establish this bound; a function can return a decimal outside its declared modifiers. |
+| Sequence expression | 9,223,372,036,854,775,808, covering every signed Int64 value. Sequence evaluation and any sequence error remain at input. |
+| Constant sbyte/short/int/long/decimal | The absolute value, converted exactly to decimal. A constant NULL alone has bound zero because its strict SUM/AVG transition is skipped. |
+
+Pseudo-type calls (including ABS, ROUND, FLOOR, CEIL/CEILING, POWER and MOD), derived columns,
+Null-typed columns/casts/calls, floating values, unconstrained NUMERIC, parameters and compound
+expressions have no proof and retain CS05067 on refusal. No bound is inferred from a
+pseudo-type's Null storage marker. A derived Null-typed column can hold values: a
+CALLED ON NULL INPUT ANYELEMENT function can return a value when all polymorphic arguments
+are NULL. Even concrete derived metadata is insufficient: a typed NULL argument can
+give that call BIGINT metadata while it returns text. CASE/COALESCE now enforce their
+resolved numeric value family at each source node (#1788), except the known grouped typed-NULL polymorphic application-result defect in SqlPlanExecutor.Grouping.cs normalization, which can pass text under numeric metadata. Ungrouped evaluation enforces the numeric family. Spill eligibility remains
+unchanged. SUM/AVG bounds and MIN/MAX families accept a column only
+from checked table storage; an explicit outer cast can establish a checked type. The
+differential corpus exercises these cases and unchecked declared NUMERIC modifiers. Expression errors still occur at input; refusing spill preserves the original
+CS05067 boundary at the same budget, rather than promising that an unsupported small grant
+reaches the error observed with a fitting large grant.
+
+The capacity contract is by live row and state shape. The in-memory phase retains the original
+accounting: live heap per aggregate is SUM/AVG 136 B, MIN/MAX 224–232 B and COUNT 112 B,
+against 128 B charged. This known under-charge preserves fitting capability;
+the live ≤ G + 262,144 bound holds from the handoff onward, when measured replay charges apply:
+
+| Shape | Admission and spill capacity |
+| --- | --- |
+| One scalar group key, COUNT(*) | 96 B key + 128 B group + 128 B accumulator = 352 B per live group; 8,000 groups are 2,816,000 B, over ten 262,144 B grants |
+| K fixed scalar keys, A ordinary native aggregates | 56 + 40K B key and 128 B group overhead plus 128 B per plain aggregate in memory, before variable payloads; replay alone charges 256 B per MIN/MAX, 144 B per SUM/AVG and 128 B per other plain aggregate, plus a 32 B replay entry |
+| COUNT, bounded SUM/AVG, fixed-width MIN/MAX, native BOOL_AND/BOOL_OR/EVERY | Fixed native state; MIN/MAX admit only numeric, temporal, boolean and UUID families (or constant NULL). Text/CHAR and binary extrema keep CS05067. COUNT(x) partitions only a NULL/non-NULL flag after evaluating/coercing x at input |
+| Streamed scan/system-view unordered hash DISTINCT | Original seen entry and output row each pay their existing charge; the first row/spelling survives. Replayed keys pay their key plus a 64 B entry allowance. Join-output DISTINCT retains its existing refusal |
+| Rows in partitions or ordinal spool | Private SQ-L2 row encoding, at most min(16,384, (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192) B including 24 B allowance; each phase's G is its remaining grant after active reader buffers and must admit SQ-L2's sorter |
+| Input-order source/output spool | Existing SQ-L2 grant-derived record bound (min(G, Int32.MaxValue) - 32,768) / 16 - 8,192 B, without the hash partition's 16,384 B cap; output projection rows reserve their codec/page/decoded overlap from the same ledger |
+| STRING_AGG, ARRAY_AGG, DISTINCT/ordered aggregates, statistical or application accumulators | Existing CS05067 refusal; no spill permission |
+| Grouping sets, direct window-over-group owners, correlated/deferred frames, SQL/JSON, DML, nested relation bodies | Existing ownership and refusal; no inherited hash spill permission |
+| Subquery-bearing group inputs/expressions or unproved MIN/MAX argument families | Existing refusal; hash eligibility remains conservative |
+| Deferred collation, second key family, application-binary cells, unsupported or oversized encoded cells | CS05067; no approximate key, state or result |
+
+Group order is the original first-seen order, including without ORDER BY. On handoff,
+the fitting dictionary's insertion ranks form an already ordered prefix; suffix input
+records receive monotonically increasing ordinals above that prefix. Replays preserve
+the first ordinal and key representative. Completed key/aggregate summaries are spooled,
+their dictionary references and charges are released, and SQ-L2 externally sorts summaries
+by ordinal before HAVING and projection. The prefix ranks avoid enlarging every fitting
+accumulator or allocating a per-group ordinal map. Unordered LIMIT/OFFSET stops projection
+at the same group as the fitting collector, including sequence state. Hash DISTINCT uses
+the same partition and ordinal mechanism, preserving the first complete projected row.
+
+Hash-key validation checks only the equality families and row codec. It never constructs a
+sort key or requires an index-backed collation; invariant linguistic keys, including UTF-16
+that their in-memory comparer accepts, retain their original representative. Each group
+invocation owns its spill in a local variable; nested invocations cannot append to or dispose
+another group's spill. The partition-hash fault hook is isolated to the test's async context
+and captured once by a spill, never read from process-global mutable state per append.
+
+A non-pipelined GROUP BY starts with the original input materializer, retaining its exact
+row representation and charges. Only its failed reservation hands the evaluated prefix and
+remaining enumerator to an input-order spool; predicates and prefix projections never repeat.
+Fitting file-engine inputs therefore avoid the staged row conversion and per-row source lookup.
+
+The ordinal merge completes before a downstream ORDER BY starts. Without ORDER BY, HAVING
+and projection append directly to an input-order output spool; there is no second external
+sort. OFFSET rows still execute projections and LIMIT stops at the original group boundary. LIMIT 0
+executes neither HAVING nor projection and releases temporary ownership before return. The single summary
+reader plus decoded-row overlap reserves from the statement ledger; the downstream
+collector gets only the remainder. The source spool, hash partitions, ordinal runs and
+downstream sort share one StorageTempStatement and one physical quota. A delivered
+SqlSpilledResultSet takes that owner; otherwise execution disposes it. Partition writers,
+bounded codec frames and the bounded recursion stack are row-count-independent scratch.
+The shared statement-wide allowance above is 262,144 B (256 KiB), not an additional aggregation allowance: at most eight 8,192 B
+partition writer pages, one 8,192 B summary writer page, an 8,192 B reader page, a record
+frame of at most 16,360 B, and an 8,192 B final-run writer page account for at most
+106,472 B of payload buffers; bounded file/iterator objects, recursion frames and codec
+objects use the remainder. Partition writer pages are released at Seal, so a fresh set
+is live for only one active repartitioning level at a time. The live-heap test samples input,
+batch entry, populated replay batches and ordered output at 12,000 and 24,000 rows with
+128-character keys. Both populations force one first-level partition and must repartition, so both fill a replay batch. Each population's peak from the handoff through ordered output must fit a 1 MiB grant plus that allowance; the replay peaks (batch entry, populated batches and ordered output) may differ by at most 131,072 B (128 KiB). Each execution uses its pre-run baseline, and each population takes the minimum of three executions: reclaiming pre-existing pooled buffers must not increase the measured replay. ArrayPool rent, allocation, trim and drop events accompany every execution. Mutants retaining a 1,024 B payload or a 64 B object per input row must fail the absolute or growth guard respectively; the smaller mutant must fail in all three paired executions. Fitting representation and allocations are retained. Replay state charges
+include the executor wrapper, accumulator, retained scalar box and group-array slot; MIN/MAX
+also retain the executor's mirrored value. SqlFunctionContext is a ref struct and is not retained.
+Marginal forced-GC tests at two populations bound every spillable native kind and value family,
+key rows and identity maps, replay entries, DISTINCT representatives and ordinal source readers. They compare marginal bytes per entry, rounded down, with the unchanged per-entry charge; a constant heap artefact smaller than one byte per entry cannot fail the contract. An additional 8 B per replay entry must fail in every measurement round.
+The seeded corpus replays and samples phase changes at 1 and 2 MiB in CI, each in two statement-range shards ([0,128) and [128,256)); at 4 MiB every statement fits under the original charges, so that unsharded case pins fitting equivalence and the absence of a handoff and has nothing to sample. The extended run uses 2,000 statements at 1, 2, 4 and 16 MiB. Near-budget aggregates complete wherever the original charges complete at the same grant and quota. Only replay charges the measured state; an input handoff occurs
+only at the original refusal boundary. Decoded hash records validate their ordinal, key families,
+acceptance flags and state types before use; mismatched tags retain located CK05004.
+
+EXPLAIN ANALYZE reports hash_spill_batches and hash_spill_passes, and the existing
+spilled_bytes, spill_peak_bytes, spill_runs and spill_merge_passes. Where a downstream
+sort also spills, its ordinary fields describe the shared final owner and hash-prefixed
+byte/run fields describe the hash phase. Counters reflect actual partitions and ordinal
+sort runs; tests never use durations to decide correctness. System.HashCode seeds vary
+between processes, so partition membership, batch/pass counts and EXPLAIN counters vary too.
+Near the eight-level limit, a statement may succeed in one process and refuse in another;
+the equality-compatible hash and existing pass limit are unchanged.
+
+The commerce-shaped default-grant probe completes a 1.5-million-row annual repeat-customers slice with 250,000 groups. The 500,000-product category-rank CTE/window shape still refuses while creating aggregate states inside the revenues CTE, whose nested executor has no spill permission. The 800,000-row NOT IN child first refuses its materialized SELECT input, before completing the eager membership vector. Nested aggregation ownership and that subquery input/vector remain follow-ups for SQ-L4. These probes preserve those explicit scope boundaries.
+
+No durable write or flush boundary is added. Crash images captured at partition append
+and ordinal-merge completion, with the fault-injecting durable recorder armed, reopen
+with the exact original rows and catalog. Existing temp CRC pages, delete-on-close,
+startup sweep, quotas and free-space floor cover abrupt termination. Temp failures are
+located CK0500x SQL errors, outside the durable-storage failure walker, and leave the
+session and an explicit transaction usable. Input producers release page latches before
+every temporary call. Disposal preserves the initiating error and records cleanup failure
+as exception data.
 
 ## Root SELECT sort spilling (#1789, SQ-L2b)
 
@@ -492,7 +769,7 @@ storage type. Non-NULL ascending values keep their previous bytes, except floati
 zero and NaN: SQL canonicalizes signed zeros and moves NaN below negative infinity to match
 SqlValueComparer. The shared Indexing/Types encodings and page layouts are unchanged, so their
 format versions do not change. Row storage retains the original values. SQL catalog/record-space
-format 36 introduced the default key order (#1787); current format 37 and mandatory index
+format 36 introduced the default key order (#1787); current format 39 and mandatory index
 extension 3 fence these SQL-specific keys and metadata. Compiled
 schema v12 carries the same effective orders. All three enums use AscendingNullsFirst = 0,
 AscendingNullsLast = 1, DescendingNullsFirst = 2 and DescendingNullsLast = 3; bit 0 means NULLS
@@ -619,7 +896,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Current catalog/record-space format 37 refuses all earlier files before writable data recovery;
+extension 3. Current catalog/record-space format 39 refuses all earlier files before writable data recovery;
 compiled-schema v12 retains CompiledSchemaIndex.Predicate (introduced in v10) and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
@@ -1692,8 +1969,8 @@ requires at least one mandatory hash equality between the children and proves th
 ON condition non-throwing with the existing hash-safety rules. CS05070 refuses other forms
 before reading either input, even when an input is empty. This includes inequality-only/OR
 conditions, unproven calls, arithmetic, subqueries, CHAR-only keys and derived text without
-a stored-codec Unicode guarantee. No merge executor, nested-loop FULL fallback or spill is
-introduced. Computed USING COALESCE and proven identity/widening casts can supply hash keys
+a stored-codec Unicode guarantee. No merge executor or nested-loop FULL fallback is introduced. Eligible root hash joins
+can spill as described under SQ-L3b above. Computed USING COALESCE and proven identity/widening casts can supply hash keys
 in later joins or grouped inner subtrees. PostgreSQL optimizer/path/joinrels.c:1157-1180
 likewise refuses FULL when it cannot produce a merge/hash path.
 
@@ -1720,8 +1997,8 @@ and separate unmatched/null-key drain; no code was copied.
 The statement grant charges the table object (104 bytes including new tracking/evaluator
 fields), bucket/entry arrays, the aligned tracking array header/payload and retained rows.
 Nested tables share the live grant. Success, budget refusal, evaluation failure and cancellation
-release every reservation. CS05067 is unchanged. Only hash-build state is bounded: existing
-outer/intermediate/result materialization retains its existing contract. The build side is
+release every reservation. CS05067 is unchanged. Fitting hash-build state retains these exact charges; eligible root outer/intermediate
+buffers can spill under SQ-L3b. Final materialization retains its existing contract. The build side is
 always the written right child, including when an index exists. EXPLAIN names FullHashJoin and
 unmatched=both in JoinStep detail; ANALYZE retains candidate-pair counts rather than emitted
 unmatched-row counts. Deterministic 64/640-row fixtures compare 4096/409600 loop candidates
@@ -1760,7 +2037,7 @@ canonical body. FROM-less correlated projections also retain provenance when the
 display name differs from the referenced column, or that column was already synthesized.
 An authored view name identical to a synthesized name is also expressed
 as a derived column list in that body; different catalog names already prove an explicit
-list supplied them. Star expansion avoids inventing aliases for synthesized names. SQL format stays 37.
+list supplied them. Star expansion avoids inventing aliases for synthesized names. That change retained SQL format 37; format 38 added applied-schema history and never shipped on its own; current format 39 records physical index owners.
 An older frozen star's same-name AS alias is indistinguishable from an authored re-alias;
 stored-body binding conservatively retains synthesized provenance for that shape (CS01015).
 New fully named same-name re-alias views persist an explicit output list. A mixed view can
@@ -1770,7 +2047,7 @@ An older explicit view column list matching a generated name is ambiguous too: t
 legacy(column1) AS SELECT CAST(1 AS BIGINT) as that body alone plus the name column1.
 It conservatively retains synthesized provenance and refuses NATURAL with CS01015; wrapping
 the view in a derived query with an explicit column list or recreating it resolves this. A reopen fixture writes the base's
-exact body and column contract through the unchanged format-37 kind-17 catalog writer,
+exact body and column contract through the unchanged kind-17 catalog writer in current format 39,
 alongside a new view whose stored wrapper retains the explicit list. No format changes.
 Each BindItem join checks cancellation; NATURAL skips merged-column scans until a binding
 actually has UsingColumns. A synchronous parameter-read witness tests cancellation after
@@ -3210,7 +3487,8 @@ flowchart LR
   numeric common type before its enclosing expression, DISTINCT and transition calls. This
   preserves intermediate REAL rounding through nesting, NULLIF, casts and arithmetic; NULLIF
   inherits its normalized first operand's type. The binding flag follows only the statistical
-  argument's expression tree; ordinary alternative typing and child query scopes are unchanged.
+  argument's expression tree; ordinary alternatives also use per-node common-type conversion
+  (#1788), while statistical overloads and transitions retain this contract.
   Exact transitions retain scale-28 BigInteger sums and sums of squares; final division/root
   rounds once into the engine's 96-bit Decimal domain, with midpoint ties
   away from zero. A root is rounded from the exact rational variance, including sub-Decimal
@@ -3907,6 +4185,11 @@ binary values. Stored row bytes and canonical DEFAULT text retain their existing
 
 ## Compiled-schema provisioning
 
+Compiled expression DEFAULTs remain outside the literal-only declaration contract. Their
+pre-publication policy refusal carries CS03105 through imperative apply and script generation.
+Build phase 3 leads its message with CS03101 and retains CS03105 in Diagnostics.
+Because that refusal already carries CS03105, imperative apply leaves Provisioning unset. SQL DDL expression DEFAULTs are unchanged.
+
 Joint space admission charges sparse dirty buffer pools only when the job allocates pages.
 A zero-operation marker refresh (including an empty Build) admits on the declaration-derived
 metadata floor alone. Heap-owned dropped-index pages are not retirement pages for a kept heap
@@ -4162,7 +4445,7 @@ provisioning DROP phase; decision 77 in the program design records the measureme
 
 Catalog kind 9 contains the complete target document/hash, Joint/ operation identities, ordered
 positions and per-table KeepOwner/RewriteOwner choices. Its transaction commits before any
-preparation. Format 37 fences the former per-step meaning. After a crash only a matching target
+preparation. Format 37 fenced the former per-step meaning. After a crash only a matching target
 Build may resume; a different-target Build discards it with CS03402 and uses the stored schema.
 A no-target open discards without a provisioning report or trace.
 The old applied marker stays trusted. One publication commit installs the complete new schema,
@@ -4384,6 +4667,8 @@ a plan with any worker work retain their reservation for that whole job as well.
 | Heap-owned DROP INDEX; DROP COLUMN with its declared index | Inline keep; pages stranded | Inline keep; pages stranded until heap retirement or IX-S1 (#1808) | O(1); R free | Short X; R/W wait; no table copy |
 | Same-name heap-owned index replacement | Per-step drop/build | Worker replacement; R/W wait | Per-step X; R free | Full replacement; R/W wait |
 | TYPE rewrite or another required physical replacement | TYPE joint | Worker for every populated replacement unless RunMigrationsInline | Joint; R already waits | R/W wait through copy/publication/cleanup |
+
+IX-S1 (#1808) gives every index its own page owner, so the heap-owned rows describe earlier formats: DROP INDEX, and DROP COLUMN with its declared index, retire the index's owner, and reclamation frees exactly its pages after the last snapshot that could read them.
 
 ### Provisioning wait inventory (B2 second review, #1355)
 
@@ -5289,7 +5574,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 37 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 39 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -5912,6 +6197,56 @@ mapping on Windows, whose file system folds case, as on Linux).
 UTF-16 code unit is tried, and the verdicts are literals, never read from the
 running platform.
 
+## Per-index owners and bounded builds (#1808)
+
+SQL record-space format 39 and catalog registration kind 21 require a separate owner for every
+physical index, including first Build and ordinary constraint trees. Each registration persists
+logical table id, name/kind/uniqueness, fixed root and physical owner id. Root headers must agree
+with that map; owners cannot alias a table, sequence, retired owner or another live tree. The
+recovered read-only preflight refuses earlier formats and malformed maps before writable open.
+Kind 3 registrations are retired; there is no compatibility reader or upgrade path.
+
+Before root allocation, the catalog reserves a monotonic identity and a kind-14 abandonment
+intent. Successful registration publication removes that intent in the same catalog commit.
+The preparation fence prevents reclamation even when the physical builder has committed
+and its publishing transaction has not begun. An unpublished failure releases that fence,
+so the durable intent survives for ordinary bounded owner reclamation. DROP INDEX stages a new intent atomically
+with removing its registration and description. The existing table-reclamation worker protects
+transaction snapshots and detached statement handles using its post-unpublication sequence
+fence and statement epochs, frees exactly that owner in 32-page durable batches, and removes
+the intent only after data durability and an empty owner directory. It yields to checkpoint
+signals, interval/size due checks and the shared admission pause. Other indexes and the heap
+remain allocated. Table and namespace retirement stage all their distinct tree owners too.
+
+SQL shares the global 64-leaf prune grant across small per-tree managers, using constant-time
+owner-page counts as conservative leaf-work bounds; a large tree retains the next full turn.
+No directory snapshot or page I/O occurs under the manager directory monitor.
+
+Inline, constraint and deferred builds share IndexBuildLoop: 64 retained rows per durable
+bracket, bounded statement-memory charging, preserved source MVCC stamps, cursor-based unique
+validation, and one catalog publication. IX-S1 deliberately adds build-budget refusals relative to
+1eefed274, which charged no build workspace: each chunk reserves 320 + 80 + 64 × 96 =
+6,544 B before its first row, plus the charge for each retained row. CREATE [UNIQUE] INDEX,
+UNIQUE/PRIMARY KEY constraints, joint-migration builds and rollback rebuilds all share this loop.
+With no temp space, the loop refuses CS05067 for two INT rows at G=4,096 B; even one INT row refuses at
+G=4,096–6,927 B. A chunk of 64 (INT, 4,000-character TEXT) rows at G=262,144 B refuses
+because it needs 555,408 B. Each of these builds completed at those grants with no temp quota
+at 1eefed274. This deliberate build-budget exception (#1808) retains the bounded bracket. Schema-apply migration and rollback rebuilds report CS03402 with CS05067 as the cause. Checkpoint admission occurs between chunks, while the
+table X reservation and creator/reader pins span the entire build. Same-name replacement now
+keeps the heap, reports Joint/KeepOwner, and rewrites zero rows when the remaining layout permits
+keeping it. The heap-owned collision refusal is removed. Rollback's encoder/predicate and
+validation policy remains owned by SQ-A7; page ownership does not relax its key-rejection rule.
+
+The 80,000-row regression uses a 1 MiB pool, an 11,429-page heap and a 16,666-page index;
+1,250 brackets retain at most 64 rows, with a measured checkpoint journal peak of 1,135,631 bytes.
+Dropping that owner preserves the heap and a second index, whose 80,000 keys remain readable.
+
+Crash boundaries include the owner-intent commit, root commit, each chunk before/after commit,
+registration/description publication, every reclamation page-batch commit and intent removal.
+PagesReclaimed (30) reports nonempty committed owner-page batches of at most 32 pages. IndexBuildBegan/IndexBuildEnded (28/29) report
+every physical index-owner build, including schema provisioning, CREATE INDEX, TRUNCATE and table rewrites, with engineName, database, physical index objectId and succeeded on end. These Informational events use no Start/Stop activity semantics; end fires once at publication (true) or failure/abandonment (false). An unconfirmed joint attempt ends with false without abandoning any tree or changing recovery state. Payloads never
+contain indexed values. No new diagnostic identity or wire format is introduced.
+
 ## Secondary indexes
 
 The CREATE INDEX memory regression reads storage's existing encoded pre-image accounting at
@@ -5930,7 +6265,7 @@ description + exported registrations), the engine binds them.
 
 - **DDL flow.** CREATE INDEX takes the table's Exclusive lock (DDL-blocking
   build — in-flight writers finish first, Indexing's documented no-online-rebuild
-  posture), builds inside one gated **durably committed** bracket (the
+  posture), builds inside bounded gated **durably committed** brackets (the
   self-committing DDL posture: the catalog record commits independently and must
   never describe a tree a crash could revert), walks **every stored version** and
   inserts entries carrying the version's original writer/deleter stamps — so
@@ -5938,8 +6273,7 @@ description + exported registrations), the engine binds them.
   then persists metadata + registrations in **one catalog self-commit** (the two
   must never tear: a registration without a description is an unused tree; a
   description without a registration would promise uniqueness no tree enforces).
-  Crash windows leave only orphaned tree pages — safe leaks, never a
-  half-attached index. DROP INDEX inverts the order (catalog first — the
+  Crash windows leave durable abandonment intents, never a half-attached index. DROP INDEX inverts the order (catalog first — the
   authoritative drop — then the in-memory directory) under the same lock; DROP
   TABLE drops its indexes' metadata/registrations atomically with the table
   record and DROP COLUMN on an indexed column is rejected (drop the index
@@ -8040,7 +8374,7 @@ Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
 LATERAL joins, UPDATE SET subqueries, `Serializable`
-isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash spill,
+isolation (rejected at begin), persisted statistics, standalone ANALYZE,
 and index-only result production (a seek always fetches the row).
 (Row-level MVCC visibility and secondary indexes — DDL, write-path maintenance, and planner seek
 adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC
@@ -8260,7 +8594,7 @@ bounded peer-sent names) are in the area's
 | 11 | `StatementTooComplex` | Warning | — | `database`, `depth` (-1 when an execution stack backstop has no measured depth) |
 | 12 | `DdlSelfCommitted` | Verbose | `Statements` | `database`, `commandType` |
 | 13 | `ProvisioningStart` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `mode` (`Apply`/`Verify`/`Resume`/`Replan`), `stepCount` (-1 before planning) |
-| 14 | `ProvisioningStop` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `stepCount`, `outcome` (`Applied`, `Skipped`, `Deferred`, `Verified`, `Restarted`, `Discarded`, `Error`, `Cancelled`), `durationMilliseconds` |
+| 14 | `ProvisioningStop` | Informational | — | `engineName`, `database`, `schema`, `schemaHash`, `stepCount`, `outcome` (`Applied`, `Skipped`, `Deferred`, `Verified`, `Restarted`, `Discarded`, `Held`, `Error`, `Cancelled`), `durationMilliseconds` |
 | 15 | `ProvisioningFailed` | Error | — | `engineName`, `database`, `schema`, `position`, `kind`, `code`, `exceptionType` (no message) |
 | 16 | `ExtensionRegistered` | Verbose | — | `kind` (`Scalar`, `Aggregate`, `Type`, `Cast`), `name` (cut to 256 characters per identifier; a cast is `source -> target`) |
 | 17 | *(retired)* | — | — | `IndexRegistrationsSaved` reported a separate registration save; B2 publishes an index's registration atomically with its description (#1355), so the id is retired, never reused |
@@ -8272,6 +8606,9 @@ bounded peer-sent names) are in the area's
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
 | 27 | `TableReclamationYielded` | Verbose | — | `engineName`, `database`, `objectId` (each poll yielding to a due or pending checkpoint) |
+| 28 | `IndexBuildBegan` | Informational | — | `engineName`, `database`, `objectId` (physical index owner; every build, including schema provisioning, TRUNCATE and rewrites) |
+| 29 | `IndexBuildEnded` | Informational | — | `engineName`, `database`, `objectId`, `succeeded` (publication true; failure, cancellation or abandonment false) |
+| 30 | `PagesReclaimed` | Informational | — | `engineName`, `database`, `objectId` (physical owner), `pages` |
 | 25 | `TransactionCleanupFailed` | Warning | — | `transactionId`, `exceptionType`, `exceptionMessage` (bounded to 1024 characters) |
 
 `Sessions = 0x1`; `Statements = 0x2`. Provisioning has no keyword. Id 17 stays retired.
@@ -8689,10 +9026,53 @@ predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refu
 The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
 ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
 including grouping, windows, correlation, persisted equivalence and definition checks.
-JSON positions share a scoped CASE/COALESCE common-type resolver: unknown literals adopt
-declared alternatives, all-unknown sets become TEXT, and incompatible declared alternatives
-refuse before rows. The ordinary binder has no equivalent resolver; its rules outside these
-positions remain unchanged. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
+All scalar positions share the existing CASE/COALESCE common-type resolver (#1788):
+unknown literals adopt declared alternatives, all-unknown sets become TEXT, and incompatible
+declared alternatives refuse with CS02080 before rows. Alternatives convert at each node,
+including analysis-time conversion of skipped unknown literals (CS02022 for invalid numeric
+or Boolean text, CS02002 for numeric overflow). Grouping keys and aggregate inputs use the
+scalar rule. A select-list, HAVING or ORDER BY node reading a key slot declares and returns
+the key's resolved source-scope type, including under ROLLUP, CUBE and GROUPING SETS.
+Aggregate result types follow their bound inputs and their existing transition contracts.
+CASE/COALESCE over grouped values (aggregate results, key slots, expressions over them or
+constants) retains Decimal-above-Double-above-Real normalization, CHAR/TEXT folding to TEXT
+with padding removed, grouped overload selection, Int64 integer literals and all-NULL
+metadata. Native grouped arguments retain base value families, including signed BIGINT
+literals. This is a recorded PostgreSQL departure. A SlotScope alone does not imply grouped
+output: only PlanPlainGroup and PlanGroupingSets set the flag; ForOrdering copies it.
+Plain window projections and ORDER BY use the scalar rule. Window arguments use a scalar
+scope even over completed grouping slots. Alternative types
+reuse the scope's existing type cache, avoiding cubic grouped nesting without enlarging it.
+Built-in implicit conversions handle declared alternatives; application and explicit-only
+casts are excluded. Unconstrained NUMERIC preserves its original box and constant alternative
+casts fold during binding. Unresolved polymorphic results and unsupported parameter values
+refuse with CS02080 before rows. Parameter types come from their values: NULL is untyped,
+so an application polymorphic result depending only on NULL parameters remains unresolved.
+An explicit parameter CAST resolves its type independently of its value (PostgreSQL
+parse_coerce.c:2505-2514 refuses unknown polymorphic input with 42804).
+Only Declared pseudo results create function refusal sources: application functions use that
+rule. ABS uses NumericElement; pseudo-returning scalar built-ins use Builtin. For an unknown
+result, the source check follows their ANYELEMENT parameters, rather than their names, and
+native MIN/MAX arguments while retaining the native extrema result-slot exemption.
+COLLATE, NULLIF's first operand, unary signs, nested alternatives and completed grouping
+slots preserve the check within an expression. A window call checks its function in its
+slot scope's window-argument scope, which types it as WindowType does; over grouped output
+this is the source scope.
+Scalar subqueries, derived-table/view/CTE columns and output aliases are query boundaries:
+their Null-typed values can adopt the common type and fail its conversion at a row.
+Integer arithmetic and ROUND, FLOOR, CEIL, CEILING, POWER and MOD type an unresolved
+application polymorphic operand by their own rules, so its value can fail the common-type
+conversion at a row with CS02011; PostgreSQL refuses the inner call with 42804.
+The NULL forms, including native MIN/MAX result slots, retain their existing behavior.
+Alternative coercion uses the same tree in IndexPredicate and Table contexts, preserving
+structural partial-index proofs for ON CONFLICT, SELECT and joins. It does not call the
+application-cast validation path. Signed literals fold only when binding produced a constant;
+a deferred failure stays deferred. Constant conversion retains parameter provenance.
+Statistical transitions and JSON's grouped conversions
+retain their contracts. CHECK and SQL function creation fully bind
+before publication, as defaults, views and partial predicates already do. Accepted definitions
+round-trip through file reopen. SQL format 39 includes applied-schema history and index owners. View columns are not migrated;
+common-type resolution changes neither format nor compatibility policy. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
 parse_coerce.c:1357-1456. Bound selectors retain their SQL type and member/index overload;
 evaluation converts alternatives to that type before access.
 Adjacent arrows fold only in the bound tree into ordered selectors over one owned, validated
@@ -8720,7 +9100,7 @@ admission now refuses malformed input; it does not rewrite existing row bytes.
 | CS01067 | Invalid JSON access or IS JSON signature (42883) |
 | CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
 | CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
-| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives or unresolved polymorphic/unsupported parameter alternatives (42804/42846) |
 
 The extraction oracle performs 10,240 comparisons over generated nested values,
 negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.
@@ -8902,7 +9282,7 @@ two questions for the planner: *what objects exist* (with stable identities) and
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
 SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
-format **29** introduced kind 18 ownership; current format **37** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+format **29** introduced kind 18 ownership; current format **39** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
 Earlier database formats are refused by the existing format gate; compiled-schema v12 is current.
@@ -9230,7 +9610,7 @@ Typed-schema worker handoff and joint crash/wire convergence are described in SQ
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 37); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 39); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -9283,8 +9663,7 @@ Implicit CREATE TABLE / ADD COLUMN identity-sequence candidates skip pending joi
 including suffixed candidates. PostgreSQL similarly checks its shared relation
 namespace before creation (src/backend/catalog/heap.c:1191-1198) and rename
 (src/backend/commands/tablecmds.c:4362-4367); SQL retains its own table/view/sequence namespace.
-Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 through both the thrown
-diagnostic and Provisioning before an intent is saved. A reservation timeout throws CS03402 with its lock-manager cause. Imperative interruption clears
+Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 in the thrown diagnostic before an intent is saved. Refusals that reach the planning boundary without a diagnostic (schema name and unsupported shapes, catalog ownership, planner policy) and script-generation refusals are re-coded CS03105 and also report Provisioning; refusals that already carry a diagnostic (declared binding failures such as a non-literal compiled DEFAULT, and the explicit-apply rollback refusal) leave Provisioning unset. A reservation timeout throws CS03402 with its lock-manager cause. Imperative interruption clears
 Provisioning; a deferred job's failure remains sticky.
 
 Space admission uses the boundary after database open/recovery and object reservations, before the kind-9 write.
@@ -9553,15 +9932,15 @@ matching intent and reports CS03402 because it cannot schedule a job. With no su
 that reopen also reports CS03402 when its declared schema differs from the stored applied hash;
 a completed job stays Healthy. A no-target open sets no provisioning observation or provisioning
 trace. Successful Verify clears a prior observation. After publication it opens the
-new schema. Rollback after success plans an ordinary reverse migration: every unproven conversion,
-length/precision/scale narrowing and rounding requires destructive opt-in, refused with CS03105
-before any step otherwise. The planner's conservative exact whitelist includes integer widening,
+new schema. Rollback after success uses the applied-schema history and hold policy below (#1779).
+An explicit ApplySchemaAsync retains its strict destructive-change gate (CS03105 without opt-in).
+The planner's conservative exact whitelist includes integer widening,
 exact integer-to-float widening, REAL to DOUBLE and non-narrowing same-type facets. All
 domain conversions require opt-in because application casts are unknown to the schema planner;
 existing metadata-only gating stays unchanged.
 
 Kind 9 identifies joint jobs with Joint/ step kinds; kind 6 and kind 14 keep their encodings.
-SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 37
+SQL catalog/record-space format 34 introduced this kind-9 meaning (#1152). Current format 39
 also fences the separate tree owners and classification steps described below; every earlier
 format is refused by the existing read-only gate, with no upgrade reader.
 Compiled-schema v12 stays current. There is no new public interface, reference or wire message.
@@ -9577,6 +9956,7 @@ rewrite locks; tablecmds.c:15618-15624 refuses dependent views. No reference cod
 | CS03402 | Joint preparation/space admission failed; old schema retained unless a storage latch fired |
 | CS03403 | Joint publication commit unconfirmed; reopen/recovery decides old or new |
 | CS03404 | Session relation creation/table rename names a relation reserved by a pending joint plan |
+| CS03405 | Earlier applied declaration held at stored schema; unsafe rollback runs no step, Degraded with hashes and refused steps |
 
 #### Joint tables that keep their physical owner (#1777, SQ-A4)
 
@@ -9598,12 +9978,9 @@ unless the declaration has that index name or the plan drops it. A declared name
 a script claim, including a stale receipt. Publication refuses duplicate index names with
 CS05060 before opening its catalog transaction. Dropping a preserved index dependency column
 refuses before intent save with CS03105, naming the blocking index through CS03056 (#1821).
-Dropping a heap-owned tree without a same-name replacement keeps the heap. Its pages remain
-on that owner and are reclaimed when the table retires (DROP TABLE or a later TYPE rewrite),
-and by IX-S1 (#1808) once indexes have their own pages. This is the owner-directed exception to
-SQ-A4's rewrite-for-reclamation rule (#1778 review fix). A same-name heap-owned replacement
-still forces RewriteOwner. Alternate-tree drops/replacements can keep the heap; kind 14
-reclaims their separate owners. Kind 9 records Joint/KeepOwner or
+Every tree has its own owner in format 39 (#1808). Index drops and same-name replacements
+keep the heap when its physical layout permits; kind 14 reclaims the separate old tree owner.
+The former heap-owned replacement exception no longer forces RewriteOwner. Kind 9 records Joint/KeepOwner or
 Joint/RewriteOwner for each existing target. Empty Build, RunMigrationsInline, ApplySchemaAsync
 and the worker use this same metadata classification. The joint X-lock protocol is unchanged:
 owned sequences, then every touched table, in ascending identity order, through publication.
@@ -9648,8 +10025,8 @@ description. Length widening and validated precision changes retain their stored
 Layout refusals distinguish a joint kept table from a generic ALTER replacement; both preserve
 the published layout and retain CS05060.
 Kept columns retain their declared spelling while preserving physical ordinals and facets.
-Before commit, the index directory refuses any prepared
-key that still names a heap-owned tree; its old heap must be replaced to reclaim that tree.
+The index directory permits a prepared same-name replacement because its physical owner
+is separate from both the old tree and the kept heap.
 Registered domains are outside the schema hash. A matching interrupted intent is discarded and
 replanned when registration changes switch an existing joint table between KeepOwner and
 RewriteOwner. Every inline replan uses the same joint executor. The old schema remains online until
@@ -9657,17 +10034,15 @@ the new plan publishes. Joint copy uses its bounded DML memory ledger and direct
 copy nor deferred index build uses plain SELECT buffers. A declared script CTAS can spill an eligible source-root sort; fitting source output and
 copy batches still share StatementMemoryBudget and can refuse with CS05067 online; its next Build
 resumes at the refused statement when given a larger budget. Optional temp-space setup failures
-do not affect joint intent resume or discard. Format 37 fences the per-step kind-9 meaning; no old partially published
+do not affect joint intent resume or discard. Format 37 fenced the per-step kind-9 meaning; no old partially published
 job resumes. A fresh replan uses its new script's executable step total.
 Discard ends the current provisioning trace with outcome Restarted and starts mode Replan.
 Joint intents with malformed ownership choices still fail CS06059 when the replan is joint.
 The lock order is table X -> apply gate -> tree/page latches for building, and snapshot gate -> catalog monitor
 -> index directory monitor for publication; the directory never calls back into the catalog.
-Maintenance selects one physical manager per call, preserving the global 64-leaf budget.
-With N alternate managers each manager runs once per N+1 purge passes, and small trees can
-leave part of the budget unused. Indexing reports entries removed, not leaves visited; using
-the remaining budget would need a new public Indexing member, so that improvement is deferred
-to #1808 rather than widening the boundary for this implementation.
+Maintenance shares a global 64-leaf grant across physical managers (#1808). Constant-time
+owner-index-page counts conservatively bound work without adding an Indexing bridge member.
+Small trees share a pass; a larger tree receives the next full grant when it cannot fit.
 SQL still acquires unique-key locks by logical heap identity before entering the apply gate;
 alternate managers omit Indexing's redundant key-lock acquisition, so physical tree owners
 cannot introduce a second lock namespace or a wait inside that gate.
@@ -9711,8 +10086,8 @@ Before any inline DDL commits, the provisioner classifies the complete rendered 
 49a data-scaling step would defer, the entire plan goes to joint preparation: indexes, CHECK,
 UNIQUE, FK and NOT NULL validation, bounded facet changes and required/domain column backfills.
 Cheap additions, drops and other steps in that plan remain unpublished too. Additive index
-changes and changes to alternate trees keep their heaps using SQ-A4; dropping a
-heap-owned tree keeps its pages until table retirement or IX-S1 (#1808); a same-name replacement still rewrites. One catalog commit publishes every change and
+changes, drops and same-name replacements keep their heaps using the separate tree owners
+required by format 39 (#1808). One catalog commit publishes every change and
 the applied marker.
 RunMigrationsInline, empty-table Build and ApplySchemaAsync use the same joint executor inline
 (#1778, SQ-A6). Default-only changes publish jointly, including SET and DROP DEFAULT.
@@ -9774,15 +10149,13 @@ For 32,768 rows on a primary-key table the retained 49a builder writes 201 pages
 publication writes 202; both rewrite zero rows and decode 65,536 versions. Column and composite
 primary-key tables with three columns measure 227 to 228 pages; adding a new keyed table in
 that plan measures 228 to 230. At the measured 64 MiB engine budget, the ten-percent page-write
-bound covers additive index builds, including plans that add a table. Page-write costs for
-changes to alternate trees remain unmeasured. Heap-owned drops keep the heap with zero row rewrites; the bound excludes same-name heap-owned
-replacements until #1808. Shuffled-key measurements
+bound covers additive index builds, including plans that add a table. Index drops keep the heap with zero row rewrites. Like-for-like same-name replacement measurements drain old-tree reclamation before both final checkpoints: 8,192 rows write 78 pages in each mode, and 65,536 rows write 586 in each mode (both 100.00%, within the unchanged ten-percent bound). Holding reclamation in both 8,192-row modes writes 43/43 pages on ARM64 and x64; draining both writes 78/78 on both architectures. The former 43 versus 75–78 comparison counted reclamation only in the joint window. Replacement guards require equal nonzero reclaimed pages in both modes and apply the ten-percent bound to writes with those frees subtracted as well as the full cost. Shuffled-key measurements
 count engine checkpoints during copying as well as forced copy checkpoints: a checkpoint
 already completed by the engine must not be followed by a redundant forced copy checkpoint.
 
-SQL record-space format 37 requires this joint kind-9 meaning for every deferred job and refuses
+SQL record-space format 37 required this joint kind-9 meaning for every deferred job and refused
 36 before any write through the existing format gate. Compiled-schema v12 and wire messages
-are unchanged; no upgrade reader or new public boundary is added.
+were unchanged; no upgrade reader or new public boundary was added.
 
 #### Joint inline parity and kept layouts (#1778, SQ-A6)
 
@@ -9826,9 +10199,8 @@ Nullable checked-domain missing values validate once; only an invalid missing va
 emptiness probe. An empty or fully tombstoned table retains 49a's exception for that missing value. NOT NULL, new CHECKs and tighter precision use validation scans, with one bound
 table and evaluator per scan. Metadata-only admission visits no heap rows or retained trees;
 JointSpace still supplies the metadata floor, publication bound, engine reserve and watchdog.
-Dropping a heap-owned tree without replacement keeps the heap and strands its pages until
-the table retires, and IX-S1 (#1808) will reclaim each index separately. Same-name heap-owned
-replacement retains the rewrite; alternate-tree drops and constraint removal keep the heap. Script-index preservation and the
+Index drops, same-name replacements and constraint removal keep the heap when its layout
+permits. Each retired tree is reclaimed separately under format 39 (#1808). Script-index preservation and the
 existing declared-name precedence remain unchanged; promotion policy is not changed here.
 
 No new durable boundary is introduced. Inline/default/kept-layout crash images cover every
@@ -9973,6 +10345,91 @@ before resumption: no cursor or cross-file atomic commit is required. An intent 
 pages is harmless and completes on retry. Catalog itself never walks or frees the data file.
 The #1443 review kept record-space format 11 unchanged. #1437 advances it to 12 for CHAR, as described above.
 
+#### Catalog: Applied-schema history and held declarations (#1779, SQ-A7)
+
+SQL record-space format 38 introduced catalog kind 20, distinct from the current kind-6 state; format 38 never shipped on its own. Current format 39 retains that history and adds physical per-index owners.
+Each hash-only history entry stores ContentHash, FirstAppliedGeneration and LastAppliedGeneration.
+Entries are never evicted: forgetting one could let an old opted-in declaration delete newer data.
+A chunk holds at most 32 entries. With 64-character SHA-256 hashes each entry is 86 encoded bytes;
+1,000 distinct schemas occupy 86,320 bytes across 32 chunks (10 header bytes per chunk), versus
+SlottedPage.MaxRecordSize = 8,092 bytes for one record. A full chunk causes another chunk to be
+inserted; a load-derived in-memory tail keeps filling the partial chunk across reopens and
+physical record relocation. No whole-history record reaches that limit. Oversized caller-supplied identities refuse
+CS05042 through EnsureStorable, rolling back the entire state/history transaction. Memory and
+storage exhaustion also refuse the publication without eviction. Load refuses malformed/duplicate
+entries with CS06059. Reapplying a hash preserves its first generation and updates its last.
+
+SaveSchemaDocument (including declared-script bookkeeping) and joint PublishReplacements are the
+two kind-6 write sites. Both stage kind 20 in the very same StorageTransaction. Pending kind 9
+never enters history. All directory allocations precede commit. Cache changes publish only after
+the commit succeeds. The durable boundaries remain intent commit, preparation/copy checkpoints,
+and the single catalog publication commit; no separate history boundary is introduced. The crash
+corpus records every write, flush and length change on both sides of that commit for state-save,
+inline and deferred routes, including first publication and chunk rollover. Every reopened image converges to exactly the old state and old
+history or the new state and new history, with matching generations and unchanged visible rows.
+Joint publication space admission includes one extra bounded catalog chunk.
+
+Build Apply mode skips an identical applied declaration. Otherwise it plans the complete diff
+before rendering or preparing anything. A declaration found in history is a rollback only when
+its FirstAppliedGeneration is less than the stored schema's FirstAppliedGeneration. A later
+first-applied declaration is a roll-forward and follows new-schema rules, including its own
+destructive opt-in. Repeated publications update LastAppliedGeneration without changing this order.
+
+A rollback applies only planner-Safe steps that neither re-create dropped objects nor validate
+existing data. One refused step holds the complete plan, including every otherwise Safe prefix.
+The full step classification is:
+
+| Step | In a rollback | Why |
+| --- | --- | --- |
+| AddTable | Held | A re-created table would be empty instead of recovering its dropped rows. |
+| AddColumn | Held | A re-added column exposes NULL/defaults at a new ordinal instead of its dropped values. |
+| DropTable, DropColumn | Held | Removes data written by the newer application. |
+| AlterTable | Held | The planner classes key/order changes Destructive. |
+| AlterColumn: Safe, with no existing-data validation | Applied | Exact widening without a retained CHECK/FK scan preserves every source value. |
+| AlterColumn: validation or non-Safe | Held | NOT NULL tightening, domain checks, narrowing and default changes can reject or change newer values; CHAR width changes and TYPE rewrites with retained CHECK/FK constraints require validation. |
+| AddConstraint | Held | CHECK and foreign keys validate existing rows; any UNIQUE constraint addition follows the same rule (compiled UNIQUE currently uses a unique AddIndex). |
+| AddIndex: unique | Held | Uniqueness validates existing rows and can reject newer duplicates. |
+| AddIndex: non-unique, no predicate, keys provably within limit | Applied | The complete encoded key fits 1,024 bytes for every row the stored schema can hold, without retained heap-owner validation. |
+| AddIndex: other non-unique | Held | Predicates, unbounded or unproved key widths, oversized composite keys, and heap-owned replacements with retained CHECK/domain/FK validation can reject newer rows. |
+| DropIndex | Applied | Removes an access path without deleting table values. |
+| DropConstraint | Applied | Removes validation without deleting rows. |
+| AddDomain, DropDomain | Applied | These steps change no catalog and validate no rows; the engine registers domains. A transition into a domain uses AlterColumn and is held. |
+
+Rollback index admission uses declarations and the catalog before any preparation or step runs;
+it never scans rows or attempts a build to discover a hold. SqlRowCodec derives component bounds
+through the actual encoder's longest-value witnesses. The proof counts every key column, NULL
+marker, collation expansion, escape and terminator, under both stored and target types. KeyOrders
+transforms preserve length; BuildIndexKey adds no suffix (B-tree entry references and stamps are
+outside the key). Fixed-width scalars and fitting VARCHAR(n)/CHAR(n) can be restored. TEXT,
+unbounded VARCHAR, binary, JSON and unknown codecs hold. The property corpus checks scalar
+extrema and every Unicode scalar under all index-backed collations, then repeats maximum-width
+strings at declared-size boundaries under every key order. A single unproved index holds the
+whole rollback, including otherwise Safe steps; roll-forwards and never-seen schemas are unchanged.
+
+A refused reversal runs no step, keeps the stored schema online, and reports CS03405 through
+Provisioning.Detail and Hosting health, naming both hashes and all refused steps. A never-seen
+destructive declaration without opt-in similarly holds with CS03105 (T3-4). New declarations and
+roll-forwards with opt-in retain their forward-migration policy. Build succeeds for holds;
+pipelines requiring failure on drift use Verify (CS03103). Explicit ApplySchemaAsync consults
+the same history and rollback policy, throws CS03105 naming every refused step, and changes
+nothing with or without the earlier declaration's opt-in. That opt-in authorizes only its own
+forward migration. To accept loss deliberately, ship a new declaration with its own opt-in.
+
+A held Build runs no declared script and suspends owner decision 65's step-6 validation of
+removed application functions/domains. Stored definitions still enforce every write; reads stay
+available, while writes that require an unavailable function/domain fail with the existing code.
+Script checksum validation still runs before planning. The internal apply result carries the hold;
+control flow never depends on the public operation string. The engine-lifetime declaration retains
+the hold progress while its stored hash is unchanged: offline/reopen republishes its code, hashes
+and steps, rewrite restores it on completion, and explicit refusal leaves it reported. Restarting
+with the stored or a successfully published newer declaration clears the hold. Old inserts use
+the stored NOT NULL/default rules. Unpublished mismatched intents are discarded with CS03402
+before classification. Ancestors never applied here count as new; lineage remains deferred (T3-5).
+SqlSchemaRollbackTests and SqlSchemaRollbackPolicyTests are the executable provisioning corpus.
+Constraint validation is also explicit in PostgreSQL src/backend/commands/tablecmds.c:13433-13450,
+which queues foreign-key, CHECK and NOT NULL scans; the hold policy here is the owner's
+availability-first decision, independent of inline, scripted or deferred execution.
+
 #### Catalog: Durable pending migrations (49a)
 
 Catalog kind 9 is a chunked UTF-8, source-generated JSON `SqlCatalogPendingMigration` envelope.
@@ -10012,7 +10469,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 37 requires the complete table extension 8 record,
+after the existing constraints. Current format 39 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -10090,7 +10547,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 37 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
+  which this catalog always writes. Current format 39 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -11174,8 +11631,9 @@ scan/seek/system-view scratch remain outside the grant. COUNT(*) and low-cardina
 can consume input much larger than the budget on the pipelined path.
 Every exit releases reservations, including cancellation, failed decoding and budget refusal.
 CS05067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
-message and one diagnostic code. Root sort spilling is described above; the remaining retained
-buffers do not partition or spill yet. Standalone ANALYZE remains later work.
+message and one diagnostic code. Root sort, eligible hash joins and normalized join buffers,
+and plain hash aggregation/DISTINCT spill as described above; other retained buffers do not spill yet.
+Standalone ANALYZE remains later work.
 
 Joined UPDATE FROM, DELETE USING and MERGE also reserve retained decoded target identities,
 non-hash input buffers, derived-source copies, normalized intermediate frames, associations,
@@ -11462,3 +11920,10 @@ The function argument view snapshots only Count; the function context view snaps
 TransactionTimestamp. Neither view retains a ref struct, span, context, or cancellation token.
 The SQL value view reads Type and IsNull without decoding its payload. Internal-only plan or
 metrics state stays hidden rather than being promoted to a public debugger projection.
+
+Index reclamation events 23 and 24 fire once per reclaimed physical owner, whether table or index. Indexing IndexCreated/IndexDropped objectId identifies SQL's physical index owner. Events 28–30 carry engineName, database and the physical objectId; build success fires only after catalog publication.
+
+Index publication refuses CS05060 before catalog persistence when the resolved physical owner equals the table identity, is absent from the live owner directory, or has an unprepared pending intent. A dropped registration cannot be republished. Prepared owners remain valid for KeepOwner, provisioning, TRUNCATE and rewrite. Every index owner is reserved before entering the data apply bracket, so admission retries are idempotent and perform no catalog I/O under that gate. Chunked builds wait for admission outside gates and retry, including ordinary CREATE INDEX and constraints. An ordinary build decodes the heap once; only a progress consumer requests the counting pass. DROP and abandon request reclamation themselves. Prepared owners do not keep the purge worker polling; abandonment requests discovery again.
+A catalog-only DROP can leave a stale manager handle until reopen. Pruning reads an immutable retiring-owner set published by the catalog at commit and abandonment, without taking the catalog monitor under the data apply gate. Open-time writer purge visits registered live owners; its former retirement/empty-owner skips were unreachable. Detached undo/read handles remain protected by their existing context and statement fences.
+
+Ordinary index builds retain the initial data-allocation admission refusal (CK04014). Later roots in the same constraint statement and all chunk retries wait outside the apply gate; an unrelated constrained CREATE TABLE therefore still refuses while a CTAS checkpoint is parked, without trapping its caller behind that pause.

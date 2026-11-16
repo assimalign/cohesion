@@ -56,7 +56,7 @@ public sealed class DocumentProcessTests
             while (registrations.MoveNext())
             {
                 var bytes = registrations.Current.Data;
-                bytes.Span[16].ShouldBe((byte)5); bytes.Span[17].ShouldBe((byte)3);
+                bytes.Span[16].ShouldBe((byte)5); bytes.Span[17].ShouldBe((byte)4);
                 ulong objectId = BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span[18..]);
                 var metadata = definitions.Single(index => index.ObjectId == objectId);
                 long rootPage = BinaryPrimitives.ReadInt64LittleEndian(bytes.Span[26..]);

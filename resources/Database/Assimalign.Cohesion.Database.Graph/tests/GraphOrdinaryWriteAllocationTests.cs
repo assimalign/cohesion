@@ -22,7 +22,6 @@ public sealed class GraphOrdinaryWriteAllocationTests
 
     public GraphOrdinaryWriteAllocationTests(ITestOutputHelper output) { _output = output; }
 
-#if !DEBUG
     [Theory(DisplayName = "Cohesion Test [Graph] - typed label writes retain one-decode allocations and 128 B headroom (#1806)")]
     [InlineData(-1)]
     [InlineData(0)]
@@ -106,6 +105,26 @@ public sealed class GraphOrdinaryWriteAllocationTests
         else { CheckIndexedCeilings(minima); }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - Unrelated text indexes preserve measured exact-index allocation minima (#1808)")]
+    [InlineData(-1)] [InlineData(1)] [InlineData(2)]
+    public async Task Execute_Fix4TextIndexedWrites_ShouldKeepAllocations(int injectedKind)
+    {
+        // Arrange / Act.
+        var minima = await MeasureAsync(injectedKind, 129, indexed: true, textIndexed: true);
+        // Assert: keep the measured DELETE floor and exactly 128 B headroom,
+        // with the same injected controls. Child diagnostics report each observed floor.
+        _output.WriteLine($"text-indexed writes bytes/statement: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
+        if (injectedKind >= 0) { Should.Throw<ShouldAssertException>(() => CheckTextIndexedCeilings(minima)); }
+        else { CheckTextIndexedCeilings(minima); }
+    }
+
+    private static void CheckTextIndexedCeilings(long[] minima)
+    {
+        minima[0].ShouldBeLessThanOrEqualTo(43_784 + 128);
+        minima[1].ShouldBeLessThanOrEqualTo(73_320 + 128);
+        minima[2].ShouldBeLessThanOrEqualTo(54_136 + 128);
+    }
+
     private static void CheckIndexedCeilings(long[] minima)
     {
         minima[0].ShouldBeLessThanOrEqualTo(42_256 + 128);
@@ -113,9 +132,9 @@ public sealed class GraphOrdinaryWriteAllocationTests
         minima[2].ShouldBeLessThanOrEqualTo(53_264 + 128);
     }
 
-    private static async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false)
+    private async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024, bool typed = false, bool indexed = false, bool textIndexed = false)
     {
-        string fixture = Path.Combine(AppContext.BaseDirectory, "GraphRecoveryFixture", "Assimalign.Cohesion.Database.Graph.RecoveryFixture.dll");
+        string fixture = Path.Combine(AppContext.BaseDirectory, "GraphAllocationFixture", "Assimalign.Cohesion.Database.Graph.RecoveryFixture.dll");
         // PATH can select arm64 even when --arch x64 runs an x64 testhost.
         string host = Path.GetFullPath(Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", "..",
             OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"));
@@ -125,8 +144,9 @@ public sealed class GraphOrdinaryWriteAllocationTests
         // by 144 B depending on whether a control allocation was injected. The measured ceilings
         // preserve 128 B headroom and injected 129 B/1 KiB controls; ordinary execution keeps its defaults.
         start.Environment["DOTNET_TieredCompilation"] = "0";
+        if (indexed) { start.Environment["T3_ALLOCATION_PROBE"] = "1"; }
         start.ArgumentList.Add(fixture);
-        start.ArgumentList.Add(indexed ? "indexed-allocations" : typed ? "typed-allocations" : "allocations");
+        start.ArgumentList.Add(textIndexed ? "text-indexed-allocations" : indexed ? "indexed-allocations" : typed ? "typed-allocations" : "allocations");
         start.ArgumentList.Add(injectedKind.ToString(CultureInfo.InvariantCulture));
         start.ArgumentList.Add(injectedBytes.ToString(CultureInfo.InvariantCulture));
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start graph allocation fixture.");
@@ -142,9 +162,9 @@ public sealed class GraphOrdinaryWriteAllocationTests
             throw;
         }
         process.ExitCode.ShouldBe(0, await output + await error);
+        _output.WriteLine((await output).Trim());
         (await output).ShouldContain("architecture=" + RuntimeInformation.ProcessArchitecture, Case.Sensitive);
         string line = (await output).Split('\n').Single(value => value.StartsWith("allocations=", StringComparison.Ordinal));
         return line["allocations=".Length..].Trim().Split(',').Select(value => long.Parse(value, CultureInfo.InvariantCulture)).ToArray();
     }
-#endif
 }

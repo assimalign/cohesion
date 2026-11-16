@@ -418,6 +418,75 @@ General ON predicates, ON KEYS, expression/derived right-hand sources and comma 
 named CK00001 refusals. No format or wire
 version changes are required.
 
+## MERGE (#1804, OQ-M1)
+
+Both Couchbase forms parse, bind and plan. They accept at least one action, each at most once,
+in UPDATE, DELETE, INSERT order:
+
+```sql
+MERGE INTO targets [AS t] USING sources [AS s] ON [PRIMARY] KEY s.key
+  WHEN MATCHED THEN UPDATE SET t.n = s.n UNSET t.old WHERE s.enabled
+  WHEN MATCHED THEN DELETE WHERE t.deleted
+  WHEN NOT MATCHED THEN INSERT s WHERE t IS MISSING
+  RETURNING RAW t;
+
+MERGE INTO targets t USING [{key:'a', n:2}] AS s ON META(t).id = s.key
+  WHEN NOT MATCHED THEN INSERT (KEY s.key, VALUE s) WHERE t IS MISSING;
+```
+
+The brackets in the first header denote optional syntax. Sources are a keyspace, an aliased
+parenthesized query (including compounds), or an expression. Generic expressions require AS
+before their alias; a path can supply its final named member implicitly. Collections use the
+same implicit names as SELECT, including the final segment of a reserved system source.
+Aliases are ordinal and must differ; duplicate implicit or explicit declarations give CD00010
+in text and CD01023 in a direct AST. A subquery requires an alias (CD00015 in text).
+Bare MERGE aliases cannot be keys, options, limit, offset or use, or a word starting a
+JOIN, NEST or UNNEST clause (including LEFT/INNER forms); use AS and a quoted identifier
+for those names. Generic expression aliases require AS even when a bare name is written.
+
+ON KEY binds only the source. ANSI ON sees both names and is restricted to the written
+META(target).id = expression shape; reversed equalities and general predicates receive one
+CK00001. The key expression must be computable from the source before lookup; a target-dependent
+key, including a correlated subquery capturing the target, receives CK00001. UPDATE values and
+WHERE, and DELETE WHERE, see both sides. INSERT key, value and WHERE see the source and a
+MISSING target binding, including MISSING target metadata. RETURNING keeps ordinary target-image
+field and META() binding; source references remain CK00001 until their scope is established.
+Lookup INSERT inherits the ON KEY
+key; ANSI INSERT currently requires explicit KEY and VALUE expressions. The omitted KEY/VALUE
+rules are not established by the available references and receive CK00001. Outside nested SELECTs
+and RETURNING, value paths must
+name a visible source, target or local expression variable; unqualified field resolution remains
+CK00001. META requires an explicit visible binding; its unqualified form outside RETURNING stays
+CK00001. Expression and derived source metadata retain the existing NULL rule. An unavailable ON KEY
+target binding or invalid META receiver gives CD01040. UPDATE destination paths keep existing target-
+relative SET/UNSET rules, including CD02016 and CD01017; a source-prefixed destination is invalid.
+
+LIMIT, OFFSET, OPTIONS, USE INDEX, USE KEYS, join hints and source joins remain one CK00001.
+A system target receives CD04004. Missing, repeated or out-of-order actions receive CD00002;
+an invalid direct AST form/action/source receives CD01039. Expression nesting retains the parser
+limit. Both the complete MERGE tree and the parser recursion needed by its fully grouped canonical
+text stop at 128 levels with CD00005. Prefixes consume two canonical levels (63 fit; 64 refuse),
+while 127 left-associated binary terms fit. Long action lists stop at the first repetition or
+ordering violation.
+
+OqlMergeExpression.ToString renders canonical syntax that reparses to the same tree shape.
+Array-form IN keeps its precedence-four operand distinct from an IN value list, including
+arithmetic, prefixes and IS tests. Only the two reserved system collection names render with
+qualification; a user name such as "COHESION_SCHEMA." remains one quoted identifier.
+The MERGE constructors reject null required members and null mutation-list elements and take
+read-only snapshots of the SET/UNSET lists. Parse recovery returns a renderable empty expression
+instead of an incomplete MERGE. The executable profile's Supports("MERGE") remains false.
+MERGE remains contextual: SELECT merge.x FROM c merge parses. A nested MERGE statement in an
+expression retains its single CK00001 refusal. EXPLAIN MERGE validates bindings and describes
+Merge, its source plan, KeyLookup or KeyJoin access, ordered MergeUpdate/MergeDelete/MergeInsert
+actions and RETURNING. It does not evaluate source/action expressions, perform key probes, read
+documents or write. Source plans retain their collection/derived/expression operators.
+
+Execution is deliberately unavailable until OQ-M2: a valid executed MERGE receives one located
+CD05022, with no source reads or writes. It follows the existing statement failure and explicit-
+transaction abort contract. RETURNING's image, count and snapshot execution semantics remain
+OQ-M2 work. There is no disk, catalog or wire format change.
+
 ## RETURNING (#1727)
 
 INSERT and UPSERT (VALUES or SELECT), UPDATE and DELETE accept a final
@@ -454,7 +523,7 @@ length plus 12 bytes per token), and preserved whole-image bytes once per repres
 this per-statement budget; exhaustion gives CD05018 at the clause span
 and rolls back the writes. Serialized rows are preflighted in the same transaction: the existing
 CD05016 covers the 16 MiB frame cap, and CD05019 covers values deeper than 256 levels including
-the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement;
+the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement.
 SELECT source and group staging share this counter; UPDATE, DELETE, INSERT and UPSERT pending buffers share it too (#1755). Pending-buffer exhaustion refuses with CD05018 before any write, including INSERT/UPSERT SELECT; all reservations release on every exit.
 An over-deep array/object constructor gives CD05015 naming RETURNING at its expression span;
 other serialization failures retain their own diagnostic identity.
@@ -846,7 +915,7 @@ enclosing binding has that name.
 Wildcard document operands leave their member names open. Scalar expressions and existing null
 placement rules apply; ties preserve concatenation order. CD01038 rejects an unbound result member,
 META or star in this result-only scope. CD01037 refuses ORDER BY on an all-RAW/VALUE compound,
-which has no named result members. Subqueries within compound ORDER BY remain CK00001 in this run.
+which has no named result members. Subqueries within compound ORDER BY retain CK00001.
 
 UNION ALL pulls one operand row at a time without retaining operand results. An operand's own
 GROUP BY, DISTINCT or ORDER BY still owns its necessary blocking stages. Distinct keys,
@@ -895,6 +964,106 @@ typed-column trial pins the surviving left and right representatives through Jso
 scale (3.00 and 4.50). The same generator runs 288 cases over TCP; the wider conformance corpus
 checks equality, budgets and both transports.
 
+## Window stage (#1805, OQ-W1)
+
+OVER accepts an inline (PARTITION BY ... ORDER BY ...) specification, OVER name, or a
+parenthesized copy (name ...). WINDOW name AS (...) declarations follow GROUP BY, GROUP AS
+and HAVING and precede final ORDER BY/LIMIT/OFFSET. LETTING remains CK00001. Names preserve
+OQL's ordinal, case-sensitive identifier rules. The new window words remain usable as field,
+collection, alias and binding names in window-free statements, including inside call arguments.
+Only a call's closing parenthesis can introduce its OVER suffix. After an ordinary call, OVER
+starts a window before a parenthesized specification or a name token that cannot begin a clause
+after an implicit alias. Otherwise the base implicit-alias rules apply. After any of the twelve
+window-only names listed below, OVER is always the window keyword; FIRST_VALUE, LAST_VALUE,
+NTH_VALUE and RATIO_TO_REPORT with a valid target remain unsupported (CK00001). A missing or invalid target
+receives CD00002 at that target, asking for a window name or parenthesized specification and
+explaining that clause-word names must be quoted. WINDOW followed by
+an identifier (including a function name) or quoted identifier, then AS, starts a declaration. RESPECT and IGNORE are modifiers only
+as RESPECT NULLS or IGNORE NULLS immediately after a call's closing parenthesis. Definitions may copy earlier definitions only;
+self/forward references fail CD01042. Duplicate or empty names fail CD01041. A copy cannot
+supply PARTITION BY, even when its base has none, or replace an existing ORDER BY (CD01043).
+A direct AST with neither or both a name and specification also fails CD01043.
+
+ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE, LAG and LEAD require OVER.
+They execute after WHERE, grouping and HAVING, before projection, DISTINCT, final ordering and
+paging. SELECT projections and SELECT ORDER BY are their only positions at each query level.
+Aggregate arguments, SATISFIES and comprehension bodies, WHERE, GROUP BY, HAVING,
+DML values/actions and RETURNING refuse with one located CD01044.
+A window-only function without OVER also fails CD01044. A window in another window's arguments
+or keys, including a named definition's keys, fails CD01045.
+An independent subquery, including a MERGE source, owns its own window scope and placements.
+A compound's result-only ORDER BY fails CD01044 for window calls; wrap the compound in SELECT.
+Grouped expressions and ordinary aggregate results may supply window arguments and keys.
+Window keys and arguments do not see projection aliases, including in final ORDER BY.
+A window named rows, range, groups, exclude or partition must be quoted in a parenthesized
+copy, for example OVER ("rows" ORDER BY x); frame vocabulary belongs to the later frame stage.
+After OVER, names spelled UNNEST, NEST, JOIN, LEFT, INNER, UNION, INTERSECT, EXCEPT, RETURNING,
+LETTING or WINDOW must be quoted, for example OVER "union". These words can introduce clauses
+after a base implicit alias; reserved clause keywords such as ORDER also require quoting.
+Function-name tokens otherwise follow the ordinary name rules.
+
+A non-window, non-aggregate function with OVER is never valid. For example, LOWER(x) OVER ()
+retains CK00001 in OQ-W1. A distinct diagnostic waits for OQ-W2, whose aggregate OVER support
+must distinguish valid aggregate windows from invalid scalar functions.
+
+Partitions use GROUP BY equality: MISSING and NULL are different partitions, numeric
+representations compare by value, strings use ordinal collation, and arrays/objects use the
+existing structural order. Window ORDER BY uses the direction/NULLS table below; ASC is the
+omitted direction, with NULLS FIRST for ASC and NULLS LAST for DESC. Peers have equal ordering
+keys. Without ORDER BY the entire partition is one peer group. Peer order and unordered
+ROW_NUMBER/navigation order are unspecified; execution uses stable stage-input order, which
+is document identity for a plain collection and source iteration order for expression sources.
+A final ORDER BY controls result order independently of the window ordering.
+
+An unaliased window projection uses the lowercase function name, as ordinary calls do.
+ROW_NUMBER and ranks are one-based Int64; RANK leaves gaps and DENSE_RANK counts peer groups.
+PERCENT_RANK is (rank-1)/(partition rows-1), or Decimal zero for a singleton; CUME_DIST is the
+last peer's position divided by partition rows, also Decimal. NTILE returns Int64 bucket numbers:
+larger buckets precede smaller ones, with trailing buckets empty when buckets exceed rows.
+W1 accepts positive Int64 integer literal bucket counts and nonnegative Int64 integer literal
+navigation offsets, optionally unary plus. Zero navigation offsets read the current row.
+Parameters, noninteger, NULL/MISSING, negative and row-dependent counts/offsets retain CK00001,
+including on empty input. LAG/LEAD default to offset 1 and fallback NULL, respect both NULL and
+MISSING, and use the current row's explicit default only for an out-of-partition target.
+Value expressions evaluate only at selected target rows; an out-of-partition target never
+evaluates the value expression. Constant offsets visit each target at most once per call. This
+rule follows SQL's documented contract and PostgreSQL utils/adt/windowfuncs.c:558-574;
+no SQL common-type coercion is introduced over JSON values.
+
+Every partition sees the complete input. LIMIT/OFFSET and index-order shortcuts cannot truncate
+it; LIMIT 0 retains eager validation and skips execution. Equal specifications share a sort and
+key evaluation using scoped expression equivalence, including implicit aliases. Independent
+specifications evaluate keys independently. Window row storage, result bindings, sort indexes,
+key payloads, navigation values and output charge StatementMemoryBudget (CD05018); there is
+no spill. Work shares StatementWorkBudget (CD05020), including sort comparisons. Reservations
+release on success, error and cancellation. EXPLAIN includes WindowAggregate without reading
+input values; its detail names partition/order keys and groups that share a sort. Window-only
+children have separate iterators; the shared planner and MERGE child iterators retain their base
+instance layouts (21 and 28 fields respectively). Exact JOIN-plan and MERGE-parse allocation
+guards pin the window-free paths on ARM64 and x64, including an OVER field name.
+Using OVER as an identifier does not start the post-parse window walk. Deferred value-function names
+also remain usable as collection and header-alias names before a parenthesized key/value list.
+Adding OVER selects the nested execution path for the entire statement: scan predicates and
+projections also consume StatementWorkBudget and can refuse with CD05020.
+
+Frames (ROWS/RANGE/GROUPS/EXCLUDE), aggregate OVER, FIRST_VALUE/LAST_VALUE/NTH_VALUE,
+RATIO_TO_REPORT and RESPECT/IGNORE NULLS remain located CK00001 for OQ-W2/OQ-W3.
+Function registration reserves all twelve window names: ROW_NUMBER, RANK, DENSE_RANK,
+PERCENT_RANK, CUME_DIST, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE and RATIO_TO_REPORT.
+Application functions (scalar or aggregate) with these names are refused at registration.
+Registering one throws ArgumentException for the function parameter before engine build.
+The four deferred value/ratio names follow the existing REGEXP_* reservation policy.
+No implicit frame is evaluated by these ranking/navigation functions. No storage or wire
+version changes. The sealed window AST and OqlFunction.WindowKind are public metadata;
+MERGE's canonical renderer traverses declarations, keys and arguments within its 128-level bound.
+
+OqlWindowParserTests, DocumentWindowTests and DocumentWindowBudgetTests are the parser,
+generated brute-force and lifetime corpus. The seeded 10,000-statement MERGE round trip
+includes window-bearing source subqueries. Wire and NativeAOT checks run on InMemory and TCP.
+The generated oracle covers both directions, all null placements, ties, NULL/MISSING partitions,
+mixed numeric representations, ordinal strings, empty/singleton inputs, oversized NTILE buckets,
+and zero/out-of-partition navigation. It derives permitted peer permutations from ROW_NUMBER.
+
 ## ORDER BY null placement (#1730)
 
 Each term accepts `expr [ASC | DESC] [NULLS FIRST | LAST]`, including projection aliases,
@@ -934,6 +1103,30 @@ carry structured diagnostics. OQL index DDL is autocommit-only; an explicit tran
 it with CD04105 before catalog access. After a failed autocommit statement the next can run immediately.
 PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, and IS_UNIQUE is real.
 
+CREATE INDEX uses durable brackets of at most 64 postings and one final definition publication (#1808). Beyond resident catalog state, it retains an exact-size snapshot of existing name references, a bounded source/posting chunk and one document's extracted keys. UNIQUE validation walks adjacent built keys and retains no collection-wide key set. All build reservations share StatementMemoryBudget and CD05018; a failed build abandons its owner. DROP INDEX retains old trees for pinned snapshots and reclaims their exact owners after the safe horizon.
+
+Within one document, a build fails at the first bad value in navigation order. Raw
+`{"a":"\uD800","b":1.0000000000000000000000000000001}` under `(a,b)` raises
+InvalidOperationException for the invalid string.
+Invalid property names, which only raw writes can store, are admitted by a build; later PUT
+and DELETE of that document throw.
+
+During CREATE UNIQUE INDEX, extraction validates every key before the completed tree is walked for duplicates. A non-scalar key (CD02021) or oversized key (CD02026) anywhere therefore refuses before a duplicate (CD03020); the offending row can differ from name-order duplicate checking.
+
+| Build state | First refusal |
+|---|---|
+| Name snapshot | 24 + 8 × name count, plus other live build state, exceeds the statement grant |
+| Chunk and one document's JSON/keys | Actual chunk slots, encoded key sizes and extraction workspace exceed the remaining grant |
+| Duplicate valued UNIQUE keys | CD03020 after the tree is built; NULL and MISSING remain distinct |
+| Oversized scalar component plus an empty or fully filtered array comprehension | No key is formed, so no CD02026; a formed key beyond 1024 bytes refuses CD02026, as on PUT. A later non-scalar UNIQUE component still refuses CD02021 first |
+| Default 64 MiB grant; one document with a 20 MiB ASCII name in variants; WHEN v.name = 'x' or != 'x' | = and != build, comparing without decoding the name; ordered comparisons (<, <=, >, >=) reserve decoded string space first and refuse CD05018 before decoding. Transient WHEN scratch is charged as a per-document high-water mark, so repeated comparisons retain only their largest single comparison |
+| Key components or WHEN string-comparison operands with invalid UTF-8 or unpaired surrogate escapes, including oversized and later components | InvalidOperationException, as in ordinary maintenance; validation allocates no decoded string |
+| Raw OpenWrite content with an accessed number that cannot round-trip exactly as Decimal | CK06003, including rounded or underflowed values; duplicates and numbers outside accessed paths are not validated by a build |
+| Default 64 MiB grant; one document `{"v":1,"a":[0,...]}` with 1,400,000 zeros; `CREATE INDEX ix ON items(v)` | CD05018: cumulative pooled DOM growth buffers plus content and other live build state exceed the grant, even though `a` is unindexed |
+| 64 KiB grant; one `one` document `{"arr":[0,...,N-1]}`; `CREATE INDEX ix ON items(DISTINCT ARRAY v FOR v IN arr END)` | N=336 succeeds; N=337 is the first CD05018, from extraction/key state alongside the current chunk |
+
+A one-document scalar build fits 64 KiB; 128 small documents build under 16 KiB. A default 64 MiB engine builds 250,000 small documents and one document with 10,000 array keys. These are measured examples, not fixed population limits.
+
 Leading MISSING omits the entry unless the leading scalar key has INCLUDE MISSING. Components sort MISSING, NULL, FALSE, TRUE, numbers, ordinal
 strings, arrays, objects; full predicates always filter seek candidates. UNIQUE keys containing
 any NULL or MISSING do not conflict (PostgreSQL NULLS DISTINCT, diverging from Cohesion SQL).
@@ -943,7 +1136,7 @@ per row, so key swaps may fail. A failed explicit transaction requires RollbackA
 The wire uses ExecutionFailure (6) without a protocol change and keeps the connection usable.
 The path-count cap reports CD00009 at the 33rd key (CD03022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
 WHERE receive CD00002. ALL array keys get one CK00001 at ALL.
-The catalog uses v3 index records (#1530) and refuses v1/v2 indexes before recovery writes;
+The catalog uses v4 index records (#1808) and refuses v1/v2/v3 indexes before recovery writes;
 there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
 and one range on the next path. Bounded snapshot-visible probes rank candidate cost first;
 ties use prefix length, range, UNIQUE, then ordinal name. Comparable complete inputs may

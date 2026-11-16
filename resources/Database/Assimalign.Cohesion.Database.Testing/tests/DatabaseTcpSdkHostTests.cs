@@ -21,7 +21,7 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Testing.Tests;
 
 /// <summary>Real packaged-SDK proof of public TCP composition for the three #1391 models.</summary>
-public sealed class DatabaseTcpSdkHostTests
+public sealed partial class DatabaseTcpSdkHostTests
 {
     private const string fixtureName = "Assimalign.Cohesion.Database.TcpSdkHost";
 

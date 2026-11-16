@@ -90,9 +90,10 @@ internal static class SqlDefinitionBinder
         var columns = create.Parameters.Select((parameter, index) => new SqlCatalogColumn(parameter.Name, types[index].Storage,
             domainName: types[index].IsDomain ? types[index].Name : null)).ToArray();
         var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: scopeEnvironment,
-            bindingContext: SqlBindingContext.Function);
+            bindingContext: SqlBindingContext.Function, foldConstants: false);
         SqlPersistedExpression.Bind(create.Body, scope, declaring: true);
         SqlPlanner.ValidateExpression(create.Body, scope);
+        _ = scope.Bind(create.Body);
         var dependencies = Dependencies(create.Body, scope, volatility);
         foreach (var type in types.Append(result).Where(type => type.IsDomain))
         {

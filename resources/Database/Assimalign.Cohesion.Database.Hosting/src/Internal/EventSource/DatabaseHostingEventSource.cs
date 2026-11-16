@@ -201,7 +201,8 @@ internal sealed class DatabaseHostingEventSource : EventSource
         {
             HealthDegraded(context.HostId.ToString(), engine.Name, database, reason, cause?.ToString() ?? string.Empty,
                 Bound(progress?.Operation ?? string.Empty), Bound(progress?.ObjectName ?? string.Empty), progress?.Position ?? 0,
-                progress?.StepCount ?? 0, progress?.RowsProcessed ?? -1, progress?.TotalRows ?? -1);
+                progress?.StepCount ?? 0, progress?.RowsProcessed ?? -1, progress?.TotalRows ?? -1,
+                progress?.FailureCode ?? string.Empty, BoundDetail(progress?.Detail ?? string.Empty));
         }
     }
 
@@ -213,7 +214,8 @@ internal sealed class DatabaseHostingEventSource : EventSource
         {
             HealthRestored(context.HostId.ToString(), engine.Name, database, reason, cause?.ToString() ?? string.Empty,
                 Bound(progress?.Operation ?? string.Empty), Bound(progress?.ObjectName ?? string.Empty), progress?.Position ?? 0,
-                progress?.StepCount ?? 0, progress?.RowsProcessed ?? -1, progress?.TotalRows ?? -1);
+                progress?.StepCount ?? 0, progress?.RowsProcessed ?? -1, progress?.TotalRows ?? -1,
+                progress?.FailureCode ?? string.Empty, BoundDetail(progress?.Detail ?? string.Empty));
         }
     }
 
@@ -272,13 +274,13 @@ internal sealed class DatabaseHostingEventSource : EventSource
     private void AdminEndpointFailed(string endpoint, string operation, string exceptionType, string exceptionMessage)
         => WriteEvent(15, endpoint, operation, exceptionType, exceptionMessage);
 
-    [Event(16, Level = EventLevel.Warning, Message = "HealthDegraded {1}/{2}: {3} {4}, {5} {6}, step {7} of {8}, {9} of {10} rows.")]
-    private void HealthDegraded(string hostId, string engineName, string database, string reason, string cause, string operation, string objectName, int position, int stepCount, long rowsProcessed, long totalRows)
-        => WriteEvent(16, hostId, engineName, database, reason, cause, operation, objectName, position, stepCount, rowsProcessed, totalRows);
+    [Event(16, Level = EventLevel.Warning, Message = "HealthDegraded {1}/{2}: {3} {4}, {5} {6}, step {7} of {8}, {9} of {10} rows. {11} {12}")]
+    private void HealthDegraded(string hostId, string engineName, string database, string reason, string cause, string operation, string objectName, int position, int stepCount, long rowsProcessed, long totalRows, string failureCode, string detail)
+        => WriteEvent(16, hostId, engineName, database, reason, cause, operation, objectName, position, stepCount, rowsProcessed, totalRows, failureCode, detail);
 
-    [Event(17, Level = EventLevel.Informational, Message = "HealthRestored {1}/{2}: {3} {4}, {5} {6}, step {7} of {8}, {9} of {10} rows.")]
-    private void HealthRestored(string hostId, string engineName, string database, string reason, string cause, string operation, string objectName, int position, int stepCount, long rowsProcessed, long totalRows)
-        => WriteEvent(17, hostId, engineName, database, reason, cause, operation, objectName, position, stepCount, rowsProcessed, totalRows);
+    [Event(17, Level = EventLevel.Informational, Message = "HealthRestored {1}/{2}: {3} {4}, {5} {6}, step {7} of {8}, {9} of {10} rows. {11} {12}")]
+    private void HealthRestored(string hostId, string engineName, string database, string reason, string cause, string operation, string objectName, int position, int stepCount, long rowsProcessed, long totalRows, string failureCode, string detail)
+        => WriteEvent(17, hostId, engineName, database, reason, cause, operation, objectName, position, stepCount, rowsProcessed, totalRows, failureCode, detail);
 
     [NonEvent]
     public void HealthEndpointAssignmentSkipped(Uri endpoint)
@@ -309,15 +311,17 @@ internal sealed class DatabaseHostingEventSource : EventSource
 
     private static double Elapsed(long started) => started == 0 ? 0 : Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
-    private static string Bound(string value)
+    internal static string BoundDetail(string value) => Bound(value, 4096, 4093);
+
+    private static string Bound(string value, int maxLength = 256, int? prefixLimit = null)
     {
-        const int maxLength = 256;
         if (value.Length <= maxLength)
         {
             return value;
         }
 
-        int length = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        int length = prefixLimit ?? maxLength;
+        if (char.IsHighSurrogate(value[length - 1])) { length--; }
         return string.Concat(value.AsSpan(0, length), "...");
     }
 }

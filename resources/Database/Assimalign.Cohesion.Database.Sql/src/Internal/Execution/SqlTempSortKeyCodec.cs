@@ -34,7 +34,7 @@ internal static class SqlTempSortKeyCodec
                 if (keys[i] is null) { Append(writer, column.NullsFirst ? (byte)0 : (byte)255); }
                 else
                 {
-                    byte family = FamilyOf(keys[i]!);
+                    byte family = SqlValueComparer.ComparisonFamily(keys[i]!);
                     if (family == 0 || families[i] != 0 && families[i] != family) { return false; }
                     families[i] = family;
                     // NULL placement is independent of DESC. Values start with an interior marker.
@@ -54,26 +54,6 @@ internal static class SqlTempSortKeyCodec
         }
         finally { if (rented is not null) { ArrayPool<int>.Shared.Return(rented); } }
     }
-
-    // Exactly the cross-type families accepted by SqlValueComparer.Compare. Raw parameter
-    // primitives are separate: its numeric path recognizes only signed SQL numerics.
-    private static byte FamilyOf(object value) => value switch
-    {
-        sbyte or short or int or long or float or double or decimal => 1,
-        string or SqlCharacter => 2,
-        DateOnly or DateTime or DateTimeOffset => 3,
-        byte[] => 4,
-        bool => 5,
-        TimeOnly => 6,
-        TimeSpan => 7,
-        Guid => 8,
-        byte => 9,
-        ushort => 10,
-        uint => 11,
-        ulong => 12,
-        char => 13,
-        _ => 0,
-    };
 
     private static bool TryAppendValue(ArrayBufferWriter<byte> writer, object value, Collation collation)
     {

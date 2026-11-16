@@ -515,7 +515,8 @@ public sealed class SqlStorageOperationsTests
         offline.Message.ShouldStartWith("Database 'ddl' is offline", Case.Sensitive);
         (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'u'")).ShouldBe(0L);
         reopened.Catalog.TryGetTable("dbo", "v", out var next).ShouldBeTrue();
-        next.ObjectId.ShouldBe(existing.ObjectId + 2);
+        // The failed table and its separately owned primary tree both consume identities.
+        next.ObjectId.ShouldBe(existing.ObjectId + 3);
     }
 
     /// <summary>

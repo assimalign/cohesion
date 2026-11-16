@@ -281,7 +281,8 @@ public sealed class SqlBitwiseTests
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        int width = operand.Contains("SMALLINT", StringComparison.Ordinal) || operand.Contains("small_integer", StringComparison.Ordinal) ? 16 : 64;
+        // The INTEGER literal widens a SMALLINT alternative to INTEGER (#1788).
+        int width = operand.Contains("SMALLINT", StringComparison.Ordinal) || operand.Contains("small_integer", StringComparison.Ordinal) ? 32 : 64;
         string[] expressions = [$"({operand}) << 32", $"({operand}) >> 32", $"({operand}) & 3::SMALLINT",
             $"3::SMALLINT | ({operand})", $"({operand}) # 3::SMALLINT", $"~({operand})"];
         long[] expected = [width == 64 ? 4294967296 : 1, width == 64 ? 0 : 1, 1, 3, 2, -2];
@@ -289,7 +290,7 @@ public sealed class SqlBitwiseTests
         for (int index = 0; index < expressions.Length; index++)
         {
             await using var result = (await session.ExecuteAsync("SELECT " + expressions[index], cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
-            result.Columns.ShouldHaveSingleItem().Type.ShouldBe(width == 64 ? DatabaseType.Int64 : DatabaseType.Int16);
+            result.Columns.ShouldHaveSingleItem().Type.ShouldBe(width == 64 ? DatabaseType.Int64 : DatabaseType.Int32);
             int rows = 0;
             await foreach (var row in result.GetRowsAsync(CancellationToken.None))
             {
@@ -302,11 +303,11 @@ public sealed class SqlBitwiseTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Bitwise: every wrapped result and parameter is validated before reading rows (#1721)")]
-    [InlineData("COALESCE(NULL::INT, 'x')")]
-    [InlineData("CASE WHEN TRUE THEN 1 ELSE 'x' END")]
-    [InlineData("COALESCE(NULL::INT, @p)")]
-    [InlineData("CASE WHEN TRUE THEN 1 ELSE @p END")]
-    public async Task Execute_WrappedInvalidOperand_ShouldRefuseBeforeRowsAsync(string operand)
+    [InlineData("COALESCE(NULL::INT, 'x')", "CS02022")]
+    [InlineData("CASE WHEN TRUE THEN 1 ELSE 'x' END", "CS02022")]
+    [InlineData("COALESCE(NULL::INT, @p)", "CS02077")]
+    [InlineData("CASE WHEN TRUE THEN 1 ELSE @p END", "CS02077")]
+    public async Task Execute_WrappedInvalidOperand_ShouldRefuseBeforeRowsAsync(string operand, string code)
     {
         // Arrange
         await using var engine = SqlPredicateExecutionTests.CreateEngine();
@@ -320,7 +321,7 @@ public sealed class SqlBitwiseTests
         {
             var request = SqlQueryRequest.FromSql("SELECT " + expression + " FROM empty_rows", parameters);
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02077");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         }
     }
 

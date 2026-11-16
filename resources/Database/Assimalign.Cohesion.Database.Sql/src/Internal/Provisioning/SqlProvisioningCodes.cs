@@ -1,10 +1,9 @@
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// The codes that lead the message of each provisioning failure of a SQL engine's declared
-/// databases (B1 of the engine extensibility design), as <c>COHSQLE</c> and <c>COHSQLT</c> lead the
-/// evaluation and transaction failures. Each failure is a <c>SqlSchemaMigrationException</c> that
-/// names the engine and the database.
+/// Stable identities for provisioning a SQL engine's declared databases. Exceptions carry their
+/// code through diagnostics; held declarations report their code and detail through Provisioning
+/// while the database remains available at the stored schema.
 /// </summary>
 internal static class SqlProvisioningCodes
 {
@@ -37,6 +36,9 @@ internal static class SqlProvisioningCodes
 
     /// <summary>A pending joint migration reserves an unpublished table name.</summary>
     internal const string JointNameReserved = "CS03404";
+
+    /// <summary>An earlier applied declaration would lose data; Build retained the stored schema.</summary>
+    internal const string RollbackHeld = "CS03405";
 
     /// <summary>
     /// An apply refused before any step runs: its plan needs a destructive step the schema does

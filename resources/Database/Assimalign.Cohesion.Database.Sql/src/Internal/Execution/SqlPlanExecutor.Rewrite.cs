@@ -66,6 +66,7 @@ internal sealed partial class SqlPlanExecutor
         if (additionalIndexes is { Count: > 0 })
         { indexes = indexes.Concat(additionalIndexes.Select(index => new SqlCatalogIndex(replacements[0].ObjectId, index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls, index.KeyOrders))).ToArray(); }
         var created = new List<SqlCatalogIndex>();
+        var treeOwners = new Dictionary<SqlCatalogIndex, ulong>();
         bool published = false;
         Exception? operationFailure = null;
         try
@@ -89,12 +90,18 @@ internal sealed partial class SqlPlanExecutor
             }
             if (indexes.Length != 0)
             {
+                foreach (var index in indexes)
+                {
+                    treeOwners.Add(index, await WithCatalogMigrationAdmissionAsync(() =>
+                        _catalog.ReserveIndexTreeOwner(index.TableObjectId, cancellationToken), statement, cancellationToken).ConfigureAwait(false));
+                }
+                foreach (ulong owner in treeOwners.Values) { _catalog.BeginIndexBuild(owner); }
                 await WithMigrationAdmissionAsync(() => statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
                 {
                     foreach (var index in indexes)
                     {
                         await _indexManager.CreateIndexAsync(statement.Transaction, index.TableObjectId,
-                            new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken).ConfigureAwait(false);
+                            new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken, treeOwners[index]).ConfigureAwait(false);
                         created.Add(index);
                     }
                     return true;
@@ -157,7 +164,11 @@ internal sealed partial class SqlPlanExecutor
             }
             finally
             {
-                if (!published) { _catalog.AbandonStorageReplacement(replacements); }
+                if (!published)
+                {
+                    foreach (ulong owner in treeOwners.Values) { _catalog.AbandonTableAs(owner); }
+                    _catalog.AbandonStorageReplacement(replacements);
+                }
             }
         }
     }
@@ -176,7 +187,7 @@ internal sealed partial class SqlPlanExecutor
         // leftmost path per bracket; never infer its height from source rows.
         var copyRoots = statement.CheckpointCopy ? _indexManager.ExportRegistrations()
             .Where(registration => registration.ObjectId == replacement.ObjectId)
-            .ToDictionary(registration => registration.Definition.Name, registration => registration.RootPageId, StringComparer.OrdinalIgnoreCase) : null;
+            .ToDictionary(registration => registration.Definition.Name, registration => registration, StringComparer.OrdinalIgnoreCase) : null;
         var maximumKeys = statement.CheckpointCopy ? new int[indexes.Length] : null;
         var snapshot = ConstraintCurrentSnapshot(statement);
         long processed = 0;
@@ -243,7 +254,7 @@ internal sealed partial class SqlPlanExecutor
                                 BuildIndexKey(replacement, index.Ordinals, converted[row], index.Metadata.KeyOrders).Length);
                         }
                     }
-                    int height = SqlSchemaProvisioner.JointTreeHeight(_storage, copyRoots![index.Metadata.Name], replacement.ObjectId, out int free);
+                    int height = SqlSchemaProvisioner.JointTreeHeight(_storage, copyRoots![index.Metadata.Name].RootPageId, _indexManager.PageOwner(copyRoots[index.Metadata.Name]), out int free);
                     int entryBytes = maximumKeys![tree] + 28; // key, slot, length, both ties, child
                     int growth = free >= batch.Count * entryBytes ? 0 : SqlSchemaProvisioner.JointTreeGrowth(batch.Count, entryBytes);
                     height += growth;

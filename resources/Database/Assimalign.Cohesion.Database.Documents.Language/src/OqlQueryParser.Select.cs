@@ -39,7 +39,7 @@ public sealed partial class OqlQueryParser
         {
             alias = Identifier();
         }
-        else if ((source is null or OqlSubqueryExpression) && Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause() && !IsSourceBindingClause() && !IsSetOperator())
+        else if ((source is null or OqlSubqueryExpression) && Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause() && !IsSourceBindingClause() && !IsWindowDeclaration() && !IsSetOperator())
         {
             alias = Identifier();
         }
@@ -98,7 +98,7 @@ public sealed partial class OqlQueryParser
             string? variable = null;
             bool implicitVariable = false;
             if (Take("AS")) { variableToken = Current; variable = Identifier(); }
-            else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsSourceBindingClause() && !IsReturningClause() && !IsSetOperator())
+            else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsSourceBindingClause() && !IsReturningClause() && !IsWindowDeclaration() && !IsSetOperator())
             { variable = Identifier(); }
             else if (expression is OqlPathExpression { Segments.Count: > 0 } path)
             {
@@ -133,7 +133,7 @@ public sealed partial class OqlQueryParser
                 string? name = null;
                 if (Take("AS")) { name = Identifier(); }
                 else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
-                    !Is("LETTING") && !Is("RETURNING") && !IsSetOperator()) { name = Identifier(); }
+                    !Is("LETTING") && !IsWindowDeclaration() && !Is("RETURNING") && !IsSetOperator()) { name = Identifier(); }
                 if (name is not null && groupAliases is null)
                 {
                     groupAliases = [];
@@ -144,9 +144,10 @@ public sealed partial class OqlQueryParser
             if (Take("GROUP")) { Expect("AS"); groupAs = Identifier(); }
         }
         OqlExpression? having = Take("HAVING") ? ParseExpression() : null;
+        var windows = !Failed && Take("WINDOW") ? ParseWindowDefinitions() : null;
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
             groups.AsReadOnly(), having, new List<OqlOrdering>().AsReadOnly(), distinct, value, null, null, Span(start, Previous), unnest.AsReadOnly(),
-            groupAliases?.AsReadOnly(), groupAs, source, bindings?.AsReadOnly(), implicitAlias);
+            groupAliases?.AsReadOnly(), groupAs, source, bindings?.AsReadOnly(), implicitAlias, windows);
     }
 
     private void UnsupportedKeyJoin(Lexeme token, string suffix = " general ON predicate")

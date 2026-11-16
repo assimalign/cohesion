@@ -27,11 +27,13 @@ public class SqlCatalogIndexTests
     {
         private readonly MemoryStream _data = new();
         private readonly MemoryStream _journal = new();
+        internal SqlStorage Storage { get; private set; } = null!;
 
         public SqlCatalog Open()
         {
             var storage = SqlStorage.Create(
                 new NonClosingStream(_data), new NonClosingStream(_journal), new MemoryStream(), "index-catalog-test");
+            Storage = storage;
             return SqlCatalog.Open(storage);
         }
 
@@ -64,12 +66,16 @@ public class SqlCatalogIndexTests
     private static BTreeIndexRegistration Registration(ulong objectId, string name, bool unique, long rootPageId)
         => new(objectId, new IndexDefinition(name, IndexKind.BTree, unique), rootPageId);
 
+    private static ValueTask<BTreeIndexRegistration> PrepareAsync(SqlCatalog catalog, CatalogHarness harness,
+        ulong tableId, string name, bool unique)
+        => PreparedCatalogIndexes.CreateAsync(catalog, harness.Storage, tableId, new(name, IndexKind.BTree, unique));
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Indexes: description and registration persist atomically and reload on reopen")]
     public async Task CreateIndex_WithRegistrations_ShouldPersistAcrossReopen()
     {
         // Arrange
         var (catalog, harness, table) = await OpenWithTableAsync();
-        var registration = Registration(table.ObjectId, "ix_email", unique: true, rootPageId: 42);
+        var registration = await PrepareAsync(catalog, harness, table.ObjectId, "ix_email", true);
 
         // Act
         await catalog.CreateIndexAsync(
@@ -99,7 +105,7 @@ public class SqlCatalogIndexTests
         orders[0] = SqlCatalogIndexKeyOrder.AscendingNullsLast;
 
         // Act
-        await catalog.CreateIndexAsync(metadata, [Registration(table.ObjectId, "ix", false, 42)], CancellationToken.None);
+        await catalog.CreateIndexAsync(metadata, [await PrepareAsync(catalog, harness, table.ObjectId, "ix", false)], CancellationToken.None);
         var recovered = harness.Reopen();
 
         // Assert
@@ -125,7 +131,7 @@ public class SqlCatalogIndexTests
         columns[0] = "email";
 
         // Act
-        await catalog.CreateIndexAsync(metadata, [Registration(table.ObjectId, "ix_adult", true, 42)], CancellationToken.None);
+        await catalog.CreateIndexAsync(metadata, [await PrepareAsync(catalog, harness, table.ObjectId, "ix_adult", true)], CancellationToken.None);
         var recovered = harness.Reopen();
         recovered.TryGetIndex(table.ObjectId, "ix_adult", out var index).ShouldBeTrue();
 
@@ -150,10 +156,10 @@ public class SqlCatalogIndexTests
     public async Task CreateIndex_InvalidDefinitions_ShouldThrow()
     {
         // Arrange
-        var (catalog, _, table) = await OpenWithTableAsync();
+        var (catalog, harness, table) = await OpenWithTableAsync();
         await catalog.CreateIndexAsync(
             new SqlCatalogIndex(table.ObjectId, "ix_email", new[] { "email" }, isUnique: false),
-            [Registration(table.ObjectId, "ix_email", false, 7)]);
+            [await PrepareAsync(catalog, harness, table.ObjectId, "ix_email", false)]);
 
         // Act + Assert
         await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CreateIndexAsync(
@@ -173,10 +179,10 @@ public class SqlCatalogIndexTests
     public async Task DropColumn_OnIndexedColumn_ShouldBeRejected()
     {
         // Arrange
-        var (catalog, _, table) = await OpenWithTableAsync();
+        var (catalog, harness, table) = await OpenWithTableAsync();
         await catalog.CreateIndexAsync(
             new SqlCatalogIndex(table.ObjectId, "ix_email", new[] { "email" }, isUnique: false),
-            [Registration(table.ObjectId, "ix_email", false, 7)]);
+            [await PrepareAsync(catalog, harness, table.ObjectId, "ix_email", false)]);
 
         // Act + Assert: guarded while the index exists...
         var exception = await Should.ThrowAsync<SqlCatalogException>(
@@ -195,13 +201,15 @@ public class SqlCatalogIndexTests
         // Arrange: two tables; only one is dropped.
         var (catalog, harness, table) = await OpenWithTableAsync();
         var other = await catalog.CreateTableAsync("dbo", "orders", new[] { Column("id", DatabaseType.Int32, nullable: false) });
+        var email = await PrepareAsync(catalog, harness, table.ObjectId, "ix_email", false);
+        var orders = await PrepareAsync(catalog, harness, other.ObjectId, "ix_orders", false);
 
         await catalog.CreateIndexAsync(
             new SqlCatalogIndex(table.ObjectId, "ix_email", new[] { "email" }, isUnique: false),
-            new[] { Registration(table.ObjectId, "ix_email", false, 7), Registration(other.ObjectId, "ix_orders", false, 9) });
+            new[] { email, orders });
         await catalog.CreateIndexAsync(
             new SqlCatalogIndex(other.ObjectId, "ix_orders", new[] { "id" }, isUnique: false),
-            new[] { Registration(table.ObjectId, "ix_email", false, 7), Registration(other.ObjectId, "ix_orders", false, 9) });
+            new[] { email, orders });
 
         // Act
         await catalog.DropTableAsync("dbo", "users");
@@ -226,7 +234,7 @@ public class SqlCatalogIndexTests
     {
         // Arrange: exercise standalone index creation, new-table publication and replacement.
         var (catalog, harness, original) = await OpenWithTableAsync();
-        var existing = Registration(original.ObjectId, "ix_age", false, 7);
+        var existing = await PrepareAsync(catalog, harness, original.ObjectId, "ix_age", false);
         await catalog.CreateIndexAsync(new SqlCatalogIndex(original.ObjectId, "ix_age", ["age"], false),
             [existing], CancellationToken.None);
         var table = publication == 1
@@ -235,7 +243,7 @@ public class SqlCatalogIndexTests
             : new SqlCatalogTable(original.ObjectId, original.Schema, original.Name,
                 [.. original.Columns, Column("added", DatabaseType.Int32)]);
         var index = new SqlCatalogIndex(table.ObjectId, "ix_email", ["email"], true);
-        var valid = Registration(table.ObjectId, index.Name, true, 9);
+        var valid = await PrepareAsync(catalog, harness, table.ObjectId, index.Name, true);
         BTreeIndexRegistration[][] invalidSnapshots =
         [
             [],
@@ -278,7 +286,7 @@ public class SqlCatalogIndexTests
         }
 
         // A matching registration uses the catalog's case-insensitive name identity.
-        var matching = Registration(table.ObjectId, "IX_EMAIL", true, 9);
+        var matching = valid with { Definition = new IndexDefinition("IX_EMAIL", IndexKind.BTree, true) };
         if (publication == 0)
         {
             await catalog.CreateIndexAsync(index, [matching], CancellationToken.None);
@@ -300,9 +308,9 @@ public class SqlCatalogIndexTests
         // Arrange: DROP captured the directory before the age index published.
         var (catalog, harness, table) = await OpenWithTableAsync();
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_email", ["email"], false),
-            [Registration(table.ObjectId, "ix_email", false, 7)]);
+            [await PrepareAsync(catalog, harness, table.ObjectId, "ix_email", false)]);
         var remaining = Array.Empty<BTreeIndexRegistration>();
-        var age = Registration(table.ObjectId, "ix_age", false, 9);
+        var age = await PrepareAsync(catalog, harness, table.ObjectId, "ix_age", false);
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_age", ["age"], false), [age]);
 
         // Act

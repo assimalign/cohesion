@@ -22,7 +22,7 @@ internal sealed partial class DocumentPlanner
             DocumentSystemCollections.Find(query.Collection) is string system ?
                 new DocumentSystemCollectionPlan(CreateLogicalPlan(query, _cancellationToken, _parameters, _functions, outerNames), system) : Plan(query, outerNames);
         var logical = QueryLogical(input);
-        return new DocumentJoinPlan(input, logical with { CanStopEarly = !logical.IsGrouped && !query.IsDistinct && query.OrderBy.Count == 0 }, collections);
+        return new DocumentJoinPlan(input, logical with { CanStopEarly = !HasWindows(query) && !logical.IsGrouped && !query.IsDistinct && query.OrderBy.Count == 0 }, collections);
     }
 
     private static void ValidateQueryMetadata(OqlExpression expression, OqlSelectExpression query,

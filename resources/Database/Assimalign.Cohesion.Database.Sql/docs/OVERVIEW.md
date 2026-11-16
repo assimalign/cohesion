@@ -12,10 +12,11 @@ snapshot-consistent UTF-8 text/CSV (#1724).
 
 Typed migrations containing TYPE rewrites prepare the entire target unpublished and publish
 it in one catalog commit. Failed preparation leaves the old schema online and available to
-a rolled-back application; potentially lossy reversals require destructive opt-in (#1447).
+a rolled-back application. Earlier applied declarations refuse unsafe rollback regardless of
+their opt-in; Build holds online with CS03405 and explicit apply throws CS03105 (#1779).
 
 Index DDL defaults to ASC NULLS FIRST and DESC NULLS LAST, matching ORDER BY (#1787).
-Default nullable indexes can remove sorts in both directions. SQL format 37 and compiled-schema
+Default nullable indexes can remove sorts in both directions. SQL format 39 and compiled-schema
 v12 fence the new enum meanings; earlier databases and artifacts must be recreated or rebuilt.
 
 Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
@@ -186,7 +187,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 37). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 39). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -443,24 +444,35 @@ a hard-deadlock victim. Public APIs and wire messages are unchanged.
 ## Probe costing and hash joins (#1522)
 
 Access selection compares bounded snapshot-visible index probes without stored statistics.
-Broad safe equijoins can build an in-memory hash table; unique and small indexed probes retain
+Broad safe equijoins can build a bounded hash table; eligible roots use an indexed temporary build.
+Retained normalized-tree buffers can stage after their original reservation refuses, including
+left inputs and intermediate outputs. Optional join arenas yield to other statement reservations.
+Sorts and staged GROUP BY inputs outside the join statement keep their original grant arithmetic.
+Unique and small indexed probes retain
 nested loops. LEFT semantics, duplicate matches, SQL equality and full residual evaluation remain.
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live
 hash builds, retained SELECT buffers and grouping-set aggregate states per statement.
 CTAS sources charge like any SELECT; CTAS itself admits only kept output after pagination.
 CS05067 (SQLSTATE 53200) refuses newly charged memory and stops input promptly unless an
-eligible root plain SELECT ORDER BY or ordered DISTINCT, including a CTAS source root,
+eligible root hash join, plain SELECT ORDER BY, ordered DISTINCT, fixed-state hash GROUP BY or
+streamed scan/system-view hash DISTINCT, including a CTAS source root,
 hands off to configured temporary space. Its fully evaluated result decodes lazily and
 supports repeated or concurrent reads.
 Nested plans, windows, recursion, grouping sets and ordered sequence
-deferral retain their existing refusals; DISTINCT's retained representatives must still fit.
+deferral retain their existing refusals; ordered DISTINCT's retained representatives must still fit.
+Hash aggregation keeps existing groups live and partitions new-group inputs, then restores
+first-seen order before output. COUNT, bounded SUM/AVG, fixed-width MIN/MAX (numeric, temporal,
+boolean and UUID) and native Boolean states qualify; text/binary extrema, unbounded states
+and unproved sums retain CS05067. Unordered output streams to an input-order spool. Hash DISTINCT preserves its
+first complete representative. Hash DISTINCT over join output retains the existing refusal.
+DESIGN.md records row/state capacity, the eight-level repartitioning bound and the shared quota.
 DML sources gain no spill permission; their existing budgeting policy, including the
 INSERT SELECT gap tracked by #1828, is unchanged.
 Window and SQL/JSON grants retain their existing refusal codes when they fail without the
 plain SELECT charges.
 Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
-executes to report candidate work in the same eight-column description; actual root sort spills
-add byte, run and merge-pass details. Unavailable counts remain
+executes to report candidate work in the same eight-column description; actual root sort and hash spills
+add byte, run, batch and pass details. Unavailable counts remain
 NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;
 statement-wide totals include all invocations. No standalone ANALYZE, persisted statistics,
 format change or new wire message is added.
@@ -595,3 +607,5 @@ The function argument view snapshots only Count; the function context view snaps
 TransactionTimestamp. Neither view retains a ref struct, span, context, or cancellation token.
 The SQL value view reads Type and IsNull without decoding its payload. Internal-only plan or
 metrics state stays hidden rather than being promoted to a public debugger projection.
+
+Chunked index builds wait for journal admission between chunks while retaining the table writer reservation. Owners are reserved before data apply, and publication refuses a dropped, unknown or heap-owned registration with CS05060. DROP and failed builds request exact owner reclamation automatically.

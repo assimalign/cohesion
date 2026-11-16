@@ -20,6 +20,27 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 internal static class SqlValueComparer
 {
+    // Exactly the cross-type families accepted by SqlValueComparer.Compare. Raw parameter
+    // primitives are separate: its numeric path recognizes only signed SQL numerics.
+    internal static byte ComparisonFamily(object value) => value switch
+    {
+        sbyte or short or int or long or float or double or decimal => 1,
+        string or SqlCharacter => 2,
+        DateOnly or DateTime or DateTimeOffset => 3,
+        byte[] => 4,
+        bool => 5,
+        TimeOnly => 6,
+        TimeSpan => 7,
+        Guid => 8,
+        byte => 9,
+        ushort => 10,
+        uint => 11,
+        ulong => 12,
+        char => 13,
+        _ => 0,
+    };
+
+
     /// <summary>Compares two non-null values using the resolved string collation.</summary>
     internal static int Compare(object left, object right, Collation? collation = null)
     {

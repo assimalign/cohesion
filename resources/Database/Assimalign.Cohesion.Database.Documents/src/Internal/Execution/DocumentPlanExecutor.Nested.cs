@@ -164,7 +164,9 @@ internal static partial class DocumentPlanExecutor
     {
         var memory = evaluator.Memory;
         long before = memory.Bytes - nested.RetainedBytes;
-        try { return (await ExecuteNestedRowsCoreAsync(logical, matches, evaluator, cancellationToken, ordered, nested).ConfigureAwait(false)); }
+        try { return DocumentPlanner.HasWindows(logical.Query)
+            ? await ExecuteWindowRowsAsync(logical, matches, evaluator, cancellationToken, ordered, nested).ConfigureAwait(false)
+            : await ExecuteNestedRowsCoreAsync(logical, matches, evaluator, cancellationToken, ordered, nested).ConfigureAwait(false); }
         catch
         {
             memory.Release(memory.Bytes - nested.RetainedBytes - before);

@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -30,21 +31,27 @@ public sealed class OqlSelectExpression : OqlQueryExpression
     /// <param name="groupAs">The optional GROUP AS binding for the array of input binding wrappers.</param>
     /// <param name="bindings">The ordered UNNEST, JOIN and NEST bindings; null uses <paramref name="unnest"/>.</param>
     /// <param name="source">The FROM expression, including a subquery for a derived source; null selects <paramref name="collection"/>.</param>
+    /// <param name="windows">The query-local named windows.</param>
     /// <param name="isAliasImplicit">Whether a supplied alias was inferred from its source rather than explicitly declared.</param>
+    /// <exception cref="ArgumentNullException">A supplied window declaration is null.</exception>
     public OqlSelectExpression(string collection, string? alias, IReadOnlyList<OqlProjection> projections,
         OqlExpression? predicate, IReadOnlyList<OqlExpression> groupBy, OqlExpression? having,
         IReadOnlyList<OqlOrdering> orderBy, bool isDistinct, bool isValue, OqlExpression? limit = null,
         OqlExpression? offset = null, Location? location = null, IReadOnlyList<OqlUnnestExpression>? unnest = null,
         IReadOnlyList<string?>? groupAliases = null, string? groupAs = null, OqlExpression? source = null, IReadOnlyList<OqlSourceBindingExpression>? bindings = null,
-        bool isAliasImplicit = false) : base(orderBy, isValue, limit, offset, location)
+        bool isAliasImplicit = false, IReadOnlyList<OqlWindowDefinition>? windows = null) : base(orderBy, isValue, limit, offset, location)
     {
+        if (windows is not null) { foreach (var window in windows) { ArgumentNullException.ThrowIfNull(window); } }
         _from = bindings is null || !bindings.Any(binding => binding is OqlJoinExpression)
             ? source is null ? collection : source : new Sources(source is null ? collection : source, bindings);
         Alias = alias;
         IsAliasImplicit = alias is null || isAliasImplicit;
         Projections = projections;
         Predicate = predicate;
-        GroupBy = groupAliases is null && groupAs is null ? groupBy : new Grouping(groupBy, groupAliases ?? [], groupAs);
+        var windowDefinitions = windows ?? (groupBy as WindowGrouping)?.Windows;
+        var groupKeys = (groupBy as WindowGrouping)?.Keys ?? groupBy;
+        GroupBy = groupAliases is null && groupAs is null ? groupKeys : new Grouping(groupKeys, groupAliases ?? [], groupAs);
+        if (windowDefinitions is { Count: > 0 }) { GroupBy = new WindowGrouping(GroupBy, windowDefinitions); }
         Having = having;
         IsDistinct = isDistinct;
         Unnest = bindings is null ? unnest ?? [] : bindings.OfType<OqlUnnestExpression>().ToArray();
@@ -72,11 +79,14 @@ public sealed class OqlSelectExpression : OqlQueryExpression
     /// <summary>Gets the grouping expressions.</summary>
     public IReadOnlyList<OqlExpression> GroupBy { get; }
     /// <summary>Gets the group-term aliases, parallel to GroupBy, or an empty list when no terms have aliases.</summary>
-    public IReadOnlyList<string?> GroupAliases => (GroupBy as Grouping)?.Aliases ?? [];
+    public IReadOnlyList<string?> GroupAliases => (((GroupBy as WindowGrouping)?.Keys ?? GroupBy) as Grouping)?.Aliases ?? [];
     /// <summary>Gets the optional name of the array of input binding wrappers.</summary>
-    public string? GroupAs => (GroupBy as Grouping)?.GroupAs;
+    public string? GroupAs => (((GroupBy as WindowGrouping)?.Keys ?? GroupBy) as Grouping)?.GroupAs;
     /// <summary>Gets the optional group predicate.</summary>
     public OqlExpression? Having { get; }
+
+    /// <summary>Gets the query-local WINDOW declarations.</summary>
+    public IReadOnlyList<OqlWindowDefinition> Windows => (GroupBy as WindowGrouping)?.Windows ?? [];
 
     private sealed record Sources(object From, IReadOnlyList<OqlSourceBindingExpression> Bindings);
 
@@ -90,6 +100,18 @@ public sealed class OqlSelectExpression : OqlQueryExpression
         public IReadOnlyList<OqlExpression> Keys { get; }
         public IReadOnlyList<string?> Aliases { get; }
         public string? GroupAs { get; }
+        public int Count => Keys.Count;
+        public OqlExpression this[int index] => Keys[index];
+        public IEnumerator<OqlExpression> GetEnumerator() => Keys.GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class WindowGrouping : IReadOnlyList<OqlExpression>
+    {
+        public WindowGrouping(IReadOnlyList<OqlExpression> keys, IReadOnlyList<OqlWindowDefinition> windows)
+        { Keys = keys; Windows = Array.AsReadOnly(windows.ToArray()); }
+        public IReadOnlyList<OqlExpression> Keys { get; }
+        public IReadOnlyList<OqlWindowDefinition> Windows { get; }
         public int Count => Keys.Count;
         public OqlExpression this[int index] => Keys[index];
         public IEnumerator<OqlExpression> GetEnumerator() => Keys.GetEnumerator();
@@ -118,6 +140,7 @@ public sealed class OqlSelectExpression : OqlQueryExpression
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression> GroupBy => _target.GroupBy;
         public IReadOnlyList<string?> GroupAliases => _target.GroupAliases;
         public string? GroupAs => _target.GroupAs;
+        public IReadOnlyList<OqlWindowDefinition> Windows => _target.Windows;
         public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Having => _target.Having;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlOrdering> OrderBy => _target.OrderBy;
         public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Limit => _target.Limit;

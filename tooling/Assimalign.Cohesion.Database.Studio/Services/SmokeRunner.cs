@@ -271,7 +271,7 @@ internal sealed class SmokeRunner
             Require(catalog.Any(row => row[0] is "wire_items"), ErrorMessages.WireCollectionCatalogMissing);
             try
             {
-                await connection.QueryAsync("MERGE INTO wire_items", cancellationToken: token).ConfigureAwait(false);
+                await connection.QueryAsync("DEFINE wire_items", cancellationToken: token).ConfigureAwait(false);
                 throw new InvalidOperationException(ErrorMessages.OqlRejectionMissing);
             }
             catch (Documents.Client.DocumentClientException exception)

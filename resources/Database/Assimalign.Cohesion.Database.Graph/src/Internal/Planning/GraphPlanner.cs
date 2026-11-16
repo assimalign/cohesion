@@ -391,7 +391,7 @@ internal sealed partial class GraphPlanner
                     }
                 }
             }
-            if (stage is GqlReturnStage && !query.ReturnStar && query.Projections.Count == 0 || !Enum.IsDefined(query.SetQuantifier) || query.ReturnStar && (query.Projections.Count != 0 || declarations.Count == 0) ||
+            if (stage is GqlReturnStage && !query.ReturnStar && query.Projections.Count == 0 || !(query.SetQuantifier is GqlSetQuantifier.All or GqlSetQuantifier.Distinct) || query.ReturnStar && (query.Projections.Count != 0 || declarations.Count == 0) ||
                 query.SetQuantifier == GqlSetQuantifier.Distinct && !query.ReturnStar && query.Projections.Count == 0)
             { throw new GraphPlanningException("CG05001", ErrorMessages.ReturnShapeInvalid, query.Location); }
             var items = query.ReturnStar
@@ -471,7 +471,7 @@ internal sealed partial class GraphPlanner
             foreach (var item in query.OrderBy)
             {
                 token.ThrowIfCancellationRequested();
-                if (item?.Expression is null || !Enum.IsDefined(item.Direction) || !Enum.IsDefined(item.NullOrdering))
+                if (item?.Expression is null || !(item.Direction is GqlSortDirection.Ascending or GqlSortDirection.Descending) || !(item.NullOrdering is GqlNullOrdering.Default or GqlNullOrdering.First or GqlNullOrdering.Last))
                 { throw new GraphPlanningException("CG05001", ErrorMessages.SortShapeInvalid, query.Location); }
                 ValidateExpression(item.Expression, allowAggregates: grouping is not null, ordering: true);
                 if (grouping is not null) { grouping.Scope.Validate(item.Expression, orderAliases, groupedExpressions, subplans: (_nativeExpressions as CorrelatedPlanningState)?.Subplans); }
@@ -1087,7 +1087,7 @@ internal sealed partial class GraphPlanner
                         break;
                     case GqlCastExpression cast:
                         function = cast;
-                        if (!Enum.IsDefined(cast.Target)) { throw new GraphPlanningException("CG05001", ErrorMessages.CastValueInvalid, cast.Location); }
+                        if (!(cast.Target is >= GqlCastType.Int32 and <= GqlCastType.Timestamp)) { throw new GraphPlanningException("CG05001", ErrorMessages.CastValueInvalid, cast.Location); }
                         if ((KnownFunctionKind(cast.Operand, ordering, iterators) & (GraphFunctionKind.Node | GraphFunctionKind.Relationship | GraphFunctionKind.Path | GraphFunctionKind.List | GraphFunctionKind.Map)) != 0 ||
                             KnownFunctionKind(cast.Operand, ordering, iterators) == GraphFunctionKind.Boolean && cast.Target is GqlCastType.Int32 or GqlCastType.Int64 or GqlCastType.Float32 or GqlCastType.Float64 or GqlCastType.Decimal)
                         { throw new GraphPlanningException("CG03003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, "CAST", 1), cast.Location); }
@@ -1096,7 +1096,7 @@ internal sealed partial class GraphPlanner
                     case GqlAggregateExpression aggregate:
                         if (iterators is not null)
                         { throw new GraphPlanningException("CG05024", ErrorMessages.IteratorAggregateInvalid, aggregate.Location); }
-                        if (!allowAggregates || !Enum.IsDefined(aggregate.Function) ||
+                        if (!allowAggregates || !(aggregate.Function is >= GqlAggregateFunction.Count and <= GqlAggregateFunction.CollectList) ||
                             aggregate.Operand is null && (aggregate.Function != GqlAggregateFunction.Count || aggregate.Distinct))
                         { throw new GraphPlanningException("CG05001", ErrorMessages.AggregatePlacement, aggregate.Location); }
                         if (aggregate.Operand is not null) { pending.Push((aggregate.Operand, function)); }
@@ -1131,7 +1131,7 @@ internal sealed partial class GraphPlanner
                     case GqlBinaryExpression { Operator: "AND" }:
                         throw new GraphPlanningException("CG05001", ErrorMessages.LogicalNodeRequired, expression?.Location);
                     case GqlLogicalExpression logical:
-                        if (!Enum.IsDefined(logical.Operator))
+                        if (!(logical.Operator is GqlLogicalOperator.And or GqlLogicalOperator.Or or GqlLogicalOperator.Xor))
                         { throw new GraphPlanningException("CG05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphPlannerPlanCoreGraphPlanning4, (int)logical.Operator), expression?.Location); }
                         if (logical.Operands is null || logical.Operands.Count < 2)
                         { throw new GraphPlanningException("CG05001", ErrorMessages.GraphPlannerPlanCoreGraphPlanning5, expression?.Location); }
@@ -1188,7 +1188,7 @@ internal sealed partial class GraphPlanner
                         GqlNullIfExpression or GqlSubscriptExpression:
                         foreach (var child in GraphValueExpressions.Children(expression).Reverse()) { pending.Push((child, function)); }
                         break;
-                    case GqlStringPredicateExpression predicate when Enum.IsDefined(predicate.Operator):
+                    case GqlStringPredicateExpression predicate when (predicate.Operator is GqlStringPredicateOperator.StartsWith or GqlStringPredicateOperator.EndsWith or GqlStringPredicateOperator.Contains):
                         pending.Push((predicate.Right, function));
                         pending.Push((predicate.Left, function));
                         break;
@@ -1799,7 +1799,7 @@ internal sealed partial class GraphPlanner
     /// </returns>
     private static bool ValidateRelationship(GqlRelationshipPattern relationship, bool creating, GraphTokenResolver tokens)
     {
-        if (!Enum.IsDefined(relationship.Direction))
+        if (!(relationship.Direction is >= GqlPatternDirection.Outgoing and <= GqlPatternDirection.LeftOrRight))
         { throw new GraphPlanningException("CG05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateRelationshipGraphPlanning, (int)relationship.Direction), null); }
         string? type = relationship.Type;
         IReadOnlyList<string> names = type is null ? [] : [type];

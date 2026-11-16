@@ -33,6 +33,20 @@ public sealed class OqlFunction
     /// <summary>Gets whether the call consumes a group of documents.</summary>
     public bool IsAggregate { get; }
 
+    /// <summary>Gets the window operation, or None for scalar and aggregate calls.</summary>
+    public OqlWindowFunctionKind WindowKind => Name switch
+    {
+        "ROW_NUMBER" => OqlWindowFunctionKind.RowNumber,
+        "RANK" => OqlWindowFunctionKind.Rank,
+        "DENSE_RANK" => OqlWindowFunctionKind.DenseRank,
+        "PERCENT_RANK" => OqlWindowFunctionKind.PercentRank,
+        "CUME_DIST" => OqlWindowFunctionKind.CumeDist,
+        "NTILE" => OqlWindowFunctionKind.Ntile,
+        "LAG" => OqlWindowFunctionKind.Lag,
+        "LEAD" => OqlWindowFunctionKind.Lead,
+        _ => OqlWindowFunctionKind.None,
+    };
+
     /// <summary>Checks the number of arguments, including COUNT's star argument.</summary>
     /// <param name="count">The argument count.</param>
     /// <returns>Whether the count is accepted.</returns>
@@ -65,5 +79,6 @@ public sealed class OqlFunction
         public int MaximumArguments => _target.MaximumArguments;
         public global::Assimalign.Cohesion.Database.Types.DatabaseType ResultType => _target.ResultType;
         public bool IsAggregate => _target.IsAggregate;
+        public OqlWindowFunctionKind WindowKind => _target.WindowKind;
     }
 }

@@ -98,7 +98,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 var executor = new SqlPlanExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
                 ExecutorMetrics(executor) = statement.Metrics;
                 SqlMaterializedResultSet result;
-                if (leaf) { result = (SqlMaterializedResultSet)TableAsSelect(executor, (SqlSelectPlan)plan, statement, default, null, plan, permission ? session : null); }
+                if (leaf) { result = (SqlMaterializedResultSet)TableAsSelect(executor, (SqlSelectPlan)plan, statement, default, null, plan, permission ? session : null, null); }
                 else
                 {
                     var task = permission ? executor.ExecuteRootAsync(plan, statement, default, session) : executor.ExecuteAsync(plan, statement, default);
@@ -419,7 +419,7 @@ public sealed partial class SqlSortSpillConformanceTests
     private static extern StorageTempSpace TableAsSpace(StorageTempStatement statement);
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ExecuteSelect")]
     private static extern DatabaseResult TableAsSelect(SqlPlanExecutor executor, SqlSelectPlan plan, SqlStatementContext statement,
-        CancellationToken token, int? retainRows, SqlPlan? retentionPlan, SqlDatabaseSession? owner);
+        CancellationToken token, int? retainRows, SqlPlan? retentionPlan, SqlDatabaseSession? owner, SqlGroupPlan? hashInput);
 
     private sealed class TableAsFailedCloseStream : FileStream
     {

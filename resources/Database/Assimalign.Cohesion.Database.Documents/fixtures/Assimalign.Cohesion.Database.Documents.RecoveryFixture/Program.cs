@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.RecoveryFixture;
 using Assimalign.Cohesion.Database.Execution;
 
+if (args.Length == 2 && args[0].StartsWith("allocations", StringComparison.Ordinal))
+{ DocumentWriteAllocations.Run(int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture), args[0] == "allocations-indexed"); return; }
 if (args.Length != 2) { throw new ArgumentException("Usage: seed|verify directory"); }
 var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
 builder.Options.RootPath = args[1];

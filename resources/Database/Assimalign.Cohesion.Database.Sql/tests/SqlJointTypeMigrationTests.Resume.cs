@@ -18,10 +18,10 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlJointTypeMigrationTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Prepared publication refuses a heap-owned index collision before commit (#1777)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Prepared publication stages a same-name replacement without switching the live tree (#1808)")]
     [InlineData("ix_v")]
     [InlineData("IX_V")]
-    public async Task PreparePublication_HeapOwnedIndexCollision_ShouldRefuseAndKeepTree(string preparedName)
+    public async Task PreparePublication_SameNameIndexReplacement_ShouldStageAndKeepLiveTree(string preparedName)
     {
         // Arrange.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -39,10 +39,9 @@ public sealed partial class SqlJointTypeMigrationTests
                     new IndexDefinition(preparedName, IndexKind.BTree, false), guard.Token), cancellationToken: guard.Token);
 
             // Act.
-            var failure = Should.Throw<InvalidOperationException>(() => database.IndexManager.PreparePublication());
+            Should.NotThrow(() => database.IndexManager.PreparePublication());
 
             // Assert.
-            failure.Message.ShouldContain("heap-owned tree", Case.Sensitive);
             database.IndexManager.TryGetIndex(heap.ObjectId, "ix_v", out var current).ShouldBeTrue();
             current.ShouldBeSameAs(original);
             database.IsOffline.ShouldBeFalse();

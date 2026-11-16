@@ -149,7 +149,7 @@ internal sealed partial class SqlSchemaProvisioner
                 {
                     throw new AggregateException(operationFailure, cleanupFailure);
                 }
-                finally { _database.ReportProvisioning(null); }
+                finally { _database.ReportProvisioning(_database.HeldProvisioning); }
             }
         }
         catch (Exception failure) when (_database.TranslateFailure(failure, metrics.SelfCommits != 0) is var translated && !ReferenceEquals(failure, translated))

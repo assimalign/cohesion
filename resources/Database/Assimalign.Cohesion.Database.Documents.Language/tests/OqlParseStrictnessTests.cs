@@ -65,7 +65,7 @@ public sealed class OqlParseStrictnessTests
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: SQL++ words report one CK00001 and no CD00002")]
-    [InlineData("«MERGE» INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE")]
+    [InlineData("MERGE INTO c USING d «ON» c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE general ON predicate")]
     [InlineData("SELECT c.fetch «first» FROM c", "FIRST")]
     [InlineData("SELECT c.limit «ALL» FROM c", "ALL")]
     [InlineData("SELECT union «ALL» FROM c", "ALL")]

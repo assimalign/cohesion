@@ -15,10 +15,11 @@ public sealed class DatabaseProvisioningProgress
     /// <param name="rowsProcessed">Rows processed, or null when unavailable.</param>
     /// <param name="totalRows">Rows to process, or null until counted.</param>
     /// <param name="failureCode">The model's failure code, or null while pending or running.</param>
+    /// <param name="detail">The model's refusal detail, including schema identities and refused steps when held.</param>
     /// <exception cref="ArgumentException">An identity is blank.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A position or count is invalid.</exception>
     public DatabaseProvisioningProgress(string operation, string objectName, int position, int stepCount,
-        bool isRunning, long? rowsProcessed = null, long? totalRows = null, string? failureCode = null)
+        bool isRunning, long? rowsProcessed = null, long? totalRows = null, string? failureCode = null, string? detail = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
         ArgumentException.ThrowIfNullOrWhiteSpace(objectName);
@@ -36,6 +37,7 @@ public sealed class DatabaseProvisioningProgress
         RowsProcessed = rowsProcessed;
         TotalRows = totalRows;
         FailureCode = failureCode;
+        Detail = detail;
     }
 
     /// <summary>Gets the model's operation kind.</summary>
@@ -54,4 +56,6 @@ public sealed class DatabaseProvisioningProgress
     public long? TotalRows { get; }
     /// <summary>Gets the failure code, or null while the step has not failed.</summary>
     public string? FailureCode { get; }
+    /// <summary>Gets the model's refusal detail, or null when unavailable.</summary>
+    public string? Detail { get; }
 }

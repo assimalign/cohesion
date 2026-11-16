@@ -1,0 +1,1937 @@
+# PostgreSQL 17.11, UTC; oracle id, left type, right type, mode, result type, value, SQLSTATE, outcome
+0	SMALLINT	SMALLINT	0	smallint	7		success
+1	SMALLINT	SMALLINT	1	smallint	7		success
+2	SMALLINT	SMALLINT	2	smallint	7		success
+3	SMALLINT	SMALLINT	3	smallint	7		success
+4	SMALLINT	INT	0	integer	7		success
+5	SMALLINT	INT	1	integer	8		success
+6	SMALLINT	INT	2	integer	7		success
+7	SMALLINT	INT	3	integer	8		success
+8	SMALLINT	BIGINT	0	bigint	7		success
+9	SMALLINT	BIGINT	1	bigint	9		success
+10	SMALLINT	BIGINT	2	bigint	7		success
+11	SMALLINT	BIGINT	3	bigint	9		success
+12	SMALLINT	NUMERIC(6,2)	0	numeric	7		success
+13	SMALLINT	NUMERIC(6,2)	1	numeric	1.25		success
+14	SMALLINT	NUMERIC(6,2)	2	numeric	7		success
+15	SMALLINT	NUMERIC(6,2)	3	numeric	1.25		success
+16	SMALLINT	NUMERIC(8,3)	0	numeric	7		success
+17	SMALLINT	NUMERIC(8,3)	1	numeric	2.375		success
+18	SMALLINT	NUMERIC(8,3)	2	numeric	7		success
+19	SMALLINT	NUMERIC(8,3)	3	numeric	2.375		success
+20	SMALLINT	REAL	0	real	7		success
+21	SMALLINT	REAL	1	real	3.5		success
+22	SMALLINT	REAL	2	real	7		success
+23	SMALLINT	REAL	3	real	3.5		success
+24	SMALLINT	DOUBLE PRECISION	0	double precision	7		success
+25	SMALLINT	DOUBLE PRECISION	1	double precision	4.75		success
+26	SMALLINT	DOUBLE PRECISION	2	double precision	7		success
+27	SMALLINT	DOUBLE PRECISION	3	double precision	4.75		success
+28	SMALLINT	TEXT	0			42804	refused
+29	SMALLINT	TEXT	1			42804	refused
+30	SMALLINT	TEXT	2			42804	refused
+31	SMALLINT	TEXT	3			42804	refused
+32	SMALLINT	VARCHAR(8)	0			42804	refused
+33	SMALLINT	VARCHAR(8)	1			42804	refused
+34	SMALLINT	VARCHAR(8)	2			42804	refused
+35	SMALLINT	VARCHAR(8)	3			42804	refused
+36	SMALLINT	CHAR(4)	0			42804	refused
+37	SMALLINT	CHAR(4)	1			42804	refused
+38	SMALLINT	CHAR(4)	2			42804	refused
+39	SMALLINT	CHAR(4)	3			42804	refused
+40	SMALLINT	BOOLEAN	0			42804	refused
+41	SMALLINT	BOOLEAN	1			42804	refused
+42	SMALLINT	BOOLEAN	2			42804	refused
+43	SMALLINT	BOOLEAN	3			42804	refused
+44	SMALLINT	DATE	0			42804	refused
+45	SMALLINT	DATE	1			42804	refused
+46	SMALLINT	DATE	2			42804	refused
+47	SMALLINT	DATE	3			42804	refused
+48	SMALLINT	TIME	0			42804	refused
+49	SMALLINT	TIME	1			42804	refused
+50	SMALLINT	TIME	2			42804	refused
+51	SMALLINT	TIME	3			42804	refused
+52	SMALLINT	TIMESTAMP	0			42804	refused
+53	SMALLINT	TIMESTAMP	1			42804	refused
+54	SMALLINT	TIMESTAMP	2			42804	refused
+55	SMALLINT	TIMESTAMP	3			42804	refused
+56	SMALLINT	TIMESTAMPTZ	0			42804	refused
+57	SMALLINT	TIMESTAMPTZ	1			42804	refused
+58	SMALLINT	TIMESTAMPTZ	2			42804	refused
+59	SMALLINT	TIMESTAMPTZ	3			42804	refused
+60	SMALLINT	BINARY	0			42804	refused
+61	SMALLINT	BINARY	1			42804	refused
+62	SMALLINT	BINARY	2			42804	refused
+63	SMALLINT	BINARY	3			42804	refused
+64	SMALLINT	JSON	0			42804	refused
+65	SMALLINT	JSON	1			42804	refused
+66	SMALLINT	JSON	2			42804	refused
+67	SMALLINT	JSON	3			42804	refused
+68	SMALLINT	JSONB	0			42804	refused
+69	SMALLINT	JSONB	1			42804	refused
+70	SMALLINT	JSONB	2			42804	refused
+71	SMALLINT	JSONB	3			42804	refused
+72	SMALLINT	UUID	0			42804	refused
+73	SMALLINT	UUID	1			42804	refused
+74	SMALLINT	UUID	2			42804	refused
+75	SMALLINT	UUID	3			42804	refused
+76	SMALLINT	INTERVAL	0			42804	refused
+77	SMALLINT	INTERVAL	1			42804	refused
+78	SMALLINT	INTERVAL	2			42804	refused
+79	SMALLINT	INTERVAL	3			42804	refused
+80	SMALLINT	unknown	0	smallint	7		success
+81	SMALLINT	unknown	1	smallint	11		success
+82	SMALLINT	unknown	2	smallint	7		success
+83	SMALLINT	unknown	3	smallint	11		success
+84	SMALLINT	null	0	smallint	7		success
+85	SMALLINT	null	1	smallint	<NULL>		success
+86	SMALLINT	null	2	smallint	7		success
+87	SMALLINT	null	3	smallint	<NULL>		success
+88	INT	SMALLINT	0	integer	8		success
+89	INT	SMALLINT	1	integer	7		success
+90	INT	SMALLINT	2	integer	8		success
+91	INT	SMALLINT	3	integer	7		success
+92	INT	INT	0	integer	8		success
+93	INT	INT	1	integer	8		success
+94	INT	INT	2	integer	8		success
+95	INT	INT	3	integer	8		success
+96	INT	BIGINT	0	bigint	8		success
+97	INT	BIGINT	1	bigint	9		success
+98	INT	BIGINT	2	bigint	8		success
+99	INT	BIGINT	3	bigint	9		success
+100	INT	NUMERIC(6,2)	0	numeric	8		success
+101	INT	NUMERIC(6,2)	1	numeric	1.25		success
+102	INT	NUMERIC(6,2)	2	numeric	8		success
+103	INT	NUMERIC(6,2)	3	numeric	1.25		success
+104	INT	NUMERIC(8,3)	0	numeric	8		success
+105	INT	NUMERIC(8,3)	1	numeric	2.375		success
+106	INT	NUMERIC(8,3)	2	numeric	8		success
+107	INT	NUMERIC(8,3)	3	numeric	2.375		success
+108	INT	REAL	0	real	8		success
+109	INT	REAL	1	real	3.5		success
+110	INT	REAL	2	real	8		success
+111	INT	REAL	3	real	3.5		success
+112	INT	DOUBLE PRECISION	0	double precision	8		success
+113	INT	DOUBLE PRECISION	1	double precision	4.75		success
+114	INT	DOUBLE PRECISION	2	double precision	8		success
+115	INT	DOUBLE PRECISION	3	double precision	4.75		success
+116	INT	TEXT	0			42804	refused
+117	INT	TEXT	1			42804	refused
+118	INT	TEXT	2			42804	refused
+119	INT	TEXT	3			42804	refused
+120	INT	VARCHAR(8)	0			42804	refused
+121	INT	VARCHAR(8)	1			42804	refused
+122	INT	VARCHAR(8)	2			42804	refused
+123	INT	VARCHAR(8)	3			42804	refused
+124	INT	CHAR(4)	0			42804	refused
+125	INT	CHAR(4)	1			42804	refused
+126	INT	CHAR(4)	2			42804	refused
+127	INT	CHAR(4)	3			42804	refused
+128	INT	BOOLEAN	0			42804	refused
+129	INT	BOOLEAN	1			42804	refused
+130	INT	BOOLEAN	2			42804	refused
+131	INT	BOOLEAN	3			42804	refused
+132	INT	DATE	0			42804	refused
+133	INT	DATE	1			42804	refused
+134	INT	DATE	2			42804	refused
+135	INT	DATE	3			42804	refused
+136	INT	TIME	0			42804	refused
+137	INT	TIME	1			42804	refused
+138	INT	TIME	2			42804	refused
+139	INT	TIME	3			42804	refused
+140	INT	TIMESTAMP	0			42804	refused
+141	INT	TIMESTAMP	1			42804	refused
+142	INT	TIMESTAMP	2			42804	refused
+143	INT	TIMESTAMP	3			42804	refused
+144	INT	TIMESTAMPTZ	0			42804	refused
+145	INT	TIMESTAMPTZ	1			42804	refused
+146	INT	TIMESTAMPTZ	2			42804	refused
+147	INT	TIMESTAMPTZ	3			42804	refused
+148	INT	BINARY	0			42804	refused
+149	INT	BINARY	1			42804	refused
+150	INT	BINARY	2			42804	refused
+151	INT	BINARY	3			42804	refused
+152	INT	JSON	0			42804	refused
+153	INT	JSON	1			42804	refused
+154	INT	JSON	2			42804	refused
+155	INT	JSON	3			42804	refused
+156	INT	JSONB	0			42804	refused
+157	INT	JSONB	1			42804	refused
+158	INT	JSONB	2			42804	refused
+159	INT	JSONB	3			42804	refused
+160	INT	UUID	0			42804	refused
+161	INT	UUID	1			42804	refused
+162	INT	UUID	2			42804	refused
+163	INT	UUID	3			42804	refused
+164	INT	INTERVAL	0			42804	refused
+165	INT	INTERVAL	1			42804	refused
+166	INT	INTERVAL	2			42804	refused
+167	INT	INTERVAL	3			42804	refused
+168	INT	unknown	0	integer	8		success
+169	INT	unknown	1	integer	11		success
+170	INT	unknown	2	integer	8		success
+171	INT	unknown	3	integer	11		success
+172	INT	null	0	integer	8		success
+173	INT	null	1	integer	<NULL>		success
+174	INT	null	2	integer	8		success
+175	INT	null	3	integer	<NULL>		success
+176	BIGINT	SMALLINT	0	bigint	9		success
+177	BIGINT	SMALLINT	1	bigint	7		success
+178	BIGINT	SMALLINT	2	bigint	9		success
+179	BIGINT	SMALLINT	3	bigint	7		success
+180	BIGINT	INT	0	bigint	9		success
+181	BIGINT	INT	1	bigint	8		success
+182	BIGINT	INT	2	bigint	9		success
+183	BIGINT	INT	3	bigint	8		success
+184	BIGINT	BIGINT	0	bigint	9		success
+185	BIGINT	BIGINT	1	bigint	9		success
+186	BIGINT	BIGINT	2	bigint	9		success
+187	BIGINT	BIGINT	3	bigint	9		success
+188	BIGINT	NUMERIC(6,2)	0	numeric	9		success
+189	BIGINT	NUMERIC(6,2)	1	numeric	1.25		success
+190	BIGINT	NUMERIC(6,2)	2	numeric	9		success
+191	BIGINT	NUMERIC(6,2)	3	numeric	1.25		success
+192	BIGINT	NUMERIC(8,3)	0	numeric	9		success
+193	BIGINT	NUMERIC(8,3)	1	numeric	2.375		success
+194	BIGINT	NUMERIC(8,3)	2	numeric	9		success
+195	BIGINT	NUMERIC(8,3)	3	numeric	2.375		success
+196	BIGINT	REAL	0	real	9		success
+197	BIGINT	REAL	1	real	3.5		success
+198	BIGINT	REAL	2	real	9		success
+199	BIGINT	REAL	3	real	3.5		success
+200	BIGINT	DOUBLE PRECISION	0	double precision	9		success
+201	BIGINT	DOUBLE PRECISION	1	double precision	4.75		success
+202	BIGINT	DOUBLE PRECISION	2	double precision	9		success
+203	BIGINT	DOUBLE PRECISION	3	double precision	4.75		success
+204	BIGINT	TEXT	0			42804	refused
+205	BIGINT	TEXT	1			42804	refused
+206	BIGINT	TEXT	2			42804	refused
+207	BIGINT	TEXT	3			42804	refused
+208	BIGINT	VARCHAR(8)	0			42804	refused
+209	BIGINT	VARCHAR(8)	1			42804	refused
+210	BIGINT	VARCHAR(8)	2			42804	refused
+211	BIGINT	VARCHAR(8)	3			42804	refused
+212	BIGINT	CHAR(4)	0			42804	refused
+213	BIGINT	CHAR(4)	1			42804	refused
+214	BIGINT	CHAR(4)	2			42804	refused
+215	BIGINT	CHAR(4)	3			42804	refused
+216	BIGINT	BOOLEAN	0			42804	refused
+217	BIGINT	BOOLEAN	1			42804	refused
+218	BIGINT	BOOLEAN	2			42804	refused
+219	BIGINT	BOOLEAN	3			42804	refused
+220	BIGINT	DATE	0			42804	refused
+221	BIGINT	DATE	1			42804	refused
+222	BIGINT	DATE	2			42804	refused
+223	BIGINT	DATE	3			42804	refused
+224	BIGINT	TIME	0			42804	refused
+225	BIGINT	TIME	1			42804	refused
+226	BIGINT	TIME	2			42804	refused
+227	BIGINT	TIME	3			42804	refused
+228	BIGINT	TIMESTAMP	0			42804	refused
+229	BIGINT	TIMESTAMP	1			42804	refused
+230	BIGINT	TIMESTAMP	2			42804	refused
+231	BIGINT	TIMESTAMP	3			42804	refused
+232	BIGINT	TIMESTAMPTZ	0			42804	refused
+233	BIGINT	TIMESTAMPTZ	1			42804	refused
+234	BIGINT	TIMESTAMPTZ	2			42804	refused
+235	BIGINT	TIMESTAMPTZ	3			42804	refused
+236	BIGINT	BINARY	0			42804	refused
+237	BIGINT	BINARY	1			42804	refused
+238	BIGINT	BINARY	2			42804	refused
+239	BIGINT	BINARY	3			42804	refused
+240	BIGINT	JSON	0			42804	refused
+241	BIGINT	JSON	1			42804	refused
+242	BIGINT	JSON	2			42804	refused
+243	BIGINT	JSON	3			42804	refused
+244	BIGINT	JSONB	0			42804	refused
+245	BIGINT	JSONB	1			42804	refused
+246	BIGINT	JSONB	2			42804	refused
+247	BIGINT	JSONB	3			42804	refused
+248	BIGINT	UUID	0			42804	refused
+249	BIGINT	UUID	1			42804	refused
+250	BIGINT	UUID	2			42804	refused
+251	BIGINT	UUID	3			42804	refused
+252	BIGINT	INTERVAL	0			42804	refused
+253	BIGINT	INTERVAL	1			42804	refused
+254	BIGINT	INTERVAL	2			42804	refused
+255	BIGINT	INTERVAL	3			42804	refused
+256	BIGINT	unknown	0	bigint	9		success
+257	BIGINT	unknown	1	bigint	11		success
+258	BIGINT	unknown	2	bigint	9		success
+259	BIGINT	unknown	3	bigint	11		success
+260	BIGINT	null	0	bigint	9		success
+261	BIGINT	null	1	bigint	<NULL>		success
+262	BIGINT	null	2	bigint	9		success
+263	BIGINT	null	3	bigint	<NULL>		success
+264	NUMERIC(6,2)	SMALLINT	0	numeric	1.25		success
+265	NUMERIC(6,2)	SMALLINT	1	numeric	7		success
+266	NUMERIC(6,2)	SMALLINT	2	numeric	1.25		success
+267	NUMERIC(6,2)	SMALLINT	3	numeric	7		success
+268	NUMERIC(6,2)	INT	0	numeric	1.25		success
+269	NUMERIC(6,2)	INT	1	numeric	8		success
+270	NUMERIC(6,2)	INT	2	numeric	1.25		success
+271	NUMERIC(6,2)	INT	3	numeric	8		success
+272	NUMERIC(6,2)	BIGINT	0	numeric	1.25		success
+273	NUMERIC(6,2)	BIGINT	1	numeric	9		success
+274	NUMERIC(6,2)	BIGINT	2	numeric	1.25		success
+275	NUMERIC(6,2)	BIGINT	3	numeric	9		success
+276	NUMERIC(6,2)	NUMERIC(6,2)	0	numeric	1.25		success
+277	NUMERIC(6,2)	NUMERIC(6,2)	1	numeric	1.25		success
+278	NUMERIC(6,2)	NUMERIC(6,2)	2	numeric	1.25		success
+279	NUMERIC(6,2)	NUMERIC(6,2)	3	numeric	1.25		success
+280	NUMERIC(6,2)	NUMERIC(8,3)	0	numeric	1.25		success
+281	NUMERIC(6,2)	NUMERIC(8,3)	1	numeric	2.375		success
+282	NUMERIC(6,2)	NUMERIC(8,3)	2	numeric	1.25		success
+283	NUMERIC(6,2)	NUMERIC(8,3)	3	numeric	2.375		success
+284	NUMERIC(6,2)	REAL	0	real	1.25		success
+285	NUMERIC(6,2)	REAL	1	real	3.5		success
+286	NUMERIC(6,2)	REAL	2	real	1.25		success
+287	NUMERIC(6,2)	REAL	3	real	3.5		success
+288	NUMERIC(6,2)	DOUBLE PRECISION	0	double precision	1.25		success
+289	NUMERIC(6,2)	DOUBLE PRECISION	1	double precision	4.75		success
+290	NUMERIC(6,2)	DOUBLE PRECISION	2	double precision	1.25		success
+291	NUMERIC(6,2)	DOUBLE PRECISION	3	double precision	4.75		success
+292	NUMERIC(6,2)	TEXT	0			42804	refused
+293	NUMERIC(6,2)	TEXT	1			42804	refused
+294	NUMERIC(6,2)	TEXT	2			42804	refused
+295	NUMERIC(6,2)	TEXT	3			42804	refused
+296	NUMERIC(6,2)	VARCHAR(8)	0			42804	refused
+297	NUMERIC(6,2)	VARCHAR(8)	1			42804	refused
+298	NUMERIC(6,2)	VARCHAR(8)	2			42804	refused
+299	NUMERIC(6,2)	VARCHAR(8)	3			42804	refused
+300	NUMERIC(6,2)	CHAR(4)	0			42804	refused
+301	NUMERIC(6,2)	CHAR(4)	1			42804	refused
+302	NUMERIC(6,2)	CHAR(4)	2			42804	refused
+303	NUMERIC(6,2)	CHAR(4)	3			42804	refused
+304	NUMERIC(6,2)	BOOLEAN	0			42804	refused
+305	NUMERIC(6,2)	BOOLEAN	1			42804	refused
+306	NUMERIC(6,2)	BOOLEAN	2			42804	refused
+307	NUMERIC(6,2)	BOOLEAN	3			42804	refused
+308	NUMERIC(6,2)	DATE	0			42804	refused
+309	NUMERIC(6,2)	DATE	1			42804	refused
+310	NUMERIC(6,2)	DATE	2			42804	refused
+311	NUMERIC(6,2)	DATE	3			42804	refused
+312	NUMERIC(6,2)	TIME	0			42804	refused
+313	NUMERIC(6,2)	TIME	1			42804	refused
+314	NUMERIC(6,2)	TIME	2			42804	refused
+315	NUMERIC(6,2)	TIME	3			42804	refused
+316	NUMERIC(6,2)	TIMESTAMP	0			42804	refused
+317	NUMERIC(6,2)	TIMESTAMP	1			42804	refused
+318	NUMERIC(6,2)	TIMESTAMP	2			42804	refused
+319	NUMERIC(6,2)	TIMESTAMP	3			42804	refused
+320	NUMERIC(6,2)	TIMESTAMPTZ	0			42804	refused
+321	NUMERIC(6,2)	TIMESTAMPTZ	1			42804	refused
+322	NUMERIC(6,2)	TIMESTAMPTZ	2			42804	refused
+323	NUMERIC(6,2)	TIMESTAMPTZ	3			42804	refused
+324	NUMERIC(6,2)	BINARY	0			42804	refused
+325	NUMERIC(6,2)	BINARY	1			42804	refused
+326	NUMERIC(6,2)	BINARY	2			42804	refused
+327	NUMERIC(6,2)	BINARY	3			42804	refused
+328	NUMERIC(6,2)	JSON	0			42804	refused
+329	NUMERIC(6,2)	JSON	1			42804	refused
+330	NUMERIC(6,2)	JSON	2			42804	refused
+331	NUMERIC(6,2)	JSON	3			42804	refused
+332	NUMERIC(6,2)	JSONB	0			42804	refused
+333	NUMERIC(6,2)	JSONB	1			42804	refused
+334	NUMERIC(6,2)	JSONB	2			42804	refused
+335	NUMERIC(6,2)	JSONB	3			42804	refused
+336	NUMERIC(6,2)	UUID	0			42804	refused
+337	NUMERIC(6,2)	UUID	1			42804	refused
+338	NUMERIC(6,2)	UUID	2			42804	refused
+339	NUMERIC(6,2)	UUID	3			42804	refused
+340	NUMERIC(6,2)	INTERVAL	0			42804	refused
+341	NUMERIC(6,2)	INTERVAL	1			42804	refused
+342	NUMERIC(6,2)	INTERVAL	2			42804	refused
+343	NUMERIC(6,2)	INTERVAL	3			42804	refused
+344	NUMERIC(6,2)	unknown	0	numeric	1.25		success
+345	NUMERIC(6,2)	unknown	1	numeric	11		success
+346	NUMERIC(6,2)	unknown	2	numeric	1.25		success
+347	NUMERIC(6,2)	unknown	3	numeric	11		success
+348	NUMERIC(6,2)	null	0	numeric	1.25		success
+349	NUMERIC(6,2)	null	1	numeric	<NULL>		success
+350	NUMERIC(6,2)	null	2	numeric	1.25		success
+351	NUMERIC(6,2)	null	3	numeric	<NULL>		success
+352	NUMERIC(8,3)	SMALLINT	0	numeric	2.375		success
+353	NUMERIC(8,3)	SMALLINT	1	numeric	7		success
+354	NUMERIC(8,3)	SMALLINT	2	numeric	2.375		success
+355	NUMERIC(8,3)	SMALLINT	3	numeric	7		success
+356	NUMERIC(8,3)	INT	0	numeric	2.375		success
+357	NUMERIC(8,3)	INT	1	numeric	8		success
+358	NUMERIC(8,3)	INT	2	numeric	2.375		success
+359	NUMERIC(8,3)	INT	3	numeric	8		success
+360	NUMERIC(8,3)	BIGINT	0	numeric	2.375		success
+361	NUMERIC(8,3)	BIGINT	1	numeric	9		success
+362	NUMERIC(8,3)	BIGINT	2	numeric	2.375		success
+363	NUMERIC(8,3)	BIGINT	3	numeric	9		success
+364	NUMERIC(8,3)	NUMERIC(6,2)	0	numeric	2.375		success
+365	NUMERIC(8,3)	NUMERIC(6,2)	1	numeric	1.25		success
+366	NUMERIC(8,3)	NUMERIC(6,2)	2	numeric	2.375		success
+367	NUMERIC(8,3)	NUMERIC(6,2)	3	numeric	1.25		success
+368	NUMERIC(8,3)	NUMERIC(8,3)	0	numeric	2.375		success
+369	NUMERIC(8,3)	NUMERIC(8,3)	1	numeric	2.375		success
+370	NUMERIC(8,3)	NUMERIC(8,3)	2	numeric	2.375		success
+371	NUMERIC(8,3)	NUMERIC(8,3)	3	numeric	2.375		success
+372	NUMERIC(8,3)	REAL	0	real	2.375		success
+373	NUMERIC(8,3)	REAL	1	real	3.5		success
+374	NUMERIC(8,3)	REAL	2	real	2.375		success
+375	NUMERIC(8,3)	REAL	3	real	3.5		success
+376	NUMERIC(8,3)	DOUBLE PRECISION	0	double precision	2.375		success
+377	NUMERIC(8,3)	DOUBLE PRECISION	1	double precision	4.75		success
+378	NUMERIC(8,3)	DOUBLE PRECISION	2	double precision	2.375		success
+379	NUMERIC(8,3)	DOUBLE PRECISION	3	double precision	4.75		success
+380	NUMERIC(8,3)	TEXT	0			42804	refused
+381	NUMERIC(8,3)	TEXT	1			42804	refused
+382	NUMERIC(8,3)	TEXT	2			42804	refused
+383	NUMERIC(8,3)	TEXT	3			42804	refused
+384	NUMERIC(8,3)	VARCHAR(8)	0			42804	refused
+385	NUMERIC(8,3)	VARCHAR(8)	1			42804	refused
+386	NUMERIC(8,3)	VARCHAR(8)	2			42804	refused
+387	NUMERIC(8,3)	VARCHAR(8)	3			42804	refused
+388	NUMERIC(8,3)	CHAR(4)	0			42804	refused
+389	NUMERIC(8,3)	CHAR(4)	1			42804	refused
+390	NUMERIC(8,3)	CHAR(4)	2			42804	refused
+391	NUMERIC(8,3)	CHAR(4)	3			42804	refused
+392	NUMERIC(8,3)	BOOLEAN	0			42804	refused
+393	NUMERIC(8,3)	BOOLEAN	1			42804	refused
+394	NUMERIC(8,3)	BOOLEAN	2			42804	refused
+395	NUMERIC(8,3)	BOOLEAN	3			42804	refused
+396	NUMERIC(8,3)	DATE	0			42804	refused
+397	NUMERIC(8,3)	DATE	1			42804	refused
+398	NUMERIC(8,3)	DATE	2			42804	refused
+399	NUMERIC(8,3)	DATE	3			42804	refused
+400	NUMERIC(8,3)	TIME	0			42804	refused
+401	NUMERIC(8,3)	TIME	1			42804	refused
+402	NUMERIC(8,3)	TIME	2			42804	refused
+403	NUMERIC(8,3)	TIME	3			42804	refused
+404	NUMERIC(8,3)	TIMESTAMP	0			42804	refused
+405	NUMERIC(8,3)	TIMESTAMP	1			42804	refused
+406	NUMERIC(8,3)	TIMESTAMP	2			42804	refused
+407	NUMERIC(8,3)	TIMESTAMP	3			42804	refused
+408	NUMERIC(8,3)	TIMESTAMPTZ	0			42804	refused
+409	NUMERIC(8,3)	TIMESTAMPTZ	1			42804	refused
+410	NUMERIC(8,3)	TIMESTAMPTZ	2			42804	refused
+411	NUMERIC(8,3)	TIMESTAMPTZ	3			42804	refused
+412	NUMERIC(8,3)	BINARY	0			42804	refused
+413	NUMERIC(8,3)	BINARY	1			42804	refused
+414	NUMERIC(8,3)	BINARY	2			42804	refused
+415	NUMERIC(8,3)	BINARY	3			42804	refused
+416	NUMERIC(8,3)	JSON	0			42804	refused
+417	NUMERIC(8,3)	JSON	1			42804	refused
+418	NUMERIC(8,3)	JSON	2			42804	refused
+419	NUMERIC(8,3)	JSON	3			42804	refused
+420	NUMERIC(8,3)	JSONB	0			42804	refused
+421	NUMERIC(8,3)	JSONB	1			42804	refused
+422	NUMERIC(8,3)	JSONB	2			42804	refused
+423	NUMERIC(8,3)	JSONB	3			42804	refused
+424	NUMERIC(8,3)	UUID	0			42804	refused
+425	NUMERIC(8,3)	UUID	1			42804	refused
+426	NUMERIC(8,3)	UUID	2			42804	refused
+427	NUMERIC(8,3)	UUID	3			42804	refused
+428	NUMERIC(8,3)	INTERVAL	0			42804	refused
+429	NUMERIC(8,3)	INTERVAL	1			42804	refused
+430	NUMERIC(8,3)	INTERVAL	2			42804	refused
+431	NUMERIC(8,3)	INTERVAL	3			42804	refused
+432	NUMERIC(8,3)	unknown	0	numeric	2.375		success
+433	NUMERIC(8,3)	unknown	1	numeric	11		success
+434	NUMERIC(8,3)	unknown	2	numeric	2.375		success
+435	NUMERIC(8,3)	unknown	3	numeric	11		success
+436	NUMERIC(8,3)	null	0	numeric	2.375		success
+437	NUMERIC(8,3)	null	1	numeric	<NULL>		success
+438	NUMERIC(8,3)	null	2	numeric	2.375		success
+439	NUMERIC(8,3)	null	3	numeric	<NULL>		success
+440	REAL	SMALLINT	0	real	3.5		success
+441	REAL	SMALLINT	1	real	7		success
+442	REAL	SMALLINT	2	real	3.5		success
+443	REAL	SMALLINT	3	real	7		success
+444	REAL	INT	0	real	3.5		success
+445	REAL	INT	1	real	8		success
+446	REAL	INT	2	real	3.5		success
+447	REAL	INT	3	real	8		success
+448	REAL	BIGINT	0	real	3.5		success
+449	REAL	BIGINT	1	real	9		success
+450	REAL	BIGINT	2	real	3.5		success
+451	REAL	BIGINT	3	real	9		success
+452	REAL	NUMERIC(6,2)	0	real	3.5		success
+453	REAL	NUMERIC(6,2)	1	real	1.25		success
+454	REAL	NUMERIC(6,2)	2	real	3.5		success
+455	REAL	NUMERIC(6,2)	3	real	1.25		success
+456	REAL	NUMERIC(8,3)	0	real	3.5		success
+457	REAL	NUMERIC(8,3)	1	real	2.375		success
+458	REAL	NUMERIC(8,3)	2	real	3.5		success
+459	REAL	NUMERIC(8,3)	3	real	2.375		success
+460	REAL	REAL	0	real	3.5		success
+461	REAL	REAL	1	real	3.5		success
+462	REAL	REAL	2	real	3.5		success
+463	REAL	REAL	3	real	3.5		success
+464	REAL	DOUBLE PRECISION	0	double precision	3.5		success
+465	REAL	DOUBLE PRECISION	1	double precision	4.75		success
+466	REAL	DOUBLE PRECISION	2	double precision	3.5		success
+467	REAL	DOUBLE PRECISION	3	double precision	4.75		success
+468	REAL	TEXT	0			42804	refused
+469	REAL	TEXT	1			42804	refused
+470	REAL	TEXT	2			42804	refused
+471	REAL	TEXT	3			42804	refused
+472	REAL	VARCHAR(8)	0			42804	refused
+473	REAL	VARCHAR(8)	1			42804	refused
+474	REAL	VARCHAR(8)	2			42804	refused
+475	REAL	VARCHAR(8)	3			42804	refused
+476	REAL	CHAR(4)	0			42804	refused
+477	REAL	CHAR(4)	1			42804	refused
+478	REAL	CHAR(4)	2			42804	refused
+479	REAL	CHAR(4)	3			42804	refused
+480	REAL	BOOLEAN	0			42804	refused
+481	REAL	BOOLEAN	1			42804	refused
+482	REAL	BOOLEAN	2			42804	refused
+483	REAL	BOOLEAN	3			42804	refused
+484	REAL	DATE	0			42804	refused
+485	REAL	DATE	1			42804	refused
+486	REAL	DATE	2			42804	refused
+487	REAL	DATE	3			42804	refused
+488	REAL	TIME	0			42804	refused
+489	REAL	TIME	1			42804	refused
+490	REAL	TIME	2			42804	refused
+491	REAL	TIME	3			42804	refused
+492	REAL	TIMESTAMP	0			42804	refused
+493	REAL	TIMESTAMP	1			42804	refused
+494	REAL	TIMESTAMP	2			42804	refused
+495	REAL	TIMESTAMP	3			42804	refused
+496	REAL	TIMESTAMPTZ	0			42804	refused
+497	REAL	TIMESTAMPTZ	1			42804	refused
+498	REAL	TIMESTAMPTZ	2			42804	refused
+499	REAL	TIMESTAMPTZ	3			42804	refused
+500	REAL	BINARY	0			42804	refused
+501	REAL	BINARY	1			42804	refused
+502	REAL	BINARY	2			42804	refused
+503	REAL	BINARY	3			42804	refused
+504	REAL	JSON	0			42804	refused
+505	REAL	JSON	1			42804	refused
+506	REAL	JSON	2			42804	refused
+507	REAL	JSON	3			42804	refused
+508	REAL	JSONB	0			42804	refused
+509	REAL	JSONB	1			42804	refused
+510	REAL	JSONB	2			42804	refused
+511	REAL	JSONB	3			42804	refused
+512	REAL	UUID	0			42804	refused
+513	REAL	UUID	1			42804	refused
+514	REAL	UUID	2			42804	refused
+515	REAL	UUID	3			42804	refused
+516	REAL	INTERVAL	0			42804	refused
+517	REAL	INTERVAL	1			42804	refused
+518	REAL	INTERVAL	2			42804	refused
+519	REAL	INTERVAL	3			42804	refused
+520	REAL	unknown	0	real	3.5		success
+521	REAL	unknown	1	real	11		success
+522	REAL	unknown	2	real	3.5		success
+523	REAL	unknown	3	real	11		success
+524	REAL	null	0	real	3.5		success
+525	REAL	null	1	real	<NULL>		success
+526	REAL	null	2	real	3.5		success
+527	REAL	null	3	real	<NULL>		success
+528	DOUBLE PRECISION	SMALLINT	0	double precision	4.75		success
+529	DOUBLE PRECISION	SMALLINT	1	double precision	7		success
+530	DOUBLE PRECISION	SMALLINT	2	double precision	4.75		success
+531	DOUBLE PRECISION	SMALLINT	3	double precision	7		success
+532	DOUBLE PRECISION	INT	0	double precision	4.75		success
+533	DOUBLE PRECISION	INT	1	double precision	8		success
+534	DOUBLE PRECISION	INT	2	double precision	4.75		success
+535	DOUBLE PRECISION	INT	3	double precision	8		success
+536	DOUBLE PRECISION	BIGINT	0	double precision	4.75		success
+537	DOUBLE PRECISION	BIGINT	1	double precision	9		success
+538	DOUBLE PRECISION	BIGINT	2	double precision	4.75		success
+539	DOUBLE PRECISION	BIGINT	3	double precision	9		success
+540	DOUBLE PRECISION	NUMERIC(6,2)	0	double precision	4.75		success
+541	DOUBLE PRECISION	NUMERIC(6,2)	1	double precision	1.25		success
+542	DOUBLE PRECISION	NUMERIC(6,2)	2	double precision	4.75		success
+543	DOUBLE PRECISION	NUMERIC(6,2)	3	double precision	1.25		success
+544	DOUBLE PRECISION	NUMERIC(8,3)	0	double precision	4.75		success
+545	DOUBLE PRECISION	NUMERIC(8,3)	1	double precision	2.375		success
+546	DOUBLE PRECISION	NUMERIC(8,3)	2	double precision	4.75		success
+547	DOUBLE PRECISION	NUMERIC(8,3)	3	double precision	2.375		success
+548	DOUBLE PRECISION	REAL	0	double precision	4.75		success
+549	DOUBLE PRECISION	REAL	1	double precision	3.5		success
+550	DOUBLE PRECISION	REAL	2	double precision	4.75		success
+551	DOUBLE PRECISION	REAL	3	double precision	3.5		success
+552	DOUBLE PRECISION	DOUBLE PRECISION	0	double precision	4.75		success
+553	DOUBLE PRECISION	DOUBLE PRECISION	1	double precision	4.75		success
+554	DOUBLE PRECISION	DOUBLE PRECISION	2	double precision	4.75		success
+555	DOUBLE PRECISION	DOUBLE PRECISION	3	double precision	4.75		success
+556	DOUBLE PRECISION	TEXT	0			42804	refused
+557	DOUBLE PRECISION	TEXT	1			42804	refused
+558	DOUBLE PRECISION	TEXT	2			42804	refused
+559	DOUBLE PRECISION	TEXT	3			42804	refused
+560	DOUBLE PRECISION	VARCHAR(8)	0			42804	refused
+561	DOUBLE PRECISION	VARCHAR(8)	1			42804	refused
+562	DOUBLE PRECISION	VARCHAR(8)	2			42804	refused
+563	DOUBLE PRECISION	VARCHAR(8)	3			42804	refused
+564	DOUBLE PRECISION	CHAR(4)	0			42804	refused
+565	DOUBLE PRECISION	CHAR(4)	1			42804	refused
+566	DOUBLE PRECISION	CHAR(4)	2			42804	refused
+567	DOUBLE PRECISION	CHAR(4)	3			42804	refused
+568	DOUBLE PRECISION	BOOLEAN	0			42804	refused
+569	DOUBLE PRECISION	BOOLEAN	1			42804	refused
+570	DOUBLE PRECISION	BOOLEAN	2			42804	refused
+571	DOUBLE PRECISION	BOOLEAN	3			42804	refused
+572	DOUBLE PRECISION	DATE	0			42804	refused
+573	DOUBLE PRECISION	DATE	1			42804	refused
+574	DOUBLE PRECISION	DATE	2			42804	refused
+575	DOUBLE PRECISION	DATE	3			42804	refused
+576	DOUBLE PRECISION	TIME	0			42804	refused
+577	DOUBLE PRECISION	TIME	1			42804	refused
+578	DOUBLE PRECISION	TIME	2			42804	refused
+579	DOUBLE PRECISION	TIME	3			42804	refused
+580	DOUBLE PRECISION	TIMESTAMP	0			42804	refused
+581	DOUBLE PRECISION	TIMESTAMP	1			42804	refused
+582	DOUBLE PRECISION	TIMESTAMP	2			42804	refused
+583	DOUBLE PRECISION	TIMESTAMP	3			42804	refused
+584	DOUBLE PRECISION	TIMESTAMPTZ	0			42804	refused
+585	DOUBLE PRECISION	TIMESTAMPTZ	1			42804	refused
+586	DOUBLE PRECISION	TIMESTAMPTZ	2			42804	refused
+587	DOUBLE PRECISION	TIMESTAMPTZ	3			42804	refused
+588	DOUBLE PRECISION	BINARY	0			42804	refused
+589	DOUBLE PRECISION	BINARY	1			42804	refused
+590	DOUBLE PRECISION	BINARY	2			42804	refused
+591	DOUBLE PRECISION	BINARY	3			42804	refused
+592	DOUBLE PRECISION	JSON	0			42804	refused
+593	DOUBLE PRECISION	JSON	1			42804	refused
+594	DOUBLE PRECISION	JSON	2			42804	refused
+595	DOUBLE PRECISION	JSON	3			42804	refused
+596	DOUBLE PRECISION	JSONB	0			42804	refused
+597	DOUBLE PRECISION	JSONB	1			42804	refused
+598	DOUBLE PRECISION	JSONB	2			42804	refused
+599	DOUBLE PRECISION	JSONB	3			42804	refused
+600	DOUBLE PRECISION	UUID	0			42804	refused
+601	DOUBLE PRECISION	UUID	1			42804	refused
+602	DOUBLE PRECISION	UUID	2			42804	refused
+603	DOUBLE PRECISION	UUID	3			42804	refused
+604	DOUBLE PRECISION	INTERVAL	0			42804	refused
+605	DOUBLE PRECISION	INTERVAL	1			42804	refused
+606	DOUBLE PRECISION	INTERVAL	2			42804	refused
+607	DOUBLE PRECISION	INTERVAL	3			42804	refused
+608	DOUBLE PRECISION	unknown	0	double precision	4.75		success
+609	DOUBLE PRECISION	unknown	1	double precision	11		success
+610	DOUBLE PRECISION	unknown	2	double precision	4.75		success
+611	DOUBLE PRECISION	unknown	3	double precision	11		success
+612	DOUBLE PRECISION	null	0	double precision	4.75		success
+613	DOUBLE PRECISION	null	1	double precision	<NULL>		success
+614	DOUBLE PRECISION	null	2	double precision	4.75		success
+615	DOUBLE PRECISION	null	3	double precision	<NULL>		success
+616	TEXT	SMALLINT	0			42804	refused
+617	TEXT	SMALLINT	1			42804	refused
+618	TEXT	SMALLINT	2			42804	refused
+619	TEXT	SMALLINT	3			42804	refused
+620	TEXT	INT	0			42804	refused
+621	TEXT	INT	1			42804	refused
+622	TEXT	INT	2			42804	refused
+623	TEXT	INT	3			42804	refused
+624	TEXT	BIGINT	0			42804	refused
+625	TEXT	BIGINT	1			42804	refused
+626	TEXT	BIGINT	2			42804	refused
+627	TEXT	BIGINT	3			42804	refused
+628	TEXT	NUMERIC(6,2)	0			42804	refused
+629	TEXT	NUMERIC(6,2)	1			42804	refused
+630	TEXT	NUMERIC(6,2)	2			42804	refused
+631	TEXT	NUMERIC(6,2)	3			42804	refused
+632	TEXT	NUMERIC(8,3)	0			42804	refused
+633	TEXT	NUMERIC(8,3)	1			42804	refused
+634	TEXT	NUMERIC(8,3)	2			42804	refused
+635	TEXT	NUMERIC(8,3)	3			42804	refused
+636	TEXT	REAL	0			42804	refused
+637	TEXT	REAL	1			42804	refused
+638	TEXT	REAL	2			42804	refused
+639	TEXT	REAL	3			42804	refused
+640	TEXT	DOUBLE PRECISION	0			42804	refused
+641	TEXT	DOUBLE PRECISION	1			42804	refused
+642	TEXT	DOUBLE PRECISION	2			42804	refused
+643	TEXT	DOUBLE PRECISION	3			42804	refused
+644	TEXT	TEXT	0	text	a		success
+645	TEXT	TEXT	1	text	a		success
+646	TEXT	TEXT	2	text	a		success
+647	TEXT	TEXT	3	text	a		success
+648	TEXT	VARCHAR(8)	0	character varying	a		success
+649	TEXT	VARCHAR(8)	1	character varying	b		success
+650	TEXT	VARCHAR(8)	2	text	a		success
+651	TEXT	VARCHAR(8)	3	text	b		success
+652	TEXT	CHAR(4)	0	character	a		success
+653	TEXT	CHAR(4)	1	character	c		success
+654	TEXT	CHAR(4)	2	text	a		success
+655	TEXT	CHAR(4)	3	text	c		success
+656	TEXT	BOOLEAN	0			42804	refused
+657	TEXT	BOOLEAN	1			42804	refused
+658	TEXT	BOOLEAN	2			42804	refused
+659	TEXT	BOOLEAN	3			42804	refused
+660	TEXT	DATE	0			42804	refused
+661	TEXT	DATE	1			42804	refused
+662	TEXT	DATE	2			42804	refused
+663	TEXT	DATE	3			42804	refused
+664	TEXT	TIME	0			42804	refused
+665	TEXT	TIME	1			42804	refused
+666	TEXT	TIME	2			42804	refused
+667	TEXT	TIME	3			42804	refused
+668	TEXT	TIMESTAMP	0			42804	refused
+669	TEXT	TIMESTAMP	1			42804	refused
+670	TEXT	TIMESTAMP	2			42804	refused
+671	TEXT	TIMESTAMP	3			42804	refused
+672	TEXT	TIMESTAMPTZ	0			42804	refused
+673	TEXT	TIMESTAMPTZ	1			42804	refused
+674	TEXT	TIMESTAMPTZ	2			42804	refused
+675	TEXT	TIMESTAMPTZ	3			42804	refused
+676	TEXT	BINARY	0			42804	refused
+677	TEXT	BINARY	1			42804	refused
+678	TEXT	BINARY	2			42804	refused
+679	TEXT	BINARY	3			42804	refused
+680	TEXT	JSON	0			42804	refused
+681	TEXT	JSON	1			42804	refused
+682	TEXT	JSON	2			42804	refused
+683	TEXT	JSON	3			42804	refused
+684	TEXT	JSONB	0			42804	refused
+685	TEXT	JSONB	1			42804	refused
+686	TEXT	JSONB	2			42804	refused
+687	TEXT	JSONB	3			42804	refused
+688	TEXT	UUID	0			42804	refused
+689	TEXT	UUID	1			42804	refused
+690	TEXT	UUID	2			42804	refused
+691	TEXT	UUID	3			42804	refused
+692	TEXT	INTERVAL	0			42804	refused
+693	TEXT	INTERVAL	1			42804	refused
+694	TEXT	INTERVAL	2			42804	refused
+695	TEXT	INTERVAL	3			42804	refused
+696	TEXT	unknown	0	text	a		success
+697	TEXT	unknown	1	text	11		success
+698	TEXT	unknown	2	text	a		success
+699	TEXT	unknown	3	text	11		success
+700	TEXT	null	0	text	a		success
+701	TEXT	null	1	text	<NULL>		success
+702	TEXT	null	2	text	a		success
+703	TEXT	null	3	text	<NULL>		success
+704	VARCHAR(8)	SMALLINT	0			42804	refused
+705	VARCHAR(8)	SMALLINT	1			42804	refused
+706	VARCHAR(8)	SMALLINT	2			42804	refused
+707	VARCHAR(8)	SMALLINT	3			42804	refused
+708	VARCHAR(8)	INT	0			42804	refused
+709	VARCHAR(8)	INT	1			42804	refused
+710	VARCHAR(8)	INT	2			42804	refused
+711	VARCHAR(8)	INT	3			42804	refused
+712	VARCHAR(8)	BIGINT	0			42804	refused
+713	VARCHAR(8)	BIGINT	1			42804	refused
+714	VARCHAR(8)	BIGINT	2			42804	refused
+715	VARCHAR(8)	BIGINT	3			42804	refused
+716	VARCHAR(8)	NUMERIC(6,2)	0			42804	refused
+717	VARCHAR(8)	NUMERIC(6,2)	1			42804	refused
+718	VARCHAR(8)	NUMERIC(6,2)	2			42804	refused
+719	VARCHAR(8)	NUMERIC(6,2)	3			42804	refused
+720	VARCHAR(8)	NUMERIC(8,3)	0			42804	refused
+721	VARCHAR(8)	NUMERIC(8,3)	1			42804	refused
+722	VARCHAR(8)	NUMERIC(8,3)	2			42804	refused
+723	VARCHAR(8)	NUMERIC(8,3)	3			42804	refused
+724	VARCHAR(8)	REAL	0			42804	refused
+725	VARCHAR(8)	REAL	1			42804	refused
+726	VARCHAR(8)	REAL	2			42804	refused
+727	VARCHAR(8)	REAL	3			42804	refused
+728	VARCHAR(8)	DOUBLE PRECISION	0			42804	refused
+729	VARCHAR(8)	DOUBLE PRECISION	1			42804	refused
+730	VARCHAR(8)	DOUBLE PRECISION	2			42804	refused
+731	VARCHAR(8)	DOUBLE PRECISION	3			42804	refused
+732	VARCHAR(8)	TEXT	0	text	b		success
+733	VARCHAR(8)	TEXT	1	text	a		success
+734	VARCHAR(8)	TEXT	2	character varying	b		success
+735	VARCHAR(8)	TEXT	3	character varying	a		success
+736	VARCHAR(8)	VARCHAR(8)	0	character varying	b		success
+737	VARCHAR(8)	VARCHAR(8)	1	character varying	b		success
+738	VARCHAR(8)	VARCHAR(8)	2	character varying	b		success
+739	VARCHAR(8)	VARCHAR(8)	3	character varying	b		success
+740	VARCHAR(8)	CHAR(4)	0	character	b		success
+741	VARCHAR(8)	CHAR(4)	1	character	c		success
+742	VARCHAR(8)	CHAR(4)	2	character varying	b		success
+743	VARCHAR(8)	CHAR(4)	3	character varying	c		success
+744	VARCHAR(8)	BOOLEAN	0			42804	refused
+745	VARCHAR(8)	BOOLEAN	1			42804	refused
+746	VARCHAR(8)	BOOLEAN	2			42804	refused
+747	VARCHAR(8)	BOOLEAN	3			42804	refused
+748	VARCHAR(8)	DATE	0			42804	refused
+749	VARCHAR(8)	DATE	1			42804	refused
+750	VARCHAR(8)	DATE	2			42804	refused
+751	VARCHAR(8)	DATE	3			42804	refused
+752	VARCHAR(8)	TIME	0			42804	refused
+753	VARCHAR(8)	TIME	1			42804	refused
+754	VARCHAR(8)	TIME	2			42804	refused
+755	VARCHAR(8)	TIME	3			42804	refused
+756	VARCHAR(8)	TIMESTAMP	0			42804	refused
+757	VARCHAR(8)	TIMESTAMP	1			42804	refused
+758	VARCHAR(8)	TIMESTAMP	2			42804	refused
+759	VARCHAR(8)	TIMESTAMP	3			42804	refused
+760	VARCHAR(8)	TIMESTAMPTZ	0			42804	refused
+761	VARCHAR(8)	TIMESTAMPTZ	1			42804	refused
+762	VARCHAR(8)	TIMESTAMPTZ	2			42804	refused
+763	VARCHAR(8)	TIMESTAMPTZ	3			42804	refused
+764	VARCHAR(8)	BINARY	0			42804	refused
+765	VARCHAR(8)	BINARY	1			42804	refused
+766	VARCHAR(8)	BINARY	2			42804	refused
+767	VARCHAR(8)	BINARY	3			42804	refused
+768	VARCHAR(8)	JSON	0			42804	refused
+769	VARCHAR(8)	JSON	1			42804	refused
+770	VARCHAR(8)	JSON	2			42804	refused
+771	VARCHAR(8)	JSON	3			42804	refused
+772	VARCHAR(8)	JSONB	0			42804	refused
+773	VARCHAR(8)	JSONB	1			42804	refused
+774	VARCHAR(8)	JSONB	2			42804	refused
+775	VARCHAR(8)	JSONB	3			42804	refused
+776	VARCHAR(8)	UUID	0			42804	refused
+777	VARCHAR(8)	UUID	1			42804	refused
+778	VARCHAR(8)	UUID	2			42804	refused
+779	VARCHAR(8)	UUID	3			42804	refused
+780	VARCHAR(8)	INTERVAL	0			42804	refused
+781	VARCHAR(8)	INTERVAL	1			42804	refused
+782	VARCHAR(8)	INTERVAL	2			42804	refused
+783	VARCHAR(8)	INTERVAL	3			42804	refused
+784	VARCHAR(8)	unknown	0	character varying	b		success
+785	VARCHAR(8)	unknown	1	character varying	11		success
+786	VARCHAR(8)	unknown	2	character varying	b		success
+787	VARCHAR(8)	unknown	3	character varying	11		success
+788	VARCHAR(8)	null	0	character varying	b		success
+789	VARCHAR(8)	null	1	character varying	<NULL>		success
+790	VARCHAR(8)	null	2	character varying	b		success
+791	VARCHAR(8)	null	3	character varying	<NULL>		success
+792	CHAR(4)	SMALLINT	0			42804	refused
+793	CHAR(4)	SMALLINT	1			42804	refused
+794	CHAR(4)	SMALLINT	2			42804	refused
+795	CHAR(4)	SMALLINT	3			42804	refused
+796	CHAR(4)	INT	0			42804	refused
+797	CHAR(4)	INT	1			42804	refused
+798	CHAR(4)	INT	2			42804	refused
+799	CHAR(4)	INT	3			42804	refused
+800	CHAR(4)	BIGINT	0			42804	refused
+801	CHAR(4)	BIGINT	1			42804	refused
+802	CHAR(4)	BIGINT	2			42804	refused
+803	CHAR(4)	BIGINT	3			42804	refused
+804	CHAR(4)	NUMERIC(6,2)	0			42804	refused
+805	CHAR(4)	NUMERIC(6,2)	1			42804	refused
+806	CHAR(4)	NUMERIC(6,2)	2			42804	refused
+807	CHAR(4)	NUMERIC(6,2)	3			42804	refused
+808	CHAR(4)	NUMERIC(8,3)	0			42804	refused
+809	CHAR(4)	NUMERIC(8,3)	1			42804	refused
+810	CHAR(4)	NUMERIC(8,3)	2			42804	refused
+811	CHAR(4)	NUMERIC(8,3)	3			42804	refused
+812	CHAR(4)	REAL	0			42804	refused
+813	CHAR(4)	REAL	1			42804	refused
+814	CHAR(4)	REAL	2			42804	refused
+815	CHAR(4)	REAL	3			42804	refused
+816	CHAR(4)	DOUBLE PRECISION	0			42804	refused
+817	CHAR(4)	DOUBLE PRECISION	1			42804	refused
+818	CHAR(4)	DOUBLE PRECISION	2			42804	refused
+819	CHAR(4)	DOUBLE PRECISION	3			42804	refused
+820	CHAR(4)	TEXT	0	text	c		success
+821	CHAR(4)	TEXT	1	text	a		success
+822	CHAR(4)	TEXT	2	character	c		success
+823	CHAR(4)	TEXT	3	character	a		success
+824	CHAR(4)	VARCHAR(8)	0	character varying	c		success
+825	CHAR(4)	VARCHAR(8)	1	character varying	b		success
+826	CHAR(4)	VARCHAR(8)	2	character	c		success
+827	CHAR(4)	VARCHAR(8)	3	character	b		success
+828	CHAR(4)	CHAR(4)	0	character	c		success
+829	CHAR(4)	CHAR(4)	1	character	c		success
+830	CHAR(4)	CHAR(4)	2	character	c		success
+831	CHAR(4)	CHAR(4)	3	character	c		success
+832	CHAR(4)	BOOLEAN	0			42804	refused
+833	CHAR(4)	BOOLEAN	1			42804	refused
+834	CHAR(4)	BOOLEAN	2			42804	refused
+835	CHAR(4)	BOOLEAN	3			42804	refused
+836	CHAR(4)	DATE	0			42804	refused
+837	CHAR(4)	DATE	1			42804	refused
+838	CHAR(4)	DATE	2			42804	refused
+839	CHAR(4)	DATE	3			42804	refused
+840	CHAR(4)	TIME	0			42804	refused
+841	CHAR(4)	TIME	1			42804	refused
+842	CHAR(4)	TIME	2			42804	refused
+843	CHAR(4)	TIME	3			42804	refused
+844	CHAR(4)	TIMESTAMP	0			42804	refused
+845	CHAR(4)	TIMESTAMP	1			42804	refused
+846	CHAR(4)	TIMESTAMP	2			42804	refused
+847	CHAR(4)	TIMESTAMP	3			42804	refused
+848	CHAR(4)	TIMESTAMPTZ	0			42804	refused
+849	CHAR(4)	TIMESTAMPTZ	1			42804	refused
+850	CHAR(4)	TIMESTAMPTZ	2			42804	refused
+851	CHAR(4)	TIMESTAMPTZ	3			42804	refused
+852	CHAR(4)	BINARY	0			42804	refused
+853	CHAR(4)	BINARY	1			42804	refused
+854	CHAR(4)	BINARY	2			42804	refused
+855	CHAR(4)	BINARY	3			42804	refused
+856	CHAR(4)	JSON	0			42804	refused
+857	CHAR(4)	JSON	1			42804	refused
+858	CHAR(4)	JSON	2			42804	refused
+859	CHAR(4)	JSON	3			42804	refused
+860	CHAR(4)	JSONB	0			42804	refused
+861	CHAR(4)	JSONB	1			42804	refused
+862	CHAR(4)	JSONB	2			42804	refused
+863	CHAR(4)	JSONB	3			42804	refused
+864	CHAR(4)	UUID	0			42804	refused
+865	CHAR(4)	UUID	1			42804	refused
+866	CHAR(4)	UUID	2			42804	refused
+867	CHAR(4)	UUID	3			42804	refused
+868	CHAR(4)	INTERVAL	0			42804	refused
+869	CHAR(4)	INTERVAL	1			42804	refused
+870	CHAR(4)	INTERVAL	2			42804	refused
+871	CHAR(4)	INTERVAL	3			42804	refused
+872	CHAR(4)	unknown	0	character	c		success
+873	CHAR(4)	unknown	1	character	11		success
+874	CHAR(4)	unknown	2	character	c		success
+875	CHAR(4)	unknown	3	character	11		success
+876	CHAR(4)	null	0	character	c		success
+877	CHAR(4)	null	1	character	<NULL>		success
+878	CHAR(4)	null	2	character	c		success
+879	CHAR(4)	null	3	character	<NULL>		success
+880	BOOLEAN	SMALLINT	0			42804	refused
+881	BOOLEAN	SMALLINT	1			42804	refused
+882	BOOLEAN	SMALLINT	2			42804	refused
+883	BOOLEAN	SMALLINT	3			42804	refused
+884	BOOLEAN	INT	0			42804	refused
+885	BOOLEAN	INT	1			42804	refused
+886	BOOLEAN	INT	2			42804	refused
+887	BOOLEAN	INT	3			42804	refused
+888	BOOLEAN	BIGINT	0			42804	refused
+889	BOOLEAN	BIGINT	1			42804	refused
+890	BOOLEAN	BIGINT	2			42804	refused
+891	BOOLEAN	BIGINT	3			42804	refused
+892	BOOLEAN	NUMERIC(6,2)	0			42804	refused
+893	BOOLEAN	NUMERIC(6,2)	1			42804	refused
+894	BOOLEAN	NUMERIC(6,2)	2			42804	refused
+895	BOOLEAN	NUMERIC(6,2)	3			42804	refused
+896	BOOLEAN	NUMERIC(8,3)	0			42804	refused
+897	BOOLEAN	NUMERIC(8,3)	1			42804	refused
+898	BOOLEAN	NUMERIC(8,3)	2			42804	refused
+899	BOOLEAN	NUMERIC(8,3)	3			42804	refused
+900	BOOLEAN	REAL	0			42804	refused
+901	BOOLEAN	REAL	1			42804	refused
+902	BOOLEAN	REAL	2			42804	refused
+903	BOOLEAN	REAL	3			42804	refused
+904	BOOLEAN	DOUBLE PRECISION	0			42804	refused
+905	BOOLEAN	DOUBLE PRECISION	1			42804	refused
+906	BOOLEAN	DOUBLE PRECISION	2			42804	refused
+907	BOOLEAN	DOUBLE PRECISION	3			42804	refused
+908	BOOLEAN	TEXT	0			42804	refused
+909	BOOLEAN	TEXT	1			42804	refused
+910	BOOLEAN	TEXT	2			42804	refused
+911	BOOLEAN	TEXT	3			42804	refused
+912	BOOLEAN	VARCHAR(8)	0			42804	refused
+913	BOOLEAN	VARCHAR(8)	1			42804	refused
+914	BOOLEAN	VARCHAR(8)	2			42804	refused
+915	BOOLEAN	VARCHAR(8)	3			42804	refused
+916	BOOLEAN	CHAR(4)	0			42804	refused
+917	BOOLEAN	CHAR(4)	1			42804	refused
+918	BOOLEAN	CHAR(4)	2			42804	refused
+919	BOOLEAN	CHAR(4)	3			42804	refused
+920	BOOLEAN	BOOLEAN	0	boolean	true		success
+921	BOOLEAN	BOOLEAN	1	boolean	true		success
+922	BOOLEAN	BOOLEAN	2	boolean	true		success
+923	BOOLEAN	BOOLEAN	3	boolean	true		success
+924	BOOLEAN	DATE	0			42804	refused
+925	BOOLEAN	DATE	1			42804	refused
+926	BOOLEAN	DATE	2			42804	refused
+927	BOOLEAN	DATE	3			42804	refused
+928	BOOLEAN	TIME	0			42804	refused
+929	BOOLEAN	TIME	1			42804	refused
+930	BOOLEAN	TIME	2			42804	refused
+931	BOOLEAN	TIME	3			42804	refused
+932	BOOLEAN	TIMESTAMP	0			42804	refused
+933	BOOLEAN	TIMESTAMP	1			42804	refused
+934	BOOLEAN	TIMESTAMP	2			42804	refused
+935	BOOLEAN	TIMESTAMP	3			42804	refused
+936	BOOLEAN	TIMESTAMPTZ	0			42804	refused
+937	BOOLEAN	TIMESTAMPTZ	1			42804	refused
+938	BOOLEAN	TIMESTAMPTZ	2			42804	refused
+939	BOOLEAN	TIMESTAMPTZ	3			42804	refused
+940	BOOLEAN	BINARY	0			42804	refused
+941	BOOLEAN	BINARY	1			42804	refused
+942	BOOLEAN	BINARY	2			42804	refused
+943	BOOLEAN	BINARY	3			42804	refused
+944	BOOLEAN	JSON	0			42804	refused
+945	BOOLEAN	JSON	1			42804	refused
+946	BOOLEAN	JSON	2			42804	refused
+947	BOOLEAN	JSON	3			42804	refused
+948	BOOLEAN	JSONB	0			42804	refused
+949	BOOLEAN	JSONB	1			42804	refused
+950	BOOLEAN	JSONB	2			42804	refused
+951	BOOLEAN	JSONB	3			42804	refused
+952	BOOLEAN	UUID	0			42804	refused
+953	BOOLEAN	UUID	1			42804	refused
+954	BOOLEAN	UUID	2			42804	refused
+955	BOOLEAN	UUID	3			42804	refused
+956	BOOLEAN	INTERVAL	0			42804	refused
+957	BOOLEAN	INTERVAL	1			42804	refused
+958	BOOLEAN	INTERVAL	2			42804	refused
+959	BOOLEAN	INTERVAL	3			42804	refused
+960	BOOLEAN	unknown	0			22P02	refused
+961	BOOLEAN	unknown	1			22P02	refused
+962	BOOLEAN	unknown	2			22P02	refused
+963	BOOLEAN	unknown	3			22P02	refused
+964	BOOLEAN	null	0	boolean	true		success
+965	BOOLEAN	null	1	boolean	<NULL>		success
+966	BOOLEAN	null	2	boolean	true		success
+967	BOOLEAN	null	3	boolean	<NULL>		success
+968	DATE	SMALLINT	0			42804	refused
+969	DATE	SMALLINT	1			42804	refused
+970	DATE	SMALLINT	2			42804	refused
+971	DATE	SMALLINT	3			42804	refused
+972	DATE	INT	0			42804	refused
+973	DATE	INT	1			42804	refused
+974	DATE	INT	2			42804	refused
+975	DATE	INT	3			42804	refused
+976	DATE	BIGINT	0			42804	refused
+977	DATE	BIGINT	1			42804	refused
+978	DATE	BIGINT	2			42804	refused
+979	DATE	BIGINT	3			42804	refused
+980	DATE	NUMERIC(6,2)	0			42804	refused
+981	DATE	NUMERIC(6,2)	1			42804	refused
+982	DATE	NUMERIC(6,2)	2			42804	refused
+983	DATE	NUMERIC(6,2)	3			42804	refused
+984	DATE	NUMERIC(8,3)	0			42804	refused
+985	DATE	NUMERIC(8,3)	1			42804	refused
+986	DATE	NUMERIC(8,3)	2			42804	refused
+987	DATE	NUMERIC(8,3)	3			42804	refused
+988	DATE	REAL	0			42804	refused
+989	DATE	REAL	1			42804	refused
+990	DATE	REAL	2			42804	refused
+991	DATE	REAL	3			42804	refused
+992	DATE	DOUBLE PRECISION	0			42804	refused
+993	DATE	DOUBLE PRECISION	1			42804	refused
+994	DATE	DOUBLE PRECISION	2			42804	refused
+995	DATE	DOUBLE PRECISION	3			42804	refused
+996	DATE	TEXT	0			42804	refused
+997	DATE	TEXT	1			42804	refused
+998	DATE	TEXT	2			42804	refused
+999	DATE	TEXT	3			42804	refused
+1000	DATE	VARCHAR(8)	0			42804	refused
+1001	DATE	VARCHAR(8)	1			42804	refused
+1002	DATE	VARCHAR(8)	2			42804	refused
+1003	DATE	VARCHAR(8)	3			42804	refused
+1004	DATE	CHAR(4)	0			42804	refused
+1005	DATE	CHAR(4)	1			42804	refused
+1006	DATE	CHAR(4)	2			42804	refused
+1007	DATE	CHAR(4)	3			42804	refused
+1008	DATE	BOOLEAN	0			42804	refused
+1009	DATE	BOOLEAN	1			42804	refused
+1010	DATE	BOOLEAN	2			42804	refused
+1011	DATE	BOOLEAN	3			42804	refused
+1012	DATE	DATE	0	date	2001-01-02		success
+1013	DATE	DATE	1	date	2001-01-02		success
+1014	DATE	DATE	2	date	2001-01-02		success
+1015	DATE	DATE	3	date	2001-01-02		success
+1016	DATE	TIME	0			42846	refused
+1017	DATE	TIME	1			42846	refused
+1018	DATE	TIME	2			42846	refused
+1019	DATE	TIME	3			42846	refused
+1020	DATE	TIMESTAMP	0	timestamp without time zone	2001-01-02 00:00:00		success
+1021	DATE	TIMESTAMP	1	timestamp without time zone	2001-01-02 03:04:05		success
+1022	DATE	TIMESTAMP	2	timestamp without time zone	2001-01-02 00:00:00		success
+1023	DATE	TIMESTAMP	3	timestamp without time zone	2001-01-02 03:04:05		success
+1024	DATE	TIMESTAMPTZ	0	timestamp with time zone	2001-01-02 00:00:00+00		success
+1025	DATE	TIMESTAMPTZ	1	timestamp with time zone	2001-01-02 03:04:05+00		success
+1026	DATE	TIMESTAMPTZ	2	timestamp with time zone	2001-01-02 00:00:00+00		success
+1027	DATE	TIMESTAMPTZ	3	timestamp with time zone	2001-01-02 03:04:05+00		success
+1028	DATE	BINARY	0			42804	refused
+1029	DATE	BINARY	1			42804	refused
+1030	DATE	BINARY	2			42804	refused
+1031	DATE	BINARY	3			42804	refused
+1032	DATE	JSON	0			42804	refused
+1033	DATE	JSON	1			42804	refused
+1034	DATE	JSON	2			42804	refused
+1035	DATE	JSON	3			42804	refused
+1036	DATE	JSONB	0			42804	refused
+1037	DATE	JSONB	1			42804	refused
+1038	DATE	JSONB	2			42804	refused
+1039	DATE	JSONB	3			42804	refused
+1040	DATE	UUID	0			42804	refused
+1041	DATE	UUID	1			42804	refused
+1042	DATE	UUID	2			42804	refused
+1043	DATE	UUID	3			42804	refused
+1044	DATE	INTERVAL	0			42804	refused
+1045	DATE	INTERVAL	1			42804	refused
+1046	DATE	INTERVAL	2			42804	refused
+1047	DATE	INTERVAL	3			42804	refused
+1048	DATE	unknown	0			22007	refused
+1049	DATE	unknown	1			22007	refused
+1050	DATE	unknown	2			22007	refused
+1051	DATE	unknown	3			22007	refused
+1052	DATE	null	0	date	2001-01-02		success
+1053	DATE	null	1	date	<NULL>		success
+1054	DATE	null	2	date	2001-01-02		success
+1055	DATE	null	3	date	<NULL>		success
+1056	TIME	SMALLINT	0			42804	refused
+1057	TIME	SMALLINT	1			42804	refused
+1058	TIME	SMALLINT	2			42804	refused
+1059	TIME	SMALLINT	3			42804	refused
+1060	TIME	INT	0			42804	refused
+1061	TIME	INT	1			42804	refused
+1062	TIME	INT	2			42804	refused
+1063	TIME	INT	3			42804	refused
+1064	TIME	BIGINT	0			42804	refused
+1065	TIME	BIGINT	1			42804	refused
+1066	TIME	BIGINT	2			42804	refused
+1067	TIME	BIGINT	3			42804	refused
+1068	TIME	NUMERIC(6,2)	0			42804	refused
+1069	TIME	NUMERIC(6,2)	1			42804	refused
+1070	TIME	NUMERIC(6,2)	2			42804	refused
+1071	TIME	NUMERIC(6,2)	3			42804	refused
+1072	TIME	NUMERIC(8,3)	0			42804	refused
+1073	TIME	NUMERIC(8,3)	1			42804	refused
+1074	TIME	NUMERIC(8,3)	2			42804	refused
+1075	TIME	NUMERIC(8,3)	3			42804	refused
+1076	TIME	REAL	0			42804	refused
+1077	TIME	REAL	1			42804	refused
+1078	TIME	REAL	2			42804	refused
+1079	TIME	REAL	3			42804	refused
+1080	TIME	DOUBLE PRECISION	0			42804	refused
+1081	TIME	DOUBLE PRECISION	1			42804	refused
+1082	TIME	DOUBLE PRECISION	2			42804	refused
+1083	TIME	DOUBLE PRECISION	3			42804	refused
+1084	TIME	TEXT	0			42804	refused
+1085	TIME	TEXT	1			42804	refused
+1086	TIME	TEXT	2			42804	refused
+1087	TIME	TEXT	3			42804	refused
+1088	TIME	VARCHAR(8)	0			42804	refused
+1089	TIME	VARCHAR(8)	1			42804	refused
+1090	TIME	VARCHAR(8)	2			42804	refused
+1091	TIME	VARCHAR(8)	3			42804	refused
+1092	TIME	CHAR(4)	0			42804	refused
+1093	TIME	CHAR(4)	1			42804	refused
+1094	TIME	CHAR(4)	2			42804	refused
+1095	TIME	CHAR(4)	3			42804	refused
+1096	TIME	BOOLEAN	0			42804	refused
+1097	TIME	BOOLEAN	1			42804	refused
+1098	TIME	BOOLEAN	2			42804	refused
+1099	TIME	BOOLEAN	3			42804	refused
+1100	TIME	DATE	0			42846	refused
+1101	TIME	DATE	1			42846	refused
+1102	TIME	DATE	2			42846	refused
+1103	TIME	DATE	3			42846	refused
+1104	TIME	TIME	0	time without time zone	03:04:05		success
+1105	TIME	TIME	1	time without time zone	03:04:05		success
+1106	TIME	TIME	2	time without time zone	03:04:05		success
+1107	TIME	TIME	3	time without time zone	03:04:05		success
+1108	TIME	TIMESTAMP	0			42846	refused
+1109	TIME	TIMESTAMP	1			42846	refused
+1110	TIME	TIMESTAMP	2			42846	refused
+1111	TIME	TIMESTAMP	3			42846	refused
+1112	TIME	TIMESTAMPTZ	0			42846	refused
+1113	TIME	TIMESTAMPTZ	1			42846	refused
+1114	TIME	TIMESTAMPTZ	2			42846	refused
+1115	TIME	TIMESTAMPTZ	3			42846	refused
+1116	TIME	BINARY	0			42804	refused
+1117	TIME	BINARY	1			42804	refused
+1118	TIME	BINARY	2			42804	refused
+1119	TIME	BINARY	3			42804	refused
+1120	TIME	JSON	0			42804	refused
+1121	TIME	JSON	1			42804	refused
+1122	TIME	JSON	2			42804	refused
+1123	TIME	JSON	3			42804	refused
+1124	TIME	JSONB	0			42804	refused
+1125	TIME	JSONB	1			42804	refused
+1126	TIME	JSONB	2			42804	refused
+1127	TIME	JSONB	3			42804	refused
+1128	TIME	UUID	0			42804	refused
+1129	TIME	UUID	1			42804	refused
+1130	TIME	UUID	2			42804	refused
+1131	TIME	UUID	3			42804	refused
+1132	TIME	INTERVAL	0			42804	refused
+1133	TIME	INTERVAL	1			42804	refused
+1134	TIME	INTERVAL	2			42804	refused
+1135	TIME	INTERVAL	3			42804	refused
+1136	TIME	unknown	0			22007	refused
+1137	TIME	unknown	1			22007	refused
+1138	TIME	unknown	2			22007	refused
+1139	TIME	unknown	3			22007	refused
+1140	TIME	null	0	time without time zone	03:04:05		success
+1141	TIME	null	1	time without time zone	<NULL>		success
+1142	TIME	null	2	time without time zone	03:04:05		success
+1143	TIME	null	3	time without time zone	<NULL>		success
+1144	TIMESTAMP	SMALLINT	0			42804	refused
+1145	TIMESTAMP	SMALLINT	1			42804	refused
+1146	TIMESTAMP	SMALLINT	2			42804	refused
+1147	TIMESTAMP	SMALLINT	3			42804	refused
+1148	TIMESTAMP	INT	0			42804	refused
+1149	TIMESTAMP	INT	1			42804	refused
+1150	TIMESTAMP	INT	2			42804	refused
+1151	TIMESTAMP	INT	3			42804	refused
+1152	TIMESTAMP	BIGINT	0			42804	refused
+1153	TIMESTAMP	BIGINT	1			42804	refused
+1154	TIMESTAMP	BIGINT	2			42804	refused
+1155	TIMESTAMP	BIGINT	3			42804	refused
+1156	TIMESTAMP	NUMERIC(6,2)	0			42804	refused
+1157	TIMESTAMP	NUMERIC(6,2)	1			42804	refused
+1158	TIMESTAMP	NUMERIC(6,2)	2			42804	refused
+1159	TIMESTAMP	NUMERIC(6,2)	3			42804	refused
+1160	TIMESTAMP	NUMERIC(8,3)	0			42804	refused
+1161	TIMESTAMP	NUMERIC(8,3)	1			42804	refused
+1162	TIMESTAMP	NUMERIC(8,3)	2			42804	refused
+1163	TIMESTAMP	NUMERIC(8,3)	3			42804	refused
+1164	TIMESTAMP	REAL	0			42804	refused
+1165	TIMESTAMP	REAL	1			42804	refused
+1166	TIMESTAMP	REAL	2			42804	refused
+1167	TIMESTAMP	REAL	3			42804	refused
+1168	TIMESTAMP	DOUBLE PRECISION	0			42804	refused
+1169	TIMESTAMP	DOUBLE PRECISION	1			42804	refused
+1170	TIMESTAMP	DOUBLE PRECISION	2			42804	refused
+1171	TIMESTAMP	DOUBLE PRECISION	3			42804	refused
+1172	TIMESTAMP	TEXT	0			42804	refused
+1173	TIMESTAMP	TEXT	1			42804	refused
+1174	TIMESTAMP	TEXT	2			42804	refused
+1175	TIMESTAMP	TEXT	3			42804	refused
+1176	TIMESTAMP	VARCHAR(8)	0			42804	refused
+1177	TIMESTAMP	VARCHAR(8)	1			42804	refused
+1178	TIMESTAMP	VARCHAR(8)	2			42804	refused
+1179	TIMESTAMP	VARCHAR(8)	3			42804	refused
+1180	TIMESTAMP	CHAR(4)	0			42804	refused
+1181	TIMESTAMP	CHAR(4)	1			42804	refused
+1182	TIMESTAMP	CHAR(4)	2			42804	refused
+1183	TIMESTAMP	CHAR(4)	3			42804	refused
+1184	TIMESTAMP	BOOLEAN	0			42804	refused
+1185	TIMESTAMP	BOOLEAN	1			42804	refused
+1186	TIMESTAMP	BOOLEAN	2			42804	refused
+1187	TIMESTAMP	BOOLEAN	3			42804	refused
+1188	TIMESTAMP	DATE	0	timestamp without time zone	2001-01-02 03:04:05		success
+1189	TIMESTAMP	DATE	1	timestamp without time zone	2001-01-02 00:00:00		success
+1190	TIMESTAMP	DATE	2	timestamp without time zone	2001-01-02 03:04:05		success
+1191	TIMESTAMP	DATE	3	timestamp without time zone	2001-01-02 00:00:00		success
+1192	TIMESTAMP	TIME	0			42846	refused
+1193	TIMESTAMP	TIME	1			42846	refused
+1194	TIMESTAMP	TIME	2			42846	refused
+1195	TIMESTAMP	TIME	3			42846	refused
+1196	TIMESTAMP	TIMESTAMP	0	timestamp without time zone	2001-01-02 03:04:05		success
+1197	TIMESTAMP	TIMESTAMP	1	timestamp without time zone	2001-01-02 03:04:05		success
+1198	TIMESTAMP	TIMESTAMP	2	timestamp without time zone	2001-01-02 03:04:05		success
+1199	TIMESTAMP	TIMESTAMP	3	timestamp without time zone	2001-01-02 03:04:05		success
+1200	TIMESTAMP	TIMESTAMPTZ	0	timestamp with time zone	2001-01-02 03:04:05+00		success
+1201	TIMESTAMP	TIMESTAMPTZ	1	timestamp with time zone	2001-01-02 03:04:05+00		success
+1202	TIMESTAMP	TIMESTAMPTZ	2	timestamp with time zone	2001-01-02 03:04:05+00		success
+1203	TIMESTAMP	TIMESTAMPTZ	3	timestamp with time zone	2001-01-02 03:04:05+00		success
+1204	TIMESTAMP	BINARY	0			42804	refused
+1205	TIMESTAMP	BINARY	1			42804	refused
+1206	TIMESTAMP	BINARY	2			42804	refused
+1207	TIMESTAMP	BINARY	3			42804	refused
+1208	TIMESTAMP	JSON	0			42804	refused
+1209	TIMESTAMP	JSON	1			42804	refused
+1210	TIMESTAMP	JSON	2			42804	refused
+1211	TIMESTAMP	JSON	3			42804	refused
+1212	TIMESTAMP	JSONB	0			42804	refused
+1213	TIMESTAMP	JSONB	1			42804	refused
+1214	TIMESTAMP	JSONB	2			42804	refused
+1215	TIMESTAMP	JSONB	3			42804	refused
+1216	TIMESTAMP	UUID	0			42804	refused
+1217	TIMESTAMP	UUID	1			42804	refused
+1218	TIMESTAMP	UUID	2			42804	refused
+1219	TIMESTAMP	UUID	3			42804	refused
+1220	TIMESTAMP	INTERVAL	0			42804	refused
+1221	TIMESTAMP	INTERVAL	1			42804	refused
+1222	TIMESTAMP	INTERVAL	2			42804	refused
+1223	TIMESTAMP	INTERVAL	3			42804	refused
+1224	TIMESTAMP	unknown	0			22007	refused
+1225	TIMESTAMP	unknown	1			22007	refused
+1226	TIMESTAMP	unknown	2			22007	refused
+1227	TIMESTAMP	unknown	3			22007	refused
+1228	TIMESTAMP	null	0	timestamp without time zone	2001-01-02 03:04:05		success
+1229	TIMESTAMP	null	1	timestamp without time zone	<NULL>		success
+1230	TIMESTAMP	null	2	timestamp without time zone	2001-01-02 03:04:05		success
+1231	TIMESTAMP	null	3	timestamp without time zone	<NULL>		success
+1232	TIMESTAMPTZ	SMALLINT	0			42804	refused
+1233	TIMESTAMPTZ	SMALLINT	1			42804	refused
+1234	TIMESTAMPTZ	SMALLINT	2			42804	refused
+1235	TIMESTAMPTZ	SMALLINT	3			42804	refused
+1236	TIMESTAMPTZ	INT	0			42804	refused
+1237	TIMESTAMPTZ	INT	1			42804	refused
+1238	TIMESTAMPTZ	INT	2			42804	refused
+1239	TIMESTAMPTZ	INT	3			42804	refused
+1240	TIMESTAMPTZ	BIGINT	0			42804	refused
+1241	TIMESTAMPTZ	BIGINT	1			42804	refused
+1242	TIMESTAMPTZ	BIGINT	2			42804	refused
+1243	TIMESTAMPTZ	BIGINT	3			42804	refused
+1244	TIMESTAMPTZ	NUMERIC(6,2)	0			42804	refused
+1245	TIMESTAMPTZ	NUMERIC(6,2)	1			42804	refused
+1246	TIMESTAMPTZ	NUMERIC(6,2)	2			42804	refused
+1247	TIMESTAMPTZ	NUMERIC(6,2)	3			42804	refused
+1248	TIMESTAMPTZ	NUMERIC(8,3)	0			42804	refused
+1249	TIMESTAMPTZ	NUMERIC(8,3)	1			42804	refused
+1250	TIMESTAMPTZ	NUMERIC(8,3)	2			42804	refused
+1251	TIMESTAMPTZ	NUMERIC(8,3)	3			42804	refused
+1252	TIMESTAMPTZ	REAL	0			42804	refused
+1253	TIMESTAMPTZ	REAL	1			42804	refused
+1254	TIMESTAMPTZ	REAL	2			42804	refused
+1255	TIMESTAMPTZ	REAL	3			42804	refused
+1256	TIMESTAMPTZ	DOUBLE PRECISION	0			42804	refused
+1257	TIMESTAMPTZ	DOUBLE PRECISION	1			42804	refused
+1258	TIMESTAMPTZ	DOUBLE PRECISION	2			42804	refused
+1259	TIMESTAMPTZ	DOUBLE PRECISION	3			42804	refused
+1260	TIMESTAMPTZ	TEXT	0			42804	refused
+1261	TIMESTAMPTZ	TEXT	1			42804	refused
+1262	TIMESTAMPTZ	TEXT	2			42804	refused
+1263	TIMESTAMPTZ	TEXT	3			42804	refused
+1264	TIMESTAMPTZ	VARCHAR(8)	0			42804	refused
+1265	TIMESTAMPTZ	VARCHAR(8)	1			42804	refused
+1266	TIMESTAMPTZ	VARCHAR(8)	2			42804	refused
+1267	TIMESTAMPTZ	VARCHAR(8)	3			42804	refused
+1268	TIMESTAMPTZ	CHAR(4)	0			42804	refused
+1269	TIMESTAMPTZ	CHAR(4)	1			42804	refused
+1270	TIMESTAMPTZ	CHAR(4)	2			42804	refused
+1271	TIMESTAMPTZ	CHAR(4)	3			42804	refused
+1272	TIMESTAMPTZ	BOOLEAN	0			42804	refused
+1273	TIMESTAMPTZ	BOOLEAN	1			42804	refused
+1274	TIMESTAMPTZ	BOOLEAN	2			42804	refused
+1275	TIMESTAMPTZ	BOOLEAN	3			42804	refused
+1276	TIMESTAMPTZ	DATE	0	timestamp with time zone	2001-01-02 03:04:05+00		success
+1277	TIMESTAMPTZ	DATE	1	timestamp with time zone	2001-01-02 00:00:00+00		success
+1278	TIMESTAMPTZ	DATE	2	timestamp with time zone	2001-01-02 03:04:05+00		success
+1279	TIMESTAMPTZ	DATE	3	timestamp with time zone	2001-01-02 00:00:00+00		success
+1280	TIMESTAMPTZ	TIME	0			42846	refused
+1281	TIMESTAMPTZ	TIME	1			42846	refused
+1282	TIMESTAMPTZ	TIME	2			42846	refused
+1283	TIMESTAMPTZ	TIME	3			42846	refused
+1284	TIMESTAMPTZ	TIMESTAMP	0	timestamp with time zone	2001-01-02 03:04:05+00		success
+1285	TIMESTAMPTZ	TIMESTAMP	1	timestamp with time zone	2001-01-02 03:04:05+00		success
+1286	TIMESTAMPTZ	TIMESTAMP	2	timestamp with time zone	2001-01-02 03:04:05+00		success
+1287	TIMESTAMPTZ	TIMESTAMP	3	timestamp with time zone	2001-01-02 03:04:05+00		success
+1288	TIMESTAMPTZ	TIMESTAMPTZ	0	timestamp with time zone	2001-01-02 03:04:05+00		success
+1289	TIMESTAMPTZ	TIMESTAMPTZ	1	timestamp with time zone	2001-01-02 03:04:05+00		success
+1290	TIMESTAMPTZ	TIMESTAMPTZ	2	timestamp with time zone	2001-01-02 03:04:05+00		success
+1291	TIMESTAMPTZ	TIMESTAMPTZ	3	timestamp with time zone	2001-01-02 03:04:05+00		success
+1292	TIMESTAMPTZ	BINARY	0			42804	refused
+1293	TIMESTAMPTZ	BINARY	1			42804	refused
+1294	TIMESTAMPTZ	BINARY	2			42804	refused
+1295	TIMESTAMPTZ	BINARY	3			42804	refused
+1296	TIMESTAMPTZ	JSON	0			42804	refused
+1297	TIMESTAMPTZ	JSON	1			42804	refused
+1298	TIMESTAMPTZ	JSON	2			42804	refused
+1299	TIMESTAMPTZ	JSON	3			42804	refused
+1300	TIMESTAMPTZ	JSONB	0			42804	refused
+1301	TIMESTAMPTZ	JSONB	1			42804	refused
+1302	TIMESTAMPTZ	JSONB	2			42804	refused
+1303	TIMESTAMPTZ	JSONB	3			42804	refused
+1304	TIMESTAMPTZ	UUID	0			42804	refused
+1305	TIMESTAMPTZ	UUID	1			42804	refused
+1306	TIMESTAMPTZ	UUID	2			42804	refused
+1307	TIMESTAMPTZ	UUID	3			42804	refused
+1308	TIMESTAMPTZ	INTERVAL	0			42804	refused
+1309	TIMESTAMPTZ	INTERVAL	1			42804	refused
+1310	TIMESTAMPTZ	INTERVAL	2			42804	refused
+1311	TIMESTAMPTZ	INTERVAL	3			42804	refused
+1312	TIMESTAMPTZ	unknown	0			22007	refused
+1313	TIMESTAMPTZ	unknown	1			22007	refused
+1314	TIMESTAMPTZ	unknown	2			22007	refused
+1315	TIMESTAMPTZ	unknown	3			22007	refused
+1316	TIMESTAMPTZ	null	0	timestamp with time zone	2001-01-02 03:04:05+00		success
+1317	TIMESTAMPTZ	null	1	timestamp with time zone	<NULL>		success
+1318	TIMESTAMPTZ	null	2	timestamp with time zone	2001-01-02 03:04:05+00		success
+1319	TIMESTAMPTZ	null	3	timestamp with time zone	<NULL>		success
+1320	BINARY	SMALLINT	0			42804	refused
+1321	BINARY	SMALLINT	1			42804	refused
+1322	BINARY	SMALLINT	2			42804	refused
+1323	BINARY	SMALLINT	3			42804	refused
+1324	BINARY	INT	0			42804	refused
+1325	BINARY	INT	1			42804	refused
+1326	BINARY	INT	2			42804	refused
+1327	BINARY	INT	3			42804	refused
+1328	BINARY	BIGINT	0			42804	refused
+1329	BINARY	BIGINT	1			42804	refused
+1330	BINARY	BIGINT	2			42804	refused
+1331	BINARY	BIGINT	3			42804	refused
+1332	BINARY	NUMERIC(6,2)	0			42804	refused
+1333	BINARY	NUMERIC(6,2)	1			42804	refused
+1334	BINARY	NUMERIC(6,2)	2			42804	refused
+1335	BINARY	NUMERIC(6,2)	3			42804	refused
+1336	BINARY	NUMERIC(8,3)	0			42804	refused
+1337	BINARY	NUMERIC(8,3)	1			42804	refused
+1338	BINARY	NUMERIC(8,3)	2			42804	refused
+1339	BINARY	NUMERIC(8,3)	3			42804	refused
+1340	BINARY	REAL	0			42804	refused
+1341	BINARY	REAL	1			42804	refused
+1342	BINARY	REAL	2			42804	refused
+1343	BINARY	REAL	3			42804	refused
+1344	BINARY	DOUBLE PRECISION	0			42804	refused
+1345	BINARY	DOUBLE PRECISION	1			42804	refused
+1346	BINARY	DOUBLE PRECISION	2			42804	refused
+1347	BINARY	DOUBLE PRECISION	3			42804	refused
+1348	BINARY	TEXT	0			42804	refused
+1349	BINARY	TEXT	1			42804	refused
+1350	BINARY	TEXT	2			42804	refused
+1351	BINARY	TEXT	3			42804	refused
+1352	BINARY	VARCHAR(8)	0			42804	refused
+1353	BINARY	VARCHAR(8)	1			42804	refused
+1354	BINARY	VARCHAR(8)	2			42804	refused
+1355	BINARY	VARCHAR(8)	3			42804	refused
+1356	BINARY	CHAR(4)	0			42804	refused
+1357	BINARY	CHAR(4)	1			42804	refused
+1358	BINARY	CHAR(4)	2			42804	refused
+1359	BINARY	CHAR(4)	3			42804	refused
+1360	BINARY	BOOLEAN	0			42804	refused
+1361	BINARY	BOOLEAN	1			42804	refused
+1362	BINARY	BOOLEAN	2			42804	refused
+1363	BINARY	BOOLEAN	3			42804	refused
+1364	BINARY	DATE	0			42804	refused
+1365	BINARY	DATE	1			42804	refused
+1366	BINARY	DATE	2			42804	refused
+1367	BINARY	DATE	3			42804	refused
+1368	BINARY	TIME	0			42804	refused
+1369	BINARY	TIME	1			42804	refused
+1370	BINARY	TIME	2			42804	refused
+1371	BINARY	TIME	3			42804	refused
+1372	BINARY	TIMESTAMP	0			42804	refused
+1373	BINARY	TIMESTAMP	1			42804	refused
+1374	BINARY	TIMESTAMP	2			42804	refused
+1375	BINARY	TIMESTAMP	3			42804	refused
+1376	BINARY	TIMESTAMPTZ	0			42804	refused
+1377	BINARY	TIMESTAMPTZ	1			42804	refused
+1378	BINARY	TIMESTAMPTZ	2			42804	refused
+1379	BINARY	TIMESTAMPTZ	3			42804	refused
+1380	BINARY	BINARY	0	bytea	\x0102		success
+1381	BINARY	BINARY	1	bytea	\x0102		success
+1382	BINARY	BINARY	2	bytea	\x0102		success
+1383	BINARY	BINARY	3	bytea	\x0102		success
+1384	BINARY	JSON	0			42846	refused
+1385	BINARY	JSON	1			42846	refused
+1386	BINARY	JSON	2			42846	refused
+1387	BINARY	JSON	3			42846	refused
+1388	BINARY	JSONB	0			42846	refused
+1389	BINARY	JSONB	1			42846	refused
+1390	BINARY	JSONB	2			42846	refused
+1391	BINARY	JSONB	3			42846	refused
+1392	BINARY	UUID	0			42846	refused
+1393	BINARY	UUID	1			42846	refused
+1394	BINARY	UUID	2			42846	refused
+1395	BINARY	UUID	3			42846	refused
+1396	BINARY	INTERVAL	0			42804	refused
+1397	BINARY	INTERVAL	1			42804	refused
+1398	BINARY	INTERVAL	2			42804	refused
+1399	BINARY	INTERVAL	3			42804	refused
+1400	BINARY	unknown	0	bytea	\x0102		success
+1401	BINARY	unknown	1	bytea	\x3131		success
+1402	BINARY	unknown	2	bytea	\x0102		success
+1403	BINARY	unknown	3	bytea	\x3131		success
+1404	BINARY	null	0	bytea	\x0102		success
+1405	BINARY	null	1	bytea	<NULL>		success
+1406	BINARY	null	2	bytea	\x0102		success
+1407	BINARY	null	3	bytea	<NULL>		success
+1408	JSON	SMALLINT	0			42804	refused
+1409	JSON	SMALLINT	1			42804	refused
+1410	JSON	SMALLINT	2			42804	refused
+1411	JSON	SMALLINT	3			42804	refused
+1412	JSON	INT	0			42804	refused
+1413	JSON	INT	1			42804	refused
+1414	JSON	INT	2			42804	refused
+1415	JSON	INT	3			42804	refused
+1416	JSON	BIGINT	0			42804	refused
+1417	JSON	BIGINT	1			42804	refused
+1418	JSON	BIGINT	2			42804	refused
+1419	JSON	BIGINT	3			42804	refused
+1420	JSON	NUMERIC(6,2)	0			42804	refused
+1421	JSON	NUMERIC(6,2)	1			42804	refused
+1422	JSON	NUMERIC(6,2)	2			42804	refused
+1423	JSON	NUMERIC(6,2)	3			42804	refused
+1424	JSON	NUMERIC(8,3)	0			42804	refused
+1425	JSON	NUMERIC(8,3)	1			42804	refused
+1426	JSON	NUMERIC(8,3)	2			42804	refused
+1427	JSON	NUMERIC(8,3)	3			42804	refused
+1428	JSON	REAL	0			42804	refused
+1429	JSON	REAL	1			42804	refused
+1430	JSON	REAL	2			42804	refused
+1431	JSON	REAL	3			42804	refused
+1432	JSON	DOUBLE PRECISION	0			42804	refused
+1433	JSON	DOUBLE PRECISION	1			42804	refused
+1434	JSON	DOUBLE PRECISION	2			42804	refused
+1435	JSON	DOUBLE PRECISION	3			42804	refused
+1436	JSON	TEXT	0			42804	refused
+1437	JSON	TEXT	1			42804	refused
+1438	JSON	TEXT	2			42804	refused
+1439	JSON	TEXT	3			42804	refused
+1440	JSON	VARCHAR(8)	0			42804	refused
+1441	JSON	VARCHAR(8)	1			42804	refused
+1442	JSON	VARCHAR(8)	2			42804	refused
+1443	JSON	VARCHAR(8)	3			42804	refused
+1444	JSON	CHAR(4)	0			42804	refused
+1445	JSON	CHAR(4)	1			42804	refused
+1446	JSON	CHAR(4)	2			42804	refused
+1447	JSON	CHAR(4)	3			42804	refused
+1448	JSON	BOOLEAN	0			42804	refused
+1449	JSON	BOOLEAN	1			42804	refused
+1450	JSON	BOOLEAN	2			42804	refused
+1451	JSON	BOOLEAN	3			42804	refused
+1452	JSON	DATE	0			42804	refused
+1453	JSON	DATE	1			42804	refused
+1454	JSON	DATE	2			42804	refused
+1455	JSON	DATE	3			42804	refused
+1456	JSON	TIME	0			42804	refused
+1457	JSON	TIME	1			42804	refused
+1458	JSON	TIME	2			42804	refused
+1459	JSON	TIME	3			42804	refused
+1460	JSON	TIMESTAMP	0			42804	refused
+1461	JSON	TIMESTAMP	1			42804	refused
+1462	JSON	TIMESTAMP	2			42804	refused
+1463	JSON	TIMESTAMP	3			42804	refused
+1464	JSON	TIMESTAMPTZ	0			42804	refused
+1465	JSON	TIMESTAMPTZ	1			42804	refused
+1466	JSON	TIMESTAMPTZ	2			42804	refused
+1467	JSON	TIMESTAMPTZ	3			42804	refused
+1468	JSON	BINARY	0			42846	refused
+1469	JSON	BINARY	1			42846	refused
+1470	JSON	BINARY	2			42846	refused
+1471	JSON	BINARY	3			42846	refused
+1472	JSON	JSON	0	json	{}		success
+1473	JSON	JSON	1	json	{}		success
+1474	JSON	JSON	2	json	{}		success
+1475	JSON	JSON	3	json	{}		success
+1476	JSON	JSONB	0			42846	refused
+1477	JSON	JSONB	1			42846	refused
+1478	JSON	JSONB	2			42846	refused
+1479	JSON	JSONB	3			42846	refused
+1480	JSON	UUID	0			42846	refused
+1481	JSON	UUID	1			42846	refused
+1482	JSON	UUID	2			42846	refused
+1483	JSON	UUID	3			42846	refused
+1484	JSON	INTERVAL	0			42804	refused
+1485	JSON	INTERVAL	1			42804	refused
+1486	JSON	INTERVAL	2			42804	refused
+1487	JSON	INTERVAL	3			42804	refused
+1488	JSON	unknown	0	json	{}		success
+1489	JSON	unknown	1	json	11		success
+1490	JSON	unknown	2	json	{}		success
+1491	JSON	unknown	3	json	11		success
+1492	JSON	null	0	json	{}		success
+1493	JSON	null	1	json	<NULL>		success
+1494	JSON	null	2	json	{}		success
+1495	JSON	null	3	json	<NULL>		success
+1496	JSONB	SMALLINT	0			42804	refused
+1497	JSONB	SMALLINT	1			42804	refused
+1498	JSONB	SMALLINT	2			42804	refused
+1499	JSONB	SMALLINT	3			42804	refused
+1500	JSONB	INT	0			42804	refused
+1501	JSONB	INT	1			42804	refused
+1502	JSONB	INT	2			42804	refused
+1503	JSONB	INT	3			42804	refused
+1504	JSONB	BIGINT	0			42804	refused
+1505	JSONB	BIGINT	1			42804	refused
+1506	JSONB	BIGINT	2			42804	refused
+1507	JSONB	BIGINT	3			42804	refused
+1508	JSONB	NUMERIC(6,2)	0			42804	refused
+1509	JSONB	NUMERIC(6,2)	1			42804	refused
+1510	JSONB	NUMERIC(6,2)	2			42804	refused
+1511	JSONB	NUMERIC(6,2)	3			42804	refused
+1512	JSONB	NUMERIC(8,3)	0			42804	refused
+1513	JSONB	NUMERIC(8,3)	1			42804	refused
+1514	JSONB	NUMERIC(8,3)	2			42804	refused
+1515	JSONB	NUMERIC(8,3)	3			42804	refused
+1516	JSONB	REAL	0			42804	refused
+1517	JSONB	REAL	1			42804	refused
+1518	JSONB	REAL	2			42804	refused
+1519	JSONB	REAL	3			42804	refused
+1520	JSONB	DOUBLE PRECISION	0			42804	refused
+1521	JSONB	DOUBLE PRECISION	1			42804	refused
+1522	JSONB	DOUBLE PRECISION	2			42804	refused
+1523	JSONB	DOUBLE PRECISION	3			42804	refused
+1524	JSONB	TEXT	0			42804	refused
+1525	JSONB	TEXT	1			42804	refused
+1526	JSONB	TEXT	2			42804	refused
+1527	JSONB	TEXT	3			42804	refused
+1528	JSONB	VARCHAR(8)	0			42804	refused
+1529	JSONB	VARCHAR(8)	1			42804	refused
+1530	JSONB	VARCHAR(8)	2			42804	refused
+1531	JSONB	VARCHAR(8)	3			42804	refused
+1532	JSONB	CHAR(4)	0			42804	refused
+1533	JSONB	CHAR(4)	1			42804	refused
+1534	JSONB	CHAR(4)	2			42804	refused
+1535	JSONB	CHAR(4)	3			42804	refused
+1536	JSONB	BOOLEAN	0			42804	refused
+1537	JSONB	BOOLEAN	1			42804	refused
+1538	JSONB	BOOLEAN	2			42804	refused
+1539	JSONB	BOOLEAN	3			42804	refused
+1540	JSONB	DATE	0			42804	refused
+1541	JSONB	DATE	1			42804	refused
+1542	JSONB	DATE	2			42804	refused
+1543	JSONB	DATE	3			42804	refused
+1544	JSONB	TIME	0			42804	refused
+1545	JSONB	TIME	1			42804	refused
+1546	JSONB	TIME	2			42804	refused
+1547	JSONB	TIME	3			42804	refused
+1548	JSONB	TIMESTAMP	0			42804	refused
+1549	JSONB	TIMESTAMP	1			42804	refused
+1550	JSONB	TIMESTAMP	2			42804	refused
+1551	JSONB	TIMESTAMP	3			42804	refused
+1552	JSONB	TIMESTAMPTZ	0			42804	refused
+1553	JSONB	TIMESTAMPTZ	1			42804	refused
+1554	JSONB	TIMESTAMPTZ	2			42804	refused
+1555	JSONB	TIMESTAMPTZ	3			42804	refused
+1556	JSONB	BINARY	0			42846	refused
+1557	JSONB	BINARY	1			42846	refused
+1558	JSONB	BINARY	2			42846	refused
+1559	JSONB	BINARY	3			42846	refused
+1560	JSONB	JSON	0			42846	refused
+1561	JSONB	JSON	1			42846	refused
+1562	JSONB	JSON	2			42846	refused
+1563	JSONB	JSON	3			42846	refused
+1564	JSONB	JSONB	0	jsonb	{}		success
+1565	JSONB	JSONB	1	jsonb	{}		success
+1566	JSONB	JSONB	2	jsonb	{}		success
+1567	JSONB	JSONB	3	jsonb	{}		success
+1568	JSONB	UUID	0			42846	refused
+1569	JSONB	UUID	1			42846	refused
+1570	JSONB	UUID	2			42846	refused
+1571	JSONB	UUID	3			42846	refused
+1572	JSONB	INTERVAL	0			42804	refused
+1573	JSONB	INTERVAL	1			42804	refused
+1574	JSONB	INTERVAL	2			42804	refused
+1575	JSONB	INTERVAL	3			42804	refused
+1576	JSONB	unknown	0	jsonb	{}		success
+1577	JSONB	unknown	1	jsonb	11		success
+1578	JSONB	unknown	2	jsonb	{}		success
+1579	JSONB	unknown	3	jsonb	11		success
+1580	JSONB	null	0	jsonb	{}		success
+1581	JSONB	null	1	jsonb	<NULL>		success
+1582	JSONB	null	2	jsonb	{}		success
+1583	JSONB	null	3	jsonb	<NULL>		success
+1584	UUID	SMALLINT	0			42804	refused
+1585	UUID	SMALLINT	1			42804	refused
+1586	UUID	SMALLINT	2			42804	refused
+1587	UUID	SMALLINT	3			42804	refused
+1588	UUID	INT	0			42804	refused
+1589	UUID	INT	1			42804	refused
+1590	UUID	INT	2			42804	refused
+1591	UUID	INT	3			42804	refused
+1592	UUID	BIGINT	0			42804	refused
+1593	UUID	BIGINT	1			42804	refused
+1594	UUID	BIGINT	2			42804	refused
+1595	UUID	BIGINT	3			42804	refused
+1596	UUID	NUMERIC(6,2)	0			42804	refused
+1597	UUID	NUMERIC(6,2)	1			42804	refused
+1598	UUID	NUMERIC(6,2)	2			42804	refused
+1599	UUID	NUMERIC(6,2)	3			42804	refused
+1600	UUID	NUMERIC(8,3)	0			42804	refused
+1601	UUID	NUMERIC(8,3)	1			42804	refused
+1602	UUID	NUMERIC(8,3)	2			42804	refused
+1603	UUID	NUMERIC(8,3)	3			42804	refused
+1604	UUID	REAL	0			42804	refused
+1605	UUID	REAL	1			42804	refused
+1606	UUID	REAL	2			42804	refused
+1607	UUID	REAL	3			42804	refused
+1608	UUID	DOUBLE PRECISION	0			42804	refused
+1609	UUID	DOUBLE PRECISION	1			42804	refused
+1610	UUID	DOUBLE PRECISION	2			42804	refused
+1611	UUID	DOUBLE PRECISION	3			42804	refused
+1612	UUID	TEXT	0			42804	refused
+1613	UUID	TEXT	1			42804	refused
+1614	UUID	TEXT	2			42804	refused
+1615	UUID	TEXT	3			42804	refused
+1616	UUID	VARCHAR(8)	0			42804	refused
+1617	UUID	VARCHAR(8)	1			42804	refused
+1618	UUID	VARCHAR(8)	2			42804	refused
+1619	UUID	VARCHAR(8)	3			42804	refused
+1620	UUID	CHAR(4)	0			42804	refused
+1621	UUID	CHAR(4)	1			42804	refused
+1622	UUID	CHAR(4)	2			42804	refused
+1623	UUID	CHAR(4)	3			42804	refused
+1624	UUID	BOOLEAN	0			42804	refused
+1625	UUID	BOOLEAN	1			42804	refused
+1626	UUID	BOOLEAN	2			42804	refused
+1627	UUID	BOOLEAN	3			42804	refused
+1628	UUID	DATE	0			42804	refused
+1629	UUID	DATE	1			42804	refused
+1630	UUID	DATE	2			42804	refused
+1631	UUID	DATE	3			42804	refused
+1632	UUID	TIME	0			42804	refused
+1633	UUID	TIME	1			42804	refused
+1634	UUID	TIME	2			42804	refused
+1635	UUID	TIME	3			42804	refused
+1636	UUID	TIMESTAMP	0			42804	refused
+1637	UUID	TIMESTAMP	1			42804	refused
+1638	UUID	TIMESTAMP	2			42804	refused
+1639	UUID	TIMESTAMP	3			42804	refused
+1640	UUID	TIMESTAMPTZ	0			42804	refused
+1641	UUID	TIMESTAMPTZ	1			42804	refused
+1642	UUID	TIMESTAMPTZ	2			42804	refused
+1643	UUID	TIMESTAMPTZ	3			42804	refused
+1644	UUID	BINARY	0			42846	refused
+1645	UUID	BINARY	1			42846	refused
+1646	UUID	BINARY	2			42846	refused
+1647	UUID	BINARY	3			42846	refused
+1648	UUID	JSON	0			42846	refused
+1649	UUID	JSON	1			42846	refused
+1650	UUID	JSON	2			42846	refused
+1651	UUID	JSON	3			42846	refused
+1652	UUID	JSONB	0			42846	refused
+1653	UUID	JSONB	1			42846	refused
+1654	UUID	JSONB	2			42846	refused
+1655	UUID	JSONB	3			42846	refused
+1656	UUID	UUID	0	uuid	00000000-0000-0000-0000-000000000001		success
+1657	UUID	UUID	1	uuid	00000000-0000-0000-0000-000000000001		success
+1658	UUID	UUID	2	uuid	00000000-0000-0000-0000-000000000001		success
+1659	UUID	UUID	3	uuid	00000000-0000-0000-0000-000000000001		success
+1660	UUID	INTERVAL	0			42804	refused
+1661	UUID	INTERVAL	1			42804	refused
+1662	UUID	INTERVAL	2			42804	refused
+1663	UUID	INTERVAL	3			42804	refused
+1664	UUID	unknown	0			22P02	refused
+1665	UUID	unknown	1			22P02	refused
+1666	UUID	unknown	2			22P02	refused
+1667	UUID	unknown	3			22P02	refused
+1668	UUID	null	0	uuid	00000000-0000-0000-0000-000000000001		success
+1669	UUID	null	1	uuid	<NULL>		success
+1670	UUID	null	2	uuid	00000000-0000-0000-0000-000000000001		success
+1671	UUID	null	3	uuid	<NULL>		success
+1672	INTERVAL	SMALLINT	0			42804	refused
+1673	INTERVAL	SMALLINT	1			42804	refused
+1674	INTERVAL	SMALLINT	2			42804	refused
+1675	INTERVAL	SMALLINT	3			42804	refused
+1676	INTERVAL	INT	0			42804	refused
+1677	INTERVAL	INT	1			42804	refused
+1678	INTERVAL	INT	2			42804	refused
+1679	INTERVAL	INT	3			42804	refused
+1680	INTERVAL	BIGINT	0			42804	refused
+1681	INTERVAL	BIGINT	1			42804	refused
+1682	INTERVAL	BIGINT	2			42804	refused
+1683	INTERVAL	BIGINT	3			42804	refused
+1684	INTERVAL	NUMERIC(6,2)	0			42804	refused
+1685	INTERVAL	NUMERIC(6,2)	1			42804	refused
+1686	INTERVAL	NUMERIC(6,2)	2			42804	refused
+1687	INTERVAL	NUMERIC(6,2)	3			42804	refused
+1688	INTERVAL	NUMERIC(8,3)	0			42804	refused
+1689	INTERVAL	NUMERIC(8,3)	1			42804	refused
+1690	INTERVAL	NUMERIC(8,3)	2			42804	refused
+1691	INTERVAL	NUMERIC(8,3)	3			42804	refused
+1692	INTERVAL	REAL	0			42804	refused
+1693	INTERVAL	REAL	1			42804	refused
+1694	INTERVAL	REAL	2			42804	refused
+1695	INTERVAL	REAL	3			42804	refused
+1696	INTERVAL	DOUBLE PRECISION	0			42804	refused
+1697	INTERVAL	DOUBLE PRECISION	1			42804	refused
+1698	INTERVAL	DOUBLE PRECISION	2			42804	refused
+1699	INTERVAL	DOUBLE PRECISION	3			42804	refused
+1700	INTERVAL	TEXT	0			42804	refused
+1701	INTERVAL	TEXT	1			42804	refused
+1702	INTERVAL	TEXT	2			42804	refused
+1703	INTERVAL	TEXT	3			42804	refused
+1704	INTERVAL	VARCHAR(8)	0			42804	refused
+1705	INTERVAL	VARCHAR(8)	1			42804	refused
+1706	INTERVAL	VARCHAR(8)	2			42804	refused
+1707	INTERVAL	VARCHAR(8)	3			42804	refused
+1708	INTERVAL	CHAR(4)	0			42804	refused
+1709	INTERVAL	CHAR(4)	1			42804	refused
+1710	INTERVAL	CHAR(4)	2			42804	refused
+1711	INTERVAL	CHAR(4)	3			42804	refused
+1712	INTERVAL	BOOLEAN	0			42804	refused
+1713	INTERVAL	BOOLEAN	1			42804	refused
+1714	INTERVAL	BOOLEAN	2			42804	refused
+1715	INTERVAL	BOOLEAN	3			42804	refused
+1716	INTERVAL	DATE	0			42804	refused
+1717	INTERVAL	DATE	1			42804	refused
+1718	INTERVAL	DATE	2			42804	refused
+1719	INTERVAL	DATE	3			42804	refused
+1720	INTERVAL	TIME	0			42804	refused
+1721	INTERVAL	TIME	1			42804	refused
+1722	INTERVAL	TIME	2			42804	refused
+1723	INTERVAL	TIME	3			42804	refused
+1724	INTERVAL	TIMESTAMP	0			42804	refused
+1725	INTERVAL	TIMESTAMP	1			42804	refused
+1726	INTERVAL	TIMESTAMP	2			42804	refused
+1727	INTERVAL	TIMESTAMP	3			42804	refused
+1728	INTERVAL	TIMESTAMPTZ	0			42804	refused
+1729	INTERVAL	TIMESTAMPTZ	1			42804	refused
+1730	INTERVAL	TIMESTAMPTZ	2			42804	refused
+1731	INTERVAL	TIMESTAMPTZ	3			42804	refused
+1732	INTERVAL	BINARY	0			42804	refused
+1733	INTERVAL	BINARY	1			42804	refused
+1734	INTERVAL	BINARY	2			42804	refused
+1735	INTERVAL	BINARY	3			42804	refused
+1736	INTERVAL	JSON	0			42804	refused
+1737	INTERVAL	JSON	1			42804	refused
+1738	INTERVAL	JSON	2			42804	refused
+1739	INTERVAL	JSON	3			42804	refused
+1740	INTERVAL	JSONB	0			42804	refused
+1741	INTERVAL	JSONB	1			42804	refused
+1742	INTERVAL	JSONB	2			42804	refused
+1743	INTERVAL	JSONB	3			42804	refused
+1744	INTERVAL	UUID	0			42804	refused
+1745	INTERVAL	UUID	1			42804	refused
+1746	INTERVAL	UUID	2			42804	refused
+1747	INTERVAL	UUID	3			42804	refused
+1748	INTERVAL	INTERVAL	0	interval	01:02:03		success
+1749	INTERVAL	INTERVAL	1	interval	01:02:03		success
+1750	INTERVAL	INTERVAL	2	interval	01:02:03		success
+1751	INTERVAL	INTERVAL	3	interval	01:02:03		success
+1752	INTERVAL	unknown	0	interval	01:02:03		success
+1753	INTERVAL	unknown	1	interval	00:00:11		success
+1754	INTERVAL	unknown	2	interval	01:02:03		success
+1755	INTERVAL	unknown	3	interval	00:00:11		success
+1756	INTERVAL	null	0	interval	01:02:03		success
+1757	INTERVAL	null	1	interval	<NULL>		success
+1758	INTERVAL	null	2	interval	01:02:03		success
+1759	INTERVAL	null	3	interval	<NULL>		success
+1760	unknown	SMALLINT	0	smallint	11		success
+1761	unknown	SMALLINT	1	smallint	7		success
+1762	unknown	SMALLINT	2	smallint	11		success
+1763	unknown	SMALLINT	3	smallint	11		success
+1764	unknown	INT	0	integer	11		success
+1765	unknown	INT	1	integer	8		success
+1766	unknown	INT	2	integer	11		success
+1767	unknown	INT	3	integer	11		success
+1768	unknown	BIGINT	0	bigint	11		success
+1769	unknown	BIGINT	1	bigint	9		success
+1770	unknown	BIGINT	2	bigint	11		success
+1771	unknown	BIGINT	3	bigint	11		success
+1772	unknown	NUMERIC(6,2)	0	numeric	11		success
+1773	unknown	NUMERIC(6,2)	1	numeric	1.25		success
+1774	unknown	NUMERIC(6,2)	2	numeric	11		success
+1775	unknown	NUMERIC(6,2)	3	numeric	11		success
+1776	unknown	NUMERIC(8,3)	0	numeric	11		success
+1777	unknown	NUMERIC(8,3)	1	numeric	2.375		success
+1778	unknown	NUMERIC(8,3)	2	numeric	11		success
+1779	unknown	NUMERIC(8,3)	3	numeric	11		success
+1780	unknown	REAL	0	real	11		success
+1781	unknown	REAL	1	real	3.5		success
+1782	unknown	REAL	2	real	11		success
+1783	unknown	REAL	3	real	11		success
+1784	unknown	DOUBLE PRECISION	0	double precision	11		success
+1785	unknown	DOUBLE PRECISION	1	double precision	4.75		success
+1786	unknown	DOUBLE PRECISION	2	double precision	11		success
+1787	unknown	DOUBLE PRECISION	3	double precision	11		success
+1788	unknown	TEXT	0	text	11		success
+1789	unknown	TEXT	1	text	a		success
+1790	unknown	TEXT	2	text	11		success
+1791	unknown	TEXT	3	text	11		success
+1792	unknown	VARCHAR(8)	0	character varying	11		success
+1793	unknown	VARCHAR(8)	1	character varying	b		success
+1794	unknown	VARCHAR(8)	2	character varying	11		success
+1795	unknown	VARCHAR(8)	3	character varying	11		success
+1796	unknown	CHAR(4)	0	character	11		success
+1797	unknown	CHAR(4)	1	character	c		success
+1798	unknown	CHAR(4)	2	character	11		success
+1799	unknown	CHAR(4)	3	character	11		success
+1800	unknown	BOOLEAN	0			22P02	refused
+1801	unknown	BOOLEAN	1			22P02	refused
+1802	unknown	BOOLEAN	2			22P02	refused
+1803	unknown	BOOLEAN	3			22P02	refused
+1804	unknown	DATE	0			22007	refused
+1805	unknown	DATE	1			22007	refused
+1806	unknown	DATE	2			22007	refused
+1807	unknown	DATE	3			22007	refused
+1808	unknown	TIME	0			22007	refused
+1809	unknown	TIME	1			22007	refused
+1810	unknown	TIME	2			22007	refused
+1811	unknown	TIME	3			22007	refused
+1812	unknown	TIMESTAMP	0			22007	refused
+1813	unknown	TIMESTAMP	1			22007	refused
+1814	unknown	TIMESTAMP	2			22007	refused
+1815	unknown	TIMESTAMP	3			22007	refused
+1816	unknown	TIMESTAMPTZ	0			22007	refused
+1817	unknown	TIMESTAMPTZ	1			22007	refused
+1818	unknown	TIMESTAMPTZ	2			22007	refused
+1819	unknown	TIMESTAMPTZ	3			22007	refused
+1820	unknown	BINARY	0	bytea	\x3131		success
+1821	unknown	BINARY	1	bytea	\x0102		success
+1822	unknown	BINARY	2	bytea	\x3131		success
+1823	unknown	BINARY	3	bytea	\x3131		success
+1824	unknown	JSON	0	json	11		success
+1825	unknown	JSON	1	json	{}		success
+1826	unknown	JSON	2	json	11		success
+1827	unknown	JSON	3	json	11		success
+1828	unknown	JSONB	0	jsonb	11		success
+1829	unknown	JSONB	1	jsonb	{}		success
+1830	unknown	JSONB	2	jsonb	11		success
+1831	unknown	JSONB	3	jsonb	11		success
+1832	unknown	UUID	0			22P02	refused
+1833	unknown	UUID	1			22P02	refused
+1834	unknown	UUID	2			22P02	refused
+1835	unknown	UUID	3			22P02	refused
+1836	unknown	INTERVAL	0	interval	00:00:11		success
+1837	unknown	INTERVAL	1	interval	01:02:03		success
+1838	unknown	INTERVAL	2	interval	00:00:11		success
+1839	unknown	INTERVAL	3	interval	00:00:11		success
+1840	unknown	unknown	0	text	11		success
+1841	unknown	unknown	1	text	11		success
+1842	unknown	unknown	2	text	11		success
+1843	unknown	unknown	3	text	11		success
+1844	unknown	null	0	text	11		success
+1845	unknown	null	1	text	<NULL>		success
+1846	unknown	null	2	text	11		success
+1847	unknown	null	3	text	11		success
+1848	null	SMALLINT	0	smallint	<NULL>		success
+1849	null	SMALLINT	1	smallint	7		success
+1850	null	SMALLINT	2	smallint	7		success
+1851	null	SMALLINT	3	smallint	7		success
+1852	null	INT	0	integer	<NULL>		success
+1853	null	INT	1	integer	8		success
+1854	null	INT	2	integer	8		success
+1855	null	INT	3	integer	8		success
+1856	null	BIGINT	0	bigint	<NULL>		success
+1857	null	BIGINT	1	bigint	9		success
+1858	null	BIGINT	2	bigint	9		success
+1859	null	BIGINT	3	bigint	9		success
+1860	null	NUMERIC(6,2)	0	numeric	<NULL>		success
+1861	null	NUMERIC(6,2)	1	numeric	1.25		success
+1862	null	NUMERIC(6,2)	2	numeric	1.25		success
+1863	null	NUMERIC(6,2)	3	numeric	1.25		success
+1864	null	NUMERIC(8,3)	0	numeric	<NULL>		success
+1865	null	NUMERIC(8,3)	1	numeric	2.375		success
+1866	null	NUMERIC(8,3)	2	numeric	2.375		success
+1867	null	NUMERIC(8,3)	3	numeric	2.375		success
+1868	null	REAL	0	real	<NULL>		success
+1869	null	REAL	1	real	3.5		success
+1870	null	REAL	2	real	3.5		success
+1871	null	REAL	3	real	3.5		success
+1872	null	DOUBLE PRECISION	0	double precision	<NULL>		success
+1873	null	DOUBLE PRECISION	1	double precision	4.75		success
+1874	null	DOUBLE PRECISION	2	double precision	4.75		success
+1875	null	DOUBLE PRECISION	3	double precision	4.75		success
+1876	null	TEXT	0	text	<NULL>		success
+1877	null	TEXT	1	text	a		success
+1878	null	TEXT	2	text	a		success
+1879	null	TEXT	3	text	a		success
+1880	null	VARCHAR(8)	0	character varying	<NULL>		success
+1881	null	VARCHAR(8)	1	character varying	b		success
+1882	null	VARCHAR(8)	2	character varying	b		success
+1883	null	VARCHAR(8)	3	character varying	b		success
+1884	null	CHAR(4)	0	character	<NULL>		success
+1885	null	CHAR(4)	1	character	c		success
+1886	null	CHAR(4)	2	character	c		success
+1887	null	CHAR(4)	3	character	c		success
+1888	null	BOOLEAN	0	boolean	<NULL>		success
+1889	null	BOOLEAN	1	boolean	true		success
+1890	null	BOOLEAN	2	boolean	true		success
+1891	null	BOOLEAN	3	boolean	true		success
+1892	null	DATE	0	date	<NULL>		success
+1893	null	DATE	1	date	2001-01-02		success
+1894	null	DATE	2	date	2001-01-02		success
+1895	null	DATE	3	date	2001-01-02		success
+1896	null	TIME	0	time without time zone	<NULL>		success
+1897	null	TIME	1	time without time zone	03:04:05		success
+1898	null	TIME	2	time without time zone	03:04:05		success
+1899	null	TIME	3	time without time zone	03:04:05		success
+1900	null	TIMESTAMP	0	timestamp without time zone	<NULL>		success
+1901	null	TIMESTAMP	1	timestamp without time zone	2001-01-02 03:04:05		success
+1902	null	TIMESTAMP	2	timestamp without time zone	2001-01-02 03:04:05		success
+1903	null	TIMESTAMP	3	timestamp without time zone	2001-01-02 03:04:05		success
+1904	null	TIMESTAMPTZ	0	timestamp with time zone	<NULL>		success
+1905	null	TIMESTAMPTZ	1	timestamp with time zone	2001-01-02 03:04:05+00		success
+1906	null	TIMESTAMPTZ	2	timestamp with time zone	2001-01-02 03:04:05+00		success
+1907	null	TIMESTAMPTZ	3	timestamp with time zone	2001-01-02 03:04:05+00		success
+1908	null	BINARY	0	bytea	<NULL>		success
+1909	null	BINARY	1	bytea	\x0102		success
+1910	null	BINARY	2	bytea	\x0102		success
+1911	null	BINARY	3	bytea	\x0102		success
+1912	null	JSON	0	json	<NULL>		success
+1913	null	JSON	1	json	{}		success
+1914	null	JSON	2	json	{}		success
+1915	null	JSON	3	json	{}		success
+1916	null	JSONB	0	jsonb	<NULL>		success
+1917	null	JSONB	1	jsonb	{}		success
+1918	null	JSONB	2	jsonb	{}		success
+1919	null	JSONB	3	jsonb	{}		success
+1920	null	UUID	0	uuid	<NULL>		success
+1921	null	UUID	1	uuid	00000000-0000-0000-0000-000000000001		success
+1922	null	UUID	2	uuid	00000000-0000-0000-0000-000000000001		success
+1923	null	UUID	3	uuid	00000000-0000-0000-0000-000000000001		success
+1924	null	INTERVAL	0	interval	<NULL>		success
+1925	null	INTERVAL	1	interval	01:02:03		success
+1926	null	INTERVAL	2	interval	01:02:03		success
+1927	null	INTERVAL	3	interval	01:02:03		success
+1928	null	unknown	0	text	<NULL>		success
+1929	null	unknown	1	text	11		success
+1930	null	unknown	2	text	11		success
+1931	null	unknown	3	text	11		success
+1932	null	null	0	text	<NULL>		success
+1933	null	null	1	text	<NULL>		success
+1934	null	null	2	text	<NULL>		success
+1935	null	null	3	text	<NULL>		success

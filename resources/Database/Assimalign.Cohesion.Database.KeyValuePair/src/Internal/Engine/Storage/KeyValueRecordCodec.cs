@@ -29,7 +29,7 @@ internal static class KeyValueRecordCodec
     /// with a primary index on any other version is refused at open. There is no
     /// upgrade path (owner decision of 2026-10-02; upgrades are #1152).
     /// </summary>
-    internal const int EntrySpaceFormatVersion = 2;
+    internal const int EntrySpaceFormatVersion = 3;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

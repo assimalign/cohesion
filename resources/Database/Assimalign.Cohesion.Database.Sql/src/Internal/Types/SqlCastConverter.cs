@@ -170,6 +170,7 @@ internal static class SqlCastConverter
             case byte[] bytes when target.MaxLength is int length && bytes.Length > length:
                 throw new InvalidCastException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConverterApplyModifiersInvalidCast, length));
             case decimal number when target.Type == DatabaseType.Decimal:
+                if (target.Precision is null && target.Scale is null) { return value; }
                 int? scale = NumericScale(target);
                 // PostgreSQL numeric.c:7693-7750 rounds before checking the integer digits;
                 // round_var at numeric.c:11720-11748 rounds midpoint ties away from zero.

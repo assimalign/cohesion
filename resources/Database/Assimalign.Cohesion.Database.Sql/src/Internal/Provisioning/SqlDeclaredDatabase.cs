@@ -23,6 +23,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlDeclaredDatabase
 {
     private SqlSchemaMigrationResult? _result;
+    private DatabaseProvisioningProgress? _heldProgress;
 
     private SqlDeclaredDatabase(DatabaseName name, Collation collation, SqlProvisioningMode mode, SqlCompiledSchema? schema, bool runMigrationsInline)
     {
@@ -46,6 +47,12 @@ internal sealed partial class SqlDeclaredDatabase
     internal SqlCompiledSchema? Schema { get; }
 
     internal bool RunMigrationsInline { get; }
+
+    internal DatabaseProvisioningProgress? HeldProgress => _heldProgress;
+
+    internal DatabaseProvisioningProgress? GetHeldProgress(string? storedHash)
+        => _heldProgress is not null && string.Equals(_result?.FromHash, storedHash, StringComparison.Ordinal)
+            ? _heldProgress : null;
 
     /// <summary>
     /// Gets the outcome of the schema's apply or verification once provisioning ran, or null before
@@ -190,17 +197,23 @@ internal sealed partial class SqlDeclaredDatabase
         await ValidateScriptsAsync(database, cancellationToken).ConfigureAwait(false);
         if (Schema is not null)
         {
-            _result = Mode == SqlProvisioningMode.Verify
-                ? await database.VerifySchemaAsync(Schema, cancellationToken).ConfigureAwait(false)
-                : await database.SchemaProvisioner.ApplyAsync(Schema, cancellationToken, !RunMigrationsInline).ConfigureAwait(false);
+            if (Mode == SqlProvisioningMode.Verify)
+            { _result = await database.VerifySchemaAsync(Schema, cancellationToken).ConfigureAwait(false); }
+            else
+            {
+                var applied = await database.SchemaProvisioner.ApplyAsync(Schema, cancellationToken, !RunMigrationsInline, holdUnsafeChanges: true).ConfigureAwait(false);
+                _result = applied.Migration;
+                _heldProgress = applied.HeldProgress;
+                if (applied.IsHeld) { return; }
+            }
         }
 
         await ApplyScriptsAsync(database, cancellationToken).ConfigureAwait(false);
 
-        // Step 6 (owner decision 65): every persisted definition binds to the engine's catalog. A
-        // CHECK that calls a function this engine does not register opens, and fails each write;
-        // for a database the engine declares, the application that declares it removed the
-        // function, so its build fails before it accepts work.
+        // Step 6 (owner decision 65) validates persisted definitions after an applied or matching
+        // declaration. A held Build suspends this validation to preserve availability: reads
+        // still work, while writes evaluating a missing application function or domain fail
+        // against the stored definition. The hold above also prevents every declared script.
         var preparation = database.SchemaProvisioner.Deferred?.JointPlan;
         var validation = preparation is null
             ? (Definition: database.Definitions.FindUnresolved(cancellationToken), Domain: database.Definitions.FindUnresolvedDomain(cancellationToken))

@@ -244,6 +244,20 @@ Health observes distinct engines, states and workers from the frozen runtime reg
 
 Health also reports offline databases (#1243). A database whose journal or data fsync failed, whose journal's append buffer failed to drain (#1252), whose header slot write failed (#1268), or whose engine gave up on it after a background worker kept failing on it or its journal passed the engine's cap (owner decision 25) refuses every request until it is reopened, while its engine stays `Running`, so the engine state alone left health `Healthy`. The contribution reads each engine's `OfflineDatabases`, adds the databases the reopen service is still reopening (below), records `engine.N.offlineDatabaseCount`, `engine.N.offlineDatabases`, the total `offlineDatabaseCount` and `reopenOfflineDatabases`, and for each offline database `engine.N.offline.M.name`, its `cause` (the `StorageOfflineCause` name, read through `DatabaseEngine.GetOfflineError`) and, once a reopen failed, `reopenAttempts` and `reopenFault` (the exception type). It is `Unhealthy` while any database is offline, naming each as `engine/database (cause; n failed reopen attempt(s), last ExceptionType)`, and turns healthy again once every one is open. Like the worker faults, the output carries exception types only, never messages, because the endpoint is unauthenticated. Without the reopen service it turns healthy once the database is reopened (`OpenDatabaseAsync`, in process) or the process restarts and opens it again; an orchestrator that restarts an unhealthy process recovers it the way PostgreSQL's postmaster does after a `PANIC` (`restart_after_crash`, on by default, `src/backend/postmaster/postmaster.c:248`; the "reinitializing" restart at `3245-3252`). Hosting has no remote reopen command (an open owner decision, recorded with the #1243 review).
 
+Held SQL declarations (#1779) remain online with Degraded health. Provisioning.Detail carries
+both schema hashes and every refused step; health includes it in the description and the
+engine.N.provisioning.M.detail data value beside failureCode. CS03405 identifies an unsafe
+rollback, including re-adding a dropped column; CS03105 identifies a never-seen destructive
+change without opt-in. Build succeeds and runs no migration step or declared script. Verify
+remains the strict pipeline path (CS03103). Redeploying the stored schema clears the hold.
+HealthDegraded and HealthRestored append failureCode and detail to their payloads; detail is
+bounded to 4,096 UTF-16 code units including the ellipsis for both events and health (description
+and detail data), with a surrogate-safe cut. The SQL engine's declaration retains a hold across
+offline/reopen, rewrite and refused explicit apply while the stored hash remains held. A restart
+with the stored or a successfully published newer declaration clears it.
+Restoration on a later observation carries the prior condition's code/detail. A new application's
+observer starts fresh and does not invent a restoration event for an earlier process.
+
 ## Reopening offline databases (owner decision 22 of 2026-10-06)
 
 A running application reopens a database its engine reports offline by itself, with exponential backoff and jitter, until the reopen succeeds or the application stops. It is the module's own lifecycle service, `Internal/DatabaseReopenService`, registered at Build after the other services and before the servers (so it starts before them and stops after they drained), and owned by the application. `DatabaseApplicationOptions` configures it: `ReopenOfflineDatabases` (on by default; off leaves every offline database to the operator and composes no service), `ReopenInitialDelay` (one second, the engines' worker failure backoff) and `ReopenMaximumDelay` (one minute), validated at Build (the initial delay positive, the maximum at least the initial delay and at most `DatabaseApplicationOptions.MaximumReopenDelay`, the longest a timer waits) and copied with the other host settings.
@@ -280,7 +294,7 @@ The module raises its own events through one internal event source, named for th
 | 11 | `ApplicationStopped` | Informational | `hostId`, `durationMilliseconds` |
 | 12 | `ApplicationDisposeFailed` | Error | `hostId`, `failureCount`, `exceptionType`, `exceptionMessage` (first collected failure) |
 | 15 | `AdminEndpointFailed` | Error | `endpoint` (scheme and authority only), `operation` (`Start`, `Stop`, `Dispose`), `exceptionType`, `exceptionMessage` |
-| 16 | `HealthDegraded` | Warning | `hostId`, `engineName`, `database`, `reason` (`Provisioning`/`Offline`), `cause` (offline cause or empty), `operation`, `objectName`, `position`, `stepCount`, `rowsProcessed`, `totalRows` |
+| 16 | `HealthDegraded` | Warning | `hostId`, `engineName`, `database`, `reason` (`Provisioning`/`Offline`), `cause` (offline cause or empty), `operation`, `objectName`, `position`, `stepCount`, `rowsProcessed`, `totalRows`, `failureCode`, `detail` (4,096 characters) |
 | 17 | `HealthRestored` | Informational | same as 16; the condition and last observed progress that cleared |
 | 18 | `HealthEndpointAssignmentSkipped` | Informational | `assignment` (`http`), `endpoint` (scheme and authority only), `scheme` |
 | 19 | `HealthEndpointOverridden` | Informational | `explicitEndpoint`, `platformEndpoint` (scheme and authority only) |

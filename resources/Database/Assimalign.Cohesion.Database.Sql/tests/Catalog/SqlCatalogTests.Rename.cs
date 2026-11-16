@@ -45,7 +45,8 @@ public partial class SqlCatalogTests
             DatabaseObjectOwner.Adhoc, null, CancellationToken.None,
             [new SqlCatalogConstraint("fk", SqlCatalogConstraintKind.Reference, ["pid"], "dbo", "p", ["id"])]);
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_id", ["id"], true),
-            [new BTreeIndexRegistration(table.ObjectId, new IndexDefinition("ix_id", IndexKind.BTree, true), 7)], CancellationToken.None);
+            [await PreparedCatalogIndexes.CreateAsync(catalog, harness.Storage, table.ObjectId,
+                new IndexDefinition("ix_id", IndexKind.BTree, true))], CancellationToken.None);
         ulong generation = catalog.DdlGeneration;
 
         // Act

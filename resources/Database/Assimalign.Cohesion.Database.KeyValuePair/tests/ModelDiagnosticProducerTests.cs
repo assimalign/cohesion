@@ -33,7 +33,7 @@ public sealed class ModelDiagnosticProducerTests
         await database.DisposeAsync();
         var error = await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync("db", CancellationToken.None));
         error.ShouldBeOfType<DatabaseException>();
-        error.Message.ShouldContain("uses entry-space format 99, but this engine supports only format 2", Case.Sensitive);
+        error.Message.ShouldContain("uses entry-space format 99, but this engine supports only format 3", Case.Sensitive);
         Diagnostic(error, "CV06107", error.Message);
     }
 

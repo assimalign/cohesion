@@ -63,7 +63,8 @@ internal sealed partial class SqlPlanner
                 SqlFunctionCallExpression call when IsAggregate(call) => call.FunctionName.ToLowerInvariant(),
                 _ => $"column{projections.Count + 1}",
             });
-            projections.Add(new SqlProjection(name, null, column.Expression, GroupExpressionType(column.Expression, columns, evaluator))
+            projections.Add(new SqlProjection(name, null, column.Expression, HasAlternativeResult(column.Expression)
+                ? DatabaseType.Null : GroupExpressionType(column.Expression, columns, evaluator, grouped: true))
             {
                 HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression ||
                     column.Expression is SqlFunctionCallExpression namedCall && IsAggregate(namedCall),
@@ -115,7 +116,7 @@ internal sealed partial class SqlPlanner
         // as the same call does outside a grouping: describe(COUNT(*)) is describe(BIGINT).
         var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
-            outerScope: OuterScope, outerDependencies: OuterDependencies, slotScope: sourceScope, relation: select.From.Count == 0 ? null : select.From[0].Table);
+            outerScope: OuterScope, outerDependencies: OuterDependencies, slotScope: sourceScope, groupedOutput: true, relation: select.From.Count == 0 ? null : select.From[0].Table);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.BindPredicate(select.Where);
@@ -163,6 +164,8 @@ internal sealed partial class SqlPlanner
         {
             var value = groupScope.Bind(projections[i].Expression!, out SqlBoundCollation collation, out var candidate);
             projections[i] = projections[i] with { Value = value, Collation = collation,
+                Type = HasAlternativeResult(projections[i].Expression!)
+                    ? GroupExpressionType(projections[i].Expression!, columns, groupScope, grouped: true) : projections[i].Type,
                 Metadata = CaptureProjectionMetadata(candidate,
                     UnwrapCollation(projections[i].Expression!) is SqlColumnReferenceExpression column ? evaluator.ColumnMetadata(column) : null,
                     projections[i].Expression, evaluator) };
@@ -491,22 +494,46 @@ internal sealed partial class SqlPlanner
         }
     }
 
-    /// <summary>Declares aggregate result types even when no source rows exist.</summary>
-    private DatabaseType GroupExpressionType(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
-        SqlExpressionEvaluator evaluator)
+    // The compatibility rule changes only nodes that contain alternatives. Avoid
+    // retyping ordinary grouped projections (and allocating aggregate type arrays).
+    private static bool HasAlternativeResult(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        return evaluator.IsBoundValue(expression) ? evaluator.StaticTypeOf(expression) : GroupExpressionTypeCore(expression, columns, evaluator);
+        switch (expression)
+        {
+            case SqlCaseExpression: return true;
+            case SqlFunctionCallExpression call:
+                if (SqlStandardLibrary.IsCoalesce(call.FunctionName)) { return true; }
+                for (int index = 0; index < call.Arguments.Count; index++)
+                { if (HasAlternativeResult(call.Arguments[index])) { return true; } }
+                return false;
+            case SqlCollateExpression collate: return HasAlternativeResult(collate.Operand);
+            case SqlCastExpression cast: return HasAlternativeResult(cast.Operand);
+            case SqlUnaryExpression unary: return HasAlternativeResult(unary.Operand);
+            case SqlBinaryExpression binary: return HasAlternativeResult(binary.Left) || HasAlternativeResult(binary.Right);
+            case SqlWindowExpression window: return HasAlternativeResult(window.Function);
+            default: return false;
+        }
+    }
+
+    /// <summary>Declares aggregate result types even when no source rows exist.</summary>
+    private DatabaseType GroupExpressionType(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
+        SqlExpressionEvaluator evaluator, bool grouped = false)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (evaluator.IsBoundValue(expression) && (expression is not SqlFunctionCallExpression call || !IsAggregate(call)))
+        { return evaluator.StaticTypeOf(expression); }
+        return GroupExpressionTypeCore(expression, columns, evaluator, grouped);
     }
 
     private DatabaseType GroupExpressionTypeCore(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
-        SqlExpressionEvaluator evaluator) => expression switch
+        SqlExpressionEvaluator evaluator, bool grouped) => expression switch
     {
         SqlWindowExpression window => evaluator.WindowType(window),
         SqlColumnReferenceExpression column => evaluator.ColumnMetadata(column).Type.Type,
         SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlInExpression { Subquery: not null }
             when _subqueryTypes.TryGetValue(expression, out var subqueryType) => subqueryType,
-        SqlCollateExpression collate => GroupExpressionType(collate.Operand, columns, evaluator),
+        SqlCollateExpression collate => GroupExpressionType(collate.Operand, columns, evaluator, grouped),
         SqlJsonFunctionExpression json => evaluator.JsonReturning(json).Storage.Type,
         SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? ResolveCastTarget(cast, _functions.Types).Storage.Type,
         SqlParameterExpression parameter => GroupValueType(evaluator.Evaluate(parameter, [])),
@@ -527,17 +554,17 @@ internal sealed partial class SqlPlanner
         SqlNextValueExpression => DatabaseType.Int64,
         SqlFunctionCallExpression call when SqlSequenceExecution.IsFunction(call.FunctionName) => DatabaseType.Int64,
         SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName)
-            => CoalesceGroupType(call.Arguments, columns, evaluator),
+            => grouped ? CoalesceGroupType(call, columns, evaluator) : evaluator.StaticTypeOf(call),
         SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)
-            => GroupExpressionType(call.Arguments[0], columns, evaluator),
+            => GroupExpressionType(call.Arguments[0], columns, evaluator, grouped),
         SqlFunctionCallExpression call when SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) => evaluator.StaticCallType(call),
         SqlFunctionCallExpression call when IsGrouping(call) => DatabaseType.Int32,
-        SqlFunctionCallExpression call => CallResultType(call, columns, evaluator),
+        SqlFunctionCallExpression call => CallResultType(call, columns, evaluator, grouped),
         SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
         // Unary plus returns its operand unchanged; only negation widens exact integers.
-        SqlUnaryExpression { Operator: SqlUnaryOperator.Plus } plus => GroupExpressionType(plus.Operand, columns, evaluator),
+        SqlUnaryExpression { Operator: SqlUnaryOperator.Plus } plus => GroupExpressionType(plus.Operand, columns, evaluator, grouped),
         SqlUnaryExpression { Operator: SqlUnaryOperator.BitwiseNot } bitwise => evaluator.StaticTypeOf(bitwise),
-        SqlUnaryExpression unary => GroupExpressionType(unary.Operand, columns, evaluator) switch
+        SqlUnaryExpression unary => GroupExpressionType(unary.Operand, columns, evaluator, grouped) switch
         {
             DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 => DatabaseType.Int64,
             DatabaseType.Float32 => DatabaseType.Float64,
@@ -546,14 +573,14 @@ internal sealed partial class SqlPlanner
         SqlBinaryExpression binary when binary.Operator == SqlBinaryOperator.Concat => DatabaseType.String,
         SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
             or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo
-            => SqlExpressionEvaluator.ArithmeticType(binary.Operator, GroupExpressionType(binary.Left, columns, evaluator), GroupExpressionType(binary.Right, columns, evaluator)),
+            => SqlExpressionEvaluator.ArithmeticType(binary.Operator, GroupExpressionType(binary.Left, columns, evaluator, grouped), GroupExpressionType(binary.Right, columns, evaluator, grouped)),
         SqlBinaryExpression json when SqlJsonAccess.IsOperator(json.Operator)
             => evaluator.StaticTypeOf(json),
         SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator)
             => evaluator.StaticTypeOf(bitwise),
         SqlLogicalExpression or SqlBinaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression
             or SqlLikeExpression => DatabaseType.Boolean,
-        SqlCaseExpression @case => CaseGroupType(@case, columns, evaluator),
+        SqlCaseExpression @case => grouped ? CaseGroupType(@case, columns, evaluator) : evaluator.StaticTypeOf(@case),
         _ => DatabaseType.Null,
     };
 
@@ -564,12 +591,13 @@ internal sealed partial class SqlPlanner
     /// the type of its first argument, as before.
     /// </summary>
     private DatabaseType CallResultType(SqlFunctionCallExpression call, IReadOnlyList<SqlCatalogColumn> columns,
-        SqlExpressionEvaluator evaluator)
+        SqlExpressionEvaluator evaluator, bool grouped)
     {
+        if (IsAggregate(call)) { evaluator = evaluator.GroupInputScope; grouped = false; }
         var types = new DatabaseType[call.Arguments.Count];
         for (int index = 0; index < types.Length; index++)
         {
-            types[index] = GroupExpressionType(call.Arguments[index], columns, evaluator);
+            types[index] = GroupExpressionType(call.Arguments[index], columns, evaluator, grouped && !IsAggregate(call));
         }
 
         SqlFunction? function;
@@ -595,30 +623,41 @@ internal sealed partial class SqlPlanner
     private DatabaseType CaseGroupType(SqlCaseExpression @case, IReadOnlyList<SqlCatalogColumn> columns,
         SqlExpressionEvaluator evaluator)
     {
+        var resolved = evaluator.StaticTypeOf(@case);
         // The ELSE is typed before the clauses, as the chain this replaces did, so a failure in
         // either surfaces in the same order.
-        DatabaseType elseType = @case.ElseResult is null ? DatabaseType.Null : GroupExpressionType(@case.ElseResult, columns, evaluator);
+        DatabaseType elseType = @case.ElseResult is null ? DatabaseType.Null : GroupAlternativeType(@case.ElseResult, columns, evaluator, resolved);
         DatabaseType type = DatabaseType.Null;
         IReadOnlyList<SqlWhenClause> clauses = @case.WhenClauses;
         for (int index = 0; index < clauses.Count; index++)
         {
-            type = CommonGroupType(type, GroupExpressionType(clauses[index].Result, columns, evaluator));
+            type = CommonGroupType(type, GroupAlternativeType(clauses[index].Result, columns, evaluator, resolved));
         }
 
         return CommonGroupType(type, elseType);
     }
 
     /// <summary>Finds the common type of COALESCE's arguments, in order.</summary>
-    private DatabaseType CoalesceGroupType(IReadOnlyList<SqlExpression> arguments, IReadOnlyList<SqlCatalogColumn> columns,
+    private DatabaseType CoalesceGroupType(SqlFunctionCallExpression call, IReadOnlyList<SqlCatalogColumn> columns,
         SqlExpressionEvaluator evaluator)
     {
+        var resolved = evaluator.StaticTypeOf(call);
+        var arguments = call.Arguments;
         DatabaseType type = DatabaseType.Null;
         for (int index = 0; index < arguments.Count; index++)
         {
-            type = CommonGroupType(type, GroupExpressionType(arguments[index], columns, evaluator));
+            type = CommonGroupType(type, GroupAlternativeType(arguments[index], columns, evaluator, resolved));
         }
 
         return type;
+    }
+
+    private DatabaseType GroupAlternativeType(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns, SqlExpressionEvaluator evaluator, DatabaseType resolved)
+    {
+        if (evaluator.IsBoundValue(expression)) { return GroupExpressionType(expression, columns, evaluator, grouped: true); }
+        while (expression is SqlCollateExpression collate) { expression = collate.Operand; }
+        return expression is SqlLiteralExpression { LiteralType: SqlLiteralType.String } && resolved is not (DatabaseType.String or DatabaseType.Character)
+            ? DatabaseType.Null : GroupExpressionType(expression, columns, evaluator, grouped: true);
     }
 
     /// <summary>Finds the numeric common type of alternative scalar results.</summary>

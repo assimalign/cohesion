@@ -495,6 +495,12 @@
   <data name="SpillCleanupFailed" xml:space="preserve">
     <value>Temporary SQL result cleanup failed.</value>
   </data>
+  <data name="HashSpillDepthExceeded" xml:space="preserve">
+    <value>Hash aggregation or DISTINCT exceeded the {0}-pass repartitioning limit within the statement memory budget.</value>
+  </data>
+  <data name="HashSpillOrdinalRecordTooLarge" xml:space="preserve">
+    <value>The hash ordinal sort record exceeds its bound after reserving the source reader workspace.</value>
+  </data>
   <data name="SpillRowDamaged" xml:space="preserve">
     <value>A temporary SQL result row is damaged.</value>
   </data>
@@ -859,6 +865,18 @@
   <data name="ValidateSupportedSchemaFailure" xml:space="preserve"><value>{0}: the database cannot apply schema '{1}'.</value></data>
   <data name="ValidateSupportedSchemaFailure2" xml:space="preserve"><value>{0}: SQL schema '{1}' declares {2}.</value></data>
   <data name="ValidateSupportedSchemaFailure3" xml:space="preserve"><value>{0}: {1}: SQL schema '{2}': {3} Nothing was changed.</value></data>
+  <data name="SchemaHistoryInvalid" xml:space="preserve">
+    <value>The applied-schema history chunk is malformed.</value>
+  </data>
+  <data name="SchemaHeld" xml:space="preserve">
+    <value>{0}: declared schema {1}, stored schema {2}; {3}. No migration step ran. Refused steps: {4}.</value>
+  </data>
+  <data name="RollbackSchemaHeld" xml:space="preserve">
+    <value>the declared schema is an earlier applied schema; opened at the stored schema</value>
+  </data>
+  <data name="NewSchemaHeld" xml:space="preserve">
+    <value>the new declaration requires destructive changes without opt-in; opened at the stored schema</value>
+  </data>
   <data name="JointIntentDiscarded" xml:space="preserve">
     <value>The unpublished migration target or resolved route no longer matches; preparation was discarded and the stored schema remains online.</value>
   </data>
@@ -1060,7 +1078,7 @@
   <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
   <data name="WindowFrameWorkLimit" xml:space="preserve"><value>Window frame recomputation exceeded the statement limit of {0} input visits.</value></data>
   <data name="RecursiveReaderCountExceeded" xml:space="preserve"><value>The CTE '{0}' opened more readers than its execution plan counted.</value></data>
-  <data name="JsonAlternativesMismatch" xml:space="preserve"><value>CASE/COALESCE alternatives in a JSON operand require compatible types; found {0} and {1}.</value></data>
+  <data name="AlternativesMismatch" xml:space="preserve"><value>CASE/COALESCE alternatives require compatible types; found {0} and {1}.</value></data>
   <data name="JointIndexShapeInvalid" xml:space="preserve">
     <value>A prepared migration source index has invalid page geometry or ownership.</value>
   </data>
@@ -1070,9 +1088,6 @@
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
   <data name="ReclamationContextBarrierTimeout" xml:space="preserve">
     <value>Timed out waiting for the reclamation context snapshot barrier.</value>
-  </data>
-  <data name="PreparedIndexShadowsHeapTree" xml:space="preserve">
-    <value>Internal invariant: a prepared index cannot replace a heap-owned tree without replacing its heap.</value>
   </data>
   <data name="KeptTableShapeMismatch" xml:space="preserve">
     <value>Kept table '{0}.{1}' has a different {2}; publication requires identical physical metadata.</value>
@@ -1089,4 +1104,5 @@
   <data name="NaturalSynthesizedName" xml:space="preserve">
     <value>NATURAL JOIN input column '{0}' has a synthesized name; give the column an explicit alias.</value>
   </data>
+  <data name="AlternativeTypeUnresolved" xml:space="preserve"><value>CASE/COALESCE cannot determine the type of a polymorphic result or unsupported parameter value.</value></data>
 </root>

@@ -47,7 +47,7 @@ internal sealed partial class DocumentPlanner
 
     internal DocumentStatementPlan Plan(OqlExpression expression)
     {
-        if (expression is OqlInsertExpression { Select: OqlSetOperationExpression } or OqlUpsertExpression { Select: OqlSetOperationExpression } ||
+        if (expression is OqlMergeExpression or OqlInsertExpression { Select: OqlSetOperationExpression } or OqlUpsertExpression { Select: OqlSetOperationExpression } ||
             HasSubquery(expression, _cancellationToken)) { return PlanNested(expression); }
         _cancellationToken.ThrowIfCancellationRequested();
         return PlanCore(expression);
@@ -61,6 +61,7 @@ internal sealed partial class DocumentPlanner
         OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName, nested, queryOuterNames),
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
+        OqlMergeExpression merge => PlanMerge(merge, nested, queryOuterNames),
         OqlSetOperationExpression compound => PlanSetOperation(compound, nested, outerNames, queryOuterNames),
         OqlSelectExpression select when select.Bindings != select.Unnest => PlanJoins(select, nested, outerNames),
         OqlSelectExpression { Source: not null } select => PlanFrom(select, nested, outerNames),
@@ -81,7 +82,7 @@ internal sealed partial class DocumentPlanner
         var indexes = _catalog.GetIndexes(collection.Id, _snapshot);
         var nonSourceNames = NonSourceNames(logical.UnnestVariables, outerNames);
         var access = ChooseAccess(query.Predicate, DocumentSourceName.Of(query), indexes, out var accessCandidates, nonSourceNames, query.Unnest, outerNames);
-        if (logical.Query.OrderBy.Count > 0 && (_estimateSinglePath || indexes.Count > 0 &&
+        if (!HasWindows(logical.Query) && logical.Query.OrderBy.Count > 0 && (_estimateSinglePath || indexes.Count > 0 &&
             access is not DocumentIntersectionPath && !logical.IsGrouped && !query.IsDistinct && query.Bindings.Count == 0 &&
             logical.Query.OrderBy.All(order => order.Expression is OqlPathExpression)))
         {
@@ -216,13 +217,42 @@ internal sealed partial class DocumentPlanner
         query = new OqlSelectExpression(query.Collection, sourceName, query.Projections, query.Predicate,
             query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest, source: query.Source,
             bindings: query.Bindings == query.Unnest ? null : query.Bindings, isAliasImplicit: query.IsAliasImplicit);
+        if (query.Windows.Count > 0 || HasWindows(query))
+        {
+            // Placement owns its refusal before grouped key validation, including
+            // engine-registered aggregates unknown to the standalone grammar.
+            foreach (var projection in query.Projections)
+            {
+                if (query.Bindings != query.Unnest && projection.Expression is OqlUnaryExpression { Operator: ".*" } qualified)
+                { Validate(qualified.Operand, false, functions: functions); }
+                else { Validate(projection.Expression, true, allowStar: true, functions: functions, allowWindow: true); }
+            }
+            foreach (var order in query.OrderBy) { Validate(order.Expression, true, functions: functions, allowWindow: true); }
+            if (query.Predicate is not null) { Validate(query.Predicate, false, functions: functions); }
+            foreach (var key in query.GroupBy) { Validate(key, false, functions: functions); }
+            if (query.Having is not null) { Validate(query.Having, true, functions: functions); }
+            ValidateWindows(query, functions, outerNames);
+        }
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression, functions)) ||
-            (query.Having is not null && ContainsAggregate(query.Having, functions)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression, functions));
+            (query.Having is not null && ContainsAggregate(query.Having, functions)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression, functions)) ||
+            ContainsWindowKeyAggregate(query, functions);
         variables?.Remove(DocumentSourceName.Of(query));
         var unnestVariables = variables;
         var groupScope = query.GroupAliases.Count > 0 || query.GroupAs is not null ? GroupScope(query, unnestVariables) : null;
         var scopes = grouped || query.IsDistinct || query.IsValue && query.OrderBy.Count > 0 ? new DocumentBindingScopes() : null;
         if (groupScope is not null) { scopes!.RegisterGroup(query, groupScope); }
+        if (grouped && (query.Windows.Count > 0 || HasWindows(query)))
+        {
+            var definitions = WindowDefinitions(query);
+            foreach (var specification in definitions.Values.Concat(Windows(query).Select(w => ResolveWindow(w, definitions))))
+            {
+                foreach (var key in specification.PartitionBy.Concat(specification.OrderBy.Select(o => o.Expression)))
+                {
+                    ValidateGrouped(key, query, unnestVariables, scopes!, functions, groupScope, outerNames);
+                    if (query.GroupAs is not null) { ValidateGroupArrayInput(key, query, scopes!, functions); }
+                }
+            }
+        }
         if (query.Predicate is not null)
         {
             Validate(query.Predicate, allowAggregate: false, functions: functions);
@@ -236,13 +266,14 @@ internal sealed partial class DocumentPlanner
             cancellationToken.ThrowIfCancellationRequested();
             if (!grouped && query.Bindings != query.Unnest && projection.Expression is OqlUnaryExpression { Operator: ".*" } qualified)
             { Validate(qualified.Operand, allowAggregate: false, functions: functions); }
-            else { Validate(projection.Expression, allowAggregate: true, allowStar: !grouped, functions: functions); }
+            else { Validate(projection.Expression, allowAggregate: true, allowStar: !grouped, functions: functions, allowWindow: true); }
             if (grouped) { ValidateGrouped(projection.Expression, query, unnestVariables, scopes!, functions, groupScope, outerNames); }
             if (query.GroupAs is not null) { ValidateGroupArrayInput(projection.Expression, query, scopes!, functions); }
             string name = query.IsValue ? "value" : projection.Alias ?? projection.Expression switch
             {
                 OqlStarExpression or OqlUnaryExpression { Operator: ".*" } => "document",
                 OqlPathExpression path => path.Segments.LastOrDefault().Name ?? $"column{projections.Count + 1}",
+                OqlWindowExpression window => window.Call.Name.ToLowerInvariant(),
                 OqlCallExpression call => call.Name.ToLowerInvariant(),
                 OqlMetaExpression meta => meta.Member!,
                 _ => $"column{projections.Count + 1}",
@@ -269,11 +300,11 @@ internal sealed partial class DocumentPlanner
             {
                 throw new DocumentPlanningException("CD01014", ErrorMessages.DistinctOrderNotProjected, order.Expression.Location);
             }
-            Validate(order.Expression, allowAggregate: true, functions: functions);
+            Validate(order.Expression, allowAggregate: true, functions: functions, allowWindow: true);
             if (grouped) { ValidateGrouped(order.Expression, query, unnestVariables, scopes!, functions, groupScope, outerNames); }
             if (query.GroupAs is not null) { ValidateGroupArrayInput(order.Expression, query, scopes!, functions); }
         }
-        bool canStopEarly = !grouped && !query.IsDistinct && (query.OrderBy.Count == 0 ||
+        bool canStopEarly = !HasWindows(query) && !grouped && !query.IsDistinct && (query.OrderBy.Count == 0 ||
             query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" } identity &&
                 IsLocalMetadata(identity, DocumentSourceName.Of(query))) &&
             projections.All(projection => (projection.Expression is not OqlStarExpression || query.Unnest.Count > 0) &&
@@ -588,6 +619,7 @@ internal sealed partial class DocumentPlanner
             OqlComprehensionExpression or OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).Any(child => ContainsAggregate(child, functions)),
             OqlArrayExpression array => array.Elements.Any(child => ContainsAggregate(child, functions)),
             OqlObjectExpression obj => obj.Members.Any(member => ContainsAggregate(member.Value, functions)),
+            OqlWindowExpression window => WindowChildren(window).Any(child => ContainsAggregate(child, functions)),
             OqlCallExpression call => functions.IsAggregate(call.Name) || call.Arguments.Any(child => ContainsAggregate(child, functions)),
             OqlBinaryExpression binary => ContainsAggregate(binary.Left, functions) || ContainsAggregate(binary.Right, functions),
             OqlUnaryExpression unary => ContainsAggregate(unary.Operand, functions),
@@ -595,11 +627,17 @@ internal sealed partial class DocumentPlanner
         };
     }
 
-    private static void Validate(OqlExpression expression, bool allowAggregate, bool allowStar = false, DocumentFunctionCatalog? functions = null)
+    private static void Validate(OqlExpression expression, bool allowAggregate, bool allowStar = false, DocumentFunctionCatalog? functions = null, bool allowWindow = false)
     {
         functions ??= DocumentFunctionCatalog.Standard;
         switch (expression)
         {
+            case OqlWindowExpression window:
+                if (!allowWindow) { throw new DocumentPlanningException("CD01044", ErrorMessages.WindowPlacementInvalid, window.Location); }
+                ValidateWindowCall(window);
+                foreach (var child in WindowChildren(window))
+                { ValidateNoNestedWindow(child); Validate(child, true, functions: functions); }
+                return;
             case OqlComprehensionExpression comprehension:
                 if (comprehension.Variable.Length == 0)
                 { throw new DocumentPlanningException("CD01027", ErrorMessages.ComprehensionBindingInvalid, comprehension.Location); }
@@ -610,29 +648,31 @@ internal sealed partial class DocumentPlanner
                 Validate(quantified.Predicate, allowAggregate, functions: functions);
                 return;
             case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
-                foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate, functions: functions); }
+                foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate, functions: functions, allowWindow: allowWindow); }
                 return;
             case OqlSubqueryExpression:
             case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression or OqlPathExpression or OqlMetaExpression:
                 return;
             case OqlArrayExpression array:
-                foreach (var element in array.Elements) { Validate(element, allowAggregate, functions: functions); }
+                foreach (var element in array.Elements) { Validate(element, allowAggregate, functions: functions, allowWindow: allowWindow); }
                 return;
             case OqlObjectExpression obj:
-                foreach (var member in obj.Members) { Validate(member.Value, allowAggregate, functions: functions); }
+                foreach (var member in obj.Members) { Validate(member.Value, allowAggregate, functions: functions, allowWindow: allowWindow); }
                 return;
             case OqlStarExpression when allowStar:
                 return;
             case OqlBinaryExpression binary when binary.Operator is "IS DISTINCT FROM" or "IS NOT DISTINCT FROM" or "AND" or "OR" or "=" or "!=" or "<>" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%":
-                Validate(binary.Left, allowAggregate, functions: functions);
-                Validate(binary.Right, allowAggregate, functions: functions);
+                Validate(binary.Left, allowAggregate, functions: functions, allowWindow: allowWindow);
+                Validate(binary.Right, allowAggregate, functions: functions, allowWindow: allowWindow);
                 return;
             case OqlUnaryExpression { Operator: ".*" }:
                 throw new DocumentPlanningException("CK00001", ErrorMessages.QualifiedStarDeferred, expression.Location);
             case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "EXISTS" or "IS NULL" or "IS NOT NULL" or "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
-                Validate(unary.Operand, allowAggregate, functions: functions);
+                Validate(unary.Operand, allowAggregate, functions: functions, allowWindow: allowWindow);
                 return;
             case OqlCallExpression call:
+                if (OqlFunctions.Find(call.Name)?.WindowKind is not (null or OqlWindowFunctionKind.None))
+                { throw new DocumentPlanningException("CD01044", ErrorMessages.WindowPlacementInvalid, call.Location); }
                 if (call.Quantifier != OqlAggregateQuantifier.None &&
                     (call.Quantifier is not (OqlAggregateQuantifier.All or OqlAggregateQuantifier.Distinct) ||
                      call.Arguments.Count != 1 || call.Arguments[0] is OqlStarExpression ||
@@ -643,7 +683,7 @@ internal sealed partial class DocumentPlanner
                     var form = OqlFunctions.Find(call.Name);
                     if (call.Name == "META" || form is null || !form.AcceptsArity(call.Arguments.Count))
                     { throw new DocumentPlanningException("CD05001", ErrorMessages.FunctionArgumentsInvalid, call.Location); }
-                    foreach (var argument in call.Arguments) { Validate(argument, allowAggregate, functions: functions); }
+                    foreach (var argument in call.Arguments) { Validate(argument, allowAggregate, functions: functions, allowWindow: allowWindow); }
                     return;
                 }
                 bool star = call.Arguments.Count == 1 && call.Arguments[0] is OqlStarExpression;
@@ -661,7 +701,7 @@ internal sealed partial class DocumentPlanner
                 { throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerValidateFailure, call.Location); }
                 for (int index = 0; index < call.Arguments.Count; index++)
                 {
-                    Validate(call.Arguments[index], !aggregate && allowAggregate, allowStar: star, functions: functions);
+                    Validate(call.Arguments[index], !aggregate && allowAggregate, allowStar: star, functions: functions, allowWindow: !aggregate && allowWindow);
                     if (!star) { ValidateFunctionKind(function, index, call.Arguments[index]); }
                 }
                 return;
@@ -719,6 +759,11 @@ internal sealed partial class DocumentPlanner
             foreach (var member in obj.Members) { ValidateGrouped(member.Value, query, variables, scopes, functions, bound, outerNames); }
             return;
         }
+        if (expression is OqlWindowExpression window)
+        {
+            foreach (var child in WindowChildren(window)) { ValidateGrouped(child, query, variables, scopes, functions, bound, outerNames); }
+            return;
+        }
         if (expression is OqlCallExpression call)
         {
             if (functions.IsAggregate(call.Name)) { return; }
@@ -766,6 +811,9 @@ internal sealed partial class DocumentPlanner
             (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth),
         (OqlPathExpression a, OqlPathExpression b) => EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
+        (OqlWindowDefinition a, OqlWindowDefinition b) => a.Name == b.Name && EquivalentWindowSpecifications(a.Specification, b.Specification, query),
+        (OqlWindowSpecification a, OqlWindowSpecification b) => a.Reference == b.Reference && EquivalentWindowSpecifications(a, b, query),
+        (OqlWindowExpression a, OqlWindowExpression b) => EquivalentWindows(a, b, query, variables, scopes, leftScope, rightScope, localDepth),
         (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && (a.Quantifier == OqlAggregateQuantifier.Distinct) == (b.Quantifier == OqlAggregateQuantifier.Distinct) && a.Arguments.Count == b.Arguments.Count &&
             a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth)),
         (OqlStarExpression, OqlStarExpression) => true,

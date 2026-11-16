@@ -72,11 +72,30 @@ public sealed partial class SqlDatabase : DatabaseInstance
     internal SqlDdlInterlock DdlInterlock { get; } = new();
     internal SqlTableReclamation TableReclamation { get; }
     internal void ReportProvisioning(DatabaseProvisioningProgress? progress) => SetProvisioningProgress(progress);
+    internal DatabaseProvisioningProgress? HeldProvisioning
+    {
+        get
+        {
+            if (_engine.FindDeclaration(Name) is not { HeldProgress: { } held } declaration) { return null; }
+            try { return declaration.GetHeldProgress(_catalog.SchemaState?.ContentHash); }
+            catch (StorageOfflineException)
+            {
+                // Cleanup must release admission even when either file set just latched.
+                // Offline health takes precedence; reopen checks the recovered hash again.
+                return held;
+            }
+        }
+    }
 
     internal async ValueTask ResumeProvisioningAsync(CancellationToken cancellationToken)
     {
         if (_catalog.PendingMigration is not { } pending)
         {
+            if (HeldProvisioning is { } held)
+            {
+                ReportProvisioning(held);
+                return;
+            }
             // A completed Build cannot schedule work on reopen. A prior job may have
             // failed and discarded its intent before an independent storage latch.
             if (_engine.ProvisioningBuildComplete && _engine.FindDeclaration(Name)?.Schema is { } target &&
@@ -208,7 +227,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
                 LockManager = _coordinator.LockManager,
                 ExistingIndexes = _catalog.GetIndexRegistrations(),
             }, _catalog.Tables.Select(table => table.ObjectId).Concat(_catalog.Sequences.Select(sequence => sequence.ObjectId))
-                .Concat(_catalog.GetPendingTableReclamations()).ToHashSet(), _catalog.NextReservedIdentity);
+                .Concat(_catalog.GetPendingTableReclamations()).ToHashSet(), _catalog.NextReservedIdentity, _catalog.ReserveIndexTreeOwner, _catalog.AbandonTableAs, _catalog.PhysicalIndexOwner, _catalog.IsOwnerRetiring);
         }
         catch (IndexFormatException exception)
         {
@@ -229,7 +248,13 @@ public sealed partial class SqlDatabase : DatabaseInstance
             throw;
         }
         _catalog.IndexPageOwner = _indexManager.PageOwner;
+        _catalog.IndexOwnerKnown = registration => _indexManager.IsKnownRegistration(registration) &&
+            _storage.GetOwnerIndexPageCount(_indexManager.PageOwner(registration)) != 0;
         TableReclamation = new SqlTableReclamation(this);
+        _catalog.EngineName = engine.Name;
+        _catalog.IndexReclamationRequested = TableReclamation.Request;
+        _catalog.IndexBuildStarted = owner => SqlDatabaseEventSource.Log.IndexBuildBegan(engine.Name, _storage, owner);
+        _catalog.IndexBuildFinished = (owner, succeeded) => SqlDatabaseEventSource.Log.IndexBuildEnded(engine.Name, _storage, owner, succeeded);
         _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
         engine.BeforeProvisioning?.Invoke(this);
 
@@ -266,7 +291,22 @@ public sealed partial class SqlDatabase : DatabaseInstance
 
     internal static void EnsureIndexFormats(string name, SqlStorage storage, SqlCatalog catalog)
     {
-        try { BTreeIndexManager.EnsureFormat(storage, catalog.GetIndexRegistrations()); }
+        try
+        {
+            var registrations = catalog.GetIndexRegistrations();
+            BTreeIndexManager.EnsureFormat(storage, registrations);
+            var owners = new HashSet<ulong>();
+            var forbidden = catalog.Tables.Select(table => table.ObjectId).Concat(catalog.Sequences.Select(sequence => sequence.ObjectId))
+                .Concat(catalog.GetPendingTableReclamations()).ToHashSet();
+            foreach (var registration in registrations)
+            {
+                using var root = storage.PageManager.GetPage((PageId)registration.RootPageId);
+                ulong owner = root.Page.OwnerId;
+                if (owner != catalog.PhysicalIndexOwner(registration) || owner == 0 || owner >= catalog.NextReservedIdentity ||
+                    forbidden.Contains(owner) || !owners.Add(owner))
+                { throw new StorageCorruptionException(root.Id, ErrorMessages.JointIndexShapeInvalid); }
+            }
+        }
         catch (IndexFormatException exception)
         {
             throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
@@ -618,7 +658,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// The schema targets another database, declares what the engine has no DDL for (principals),
     /// declares a domain the engine does not register with that base type (<c>CS03105</c>: an
     /// imperative apply cannot add to the engine's frozen type catalog), would adopt an ad-hoc object
-    /// (<c>CS03105</c>), needs a destructive step it does not allow (<c>CS03105</c>), or unpublished
+    /// (<c>CS03105</c>), needs a destructive step it does not allow or an unsafe rollback (<c>CS03105</c>), or unpublished
     /// joint preparation failed (<c>CS03402</c>, with the old schema retained online
     /// unless a storage latch fired), or publication is unconfirmed (<c>CS03403</c>:
     /// recovery determines the committed schema).
@@ -632,12 +672,15 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// next build. A database declared without a schema, and one the builder did not declare, accept
     /// any schema. The checks run in the order the root base's members use: disposal, the schema,
     /// the token, then the offline refusal, then the declaration.
-    /// Potentially lossy TYPE conversions, including reverse migrations after application rollback,
-    /// require the declaration's destructive-change opt-in before any step runs.
+    /// New declarations and roll-forwards require destructive-change opt-in for potentially lossy
+    /// steps. An earlier applied declaration uses the rollback policy regardless of its opt-in:
+    /// re-creating dropped objects, data validation and non-Safe steps refuse with CS03105,
+    /// naming the refused steps and changing nothing. Build holds the same refusal online,
+    /// reporting the stored schema and refused steps through Provisioning.
     /// Readers, writers and session DDL naming a touched table wait through the joint job before
     /// binding the published schema. The engine's configured LockTimeout bounds reservation;
     /// zero waits without a timeout. Imperative cancellation or reservation timeout clears the
-    /// provisioning observation because this caller receives the exception.
+    /// provisioning observation because this caller receives the exception; an existing schema hold is restored.
     /// A transient checkpoint-admission refusal waits outside the physical and publication gates,
     /// then resumes the same prepared job with completed copy and index work retained.
     /// </remarks>
@@ -657,8 +700,11 @@ public sealed partial class SqlDatabase : DatabaseInstance
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseApplySchemaAsyncFailure, _engine.Name, Name));
         }
 
-        return _schemaProvisioner.ApplyAsync(schema, cancellationToken);
+        return ApplySchemaCoreAsync(schema, cancellationToken);
     }
+
+    private async ValueTask<SqlSchemaMigrationResult> ApplySchemaCoreAsync(SqlCompiledSchema schema, CancellationToken cancellationToken)
+        => (await _schemaProvisioner.ApplyAsync(schema, cancellationToken).ConfigureAwait(false)).Migration;
 
     /// <summary>
     /// Verifies, without running any DDL, that a compiled schema is the one applied: the recorded

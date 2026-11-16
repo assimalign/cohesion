@@ -31,11 +31,14 @@ internal sealed class ServerTestHarness : IAsyncDisposable
     public static async Task<ServerTestHarness> StartAsync(
         Action<SqlDatabaseServerOptions>? configure = null,
         Action<SqlDatabaseEngineOptions>? configureEngine = null,
-        string engineName = "sql-e2e")
+        string? engineName = null,
+        SqlDatabaseEngine? engine = null)
     {
+        if (engine is not null && (configureEngine is not null || engineName is not null))
+        { throw new ArgumentException(null, nameof(engine)); }
         var engineOptions = new SqlDatabaseEngineOptions();
         configureEngine?.Invoke(engineOptions);
-        var engine = SqlDatabaseEngine.Create(engineName, engineOptions);
+        engine ??= SqlDatabaseEngine.Create(engineName ?? "sql-e2e", engineOptions);
 
         var database = await engine.CreateDatabaseAsync(DatabaseName);
 

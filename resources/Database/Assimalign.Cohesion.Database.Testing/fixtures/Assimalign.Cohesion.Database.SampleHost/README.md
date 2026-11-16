@@ -14,3 +14,7 @@ its apphost exists for the real-process tests.
 The versionless `resources/Database/global.template.json` is materialized as an ignored
 area-level `global.json` by `Install-Local.ps1`, so the sample, its referencing tests, and
 the Database solution all resolve the exact package-backed SDK version produced by that run.
+
+For process acceptance, `--Sample:TestHandshake=true` selects a reserved loopback port and
+prints `READY|port|provisioningCode|detail` after StartAsync. Send `STOP` on stdin for graceful
+shutdown. The ordinary schema declaration remains the SDK compiler input.

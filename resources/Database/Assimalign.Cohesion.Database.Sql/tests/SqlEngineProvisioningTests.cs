@@ -361,7 +361,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         free.WasAlreadyApplied.ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a destructive step and an adopted table are refused with a code before any step runs")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a destructive change holds and an adopted table refuses before any step runs")]
     public async Task BuildAsync_PolicyRefusals_ShouldBeCodedAndChangeNothing()
     {
         // Arrange: a provisioned database with a second table, and an ad-hoc table in another.
@@ -382,16 +382,17 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         }
 
         // Act: dropping the archive table is destructive, and the shop schema would adopt the table.
-        var destructive = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
-            await CreateBuilder("policy").AddDatabase(_sales).BuildAsync());
+        await using (var held = await CreateBuilder("policy").AddDatabase(_sales).BuildAsync())
+        {
+            var database = await held.OpenDatabaseAsync("sales");
+            database.Provisioning!.FailureCode.ShouldBe("CS03105");
+            database.Provisioning.Detail!.ShouldContain("DropTable 'archive'", Case.Sensitive);
+            database.Catalog.SchemaState!.ContentHash.ShouldBe(salesWithArchive.Compile().Hash);
+        }
         var adopt = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
             await CreateBuilder("policy").AddDatabase(_unreferenced).BuildAsync());
 
         // Assert
-        destructive.Message.ShouldStartWith(
-            "CS03105: SQL engine 'policy', database 'sales': Destructive migration step 'DropTable' for 'archive' was refused.",
-            Case.Sensitive);
-        destructive.Message.ShouldEndWith("Nothing was changed.", Case.Sensitive);
         adopt.Message.ShouldBe(
             "CS03105: SQL engine 'policy', database 'shop': SQL schema 'shop' cannot adopt table 'parents' because it " +
             "was not created by this schema. Nothing was changed.");

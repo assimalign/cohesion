@@ -96,6 +96,11 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         }
     }
 
+    internal long PageWrites(string databaseName, bool catalog)
+    {
+        lock (_sync) { return _live[Key(databaseName, catalog)].Data.PageWrites; }
+    }
+
     /// <summary>
     /// Captures the durable byte image of every storage this strategy has created
     /// or opened — the state a process crash would leave on disk — and returns a

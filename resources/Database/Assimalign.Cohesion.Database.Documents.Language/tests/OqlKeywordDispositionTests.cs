@@ -31,6 +31,15 @@ public sealed class OqlKeywordDispositionTests
         ["GROUP"] = Parses("SELECT a, COUNT(*) FROM c GROUP BY a"),
         ["BY"] = Parses("SELECT a, COUNT(*) FROM c GROUP BY a"),
         ["HAVING"] = Parses("SELECT a, COUNT(*) FROM c GROUP BY a HAVING COUNT(*) > 1"),
+        ["OVER"] = Parses("SELECT RANK() OVER () FROM c"),
+        ["WINDOW"] = Parses("SELECT RANK() OVER w FROM c WINDOW w AS ()"),
+        ["PARTITION"] = Parses("SELECT RANK() OVER (PARTITION BY p) FROM c"),
+        ["FIRST_VALUE"] = Rejects("SELECT FIRST_VALUE(x) OVER () FROM c", "FIRST_VALUE"),
+        ["LAST_VALUE"] = Rejects("SELECT LAST_VALUE(x) OVER () FROM c", "LAST_VALUE"),
+        ["NTH_VALUE"] = Rejects("SELECT NTH_VALUE(x,1) OVER () FROM c", "NTH_VALUE"),
+        ["RATIO_TO_REPORT"] = Rejects("SELECT RATIO_TO_REPORT(x) OVER () FROM c", "RATIO_TO_REPORT"),
+        ["RESPECT"] = Rejects("SELECT LAG(x) RESPECT NULLS OVER () FROM c", "RESPECT"),
+        ["IGNORE"] = Rejects("SELECT LAG(x) IGNORE NULLS OVER () FROM c", "IGNORE"),
         ["ORDER"] = Parses("SELECT a FROM c ORDER BY a"),
         ["ASC"] = Parses("SELECT a FROM c ORDER BY a ASC"),
         ["DESC"] = Parses("SELECT a FROM c ORDER BY a DESC"),
@@ -112,7 +121,7 @@ public sealed class OqlKeywordDispositionTests
         ["OFFSET"] = Parses("SELECT * FROM c ORDER BY a DESC OFFSET 2"),
         ["FETCH"] = Rejects("SELECT * FROM c ORDER BY a FETCH FIRST 5 ROWS ONLY", "FETCH"),
         ["UPSERT"] = Parses("UPSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})"),
-        ["MERGE"] = Rejects("MERGE INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE"),
+        ["MERGE"] = Parses("MERGE INTO c USING d ON META(c).id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a"),
         ["NEST"] = Parses("SELECT * FROM c AS a NEST d AS b ON META(b).id = a.k"),
         ["WITHIN"] = Rejects("SELECT * FROM c WHERE ANY x WITHIN a SATISFIES TRUE END", "WITHIN"),
         ["INNER"] = Parses("SELECT * FROM c d INNER UNNEST d.a t"),
@@ -261,7 +270,7 @@ public sealed class OqlKeywordDispositionTests
     private static string[] Words()
         => OqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(OqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
-            .Concat(new[] { "NULLS", "INCLUDE" })
+            .Concat(new[] { "NULLS", "INCLUDE", "MERGE" })
             .Concat(new[] { "UNNEST", "INNER", "LEFT", "OUTER", "EVERY", "SATISFIES" }).Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

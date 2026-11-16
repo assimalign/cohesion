@@ -45,6 +45,15 @@ internal sealed class FaultInjectingJournalStorageStrategy : GraphStorageStrateg
         set => _beforeCommitFlush.Value = value;
     }
 
+    internal void DamageOwnerTag(string name, PageId page)
+    {
+        lock (_sync)
+        {
+            var data = _databases[name].Data;
+            data.Position = (long)page * 8192 + 64;
+            data.Write(BitConverter.GetBytes(1000000000UL));
+        }
+    }
     private readonly Dictionary<string, Files> _databases = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DeviceFaults> _faults = new(StringComparer.Ordinal);
     private readonly object _sync = new();

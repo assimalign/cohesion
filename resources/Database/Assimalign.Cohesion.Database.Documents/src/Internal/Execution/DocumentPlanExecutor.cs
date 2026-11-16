@@ -25,6 +25,8 @@ internal static partial class DocumentPlanExecutor
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         if (error is not null) { throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryRequestFromOqlDatabaseParse, error.Code, error.Message), statement.Diagnostics); }
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters, cancellationToken, functions: database.Engine.Functions).Plan(statement.OqlExpression);
+        if (plan is DocumentMergePlan or DocumentNestedPlan { Root: DocumentMergePlan })
+        { throw new DocumentPlanningException("CD05022", ErrorMessages.MergeExecutionUnavailable, statement.OqlExpression.Location); }
         return plan switch
         {
             DocumentSetOperationPlan compound => await ExecuteSetOperationAsync(database, operation, compound, parameters, cancellationToken).ConfigureAwait(false),

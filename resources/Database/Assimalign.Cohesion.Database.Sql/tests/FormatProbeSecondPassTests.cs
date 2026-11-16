@@ -41,7 +41,7 @@ public sealed class FormatProbeSecondPassTests
                         await engine.OpenDatabaseAsync("probe", CancellationToken.None));
                     failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
                     failure.Message.ShouldContain($"uses data-storage format {format}", Case.Sensitive);
-                    failure.Message.ShouldContain("supports only format 37", Case.Sensitive);
+                    failure.Message.ShouldContain("supports only format 39", Case.Sensitive);
                 }
                 FormatProbeCrash.AssertUnchanged(root, before);
             }
@@ -70,7 +70,7 @@ public sealed class FormatProbeSecondPassTests
                     // Assert: physical-owner attachment would report corruption instead.
                     failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
                     failure.Message.ShouldContain("34", Case.Sensitive);
-                    failure.Message.ShouldContain("supports only format 37", Case.Sensitive);
+                    failure.Message.ShouldContain("supports only format 39", Case.Sensitive);
                 }
                 FormatProbeCrash.AssertUnchanged(root, before);
             }

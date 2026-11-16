@@ -45,7 +45,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await using var engine = await Builder(storage).AddDatabase(RetirementDeclaration(true)).BuildAsync(token);
         var db = await engine.OpenDatabaseAsync("typed", token);
         ulong owner = Table(db).ObjectId;
-        db.IndexManager.ExportRegistrations().All(index => db.IndexManager.PageOwner(index) == owner).ShouldBeTrue();
+        db.IndexManager.ExportRegistrations().All(index => db.IndexManager.PageOwner(index) != owner).ShouldBeTrue();
         await using var writer = await db.CreateSessionAsync(token);
         for (int start = 1; start <= 8192; start += 64)
         {
@@ -55,9 +55,45 @@ public sealed partial class SqlJointTypeMigrationTests
         await db.SchemaProvisioner.ApplyAsync(RetirementDeclaration(false).Compile(), token);
         Table(db).ObjectId.ShouldBe(owner);
         db.IndexManager.ExportRegistrations().Count.ShouldBe(1);
+        await DrainReclamationAsync(db, token);
+        // Defensive costing still covers abandoned heap-tagged pages, although format 39
+        // never creates a live heap-owned tree. Recreate the old leak as an unregistered
+        // physical tree, without a compatibility reader or a live registration.
+        await SeedUnregisteredHeapTreeAsync(db, owner, 16384, token);
         IndexOwnerPages(db, owner).ShouldBeGreaterThan(1000);
         db.Coordinator.Checkpoint(token); db.CatalogStorage.Checkpoint();
         return storage.CaptureDurableImages();
+    }
+
+    private static async Task SeedUnregisteredHeapTreeAsync(SqlDatabase db, ulong owner, int count, CancellationToken token)
+    {
+        var physical = Assimalign.Cohesion.Database.Indexing.BTreeIndexManager.Create(new()
+        {
+            Storage = db.DataStorage,
+            TransactionSource = context => db.Coordinator.TryGetStorageTransaction(context, out var bracket) ? bracket : throw new InvalidOperationException(),
+        });
+        var context = await db.Coordinator.BeginAsync(Assimalign.Cohesion.Database.Transactions.IsolationLevel.Snapshot, token);
+        try
+        {
+            var tree = await db.Coordinator.ApplyStatementAsync(context, bracket => physical.CreateIndexAsync(context, owner,
+                new("abandoned"), token), durable: true, cancellationToken: token);
+            for (int start = 0; start < count; start += 64)
+            {
+                await db.Coordinator.ApplyStatementAsync(context, async bracket =>
+                {
+                    for (int entry = start; entry < start + 64; entry++)
+                    {
+                        var bytes = new byte[1000];
+                        BinaryPrimitives.WriteInt32BigEndian(bytes, entry);
+                        await tree.InsertVersionAsync(bracket, new(bytes), (ulong)entry,
+                            Assimalign.Cohesion.Database.Transactions.TransactionSequence.None,
+                            Assimalign.Cohesion.Database.Transactions.TransactionSequence.None, token);
+                    }
+                    return true;
+                }, durable: true, cancellationToken: token);
+            }
+        }
+        finally { await db.Coordinator.RollbackAsync(context, CancellationToken.None); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Second review: stranded retirement admits at a real cap and refuses one page under (#1778)")]

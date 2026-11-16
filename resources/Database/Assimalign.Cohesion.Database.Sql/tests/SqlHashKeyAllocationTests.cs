@@ -24,7 +24,7 @@ public sealed class SqlHashKeyAllocationTests
     public async Task HashKeys_ColumnEquijoin_ShouldRetainBaseAllocationBudget()
     {
         // Arrange: parse and bind once, outside the measured extraction calls.
-        await using var engine = SqlDatabaseEngine.Create("hash-key-allocation", new());
+        await using var engine = SqlDatabaseEngine.Create("hash-key-allocation", new() { TempDirectory = SqlAllocationTemp.Directory });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE a(k INT)", cancellationToken: CancellationToken.None);

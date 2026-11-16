@@ -197,7 +197,8 @@ public sealed partial class SqlCatalog
             ValidateStorageReplacement(expectedKept ?? [], null);
             dropped ??= [];
             kept ??= [];
-            treeOwners ??= [];
+            treeOwners = (treeOwners ?? []).Concat(registrations.Select(registration => IndexPageOwner?.Invoke(registration) ?? registration.ObjectId)
+                .Where(owner => _preparedTruncateOwners.Contains(owner))).Distinct().ToArray();
             foreach (var table in kept)
             {
                 var previous = _tables[(table.Schema, table.Name)].Table;
@@ -315,6 +316,7 @@ public sealed partial class SqlCatalog
                 }
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(merged));
                 var stateLocations = appliedSchema is null ? null : StageJointSchemaState(transaction, appliedSchema);
+                var publishHistory = appliedSchema is null ? null : StageSchemaHistory(transaction, appliedSchema.ContentHash, checked(_ddlGeneration + 1));
                 var appliedState = appliedSchema is null ? null : new SqlCatalogSchemaState(appliedSchema.ContentHash,
                     appliedSchema.CanonicalDocument, checked(_ddlGeneration + 1));
                 // Allocate every publication directory/vector before the irrevocable commit.
@@ -352,6 +354,7 @@ public sealed partial class SqlCatalog
                 { _tables.Remove((dropped[index].Schema, dropped[index].Name)); }
                 if (appliedSchema is not null)
                 {
+                    publishHistory!();
                     _schemaState = appliedState;
                     _schemaStateLocations = stateLocations!;
                     _pendingMigration = null;
@@ -386,7 +389,6 @@ public sealed partial class SqlCatalog
                 _registrationsLocation = registrationsLocation;
                 Volatile.Write(ref _storageBindingGeneration, bindingGeneration);
                 _snapshot = null;
-                return default;
             }
             catch (Exception failure) when (committed)
             {
@@ -406,6 +408,9 @@ public sealed partial class SqlCatalog
                 { foreach (var previous in addedReadVersions) { _keptReadVersions.Remove(previous); } }
             }
         }
+        foreach (ulong owner in treeOwners) { EndIndexBuild(owner, true); }
+        IndexReclamationRequested?.Invoke();
+        return default;
     }
 
     // Immutable owner descriptions and detached trees are usable only while reclamation

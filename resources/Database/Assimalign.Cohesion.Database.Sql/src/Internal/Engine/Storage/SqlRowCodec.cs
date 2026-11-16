@@ -55,7 +55,8 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 37 requires joint publication for every deferred migration (#1778);
+    /// the catalog: 38 adds hash-only applied-schema history (kind 20, #1779);
+    /// 37 requires joint publication for every deferred migration (#1778);
     /// 36 makes zero key order ASC NULLS FIRST, matching ORDER BY (#1787);
     /// 35 separates joint index tree ownership from its logical table (#1777);
     /// 34 distinguishes Joint/ kind-9 intents from per-step 49a jobs (#1447);
@@ -96,7 +97,7 @@ internal static class SqlRowCodec
     /// </summary>
     // Format 30 adds foreign-key ON UPDATE metadata to table extension 8; rows and
     // format-29 identity/owned-sequence records are unchanged (#1723, SQ-F1).
-    internal const int RecordSpaceFormatVersion = 37;
+    internal const int RecordSpaceFormatVersion = 39;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
@@ -269,6 +270,63 @@ internal static class SqlRowCodec
             return;
         }
         AppendValue(writer, type, ToKeyIdentity(value), collation);
+    }
+
+    /// <summary>
+    /// Bounds a complete key component, including its tag, collation and terminator.
+    /// Unknown/unbounded families have no proof. Witnesses go through the real encoder;
+    /// SqlIndexKeyEncodingTests checks all scalar families and every Unicode scalar
+    /// against these witnesses (including collation expansion and zero escaping).
+    /// </summary>
+    internal static bool TryGetMaximumKeyLength(DatabaseTypeInfo type, Collation collation, out long length)
+    {
+        length = 0;
+        if (type.Type is DatabaseType.String or DatabaseType.Character)
+        {
+            if (type.MaxLength is not > 0 || !collation.IsIndexBacked) { return false; }
+            // SQL widths count Unicode scalars. Binary/simple case folding emits at
+            // most one four-byte scalar; accent folding's longest output is
+            // U+16D6A's three four-byte scalars in Unicode 17. U+0000's two-byte
+            // escape is smaller. The exhaustive codec oracle pins this maximum.
+            string witness = collation == Collation.CaseAccentInsensitive ? "\U00016D6A" : "\U0010FFFF";
+            var textWriter = new DatabaseKeyWriter();
+            AppendKeyValue(textWriter, DatabaseType.String, string.Empty, collation);
+            int overhead = textWriter.Length;
+            textWriter.Reset();
+            AppendKeyValue(textWriter, DatabaseType.String, witness, collation);
+            length = overhead + (long)type.MaxLength.Value * (textWriter.Length - overhead);
+            return true;
+        }
+
+        // Fixed-width codecs have the same length for every non-NULL value.
+        // Decimal's longest significand has 29 digits; its sign/exponent and
+        // terminator have fixed widths for either sign, independently of scale.
+        object? maximum = type.Type switch
+        {
+            DatabaseType.Boolean => true,
+            DatabaseType.Int8 => sbyte.MaxValue,
+            DatabaseType.Int16 => short.MaxValue,
+            DatabaseType.Int32 => int.MaxValue,
+            DatabaseType.Int64 => long.MaxValue,
+            DatabaseType.Float32 => float.MaxValue,
+            DatabaseType.Float64 => double.MaxValue,
+            DatabaseType.Decimal => decimal.MaxValue,
+            DatabaseType.Date => DateOnly.MaxValue,
+            DatabaseType.Time => TimeOnly.MaxValue,
+            DatabaseType.DateTime => DateTime.MaxValue,
+            DatabaseType.DateTimeOffset => DateTimeOffset.MaxValue,
+            DatabaseType.TimeSpan => TimeSpan.MaxValue,
+            DatabaseType.Guid => Guid.Empty,
+            _ => null,
+        };
+        if (maximum is null) { return false; }
+        var writer = new DatabaseKeyWriter();
+        AppendKeyValue(writer, type.Type, maximum, collation);
+        length = writer.Length;
+        writer.Reset();
+        AppendKeyValue(writer, type.Type, null, collation);
+        length = Math.Max(length, writer.Length);
+        return true;
     }
 
     /// <summary>

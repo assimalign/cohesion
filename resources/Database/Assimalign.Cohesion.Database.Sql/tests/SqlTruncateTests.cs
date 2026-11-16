@@ -92,10 +92,10 @@ public sealed class SqlTruncateTests
         database.DataStorage.GetOwnerPages(old).ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: a cached prepared intent cannot supply the retirement fence for its later live owner")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: skipped prepared owners acquire fresh fences when their later live owner retires")]
     public async Task ExecuteAsync_PreparedOwnerRetiredAgain_ShouldAcquireANewIntentFence()
     {
-        // Arrange: pause the engine pump while the explicit passes retain one prepared intent.
+        // Arrange: pause the engine pump while explicit discovery skips prepared owners.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var workerEntered = new ManualResetEventSlim();
         using var resumeWorker = new ManualResetEventSlim();
@@ -115,7 +115,7 @@ public sealed class SqlTruncateTests
             {
                 database.TableReclamation.Request();
                 database.TableReclamation.RunBatch(timeout.Token);
-                database.TableReclamation.HasWork.ShouldBeTrue();
+                database.TableReclamation.HasWork.ShouldBeFalse();
                 preparedPasses++;
             };
             await ExecAsync(writer, "TRUNCATE t", timeout.Token);

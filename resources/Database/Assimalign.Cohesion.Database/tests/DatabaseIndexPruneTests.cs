@@ -67,7 +67,7 @@ public sealed class DatabaseIndexPruneTests
             case DocumentDatabase documents:
                 coordinator = Coordinator(documents);
                 var catalog = Catalog(documents);
-                ReloadIndexes(catalog);
+                ReloadIndexes(catalog, scheduleReclamation: true);
                 indexes = Indexes(catalog);
                 break;
             case GraphDatabase graph:
@@ -139,7 +139,7 @@ public sealed class DatabaseIndexPruneTests
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_storage")]
     private static extern ref Storage.Storage Storage(TransactionCoordinator coordinator);
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "OpenIndexes")]
-    private static extern void ReloadIndexes(DocumentCatalog catalog);
+    private static extern void ReloadIndexes(DocumentCatalog catalog, bool scheduleReclamation);
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "OpenIndexes")]
     private static extern void ReloadIndexes(GraphStore store);
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_EntriesExamined")]

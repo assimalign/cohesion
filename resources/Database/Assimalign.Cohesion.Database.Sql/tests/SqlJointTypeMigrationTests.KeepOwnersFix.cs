@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Linq;
@@ -125,22 +126,31 @@ public sealed partial class SqlJointTypeMigrationTests
         Table(current).Columns[0].IsNullable.ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Joint heap-owned drops keep pages until retirement; same-name replacements rewrite")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint index drops and replacements keep the heap and reclaim only their tree")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ApplyAsync_HeapOwnedIndexRemoval_ShouldKeepDropAndRewriteReplacement(bool replace)
+    public async Task ApplyAsync_IndexRemoval_ShouldKeepHeapAndReclaimTree(bool replace)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         await using var engine = await Builder(new CrashCaptureSqlStorageStrategy()).BuildAsync(guard.Token);
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
-        await database.ApplySchemaAsync(OwnerDeclaration(false), guard.Token);
-        SeedRaw(database, [7, 8], 1024);
-        // Seed a heap-owned tree explicitly. First-Build declarations also use
-        // heap ownership; additive indexes on an existing heap use alternate owners.
-        await ApplyOrdinaryParityAsync(database, OwnerDeclaration(false), OwnerDeclaration(false, [new("ix_v", ["w"], false)]), guard.Token);
+        SqlCompiledSchema Declaration(bool changed, IReadOnlyList<CompiledSchemaIndex>? indexes = null)
+            => Compiled(OwnerDeclaration(changed, indexes).Tables.Select(table => table.Name != "items" ? table : new CompiledSchemaTable(
+                table.Name, table.RowType, table.Columns.Append(new CompiledSchemaColumn("padding", DatabaseType.String, true, MaxLength: 1000)).ToArray(),
+                table.PrimaryKey, table.Indexes, table.Constraints)).ToArray());
+        await database.ApplySchemaAsync(Declaration(false), guard.Token);
+        SeedRaw(database, [7, 8, new string('x', 1000)], 1024);
+        // Ordinary DDL and first-Build trees use their own physical owners too.
+        await ApplyOrdinaryParityAsync(database, Declaration(false), Declaration(false, [new("ix_v", ["w"], false)]), guard.Token);
         ulong heap = Table(database).ObjectId;
-        IndexOwnerPages(database, heap).ShouldBeGreaterThan(1);
+        var oldTree = database.IndexManager.ExportRegistrations().Single();
+        ulong treeOwner = database.IndexManager.PageOwner(oldTree);
+        treeOwner.ShouldNotBe(heap);
+        IndexOwnerPages(database, treeOwner).ShouldBeGreaterThan(1);
+        var heapPages = database.DataStorage.GetOwnerPages(heap).ToArray();
+        long rewritten = 0;
+        SqlPlanExecutor.RewriteStage = (stage, count) => { if (stage == "Copied") { rewritten += count; } };
         string? classification = null;
         database.SchemaProvisioner.JointStage = stage =>
         {
@@ -149,24 +159,20 @@ public sealed partial class SqlJointTypeMigrationTests
         };
 
         // Act
-        await database.ApplySchemaAsync(OwnerDeclaration(true, replace ? [new("ix_v", ["v"], false)] : []), guard.Token);
-        await DrainReclamationAsync(database, guard.Token);
+        try
+        {
+            await database.ApplySchemaAsync(Declaration(true, replace ? [new("ix_v", ["v"], false)] : []), guard.Token);
+            await DrainReclamationAsync(database, guard.Token);
+        }
+        finally { SqlPlanExecutor.RewriteStage = null; }
 
         // Assert
-        if (replace)
-        {
-            IndexOwnerPages(database, heap).ShouldBe(0);
-            database.DataStorage.HasOwnerPages(heap).ShouldBeFalse();
-            classification.ShouldBe("Joint/RewriteOwner");
-            Table(database).ObjectId.ShouldNotBe(heap);
-        }
-        else
-        {
-            IndexOwnerPages(database, heap).ShouldBeGreaterThan(1);
-            database.DataStorage.HasOwnerPages(heap).ShouldBeTrue();
-            classification.ShouldBe("Joint/KeepOwner");
-            Table(database).ObjectId.ShouldBe(heap);
-        }
+        IndexOwnerPages(database, treeOwner).ShouldBe(0);
+        IndexOwnerPages(database, heap).ShouldBe(0);
+        database.DataStorage.GetOwnerPages(heap).ShouldBe(heapPages);
+        classification.ShouldBe("Joint/KeepOwner");
+        Table(database).ObjectId.ShouldBe(heap);
+        rewritten.ShouldBe(0);
         await using var reader = await database.CreateSessionAsync(guard.Token);
         (await RowsAsync(reader, "SELECT COUNT(*) FROM items WHERE v=7", guard.Token)).Single()[0].ShouldBe(1024L);
     }

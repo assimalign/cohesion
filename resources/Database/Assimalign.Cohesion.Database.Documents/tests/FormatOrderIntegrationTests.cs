@@ -14,15 +14,18 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 public sealed class FormatOrderIntegrationTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents] - Older model and B-tree formats have one stable refusal without any file write (#1744, #1809, #1644)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Open_OlderModelAndPageFormats_ShouldKeepRefusalOrderAndEveryByte(bool clean)
+    [InlineData(false, 2)]
+    [InlineData(true, 2)]
+    [InlineData(false, 3)]
+    [InlineData(true, 3)]
+    public async Task Open_OlderModelAndPageFormats_ShouldKeepRefusalOrderAndEveryByte(bool clean, int format)
     {
         // Arrange: build the image through the existing clean/crashed refusal fixture.
         string root = Path.Combine(Path.GetTempPath(), "cohesion-Documents-format-order-" + Guid.NewGuid().ToString("N"));
         try
         {
-            await FormatProbeCrash.SeedAsync("Documents", root, legacy: true, (clean ? "clean-" : "") + "legacy-index2");
+            await FormatProbeCrash.SeedAsync("Documents", root, legacy: true,
+                (clean ? "clean-" : "") + (format == 2 ? "legacy-index2" : "index3-index2"));
             if (!clean) { FormatProbeCrash.AssertUncommittedImages(root); }
             var before = FormatProbeCrash.Snapshot(root);
             // Act / Assert: repeat after disposal so a refusal cannot silently scrub/checkpoint.
@@ -34,7 +37,7 @@ public sealed class FormatOrderIntegrationTests
                         await engine.OpenDatabaseAsync("probe", CancellationToken.None));
                     failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06105");
                     failure.Message.ShouldNotContain("CK06101", Case.Sensitive);
-                    failure.Message.ShouldContain("Document catalog kind 4 format: found 2, supported 3", Case.Sensitive);
+                    failure.Message.ShouldContain($"Document catalog kind 4 format: found {format}, supported 4", Case.Sensitive);
                 }
                 FormatProbeCrash.AssertUnchanged(root, before);
             }

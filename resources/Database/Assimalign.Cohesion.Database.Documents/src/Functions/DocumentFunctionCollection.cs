@@ -22,7 +22,7 @@ public sealed class DocumentFunctionCollection : IReadOnlyCollection<DocumentFun
         _ensureMutable = ensureMutable;
         foreach (var definition in OqlFunctions.All)
         {
-            if (DocumentFunctionCatalog.IsSpecial(definition.Name)) { continue; }
+            if (definition.WindowKind != OqlWindowFunctionKind.None || DocumentFunctionCatalog.IsSpecial(definition.Name)) { continue; }
             if (definition.IsAggregate)
             {
                 if (definition.Name == "COUNT") { Add(new DocumentBuiltinAggregateFunction(definition, 0)); }

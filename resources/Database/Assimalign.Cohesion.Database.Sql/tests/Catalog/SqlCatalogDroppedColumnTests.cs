@@ -57,7 +57,8 @@ public sealed class SqlCatalogDroppedColumnTests
 
         // An index on the re-added column binds by name.
         await catalog.CreateIndexAsync(new SqlCatalogIndex(live.ObjectId, "ix_b", ["b"], false),
-            [new BTreeIndexRegistration(live.ObjectId, new IndexDefinition("ix_b", IndexKind.BTree, false), 9)]);
+            [await PreparedCatalogIndexes.CreateAsync(catalog, storage, live.ObjectId,
+                new IndexDefinition("ix_b", IndexKind.BTree, false))]);
 
         // ...and after a reopen without a checkpoint.
         using var reopenedStorage = SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream());

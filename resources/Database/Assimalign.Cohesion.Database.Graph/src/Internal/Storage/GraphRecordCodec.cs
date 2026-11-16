@@ -211,9 +211,24 @@ internal static class GraphRecordCodec
     /// <returns>The key prefix.</returns>
     /// <exception cref="ArgumentException">The value is not a supported index scalar.</exception>
     /// <exception cref="GraphElementTooLargeException">The value encodes past <see cref="MaximumKeyPrefix"/> bytes.</exception>
-    internal static IndexKey Key(object? value) => TryKey(value, out var key) ? key
-        : throw new GraphElementTooLargeException(
-            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphRecordCodecKeyFailure, key.Length, MaximumKeyPrefix));
+    internal static IndexKey Key(object? value)
+    {
+        long length = KeyLength(value);
+        if (length > MaximumKeyPrefix)
+        { throw new GraphElementTooLargeException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.GraphRecordCodecKeyFailure, length, MaximumKeyPrefix)); }
+        TryKey(value, out var key);
+        return key;
+    }
+
+    // Count the binary UTF-16BE zero escapes without allocating the encoded value.
+    internal static long KeyLength(object? value)
+    {
+        if (value is not string text) { return value is null ? 1 : value is bool ? 2 : 9; }
+        long length = 3L + 2L * text.Length;
+        foreach (char character in text)
+        { length += (character <= 255 ? 1 : 0) + ((character & 255) == 0 ? 1 : 0); }
+        return length;
+    }
 
     /// <summary>
     /// The index key prefix of a property value, or <see langword="false"/> when it encodes past
@@ -221,11 +236,12 @@ internal static class GraphRecordCodec
     /// matches nothing.
     /// </summary>
     /// <param name="value">The property value.</param>
-    /// <param name="key">The key prefix, oversized when the method returns <see langword="false"/>.</param>
+    /// <param name="key">The key prefix, default when the method returns <see langword="false"/>.</param>
     /// <returns><see langword="true"/> when the key fits.</returns>
     /// <exception cref="ArgumentException">The value is not a supported index scalar.</exception>
     internal static bool TryKey(object? value, out IndexKey key)
     {
+        if (KeyLength(value) > MaximumKeyPrefix) { key = default; return false; }
         var writer = new DatabaseKeyWriter();
         key = value switch
         {

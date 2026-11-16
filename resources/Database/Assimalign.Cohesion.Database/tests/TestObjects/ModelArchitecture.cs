@@ -158,6 +158,9 @@ internal static class ModelArchitecture
     private static Layer GetLayer(string path)
     {
         string normalized = path.Replace('\\', '/');
+        // The Indexing Build module is kernel-owned Storage infrastructure even when
+        // compiled into a model. Check its dependencies as Storage, never as unchecked infrastructure.
+        if (normalized.Contains("/Assimalign.Cohesion.Database.Indexing/shared/Build/", StringComparison.Ordinal)) { return Layer.Storage; }
         if (normalized.Contains("/src/Internal/Storage/", StringComparison.Ordinal) || normalized.Contains("/src/Storage/", StringComparison.Ordinal)) { return Layer.Storage; }
         if (normalized.Contains("/src/Internal/Catalog/", StringComparison.Ordinal) || normalized.Contains("/src/Catalog/", StringComparison.Ordinal)) { return Layer.Catalog; }
         // Resources, assembly attributes and their generated accessors are shared infrastructure.
@@ -182,6 +185,14 @@ internal static class ModelArchitecture
         violations.ShouldContain(value => value.Contains("Catalog references Engine", StringComparison.Ordinal));
         violations.ShouldContain(value => value.Contains("Storage references Catalog", StringComparison.Ordinal));
         violations.ShouldContain(value => value.Contains("Storage references Engine", StringComparison.Ordinal));
+
+        var sharedProbe = CSharpCompilation.Create("SharedKernelArchitectureProbe",
+        [
+            CSharpSyntaxTree.ParseText("internal class Engine { internal static void Run() {} }", path: "/src/Engine.cs"),
+            CSharpSyntaxTree.ParseText("internal class Shared { internal void Run() { Engine.Run(); } }", path: "/Assimalign.Cohesion.Database.Indexing/shared/Build/Probe.cs"),
+        ], references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        sharedProbe.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        FindViolations(sharedProbe, frameworkAssemblies).ShouldContain(value => value.Contains("Storage references Engine", StringComparison.Ordinal));
 
         // A matching namespace must not hide an outside assembly, including in generic arguments.
         var outside = CSharpCompilation.Create("Disallowed.Assembly",

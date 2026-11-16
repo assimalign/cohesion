@@ -100,14 +100,14 @@ public sealed class OqlLineCommentTests
     {
         // Arrange
         string separator = Terminator(terminator);
-        string oql = "-- note" + separator + "-- another note" + separator + "MERGE INTO people";
+        string oql = "-- note" + separator + "-- another note" + separator + "DEFINE people";
 
         // Act
         var diagnostic = Parse(oql).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
         diagnostic.Code.ShouldBe("CK00001");
-        diagnostic.Start.ShouldBe(oql.IndexOf("MERGE", StringComparison.Ordinal));
+        diagnostic.Start.ShouldBe(oql.IndexOf("DEFINE", StringComparison.Ordinal));
         diagnostic.Line.ShouldBe(3);
     }
 

@@ -21,7 +21,17 @@ public sealed class StorageTempRunReader : IDisposable
     private int _used;
     private bool _disposed;
     private bool _failed;
+    private int _seekOffset;
+    private readonly bool _seeked;
     internal StorageTempRunReader(StorageTempRun run, Memory<byte> page) { _run = run; _page = page; }
+    internal StorageTempRunReader(StorageTempRun run, Memory<byte> page, long position)
+    {
+        _run = run; _page = page; _seeked = true;
+        _pageIndex = position / StorageTempRun.PayloadSize;
+        _seekOffset = (int)(position % StorageTempRun.PayloadSize);
+        // EOF is handled without reading a nonexistent page, including a full last page.
+        if (position == run.Position) { _records = run.RecordCount; _pageIndex = run.PageCount; _seekOffset = 0; }
+    }
 
     /// <summary>Copies the next record into a caller-owned destination.</summary>
     /// <param name="destination">At least the run's MaximumRecordLength bytes.</param>
@@ -45,8 +55,8 @@ public sealed class StorageTempRunReader : IDisposable
             try
             {
                 _run.Check(); cancellationToken.ThrowIfCancellationRequested();
-                if (_records == 0 && _pageIndex == 0) { _run.ValidateLength(); }
-                if (_records == _run.RecordCount)
+                if (_records == 0) { _run.ValidateLength(); }
+                if (!_seeked && _records == _run.RecordCount || _seeked && _pageIndex == _run.PageCount && _position == _used)
                 {
                     _run.ValidateLength();
                     if (_position != _used || _pageIndex != _run.PageCount) { throw StorageTempException.Damage(); }
@@ -56,7 +66,8 @@ public sealed class StorageTempRunReader : IDisposable
                 Read(header, cancellationToken);
                 int size = BinaryPrimitives.ReadInt32LittleEndian(header);
                 if (size < 0 || size > _run.MaximumRecordLength) { throw StorageTempException.Damage(); }
-                Read(destination[..size], cancellationToken); _records++;
+                Read(destination[..size], cancellationToken);
+                _records++;
                 length = size; return true;
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -85,7 +96,8 @@ public sealed class StorageTempRunReader : IDisposable
                     used <= 0 || used > StorageTempRun.PayloadSize ||
                     (_pageIndex + 1 < _run.PageCount && used != StorageTempRun.PayloadSize) || crc != Crc32C.Compute(page))
                 { throw StorageTempException.Damage(); }
-                _used = used; _position = 0; _pageIndex++;
+                _used = used; _position = _seekOffset; _seekOffset = 0; _pageIndex++;
+                if (_position >= _used) { throw StorageTempException.Damage(); }
             }
             int take = Math.Min(destination.Length, _used - _position);
             _page.Span.Slice(StorageTempRun.HeaderSize + _position, take).CopyTo(destination);

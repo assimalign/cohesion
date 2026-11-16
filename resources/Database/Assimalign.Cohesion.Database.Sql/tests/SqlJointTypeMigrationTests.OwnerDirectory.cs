@@ -58,6 +58,7 @@ public sealed partial class SqlJointTypeMigrationTests
             await writer.ExecuteAsync("INSERT INTO items VALUES " + string.Join(',', Enumerable.Range(start, 64).Select(id =>
                 $"({id},'{id:D4}{new string('a', 396)}','{id:D4}{new string('b', 396)}')")), cancellationToken: token);
         }
+        await SeedUnregisteredHeapTreeAsync(db, owner, 256, token);
         long[] pages = ScanDirectoryPages(db, owner);
         pages.Length.ShouldBeGreaterThan(10);
         await db.SchemaProvisioner.ApplyAsync(RetirementDeclaration(false).Compile(), token);
@@ -100,6 +101,11 @@ public sealed partial class SqlJointTypeMigrationTests
             var db = await engine.OpenDatabaseAsync("typed", guard.Token);
             var snapshot = OwnerDirectory(db.DataStorage, seed.Owner);
             snapshot.Select(page => (long)page).ShouldBe(seed.Pages);
+            // The previous declaration's dropped tree has its own resumable receipt now.
+            // Settle that independent retirement before measuring this heap DROP's boundary.
+            await DrainReclamationAsync(db, guard.Token);
+            db.DataStorage.WriteBackDirtyPages(int.MaxValue);
+            db.CatalogStorage.WriteBackDirtyPages(int.MaxValue);
             long before = image.AllocatedBytes;
             if (run != 0) { image.VolumeCapacityBytes = before + need - (run == 2 ? Page.Size : 0); }
             int intents = 0;
@@ -142,6 +148,7 @@ public sealed partial class SqlJointTypeMigrationTests
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         var seed = await SeedDirectoryRetirementAsync(false, guard.Token);
         var samples = new List<long[]>();
+        var expectedSamples = new List<long[]>();
         foreach (int rows in new[] { 512, 8192 })
         {
             var image = seed.Image.CaptureDurableImages();
@@ -170,6 +177,8 @@ public sealed partial class SqlJointTypeMigrationTests
                 engine.BeforeProvisioning = db =>
                 {
                     untouchedPages = db.DataStorage.GetOwnerPages(db.Catalog.Tables.Single(table => table.Name == "untouched").ObjectId).Count;
+                    expectedSamples.Add(seed.Pages.Concat(db.IndexManager.ExportRegistrations().Where(index => index.ObjectId == seed.Owner)
+                        .SelectMany(index => db.DataStorage.GetOwnerIndexPages(db.IndexManager.PageOwner(index)).Select(page => (long)page))).Order().ToArray());
                     db.SchemaProvisioner.JointSpaceCounting = () =>
                     {
                         admissions++;
@@ -206,7 +215,7 @@ public sealed partial class SqlJointTypeMigrationTests
             (await RowsAsync(reader, "SELECT COUNT(*) FROM untouched", guard.Token)).Single()[0].ShouldBe((long)rows);
             _output.WriteLine($"directory admission: untouched rows={rows}, heap pages={untouchedPages}; visits={visits.Count}; retiring index pages={seed.Pages.Length}; foreign visits={visits.Count(page => !seed.Pages.Contains(page))}");
         }
-        foreach (var sample in samples) { sample.Order().ShouldBe(seed.Pages); }
+        for (int index = 0; index < samples.Count; index++) { samples[index].Order().ShouldBe(expectedSamples[index]); }
         samples[1].Length.ShouldBe(samples[0].Length);
     }
 }

@@ -32,7 +32,7 @@ internal static partial class DocumentPlanExecutor
     };
 
     private static bool Streams(DocumentLogicalPlan logical)
-        => !logical.IsGrouped && !logical.Query.IsDistinct && logical.Query.OrderBy.Count == 0;
+        => !DocumentPlanner.HasWindows(logical.Query) && !logical.IsGrouped && !logical.Query.IsDistinct && logical.Query.OrderBy.Count == 0;
 
     private static async ValueTask<DatabaseResult> ExecuteFromAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentStatementPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken,

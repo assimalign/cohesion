@@ -1,0 +1,2878 @@
+{
+  "version": "PostgreSQL 17.11",
+  "setup": [
+    "CREATE TABLE t(id INT,c BOOLEAN,s SMALLINT,i INT,d NUMERIC(10,8),r REAL,c4 CHAR(4),txt TEXT,amount NUMERIC)",
+    "INSERT INTO t VALUES(1,FALSE,NULL,100000,1.23456780,NULL,'a','a',2.5),(2,TRUE,2,7,1.23456781,NULL,'a','a',3.5),(3,FALSE,NULL,100000,NULL,2.5,'b','b',4.5)"
+  ],
+  "cases": [
+    {
+      "id": 0,
+      "shape": "columns",
+      "sql": "SELECT CASE WHEN c THEN 1 ELSE 2.5 END AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          "2.5"
+        ],
+        [
+          "1"
+        ],
+        [
+          "2.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 1,
+      "shape": "distinct",
+      "sql": "SELECT DISTINCT CASE WHEN c THEN 1 ELSE 2.5 END AS c0 FROM t ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          "1"
+        ],
+        [
+          "2.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 2,
+      "shape": "key",
+      "sql": "SELECT CASE WHEN c THEN 1 ELSE 2.5 END AS c0,COUNT(*) AS c1 FROM t GROUP BY CASE WHEN c THEN 1 ELSE 2.5 END ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          "1",
+          "1"
+        ],
+        [
+          "2.5",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "bigint"
+      ]
+    },
+    {
+      "id": 3,
+      "shape": "sets",
+      "sql": "SELECT CASE WHEN c THEN 1 ELSE 2.5 END AS c0,COUNT(*) AS c1 FROM t GROUP BY ROLLUP(CASE WHEN c THEN 1 ELSE 2.5 END) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "1",
+          "1"
+        ],
+        [
+          "2.5",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "bigint"
+      ]
+    },
+    {
+      "id": 4,
+      "shape": "sets",
+      "sql": "SELECT CASE WHEN c THEN 1 ELSE 2.5 END AS c0,COUNT(*) AS c1 FROM t GROUP BY CUBE(CASE WHEN c THEN 1 ELSE 2.5 END) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "1",
+          "1"
+        ],
+        [
+          "2.5",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "bigint"
+      ]
+    },
+    {
+      "id": 5,
+      "shape": "sets",
+      "sql": "SELECT CASE WHEN c THEN 1 ELSE 2.5 END AS c0,COUNT(*) AS c1 FROM t GROUP BY GROUPING SETS((CASE WHEN c THEN 1 ELSE 2.5 END),()) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "1",
+          "1"
+        ],
+        [
+          "2.5",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "bigint"
+      ]
+    },
+    {
+      "id": 6,
+      "shape": "having",
+      "sql": "SELECT CASE WHEN c THEN 1 ELSE 2.5 END AS c0,COUNT(*) AS c1 FROM t GROUP BY CASE WHEN c THEN 1 ELSE 2.5 END HAVING CASE WHEN c THEN 1 ELSE 2.5 END IS NOT NULL ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          "1",
+          "1"
+        ],
+        [
+          "2.5",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "bigint"
+      ]
+    },
+    {
+      "id": 7,
+      "shape": "window",
+      "sql": "SELECT CASE WHEN c THEN 1 ELSE 2.5 END AS c0,ROW_NUMBER() OVER (ORDER BY id) AS c1 FROM t ORDER BY id",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          "2.5",
+          "1"
+        ],
+        [
+          "1",
+          "2"
+        ],
+        [
+          "2.5",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "bigint"
+      ]
+    },
+    {
+      "id": 8,
+      "shape": "aggregate-SUM",
+      "sql": "SELECT SUM(CASE WHEN c THEN 1 ELSE 2.5 END) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 0,
+      "vals": [
+        [
+          "6.0"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 9,
+      "shape": "aggregate-AVG",
+      "sql": "SELECT AVG(CASE WHEN c THEN 1 ELSE 2.5 END) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 0,
+      "vals": [
+        [
+          "2.0000000000000000"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 10,
+      "shape": "aggregate-MIN",
+      "sql": "SELECT MIN(CASE WHEN c THEN 1 ELSE 2.5 END) AS c0 FROM t",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 11,
+      "shape": "aggregate-MAX",
+      "sql": "SELECT MAX(CASE WHEN c THEN 1 ELSE 2.5 END) AS c0 FROM t",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          "2.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 12,
+      "shape": "aggregate-COUNT(DISTINCT",
+      "sql": "SELECT COUNT(DISTINCT CASE WHEN c THEN 1 ELSE 2.5 END) AS c0 FROM t",
+      "contract": "",
+      "source": 0,
+      "vals": [
+        [
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 13,
+      "shape": "window-input",
+      "sql": "SELECT SUM(CASE WHEN c THEN 1 ELSE 2.5 END) OVER (ORDER BY id) AS c0 FROM t ORDER BY id",
+      "contract": "sum-avg",
+      "source": 0,
+      "vals": [
+        [
+          "2.5"
+        ],
+        [
+          "3.5"
+        ],
+        [
+          "6.0"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 14,
+      "shape": "grouped-output",
+      "sql": "SELECT COALESCE(MAX(CASE WHEN c THEN 1 ELSE 2.5 END),0::NUMERIC) AS c0,COUNT(*) AS c1 FROM t",
+      "contract": "grouped-output",
+      "source": 0,
+      "vals": [
+        [
+          "2.5",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "bigint"
+      ]
+    },
+    {
+      "id": 15,
+      "shape": "statistics",
+      "sql": "SELECT VAR_POP(CASE WHEN c THEN 1 ELSE 2.5 END) AS c0,VAR_SAMP(CASE WHEN c THEN 1 ELSE 2.5 END) AS c1,STDDEV_POP(CASE WHEN c THEN 1 ELSE 2.5 END) AS c2,STDDEV_SAMP(CASE WHEN c THEN 1 ELSE 2.5 END) AS c3 FROM t",
+      "contract": "statistics",
+      "source": 0,
+      "vals": [
+        [
+          "0.50000000000000000000",
+          "0.75000000000000000000",
+          "0.70710678118654752440",
+          "0.86602540378443864676"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "numeric",
+        "numeric",
+        "numeric"
+      ]
+    },
+    {
+      "id": 16,
+      "shape": "columns",
+      "sql": "SELECT COALESCE(s,i) AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          "100000"
+        ],
+        [
+          "2"
+        ],
+        [
+          "100000"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer"
+      ]
+    },
+    {
+      "id": 17,
+      "shape": "distinct",
+      "sql": "SELECT DISTINCT COALESCE(s,i) AS c0 FROM t ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          "2"
+        ],
+        [
+          "100000"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer"
+      ]
+    },
+    {
+      "id": 18,
+      "shape": "key",
+      "sql": "SELECT COALESCE(s,i) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(s,i) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 19,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(s,i) AS c0,COUNT(*) AS c1 FROM t GROUP BY ROLLUP(COALESCE(s,i)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 20,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(s,i) AS c0,COUNT(*) AS c1 FROM t GROUP BY CUBE(COALESCE(s,i)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 21,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(s,i) AS c0,COUNT(*) AS c1 FROM t GROUP BY GROUPING SETS((COALESCE(s,i)),()) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 22,
+      "shape": "having",
+      "sql": "SELECT COALESCE(s,i) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(s,i) HAVING COALESCE(s,i) IS NOT NULL ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 23,
+      "shape": "window",
+      "sql": "SELECT COALESCE(s,i) AS c0,ROW_NUMBER() OVER (ORDER BY id) AS c1 FROM t ORDER BY id",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          "100000",
+          "1"
+        ],
+        [
+          "2",
+          "2"
+        ],
+        [
+          "100000",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 24,
+      "shape": "aggregate-SUM",
+      "sql": "SELECT SUM(COALESCE(s,i)) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 16,
+      "vals": [
+        [
+          "200002"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 25,
+      "shape": "aggregate-AVG",
+      "sql": "SELECT AVG(COALESCE(s,i)) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 16,
+      "vals": [
+        [
+          "66667.333333333333"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 26,
+      "shape": "aggregate-MIN",
+      "sql": "SELECT MIN(COALESCE(s,i)) AS c0 FROM t",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer"
+      ]
+    },
+    {
+      "id": 27,
+      "shape": "aggregate-MAX",
+      "sql": "SELECT MAX(COALESCE(s,i)) AS c0 FROM t",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          "100000"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer"
+      ]
+    },
+    {
+      "id": 28,
+      "shape": "aggregate-COUNT(DISTINCT",
+      "sql": "SELECT COUNT(DISTINCT COALESCE(s,i)) AS c0 FROM t",
+      "contract": "",
+      "source": 16,
+      "vals": [
+        [
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 29,
+      "shape": "window-input",
+      "sql": "SELECT SUM(COALESCE(s,i)) OVER (ORDER BY id) AS c0 FROM t ORDER BY id",
+      "contract": "sum-avg",
+      "source": 16,
+      "vals": [
+        [
+          "100000"
+        ],
+        [
+          "100002"
+        ],
+        [
+          "200002"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 30,
+      "shape": "grouped-output",
+      "sql": "SELECT COALESCE(MAX(COALESCE(s,i)),0::NUMERIC) AS c0,COUNT(*) AS c1 FROM t",
+      "contract": "grouped-output",
+      "source": 16,
+      "vals": [
+        [
+          "100000",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "bigint"
+      ]
+    },
+    {
+      "id": 31,
+      "shape": "statistics",
+      "sql": "SELECT VAR_POP(COALESCE(s,i)) AS c0,VAR_SAMP(COALESCE(s,i)) AS c1,STDDEV_POP(COALESCE(s,i)) AS c2,STDDEV_SAMP(COALESCE(s,i)) AS c3 FROM t",
+      "contract": "statistics",
+      "source": 16,
+      "vals": [
+        [
+          "2222133334.22222222",
+          "3333200001.33333333",
+          "47139.50927006",
+          "57733.87221842"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "numeric",
+        "numeric",
+        "numeric"
+      ]
+    },
+    {
+      "id": 32,
+      "shape": "columns",
+      "sql": "SELECT COALESCE(d,r) AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          "1.2345678"
+        ],
+        [
+          "1.2345678"
+        ],
+        [
+          "2.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 33,
+      "shape": "distinct",
+      "sql": "SELECT DISTINCT COALESCE(d,r) AS c0 FROM t ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          "1.2345678"
+        ],
+        [
+          "2.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 34,
+      "shape": "key",
+      "sql": "SELECT COALESCE(d,r) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(d,r) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          "1.2345678",
+          "2"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 35,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(d,r) AS c0,COUNT(*) AS c1 FROM t GROUP BY ROLLUP(COALESCE(d,r)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "1.2345678",
+          "2"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 36,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(d,r) AS c0,COUNT(*) AS c1 FROM t GROUP BY CUBE(COALESCE(d,r)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "1.2345678",
+          "2"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 37,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(d,r) AS c0,COUNT(*) AS c1 FROM t GROUP BY GROUPING SETS((COALESCE(d,r)),()) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "1.2345678",
+          "2"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 38,
+      "shape": "having",
+      "sql": "SELECT COALESCE(d,r) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(d,r) HAVING COALESCE(d,r) IS NOT NULL ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          "1.2345678",
+          "2"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 39,
+      "shape": "window",
+      "sql": "SELECT COALESCE(d,r) AS c0,ROW_NUMBER() OVER (ORDER BY id) AS c1 FROM t ORDER BY id",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "1.2345678",
+          "2"
+        ],
+        [
+          "2.5",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 40,
+      "shape": "aggregate-SUM",
+      "sql": "SELECT SUM(COALESCE(d,r)) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 32,
+      "vals": [
+        [
+          "4.9691353"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 41,
+      "shape": "aggregate-AVG",
+      "sql": "SELECT AVG(COALESCE(d,r)) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 32,
+      "vals": [
+        [
+          "1.6563785076141357"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 42,
+      "shape": "aggregate-MIN",
+      "sql": "SELECT MIN(COALESCE(d,r)) AS c0 FROM t",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          "1.2345678"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 43,
+      "shape": "aggregate-MAX",
+      "sql": "SELECT MAX(COALESCE(d,r)) AS c0 FROM t",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          "2.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 44,
+      "shape": "aggregate-COUNT(DISTINCT",
+      "sql": "SELECT COUNT(DISTINCT COALESCE(d,r)) AS c0 FROM t",
+      "contract": "",
+      "source": 32,
+      "vals": [
+        [
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 45,
+      "shape": "window-input",
+      "sql": "SELECT SUM(COALESCE(d,r)) OVER (ORDER BY id) AS c0 FROM t ORDER BY id",
+      "contract": "sum-avg",
+      "source": 32,
+      "vals": [
+        [
+          "1.2345678"
+        ],
+        [
+          "2.4691355"
+        ],
+        [
+          "4.9691353"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 46,
+      "shape": "grouped-output",
+      "sql": "SELECT COALESCE(MAX(COALESCE(d,r)),0::NUMERIC) AS c0,COUNT(*) AS c1 FROM t",
+      "contract": "grouped-output",
+      "source": 32,
+      "vals": [
+        [
+          "2.5",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 47,
+      "shape": "statistics",
+      "sql": "SELECT VAR_POP(COALESCE(d,r)) AS c0,VAR_SAMP(COALESCE(d,r)) AS c1,STDDEV_POP(COALESCE(d,r)) AS c2,STDDEV_SAMP(COALESCE(d,r)) AS c3 FROM t",
+      "contract": "statistics",
+      "source": 32,
+      "vals": [
+        [
+          "0.3558486112076764",
+          "0.5337729168115146",
+          "0.59653047802076",
+          "0.7305976435846988"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "double precision",
+        "double precision",
+        "double precision"
+      ]
+    },
+    {
+      "id": 48,
+      "shape": "columns",
+      "sql": "SELECT COALESCE(c4,'x') AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "source": 48,
+      "vals": [
+        [
+          "a   "
+        ],
+        [
+          "a   "
+        ],
+        [
+          "b   "
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character"
+      ]
+    },
+    {
+      "id": 49,
+      "shape": "distinct",
+      "sql": "SELECT DISTINCT COALESCE(c4,'x') AS c0 FROM t ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 48,
+      "vals": [
+        [
+          "a   "
+        ],
+        [
+          "b   "
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character"
+      ]
+    },
+    {
+      "id": 50,
+      "shape": "key",
+      "sql": "SELECT COALESCE(c4,'x') AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(c4,'x') ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 48,
+      "vals": [
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 51,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(c4,'x') AS c0,COUNT(*) AS c1 FROM t GROUP BY ROLLUP(COALESCE(c4,'x')) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 48,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 52,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(c4,'x') AS c0,COUNT(*) AS c1 FROM t GROUP BY CUBE(COALESCE(c4,'x')) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 48,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 53,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(c4,'x') AS c0,COUNT(*) AS c1 FROM t GROUP BY GROUPING SETS((COALESCE(c4,'x')),()) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 48,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 54,
+      "shape": "having",
+      "sql": "SELECT COALESCE(c4,'x') AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(c4,'x') HAVING COALESCE(c4,'x') IS NOT NULL ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 48,
+      "vals": [
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 55,
+      "shape": "window",
+      "sql": "SELECT COALESCE(c4,'x') AS c0,ROW_NUMBER() OVER (ORDER BY id) AS c1 FROM t ORDER BY id",
+      "contract": "",
+      "source": 48,
+      "vals": [
+        [
+          "a   ",
+          "1"
+        ],
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 56,
+      "shape": "string-aggregate",
+      "sql": "SELECT STRING_AGG(COALESCE(c4,'x'),',' ORDER BY id) AS c0 FROM t",
+      "contract": "",
+      "source": 48,
+      "vals": [
+        [
+          "a,a,b"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "text"
+      ]
+    },
+    {
+      "id": 57,
+      "shape": "array-aggregate",
+      "sql": "SELECT ARRAY_AGG(COALESCE(c4,'x') ORDER BY id) AS c0 FROM t",
+      "contract": "array-agg",
+      "source": 48,
+      "vals": [
+        [
+          "[\"a   \",\"a   \",\"b   \"]"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character[]"
+      ]
+    },
+    {
+      "id": 58,
+      "shape": "grouped-output",
+      "sql": "SELECT COALESCE(MAX(COALESCE(c4,'x')),'x') AS c0,COUNT(*) AS c1 FROM t",
+      "contract": "grouped-output",
+      "source": 48,
+      "vals": [
+        [
+          "b   ",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 59,
+      "shape": "columns",
+      "sql": "SELECT CASE WHEN c THEN 16777217 ELSE 16777216::REAL END AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          "1.6777216e+07"
+        ],
+        [
+          "1.6777216e+07"
+        ],
+        [
+          "1.6777216e+07"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 60,
+      "shape": "distinct",
+      "sql": "SELECT DISTINCT CASE WHEN c THEN 16777217 ELSE 16777216::REAL END AS c0 FROM t ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          "1.6777216e+07"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 61,
+      "shape": "key",
+      "sql": "SELECT CASE WHEN c THEN 16777217 ELSE 16777216::REAL END AS c0,COUNT(*) AS c1 FROM t GROUP BY CASE WHEN c THEN 16777217 ELSE 16777216::REAL END ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          "1.6777216e+07",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 62,
+      "shape": "sets",
+      "sql": "SELECT CASE WHEN c THEN 16777217 ELSE 16777216::REAL END AS c0,COUNT(*) AS c1 FROM t GROUP BY ROLLUP(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "1.6777216e+07",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 63,
+      "shape": "sets",
+      "sql": "SELECT CASE WHEN c THEN 16777217 ELSE 16777216::REAL END AS c0,COUNT(*) AS c1 FROM t GROUP BY CUBE(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "1.6777216e+07",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 64,
+      "shape": "sets",
+      "sql": "SELECT CASE WHEN c THEN 16777217 ELSE 16777216::REAL END AS c0,COUNT(*) AS c1 FROM t GROUP BY GROUPING SETS((CASE WHEN c THEN 16777217 ELSE 16777216::REAL END),()) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "1.6777216e+07",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 65,
+      "shape": "having",
+      "sql": "SELECT CASE WHEN c THEN 16777217 ELSE 16777216::REAL END AS c0,COUNT(*) AS c1 FROM t GROUP BY CASE WHEN c THEN 16777217 ELSE 16777216::REAL END HAVING CASE WHEN c THEN 16777217 ELSE 16777216::REAL END IS NOT NULL ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          "1.6777216e+07",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 66,
+      "shape": "window",
+      "sql": "SELECT CASE WHEN c THEN 16777217 ELSE 16777216::REAL END AS c0,ROW_NUMBER() OVER (ORDER BY id) AS c1 FROM t ORDER BY id",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          "1.6777216e+07",
+          "1"
+        ],
+        [
+          "1.6777216e+07",
+          "2"
+        ],
+        [
+          "1.6777216e+07",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 67,
+      "shape": "aggregate-SUM",
+      "sql": "SELECT SUM(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 59,
+      "vals": [
+        [
+          "5.0331648e+07"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 68,
+      "shape": "aggregate-AVG",
+      "sql": "SELECT AVG(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 59,
+      "vals": [
+        [
+          "16777216"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 69,
+      "shape": "aggregate-MIN",
+      "sql": "SELECT MIN(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) AS c0 FROM t",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          "1.6777216e+07"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 70,
+      "shape": "aggregate-MAX",
+      "sql": "SELECT MAX(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) AS c0 FROM t",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          "1.6777216e+07"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 71,
+      "shape": "aggregate-COUNT(DISTINCT",
+      "sql": "SELECT COUNT(DISTINCT CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) AS c0 FROM t",
+      "contract": "",
+      "source": 59,
+      "vals": [
+        [
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 72,
+      "shape": "window-input",
+      "sql": "SELECT SUM(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) OVER (ORDER BY id) AS c0 FROM t ORDER BY id",
+      "contract": "sum-avg",
+      "source": 59,
+      "vals": [
+        [
+          "1.6777216e+07"
+        ],
+        [
+          "3.3554432e+07"
+        ],
+        [
+          "5.0331648e+07"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 73,
+      "shape": "grouped-output",
+      "sql": "SELECT COALESCE(MAX(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END),0::NUMERIC) AS c0,COUNT(*) AS c1 FROM t",
+      "contract": "grouped-output",
+      "source": 59,
+      "vals": [
+        [
+          "1.6777216e+07",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 74,
+      "shape": "statistics",
+      "sql": "SELECT VAR_POP(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) AS c0,VAR_SAMP(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) AS c1,STDDEV_POP(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) AS c2,STDDEV_SAMP(CASE WHEN c THEN 16777217 ELSE 16777216::REAL END) AS c3 FROM t",
+      "contract": "statistics",
+      "source": 59,
+      "vals": [
+        [
+          "0",
+          "0",
+          "0",
+          "0"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "double precision",
+        "double precision",
+        "double precision"
+      ]
+    },
+    {
+      "id": 75,
+      "shape": "columns",
+      "sql": "SELECT COALESCE(NULL,s,i,0) AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          "100000"
+        ],
+        [
+          "2"
+        ],
+        [
+          "100000"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer"
+      ]
+    },
+    {
+      "id": 76,
+      "shape": "distinct",
+      "sql": "SELECT DISTINCT COALESCE(NULL,s,i,0) AS c0 FROM t ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          "2"
+        ],
+        [
+          "100000"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer"
+      ]
+    },
+    {
+      "id": 77,
+      "shape": "key",
+      "sql": "SELECT COALESCE(NULL,s,i,0) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(NULL,s,i,0) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 78,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(NULL,s,i,0) AS c0,COUNT(*) AS c1 FROM t GROUP BY ROLLUP(COALESCE(NULL,s,i,0)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 79,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(NULL,s,i,0) AS c0,COUNT(*) AS c1 FROM t GROUP BY CUBE(COALESCE(NULL,s,i,0)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 80,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(NULL,s,i,0) AS c0,COUNT(*) AS c1 FROM t GROUP BY GROUPING SETS((COALESCE(NULL,s,i,0)),()) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 81,
+      "shape": "having",
+      "sql": "SELECT COALESCE(NULL,s,i,0) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(NULL,s,i,0) HAVING COALESCE(NULL,s,i,0) IS NOT NULL ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          "2",
+          "1"
+        ],
+        [
+          "100000",
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 82,
+      "shape": "window",
+      "sql": "SELECT COALESCE(NULL,s,i,0) AS c0,ROW_NUMBER() OVER (ORDER BY id) AS c1 FROM t ORDER BY id",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          "100000",
+          "1"
+        ],
+        [
+          "2",
+          "2"
+        ],
+        [
+          "100000",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 83,
+      "shape": "aggregate-SUM",
+      "sql": "SELECT SUM(COALESCE(NULL,s,i,0)) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 75,
+      "vals": [
+        [
+          "200002"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 84,
+      "shape": "aggregate-AVG",
+      "sql": "SELECT AVG(COALESCE(NULL,s,i,0)) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 75,
+      "vals": [
+        [
+          "66667.333333333333"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 85,
+      "shape": "aggregate-MIN",
+      "sql": "SELECT MIN(COALESCE(NULL,s,i,0)) AS c0 FROM t",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer"
+      ]
+    },
+    {
+      "id": 86,
+      "shape": "aggregate-MAX",
+      "sql": "SELECT MAX(COALESCE(NULL,s,i,0)) AS c0 FROM t",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          "100000"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer"
+      ]
+    },
+    {
+      "id": 87,
+      "shape": "aggregate-COUNT(DISTINCT",
+      "sql": "SELECT COUNT(DISTINCT COALESCE(NULL,s,i,0)) AS c0 FROM t",
+      "contract": "",
+      "source": 75,
+      "vals": [
+        [
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 88,
+      "shape": "window-input",
+      "sql": "SELECT SUM(COALESCE(NULL,s,i,0)) OVER (ORDER BY id) AS c0 FROM t ORDER BY id",
+      "contract": "sum-avg",
+      "source": 75,
+      "vals": [
+        [
+          "100000"
+        ],
+        [
+          "100002"
+        ],
+        [
+          "200002"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 89,
+      "shape": "grouped-output",
+      "sql": "SELECT COALESCE(MAX(COALESCE(NULL,s,i,0)),0::NUMERIC) AS c0,COUNT(*) AS c1 FROM t",
+      "contract": "grouped-output",
+      "source": 75,
+      "vals": [
+        [
+          "100000",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "bigint"
+      ]
+    },
+    {
+      "id": 90,
+      "shape": "statistics",
+      "sql": "SELECT VAR_POP(COALESCE(NULL,s,i,0)) AS c0,VAR_SAMP(COALESCE(NULL,s,i,0)) AS c1,STDDEV_POP(COALESCE(NULL,s,i,0)) AS c2,STDDEV_SAMP(COALESCE(NULL,s,i,0)) AS c3 FROM t",
+      "contract": "statistics",
+      "source": 75,
+      "vals": [
+        [
+          "2222133334.22222222",
+          "3333200001.33333333",
+          "47139.50927006",
+          "57733.87221842"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric",
+        "numeric",
+        "numeric",
+        "numeric"
+      ]
+    },
+    {
+      "id": 91,
+      "shape": "columns",
+      "sql": "SELECT CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          "1.2345678"
+        ],
+        [
+          null
+        ],
+        [
+          "2.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 92,
+      "shape": "distinct",
+      "sql": "SELECT DISTINCT CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END AS c0 FROM t ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          null
+        ],
+        [
+          "1.2345678"
+        ],
+        [
+          "2.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 93,
+      "shape": "key",
+      "sql": "SELECT CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END AS c0,COUNT(*) AS c1 FROM t GROUP BY CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          null,
+          "1"
+        ],
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 94,
+      "shape": "sets",
+      "sql": "SELECT CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END AS c0,COUNT(*) AS c1 FROM t GROUP BY ROLLUP(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          null,
+          "1"
+        ],
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 95,
+      "shape": "sets",
+      "sql": "SELECT CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END AS c0,COUNT(*) AS c1 FROM t GROUP BY CUBE(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          null,
+          "1"
+        ],
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 96,
+      "shape": "sets",
+      "sql": "SELECT CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END AS c0,COUNT(*) AS c1 FROM t GROUP BY GROUPING SETS((CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END),()) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          null,
+          "1"
+        ],
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 97,
+      "shape": "having",
+      "sql": "SELECT CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END AS c0,COUNT(*) AS c1 FROM t GROUP BY CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END HAVING CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END IS NOT NULL ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "2.5",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 98,
+      "shape": "window",
+      "sql": "SELECT CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END AS c0,ROW_NUMBER() OVER (ORDER BY id) AS c1 FROM t ORDER BY id",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          null,
+          "2"
+        ],
+        [
+          "2.5",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 99,
+      "shape": "aggregate-SUM",
+      "sql": "SELECT SUM(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 91,
+      "vals": [
+        [
+          "3.7345676"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 100,
+      "shape": "aggregate-AVG",
+      "sql": "SELECT AVG(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 91,
+      "vals": [
+        [
+          "1.8672838807106018"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 101,
+      "shape": "aggregate-MIN",
+      "sql": "SELECT MIN(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) AS c0 FROM t",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          "1.2345678"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 102,
+      "shape": "aggregate-MAX",
+      "sql": "SELECT MAX(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) AS c0 FROM t",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          "2.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 103,
+      "shape": "aggregate-COUNT(DISTINCT",
+      "sql": "SELECT COUNT(DISTINCT CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) AS c0 FROM t",
+      "contract": "",
+      "source": 91,
+      "vals": [
+        [
+          "2"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 104,
+      "shape": "window-input",
+      "sql": "SELECT SUM(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) OVER (ORDER BY id) AS c0 FROM t ORDER BY id",
+      "contract": "sum-avg",
+      "source": 91,
+      "vals": [
+        [
+          "1.2345678"
+        ],
+        [
+          "1.2345678"
+        ],
+        [
+          "3.7345676"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real"
+      ]
+    },
+    {
+      "id": 105,
+      "shape": "grouped-output",
+      "sql": "SELECT COALESCE(MAX(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END),0::NUMERIC) AS c0,COUNT(*) AS c1 FROM t",
+      "contract": "grouped-output",
+      "source": 91,
+      "vals": [
+        [
+          "2.5",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "real",
+        "bigint"
+      ]
+    },
+    {
+      "id": 106,
+      "shape": "statistics",
+      "sql": "SELECT VAR_POP(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) AS c0,VAR_SAMP(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) AS c1,STDDEV_POP(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) AS c2,STDDEV_SAMP(CASE WHEN c THEN NULL WHEN id=1 THEN d ELSE r END) AS c3 FROM t",
+      "contract": "statistics",
+      "source": 91,
+      "vals": [
+        [
+          "0.40032968760863596",
+          "0.8006593752172719",
+          "0.6327161192893982",
+          "0.89479571703114"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "double precision",
+        "double precision",
+        "double precision"
+      ]
+    },
+    {
+      "id": 107,
+      "shape": "columns",
+      "sql": "SELECT COALESCE(d,0::DOUBLE PRECISION) AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          "1.2345678"
+        ],
+        [
+          "1.23456781"
+        ],
+        [
+          "0"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 108,
+      "shape": "distinct",
+      "sql": "SELECT DISTINCT COALESCE(d,0::DOUBLE PRECISION) AS c0 FROM t ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          "0"
+        ],
+        [
+          "1.2345678"
+        ],
+        [
+          "1.23456781"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 109,
+      "shape": "key",
+      "sql": "SELECT COALESCE(d,0::DOUBLE PRECISION) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(d,0::DOUBLE PRECISION) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          "0",
+          "1"
+        ],
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "1.23456781",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "bigint"
+      ]
+    },
+    {
+      "id": 110,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(d,0::DOUBLE PRECISION) AS c0,COUNT(*) AS c1 FROM t GROUP BY ROLLUP(COALESCE(d,0::DOUBLE PRECISION)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "0",
+          "1"
+        ],
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "1.23456781",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "bigint"
+      ]
+    },
+    {
+      "id": 111,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(d,0::DOUBLE PRECISION) AS c0,COUNT(*) AS c1 FROM t GROUP BY CUBE(COALESCE(d,0::DOUBLE PRECISION)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "0",
+          "1"
+        ],
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "1.23456781",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "bigint"
+      ]
+    },
+    {
+      "id": 112,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(d,0::DOUBLE PRECISION) AS c0,COUNT(*) AS c1 FROM t GROUP BY GROUPING SETS((COALESCE(d,0::DOUBLE PRECISION)),()) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "0",
+          "1"
+        ],
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "1.23456781",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "bigint"
+      ]
+    },
+    {
+      "id": 113,
+      "shape": "having",
+      "sql": "SELECT COALESCE(d,0::DOUBLE PRECISION) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(d,0::DOUBLE PRECISION) HAVING COALESCE(d,0::DOUBLE PRECISION) IS NOT NULL ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          "0",
+          "1"
+        ],
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "1.23456781",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "bigint"
+      ]
+    },
+    {
+      "id": 114,
+      "shape": "window",
+      "sql": "SELECT COALESCE(d,0::DOUBLE PRECISION) AS c0,ROW_NUMBER() OVER (ORDER BY id) AS c1 FROM t ORDER BY id",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          "1.2345678",
+          "1"
+        ],
+        [
+          "1.23456781",
+          "2"
+        ],
+        [
+          "0",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "bigint"
+      ]
+    },
+    {
+      "id": 115,
+      "shape": "aggregate-SUM",
+      "sql": "SELECT SUM(COALESCE(d,0::DOUBLE PRECISION)) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 107,
+      "vals": [
+        [
+          "2.46913561"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 116,
+      "shape": "aggregate-AVG",
+      "sql": "SELECT AVG(COALESCE(d,0::DOUBLE PRECISION)) AS c0 FROM t",
+      "contract": "sum-avg",
+      "source": 107,
+      "vals": [
+        [
+          "0.8230452033333333"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 117,
+      "shape": "aggregate-MIN",
+      "sql": "SELECT MIN(COALESCE(d,0::DOUBLE PRECISION)) AS c0 FROM t",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          "0"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 118,
+      "shape": "aggregate-MAX",
+      "sql": "SELECT MAX(COALESCE(d,0::DOUBLE PRECISION)) AS c0 FROM t",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          "1.23456781"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 119,
+      "shape": "aggregate-COUNT(DISTINCT",
+      "sql": "SELECT COUNT(DISTINCT COALESCE(d,0::DOUBLE PRECISION)) AS c0 FROM t",
+      "contract": "",
+      "source": 107,
+      "vals": [
+        [
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "bigint"
+      ]
+    },
+    {
+      "id": 120,
+      "shape": "window-input",
+      "sql": "SELECT SUM(COALESCE(d,0::DOUBLE PRECISION)) OVER (ORDER BY id) AS c0 FROM t ORDER BY id",
+      "contract": "sum-avg",
+      "source": 107,
+      "vals": [
+        [
+          "1.2345678"
+        ],
+        [
+          "2.46913561"
+        ],
+        [
+          "2.46913561"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision"
+      ]
+    },
+    {
+      "id": 121,
+      "shape": "grouped-output",
+      "sql": "SELECT COALESCE(MAX(COALESCE(d,0::DOUBLE PRECISION)),0::NUMERIC) AS c0,COUNT(*) AS c1 FROM t",
+      "contract": "grouped-output",
+      "source": 107,
+      "vals": [
+        [
+          "1.23456781",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "bigint"
+      ]
+    },
+    {
+      "id": 122,
+      "shape": "statistics",
+      "sql": "SELECT VAR_POP(COALESCE(d,0::DOUBLE PRECISION)) AS c0,VAR_SAMP(COALESCE(d,0::DOUBLE PRECISION)) AS c1,STDDEV_POP(COALESCE(d,0::DOUBLE PRECISION)) AS c2,STDDEV_SAMP(COALESCE(d,0::DOUBLE PRECISION)) AS c3 FROM t",
+      "contract": "statistics",
+      "source": 107,
+      "vals": [
+        [
+          "0.338701703365004",
+          "0.508052555047506",
+          "0.5819808445000608",
+          "0.7127780545495954"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "double precision",
+        "double precision",
+        "double precision",
+        "double precision"
+      ]
+    },
+    {
+      "id": 123,
+      "shape": "columns",
+      "sql": "SELECT COALESCE(c4,txt) AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "source": 123,
+      "vals": [
+        [
+          "a   "
+        ],
+        [
+          "a   "
+        ],
+        [
+          "b   "
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character"
+      ]
+    },
+    {
+      "id": 124,
+      "shape": "distinct",
+      "sql": "SELECT DISTINCT COALESCE(c4,txt) AS c0 FROM t ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 123,
+      "vals": [
+        [
+          "a   "
+        ],
+        [
+          "b   "
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character"
+      ]
+    },
+    {
+      "id": 125,
+      "shape": "key",
+      "sql": "SELECT COALESCE(c4,txt) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(c4,txt) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 123,
+      "vals": [
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 126,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(c4,txt) AS c0,COUNT(*) AS c1 FROM t GROUP BY ROLLUP(COALESCE(c4,txt)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 123,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 127,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(c4,txt) AS c0,COUNT(*) AS c1 FROM t GROUP BY CUBE(COALESCE(c4,txt)) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 123,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 128,
+      "shape": "sets",
+      "sql": "SELECT COALESCE(c4,txt) AS c0,COUNT(*) AS c1 FROM t GROUP BY GROUPING SETS((COALESCE(c4,txt)),()) ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 123,
+      "vals": [
+        [
+          null,
+          "3"
+        ],
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 129,
+      "shape": "having",
+      "sql": "SELECT COALESCE(c4,txt) AS c0,COUNT(*) AS c1 FROM t GROUP BY COALESCE(c4,txt) HAVING COALESCE(c4,txt) IS NOT NULL ORDER BY 1 NULLS FIRST",
+      "contract": "",
+      "source": 123,
+      "vals": [
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "1"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 130,
+      "shape": "window",
+      "sql": "SELECT COALESCE(c4,txt) AS c0,ROW_NUMBER() OVER (ORDER BY id) AS c1 FROM t ORDER BY id",
+      "contract": "",
+      "source": 123,
+      "vals": [
+        [
+          "a   ",
+          "1"
+        ],
+        [
+          "a   ",
+          "2"
+        ],
+        [
+          "b   ",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 131,
+      "shape": "string-aggregate",
+      "sql": "SELECT STRING_AGG(COALESCE(c4,txt),',' ORDER BY id) AS c0 FROM t",
+      "contract": "",
+      "source": 123,
+      "vals": [
+        [
+          "a,a,b"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "text"
+      ]
+    },
+    {
+      "id": 132,
+      "shape": "array-aggregate",
+      "sql": "SELECT ARRAY_AGG(COALESCE(c4,txt) ORDER BY id) AS c0 FROM t",
+      "contract": "array-agg",
+      "source": 123,
+      "vals": [
+        [
+          "[\"a   \",\"a   \",\"b   \"]"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character[]"
+      ]
+    },
+    {
+      "id": 133,
+      "shape": "grouped-output",
+      "sql": "SELECT COALESCE(MAX(COALESCE(c4,txt)),'x') AS c0,COUNT(*) AS c1 FROM t",
+      "contract": "grouped-output",
+      "source": 123,
+      "vals": [
+        [
+          "b   ",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "character",
+        "bigint"
+      ]
+    },
+    {
+      "id": 134,
+      "shape": "window-case",
+      "sql": "SELECT CASE WHEN ROW_NUMBER() OVER (ORDER BY id)=1 THEN 0 ELSE amount END AS c0 FROM t ORDER BY id",
+      "contract": "",
+      "vals": [
+        [
+          "0"
+        ],
+        [
+          "3.5"
+        ],
+        [
+          "4.5"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "numeric"
+      ]
+    },
+    {
+      "id": 135,
+      "shape": "window-order",
+      "sql": "SELECT id AS c0,ROW_NUMBER() OVER () AS c1 FROM t ORDER BY CASE WHEN c THEN 1 ELSE 2.5 END,id",
+      "contract": "",
+      "vals": [
+        [
+          "2",
+          "2"
+        ],
+        [
+          "1",
+          "1"
+        ],
+        [
+          "3",
+          "3"
+        ]
+      ],
+      "state": null,
+      "types": [
+        "integer",
+        "bigint"
+      ]
+    },
+    {
+      "id": 136,
+      "shape": "statistics-skipped",
+      "sql": "SELECT VAR_POP(CAST(COALESCE(1,'x') AS REAL)) AS c0 FROM t",
+      "contract": "",
+      "vals": null,
+      "state": "22P02",
+      "types": null
+    }
+  ]
+}

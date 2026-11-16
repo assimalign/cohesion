@@ -40,7 +40,7 @@ internal sealed partial class SqlExpressionEvaluator
         var contextType = JsonOperandType(json.Context, types: types);
         if (contextType is not (DatabaseType.String or DatabaseType.Character or DatabaseType.Json or DatabaseType.JsonBinary or DatabaseType.Null))
         { throw new SqlPlanningException("CS01069", ErrorMessages.JsonFunctionSignature, json.Context.Location); }
-        var context = BindJsonOperand(json.Context, out SqlCollationCandidate _, statisticsInput, types);
+        var context = BindAlternativeOperand(json.Context, out SqlCollationCandidate _, statisticsInput, types, jsonPosition: true);
         var target = JsonReturning(json);
         var casts = _functions.Types.ResolveCasts(null, target);
         if (_bindingContext == SqlBindingContext.IndexPredicate)
@@ -58,7 +58,7 @@ internal sealed partial class SqlExpressionEvaluator
             ValidateDefault(syntax);
             var defaultTypes = new Dictionary<SqlExpression, DatabaseType>();
             var sourceType = JsonOperandType(syntax, types: defaultTypes);
-            var value = BindJsonOperand(syntax, out SqlCollationCandidate candidate, statisticsInput, defaultTypes);
+            var value = BindAlternativeOperand(syntax, out SqlCollationCandidate candidate, statisticsInput, defaultTypes, jsonPosition: true);
             if (target.Storage.Type is DatabaseType.String or DatabaseType.Character && candidate.Collation is { } declared && declared != _defaultCollation)
             { throw new SqlPlanningException("CS01069", ErrorMessages.JsonFunctionSignature, syntax.Location); }
             var conversions = ResolveExpressionCasts(syntax, SourceDomain(syntax), target, syntax.Location);

@@ -186,7 +186,7 @@ internal static partial class DocumentPlanExecutor
                 return left.Ordinal.CompareTo(right.Ordinal);
             });
         }
-        catch (InvalidOperationException error) when (error.InnerException is DocumentPlanningException or OperationCanceledException)
+        catch (InvalidOperationException error) when (error.InnerException is DatabaseException or ObjectDisposedException or OperationCanceledException)
         { ExceptionDispatchInfo.Capture(error.InnerException).Throw(); throw; }
         long start = applyPage ? Math.Min(plan.Offset, sorted.Count) : 0;
         long end = applyPage ? start + Math.Min(plan.Limit ?? long.MaxValue, sorted.Count - start) : sorted.Count;

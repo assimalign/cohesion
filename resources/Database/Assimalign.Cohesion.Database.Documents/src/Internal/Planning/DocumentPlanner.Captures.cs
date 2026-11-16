@@ -90,6 +90,7 @@ internal sealed partial class DocumentPlanner
             if (select.GroupAs is not null) { grouped = new DocumentBindingScope(select.GroupAs, grouped); }
             foreach (var projection in select.Projections) { if (!Same(projection.Expression, grouped)) { return false; } }
             if (select.Having is not null && !Same(select.Having, grouped)) { return false; }
+            foreach (var window in select.Windows) { if (!Same(window.Specification, grouped)) { return false; } }
             return VisitOrdering(select, grouped, (scope, name) => new DocumentBindingScope(name, scope),
                 (expression, scope, nested) => Same(expression, scope, nested));
         }
@@ -155,6 +156,7 @@ internal sealed partial class DocumentPlanner
             if (select.GroupAs is not null) { grouped = new DocumentBindingScope(select.GroupAs, grouped); }
             foreach (var projection in select.Projections) { Visit(projection.Expression, grouped); }
             if (select.Having is not null) { Visit(select.Having, grouped); }
+            foreach (var window in select.Windows) { Visit(window.Specification, grouped); }
             VisitOrdering(select, grouped, (scope, name) => new DocumentBindingScope(name, scope),
                 (expression, scope, nested) => { Visit(expression, scope, nested); return true; });
         }

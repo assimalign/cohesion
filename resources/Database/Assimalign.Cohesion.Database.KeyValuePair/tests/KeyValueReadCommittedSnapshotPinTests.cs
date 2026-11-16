@@ -202,7 +202,8 @@ public sealed class KeyValueReadCommittedSnapshotPinTests
 
     private static async Task<long> PhysicalEntriesAsync(KeyValueDatabase database)
     {
-        database.IndexManager.TryGetIndex(KeyValueOperationExecutor.KeySpaceObjectId,
+        ulong owner = database.IndexManager.ExportRegistrations().ShouldHaveSingleItem().ObjectId;
+        database.IndexManager.TryGetIndex(owner,
             KeyValueOperationExecutor.PrimaryIndexName, out var index).ShouldBeTrue();
         var reader = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, TestTimeout.Token());
         try

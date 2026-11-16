@@ -57,7 +57,8 @@ public sealed class SqlCatalogSnapshotTests
             DatabaseObjectOwner.Adhoc, null, CancellationToken.None);
         var index = new SqlCatalogIndex(table.ObjectId, "pk_orders", indexColumns, true, isPrimaryKey: true);
         await catalog.PublishTableAsync(table, [index],
-            [new(table.ObjectId, new IndexDefinition(index.Name, IndexKind.BTree, true), 7)],
+            [await PreparedCatalogIndexes.CreateAsync(catalog, storage, table.ObjectId,
+                new IndexDefinition(index.Name, IndexKind.BTree, true))],
             cancellationToken: CancellationToken.None);
         var snapshot = catalog.CaptureSnapshot();
 
@@ -97,7 +98,8 @@ public sealed class SqlCatalogSnapshotTests
         var beforePublish = catalog.CaptureSnapshot();
         var index = new SqlCatalogIndex(table.ObjectId, "pk_orders", ["id"], true, isPrimaryKey: true);
         BTreeIndexRegistration[] registrations =
-            [new(table.ObjectId, new IndexDefinition(index.Name, IndexKind.BTree, true), 7)];
+            [await PreparedCatalogIndexes.CreateAsync(catalog, storage, table.ObjectId,
+                new IndexDefinition(index.Name, IndexKind.BTree, true))];
 
         // Act: keep a read image while the live catalog publishes then drops
         // both definitions. Subsequent lookups must use the captured directory.

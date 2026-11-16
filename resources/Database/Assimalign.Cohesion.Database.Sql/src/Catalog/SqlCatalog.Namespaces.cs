@@ -179,8 +179,9 @@ public sealed partial class SqlCatalog
             foreach (var slot in defaults) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
             _registrationsLocation = registrationsLocation;
             if (indexes.Length != 0) { _registrations = registrations; }
-            return default;
         }
+        IndexReclamationRequested?.Invoke();
+        return default;
     }
 
     private void LoadNamespace(string json, (PageId PageId, int SlotIndex) location)
