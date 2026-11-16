@@ -356,7 +356,7 @@ feature's configuration on the registration verb.
   `Web.Authentication`, not in `Web`). A large area may compose its root from **child roots** —
   packages of generic base abstractions and default implementations pulled into the parent root
   for maintainability, testability, and separation of concerns (precedent:
-  `Assimalign.Cohesion.Database` aggregates `Database.Types`/`Language`/`Storage`/
+  `Assimalign.Cohesion.Database` aggregates `Database.Types`/`Types.Text`/`Language`/`Storage`/
   `Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`). **The dependency arrow always
   points root → child; a child root never references the root** — that is what keeps each child
   independently consumable, and it means a child owns its own vocabulary (value types, enums)
