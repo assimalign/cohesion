@@ -44,12 +44,13 @@ internal sealed partial class SqlPlanExecutor
                             for (int i = start; i < rows.Count; i++)
                             { RetainSelectRow(ref retainedBytes, rows[i], includeWindow: true); if (seen is not null) { RetainSelectRow(ref seenBytes, rows[i], includeWindow: true, overhead: 64); } }
                         }
-                        catch (SqlExecutionException failure) when (CanSpillSetOperation(plan, statement, failure))
+                        catch (SqlExecutionException failure) when (CanSpillSetOperation(statement, failure))
                         {
                             ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes);
                             StartSetUnionSpill(rows, seen, plan, statement, cancellationToken, failure);
                         }
                     }
+                    SqlRowCollector.ObserveBuffer?.Invoke("set-operand", rows);
                 }
             }
             else
@@ -88,7 +89,7 @@ internal sealed partial class SqlPlanExecutor
                             }
                         }
                     }
-                    catch (SqlExecutionException failure) when (CanSpillSetOperation(plan, statement, failure))
+                    catch (SqlExecutionException failure) when (CanSpillSetOperation(statement, failure))
                     {
                         ReleaseSelectMemory(ref operandBytes); ReleaseSelectMemory(ref retainedBytes);
                         ReleaseSelectMemory(ref seenBytes); ReleaseSelectMemory(ref countsBytes);
@@ -110,11 +111,11 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlBoundExpression> conversions, SqlSetOperationPlan plan,
         SqlStatementContext statement, CancellationToken cancellationToken,
         List<object?[]>? destination = null, HashSet<object?[]>? seen = null)
-        => statement.Session is null
-            ? MaterializeSetOperandBaseAsync(operand, conversions, plan, statement, cancellationToken, destination, seen)
-            : !CanSpillSetOperation(plan)
-                ? MaterializeSetOperandBaseAsync(operand, conversions, plan, statement.WithoutSession(), cancellationToken, destination, seen)
-                : MaterializePermittedSetOperandAsync(operand, conversions, plan, statement, cancellationToken, destination, seen);
+        // Root dispatch has evaluated CanSpillSetOperation once and carried its
+        // answer in the existing session slot. Every operand keeps that decision.
+        => statement.Session is not null || destination is not null && SetOperationSpill.For(destination) is not null
+            ? MaterializePermittedSetOperandAsync(operand, conversions, plan, statement, cancellationToken, destination, seen)
+            : MaterializeSetOperandBaseAsync(operand, conversions, plan, statement, cancellationToken, destination, seen);
 
     private async Task<List<object?[]>> MaterializeSetOperandBaseAsync(SqlPlan operand,
         IReadOnlyList<SqlBoundExpression> conversions, SqlSetOperationPlan plan,

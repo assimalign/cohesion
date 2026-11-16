@@ -316,7 +316,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
-            _containsLike |= plan.ContainsLike;
+            ContainsLike |= plan.ContainsLike;
             _metrics = metrics;
             var initialized = InitializeWindow(plan, cancellationToken);
             var result = initialized is SqlSelectPlan scan
@@ -344,7 +344,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
-            _containsLike |= plan.Input.ContainsLike;
+            ContainsLike |= plan.Input.ContainsLike;
             _metrics = statement.Metrics;
             input = InitializeWindow(plan.Input, cancellationToken);
             if (input is SqlJoinPlan joined)

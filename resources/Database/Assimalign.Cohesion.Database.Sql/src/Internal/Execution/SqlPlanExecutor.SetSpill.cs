@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private bool CanSpillSetOperation(SqlSetOperationPlan plan)
-        => CanPipelineSelectRetention() && _definitions.CanSpillValues
+        => CanPipelineSelectRetention() && CanSpillValues
             && plan.Projections.All(projection => projection.Collation.IsFixed) && !HasOperatorSpillCorrelation(plan);
 
     // Set output had no spill permission at the base. Keep its original memory
@@ -27,7 +27,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             return MaterializeSelect(rows, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-                false, evaluator, null, token, spillOwner: CanSpillSetOperation(plan) ? statement.Session : null);
+                false, evaluator, null, token, spillOwner: statement.Session);
         }
         catch (Exception failure) when (statement.Session is not null && SqlOperatorSpillRefusal.IsTemporary(failure))
         { throw SqlOperatorSpillRefusal.Preserve(statement.Metrics, failure, _definitions.StatementMemoryBudget); }
@@ -66,8 +66,8 @@ internal sealed partial class SqlPlanExecutor
         catch (InsufficientExecutionStackException) { return true; } // Optional eligibility never adds a depth refusal.
     }
 
-    private bool CanSpillSetOperation(SqlSetOperationPlan plan, SqlStatementContext statement, SqlExecutionException failure)
-        => statement.Session?.Database.Engine.TempSpace is not null && CanSpillSetOperation(plan)
+    private static bool CanSpillSetOperation(SqlStatementContext statement, SqlExecutionException failure)
+        => statement.Session?.Database.Engine.TempSpace is not null
             && failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode;
 
     private void TryAdmitSetLeft(List<object?[]> left, ref long bytes, SqlSetOperationPlan plan,
@@ -75,7 +75,7 @@ internal sealed partial class SqlPlanExecutor
     {
         if (SetOperandPending.For(left) is not null) { return; }
         try { bytes += AdmitSelectRows(left, token, includeWindow: true); }
-        catch (SqlExecutionException failure) when (CanSpillSetOperation(plan, statement, failure))
+        catch (SqlExecutionException failure) when (CanSpillSetOperation(statement, failure))
         { SetOperandPending.Attach(left, new SetOperandPending(failure), statement.Metrics, plan); }
     }
 
@@ -108,7 +108,7 @@ internal sealed partial class SqlPlanExecutor
                     ? spilled.ReserveReader(statement.Metrics, _definitions.StatementMemoryBudget, converting: true)
                     : AdmitSelectResult(result, token);
             }
-            catch (SqlExecutionException failure) when (CanSpillSetOperation(plan, statement, failure))
+            catch (SqlExecutionException failure) when (CanSpillSetOperation(statement, failure))
             {
                 SetOperandPending.Attach(rows, new(failure, result, null, null, evaluator, conversions), statement.Metrics, plan);
                 result = null; return rows;
@@ -125,7 +125,7 @@ internal sealed partial class SqlPlanExecutor
                     if (seen is not null) { RetainSelectRow(ref seenBytes, converted, includeWindow: true, overhead: 64); seen.Add(converted); }
                     RetainSelectRow(ref retainedBytes, converted, includeWindow: true); rows.Add(converted);
                 }
-                catch (SqlExecutionException failure) when (CanSpillSetOperation(plan, statement, failure))
+                catch (SqlExecutionException failure) when (CanSpillSetOperation(statement, failure))
                 {
                     SetOperandPending.Attach(rows, new(failure, result, reader, converted, evaluator, conversions, resultBytes), statement.Metrics, plan);
                     resultBytes = 0; result = null; reader = null; return rows;
@@ -238,6 +238,7 @@ internal sealed partial class SqlPlanExecutor
     private static IEnumerable<object?[]> ReadSetRows(List<object?[]> rows, CancellationToken token)
     {
         if (SetOperationSpill.For(rows) is not { } stage) { return rows; }
+        if (rows.Count != 0) { throw new InvalidOperationException(ErrorMessages.SetStageRowsRetained); }
         stage.Complete(token); return stage.Read(token);
     }
 

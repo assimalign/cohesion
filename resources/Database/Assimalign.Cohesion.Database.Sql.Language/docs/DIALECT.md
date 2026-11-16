@@ -85,8 +85,8 @@ and non-FULL builds in multi-join plans,
 can vary by process. Rows, order, JoinCandidatePairs, RecordsExamined, calls and the first
 evaluation error retain fitting semantics.
 ON, WHERE and projections remain in the caller. Computed keys, correlated/lateral inputs,
-deferred collations, SQL/JSON, application binary build cells, joined DML
-and join-output DISTINCT receive no join-spill permission. Probing does not encode payloads;
+deferred collations, SQL/JSON, application binary build cells and joined DML retain their existing
+join-spill exclusions. Join-output DISTINCT excludes hash-build spill; eligible nested-loop buffers can still spool. Probing does not encode payloads;
 retained buffers of a normalized join tree (left inputs and intermediate outputs) can stage under SQ-L2's exact row codec and
 grant-derived record bound. This applies to probe payloads too: application-produced binary
 probe cells refuse CS05067 when that input must stage; fitting inputs keep their existing admission.

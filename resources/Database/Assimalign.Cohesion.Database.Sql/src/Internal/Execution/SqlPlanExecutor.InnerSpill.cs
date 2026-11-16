@@ -7,7 +7,7 @@ internal sealed partial class SqlPlanExecutor
 {
     private bool CanSpillNestedLoopRows(SqlJoinPlan plan, SqlDatabaseSession? owner)
     {
-        if (owner?.Database.Engine.TempSpace is null || !CanPipelineSelectRetention() || !_definitions.CanSpillValues
+        if (owner?.Database.Engine.TempSpace is null || !CanPipelineSelectRetention() || !CanSpillValues
             || HasOperatorSpillCorrelation(plan)) { return false; }
         foreach (var binding in plan.Bindings)
         { if (binding.Source.Derived is { IsCorrelated: true }) { return false; } }

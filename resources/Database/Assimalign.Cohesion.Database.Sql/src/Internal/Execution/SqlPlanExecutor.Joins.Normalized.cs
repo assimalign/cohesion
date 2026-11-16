@@ -248,7 +248,10 @@ internal sealed partial class SqlPlanExecutor
                 try { sink.Add(row, cancellationToken); }
                 catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0
                     && error.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode && CanSpillMixedJoinBuild(plan, statement.Session))
-                { sink.Spill(statement.Session!, row, cancellationToken, error); }
+                {
+                    if (!CanSpillJoinRows(plan, statement.Session)) { SqlOperatorSpillRefusal.Record(statement.Metrics, error); }
+                    sink.Spill(statement.Session!, row, cancellationToken, error);
+                }
                 FullJoinProgress?.Invoke("build", statement.Metrics, cancellationToken);
             }
             else

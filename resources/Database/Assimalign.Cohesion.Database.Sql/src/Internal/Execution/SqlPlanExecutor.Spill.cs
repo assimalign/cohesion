@@ -59,7 +59,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            _metrics = metrics; _containsLike |= plan.ContainsLike;
+            _metrics = metrics; ContainsLike |= plan.ContainsLike;
             var initialized = InitializeWindow(plan, cancellationToken);
             DatabaseResult result;
             if (initialized is SqlWithPlan with)
@@ -92,7 +92,8 @@ internal sealed partial class SqlPlanExecutor
             if (statementRoot) { CloseJoinTemp(metrics, result, location); }
             return result;
         }
-        catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode && SqlOperatorSpillRefusal.For(metrics) is null)
+        catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode
+            && (SqlOperatorSpillRefusal.For(metrics) is null || SqlOperatorSpillRefusal.IsExistingRelationFailure(exception)))
         { throw CloseJoinFailure(metrics, exception.At(location), statementRoot, location); }
         catch (StorageTempException exception) when (SqlOperatorSpillRefusal.For(metrics) is null)
         { throw CloseJoinFailure(metrics, SqlSpilledResultSet.Translate(exception, location), statementRoot, location); }

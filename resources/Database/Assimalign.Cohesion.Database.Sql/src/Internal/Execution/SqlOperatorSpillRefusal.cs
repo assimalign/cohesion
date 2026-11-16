@@ -14,8 +14,14 @@ internal static class SqlOperatorSpillRefusal
     internal static void Record(SqlStatementMetrics metrics, SqlExecutionException refusal)
         => LazyInitializer.EnsureInitialized(ref _refusals).GetValue(metrics, _ => refusal);
     internal static bool IsTemporary(Exception failure)
-        => failure is StorageTempException || failure is SqlExecutionException sql
-            && sql.Diagnostics[0].Code is { } code && code.StartsWith("CK05", StringComparison.Ordinal);
+        => !IsExistingRelationFailure(failure) && (failure is StorageTempException || failure is SqlExecutionException sql
+            && sql.Diagnostics[0].Code is { } code && code.StartsWith("CK05", StringComparison.Ordinal));
+    internal static bool IsExistingRelationFailure(Exception failure)
+    {
+        for (Exception? cause = failure; cause is not null; cause = cause.InnerException)
+        { if (cause.Data.Contains("SqlExistingRelationTemp")) { return true; } }
+        return false;
+    }
     internal static SqlExecutionException? For(SqlStatementMetrics metrics)
         => _refusals?.TryGetValue(metrics, out var refusal) == true ? refusal : null;
     internal static SqlExecutionException Preserve(SqlStatementMetrics metrics, Exception cause, long budget)

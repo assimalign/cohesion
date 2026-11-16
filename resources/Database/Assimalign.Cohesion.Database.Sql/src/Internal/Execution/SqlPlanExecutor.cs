@@ -54,7 +54,11 @@ internal sealed partial class SqlPlanExecutor
     /// subquery plan.
     /// </summary>
     private SqlSubqueryValues? _subqueryValues;
-    private bool _containsLike;
+    // Preserve the fitting executor's byte slot. Eligibility is fixed for all
+    // bound expressions of this statement, even if another session refreshes DDL.
+    private byte _expressionFlags;
+    private bool ContainsLike { get => (_expressionFlags & 1) != 0; set { if (value) { _expressionFlags |= 1; } } }
+    private bool CanSpillValues => (_expressionFlags & 2) != 0;
     private bool _isDml;
     private SqlStatementMetrics? _metrics;
 
@@ -77,6 +81,7 @@ internal sealed partial class SqlPlanExecutor
         _catalog = catalog;
         _indexManager = indexManager;
         _definitions = definitions;
+        _expressionFlags = definitions.CanSpillValues ? (byte)2 : (byte)0;
     }
 
     /// <summary>
@@ -88,7 +93,7 @@ internal sealed partial class SqlPlanExecutor
     private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken,
         bool[]? sharedColumns = null, bool containsLike = false, DateTimeOffset? transactionTimestamp = null)
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
-            _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
+            ContainsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -143,7 +148,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            _containsLike |= plan.ContainsLike;
+            ContainsLike |= plan.ContainsLike;
             _metrics = statement.Metrics;
             if (RecursiveState is not null && StatementInput(plan) is SqlRelationPlan)
             { return await ExecuteRecursiveQueryAsync(plan, statement, cancellationToken).ConfigureAwait(false); }

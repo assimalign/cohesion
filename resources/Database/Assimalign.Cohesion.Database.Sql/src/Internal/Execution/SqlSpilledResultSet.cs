@@ -259,7 +259,7 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
             }
             catch (OperationCanceledException) { throw; }
             catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode) { throw; }
-            catch (StorageTempException exception) { var failure = Translate(exception, Location); Fail(failure); throw failure; }
+            catch (StorageTempException exception) { var failure = RelationFailure(Translate(exception, Location)); Fail(failure); throw failure; }
             catch (Exception exception) { Fail(exception); throw; }
         }
     }
@@ -280,14 +280,21 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
                 row = Decode(bytes.Span); return true;
             }
             catch (OperationCanceledException) { throw; }
-            catch (StorageTempException exception) { var failure = Translate(exception, Location); Fail(failure); throw failure; }
+            catch (StorageTempException exception) { var failure = RelationFailure(Translate(exception, Location)); Fail(failure); throw failure; }
             catch (Exception exception) { Fail(exception); throw; }
         }
     }
     private object?[] Decode(ReadOnlySpan<byte> value)
     {
         if (SqlTempRowCodec.TryDecode(value, out var row)) { return row; }
-        throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged, location: Location);
+        throw RelationFailure(new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged, location: Location));
+    }
+    private SqlExecutionException RelationFailure(SqlExecutionException failure)
+    {
+        // A cache materialized outside an admitted operand already spilled at the
+        // base. Its read failure is independent of any later operator handoff.
+        if (IsRelationCache && !IsStageResult) { failure.Data["SqlExistingRelationTemp"] = true; }
+        return failure;
     }
     // Cleanup must preserve the initiating cancellation, memory refusal or read/projection error.
     internal void DisposeAfterFailure(Exception failure)

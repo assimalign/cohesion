@@ -21,7 +21,7 @@ internal sealed partial class SqlPlanExecutor
             for (int k = 0; k < group.Partition.Count; k++) { if (!group.Partition[k].Collation.IsFixed) { return false; } }
             for (int k = 0; k < group.Ordering.Count; k++) { if (!group.Ordering[k].Collation.IsFixed) { return false; } }
         }
-        return _definitions.CanSpillValues;
+        return CanSpillValues;
     }
 
     private static bool CanRestartWindow(SqlWindowAggregatePlan plan)

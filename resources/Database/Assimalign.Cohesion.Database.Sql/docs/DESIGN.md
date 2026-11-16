@@ -28,8 +28,9 @@ DISTINCT, LIMIT and output delivery, including CTAS and CTE consumers. Ordered D
 own seen set still must fit, as its existing contract states.
 
 Flat inners spool their buffered prefix and remaining pushed-filter rows once, then seal
-and reread that run for each outer row. Normalized non-hash, non-seek child buffers use the
-same stage. No base-table rescan or repeated predicate is introduced; ON runs once per pair
+and reread that run for each outer row. Every retained buffer of a normalized tree containing
+a nested-loop step uses the same stage, including left inputs, probe sides and intermediate
+outputs. No base-table rescan or repeated predicate is introduced; ON runs once per pair
 in outer-times-inner order. Each pass allocates Storage's independent 8 KiB reader page and
 largest-record destination. One allowance of 8,192 + L + 256 + 2D bytes, for maximum encoded
 record L and decoded row D, stays charged for that buffer's entire join lifetime. Consumed
@@ -48,12 +49,18 @@ only sealed-partition metadata stays charged while descending to the next level.
 keeps nested operators from accumulating uncharged pages with plan depth.
 
 Both targets use the existing cached value-identity gate, renamed CanSpillValues without
-changing its condition. Catalogs with reference-bearing or pseudo-type application/SQL
+changing its condition. One bit in the executor's existing byte slot snapshots that gate
+when the statement's bound plan starts; dispatch, admission filters and final set output
+all use it. A concurrent definition refresh cannot redirect later operands or buffers.
+Catalogs with reference-bearing or pseudo-type application/SQL
 parameters, application casts or checked domains keep the base owner. Joined DML,
 correlated/lateral inputs, recursion, SQL/JSON and window ledgers retain their paths.
 Temporary failures following a new handoff preserve the original CS05067 and message,
 with the temp cause in Data. Existing temp failures reached before a new handoff retain
-their original code. Final set sorting/output has its own narrow refusal translation;
+their original code. Relation-cache read failures retain their origin, so a cache created
+outside the new operand permission keeps its located CK05 code even inside a set operand.
+Plain-key hash builds in mixed nested-loop trees also record their original refusal before
+handoff. Final set sorting/output has its own narrow refusal translation;
 it never reclassifies an earlier operand failure. Stage cleanup never replaces success, cancellation or an evaluator
 error. Stage runs belong to the statement and share its quota; final client results retain
 their existing lifetime and cap. Fitting EXPLAIN ANALYZE keeps the base hash policy;
@@ -64,7 +71,7 @@ are disposable temp operations, as in PostgreSQL tuplestore.c:842-882. CTAS reta
 reservation, each 64-row copy bracket, builder commit and catalog publication. Crash images
 at every existing write/flush/length and each sealed new stage converge to an absent,
 reclaimed destination or its exact complete rows; startup sweeping deletes orphan temp
-images. The executable corpus compares an independently built 1439d9ff6 at 418 grant/quota
+images. The executable corpus compares an independently built 1439d9ff6 at 440 grant/quota
 points and pins fitting ARM64/x64 allocations. During-operation LiveHeap samples at two
 populations use separate lower pre-run/post-disposal baselines and the minimum of three
 executions. Every execution must reach the active workspace floor; a 64 KiB allowance
@@ -287,7 +294,7 @@ including ranges for chunks no probe loads. The readers also validate ordinal ra
 ordinals within each hash, directory endpoints, key families, recomputed hash and NULL
 flag. Damage retains located CK05004. Quotas, the free-space floor and I/O retain CK0500x.
 Computed hash keys, correlated/lateral inputs, deferred collations, SQL/JSON,
-joined DML, application binary build cells and join-output DISTINCT receive no join-spill permission.
+joined DML and application binary build cells retain their existing join-spill exclusions. Join-output DISTINCT excludes hash-build spill; eligible nested-loop buffers can still spool.
 The probe operation itself never encodes payloads. Retained buffers of a normalized join tree,
 including left inputs and intermediate outputs, can stage when their original reservation refuses. This source applies SQ-L2's
 exact row codec and grant-derived record bound to every cell, including probe payloads;

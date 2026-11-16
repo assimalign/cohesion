@@ -24,6 +24,7 @@ public sealed partial class SqlSetInnerSpillTests
         16 => (2097152, 1108464),
         17 => (1048576, 557056),
         18 => (524288, 393216),
+        19 => (16777216, 9358752),
         _ => throw new System.ArgumentOutOfRangeException(nameof(shape)),
     };
 }
