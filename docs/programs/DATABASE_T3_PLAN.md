@@ -146,7 +146,7 @@ row by its number.
 | OQ-K1 | #1767 | An unaliased collection name is the implicit alias everywhere. Fixes DML reading `g` but writing `items.g`. Lifts OQ-J1's explicit-alias rule and retires `CD00016` | — | none |
 | SQ-L1 | #1776, #1762 | Charge all five retained buffers, and CTAS OFFSET rows | — | none |
 | EN-X1 | #1789 | Spill substrate: temp space under quotas, external sort, free-space floor | — | none (temp layout private) |
-| SQ-L2, SQ-L3, SQ-L4 | #1789 | Spillable sort; hash aggregation and DISTINCT; result spooling | EN-X1, L1 | none |
+| SQ-L2, SQ-L3, SQ-L4a–e | #1789 | Spillable sort; hash aggregation, DISTINCT and joins; result spooling, windows, set operations and nested-loop inners; then window partitions larger than the grant, membership vectors and recursive CTEs | EN-X1, L1 | none |
 | EN-C1, EN-C2 | #1283 | Trace the growth to the transactions that block checkpoints, and route raw brackets through the apply gate; bounded admission pause near the journal limit | — | none |
 | EN-P1 | #1264 | `DatabaseRow` NVI with typed accessors; parser and analyzer audit | — | public API |
 | EN-A1 | #1790 | Each model server binds its named platform endpoint when its options set none. The health listener binds `http` when managed. (#1785 already deleted `DatabaseCommandClient` and `ResourceCommandObservation`) | #1785 | public API |
@@ -226,7 +226,7 @@ The largest risk in the tier is IX-V3, HNSW repair under MVCC. Every index kind 
 | B3 | SQ-L1a, SQ-L1b, SQ-L1c (moved from B2), SQ-A5, EN-X1, SQ-H3, OQ-S2, GQ-N1, EN-P1 | SQL (A5) |
 | B4 | SQ-A6, SQ-L2a, SQ-L2b, SQ-L2c, EN-C2, IX-B1, SQ-J3, IX-R1 (#1644) | B-tree format (B1), Graph catalog (R1) |
 | B5 | SQ-A7, SQ-L3, IX-S1 after A7, SQ-CT1, OQ-M1 with OQ-W1 | SQL (A7, then S1 in merge order) |
-| B6 | SQ-A8, SQ-L4, EN-A2, IX-T1, GQ-T2 | Graph catalog (T2) |
+| B6 | SQ-A8, SQ-L4a, SQ-L4b, SQ-L4c, EN-A2, IX-T1, GQ-T2 | Graph catalog (T2) |
 
 SQ-L1 left batch 2 after four review rounds. Each round closed the previous round's findings and
 introduced new ones; the last one left a crash in joined DML over a wide GROUP BY key and two result
@@ -241,7 +241,15 @@ SQ-L2 split in batch 4: SQ-L2a (temp-space codecs), SQ-L2b (root ORDER BY and or
 lazy delivery) and SQ-L2c (a CTAS source). Window sorts move to SQ-L4: a window retains its whole input
 and output, so spilling only its sort gains nothing until partitions and output spool.
 
-After B6, Track A's EN-A3 and EN-D1 fill open slots. B and C follow their lane queues:
+SQ-L4 split in batch 6: SQ-L4a (every retained output gets a spill owner), SQ-L4b (window stages, one
+partition at a time) and SQ-L4c (set operations and nested-loop inners). A window partition larger than
+the grant moves to SQ-L4d, because frames read anywhere in the partition and keep partition-sized
+scratch. Membership vectors (`NOT IN`, `IN`, quantified comparisons) and recursive CTEs move to SQ-L4e,
+because a spilled `NOT IN` vector needs a hashed probe and recursion needs its own work table. Both
+follow B6 and complete #1789.
+
+After B6, Track A's SQ-L4d and SQ-L4e come first; EN-A3 and EN-D1 fill open slots. B and C follow
+their lane queues:
 - **SQL:** J4 → D1 → X1 → V1 → E1 → N3 → U1 → V2 → E2 → N4 → C2 → U2 → Y1 → N5 → Z3 → Y2 → C3 → B1 → N7 →
   N6 → N8 → Q2 → FU1 → B2 → Y3 → Y4.
 - **OQL:** M2 with W2 → W3.
