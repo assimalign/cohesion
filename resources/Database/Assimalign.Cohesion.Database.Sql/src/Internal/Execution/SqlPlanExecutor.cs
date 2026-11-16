@@ -76,12 +76,17 @@ internal sealed partial class SqlPlanExecutor
     /// name while the statement runs.
     /// </remarks>
     internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, SqlIndexManager indexManager, SqlBoundTableCache definitions)
+        : this(storage, catalog, indexManager, definitions, definitions.CanSpillValues)
+    {
+    }
+
+    internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, SqlIndexManager indexManager, SqlBoundTableCache definitions, bool canSpillValues)
     {
         _storage = storage;
         _catalog = catalog;
         _indexManager = indexManager;
         _definitions = definitions;
-        _expressionFlags = definitions.CanSpillValues ? (byte)2 : (byte)0;
+        _expressionFlags = canSpillValues ? (byte)2 : (byte)0;
     }
 
     /// <summary>
@@ -422,12 +427,16 @@ internal sealed partial class SqlPlanExecutor
                             catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
                                 && hashInput is not null && CanSpillHashGroup(hashInput, spillOwner))
                             {
+                                SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, failure);
                                 spilled = SpoolHashGroupInput(projected, output, inputs, projections, evaluator, ref outputBytes, spillOwner!, cancellationToken);
                                 return [];
                             }
                             catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
                                 && hashInput is null && spillOwner?.Database.Engine.TempSpace is not null && retainRows is null)
-                            { outputSpool = SqlOutputSpool.Add(projected, output, ref outputBytes, _metrics!, _definitions.StatementMemoryBudget, spillOwner, cancellationToken); }
+                            {
+                                SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, failure);
+                                outputSpool = SqlOutputSpool.Add(projected, output, ref outputBytes, _metrics!, _definitions.StatementMemoryBudget, spillOwner, cancellationToken);
+                            }
                         }
                     }
                     if (--remaining == 0) { break; }

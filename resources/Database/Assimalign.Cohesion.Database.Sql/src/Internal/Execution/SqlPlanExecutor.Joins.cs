@@ -283,7 +283,7 @@ internal sealed partial class SqlPlanExecutor
                                     try { table.Add(item, cancellationToken); }
                                     catch (SqlExecutionException error) when (CanSpillJoinBuild(plan, hashKeys, spillOwner, error))
                                     {
-                                        if (!CanSpillJoinRows(plan, spillOwner)) { SqlOperatorSpillRefusal.Record(statement.Metrics, error); }
+                                        if (statement.Metrics.IsStageResult || !CanSpillJoinRows(plan, spillOwner)) { SqlOperatorSpillRefusal.Record(statement.Metrics, error); }
                                         table.Spill(spillOwner!, item, cancellationToken, error);
                                     }
                                 }

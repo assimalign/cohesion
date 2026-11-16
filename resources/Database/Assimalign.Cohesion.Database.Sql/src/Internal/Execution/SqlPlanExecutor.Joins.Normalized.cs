@@ -249,7 +249,7 @@ internal sealed partial class SqlPlanExecutor
                 catch (SqlExecutionException error) when ((mode & SqlJoinRowMode.AllowSpill) != 0
                     && error.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode && CanSpillMixedJoinBuild(plan, statement.Session))
                 {
-                    if (!CanSpillJoinRows(plan, statement.Session)) { SqlOperatorSpillRefusal.Record(statement.Metrics, error); }
+                    if (statement.Metrics.IsStageResult || !CanSpillJoinRows(plan, statement.Session)) { SqlOperatorSpillRefusal.Record(statement.Metrics, error); }
                     sink.Spill(statement.Session!, row, cancellationToken, error);
                 }
                 FullJoinProgress?.Invoke("build", statement.Metrics, cancellationToken);
@@ -270,6 +270,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     if (CanSpillJoinRows(plan, statement.Session))
                     {
+                        SqlOperatorSpillRefusal.RecordOutputHandoff(statement.Metrics, error);
                         _ = SqlHashSpillMetrics.JoinTemp(statement.Metrics, statement.Session!);
                         SqlStagedSortSource.Add(buffer, row, ref buffer.Memory, statement.Metrics, _definitions.StatementMemoryBudget, statement.Session!, cancellationToken);
                     }

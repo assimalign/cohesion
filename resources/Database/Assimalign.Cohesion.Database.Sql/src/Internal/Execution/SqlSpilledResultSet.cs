@@ -291,8 +291,8 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     }
     private SqlExecutionException RelationFailure(SqlExecutionException failure)
     {
-        // A cache materialized outside an admitted operand already spilled at the
-        // base. Its read failure is independent of any later operator handoff.
+        // Preserve cache provenance through located carriers. The converter honors
+        // this tag only while the statement has no recorded new operator handoff.
         if (IsRelationCache && !IsStageResult)
         {
             failure.Data["SqlExistingRelationTemp"] = true;

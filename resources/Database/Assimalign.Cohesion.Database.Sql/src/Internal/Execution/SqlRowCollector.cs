@@ -90,7 +90,10 @@ internal sealed partial class SqlRowCollector : IDisposable
                 try { if (chargesPlainMemory) { ReserveRow(output); } }
                 catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
                     && spillOwner?.Database.Engine.TempSpace is not null)
-                { SqlOutputSpool.Add(_rows, output, ref _memory, _metrics!, _budget, spillOwner, _cancellationToken); return output; }
+                {
+                    SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, failure);
+                    SqlOutputSpool.Add(_rows, output, ref _memory, _metrics!, _budget, spillOwner, _cancellationToken); return output;
+                }
                 _rows.Add(output); return null;
             }
             windowMemory?.ReleaseRow(output);
@@ -141,7 +144,7 @@ internal sealed partial class SqlRowCollector : IDisposable
             {
                 try { Reserve(difference); }
                 catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
-                { if (TrySpill(entry, spillOwner)) { return output; } throw; }
+                { if (TrySpill(entry, spillOwner, exception)) { return output; } throw; }
             }
             SiftDown(0, entry);
             if (chargesPlainMemory && (_memory.HasWideCells || wide))

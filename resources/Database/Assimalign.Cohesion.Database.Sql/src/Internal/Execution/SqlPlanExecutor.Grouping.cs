@@ -124,6 +124,7 @@ internal sealed partial class SqlPlanExecutor
                                 long bytes = keyBytes.RemoveRow(key); keyBytes.Bytes -= bytes;
                                 _metrics!.ReleasePlainSelectMemory(bytes);
                             }
+                            SqlOperatorSpillRefusal.RecordOutputHandoff(statement.Metrics, failure);
                             hashSpill = new HashSpill(this, spillOwner!, keyCollations, plan, statement, hashInput?.Statement);
                             hashInput?.Relinquish();
                         }
@@ -364,6 +365,7 @@ internal sealed partial class SqlPlanExecutor
                                     long bytes = keyBytes.RemoveRow(key); keyBytes.Bytes -= bytes;
                                     _metrics!.ReleasePlainSelectMemory(bytes);
                                 }
+                                SqlOperatorSpillRefusal.RecordOutputHandoff(statement.Metrics, failure);
                                 hashSpill = new HashSpill(this, spillOwner!, keyCollations, plan, statement);
                             }
                         }

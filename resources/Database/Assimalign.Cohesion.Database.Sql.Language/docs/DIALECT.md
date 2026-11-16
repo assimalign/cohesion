@@ -35,8 +35,11 @@ ANALYZE adds spill bytes and runs only when a stage actually spills.
 The value-identity exclusion covers catalogs with reference-bearing or pseudo-type
 application/SQL parameters, application casts or checked domains, including unused
 registrations. Such callbacks can observe aliases that a value-only codec cannot preserve.
+The function environment and eligibility bit come from one catalog-state read before
+planning and stay fixed for the statement, including window admission across concurrent DDL.
 A temp failure following a new operator handoff retains the original CS05067 and message,
-with its cause attached as exception data. No diagnostic identity or persistent format changes.
+with its cause attached as exception data. A relation-cache read keeps its located CK05 code
+only before any new handoff has recorded a refusal. No diagnostic identity or persistent format changes.
 
 ## Retained SELECT output spooling (#1789; #1838)
 

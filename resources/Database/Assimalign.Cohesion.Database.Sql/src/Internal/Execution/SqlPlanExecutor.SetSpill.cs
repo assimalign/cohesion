@@ -24,13 +24,16 @@ internal sealed partial class SqlPlanExecutor
     private DatabaseResult MaterializeSetResult(IEnumerable<object?[]> rows, SqlSetOperationPlan plan,
         SqlStatementContext statement, SqlExpressionEvaluator evaluator, CancellationToken token)
     {
+        bool previous = statement.Metrics.IsSetOutput;
+        statement.Metrics.IsSetOutput = statement.Session is not null;
         try
         {
             return MaterializeSelect(rows, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
                 false, evaluator, null, token, spillOwner: statement.Session);
         }
-        catch (Exception failure) when (statement.Session is not null && SqlOperatorSpillRefusal.IsTemporary(failure))
+        catch (Exception failure) when (statement.Session is not null && SqlOperatorSpillRefusal.IsTemporary(statement.Metrics, failure))
         { throw SqlOperatorSpillRefusal.Preserve(statement.Metrics, failure, _definitions.StatementMemoryBudget); }
+        finally { statement.Metrics.IsSetOutput = previous; }
     }
 
     private static bool HasOperatorSpillCorrelation(SqlPlan plan)
@@ -238,7 +241,7 @@ internal sealed partial class SqlPlanExecutor
     private static IEnumerable<object?[]> ReadSetRows(List<object?[]> rows, CancellationToken token)
     {
         if (SetOperationSpill.For(rows) is not { } stage) { return rows; }
-        if (rows.Count != 0) { throw new InvalidOperationException(ErrorMessages.SetStageRowsRetained); }
+        if (rows.Count != 0) { throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.SetStageRowsRetained); }
         stage.Complete(token); return stage.Read(token);
     }
 

@@ -28,10 +28,10 @@ internal sealed partial class SqlRowCollector
     {
         try { ReserveEntry(entry); return true; }
         catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
-        { if (TrySpill(entry, owner)) { return false; } throw; }
+        { if (TrySpill(entry, owner, exception)) { return false; } throw; }
     }
 
-    private bool TrySpill(Entry pending, SqlDatabaseSession? owner)
+    private bool TrySpill(Entry pending, SqlDatabaseSession? owner, SqlExecutionException refusal)
     {
         if (owner?.Database.Engine.TempSpace is not { } space || _orderBy.Count == 0) { return false; }
         foreach (var order in _orderBy) { if (!order.Collation.IsFixed) { return false; } }
@@ -49,6 +49,7 @@ internal sealed partial class SqlRowCollector
         for (int i = 0; i < columns.Length; i++)
         { columns[i] = new(_orderBy[i].IsDescending, _orderBy[i].NullsFirst, _collations[i]); }
         if (_metrics?.IsStageResult != true) { SqlSpillLifetime.CheckCapacity(owner); }
+        SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, refusal);
         var state = new Spill(owner, space, columns, (int)bound, grant, statement);
         try
         {

@@ -89,6 +89,13 @@ internal sealed class SqlBoundTableCache
     internal SqlFunctionEnvironment Functions => Volatile.Read(ref _state).Functions;
     internal bool CanSpillValues => Volatile.Read(ref _state).CanSpillValues;
 
+    internal SqlFunctionEnvironment CaptureFunctions(out bool canSpillValues)
+    {
+        var state = Volatile.Read(ref _state);
+        canSpillValues = state.CanSpillValues;
+        return state.Functions;
+    }
+
     // Metadata loading never executes application code. Body compilation happens per entry,
     // after publication, so a statement needing no such body never waits for its compiler.
     internal void EnsureDefinitions(CancellationToken cancellationToken)

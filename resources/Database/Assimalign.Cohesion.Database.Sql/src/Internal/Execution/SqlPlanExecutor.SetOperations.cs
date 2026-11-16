@@ -101,7 +101,7 @@ internal sealed partial class SqlPlanExecutor
             return MaterializeSetResult(ReadSetRows(rows, cancellationToken), plan, statement, evaluator, cancellationToken);
         }
         catch (Exception failure) when (statement.Session is not null
-            && SqlHashSpillMetrics.For(statement.Metrics)?.JoinStatement is not null && SqlOperatorSpillRefusal.IsTemporary(failure))
+            && SqlHashSpillMetrics.For(statement.Metrics)?.JoinStatement is not null && SqlOperatorSpillRefusal.IsTemporary(statement.Metrics, failure))
         { throw SqlOperatorSpillRefusal.Preserve(statement.Metrics, failure, _definitions.StatementMemoryBudget); }
         catch (Exception failure) { RecordSetStageFailure(statement.Metrics, plan, failure); throw; }
         finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref seenBytes); ReleaseSelectMemory(ref countsBytes); ReleaseSelectMemory(ref operandBytes); ReleaseSetStages(statement.Metrics, plan); }
@@ -111,11 +111,14 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlBoundExpression> conversions, SqlSetOperationPlan plan,
         SqlStatementContext statement, CancellationToken cancellationToken,
         List<object?[]>? destination = null, HashSet<object?[]>? seen = null)
+    {
         // Root dispatch has evaluated CanSpillSetOperation once and carried its
         // answer in the existing session slot. Every operand keeps that decision.
-        => statement.Session is not null || destination is not null && SetOperationSpill.For(destination) is not null
+        System.Diagnostics.Debug.Assert(destination is null || SetOperationSpill.For(destination) is null || statement.Session is not null);
+        return statement.Session is not null || destination is not null && SetOperationSpill.For(destination) is not null
             ? MaterializePermittedSetOperandAsync(operand, conversions, plan, statement, cancellationToken, destination, seen)
             : MaterializeSetOperandBaseAsync(operand, conversions, plan, statement, cancellationToken, destination, seen);
+    }
 
     private async Task<List<object?[]>> MaterializeSetOperandBaseAsync(SqlPlan operand,
         IReadOnlyList<SqlBoundExpression> conversions, SqlSetOperationPlan plan,

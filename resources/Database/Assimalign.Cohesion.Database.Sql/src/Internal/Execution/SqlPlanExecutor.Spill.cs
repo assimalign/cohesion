@@ -93,7 +93,7 @@ internal sealed partial class SqlPlanExecutor
             return result;
         }
         catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode
-            && (SqlOperatorSpillRefusal.For(metrics) is null || SqlOperatorSpillRefusal.IsExistingRelationFailure(exception)))
+            && SqlOperatorSpillRefusal.For(metrics) is null)
         { throw CloseJoinFailure(metrics, exception.At(location), statementRoot, location); }
         catch (StorageTempException exception) when (SqlOperatorSpillRefusal.For(metrics) is null)
         { throw CloseJoinFailure(metrics, SqlSpilledResultSet.Translate(exception, location), statementRoot, location); }
@@ -101,7 +101,7 @@ internal sealed partial class SqlPlanExecutor
         // shared owner even when no result was created.
         catch (System.Exception exception)
         {
-            if (SqlOperatorSpillRefusal.For(metrics) is not null && SqlOperatorSpillRefusal.IsTemporary(exception))
+            if (SqlOperatorSpillRefusal.For(metrics) is not null && SqlOperatorSpillRefusal.IsTemporary(metrics, exception))
             { throw CloseJoinFailure(metrics, SqlOperatorSpillRefusal.Preserve(metrics, exception, _definitions.StatementMemoryBudget).At(location), statementRoot, location); }
             SqlOperatorSpillRefusal.AttachCleanup(metrics, exception);
             if (IsJoinTempCleanupFailure(exception))
@@ -199,9 +199,13 @@ internal sealed partial class SqlPlanExecutor
         catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
         {
             if (hashInput is null && orderBy.Count == 0 && owner?.Database.Engine.TempSpace is not null)
-            { SqlOutputSpool.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner, token); return false; }
+            {
+                SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, exception);
+                SqlOutputSpool.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner, token); return false;
+            }
             if (hashInput is not null ? !CanSpillHashGroup(hashInput, owner)
                 : owner is null || orderBy.Count == 0 || orderBy.Any(order => !order.Collation.IsFixed)) { throw; }
+            SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, exception);
             SqlStagedSortSource.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner!, token);
             return false;
         }

@@ -54,6 +54,7 @@ internal sealed partial class SqlPlanExecutor
             }
 
             _metrics.ReservePlainSelectMemory(handoff.ScratchBytes, budget); scratch = handoff.ScratchBytes;
+            SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics, handoff.Failure);
             source = new SqlStagedSortSource(owner, _metrics, budget, budget - other);
             int remaining = rows.Count - handoff.Count;
             for (int i = handoff.Count; i < rows.Count; i++)

@@ -84,10 +84,13 @@ public sealed partial class SqlSortSpillConformanceTests
             expected.ShouldBe(Enumerable.Range(0, 4000).Select(value => new RowValues([(long)value]))
                 .Append(new RowValues([999999L])).ToArray());
         }
-        bool flipped = false;
+        bool flipped = false; int stageAppends = 0;
         SqlRowCollector.ObserveBuffer = (phase, _) =>
         {
+            if (phase == "set-append") { stageAppends++; }
             if (phase != "set-operand" || flipped) { return; }
+            if (!toTrue) { stageAppends.ShouldBeGreaterThan(0); }
+            else { stageAppends.ShouldBe(0); }
             flipped = true;
             ddl.ExecuteAsync(toTrue ? "DROP FUNCTION gate_marker(TEXT)" : definition).GetAwaiter().GetResult();
             database.Definitions.CanSpillValues.ShouldBe(toTrue);
@@ -111,7 +114,7 @@ public sealed partial class SqlSortSpillConformanceTests
         finally { SqlRowCollector.ObserveBuffer = null; }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Pre-existing spilled CTE damage keeps located CK05004 inside a set operand (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Spilled CTE damage keeps the archived code at the handoff boundary (#1789)")]
     [InlineData(false)] [InlineData(true)]
     public async Task ExecuteAsync_SetCachedRelationDamage_ShouldKeepBaseCode(bool afterHandoff)
     {
@@ -124,7 +127,7 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             if (injected || afterHandoff && !handedOff) { return; }
             // The original two-column cache is wider than the first operand's
-            // one-column output. Its origin stays old even after a new handoff.
+            // one-column output. Damage is injected at the requested boundary.
             var run = StatementRuns(engine.TempSpace!).Where(run => run.IsSealed && run.RecordCount > 0)
                 .OrderByDescending(run => run.MaximumRecordLength).First();
             RandomAccess.Write(Handle(run), new byte[] { 255 }, 0); injected = true;
@@ -136,7 +139,13 @@ public sealed partial class SqlSortSpillConformanceTests
                 ? "WITH c AS (SELECT id,note FROM t) SELECT id FROM t UNION ALL SELECT id FROM c"
                 : "WITH c AS (SELECT id,note FROM t) SELECT id FROM c UNION ALL SELECT id FROM c"));
             // Assert
-            injected.ShouldBeTrue(); failure.Diagnostics[0].Code.ShouldBe("CK05004");
+            _output.WriteLine($"CACHE_REVIEW|afterHandoff={afterHandoff}|code={failure.Diagnostics[0].Code}|injected={injected}|handoff={handedOff}");
+            injected.ShouldBeTrue(); failure.Diagnostics[0].Code.ShouldBe(afterHandoff ? "CS05067" : "CK05004");
+            if (afterHandoff)
+            {
+                WindowFailureData(failure, nameof(SqlOperatorSpillRefusal)).ShouldBeTrue();
+                CacheDamageCause(failure).ShouldBeTrue();
+            }
             if (afterHandoff) { handedOff.ShouldBeTrue(); }
             failure.Diagnostics[0].Start.ShouldNotBeNull(); failure.Diagnostics[0].End.ShouldNotBeNull();
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);

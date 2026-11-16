@@ -21,10 +21,16 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.DebugView))]
 internal sealed class SqlStatementMetrics
 {
-    // Bit zero records the catalog image; upper bits count internal operand results.
+    // Bit zero records the catalog image; bits 1-30 count internal operand results.
+    // Bit 31 marks final set output, whose spill permission is also new.
     // Reuse the existing flag slot so fitting statement objects do not grow.
     private uint _contextFlags;
-    internal bool IsStageResult => _contextFlags >= 2;
+    internal bool IsStageResult => (_contextFlags & 0x7FFFFFFE) != 0;
+    internal bool IsSetOutput
+    {
+        get => (_contextFlags & 0x80000000) != 0;
+        set => _contextFlags = value ? _contextFlags | 0x80000000 : _contextFlags & 0x7FFFFFFF;
+    }
     internal void BeginStageResult() => _contextFlags += 2;
     internal void EndStageResult() => _contextFlags -= 2;
 

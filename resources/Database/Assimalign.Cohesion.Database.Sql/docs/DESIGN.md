@@ -52,16 +52,20 @@ keeps nested operators from accumulating uncharged pages with plan depth.
 
 Both targets use the existing cached value-identity gate, renamed CanSpillValues without
 changing its condition. One bit in the executor's existing byte slot snapshots that gate
-when the statement's bound plan starts; dispatch, admission filters and final set output
+from the same catalog-state read as the function environment, before planning; dispatch,
+admission filters and final set output
 all use it. A concurrent definition refresh cannot redirect later operands or buffers.
+Window admission retains this capture too: a later DROP of the last reference-parameter
+function cannot admit window spilling that the statement's original environment excluded.
 Catalogs with reference-bearing or pseudo-type application/SQL
 parameters, application casts or checked domains keep the base owner. Joined DML,
 correlated/lateral inputs, recursion, SQL/JSON and window ledgers retain their paths.
 Temporary failures following a new handoff preserve the original CS05067 and message,
 with the temp cause in Data. Existing temp failures reached before a new handoff retain
 their original code. Relation-cache read failures retain their origin through located
-carriers, so a cache created
-outside the new operand permission keeps its located CK05 code even inside a set operand.
+carriers only while no new handoff has recorded a refusal. Newly permitted final set output
+and operand-internal output, sort, group and join spools record their original admission
+failure too, so caches produced by these paths cannot masquerade as pre-existing temp.
 Plain-key hash builds in mixed nested-loop trees also record their original refusal before
 handoff. Final set sorting/output has its own narrow refusal translation;
 it never reclassifies an earlier operand failure. Stage cleanup never replaces success, cancellation or an evaluator

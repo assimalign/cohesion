@@ -13,8 +13,12 @@ internal static class SqlOperatorSpillRefusal
     private static ConditionalWeakTable<SqlStatementMetrics, SqlExecutionException>? _refusals;
     internal static void Record(SqlStatementMetrics metrics, SqlExecutionException refusal)
         => LazyInitializer.EnsureInitialized(ref _refusals).GetValue(metrics, _ => refusal);
-    internal static bool IsTemporary(Exception failure)
-        => !IsExistingRelationFailure(failure) && (failure is StorageTempException || failure is SqlExecutionException sql
+    internal static void RecordOutputHandoff(SqlStatementMetrics metrics, SqlExecutionException refusal)
+    {
+        if (metrics.IsStageResult || metrics.IsSetOutput) { Record(metrics, refusal); }
+    }
+    internal static bool IsTemporary(SqlStatementMetrics metrics, Exception failure)
+        => (For(metrics) is not null || !IsExistingRelationFailure(failure)) && (failure is StorageTempException || failure is SqlExecutionException sql
             && sql.Diagnostics[0].Code is { } code && code.StartsWith("CK05", StringComparison.Ordinal));
     internal static bool IsExistingRelationFailure(Exception failure)
     {

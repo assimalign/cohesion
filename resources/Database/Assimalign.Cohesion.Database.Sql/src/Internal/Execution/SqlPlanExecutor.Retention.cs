@@ -459,6 +459,7 @@ internal sealed partial class SqlPlanExecutor
                                     long bytes = seenBytes.RemoveRow(output, 64); seenBytes.Bytes -= bytes;
                                     _metrics!.ReleasePlainSelectMemory(bytes);
                                 }
+                                SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, failure);
                                 spill = new HashSpill(this, spillOwner, collations);
                                 spill.Append(output, [], inputOrdinal, cancellationToken);
                             }
@@ -583,7 +584,10 @@ internal sealed partial class SqlPlanExecutor
                                     try { RetainSelectRow(ref retainedBytes, output); rows.Add(output); }
                                     catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
                                         && spillOwner?.Database.Engine.TempSpace is not null && retainRows is null)
-                                    { collection = SqlOutputSpool.Add(rows, output, ref retainedBytes, statement.Metrics, _definitions.StatementMemoryBudget, spillOwner, cancellationToken); }
+                                    {
+                                        SqlOperatorSpillRefusal.RecordOutputHandoff(statement.Metrics, failure);
+                                        collection = SqlOutputSpool.Add(rows, output, ref retainedBytes, statement.Metrics, _definitions.StatementMemoryBudget, spillOwner, cancellationToken);
+                                    }
                                 }
                             }
                             else if (RetainStagedSortSource(rows, output, ref retainedBytes, [], spillOwner, cancellationToken, hashInput: hashInput))
