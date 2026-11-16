@@ -92,16 +92,16 @@ internal sealed partial class SqlPlanExecutor
             if (statementRoot) { CloseJoinTemp(metrics, result, location); }
             return result;
         }
-        catch (System.Exception exception) when (SqlOperatorSpillRefusal.For(metrics) is not null && SqlOperatorSpillRefusal.IsTemporary(exception))
-        { throw CloseJoinFailure(metrics, SqlOperatorSpillRefusal.Preserve(metrics, exception, _definitions.StatementMemoryBudget).At(location), statementRoot, location); }
-        catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode)
+        catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode && SqlOperatorSpillRefusal.For(metrics) is null)
         { throw CloseJoinFailure(metrics, exception.At(location), statementRoot, location); }
-        catch (StorageTempException exception)
+        catch (StorageTempException exception) when (SqlOperatorSpillRefusal.For(metrics) is null)
         { throw CloseJoinFailure(metrics, SqlSpilledResultSet.Translate(exception, location), statementRoot, location); }
         // Cleanup preserves the original evaluator/cancellation failure and releases the
         // shared owner even when no result was created.
         catch (System.Exception exception)
         {
+            if (SqlOperatorSpillRefusal.For(metrics) is not null && SqlOperatorSpillRefusal.IsTemporary(exception))
+            { throw CloseJoinFailure(metrics, SqlOperatorSpillRefusal.Preserve(metrics, exception, _definitions.StatementMemoryBudget).At(location), statementRoot, location); }
             SqlOperatorSpillRefusal.AttachCleanup(metrics, exception);
             if (IsJoinTempCleanupFailure(exception))
             { throw CloseJoinFailure(metrics, SqlSpilledResultSet.TranslateCleanup((System.AggregateException)exception, location), statementRoot, location); }
