@@ -101,24 +101,27 @@ DatabaseApplicationContext.GetHealthAsync returns immutable DatabaseHealthObserv
 same evaluation core as HTTP health. Every model reads DatabaseEngine.OpenDatabases: health
 never opens, reopens or waits for a database, and takes no engine lock. It excludes closing
 instances, keeps offline open instances, and reads pending reopens after each engine's snapshot.
-A stored database this process has not opened is absent in every model; a leftover directory
-therefore cannot fail readiness. A reopen outside the reopen service is absent during recovery
-and, if recovery fails, stays absent until opened again. With ReopenOfflineDatabases=false,
-check the manual reopen's own result: health keeps no record of that failed open.
+A stored database never attempted by this process is absent in every model. FailedOpens retains
+a failed stored open, including manual reopen with ReopenOfflineDatabases=false, as Unhealthy.
+Each record supplies reason, failureCode when present, reopenFault (exception type only), failedAt
+(invariant UTC round-trip string) and reopenAttempts (consecutive failures). Exception messages
+never enter health detail. Successful open/create/drop, absence or disposal clears the record.
+Open instances outrank pending reopens, which outrank failed-open records: one component per name.
 GetDatabasesAsync retains each model's enumeration semantics,
 including opening stored Documents, Graph and Blob databases through recovery.
 
 HealthComponentNames builds live membership synchronously from the registry frozen at Build,
-each engine's OpenDatabases and its pending reopens. Discovery evaluates no health, awaits no
+each engine's OpenDatabases, its pending reopens and FailedOpens. Discovery evaluates no health, awaits no
 work, blocks on no database lifecycle operation and tolerates a custom inventory failure by
 keeping that engine's name. Managed Build therefore runs no health pass, emits no health
 transition event, and needs no discovery cancellation token.
 Pending reopens are published as immutable snapshots when membership or reported detail changes,
-so discovery and health never acquire the reopen service's scheduling monitor.
+so discovery and health never acquire the reopen service's scheduling monitor. FailedOpens likewise
+publishes immutable snapshots on change; health and discovery take no engine completion gate.
 Engines follow registration order; within each engine, databases follow ordinal ignore-case
 component-name order in both discovery and complete observations; database.accepting is last.
 Consumers re-read membership to follow opens and drops. A retained database component that is
-no longer open or pending answers Unhealthy, "not open".
+no longer open, pending or recorded answers Unhealthy, "not open".
 
 The public names are `engine/<escaped engine>`,
 `database/<escaped engine>/<escaped lowercase database>`, and `database.accepting`.

@@ -115,12 +115,13 @@ component-name order, with database.accepting last. Names are `engine/<escaped e
 `database/<escaped engine>/<escaped lowercase database>`, and `database.accepting`. Each segment
 is URI-escaped separately. Database component names lower-case only ASCII letters before URI-escaping,
 using the same spelling for open, offline and pending-reopen entries; K and the Kelvin sign
-remain distinct. Engine identity stays ordinal and registration rejects invalid UTF-16. Health reads only OpenDatabases and pending reopens in
-every model. A stored database this process has not opened is absent; a leftover directory
-cannot fail readiness. A reopen outside the reopen service is absent during recovery; failed
-recovery leaves it absent until opened again. With ReopenOfflineDatabases=false, check the manual
-reopen's own result because health keeps no failed-open record. Health never opens, reopens or
-waits for a database or takes an engine lock.
+remain distinct. Engine identity stays ordinal and registration rejects invalid UTF-16. Health reads
+OpenDatabases, pending reopens and FailedOpens in every model, without opening, reopening, waiting
+or taking an engine lock. A stored database never attempted by this process is absent. A failed
+stored open stays Unhealthy, including manual reopen with ReopenOfflineDatabases=false. Open
+instances outrank pending reopens, which outrank failed-open records; discovery includes all three.
+Records carry only safe code/type metadata, UTC time and consecutive attempts. Successful
+open/create/drop, absence or disposal clears the record (#1790).
 
 Each CheckAsync uses Hosting's single-component GetHealthAsync and maps that observation's
 status, description and immutable invariant string data directly. It evaluates only the named
@@ -133,7 +134,7 @@ Degraded, retaining their codes and bounded refused-step detail. Engine data ret
 workers and counts without copying per-database provisioning.* or offline.* detail.
 
 Consumers re-read HealthContributors to follow opens and drops. A retained contributor whose
-database is no longer open or pending answers Unhealthy, "not open". There is no cache,
+database is no longer open, pending or recorded answers Unhealthy, "not open". There is no cache,
 subscription or timer. Separate checks observe separate snapshots; a future batch contract
 could provide one snapshot for a polling round.
 

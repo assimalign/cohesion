@@ -111,7 +111,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
 
     /// <summary>Gets live health membership without evaluating health or waiting for database lifecycle work.</summary>
     /// <remarks>
-    /// Engines follow registration order; each engine is followed by its open or pending-reopen
+    /// Engines follow registration order; each engine is followed by its open, pending-reopen or recorded
     /// databases in ordinal ignore-case component-name order, then database.accepting follows all engines.
     /// A faulty inventory contributes its engine name. Re-read this member to follow opens and drops.
     /// </remarks>
@@ -130,6 +130,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                 catch (Exception failure) when (failure is not OutOfMemoryException) { databases = []; }
                 var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var database in databases) { names.Add(database.Name.ToString()); }
+                foreach (var failure in engine.FailedOpens) { names.Add(failure.Name.ToString()); }
                 foreach (var pending in ReopenService?.GetPendingReopens() ?? [])
                 {
                     if (ReferenceEquals(pending.Engine, engine)) { names.Add(pending.Name); }
@@ -144,7 +145,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     }
 
     /// <summary>
-    /// Observes each engine, each currently open or reopening database, and the host accept gate through
+    /// Observes each engine, each currently open, reopening or failed-open database, and the host accept gate through
     /// the same evaluation core used by HTTP health. Reading health never opens, reopens or waits for a database.
     /// </summary>
     /// <param name="cancellationToken">Signals that the evaluation should be abandoned.</param>
@@ -154,9 +155,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// <remarks>
     /// Evaluation failures other than caller cancellation and OutOfMemoryException become Unhealthy
     /// for that engine's components, with exception types only. Other engines and the accepting gate remain independent.
-    /// Stored databases this process has not opened are absent. A reopen outside the reopen service
-    /// is absent during recovery; failed recovery leaves it absent until opened again. With
-    /// ReopenOfflineDatabases=false, check the manual reopen's own result because health keeps no failed-open record.
+    /// Stored databases never attempted by this process are absent. Failed stored opens remain
+    /// Unhealthy through DatabaseEngine.FailedOpens, including manual reopens with automatic reopen
+    /// disabled. Open instances outrank pending reopens, which outrank failed-open records.
     /// </remarks>
     public async ValueTask<IReadOnlyList<DatabaseHealthObservation>> GetHealthAsync(CancellationToken cancellationToken = default)
     {
@@ -169,7 +170,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// <summary>Evaluates one named component, reading only its engine, or only the host accepting gate.</summary>
     /// <param name="componentName">A name from <see cref="HealthComponentNames"/>.</param>
     /// <param name="cancellationToken">Signals that evaluation should be abandoned.</param>
-    /// <returns>An immutable observation; a database no longer open or pending is Unhealthy, "not open".</returns>
+    /// <returns>An immutable observation; a database no longer open, pending or recorded is Unhealthy, "not open".</returns>
     /// <exception cref="ArgumentException"><paramref name="componentName"/> is null, empty or white space.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     /// <exception cref="OutOfMemoryException">The engine evaluation reports an out-of-memory failure.</exception>
@@ -406,7 +407,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     List<string> offline = [.. engine.OfflineDatabases.Select(name => (string)name)];
                     foreach (ReopenState pending in reopening)
                     {
-                        if (ReferenceEquals(pending.Engine, engine) && !offline.Contains(pending.Name, StringComparer.OrdinalIgnoreCase))
+                        if (ReferenceEquals(pending.Engine, engine) && !HasOpenDatabase(databases, pending.Name) && !offline.Contains(pending.Name, StringComparer.OrdinalIgnoreCase))
                         {
                             offline.Add(pending.Name);
                         }
@@ -422,7 +423,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     {
                         string database = offline[offlineIndex];
                         string prefix = $"engine.{engineIndex}.offline.{offlineIndex}";
-                        ReopenState? pending = FindPending(reopening, engine, database);
+                        ReopenState? pending = HasOpenDatabase(databases, database) ? null : FindPending(reopening, engine, database);
                         StorageOfflineCause? cause = DatabaseReopenService.GetCause(engine, database) ?? pending?.Cause;
                         observation?.ObserveOffline(engine, database, cause);
                         data[$"{prefix}.name"] = database;
@@ -464,6 +465,38 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                             }
                             components.Offline(engine.Name, database, offlineDatabases[^1], offlineData);
                         }
+                    }
+                    int reportedOfflineCount = offline.Count;
+                    foreach (var failure in engine.FailedOpens)
+                    {
+                        string database = failure.Name.ToString();
+                        if (HasOpenDatabase(databases, database) || FindPending(reopening, engine, database) is not null) { continue; }
+                        string prefix = $"engine.{engineIndex}.offline.{reportedOfflineCount++}";
+                        string failedAt = failure.FailedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+                        data[$"{prefix}.name"] = database;
+                        data[$"{prefix}.reason"] = "Open failed";
+                        data[$"{prefix}.reopenAttempts"] = failure.Attempts;
+                        data[$"{prefix}.reopenFault"] = failure.ExceptionType;
+                        data[$"{prefix}.failedAt"] = failedAt;
+                        if (failure.FailureCode is { } code) { data[$"{prefix}.failureCode"] = code; }
+                        string description = $"{engine.Name}/{database} (open failed; {failure.FailureCode}; {failure.ExceptionType}; {failedAt}; {failure.Attempts} attempt(s))";
+                        offlineDatabases.Add(description);
+                        if (components?.WantsDatabase(engine.Name, database) == true)
+                        {
+                            var detail = new Dictionary<string, object>(StringComparer.Ordinal)
+                            {
+                                ["reason"] = "Open failed",
+                                ["reopenAttempts"] = failure.Attempts,
+                                ["reopenFault"] = failure.ExceptionType,
+                                ["failedAt"] = failedAt,
+                            };
+                            if (failure.FailureCode is { } failureCode) { detail["failureCode"] = failureCode; }
+                            components.Offline(engine.Name, database, description, detail);
+                        }
+                    }
+                    if (reportedOfflineCount != offline.Count)
+                    {
+                        data[$"engine.{engineIndex}.offlineDatabaseCount"] = reportedOfflineCount;
                     }
                 }
                 components?.Engine(engine.Name, state, data, $"engine.{engineIndex}.");
@@ -548,6 +581,15 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         => fault.InnerException is { } inner
             ? $"{fault.GetType().Name} ({inner.GetType().Name})"
             : fault.GetType().Name;
+
+    private static bool HasOpenDatabase(IReadOnlyList<DatabaseInstance> databases, string name)
+    {
+        foreach (var database in databases)
+        {
+            if (string.Equals(database.Name.ToString(), name, StringComparison.OrdinalIgnoreCase)) { return true; }
+        }
+        return false;
+    }
 
     // The reopen service's record of a database, if it has one.
     private static ReopenState? FindPending(IReadOnlyList<ReopenState> reopening, DatabaseEngine engine, string database)

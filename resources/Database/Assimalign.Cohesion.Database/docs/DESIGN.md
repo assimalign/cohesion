@@ -8,9 +8,29 @@ it to a new read-only list, excludes closing instances as TryGetDatabase does, r
 open instances, and returns empty after disposal. It takes no engine lock, does no I/O and never
 opens, reopens or waits for a database. OfflineDatabases still names offline open instances.
 GetDatabasesAsync retains model enumeration semantics: Documents, Graph and Blob open stored
-databases through recovery; SQL and KeyValue enumerate open instances. Health uses OpenDatabases
-in every model, so a stored database not opened by this process is absent from health and a
-leftover directory cannot fail readiness.
+databases through recovery; SQL and KeyValue enumerate open instances. Health reads OpenDatabases,
+pending reopens and FailedOpens in every model. A stored database never attempted by this process
+is absent; a failed open of stored data remains Unhealthy until successful open/create/drop,
+DatabaseNotFoundException or engine disposal clears its record (#1790).
+
+FailedOpens is a non-virtual lock-free read of an immutable snapshot of DatabaseOpenFailure values:
+name, structured code when present, exception type name, UTC failure time and consecutive attempts.
+No exception or message is retained. Code selection reads structured carriers and coded causes,
+including aggregate branches, preserving CK06003 over additional model diagnostics. Argument
+errors, ObjectDisposedException and cancellation from the caller's token leave existing records
+unchanged; absence clears the name. The model open cores
+validate existence before storage open, and their DatabaseNotFoundException distinguishes absence.
+Documents, Graph and Blob enumeration already routes each stored open through this base path.
+
+A separate completion gate covers synchronous lifecycle core invocation and completion, with
+create/open/drop taking that gate before any leaf registry lock. It never holds the composition
+or worker gate around model work and no health reader acquires it. A deferred open retains
+a name-scoped completion token. Successful open/create/drop supersedes earlier deferred failures,
+even if the successful instance closes before the failure completes. A core returning a closing
+instance is not a successful public open; cancelling its close wait retains a prior record.
+The completed open path adds no allocation; failure publishes a new read-only collection, and
+clearing copies only when the name has a record. Events, exception delivery and corruption
+translation retain their existing paths.
 
 ## Named savepoint admission (#1726, XT-4)
 

@@ -95,8 +95,9 @@ namespace Assimalign.Cohesion.Database;
 /// <para>
 /// <b>Shape (concrete-types plan, phase 3, #1259).</b> Every public member is non-virtual and owns
 /// the argument, disposed and cancellation checks before it calls a protected core, except that
-/// <see cref="OpenDatabases"/> remains readable after disposal and filters closing instances from
-/// its non-opening core snapshot. <see cref="OfflineDatabases"/> is abstract public state the leaf computes. The leaves
+/// <see cref="OpenDatabases"/> and <see cref="FailedOpens"/> remain readable after disposal.
+/// Open inventory filters closing instances from its non-opening core snapshot.
+/// <see cref="OfflineDatabases"/> is abstract public state the leaf computes. The leaves
 /// live in the model assemblies, so the constructor is <c>protected</c>. A leaf re-exposes its
 /// typed database with <c>new</c> members that await the public members here, never the cores.
 /// The hosting layer composes every model through this base (concrete-types plan, phase 6, #1262).
@@ -105,6 +106,14 @@ namespace Assimalign.Cohesion.Database;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
 {
+    /// <summary>Gets the immutable snapshot of the last failed opens of stored databases.</summary>
+    /// <remarks>
+    /// Contains names refused by the open core, excluding absence, argument, disposal and caller
+    /// cancellation failures. Successful open, create or drop and a missing-database result clear
+    /// the name. Reading takes no lock, performs no I/O, and returns empty after disposal.
+    /// </remarks>
+    public IReadOnlyList<DatabaseOpenFailure> FailedOpens => IsDisposed ? Array.Empty<DatabaseOpenFailure>() : Volatile.Read(ref _failedOpens);
+
     /// <summary>Gets a new read-only snapshot of open database instances, including offline instances.</summary>
     /// <remarks>
     /// Never opens, reopens or waits for a database, takes no engine lock, and excludes instances
@@ -201,6 +210,12 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     private readonly int _workerFailureMinimumPasses;
     private readonly TimeProvider _timeProvider;
     private readonly object _sync = new();
+    // Separate from composition/worker state: no health reader or leaf callback takes this gate.
+    // Synchronous open completion and failure publication are one transition. Deferred opens
+    // retain a token so a later success invalidates their failures even if its instance closes.
+    private readonly object _openSync = new();
+    private IReadOnlyList<DatabaseOpenFailure> _failedOpens = Array.Empty<DatabaseOpenFailure>();
+    private List<OpenAttempt>? _pendingOpens;
     private readonly List<DatabaseEngineWorker> _workers = [];
     private readonly List<DatabaseServer> _servers = [];
     // Weak keys also cover a model's construction failure after admission was
@@ -653,7 +668,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            return DropDatabaseCoreAsync(name, cancellationToken);
+            return DropCheckedAsync(name, cancellationToken);
         }
 
         return DropDatabaseTraced(name, cancellationToken);
@@ -741,6 +756,8 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         {
             return;
         }
+
+        Volatile.Write(ref _failedOpens, Array.Empty<DatabaseOpenFailure>());
 
         long disposeStarted = DatabaseEventSource.Log.EngineDisposeStart(this);
         List<Exception>? failures = null;
@@ -1435,7 +1452,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         Exception? thrown = null;
         try
         {
-            pending = DropDatabaseCoreAsync(name, cancellationToken);
+            pending = DropCheckedAsync(name, cancellationToken);
         }
         catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
         {
@@ -1535,36 +1552,93 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             }
 
             var closing = database;
-            await closing.Closure.WaitAsync(cancellationToken).ConfigureAwait(false);
-            ThrowIfDisposed();
+            await WaitForCloseAsync(closing.Closure, name, cancellationToken).ConfigureAwait(false);
             database = await OpenCheckedAsync(name, cancellationToken).ConfigureAwait(false);
             if (ReferenceEquals(database, closing))
             {
                 // The leaf still tracks a database whose close ended: a leaf defect, reported
                 // rather than retried forever.
-                throw new InvalidOperationException(
-                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineOpenUnclosedAsyncFailure, _name, name));
+                throw RefuseClosedOpen(name, cancellationToken);
             }
         }
 
+        CompleteSuccessfulOpen(name);
         return database;
+    }
+
+    // Keep the public completed-open state machine's shape unchanged; waiting is a cold path.
+    private async Task WaitForCloseAsync(Task closure, DatabaseName name, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await closure.WaitAsync(cancellationToken).ConfigureAwait(false);
+            ThrowIfDisposed();
+        }
+        catch (Exception error)
+        {
+            lock (_openSync) { RecordFailedOpen(name, error, cancellationToken); }
+            throw;
+        }
+    }
+
+    private InvalidOperationException RefuseClosedOpen(DatabaseName name, CancellationToken cancellationToken)
+    {
+        var error = new InvalidOperationException(
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineOpenUnclosedAsyncFailure, _name, name));
+        lock (_openSync) { RecordFailedOpen(name, error, cancellationToken); }
+        return error;
     }
 
     // Translation belongs above every model's cleanup, including failures before publication.
     private ValueTask<DatabaseInstance> CreateCheckedAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
     {
-        try
+        lock (_openSync)
         {
-            // Preserve synchronous core throws and the allocation-free completed path. Only
-            // an incomplete/faulted operation needs an async integrity-translation boundary.
-            var pending = CreateDatabaseCoreAsync(name, creationState, cancellationToken);
-            return pending.IsCompletedSuccessfully ? pending : CompleteCheckedAsync(pending, name);
+            try
+            {
+                // Preserve synchronous core throws and the allocation-free completed path. Only
+                // an incomplete/faulted operation needs an async integrity-translation boundary.
+                var pending = CreateDatabaseCoreAsync(name, creationState, cancellationToken);
+                if (!pending.IsCompletedSuccessfully) { return CompleteCreateCheckedAsync(pending, name); }
+                CompleteSuccessfulOpen(name);
+                return pending;
+            }
+            catch (Exception error) when (error is not DatabaseCorruptionException && StorageCorruptionException.Find(error) is { } corruption)
+            { throw DatabaseCorruptionException.Create(name, corruption, GetCorruptionDiagnostics(error)); }
+            catch (DatabaseNotFoundException)
+            {
+                CompleteSuccessfulOpen(name);
+                throw;
+            }
         }
-        catch (Exception error) when (error is not DatabaseCorruptionException && StorageCorruptionException.Find(error) is { } corruption)
-        { throw DatabaseCorruptionException.Create(name, corruption, GetCorruptionDiagnostics(error)); }
     }
 
     private ValueTask<DatabaseInstance> OpenCheckedAsync(DatabaseName name, CancellationToken cancellationToken)
+    {
+        lock (_openSync)
+        {
+            try
+            {
+                var pending = OpenIntegrityCheckedAsync(name, cancellationToken);
+                if (pending.IsCompletedSuccessfully)
+                {
+                    return pending;
+                }
+                var attempt = new OpenAttempt(name);
+                (_pendingOpens ??= []).Add(attempt);
+                return CompleteOpenAsync(pending, attempt, cancellationToken);
+            }
+            // Every model validates existence before opening storage; absence has its own kind.
+            // Retain only safe metadata and rethrow the exact translated failure to the caller.
+            catch (Exception error)
+            {
+                RecordFailedOpen(name, error, cancellationToken);
+                throw;
+            }
+        }
+    }
+
+    private ValueTask<DatabaseInstance> OpenIntegrityCheckedAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         try
         {
@@ -1580,6 +1654,170 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         try { return await pending.ConfigureAwait(false); }
         catch (Exception error) when (error is not DatabaseCorruptionException && StorageCorruptionException.Find(error) is { } corruption)
         { throw DatabaseCorruptionException.Create(name, corruption, GetCorruptionDiagnostics(error)); }
+    }
+
+    private async ValueTask<DatabaseInstance> CompleteCreateCheckedAsync(ValueTask<DatabaseInstance> pending, DatabaseName name)
+    {
+        try
+        {
+            var database = await CompleteCheckedAsync(pending, name).ConfigureAwait(false);
+            CompleteSuccessfulOpen(name);
+            return database;
+        }
+        catch (DatabaseNotFoundException)
+        {
+            CompleteSuccessfulOpen(name);
+            throw;
+        }
+    }
+
+    private async ValueTask<DatabaseInstance> CompleteOpenAsync(ValueTask<DatabaseInstance> pending, OpenAttempt attempt, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var database = await pending.ConfigureAwait(false);
+            return database;
+        }
+        catch (Exception error)
+        {
+            lock (_openSync)
+            {
+                if (!attempt.Superseded) { RecordFailedOpen(attempt.Name, error, cancellationToken); }
+            }
+            throw;
+        }
+        finally
+        {
+            lock (_openSync) { _pendingOpens!.Remove(attempt); }
+        }
+    }
+
+    private ValueTask DropCheckedAsync(DatabaseName name, CancellationToken cancellationToken)
+    {
+        lock (_openSync)
+        {
+            try
+            {
+                var pending = DropDatabaseCoreAsync(name, cancellationToken);
+                if (!pending.IsCompletedSuccessfully) { return CompleteDropAsync(pending, name); }
+                pending.GetAwaiter().GetResult();
+                CompleteSuccessfulOpen(name);
+                return ValueTask.CompletedTask;
+            }
+            catch (DatabaseNotFoundException)
+            {
+                CompleteSuccessfulOpen(name);
+                throw;
+            }
+        }
+    }
+
+    private async ValueTask CompleteDropAsync(ValueTask pending, DatabaseName name)
+    {
+        try
+        {
+            await pending.ConfigureAwait(false);
+            CompleteSuccessfulOpen(name);
+        }
+        catch (DatabaseNotFoundException)
+        {
+            CompleteSuccessfulOpen(name);
+            throw;
+        }
+    }
+
+    private void CompleteSuccessfulOpen(DatabaseName name)
+    {
+        lock (_openSync)
+        {
+            if (_pendingOpens is { } pending)
+            {
+                foreach (var attempt in pending)
+                {
+                    if (attempt.Name == name) { attempt.Superseded = true; }
+                }
+            }
+            if (_failedOpens.Count > 0) { ClearFailedOpen(name); }
+        }
+    }
+
+    // All snapshot changes except disposal run under _openSync. No exception object is retained.
+    private void RecordFailedOpen(DatabaseName name, Exception error, CancellationToken cancellationToken)
+    {
+        if (IsDisposed) { return; }
+        if (error is DatabaseNotFoundException) { CompleteSuccessfulOpen(name); return; }
+        if (error is ArgumentException or ObjectDisposedException ||
+            error is OperationCanceledException canceled && cancellationToken.IsCancellationRequested && canceled.CancellationToken == cancellationToken)
+        { return; }
+        var records = _failedOpens;
+        var updated = new List<DatabaseOpenFailure>(records.Count + 1);
+        long attempts = 1;
+        foreach (var record in records)
+        {
+            if (record.Name == name) { attempts = record.Attempts + 1; }
+            else { updated.Add(record); }
+        }
+        string? code = GetOpenFailureCode(error);
+        updated.Add(new DatabaseOpenFailure(name, code, error.GetType().Name, _timeProvider.GetUtcNow(), attempts));
+        Volatile.Write(ref _failedOpens, updated.AsReadOnly());
+        // Disposal can begin while this transition holds its gate; its empty snapshot wins too.
+        if (IsDisposed) { Volatile.Write(ref _failedOpens, Array.Empty<DatabaseOpenFailure>()); }
+    }
+
+    private static string? GetOpenFailureCode(Exception error)
+    {
+        if (GetStructuredFailureCode(error) is { } direct) { return direct; }
+        if (error.InnerException is null && error is not AggregateException) { return null; }
+        var pending = new Stack<Exception>();
+        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+        pending.Push(error);
+        while (pending.TryPop(out var next))
+        {
+            if (!visited.Add(next)) { continue; }
+            if (GetStructuredFailureCode(next) is { } code) { return code; }
+            if (next is AggregateException aggregate)
+            {
+                for (int index = aggregate.InnerExceptions.Count - 1; index >= 0; index--)
+                { pending.Push(aggregate.InnerExceptions[index]); }
+            }
+            else if (next.InnerException is { } cause) { pending.Push(cause); }
+        }
+        return null;
+    }
+
+    private static string? GetStructuredFailureCode(Exception error)
+    {
+        if (error is DatabaseCorruptionException corruption) { return corruption.Code; }
+        if (error is DatabaseOfflineException offline) { return offline.Code; }
+        if (error is StorageFormatException) { return StorageFormatException.ErrorCode; }
+        if (error is StorageOfflineException) { return StorageOfflineException.ErrorCode; }
+        if (error is DatabaseException databaseError)
+        {
+            for (int index = 0; index < databaseError.Diagnostics.Count; index++)
+            { if (databaseError.Diagnostics[index].Code is { } code) { return code; } }
+        }
+        return error is StorageTempException storageError ? storageError.Code : null;
+    }
+
+    private void ClearFailedOpen(DatabaseName name)
+    {
+        var records = _failedOpens;
+        for (int index = 0; index < records.Count; index++)
+        {
+            if (records[index].Name != name) { continue; }
+            var updated = new List<DatabaseOpenFailure>(records.Count - 1);
+            foreach (var record in records) { if (record.Name != name) { updated.Add(record); } }
+            Volatile.Write(ref _failedOpens, updated.AsReadOnly());
+            if (IsDisposed) { Volatile.Write(ref _failedOpens, Array.Empty<DatabaseOpenFailure>()); }
+            return;
+        }
+    }
+
+    private sealed class OpenAttempt
+    {
+        public OpenAttempt(DatabaseName name) { Name = name; }
+        public DatabaseName Name { get; }
+        public bool Superseded { get; set; }
     }
 
     private static IEnumerable<Diagnostic> GetCorruptionDiagnostics(Exception error)

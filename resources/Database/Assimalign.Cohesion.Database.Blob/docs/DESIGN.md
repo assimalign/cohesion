@@ -470,7 +470,9 @@ storage's `StorageFormatException` as its inner exception, the files byte-identi
 
 GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
 Health never opens, reopens or waits for a database and takes no engine lock. A stored database
-this process has not opened is absent from health; a leftover directory cannot fail readiness.
+never attempted by this process is absent from health. A failed stored open contributes an
+Unhealthy component from DatabaseEngine.FailedOpens, including when GetDatabasesAsync attempted
+it. Successful open/create/drop, absence or engine disposal clears that failure record (#1790).
 OpenDatabases retains offline open instances and excludes closing ones.
 
 ### Interrupted creation (#1421)

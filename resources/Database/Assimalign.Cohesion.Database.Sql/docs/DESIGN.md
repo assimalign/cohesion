@@ -6768,7 +6768,9 @@ is refused, an open waits and then reopens it, and a drop waits and then drops i
 
 GetDatabasesAsync enumerates open instances; health uses the lock-free OpenDatabases snapshot instead.
 Health never opens, reopens or waits for a database and takes no engine lock. A stored database
-this process has not opened is absent from health; a leftover directory cannot fail readiness.
+never attempted by this process is absent from health. A failed stored open contributes an
+Unhealthy component from DatabaseEngine.FailedOpens. Successful open/create/drop, absence or
+engine disposal clears that failure record (#1790).
 OpenDatabases retains offline open instances and excludes closing ones.
 
 For the window between the close and the forget every worker skips it:
