@@ -2161,7 +2161,7 @@ public sealed partial class SqlCatalog
         for (int i = 0; i < calls; i++) { functionCalls.Add(reader.ReadString(out _)); }
         var keyOrders = new SqlCatalogIndexKeyOrder[columnCount];
         for (int i = 0; i < columnCount; i++) { keyOrders[i] = (SqlCatalogIndexKeyOrder)reader.ReadInt8(); }
-        if (keyOrders.Any(order => (uint)order > 3 || isPrimaryKey && order != SqlCatalogIndexKeyOrder.AscendingNullsLast) ||
+        if (keyOrders.Any(order => (uint)order > 3 || isPrimaryKey && order != SqlCatalogIndexKeyOrder.AscendingNullsFirst) ||
             !reader.IsAtEnd || dependencies < 0 || calls < 0 || (isPrimaryKey && (!isUnique || predicate is not null)) ||
             predicate is null && (dependencies != 0 || calls != 0) || predicate is not null && string.IsNullOrWhiteSpace(predicate))
         {
@@ -2476,7 +2476,7 @@ public sealed partial class SqlCatalog
                         replacement.Type.Precision != column.Type.Precision || replacement.Type.Scale != column.Type.Scale) { EnsureNoViewReads(existing.Table, column.Name, rename: true); }
                 }
             }
-            EnsurePhysicalLayoutKept(existing?.Table, table);
+            EnsurePhysicalLayoutKept(existing?.Table, table, keptTable: false);
             ValidateColumns(table.Schema, table.Name, table.Columns, table.PrimaryKeyColumns);
             ValidateConstraints(table);
             var names = new HashSet<string>(table.Constraints.Select(constraint => constraint.Name), StringComparer.OrdinalIgnoreCase);
@@ -2540,8 +2540,9 @@ public sealed partial class SqlCatalog
     /// </summary>
     /// <param name="existing">The definition being replaced, or null for a new table.</param>
     /// <param name="table">The definition being published.</param>
+    /// <param name="keptTable">Whether this is a joint publication retaining the heap owner.</param>
     /// <exception cref="SqlCatalogException">The published definition renumbers a physical column.</exception>
-    private static void EnsurePhysicalLayoutKept(SqlCatalogTable? existing, SqlCatalogTable table)
+    private static void EnsurePhysicalLayoutKept(SqlCatalogTable? existing, SqlCatalogTable table, bool keptTable)
     {
         if (existing is null)
         {
@@ -2567,7 +2568,7 @@ public sealed partial class SqlCatalog
         if (!kept)
         {
             throw new SqlCatalogException("CS05060",
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeptTableLayoutMismatch, table.Schema, table.Name));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, keptTable ? ErrorMessages.KeptTableLayoutMismatch : ErrorMessages.ReplacementTableLayoutMismatch, table.Schema, table.Name));
         }
     }
 

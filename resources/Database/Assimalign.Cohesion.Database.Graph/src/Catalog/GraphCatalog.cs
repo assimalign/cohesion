@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.Database.Graph.Catalog;
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("GraphCatalog")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalog.DebugView))]
-public sealed class GraphCatalog
+public sealed partial class GraphCatalog
 {
     private readonly GraphStorage _storage;
     private readonly TransactionCoordinator _coordinator;
@@ -241,15 +241,18 @@ public sealed class GraphCatalog
     // private identity keeps them outside every definition's metadata and avoids reserving
     // a public GUID or adding a second registry/record format. Add and undo maintain the
     // same database-wide name directory as declared keys.
-    internal ValueTask DiscoverPropertyKeyAsync(string name, TransactionContext context, CancellationToken token)
+    internal ValueTask DiscoverPropertyKeyAsync(string name, TransactionContext context, CancellationToken token, Action<long>? reserve = null)
     {
         if (HasPropertyKey(name, context.Snapshot)) { return default; }
+        reserve?.Invoke(1024);
         return SaveAsync(new CatalogRecord(property: new GraphPropertyKeyMetadata(Guid.NewGuid(), name)),
             null, context, token);
     }
 
-    internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot)
+    internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot,
+        Action? consume = null, Action<long>? reserve = null)
     {
+        if (property.Type is { } scalar) { EnsureGraphPropertyCompatible(property.DefinitionId, property.Name, scalar, snapshot, consume, reserve); }
         if (property.Type is { } type && GetConstraints(property.DefinitionId, snapshot)
             .Any(item => item.PropertyKey == property.Name && item.Type is { } expected && expected != type))
         {
@@ -263,17 +266,21 @@ public sealed class GraphCatalog
     /// <param name="cancellationToken">Cancels the mutation.</param>
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The property metadata is invalid.</exception>
-    /// <exception cref="GraphCatalogException">The owning definition is absent, or a named type rule conflicts (CG03009).</exception>
+    /// <exception cref="GraphCatalogException">The owning definition is absent, or a named type rule or graph-type declaration conflicts (CG03009).</exception>
     /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
     public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken = default)
+        => SavePropertyKeyAsync(property, context, cancellationToken, null, null);
+
+    internal ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken,
+        Action? consume, Action<long>? reserve)
     {
         EnsureActive(context);
         var record = new CatalogRecord(property: property);
         GraphCatalogCodec.Validate(record);
         RequireMutableDefinition(property.DefinitionId, context.Snapshot, "ALTER");
         EnsureParentUnchanged(property.DefinitionId, context);
-        EnsurePropertyKeyCompatible(property, Latest(context));
+        EnsurePropertyKeyCompatible(property, Latest(context), consume, reserve);
         return SaveAsync(record, EnsureUnchanged(3, property.DefinitionId, property.Name, context), context, cancellationToken);
     }
 
@@ -350,7 +357,11 @@ public sealed class GraphCatalog
     /// <exception cref="GraphCatalogException">The name is taken, the owner is missing, a constraint conflicts, or the snapshot is stale.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
     /// <exception cref="GraphElementTooLargeException">The encoded metadata exceeds one record.</exception>
-    public async ValueTask CreateConstraintAsync(GraphConstraintMetadata constraint, TransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask CreateConstraintAsync(GraphConstraintMetadata constraint, TransactionContext context, CancellationToken cancellationToken = default)
+        => CreateConstraintAsync(constraint, context, cancellationToken, null, null);
+
+    internal async ValueTask CreateConstraintAsync(GraphConstraintMetadata constraint, TransactionContext context, CancellationToken cancellationToken,
+        Action? consume, Action<long>? reserve)
     {
         EnsureActive(context);
         var record = new CatalogRecord(constraint: constraint);
@@ -366,6 +377,8 @@ public sealed class GraphCatalog
         {
             throw ConstraintConflict(constraint.PropertyKey);
         }
+        if (constraint.Type is { } scalar)
+        { EnsureGraphPropertyCompatible(constraint.DefinitionId, constraint.PropertyKey, scalar, latest, consume, reserve); }
         EnsureUnchanged(5, constraint.DefinitionId, constraint.Name, context);
         // A constraint introduces a known property key, independently of the rule's lifetime.
         // Keep unnamed rules untouched, and roll back new key discovery with a failed creation.
@@ -731,10 +744,15 @@ public sealed class GraphCatalog
         }
     }
 
-    private Found? Find(byte kind, Guid parent, string name, TransactionSnapshot snapshot)
+    private Found? Find(byte kind, Guid parent, string name, TransactionSnapshot snapshot, Action<long>? reserve = null)
+        => Find(kind, parent, name, snapshot, null, out _, reserve);
+
+    private Found? Find(byte kind, Guid parent, string name, TransactionSnapshot snapshot,
+        TransactionSnapshot? comparison, out Found? compared, Action<long>? reserve = null)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(snapshot);
+        compared = null;
         lock (_sync)
         {
             var key = (kind, parent, name);
@@ -765,6 +783,10 @@ public sealed class GraphCatalog
                     RemoveStaleReference(key, versions, index);
                     continue;
                 }
+                // The graph-type schema path reserves before decoding strings, property objects,
+                // sorting/deduplication buffers and immutable collections. Repeated versions are
+                // conservatively charged separately, including invisible candidates.
+                reserve?.Invoke(512L + bytes.Length * 32L);
                 var record = GraphCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
                 if ((record.Kind, record.Parent, record.Name) != key || record.Id != reference.Id)
                 {
@@ -776,16 +798,28 @@ public sealed class GraphCatalog
                 {
                     result = new Found(reference, record);
                 }
+                if (comparison is not null && comparison.IsVisible(writer) &&
+                    (deleter == TransactionSequence.None || !comparison.IsVisible(deleter)) &&
+                    (compared is null || writer > compared.Value.Reference.Writer))
+                {
+                    compared = new Found(reference, record);
+                }
             }
             return result;
         }
     }
 
-    private IReadOnlyList<Found> List(byte kind, Guid? parent, TransactionSnapshot snapshot)
+    private IReadOnlyList<Found> List(byte kind, Guid? parent, TransactionSnapshot snapshot, Action<long>? reserve = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         lock (_sync)
         {
+            // Reserve directory and result capacity before copying candidate keys.
+            if (reserve is not null)
+            {
+                int count = parent is { } ownerId && _children.TryGetValue((kind, ownerId), out var children) ? children.Count : 0;
+                reserve(checked(count * 128L));
+            }
             var result = new List<Found>();
             var keys = parent is { } owner
                 ? _children.TryGetValue((kind, owner), out var names)
@@ -794,7 +828,7 @@ public sealed class GraphCatalog
             foreach (var key in keys)
             {
                 BeforeDirectoryKeyVisit?.Invoke();
-                if (Find(key.Kind, key.Parent, key.Name, snapshot) is { } found)
+                if (Find(key.Kind, key.Parent, key.Name, snapshot, reserve) is { } found)
                 {
                     result.Add(found);
                 }
@@ -812,9 +846,9 @@ public sealed class GraphCatalog
         }
     }
 
-    private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, Guid Id);
+    internal readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, Guid Id);
 
-    private readonly record struct Found(Reference Reference, CatalogRecord Record);
+    internal readonly record struct Found(Reference Reference, CatalogRecord Record);
 
     private sealed class DebugView
     {

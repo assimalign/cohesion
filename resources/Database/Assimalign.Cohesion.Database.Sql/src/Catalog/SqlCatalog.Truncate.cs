@@ -215,7 +215,7 @@ public sealed partial class SqlCatalog
                 if (mismatch is not null)
                 { throw new SqlCatalogException("CS05060", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.KeptTableShapeMismatch, table.Schema, table.Name, mismatch)); }
-                EnsurePhysicalLayoutKept(previous, table);
+                EnsurePhysicalLayoutKept(previous, table, keptTable: true);
             }
             var allReplacements = replacements.Concat(kept).ToArray();
             ValidateStorageReplacement(dropped, null);

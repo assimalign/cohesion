@@ -13,4 +13,13 @@ for (int model = 0; model < TcpServerSmoke.Models.Length; model++)
     Console.WriteLine(TcpServerSmoke.Models[model] + ": TCP handshake and Ping passed.");
 }
 Console.WriteLine("Database.Tcp NativeAOT: 5/5 model servers passed.");
+for (int model = 0; model < TcpServerSmoke.Models.Length; model++)
+{
+    var result = await TcpServerSmoke.RunAsync(model, timeout.Token, usePlatformEndpoint: true);
+    if (!result.Responses.SequenceEqual(new[] { ProtocolMessageType.Authenticate, ProtocolMessageType.Ready, ProtocolMessageType.Pong }))
+    { throw new InvalidOperationException("A platform endpoint failed its TCP handshake/Ping smoke."); }
+}
+Console.WriteLine("Database.Tcp NativeAOT: 5/5 named platform endpoints passed.");
+await HealthEndpointSmoke.RunAsync(timeout.Token);
+Console.WriteLine("Database.Tcp NativeAOT: managed HTTP readiness/liveness and listener release passed.");
 await KeyValueFunctionSmoke.RunAsync(timeout.Token);

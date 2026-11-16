@@ -1288,8 +1288,9 @@ public sealed class SqlLanguageConformanceTests
                 session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
                 await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE t SET age=1 WHERE id=4;"));
             }),
-        [SqlClauses.IndexKeyOrder] = new("CREATE INDEX ix_order ON t(age DESC NULLS LAST,name ASC NULLS FIRST);", _seed,
-            expression => expression is SqlCreateIndexExpression create && create.KeyOrders[0] == SqlIndexKeyOrder.DescendingNullsLast,
+        [SqlClauses.IndexKeyOrder] = new("CREATE INDEX ix_order ON t(age DESC,name);", _seed,
+            expression => expression is SqlCreateIndexExpression create && create.KeyOrders[0] == SqlIndexKeyOrder.DescendingNullsLast &&
+                create.KeyOrders[1] == SqlIndexKeyOrder.AscendingNullsFirst,
             async (session, _) =>
             {
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE age=36 ORDER BY name;", [[1]]);

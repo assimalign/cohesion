@@ -24,9 +24,9 @@ public sealed class SqlDatabaseServerOptions : DatabaseServerOptions
 
     internal void ValidateFor(DatabaseName engineName)
     {
-        ValidateCommon("SQL", engineName);
         ValidateTimeout(ShutdownDrainTimeout, nameof(ShutdownDrainTimeout), "SQL", engineName);
         ValidateTimeout(TerminalDrainLinger, nameof(TerminalDrainLinger), "SQL", engineName);
+        ValidateCommon("SQL", engineName);
     }
 
     /// <summary>

@@ -203,9 +203,9 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
             object? value;
             if (expression.Query.IsValue)
             { value = row.GetValue(0); }
-            else if (expression.Query.Projections.Count == 1 && expression.Query.Projections[0].Expression is OqlUnaryExpression { Operator: ".*" })
+            else if (expression.Query is OqlSelectExpression { Projections.Count: 1 } block && block.Projections[0].Expression is OqlUnaryExpression { Operator: ".*" })
             { value = row.IsMissing(0) ? DocumentMissing.Instance : row.GetValue(0); }
-            else if (DocumentRowWriter.WritesBareValue(expression.Query) &&
+            else if (expression.Query is OqlSelectExpression query && DocumentRowWriter.WritesBareValue(query) &&
                 row.GetValue(0) is JsonElement { ValueKind: JsonValueKind.Object } document)
             { value = document; }
             else

@@ -1,8 +1,7 @@
 using System;
-using System.Globalization;
-using System.Net;
 
-using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Database.Internal;
+
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
@@ -33,36 +32,8 @@ public static partial class DatabaseServerOptionsExtensions
             ArgumentNullException.ThrowIfNull(options);
             Uri.ThrowIfNotEndpoint(endpoint);
 
-            IPAddress address = ResolveHost(endpoint.IdnHost);
-            options.Listener = TcpConnectionListener.Create(
-                tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port));
+            options.Listener = DatabaseTcpEndpoint.CreateListener(endpoint);
             return options;
         }
-    }
-
-    private static IPAddress ResolveHost(string host)
-    {
-        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-        {
-            return IPAddress.Loopback;
-        }
-
-        if (host is "*" or "+" or "0.0.0.0")
-        {
-            return IPAddress.Any;
-        }
-
-        if (host is "[::]" or "::")
-        {
-            return IPAddress.IPv6Any;
-        }
-
-        if (IPAddress.TryParse(host, out IPAddress? address))
-        {
-            return address;
-        }
-
-        throw new InvalidOperationException(
-            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointHostUnsupported, host));
     }
 }

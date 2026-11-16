@@ -58,6 +58,9 @@ public static class OqlClauses
     /// <summary>Selects values from one or more document collections.</summary>
     public const string Select = "SELECT";
 
+    /// <summary>Combines query values, eliminating duplicates unless ALL is specified.</summary>
+    public const string Union = "UNION";
+
     /// <summary>Eliminates duplicate projected values.</summary>
     public const string Distinct = "DISTINCT";
 

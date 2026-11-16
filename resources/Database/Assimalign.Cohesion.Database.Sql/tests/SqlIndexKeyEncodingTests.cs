@@ -64,17 +64,17 @@ public sealed class SqlIndexKeyEncodingTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Directed key encoding: ordinary ascending values retain their bytes (#1631)")]
-    public void Encode_OrdinaryAscendingValues_ShouldPreserveSharedBytes()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Directed key encoding: default ascending values including NULL retain shared bytes (#1787)")]
+    public void Encode_DefaultOrderIncludingNull_ShouldPreserveSharedBytes()
     {
         // Arrange / Act / Assert
         foreach (var (type, value) in from item in Values()
-            from value in item.Values.Where(value => value is not null && value is not float && value is not double)
+            from value in item.Values.Where(value => value is not float && value is not double)
             select (item.Type, value))
         {
             var writer = new DatabaseKeyWriter();
             SqlRowCodec.AppendKeyValue(writer, type, value, Collation.Binary);
-            Encode(type, value, Collation.Binary, SqlCatalogIndexKeyOrder.AscendingNullsLast).ShouldBe(writer.ToArray());
+            Encode(type, value, Collation.Binary, default).ShouldBe(writer.ToArray());
         }
     }
 
@@ -92,7 +92,7 @@ public sealed class SqlIndexKeyEncodingTests
         if (left is null || right is null)
         {
             if (left is null && right is null) { return 0; }
-            return (left is null ? -1 : 1) * (((int)order & 1) != 0 ? 1 : -1);
+            return (left is null ? -1 : 1) * (order is SqlCatalogIndexKeyOrder.AscendingNullsFirst or SqlCatalogIndexKeyOrder.DescendingNullsFirst ? 1 : -1);
         }
         return SqlValueComparer.Compare(left, right, collation) * (((int)order & 2) != 0 ? -1 : 1);
     }

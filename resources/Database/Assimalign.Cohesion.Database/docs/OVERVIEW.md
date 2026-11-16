@@ -18,13 +18,19 @@ child-owned vocabulary the contracts speak (`TransactionId` and `TransactionStat
 
 Database instances expose a nullable immutable `Provisioning` observation for model-owned deferred work: operation/object, step position, row progress and failure code. Hosting consumes it through the root. Application Build accepts a caller cancellation token, handed to engine factories through their application context (49a).
 
+Model server options default a missing listener from the current AppEnvironment scope's named
+endpoint: sql, documents, graph, kv or blob. Explicit listeners win; missing or malformed values
+retain the existing refusal. The root's TCP default stays private, with the stateless address
+binder shared by Database and Database.Tcp. See the design's named platform endpoint section.
+
 ## Scope
 
 Plan descriptions share the eight-column Database.Execution result contract across SQL,
 Documents and Graph. SQL's SELECT-only EXPLAIN ANALYZE can populate actual candidate counts;
 plain EXPLAIN stays nonexecuting, and the other models retain their documented syntax (#1522).
 
-Model packages compile the root's internal `Engine` shared-source module. Other Database-owned
+Model packages compile the root's internal `Engine` shared-source module. Database and Database.Tcp
+compile its `EndpointBinding` module for endpoint address validation. Other Database-owned
 modules are `Diagnostics`, `Parameters`, `Encoding`, `Types` and `Defaults`; each consumer declares
 both its owning project and `Module` in `CohesionSharedSource` (#1705). The project file identifies
 the source boundary while the existing public construction and execution APIs remain intact.

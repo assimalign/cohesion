@@ -39,7 +39,7 @@ public sealed partial class OqlQueryParser
         {
             alias = Identifier();
         }
-        else if ((source is null or OqlSubqueryExpression) && Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause() && !IsSourceBindingClause())
+        else if ((source is null or OqlSubqueryExpression) && Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause() && !IsSourceBindingClause() && !IsSetOperator())
         {
             alias = Identifier();
         }
@@ -98,7 +98,7 @@ public sealed partial class OqlQueryParser
             string? variable = null;
             bool implicitVariable = false;
             if (Take("AS")) { variableToken = Current; variable = Identifier(); }
-            else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsSourceBindingClause() && !IsReturningClause())
+            else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsSourceBindingClause() && !IsReturningClause() && !IsSetOperator())
             { variable = Identifier(); }
             else if (expression is OqlPathExpression { Segments.Count: > 0 } path)
             {
@@ -133,7 +133,7 @@ public sealed partial class OqlQueryParser
                 string? name = null;
                 if (Take("AS")) { name = Identifier(); }
                 else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
-                    !Is("LETTING") && !Is("RETURNING")) { name = Identifier(); }
+                    !Is("LETTING") && !Is("RETURNING") && !IsSetOperator()) { name = Identifier(); }
                 if (name is not null && groupAliases is null)
                 {
                     groupAliases = [];
@@ -144,54 +144,8 @@ public sealed partial class OqlQueryParser
             if (Take("GROUP")) { Expect("AS"); groupAs = Identifier(); }
         }
         OqlExpression? having = Take("HAVING") ? ParseExpression() : null;
-        List<OqlOrdering> ordering = [];
-        if (Take("ORDER"))
-        {
-            Expect("BY");
-            do
-            {
-                var expression = ParseExpression();
-                bool descending = Take("DESC");
-                if (!descending)
-                {
-                    Take("ASC");
-                }
-
-                var placement = OqlNullPlacement.Default;
-                if (Take("NULLS"))
-                {
-                    if (Take("FIRST")) { placement = OqlNullPlacement.First; }
-                    else if (Take("LAST")) { placement = OqlNullPlacement.Last; }
-                    else { Error("CD00013", ErrorMessages.NullPlacementExpected, Current); }
-                }
-                ordering.Add(new OqlOrdering(expression, descending, placement));
-            } while (!Failed && Take(TokenType.Comma));
-        }
-        OqlExpression? limit = null;
-        OqlExpression? offset = null;
-        while (!Failed && (Is("LIMIT") || Is("OFFSET")))
-        {
-            var clause = Current;
-            bool isLimit = Is("LIMIT");
-            if (isLimit ? limit is not null : offset is not null)
-            {
-                Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseSelectVoid4, clause.Text.ToUpperInvariant()), clause);
-                break;
-            }
-            Advance();
-            // Refuse the comma spelling before validating its first count, as PostgreSQL's
-            // grammar does (src/backend/parser/gram.y:13586-13593).
-            if (isLimit && HasCommaCount())
-            {
-                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIMIT m, n (use LIMIT n OFFSET m)", Profile.Language, Span(clause, clause)));
-                break;
-            }
-            var count = ParseCount(clause.Text.ToUpperInvariant());
-            if (isLimit) { limit = count; }
-            else { offset = count; }
-        }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
-            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly(),
+            groups.AsReadOnly(), having, new List<OqlOrdering>().AsReadOnly(), distinct, value, null, null, Span(start, Previous), unnest.AsReadOnly(),
             groupAliases?.AsReadOnly(), groupAs, source, bindings?.AsReadOnly(), implicitAlias);
     }
 
@@ -225,7 +179,8 @@ public sealed partial class OqlQueryParser
                 if (token.Type == TokenType.Comma) { return index > _position; }
                 if (token.Type is TokenType.Eof or TokenType.Semicolon || IsWord(token, "LIMIT") || IsWord(token, "OFFSET") ||
                     IsWord(token, "ORDER") || IsWord(token, "GROUP") || IsWord(token, "HAVING") ||
-                    IsWord(token, "WHERE") || IsWord(token, "FROM") || IsWord(token, "RETURNING")) { return false; }
+                    IsWord(token, "WHERE") || IsWord(token, "FROM") || IsWord(token, "RETURNING") ||
+                    IsWord(token, "UNION") || IsWord(token, "INTERSECT") || IsWord(token, "EXCEPT")) { return false; }
             }
             if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { depth++; }
             else if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace)

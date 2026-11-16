@@ -57,7 +57,9 @@ public partial class CompileDatabaseSchemaTaskTests
 
         string schemaPath = SchemaPath(task, "orders");
         SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(schemaPath);
-        schema.Format.ShouldBe("cohesion/database-schema/v11");
+        schema.Format.ShouldBe("cohesion/database-schema/v12");
+        schema.Tables.SelectMany(table => table.Indexes).SelectMany(index => index.KeyOrders)
+            .ShouldAllBe(order => order == CompiledSchemaIndexKeyOrder.AscendingNullsFirst);
         schema.Name.ShouldBe("orders");
         schema.Tables.Select(static table => table.Name).ShouldBe(["OrderLines", "Orders"]);
         schema.Tables.SelectMany(static table => table.Constraints)

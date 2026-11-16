@@ -8,6 +8,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Protocol;
+using Assimalign.Cohesion.Database.Types;
 
 var builder = GraphDatabaseEngine.CreateBuilder("graph-aot");
 builder.Functions.Add(GraphScalarFunction.Create<long, long>("developer_twice", value => checked(value * 2)));
@@ -172,6 +173,25 @@ foreach (var (expression, code) in new[]
     }
 }
 var schema = GraphSchema.Open(database, session);
+await schema.SetGraphTypeAsync(GraphType.Create([GraphNodeType.Create("TypedSmoke", ["SmokeEntity"],
+    [GraphPropertyType.Create("name", DatabaseType.String, true)])]), CancellationToken.None);
+await Check("INSERT (:TypedSmoke:SmokeEntity {name:'ok',extra:1}) RETURN 1", [[1L]]);
+try
+{
+    await session.ExecuteAsync("INSERT (:TypedSmoke {name:'bad'})", cancellationToken: CancellationToken.None);
+    throw new InvalidOperationException("Graph type enforcement smoke mismatch.");
+}
+catch (DatabaseException error) when (error.Diagnostics.Any(item => item.Code == "CG03012")) { checks++; }
+await schema.AddGraphTypeAsync(GraphType.Create([GraphNodeType.Create("ExtraSmoke")],
+    [GraphEdgeType.Create("SmokeEdge", "TypedSmoke", "ExtraSmoke")]), CancellationToken.None);
+await schema.AlterGraphTypeAsync(GraphType.Create([GraphNodeType.Create("ExtraSmoke", properties:
+    [GraphPropertyType.Create("value", DatabaseType.Int64)])]), CancellationToken.None);
+if ((await schema.GetGraphTypeAsync(CancellationToken.None))!.EdgeTypes.Count != 1)
+{ throw new InvalidOperationException("Graph type read smoke mismatch."); }
+checks++;
+await schema.DropGraphTypeAsync(["ExtraSmoke"], ["SmokeEdge"], CancellationToken.None);
+await schema.DropGraphTypeAsync(CancellationToken.None);
+checks++;
 Guid schemaLabel = Guid.NewGuid();
 await schema.SaveLabelAsync(new(schemaLabel, "SchemaSmoke"), CancellationToken.None);
 await schema.CreateConstraintAsync(new(schemaLabel, "schema_type", "p", Assimalign.Cohesion.Database.Types.DatabaseType.Int64), CancellationToken.None);

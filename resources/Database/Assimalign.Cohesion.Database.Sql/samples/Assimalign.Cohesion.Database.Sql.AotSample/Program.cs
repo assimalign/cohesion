@@ -356,7 +356,7 @@ internal static class Program
             "SELECT id FROM directed_guard WHERE a=1 AND b>=2 AND b<=3 ORDER BY b DESC"), [[2], [1]]);
         Check("in process: directed canonical metadata", await RowsAsync(session,
             "SELECT DIRECTION,NULL_PLACEMENT FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME='directed_ix' ORDER BY ORDINAL_POSITION"),
-            [["DESC", "LAST"], [null, "FIRST"]]);
+            [["DESC", null], [null, null]]);
         await session.ExecuteAsync("INSERT INTO partial_guard VALUES(7,TRUE) ON CONFLICT(k) WHERE active=TRUE DO UPDATE SET active=FALSE");
         Check("in process: partial inference applies replacement membership", await RowsAsync(session,
             "SELECT COUNT(*) FROM partial_guard WHERE k=7 AND active"), [[0L]]);

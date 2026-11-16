@@ -24,11 +24,11 @@ public sealed class BlobDatabaseServerOptions : DatabaseServerOptions
 
     internal void ValidateFor(DatabaseName engineName)
     {
-        ValidateCommon("Blob", engineName);
         ValidateTimeout(AuthenticationTimeout, nameof(AuthenticationTimeout), "Blob", engineName, allowInfinite: true);
         ValidateTimeout(IdleTimeout, nameof(IdleTimeout), "Blob", engineName, allowInfinite: true);
         ValidateTimeout(ShutdownDrainTimeout, nameof(ShutdownDrainTimeout), "Blob", engineName);
         ValidateTimeout(TerminalDrainLinger, nameof(TerminalDrainLinger), "Blob", engineName);
+        ValidateCommon("Blob", engineName);
     }
 
     /// <summary>

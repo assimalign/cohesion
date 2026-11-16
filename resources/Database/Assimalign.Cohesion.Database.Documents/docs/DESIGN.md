@@ -598,17 +598,19 @@ CD00007 for the same count rule at parse and plan time:
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
 | `CD05015` | A query/RETURNING constructor, SELECT projection or result formatter exceeds the 256-level serialized result limit, including the row wrapper |
-| `CD05018` | Retained statement source rows, ordered candidate buckets, key-lookup caches, groups, RETURNING results or aggregate values exceed the statement memory budget |
-| `CD05020` | Shared expression/lookup work budget exhausted across nested queries, expression sources and key joins |
+| `CD05018` | Retained statement source rows, ordered candidate buckets, key-lookup caches, groups, compound state, RETURNING results or aggregate values exceed the statement memory budget |
+| `CD05020` | Shared expression/lookup/set-operation work budget exhausted across nested queries, expression sources, key joins and compounds |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
-| `CD00014` | Direct IN subquery requires RAW/VALUE |
+| `CD00014` | IN subquery requires RAW/VALUE (direct SELECT or compound, including a parenthesized first operand; nested compounds currently retain CK00001) |
 | `CD00015` | Derived FROM subquery requires an alias |
 | `CD00016` | Retired and reserved: former joined-statement explicit-alias requirement (#1767) |
 | `CD01033` | FROM expression has no explicit alias or implicit field name |
 | `CD01034` | Unbound variable in a FROM expression without an input-row scope |
 | `CD01035` | Invalid key-join binding scope or ambiguous/invalid joined META receiver |
 | `CD01036` | VALUES references its destination binding without a source row or local declaration |
+| `CD01037` | ORDER BY over an all-RAW/VALUE compound has no named result members |
+| `CD01038` | Compound ORDER BY references an unbound result member, metadata or star |
 | `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
 | `CD01032` | Direct ordering AST has an invalid null placement |
 | `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
@@ -830,10 +832,13 @@ reference, persisted format or wire shape. EXPLAIN records captured names beside
 
 Subqueries preserve zero/multiple-row SQL++ arrays, including RAW/VALUE null normalization and
 object-star preservation (nonobject roots wrap under document). Star deliberately follows this
-engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Direct non-RAW
-IN subqueries retain the conservative CD00014 guard (owner sign-off, 2026-11-02); this is a deliberate
-SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope; inner declarations
-shadow them. Qualified stars outside joined SELECT projections retain their CK00001 refusal.
+engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Non-RAW IN
+subqueries retain the conservative CD00014 guard (owner sign-off, 2026-11-02): a direct SELECT or
+compound query, including a parenthesized first operand, requires RAW/VALUE, subject to the current
+nested-compound CK00001 gate. Redundant wrappers alone keep the value-list interpretation.
+This is a deliberate SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope;
+inner declarations shadow them. Qualified stars outside joined SELECT projections retain their
+CK00001 refusal.
 FROM references to explicit outer aliases use per-row expression scans. Unqualified fields
 otherwise bind to the inner source, as in Couchbase. EXISTS uses
 Couchbase coll_exists.go:40-53; the array
@@ -1024,6 +1029,68 @@ estimate and rollback boundary. Ordinary SELECT retains its existing memory poli
 DocumentQueryTests.Comprehensions, OqlExecutionConformanceTests and DocumentComprehensionWireTests
 cover values, nested scopes, grouping, registered calls, cancellation and both transports.
 
+#### Set-operation execution (#1803, OQ-S1)
+
+Every supported compound operand retains standalone implicit-source alias and nested-subquery
+correlation rules, including explicit-alias capture versus an independent collection read.
+Index DDL still refuses element-rooted relative paths with CD03027, and VALUES subqueries still
+refuse unbound destination capture with CD01036; compounds in those deferred query positions
+retain CK00001 until OQ-S2 (#1767).
+
+DocumentSetOperationPlan binds two independent query plans and chooses T3-30's result shape
+before document reads: all RAW/VALUE leaves give `value`; identical ordered named projections
+give typed columns; otherwise the existing whole-document mode gives one `document` Json column.
+Wildcard operands keep document mode and open result-member names. Compound ORDER BY addresses
+members from either operand, independent of input collection bindings. CD01037 rejects ordering
+on all-RAW/VALUE compounds and CD01038 rejects an unbound member or source-only metadata/star.
+The [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#set-operations-1803-oq-s1)
+records precedence, equality, deferred positions and every default.
+
+The executor reuses the source pull pipeline. UNION ALL streams each operand without an
+operand-result buffer; local grouping, DISTINCT and ordering retain their own blocking semantics.
+Unordered RAW/typed-column ALL consumers pass cells directly, building a complete JSON row only
+when a parent needs it for equality, ordering or whole-document output. Each distinct insertion
+uses one set probe before charging a new key; duplicates need no key reservation or size estimate.
+A failed charge aborts the statement, so an uncharged inserted key cannot outlive the refusal.
+UNION keeps first representatives in input order using the existing grouping structural comparator
+on complete row values. Named MISSING members are omitted before comparison; RAW MISSING is NULL.
+Different arity or member order needs no special rejection. The equality set reserves 128 bytes,
+then 160 bytes plus the existing JSON ownership/token estimate per independent retained key.
+Compound sorting separately owns row values, cells, keys and stable ordinals. Result retention
+owns independent cells; scoped reservations release on success, cancellation and every refusal.
+All use the operation's StatementMemoryBudget and CD05018. Processing, comparisons and sorting
+share the nested execution context's StatementWorkBudget and CD05020. Each top-level operand
+follows standalone SELECT's expression accounting: its own subqueries, expression sources or
+key joins enable it; plain collection scans remain uncharged even beside a charged operand. Sorter
+wrapper exceptions are unwrapped so a coded budget refusal stays coded.
+
+Static types widen across operand descriptors; heterogeneous columns retain the Null descriptor
+through later operators, independently of genuinely all-null columns. Dynamic value/named types observe the pre-page
+stream and promote Int64/Decimal as ordinary SELECT does while retaining only the requested page.
+Fixed-type unordered pages stop before another operand row is pulled. LIMIT 0 preserves eager
+binding and parameter validation, then opens no operand, invokes no callback and skips every
+blocking stage. Returned values are independently owned; no borrowed source frame escapes.
+
+EXPLAIN's Union/UnionAll parent has both complete operand trees, a static shape, order-key count
+and resolved limit/offset, without source evaluation. OqlQueryExpression is the public closed
+SELECT/set family; nested-query and DML-source properties are retyped now but compound execution
+in those positions remains a CK00001 gate for OQ-S2. The mixed statement envelope stays
+OqlExpression for queries, writes, DDL and transactions. No protocol or persisted format changes.
+
+DocumentSetOperationTests includes a deterministic 384-case generated concatenation/deduplication oracle
+covering RAW values, whole documents with omitted MISSING members, and matching named projections
+with typed columns. Canonical keys choose each first representative; Json cells preserve numeric
+scale and member order, while generated numeric cells compare by value. A fixed typed-column trial
+pins both left and right representatives through Json text and Decimal scale (3.00 and 4.50).
+The same seed and generator run 96 cases over TCP. Release guards
+enforce allocation ceilings for RAW/typed UNION ALL; Debug and Release enforce the same deterministic
+work-counter ceiling for distinct insertion. Execution also covers exactly 128 operators and duplicate
+admission at the measured memory ceiling, with a new-key refusal control and complete release.
+Further cases cover NULL/MISSING/numeric/structural equality, independent operand scopes, streaming/empty windows,
+static headers, cancellation and exact budget release. A controlled commit between operands
+proves one statement view under Snapshot and ReadCommitted. Conformance cases and InMemory/TCP wire
+probes exercise the same contract; the engine-linked NativeAOT consumer checks both transports.
+
 #### Result paging (#1129)
 
 Both stored and system collections resolve LIMIT/OFFSET in planning, before collection lookup
@@ -1085,7 +1152,7 @@ transition function; src/backend/utils/adt/float.c:2937-2955 explains why stable
 avoid naive floating squared-sum subtraction. Cohesion uses its own grouping comparator and exact
 integer squared-sum subtraction, where cancellation loses no digits; no reference-engine code was copied.
 
-The operation-owned counter applies StatementMemoryBudget to catalog identities and sort staging,
+The operation-owned counter applies StatementMemoryBudget to compound equality/sort/output state, catalog identities and sort staging,
 retained SELECT source rows (including JSON, IDs, raw star bytes and expanded bindings), group
 keys and membership, native accumulator state, DISTINCT sets, array inputs, scratch expressions,
 and projected output. It reuses CD05018 for retained statement memory exhaustion (#1753, #1097).
@@ -1214,7 +1281,7 @@ columns retain long values. JSON numeric equality and wire digits are unchanged 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, expression/derived FROM, UNNEST, key JOIN/NEST, quantified predicates, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
-CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
+CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, UNION [ALL], IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; general joins, deferred document mutations
 and server statements are rejected with `CK00001`. Expression subqueries execute as described above.
 The parser advertises only clauses this executor supports.
@@ -1519,6 +1586,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | Operators | Meaning |
 | --- | --- |
 | `Select`, `Project`, `ProjectValue`, `Group` | The physical query and its logical projection or grouping stage; details include filters and ordering |
+| `Union`, `UnionAll` | Set-operation parent with both complete operand trees, result shape, order-key count and resolved paging |
 | `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
 | `CollectionScan` | Candidate retrieval from the named collection |
@@ -3387,6 +3455,8 @@ Listener, Authenticator, MaxSessions, AuthenticationTimeout, IdleTimeout and Shu
 Defaults stay 100 sessions, ten seconds for authentication, thirty minutes idle and thirty seconds
 for shutdown. TerminalDrainLinger remains on the model leaves, default two seconds. Each model
 still snapshots every value before validation and owns the transferred listener through stop.
+Timers and MaxSessions are validated before platform listener resolution, so invalid options
+allocate no fallback listener (#1790). See the root DESIGN for managed endpoint admission.
 No public Database interface is added; the count remains five.
 
 Database.Tcp replaces Database.Sql.Tcp. Its root-namespace extension

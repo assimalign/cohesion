@@ -1433,6 +1433,44 @@ The coordinator owns the horizon/apply gate; models supply their current manager
 interfaces, model-specific vacuum loops or root access to index-page internals. Blob has no
 B-tree manager. Indexing DESIGN owns the physical rollback decision #1393 and pruning details.
 
+## Named platform endpoints (#1790, EN-A1)
+
+Server creation snapshots options before validation. When that snapshot has no Listener and
+COHESION_GATEWAY is nonempty, DatabaseServerOptions reads the current AppEnvironment flow with TryGetEndpoint: SQL uses sql,
+Documents documents, Graph graph, KeyValuePair kv, and Blob blob. An explicit Listener, including
+Listen(Uri), wins without reading the platform endpoint. Missing or malformed contract values
+retain CK08001. A DNS bind host retains CK07101. No endpoint is invented and no server is added.
+Only the reserved diagnostic names SQL, Documents, Graph, KeyValuePair and Blob select these
+assignments; other model names have no fallback. Without a gateway, a missing listener retains
+CK08001 even when endpoint values exist. Each model validates its timers, then the common session
+limit, before resolving a platform listener, so a later option refusal cannot abandon that listener.
+
+This follows Web.Hosting's HttpServerConfiguration.GetPlatformEndPoint
+(resources/Web/Assimalign.Cohesion.Web.Hosting/src/Internal/HttpServerConfiguration.cs:853-874):
+read the runtime contract from the current AppEnvironment flow: the scope when inside one,
+otherwise the process environment. Database additionally requires a named gateway for fallback.
+The root
+privately references Connections.Tcp; the existing App.Database runtime-private membership already
+carries it. Models keep their generic Connections surface and gain no transport reference, public
+member or hosting dependency. The common stateless binder lives in Database/shared/EndpointBinding,
+compiled by Database and Database.Tcp, preserving Listen's IdnHost/literal-address policy.
+As with Listen(Uri), a scheme is endpoint metadata, not transport selection: this default is plain
+TCP and does not configure TLS. A secured or different transport needs an explicit Listener.
+The listener is inert until server start; the server owns its bind, drain and terminal disposal.
+The caller's original options remain unchanged and can be reused in another environment scope.
+TCP construction is behind a non-inlined internal factory, so generic-listener and missing-listener
+paths remain usable without deploying TCP.
+
+One assignment supplies one bind address per model: two AddServer calls on one engine, or servers
+on two engines of the same model, need explicit distinct listeners. DatabaseServer exposes neither
+its listener nor its assignment origin for Build validation, so a coded Build refusal needs an
+approved composition seam; currently Start reports AddressAlreadyInUse and the host rolls back,
+releasing the first listener.
+
+The in-process platform currently assigns only http. Five-model tests assign the named runtime
+values directly and complete handshake/Ping, including under NativeAOT; named platform allocation
+and per-endpoint outputs remain ApplicationModel escalation E-AM1. No wire or store format changes.
+
 ## Shared server options and TCP composition (#1391, D7 B)
 
 The five sealed model server-options types derive from root DatabaseServerOptions. The base owns

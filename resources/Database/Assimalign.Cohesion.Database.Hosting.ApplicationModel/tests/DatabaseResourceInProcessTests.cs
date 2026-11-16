@@ -1,5 +1,7 @@
 using System;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -83,6 +85,12 @@ public sealed class DatabaseResourceInProcessTests
             // Pins today's documented gap (open question 1): this is the platform's HTTP
             // endpoint, not Database's wire address. Update deliberately when named endpoints land.
             resource.Outputs.ShouldContainKey(OutputName.Endpoint);
+            using var healthClient = new HttpClient { BaseAddress = new Uri(resource.Outputs[OutputName.Endpoint]) };
+            foreach (string path in new[] { "/cohesion/v1/readyz", "/cohesion/v1/livez" })
+            {
+                using HttpResponseMessage response = await healthClient.GetAsync(path, guard.Token);
+                response.StatusCode.ShouldBe(HttpStatusCode.OK);
+            }
 
             write.Status.ShouldBe(ApplicationActionStatus.Succeeded);
             resource.State.ShouldHaveSingleItem().Action.ShouldBe((ActionName)"greeting");

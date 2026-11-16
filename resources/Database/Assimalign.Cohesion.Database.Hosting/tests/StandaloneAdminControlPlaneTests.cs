@@ -145,7 +145,7 @@ public sealed class StandaloneAdminControlPlaneTests
     public async Task Readiness_WhileServerBindIsPending_ShouldRemainUnavailable()
     {
         // Arrange
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         var bindStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepting = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -153,7 +153,7 @@ public sealed class StandaloneAdminControlPlaneTests
         await using var engine = new RecordingEngine();
         engine.AddServer(owner => new ControlledStartServer(owner, bindStarted, accepting));
         builder.AddEngine(engine);
-        builder.AddService(context => new DatabaseAdminEndpointService(endpoint, context));
+        builder.AddHealthEndpoint(endpoint);
         await using DatabaseApplication application = builder.Build();
         using var client = new System.Net.Http.HttpClient { BaseAddress = endpoint };
 

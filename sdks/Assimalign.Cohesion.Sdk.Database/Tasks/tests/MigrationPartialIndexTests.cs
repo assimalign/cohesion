@@ -38,7 +38,7 @@ public sealed class MigrationPartialIndexTests
 
         // Act / Assert
         task.Execute().ShouldBeFalse();
-        Directory.GetFiles(directory.File("migrations/orders")).ShouldBeEmpty();
+        Directory.Exists(directory.File("migrations")).ShouldBeFalse();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Partial migrations: creation and predicate changes preserve subset and NULL uniqueness (#1630)")]

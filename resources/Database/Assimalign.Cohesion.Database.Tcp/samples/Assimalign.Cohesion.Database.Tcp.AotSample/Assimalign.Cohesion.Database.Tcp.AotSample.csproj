@@ -2,6 +2,7 @@
   <PropertyGroup><RootNamespace>Assimalign.Cohesion.Database.Tcp.AotSample</RootNamespace><OutputType>Exe</OutputType><IsPackable>false</IsPackable><PublishAot>true</PublishAot><PublishTrimmed>true</PublishTrimmed></PropertyGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Tcp" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />

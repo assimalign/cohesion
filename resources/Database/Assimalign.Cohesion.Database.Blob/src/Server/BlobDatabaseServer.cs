@@ -104,13 +104,14 @@ public sealed class BlobDatabaseServer : DatabaseServer
     /// </summary>
     /// <param name="engine">The Blob engine the server fronts. The composition root owns and disposes the engine.</param>
     /// <param name="options">
-    /// The composition options. Requires a configured <see cref="BlobDatabaseServerOptions.Listener"/>.
+    /// The composition options. Requires a listener, or the model's assigned platform endpoint when managed.
     /// The server keeps a copy, so a later change to this object does not reach it.
     /// </param>
     /// <returns>The server.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="engine"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">An authentication or idle timer is invalid, or the drain timeout or peer-close linger is not positive and finite within the runtime timer range.</exception>
-    /// <exception cref="ArgumentException">Thrown when the options carry no listener or a non-positive session limit.</exception>
+    /// <exception cref="ArgumentException">Thrown when the options carry no listener (and, when managed, no valid assigned platform endpoint) or a non-positive session limit.</exception>
+    /// <exception cref="InvalidOperationException">The assigned platform endpoint's bind host is not localhost, a wildcard or a literal IP address (CK07101).</exception>
     public static BlobDatabaseServer Create(BlobDatabaseEngine engine, BlobDatabaseServerOptions options)
     {
         ArgumentNullException.ThrowIfNull(engine);

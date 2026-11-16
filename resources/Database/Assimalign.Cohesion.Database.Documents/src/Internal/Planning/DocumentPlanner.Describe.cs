@@ -15,6 +15,8 @@ internal sealed partial class DocumentPlanner
 {
     internal static string DescribeOperator(object plan) => plan switch
     {
+        DocumentSetOperationPlan { Query.IsAll: true } => "UnionAll",
+        DocumentSetOperationPlan => "Union",
         DocumentNestedPlan => "SelectWithSubqueries",
         DocumentNestedQueryPlan => "Subquery",
         DocumentJoinPlan => "Select",
@@ -45,6 +47,24 @@ internal sealed partial class DocumentPlanner
 
     private static IReadOnlyList<DatabasePlanNode> DescribeNodes(DocumentStatementPlan plan)
     {
+        if (plan is DocumentSetOperationPlan compound)
+        {
+            var compoundNodes = new List<DatabasePlanNode>
+            {
+                new() { NodeId = 0, Operator = DescribeOperator(compound), Detail =
+                    $"shape={compound.Shape}; order_keys={compound.Query.OrderBy.Count}; limit={compound.Limit?.ToString(CultureInfo.InvariantCulture) ?? "none"}; offset={compound.Offset}" },
+            };
+            Append(compound.Left);
+            Append(compound.Right);
+            return compoundNodes;
+            void Append(DocumentStatementPlan operand)
+            {
+                int offset = compoundNodes.Count;
+                foreach (var node in DescribeNodes(operand))
+                { compoundNodes.Add(new DatabasePlanNode { NodeId = offset + node.NodeId, ParentId = node.ParentId is int parent ? offset + parent : 0,
+                    Operator = node.Operator, Target = node.Target, Index = node.Index, Detail = node.Detail, EstimatedRows = node.EstimatedRows }); }
+            }
+        }
         if (plan is DocumentJoinPlan join) { plan = join.Input; }
         var nodes = new List<DatabasePlanNode>();
         string? target = plan switch

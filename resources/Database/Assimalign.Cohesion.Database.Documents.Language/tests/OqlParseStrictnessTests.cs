@@ -68,14 +68,18 @@ public sealed class OqlParseStrictnessTests
     [InlineData("«MERGE» INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE")]
     [InlineData("SELECT c.fetch «first» FROM c", "FIRST")]
     [InlineData("SELECT c.limit «ALL» FROM c", "ALL")]
+    [InlineData("SELECT union «ALL» FROM c", "ALL")]
+    [InlineData("SELECT a AS union «ALL» FROM c", "ALL")]
+    [InlineData("SELECT a FROM union «ALL»", "ALL")]
     [InlineData("SELECT c.offset «ALL» FROM c", "ALL")]
     [InlineData("SELECT fetch «FIRST» FROM c", "FIRST")]
     [InlineData("SELECT c AS fetch «FIRST» FROM c", "FIRST")]
     [InlineData("SELECT c AS limit «ALL» FROM c", "ALL")]
     // A Clause word directly after the collection is a construct, never an AS-less alias.
     // A set operation and its ALL or DISTINCT are one construct.
-    [InlineData("SELECT * FROM c «UNION ALL» SELECT * FROM d", "UNION")]
-    [InlineData("SELECT * FROM c «EXCEPT DISTINCT» SELECT * FROM d", "EXCEPT")]
+    [InlineData("SELECT * FROM c «INTERSECT ALL» SELECT * FROM d", "INTERSECT")]
+    [InlineData("SELECT * FROM c «EXCEPT DISTINCT» SELECT * FROM d", "EXCEPT DISTINCT")]
+    [InlineData("SELECT * FROM c «UNION DISTINCT» SELECT * FROM d", "UNION DISTINCT")]
     // ODMG's FOR ALL owns its SATISFIES, which is not reported again.
     [InlineData("SELECT * FROM c WHERE «FOR» ALL x IN c.items SATISFIES x > 1", "FOR ALL")]
     public void Parse_UnsupportedWord_ShouldReportOneCapabilityDiagnostic(string marked, string construct)

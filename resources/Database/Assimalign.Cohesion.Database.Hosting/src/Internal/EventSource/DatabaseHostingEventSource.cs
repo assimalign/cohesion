@@ -280,6 +280,33 @@ internal sealed class DatabaseHostingEventSource : EventSource
     private void HealthRestored(string hostId, string engineName, string database, string reason, string cause, string operation, string objectName, int position, int stepCount, long rowsProcessed, long totalRows)
         => WriteEvent(17, hostId, engineName, database, reason, cause, operation, objectName, position, stepCount, rowsProcessed, totalRows);
 
+    [NonEvent]
+    public void HealthEndpointAssignmentSkipped(Uri endpoint)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            HealthEndpointAssignmentSkipped("http", endpoint.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped), endpoint.Scheme);
+        }
+    }
+
+    [NonEvent]
+    public void HealthEndpointOverridden(Uri explicitEndpoint, Uri platformEndpoint)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            HealthEndpointOverridden(explicitEndpoint.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped),
+                platformEndpoint.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped));
+        }
+    }
+
+    [Event(18, Level = EventLevel.Informational, Message = "Health assignment {0} ({1}) with scheme '{2}' was skipped: plain HTTP and a literal IP address or localhost are required.")]
+    private void HealthEndpointAssignmentSkipped(string assignment, string endpoint, string scheme)
+        => WriteEvent(18, assignment, endpoint, scheme);
+
+    [Event(19, Level = EventLevel.Informational, Message = "Explicit health endpoint {0} was replaced by managed platform endpoint {1}.")]
+    private void HealthEndpointOverridden(string explicitEndpoint, string platformEndpoint)
+        => WriteEvent(19, explicitEndpoint, platformEndpoint);
+
     private static double Elapsed(long started) => started == 0 ? 0 : Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
     private static string Bound(string value)

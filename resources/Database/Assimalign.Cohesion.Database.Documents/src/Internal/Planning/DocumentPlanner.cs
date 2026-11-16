@@ -59,6 +59,7 @@ internal sealed partial class DocumentPlanner
         OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName, nested),
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
+        OqlSetOperationExpression compound => PlanSetOperation(compound, nested, outerNames),
         OqlSelectExpression select when select.Bindings != select.Unnest => PlanJoins(select, nested, outerNames),
         OqlSelectExpression { Source: not null } select => PlanFrom(select, nested, outerNames),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
@@ -673,7 +674,7 @@ internal sealed partial class DocumentPlanner
         if (expression is OqlSubqueryExpression subquery)
         {
             if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes, rightScope: bound))) { return; }
-            ValidateGroupedCaptures(subquery.Query, query, variables, scopes, functions, bound, outerNames);
+            ValidateGroupedCaptures(RequireQueryBlock(subquery.Query), query, variables, scopes, functions, bound, outerNames);
             return;
         }
         if (expression is OqlMetaExpression { Arguments.Count: 1 } meta &&
@@ -742,9 +743,9 @@ internal sealed partial class DocumentPlanner
     private static bool EquivalentExpression(OqlExpression left, OqlExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
         DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0) => (left, right) switch
     {
-        (OqlSubqueryExpression a, OqlSubqueryExpression b) => EquivalentNestedQuery(a.Query, b.Query) &&
-            EquivalentNestedBindings(a.Query, leftScope, rightScope, localDepth) &&
-            EquivalentNestedBindings(b.Query, leftScope, rightScope, localDepth),
+        (OqlSubqueryExpression a, OqlSubqueryExpression b) => EquivalentNestedQuery(RequireQueryBlock(a.Query), RequireQueryBlock(b.Query)) &&
+            EquivalentNestedBindings(RequireQueryBlock(a.Query), leftScope, rightScope, localDepth) &&
+            EquivalentNestedBindings(RequireQueryBlock(b.Query), leftScope, rightScope, localDepth),
         (OqlComprehensionExpression a, OqlComprehensionExpression b) => a.IsFirst == b.IsFirst && a.Variable == b.Variable &&
             (a.Predicate is null) == (b.Predicate is null) &&
             EquivalentExpression(a.Collection, b.Collection, query, variables, scopes, leftScope, rightScope, localDepth) &&

@@ -35,11 +35,12 @@ public sealed partial class OqlQueryParser
                         left = new OqlInExpression(left, ParseExpression(4), negated, Span(start, Previous));
                         continue;
                     }
-                    if (Is("SELECT"))
+                    if (Is("SELECT") || IsParenthesizedQuery(expressionOperand: true, requireQueryContinuation: true))
                     {
                         var parenthesis = Previous;
                         var queryStart = Current;
-                        var query = ParseSelect();
+                        var query = ParseQuery();
+                        RefuseNestedCompound(query);
                         if (!Failed && !query.IsValue)
                         { Error("CD00014", ErrorMessages.InSubqueryRequiresRaw, queryStart); }
                         if (!Failed) { Expect(TokenType.RightParen, "')'"); }
@@ -259,9 +260,10 @@ public sealed partial class OqlQueryParser
         }
         if (Take(TokenType.LeftParen))
         {
-            if (Is("SELECT"))
+            if (Is("SELECT") || IsParenthesizedQuery(expressionOperand: true))
             {
-                var query = ParseSelect();
+                var query = ParseQuery();
+                RefuseNestedCompound(query);
                 if (!Failed) { Expect(TokenType.RightParen, "')'"); }
                 return new OqlSubqueryExpression(query, Span(start, Previous));
             }

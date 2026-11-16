@@ -117,7 +117,7 @@ public sealed class MigrationDefaultParityTests
         created.ShouldBeFalse();
         Should.Throw<SqlSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(SqlSchemaMigrationPlanner.Plan(null, desired)));
         buildEngine.Errors.ShouldHaveSingleItem().Code.ShouldBe("COHDBSDK206");
-        Directory.GetFiles(directory.File("migrations/orders")).ShouldBeEmpty();
+        Directory.Exists(directory.File("migrations")).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Migration DEFAULT: SDK and runtime populate old and new rows identically")]

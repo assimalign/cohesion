@@ -79,7 +79,7 @@ public sealed class SqlOrderedIndexReviewTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t(id INT,k INT)");
         await Execute(session, "INSERT INTO t VALUES(0,NULL)," + string.Join(',', Enumerable.Range(1, 128).Select(i => $"({i},{i})")));
-        await Execute(session, "CREATE INDEX ix ON t(k)");
+        await Execute(session, "CREATE INDEX ix ON t(k NULLS LAST)");
         string sql = "SELECT id FROM t" + (predicate.Length == 0 ? "" : " WHERE " + predicate) + " ORDER BY k{0} LIMIT 10";
 
         // Act / Assert
@@ -140,7 +140,7 @@ public sealed class SqlOrderedIndexReviewTests
         // Act / Assert
         if (modulus == 20000)
         {
-            var rows = await Rows(session, "SELECT id FROM t WHERE a=7 ORDER BY k ASC NULLS LAST LIMIT 10");
+            var rows = await Rows(session, "SELECT id FROM t WHERE a=7 ORDER BY k ASC NULLS FIRST LIMIT 10");
             rows.Select(row => row[0]).ShouldBe(Enumerable.Range(0, 10).Select(i => (object?)(7 + modulus * i)));
             _output.WriteLine($"modulus={modulus}; LIMIT: path={session.LastStatementMetrics!.AccessPath}; heap={session.LastStatementMetrics.RecordsExamined}");
             session.LastStatementMetrics.AccessPath.ShouldBe("seek:ix_a");
@@ -148,17 +148,17 @@ public sealed class SqlOrderedIndexReviewTests
         }
         if (modulus == 2000)
         {
-            var rows = await Rows(session, "SELECT id FROM t WHERE a=7 ORDER BY k ASC NULLS LAST");
+            var rows = await Rows(session, "SELECT id FROM t WHERE a=7 ORDER BY k ASC NULLS FIRST");
             rows.Select(row => row[0]).ShouldBe(Enumerable.Range(0, matches).Select(i => (object?)(7 + modulus * i)));
             _output.WriteLine($"unbounded: path={session.LastStatementMetrics!.AccessPath}; heap={session.LastStatementMetrics.RecordsExamined}");
             session.LastStatementMetrics.AccessPath.ShouldBe("seek:ix_a");
             session.LastStatementMetrics.RecordsExamined.ShouldBe(500);
         }
-        await Rows(session, "SELECT id FROM t WHERE a>=0 ORDER BY k ASC NULLS LAST LIMIT 10");
+        await Rows(session, "SELECT id FROM t WHERE a>=0 ORDER BY k ASC NULLS FIRST LIMIT 10");
         session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix_k:forward");
         session.LastStatementMetrics.RecordsExamined.ShouldBe(10);
         _output.WriteLine("majority residual: ordered walk; heap=10");
-        await Rows(session, "SELECT id FROM t ORDER BY k ASC NULLS LAST LIMIT 10");
+        await Rows(session, "SELECT id FROM t ORDER BY k ASC NULLS FIRST LIMIT 10");
         session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix_k:forward");
         session.LastStatementMetrics.RecordsExamined.ShouldBe(10);
         _output.WriteLine("unfiltered: ordered walk; heap=10");
@@ -180,7 +180,7 @@ public sealed class SqlOrderedIndexReviewTests
         await Execute(session, "CREATE INDEX ix_k ON t(k)" + (orderedSubset ? " WHERE active=TRUE" : ""));
 
         // Act
-        var rows = await Rows(session, "SELECT id FROM t WHERE active=TRUE ORDER BY k ASC NULLS LAST LIMIT 10");
+        var rows = await Rows(session, "SELECT id FROM t WHERE active=TRUE ORDER BY k ASC NULLS FIRST LIMIT 10");
 
         // Assert
         rows.Select(row => row[0]).ShouldBe(Enumerable.Range(0, 10).Cast<object?>());
@@ -219,7 +219,7 @@ public sealed class SqlOrderedIndexReviewTests
             else { minimum = Math.Min(minimum, GC.GetAllocatedBytesForCurrentThread() - start); }
         };
         // Warm the hooks and collection storage before the measured rounds.
-        Plan(database, "SELECT k FROM t" + predicate + " ORDER BY k ASC NULLS LAST LIMIT 10");
+        Plan(database, "SELECT k FROM t" + predicate + " ORDER BY k ASC NULLS FIRST LIMIT 10");
         inspected = allocatingPasses = 0;
         minimum = long.MaxValue;
         try
@@ -227,7 +227,7 @@ public sealed class SqlOrderedIndexReviewTests
             // Act: allocation evidence is the minimum of three rounds.
             for (int round = 0; round < 3; round++)
             {
-                Plan(database, "SELECT k FROM t" + predicate + " ORDER BY k ASC NULLS LAST LIMIT 10").Access.ShouldNotBeOfType<SqlOrderedIndexPath>();
+                Plan(database, "SELECT k FROM t" + predicate + " ORDER BY k ASC NULLS FIRST LIMIT 10").Access.ShouldNotBeOfType<SqlOrderedIndexPath>();
             }
 
             // Assert
@@ -259,8 +259,8 @@ public sealed class SqlOrderedIndexReviewTests
         await Execute(session, "CREATE INDEX ix ON t(k)");
 
         // Act
-        var expected = await Rows(session, "SELECT id FROM t WHERE " + predicate + " ORDER BY k+0 ASC NULLS LAST LIMIT 10");
-        var actual = await Rows(session, "SELECT id FROM t WHERE " + predicate + " ORDER BY k ASC NULLS LAST LIMIT 10");
+        var expected = await Rows(session, "SELECT id FROM t WHERE " + predicate + " ORDER BY k+0 ASC NULLS FIRST LIMIT 10");
+        var actual = await Rows(session, "SELECT id FROM t WHERE " + predicate + " ORDER BY k ASC NULLS FIRST LIMIT 10");
 
         // Assert
         actual.ShouldBe(expected);
@@ -277,8 +277,8 @@ public sealed class SqlOrderedIndexReviewTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t(id INT PRIMARY KEY,k INT,name TEXT)");
         await Execute(session, "INSERT INTO t VALUES(1,NULL,NULL),(2,7,'ab'),(3,8,'ac')");
-        await Execute(session, "CREATE INDEX ix_name ON t(name)");
-        await Execute(session, "CREATE INDEX ix_partial ON t(k) WHERE k IS NOT NULL");
+        await Execute(session, "CREATE INDEX ix_name ON t(name NULLS LAST)");
+        await Execute(session, "CREATE INDEX ix_partial ON t(k NULLS LAST) WHERE k IS NOT NULL");
         await Execute(session, "CREATE TABLE l(id INT PRIMARY KEY)");
         await Execute(session, "INSERT INTO l VALUES(1),(2),(4)");
 
@@ -312,7 +312,7 @@ public sealed class SqlOrderedIndexReviewTests
         try
         {
             // Act
-            var rows = await Rows(session, "SELECT id FROM t WHERE active AND k IS NULL ORDER BY k ASC NULLS LAST");
+            var rows = await Rows(session, "SELECT id FROM t WHERE active AND k IS NULL ORDER BY k ASC NULLS FIRST");
 
             // Assert: partial uniqueness does not make NULL-containing keys singletons.
             rows.Select(row => row[0]).ShouldBe(new object?[] { 1, 2, 3 }, ignoreOrder: true);
@@ -337,7 +337,7 @@ public sealed class SqlOrderedIndexReviewTests
         try
         {
             // Act
-            await Rows(session, "SELECT id FROM t WHERE id=7 ORDER BY id ASC NULLS LAST");
+            await Rows(session, "SELECT id FROM t WHERE id=7 ORDER BY id ASC NULLS FIRST");
 
             // Assert
             _output.WriteLine($"point lookup: probes={probes}; heap={session.LastStatementMetrics!.RecordsExamined}");

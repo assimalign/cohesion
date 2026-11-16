@@ -17,6 +17,8 @@ internal static partial class DocumentPlanExecutor
         DocumentStatementPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken,
         DocumentNestedExecutionContext nested, string? writeVerb = null)
     {
+        if (plan is DocumentSetOperationPlan compound)
+        { return ExecuteSetOperationAsync(database, operation, compound, parameters, cancellationToken, nested); }
         var logical = SourceLogical(plan);
         if (logical.Limit == 0) { return ValueTask.FromResult<DatabaseResult>(CreateResult(logical, [], cancellationToken)); }
         return plan switch

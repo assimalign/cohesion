@@ -1384,6 +1384,9 @@ run before sessions and remain ungated. KeepDeferredWritersInFlight adopts faile
 disposal solely to retain their checkpoint anchors. Storage's protected InsertRecord/DeleteRecord/
 UpdateRecord one-shot wrappers and standalone BTreeIndex pruning retain caller-owned exclusion;
 engine pruning invokes the latter under the data gate. No Blob normal-operation raw site exists.
+Graph graph-type kinds 6-8 reuse GraphCatalog SaveAsync/DeleteAsync and their coordinated statement
+applies, as do the existing Graph and Blob catalog writes; Documents catalog mutations use its
+coordinator too. SQ-K4 adds no raw bracket or catalog-write bypass (#1787, #1806).
 The ordering is deliberately the same as in both original engines:
 
 1. Open storage with its automatic open-time checkpoint deferred, allowing

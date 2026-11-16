@@ -124,6 +124,7 @@ public class SqlConformanceTests
     [InlineData("DROP TABLE IF EXISTS users;", SqlQueryCommandType.Drop)]
     [InlineData("TRUNCATE TABLE users;", SqlQueryCommandType.Truncate)]
     [InlineData("CREATE INDEX ix_directed ON users (name DESC NULLS LAST, age ASC NULLS FIRST);", SqlQueryCommandType.Create)]
+    [InlineData("CREATE INDEX ix_defaults ON users (name, age DESC);", SqlQueryCommandType.Create)]
     [InlineData("CREATE UNIQUE INDEX uq_directed ON users (name DESC, age) WHERE age > 0;", SqlQueryCommandType.Create)]
     [InlineData("CREATE INDEX ix_active ON users (name) WHERE active = TRUE;", SqlQueryCommandType.Create)]
     [InlineData("CREATE UNIQUE INDEX uq_active ON users (name) WHERE deleted_at IS NULL;", SqlQueryCommandType.Create)]

@@ -15,6 +15,7 @@ public sealed class OqlQueryStatement : QueryStatement
     }
 
     /// <summary>Gets the parsed OQL statement expression.</summary>
+    /// <remarks>Query roots use the closed <see cref="OqlQueryExpression"/> family; writes, DDL and transactions retain their statement types.</remarks>
     public OqlExpression OqlExpression { get; }
 
     /// <inheritdoc />

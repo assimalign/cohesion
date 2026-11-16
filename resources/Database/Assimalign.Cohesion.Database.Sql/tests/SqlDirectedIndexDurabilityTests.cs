@@ -46,7 +46,7 @@ public sealed class SqlDirectedIndexDurabilityTests
         await using var reader = await recovered.CreateSessionAsync(timeout.Token);
 
         // Assert
-        recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(35);
+        recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(36);
         recovered.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         recovered.Catalog.TryGetIndex(table.ObjectId, "ix", out var index).ShouldBe(stage == 2);
         if (stage == 2)
@@ -58,7 +58,7 @@ public sealed class SqlDirectedIndexDurabilityTests
             (await SqlPartialIndexTests.Rows(reader, "SELECT id FROM t WHERE k>=7 AND k<9 ORDER BY id")).Select(row => row[0]).ShouldBe([1, 2]);
             reader.LastStatementMetrics!.AccessPath.ShouldBe("seek:full_ix");
             (await SqlPartialIndexTests.Rows(reader, "SELECT DIRECTION,NULL_PLACEMENT FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME='ix' ORDER BY ORDINAL_POSITION"))
-                .ShouldBe(new object?[][] { ["DESC", "LAST"], [null, "FIRST"] });
+                .ShouldBe(new object?[][] { ["DESC", null], [null, null] });
             await reader.ExecuteAsync("ALTER TABLE t RENAME COLUMN k TO renamed", cancellationToken: timeout.Token);
             recovered.Catalog.TryGetIndex(table.ObjectId, "ix", out var renamed).ShouldBeTrue();
             renamed.KeyOrders.ShouldBe(index.KeyOrders);
@@ -81,7 +81,7 @@ public sealed class SqlDirectedIndexDurabilityTests
 
         // Assert
         failure.Diagnostics.ShouldContain(d => d.Code == "CS06041");
-        failure.Message.ShouldContain("supports only format 35", Case.Sensitive);
+        failure.Message.ShouldContain("supports only format 36", Case.Sensitive);
     }
 
     private static SqlDatabaseEngineBuilder Builder(CrashCaptureSqlStorageStrategy storage)

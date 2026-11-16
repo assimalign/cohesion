@@ -16,6 +16,37 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(FormatProbeFixTests))]
 public sealed class FormatProbeSecondPassTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Format 35 refuses clean and recovered crash views without changing any file (#1744, #1787)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Open_Format35_ShouldRefuseRepeatedlyWithoutWrites(bool clean)
+    {
+        // Arrange: the crash fixture includes committed changes and uncommitted
+        // full page images in both file sets. Clean mode checkpoints those sets.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-sql-format35-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await FormatProbeCrash.SeedAsync("Sql", root, legacy: false, clean ? "clean-format35" : "format35");
+            if (!clean) { FormatProbeCrash.AssertUncommittedImages(root); }
+            var before = FormatProbeCrash.Snapshot(root);
+
+            // Act / Assert: dispose and repeat, comparing data, logs, backups and sidecars.
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                await using (var engine = SqlDatabaseEngine.Create("format35-probe", new() { RootPath = root }))
+                {
+                    var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+                        await engine.OpenDatabaseAsync("probe", CancellationToken.None));
+                    failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
+                    failure.Message.ShouldContain("uses data-storage format 35", Case.Sensitive);
+                    failure.Message.ShouldContain("supports only format 36", Case.Sensitive);
+                }
+                FormatProbeCrash.AssertUnchanged(root, before);
+            }
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Unclean format 34 refuses before alternate-owner validation and preserves every byte (#1744, #1777)")]
     public async Task Open_Format34WithInvalidAlternateOwner_ShouldRefuseRecoveredFormatWithoutWrites()
     {
@@ -37,7 +68,7 @@ public sealed class FormatProbeSecondPassTests
                     // Assert: physical-owner attachment would report corruption instead.
                     failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
                     failure.Message.ShouldContain("34", Case.Sensitive);
-                    failure.Message.ShouldContain("35", Case.Sensitive);
+                    failure.Message.ShouldContain("supports only format 36", Case.Sensitive);
                 }
                 FormatProbeCrash.AssertUnchanged(root, before);
             }

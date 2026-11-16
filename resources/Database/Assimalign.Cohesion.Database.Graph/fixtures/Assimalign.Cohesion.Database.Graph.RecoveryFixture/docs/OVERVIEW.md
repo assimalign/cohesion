@@ -9,3 +9,7 @@ adjacency and catalog recovery. The test runs verification twice.
 The isolated process warms CREATE, SET and DELETE on one thread, then reports their minimum
 allocated bytes per statement. `injectedKind` is -1 for no injection or 0/1/2 for CREATE/SET/DELETE;
 the optional payload defaults to 1024 bytes and lets the guards prove their allocation headroom.
+
+The typed-allocations mode takes the same arguments and measures writes after publishing
+required Int64 property declarations for both labels. Both modes report process architecture
+so the parent can verify native and x64 measurement hosts.

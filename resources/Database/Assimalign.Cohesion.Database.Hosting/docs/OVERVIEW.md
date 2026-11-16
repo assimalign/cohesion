@@ -53,6 +53,15 @@ makes the application a managed resource with `builder.Services.AddResource(...)
 stop reverses that order. Publication and restore run before any service starts, after Build has
 opened, recovered and provisioned the engines. The gateway's startup window must cover that work.
 
+The concrete builder's AddHealthEndpoint(Uri) starts an owned HTTP health listener. The last call
+wins; when the runtime names a gateway and assigns plain http at a bindable host, that assignment
+wins instead (T3-28), reporting both endpoints when it replaces an explicit value. Other schemes
+and DNS bind hosts are reported and skipped, preserving explicit health or composing no listener.
+The listener awaits bind before model servers start and remains available until they drain.
+Without a gateway assignment or this verb, no listener is created. Model servers independently
+default a missing listener from sql, documents, graph, kv or blob only when a gateway is named;
+explicit listeners win.
+
 The `admin` endpoint accepts `/cohesion/v1` only from transport
 peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other peers receive 403 regardless of
 forwarded headers. This restricts remote standalone access supported by 10.0.0-preview.1 (#1431).

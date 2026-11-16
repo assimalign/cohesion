@@ -280,7 +280,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "NativeAOT publish of Database.Tcp.AotSample failed with exit code $LASTEXITCODE."
           }
-          if ($log -match "warning (?:IL[23]|CS)[0-9]{3,4}") {
+          # The health smoke references Database.Hosting, which brings DependencyInjection and
+          # Configuration. Their own compile-time warnings (attributed to their csproj) belong to
+          # their areas. Every ILC warning is attributed to the sample's csproj and still fails, as
+          # does any warning from Database code.
+          $foreign = '\[[^\]]*libraries[\\/](?:DependencyInjection|Configuration)[\\/]Assimalign\.Cohesion\.(?:DependencyInjection|Configuration)[\\/]src[\\/]Assimalign\.Cohesion\.(?:DependencyInjection|Configuration)\.csproj\]'
+          $warnings = @($log | Where-Object { $_ -match "warning (?:IL[23]|CS)[0-9]{3,4}" -and $_ -notmatch $foreign })
+          if ($warnings.Count -gt 0) {
+            $warnings | Write-Host
             throw "NativeAOT publish of Database.Tcp.AotSample reported compiler or trimming warnings."
           }
 

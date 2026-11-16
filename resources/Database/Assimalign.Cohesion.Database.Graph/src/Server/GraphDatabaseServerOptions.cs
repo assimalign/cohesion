@@ -24,9 +24,9 @@ public sealed class GraphDatabaseServerOptions : DatabaseServerOptions
 
     internal void ValidateFor(DatabaseName engineName)
     {
-        ValidateCommon("Graph", engineName);
         ValidateTimeout(ShutdownDrainTimeout, nameof(ShutdownDrainTimeout), "Graph", engineName);
         ValidateTimeout(TerminalDrainLinger, nameof(TerminalDrainLinger), "Graph", engineName);
+        ValidateCommon("Graph", engineName);
     }
 
     /// <summary>

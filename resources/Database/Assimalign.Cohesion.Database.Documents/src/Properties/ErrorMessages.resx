@@ -94,6 +94,18 @@
   <data name="JoinMetadataInvalid" xml:space="preserve"><value>META in a joined query requires a receiver naming a FROM, JOIN or NEST source, and id or version.</value></data>
   <data name="ValuesDestinationUnbound" xml:space="preserve"><value>VALUES cannot reference destination binding '{0}' without a source row.</value></data>
   <data name="JoinKeyInvalid" xml:space="preserve"><value>A document join key must be a string, NULL or MISSING; key lists are not supported.</value></data>
+  <data name="NestedCompoundUnsupported" xml:space="preserve">
+    <value>Compound queries in nested query and DML source positions are not supported in OQL.</value>
+  </data>
+  <data name="RawCompoundOrderUnsupported" xml:space="preserve">
+    <value>ORDER BY over a RAW or VALUE compound has no named result members.</value>
+  </data>
+  <data name="CompoundOrderMemberUnbound" xml:space="preserve">
+    <value>Compound ORDER BY requires a result member name declared by an operand.</value>
+  </data>
+  <data name="CompoundOrderSubqueryUnsupported" xml:space="preserve">
+    <value>Subqueries in compound ORDER BY are not supported in OQL.</value>
+  </data>
   <data name="FromSourceAliasRequired" xml:space="preserve"><value>A FROM expression requires an explicit alias or an implicit field name.</value></data>
   <data name="FromVariableUnbound" xml:space="preserve"><value>Unbound FROM expression variable '{0}'.</value></data>
   <data name="ComprehensionBindingInvalid" xml:space="preserve">

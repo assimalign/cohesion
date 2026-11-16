@@ -90,6 +90,31 @@ internal static class Program
         finally { await coordinator.RollbackAsync(reader, CancellationToken.None); }
     }
 
+    private static async Task RunSetOperationsAsync(DocumentConnection connection, CancellationToken cancellationToken = default)
+    {
+        var raw = await connection.QueryAsync("SELECT RAW x FROM [1,1,NULL] AS x UNION SELECT VALUE y FROM [1.0,2,NULL] AS y", cancellationToken: cancellationToken);
+        Check(raw.Columns.Single().Name == "value" && raw.Documents.Select(value => value.GetRawText()).SequenceEqual(new[] { "1", "null", "2" }), "UNION value equality and header");
+        var typed = await connection.QueryAsync("SELECT LENGTH('x') AS n FROM [1] AS x UNION ALL SELECT 2 AS n FROM [1] AS y ORDER BY n DESC LIMIT 1", cancellationToken: cancellationToken);
+        Check(typed.Columns.Single().Name == "n" && typed.Columns.Single().Type == Assimalign.Cohesion.Database.Types.DatabaseType.Decimal && Equals(typed.Single()[0], 2m), "UNION typed header and numeric widening");
+        var heterogeneous = await connection.QueryAsync("SELECT LENGTH('x') AS n FROM [1] AS x UNION ALL SELECT 's' AS n FROM [1] AS y UNION ALL SELECT 2 AS n FROM [1] AS z", cancellationToken: cancellationToken);
+        Check(heterogeneous.Columns.Single().Type == Assimalign.Cohesion.Database.Types.DatabaseType.Null && heterogeneous.Select(row => row[0]).SequenceEqual(new object?[] { 1m, "s", 2m }), "UNION heterogeneous descriptor survives later operands");
+        var whole = await connection.QueryAsync("SELECT x AS a FROM [2,1] AS x UNION ALL SELECT y AS b FROM [4,3] AS y ORDER BY a ASC NULLS LAST,b DESC OFFSET 1 LIMIT 2", cancellationToken: cancellationToken);
+        Check(whole.Columns.Single().Name == "document" && whole.Documents.Select(value => value.GetRawText()).SequenceEqual(new[] { "{\"a\":2}", "{\"b\":4}" }), "UNION heterogeneous header and ordering");
+        var empty = await connection.QueryAsync("SELECT 1 AS a FROM [1/0] AS x UNION SELECT 2 AS b FROM [1/0] AS y LIMIT 0", cancellationToken: cancellationToken);
+        Check(empty.Count == 0 && empty.Columns.Single().Name == "document", "UNION LIMIT zero opens no source");
+        var page = await connection.QueryAsync("(SELECT x AS n FROM [3,1,2] AS x ORDER BY x LIMIT 2) UNION ALL (SELECT y AS n FROM [5,4] AS y ORDER BY y DESC LIMIT 1) ORDER BY n DESC OFFSET 1 LIMIT 2", cancellationToken: cancellationToken);
+        Check(page.Select(row => row[0]).SequenceEqual(new object?[] { 2m, 1m }), "UNION parenthesized operand pages");
+        var plan = await connection.QueryAsync("EXPLAIN SELECT 1 AS n FROM [1/0] AS a UNION ALL SELECT 2 AS n FROM [1/0] AS b", cancellationToken: cancellationToken);
+        Check(plan.Documents.Count(row => row.GetProperty("operator").GetString() == "ExpressionSource") == 2, "UNION EXPLAIN operands");
+        try
+        {
+            await connection.QueryAsync("SELECT RAW 1 FROM [1] AS a UNION SELECT RAW 2 FROM [1] AS b ORDER BY n", cancellationToken: cancellationToken);
+            Check(false, "RAW compound ordering refusal expected");
+        }
+        catch (DocumentClientException error)
+        { Check(error.Diagnostics.Single().Code == "CD01037", "UNION RAW ORDER BY diagnostic"); }
+    }
+
     private static async Task RunKeyJoinsAsync(DocumentConnection connection, CancellationToken cancellationToken = default)
     {
         await connection.CreateCollectionAsync("join_items", cancellationToken);
@@ -180,6 +205,7 @@ internal static class Program
             var saved = await connection.PutAsync("items", "one", "{\"name\":\"東京\",\"score\":3,\"nested\":[1,null]}"u8.ToArray(), cancellationToken: token);
             Check(saved.Version.Value > 0, "put version");
             await RunKeyJoinsAsync(connection, token);
+            await RunSetOperationsAsync(connection, token);
             var functions = (await connection.QueryAsync("SELECT LOWER('A') AS s, ROUND(-2.5) AS n, ROUND(4.9999999999999999999999999999,-1) AS edge, MILLIS_TO_STR(0) AS d, TYPE(score) AS t, ARRAY_LENGTH(nested) AS a, IFMISSING(absent,1) AS c, LENGTH('😀a') AS l FROM items", cancellationToken: token)).Single();
             Check((string)functions["s"]! == "a", "scalar string");
             Check((decimal)functions["n"]! == -3m, "scalar rounding");

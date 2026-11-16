@@ -178,8 +178,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                 return false;
             }
 
-            Directory.CreateDirectory(migrationsRoot);
-            BaselineFile? latest = FindLatestBaseline(migrationsRoot);
+            BaselineFile? latest = Directory.Exists(migrationsRoot) ? FindLatestBaseline(migrationsRoot) : null;
             SqlCompiledSchema desired = SqlCompiledSchemaSerializer.Read(schemaPath);
             SqlCompiledSchema? current = latest is null
                 ? null
@@ -226,6 +225,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
 
             string script = SqlMigrationWriter.Write(prefix, plan);
             string baseline = SqlCompiledSchemaSerializer.Serialize(desired);
+            Directory.CreateDirectory(migrationsRoot);
             WritePair(MigrationPath, script, BaselinePath, baseline);
             Log.LogMessage(
                 MessageImportance.High,
@@ -415,9 +415,9 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                 if (i > 0) { builder.Append(", "); }
                 builder.Append(Identifier(index.Columns[i])).Append(index.KeyOrders[i] switch
                 {
-                    CompiledSchemaIndexKeyOrder.AscendingNullsFirst => " NULLS FIRST",
-                    CompiledSchemaIndexKeyOrder.DescendingNullsFirst => " DESC",
-                    CompiledSchemaIndexKeyOrder.DescendingNullsLast => " DESC NULLS LAST",
+                    CompiledSchemaIndexKeyOrder.AscendingNullsLast => " NULLS LAST",
+                    CompiledSchemaIndexKeyOrder.DescendingNullsLast => " DESC",
+                    CompiledSchemaIndexKeyOrder.DescendingNullsFirst => " DESC NULLS FIRST",
                     _ => "",
                 });
             }

@@ -147,6 +147,7 @@ public sealed partial class GraphDatabase
     {
         await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
         await operation.RefreshWriterSnapshotAsync(token).ConfigureAwait(false);
+        operation.WriterLockAcquired();
     }
 
     internal async ValueTask LockWriterAsync(TransactionContext context, CancellationToken token)

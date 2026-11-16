@@ -1,5 +1,23 @@
 # Database TCP composition design
 
+## Named platform endpoints (#1790, EN-A1)
+
+The [root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790-en-a1)
+owns resolution, precedence, transport and ownership. Fallback requires a nonempty COHESION_GATEWAY.
+Values come from the current AppEnvironment flow: the scope when inside one, otherwise the process
+environment. Explicit Listener/Listen(Uri) wins; unmanaged applications must supply a listener.
+The shared stateless binder retains IdnHost and literal-address validation. Its two consumer
+EndpointHostUnsupported resources are checked for identical text to keep CK07101 consistent.
+
+Two AddServer calls on one engine, or servers on two engines of the same model, need explicit
+distinct listeners. The root contract exposes no listener or assignment origin for Build validation,
+so a coded Build refusal awaits an approved composition seam; currently Start reports
+AddressAlreadyInUse and rolls back the first bind.
+
+The smoke helper enters a platform scope only on its platform path and requires Listen to supply
+its listener on the explicit path. Removing Listen's assignment must fail the #1391 test and the
+NativeAOT sample's first loop; a platform default cannot satisfy that guard.
+
 ## Shared server options and TCP composition (#1391, D7 B)
 
 The five sealed model server-options types derive from root DatabaseServerOptions. The base owns

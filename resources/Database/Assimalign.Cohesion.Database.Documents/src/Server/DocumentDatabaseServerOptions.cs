@@ -26,11 +26,11 @@ public sealed class DocumentDatabaseServerOptions : DatabaseServerOptions
 
     internal void ValidateFor(DatabaseName engineName)
     {
-        ValidateCommon("Documents", engineName);
         ValidateTimeout(AuthenticationTimeout, nameof(AuthenticationTimeout), "Documents", engineName, allowInfinite: true, allowZero: true);
         ValidateTimeout(IdleTimeout, nameof(IdleTimeout), "Documents", engineName, allowInfinite: true, allowZero: true);
         ValidateTimeout(ShutdownDrainTimeout, nameof(ShutdownDrainTimeout), "Documents", engineName);
         ValidateTimeout(TerminalDrainLinger, nameof(TerminalDrainLinger), "Documents", engineName);
+        ValidateCommon("Documents", engineName);
     }
 
     /// <summary>

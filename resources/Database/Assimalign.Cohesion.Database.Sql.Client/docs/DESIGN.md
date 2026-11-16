@@ -56,6 +56,9 @@ and verify that matching ORDER BY retains its ordering keys. SQ-K3 adds equality
 orders, fully reversed scans, partial-index implication, LIMIT/OFFSET and OrderedIndexScan EXPLAIN
 with direction and sort_removed=true on both transports. No client API or wire format change is
 needed; existing result and plan columns carry the behavior.
+SQ-K4 (#1787) aligns index defaults with ORDER BY: ASC NULLS FIRST and DESC NULLS LAST.
+Both transports report NULL in NULL_PLACEMENT for those defaults, LAST for ASC NULLS LAST and
+FIRST for DESC NULLS FIRST through the existing metadata columns.
 
 
 ## Partial indexes over the existing exchange (#1630, SQ-P1/SQ-P2)
