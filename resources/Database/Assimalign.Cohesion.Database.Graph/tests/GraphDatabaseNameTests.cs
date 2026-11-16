@@ -42,6 +42,19 @@ public sealed class GraphDatabaseNameTests : IDisposable
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Engine root: the model's data file set is recognized")]
+    public void DataFileSet_EngineRootRecognition_ShouldIncludeModelSet()
+    {
+        // Arrange
+        string set = GraphDatabaseEngine.DataFileSet;
+
+        // Act
+        bool recognized = global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.DataFileSets.Contains(set);
+
+        // Assert
+        recognized.ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Names: a database created as 'sales' and opened again as 'SALES' is the same database, with its data and its created name (#1392)")]
     [InlineData(true)]
     [InlineData(false)]
@@ -285,9 +298,6 @@ public sealed class GraphDatabaseNameTests : IDisposable
     {
         // Arrange
         string directory = Path.Combine(_rootPath, "sales");
-        // This fixture admits an incomplete database directory under an owner-only root.
-        if (OperatingSystem.IsWindows()) { Directory.CreateDirectory(_rootPath); }
-        else { Directory.CreateDirectory(_rootPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
         Directory.CreateDirectory(directory);
         if (truncatedData) { await File.WriteAllBytesAsync(Path.Combine(directory, "graph.dat"), [], CancellationToken.None); }
         var builder = GraphDatabaseEngine.CreateBuilder("recovery");

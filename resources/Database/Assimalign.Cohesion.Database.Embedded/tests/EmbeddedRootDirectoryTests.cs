@@ -18,8 +18,8 @@ public sealed class EmbeddedRootDirectoryTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "cohesion-embedded-root-" + Guid.NewGuid().ToString("N"));
 
-    [Fact(DisplayName = "Cohesion Test [Database.Embedded] - Engine root: composition uses the wrapped engine's owner-only root")]
-    public async Task Create_FileEngine_ShouldPrepareRootBeforeDatabaseWork()
+    [Fact(DisplayName = "Cohesion Test [Database.Embedded] - Engine root: composition retains the root prepared by the supplied KeyValue engine")]
+    public async Task Create_PreparedKeyValueEngine_ShouldRetainItsRoot()
     {
         // Arrange
         var engine = KeyValueDatabaseEngine.Create("embedded", new() { RootPath = _root });
@@ -42,8 +42,9 @@ public sealed class EmbeddedRootDirectoryTests : IDisposable
         var acl = FileSystemAclExtensions.GetAccessControl(new DirectoryInfo(_root));
         acl.AreAccessRulesProtected.ShouldBeTrue();
         var rules = acl.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
-        rules.Length.ShouldBe(3);
-        rules.Select(r => r.IdentityReference.Value).Order().ShouldBe(new[] { identity.User!.Value, "S-1-5-18", "S-1-5-32-544" }.Order());
+        string[] principals = new[] { identity.User!.Value, "S-1-5-18", "S-1-5-32-544" }.Distinct().ToArray();
+        rules.Length.ShouldBe(principals.Length);
+        rules.Select(r => r.IdentityReference.Value).Order().ShouldBe(principals.Order());
         rules.ShouldAllBe(r => !r.IsInherited && r.FileSystemRights == FileSystemRights.FullControl &&
             r.AccessControlType == AccessControlType.Allow &&
             r.InheritanceFlags == (InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit));

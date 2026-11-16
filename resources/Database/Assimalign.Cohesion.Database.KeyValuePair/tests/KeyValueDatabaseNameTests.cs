@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Internal;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 using static KeyValueTestHarness;
@@ -38,6 +40,19 @@ public sealed class KeyValueDatabaseNameTests : IDisposable
                 // Best-effort cleanup.
             }
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Engine root: the model's data file set is recognized")]
+    public void DataFileSet_EngineRootRecognition_ShouldIncludeModelSet()
+    {
+        // Arrange
+        string set = KeyValueStorageStrategy.DataFileSet;
+
+        // Act
+        bool recognized = global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.DataFileSets.Contains(set);
+
+        // Assert
+        recognized.ShouldBeTrue();
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Names: a database created as 'sales' and opened again as 'SALES' is the same database, with its data and its created name (#1392)")]
