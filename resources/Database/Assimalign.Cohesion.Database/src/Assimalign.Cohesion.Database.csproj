@@ -19,9 +19,9 @@
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Protocol" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Security" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Storage" />
-		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Text" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Transactions" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Types" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Types.Text" />
 	</ItemGroup>
 	<ItemGroup>
 		<!-- Missing model listeners default to managed platform endpoints; TCP stays runtime-private. -->

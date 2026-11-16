@@ -131,8 +131,8 @@ In the repo's L1/L2/L3 model (see `docs/programs/DELIVERY_ROADMAP.md`), this are
 | `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
 | `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
 | `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (child root; rolled up by the root) |
-| `Assimalign.Cohesion.Database.Text` | Child root — deterministic versioned `simple`/`english` analysis and immutable tsvector values; Types only ([overview](Assimalign.Cohesion.Database.Text/docs/OVERVIEW.md), [design](Assimalign.Cohesion.Database.Text/docs/DESIGN.md)) |
 | `Assimalign.Cohesion.Database.Types` | Child root — shared scalar type system: identity, comparison/collation, binary encoding |
+| `Assimalign.Cohesion.Database.Types.Text` | Child root — deterministic versioned `simple`/`english` analysis and immutable tsvector values; Types only ([overview](Assimalign.Cohesion.Database.Types.Text/docs/OVERVIEW.md), [design](Assimalign.Cohesion.Database.Types.Text/docs/DESIGN.md)) |
 | `Assimalign.Cohesion.Database.Execution` | Child root — model-neutral request/result families (Types-only dependency) (`DatabaseRequest`, `DatabaseResult`, `DatabaseResultSet`, `DatabaseRow`) |
 | `Assimalign.Cohesion.Database.Language` | Child root — shared lexer/parser and diagnostic-production infrastructure; diagnostic value types live in Types |
 | `Assimalign.Cohesion.Database.Memory` | In-memory storage strategy (tests, embedded scenarios) |

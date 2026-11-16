@@ -27,7 +27,7 @@
              must ship), and indexing (a kernel consumer of the root). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Types" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Text" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Types.Text" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Language" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Storage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Transactions" />

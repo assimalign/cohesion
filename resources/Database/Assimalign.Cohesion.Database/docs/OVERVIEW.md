@@ -113,7 +113,7 @@ the source boundary while the existing public construction and execution APIs re
 
 `Core`, the nine child roots the root rolls up (`Database.Execution`, `Database.Indexing`,
 `Database.Language`, `Database.Protocol`, `Database.Security`, `Database.Storage`,
-`Database.Transactions`, `Database.Text`, `Database.Types` — child roots never reference the root), and the
+`Database.Transactions`, `Database.Types`, `Database.Types.Text` — child roots never reference the root), and the
 existing private `Web` implementation reference (excluded from the package dependency list). The
 HTTP `admin` control plane is a separate Hosting concern implemented through that project's
 private `Web.Hosting`/`Web.Health` references.

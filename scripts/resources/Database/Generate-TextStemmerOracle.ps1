@@ -7,7 +7,7 @@ checks the server version and queries it read-only; it does not manage container
 The pinned repository revision supplies vocabulary, with suffix bases spread over
 its ordinal-sorted vocabulary by deterministic stride. Tests need no running server.
 !#>
-param([string] $Container = 'text-oracle', [string] $Revision = 'c9ac0df64', [string] $OutputPath = "$PSScriptRoot/../../../resources/Database/Assimalign.Cohesion.Database.Text/tests/TestObjects/EnglishPostgres17.tsv")
+param([string] $Container = 'text-oracle', [string] $Revision = 'c9ac0df64', [string] $OutputPath = "$PSScriptRoot/../../../resources/Database/Assimalign.Cohesion.Database.Types.Text/tests/TestObjects/EnglishPostgres17.tsv")
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -30,7 +30,7 @@ foreach ($base in $bases) {
     foreach ($suffix in $suffixes) { [void]$words.Add($base + $suffix) }
 }
 foreach ($word in @('skis','skies','dying','lying','tying','idly','gently','ugly','early','only','singly','sky','news','howe','atlas','cosmos','bias','andes','inning','outing','canning','herring','earring','proceed','exceed','succeed',"'yawning","dog's","dogs'","dog's'",'cry','happy','boy','generously','communally','arsenal','a𐐨ing','𐐨aing','caféing','élational')) { [void]$words.Add($word) }
-foreach ($stop in Get-Content (Join-Path $repository 'resources/Database/Assimalign.Cohesion.Database.Text/tests/TestObjects/EnglishStopWords127.tsv')) { [void]$words.Add($stop) }
+foreach ($stop in Get-Content (Join-Path $repository 'resources/Database/Assimalign.Cohesion.Database.Types.Text/tests/TestObjects/EnglishStopWords127.tsv')) { [void]$words.Add($stop) }
 [void]$words.Add("''s")
 $query = "CREATE TEMP TABLE words(word text);`nCOPY words FROM STDIN;`n" + ($words -join "`n") + "`n\.`nSELECT word, coalesce((ts_lexize('english_stem',word))[1],'{}') FROM words ORDER BY word COLLATE `"C`";"
 $result = @($query | & podman exec -i $Container psql -X -q -t -A -F "`t" -U postgres)
@@ -39,7 +39,7 @@ if ($result.Count -lt 20000) { throw 'Oracle corpus must contain at least 20,000
 [IO.File]::WriteAllText([IO.Path]::GetFullPath($OutputPath),($result -join "`n") + "`n",[Text.UTF8Encoding]::new($false))
 Write-Output "Captured $($result.Count) total and $($words.Count) distinct PostgreSQL 17.11 english_stem pairs."
 $words | Group-Object { $_.Substring(0, $(if ([char]::IsHighSurrogate($_[0])) { 2 } else { 1 })) } | Sort-Object Name | ForEach-Object { Write-Output "Initial $($_.Name): $($_.Count)" }
-$parserPath = Join-Path $repository 'resources/Database/Assimalign.Cohesion.Database.Text/tests/TestObjects/ParserPostgres17.tsv'
+$parserPath = Join-Path $repository 'resources/Database/Assimalign.Cohesion.Database.Types.Text/tests/TestObjects/ParserPostgres17.tsv'
 $parserRows = [Collections.Generic.List[string]]::new()
 foreach ($line in Get-Content -Encoding utf8 $parserPath) {
     $parts = $line.Split("`t")

@@ -115,7 +115,7 @@ row by its number.
 | T3-17 | Plan cache #1780 (Q-PC1) | One shared cache per database |
 | T3-18 | Full-text postings (O1) | A B-tree dictionary plus compressed posting pages (about 5–10× GIN rather than 20–40×) |
 | T3-19 | BM25 statistics (O2) | Physical counters, documented as approximate like Lucene's deleted documents. SQL ranks with `ts_rank` and `ts_rank_cd` |
-| T3-20 | New child roots (O3) | `Database.Text` and `Database.Spatial` as new projects. Each run gets #1785-style wiring scope |
+| T3-20 | New child roots (O3) | `Database.Types.Text` and `Database.Spatial` as new projects. Each run gets #1785-style wiring scope |
 | T3-21 | Vector (O4) | HNSW first, 2,000 float32 dimensions; synthetic data in tests, SIFT1M and GloVe in cohesion-benchmarks |
 | T3-22 | Geography (O5, O9) | Each model's reference model in one library. Documents refuses points outside the extents; Graph clamps them |
 | T3-23 | SQL full-text surface (O7) | PostgreSQL's `@@` family with `CREATE INDEX … USING FULLTEXT … WITH (config)`; expression-level values |
@@ -199,7 +199,7 @@ All of them follow OQ-K1. At most one OQL run per batch, except MERGE paired wit
 | Group | Runs | Issues |
 |---|---|---|
 | Substrate | IX-S1 (per-index page ownership, DROP INDEX frees pages, bounded builds), IX-B1 (B-tree leaf payloads, page format 3) | #1808, #1809 |
-| Full-text core (`Database.Text`) | IX-T1, IX-T2, IX-F1, IX-F2, IX-F3 | #1626 |
+| Full-text core (`Database.Types.Text`) | IX-T1, IX-T2, IX-F1, IX-F2, IX-F3 | #1626 |
 | Vector core | IX-V1, IX-V2, IX-V3 (HNSW with repair after deletes) | #1627 |
 | Geography and spatial (`Database.Spatial`) | IX-G1, IX-G2, IX-G3 | #1628 |
 | SQL | IX-I1, IX-I2 (INCLUDE, index-only); IX-Q1, IX-Q2 (full-text); IX-P1, IX-P2 (spatial) | #1739, #1635, #1640 |

@@ -29,7 +29,7 @@ $output = [Text.StringBuilder]::new()
 // Output changes require an analyzer version decision; no runtime categories are used.
 using System;
 
-namespace Assimalign.Cohesion.Database.Text.Internal;
+namespace Assimalign.Cohesion.Database.Types.Text.Internal;
 
 internal static class TextUnicodeData
 {
@@ -79,6 +79,6 @@ foreach ($kind in 1,2) {
 }
 '@)
 $repository = [IO.Path]::GetFullPath("$PSScriptRoot/../../..")
-$destination = Join-Path $repository 'resources/Database/Assimalign.Cohesion.Database.Text/src/Internal/TextUnicodeData.Generated.cs'
+$destination = Join-Path $repository 'resources/Database/Assimalign.Cohesion.Database.Types.Text/src/Internal/TextUnicodeData.Generated.cs'
 [IO.File]::WriteAllText($destination,($output.ToString() -replace '\r?\n',"`n"),[Text.UTF8Encoding]::new($false))
 Write-Output 'Generated Unicode 17.0 word and continuation ranges.'

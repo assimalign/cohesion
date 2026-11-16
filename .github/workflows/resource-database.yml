@@ -139,9 +139,9 @@ jobs:
             'Assimalign.Cohesion.Database.Storage',
             'Assimalign.Cohesion.Database.Tcp',
             'Assimalign.Cohesion.Database.Testing',
-            'Assimalign.Cohesion.Database.Text',
             'Assimalign.Cohesion.Database.Transactions',
-            'Assimalign.Cohesion.Database.Types'
+            'Assimalign.Cohesion.Database.Types',
+            'Assimalign.Cohesion.Database.Types.Text'
         ]]
     steps:
       - uses: actions/checkout@v7
@@ -311,22 +311,22 @@ jobs:
           MSBUILDDISABLENODEREUSE: '1'
         run: |
           $output = Join-Path $env:RUNNER_TEMP "text-aot-sample"
-          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Text/samples/Assimalign.Cohesion.Database.Text.AotSample/Assimalign.Cohesion.Database.Text.AotSample.csproj" `
+          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Types.Text/samples/Assimalign.Cohesion.Database.Types.Text.AotSample/Assimalign.Cohesion.Database.Types.Text.AotSample.csproj" `
               --configuration Release `
               --runtime linux-x64 `
               --output $output `
               --nologo 2>&1
           $log | Write-Host
           if ($LASTEXITCODE -ne 0) {
-            throw "NativeAOT publish of Database.Text.AotSample failed with exit code $LASTEXITCODE."
+            throw "NativeAOT publish of Database.Types.Text.AotSample failed with exit code $LASTEXITCODE."
           }
           if ($log -match "warning IL[23][0-9]{3}") {
-            throw "NativeAOT publish of Database.Text.AotSample reported IL2xxx/IL3xxx warnings."
+            throw "NativeAOT publish of Database.Types.Text.AotSample reported IL2xxx/IL3xxx warnings."
           }
-          $checks = & (Join-Path $output "Assimalign.Cohesion.Database.Text.AotSample")
+          $checks = & (Join-Path $output "Assimalign.Cohesion.Database.Types.Text.AotSample")
           $checks | Write-Host
-          if ($LASTEXITCODE -ne 0 -or $checks -notcontains "Database.Text NativeAOT: 5/5 checks passed.") {
-            throw "Database.Text.AotSample did not complete all five checks."
+          if ($LASTEXITCODE -ne 0 -or $checks -notcontains "Database.Types.Text NativeAOT: 5/5 checks passed.") {
+            throw "Database.Types.Text.AotSample did not complete all five checks."
           }
 
       - name: Publish and smoke-run the NativeAOT statement benchmark
