@@ -267,4 +267,7 @@
   <data name="WindowReferenceUnknown" xml:space="preserve"><value>The named window is unknown, self-referencing or declared later.</value></data>
   <data name="WindowSpecificationInvalid" xml:space="preserve"><value>A window must have one specification or name; a copy cannot add PARTITION BY or replace an existing ORDER BY.</value></data>
   <data name="WindowNestingInvalid" xml:space="preserve"><value>A window function cannot contain another window in its arguments or keys.</value></data>
+  <data name="RootPermissionsInvalid" xml:space="preserve">
+    <value>Engine root directory '{0}' has mode {1}; allowed modes are 0700 or 0750. Use a dedicated engine root or run chmod 700 &quot;{0}&quot;.</value>
+  </data>
 </root>

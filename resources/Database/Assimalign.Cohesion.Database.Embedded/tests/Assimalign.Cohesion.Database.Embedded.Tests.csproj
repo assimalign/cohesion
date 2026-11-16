@@ -12,6 +12,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Embedded" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />

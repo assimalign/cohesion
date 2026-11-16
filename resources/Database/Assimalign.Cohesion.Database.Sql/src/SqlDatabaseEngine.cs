@@ -136,7 +136,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
         if (options.RootPath is { IsEmpty: false } root)
         {
-            Directory.CreateDirectory(root);
+            DatabaseRootDirectory.Prepare(root, SqlStorageStrategy.DataFileSet, SqlDatabaseEventSource.Log.RootPermissionsTightened, options.TempDirectory ?? (FileSystemPath)Path.Combine(root, ".cohesion-temp"));
         }
 
         var tempDirectory = options.TempDirectory ?? (options.RootPath is { IsEmpty: false } tempRoot
@@ -340,6 +340,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
     /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
+    /// <exception cref="DatabaseException">An existing Unix root is wider than 0750 and cannot be tightened automatically (CK06007).</exception>
     public static SqlDatabaseEngine Create(string name, SqlDatabaseEngineOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

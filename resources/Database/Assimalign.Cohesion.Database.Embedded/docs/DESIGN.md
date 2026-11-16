@@ -16,6 +16,15 @@ The facade can only be thin because of an invariant this project *enforces by ex
 - **Typed over the root engine base (concrete-types plan, phase 6, #1262).** `EmbeddedDatabaseOptions.Engines`, `EmbeddedDatabase.Engines` and both `TryGetEngine` overloads name `DatabaseEngine`, the root base every model engine derives from; the `IDatabaseEngine` interface they named is deleted (plan §5.2). `TryGetEngine`'s engine is `[MaybeNullWhen(false)]`: null when the lookup fails. A caller that knows the model casts the engine it gets back to the model's sealed engine.
 - **Best-effort disposal with aggregation.** One failing engine must not leak the others' file handles; failures are collected and rethrown as `AggregateException`.
 
+## Engine roots
+
+Embedded composition uses the same model constructors and DatabaseRootDirectory helper.
+A new Unix root is 0700; a new Windows root grants inheritable full control only to the current
+user, SYSTEM and BUILTIN\Administrators with inheritance disabled. Existing Windows roots and
+Unix modes within 0750 remain unchanged. A wider Unix root is tightened to 0700 with one model
+warning when empty or containing only its recognized engine directories, or construction refuses
+with structured CK06007 and a chmod 700 remedy. Embedded adds no separate root or file policy.
+
 ## Non-goals
 
 - No cross-engine transactions — a transaction is scoped to one database in one engine.

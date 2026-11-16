@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Storage;
@@ -114,7 +115,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         _memory = options.StorageStrategy is null && _rootPath is null ? new DatabaseMemoryFiles() : null;
         if (_rootPath is not null)
         {
-            Directory.CreateDirectory(_rootPath);
+            DatabaseRootDirectory.Prepare(_rootPath, DataFileSet, BlobDatabaseEventSource.Log.RootPermissionsTightened);
         }
 
         // Attach the built-in workers last, after every field they observe is initialized: the
@@ -233,6 +234,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// passes is less than one, or the journal size limit is negative or set and below the
     /// checkpoint journal size.
     /// </exception>
+    /// <exception cref="DatabaseException">An existing Unix root is wider than 0750 and cannot be tightened automatically (CK06007).</exception>
     public static BlobDatabaseEngine Create(string name, BlobDatabaseEngineOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

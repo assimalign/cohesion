@@ -1,5 +1,33 @@
 # Blob engine design
 
+## Engine root permissions (owner decisions 115 and 121)
+
+Before any file work, the constructor uses the internal DatabaseRootDirectory helper from
+Database's existing shared/Engine module. A new Unix root is created with mode 0700. An existing
+mode within 0750 is retained, allowing a backup group's read/execute bits. A wider root is
+changed to 0700 only when empty or holding this engine's recognized database directories
+(lower-case valid storage names with blob.dat).
+Foreign entries or a failed permission change refuse construction with DatabaseException and
+structured code CK06007; its message includes the path, octal mode, 0700/0750 and chmod 700.
+Only the root is checked; database directories and files retain process creation defaults.
+
+On Windows a new root receives a protected ACL granting inheritable full control only to the
+current user, SYSTEM and BUILTIN\Administrators. An existing Windows root is used unchanged.
+The helper uses guarded framework APIs without reflection. Open/create/drop, temporary-space
+rules and persisted formats remain unchanged. The Unix root-only admission policy follows
+PostgreSQL src/backend/utils/init/miscinit.c:353-359; tightening an empty root follows
+src/bin/initdb/initdb.c:2922-2930.
+
+| Code | Root condition |
+|---|---|
+| CK06007 | Existing Unix engine root is wider than 0750 and cannot be tightened automatically |
+
+The existing Blob event source reports each successful tightening exactly once:
+
+| ID | Event | Level | Payload |
+|---|---|---|---|
+| 16 | EngineRootPermissionsTightened | Warning | path, oldMode (octal), newMode (0700) |
+
 ## Journal admission backstop (#1283, EN-C2)
 
 At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the

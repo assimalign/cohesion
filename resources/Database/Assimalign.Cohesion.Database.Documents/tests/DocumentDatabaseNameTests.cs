@@ -286,6 +286,9 @@ public sealed class DocumentDatabaseNameTests : IDisposable
     {
         // Arrange
         string directory = Path.Combine(_rootPath, "sales");
+        // This fixture admits an incomplete database directory under an owner-only root.
+        if (OperatingSystem.IsWindows()) { Directory.CreateDirectory(_rootPath); }
+        else { Directory.CreateDirectory(_rootPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
         Directory.CreateDirectory(directory);
         if (truncatedData) { await File.WriteAllBytesAsync(Path.Combine(directory, "document.dat"), [], CancellationToken.None); }
         var builder = DocumentDatabaseEngine.CreateBuilder("recovery");

@@ -1105,4 +1105,7 @@
     <value>NATURAL JOIN input column '{0}' has a synthesized name; give the column an explicit alias.</value>
   </data>
   <data name="AlternativeTypeUnresolved" xml:space="preserve"><value>CASE/COALESCE cannot determine the type of a polymorphic result or unsupported parameter value.</value></data>
+  <data name="RootPermissionsInvalid" xml:space="preserve">
+    <value>Engine root directory '{0}' has mode {1}; allowed modes are 0700 or 0750. Use a dedicated engine root or run chmod 700 &quot;{0}&quot;.</value>
+  </data>
 </root>

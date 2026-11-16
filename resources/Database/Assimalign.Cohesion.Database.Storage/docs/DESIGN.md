@@ -1,5 +1,27 @@
 # Assimalign.Cohesion.Database.Storage — Design
 
+## Engine root permissions (owner decisions 115 and 121)
+
+Database/shared/Engine/DatabaseRootDirectory.cs owns root preparation once. All five model
+engines already compile that stateless module, so the helper remains internal without a new
+project reference, public bridge or shipped friend-assembly grant. The model supplies its data
+file-set name, temporary directory when present, and a callback to its own internal event source.
+A new Unix root is created as 0700. Existing roots within 0750 are used unchanged. A wider root
+is tightened to 0700 only if empty or containing solely that model's recognized database
+directories and its temporary directory. Foreign entries or a failed chmod refuse construction
+with DatabaseException and structured CK06007, the path, octal mode, 0700/0750 and chmod 700.
+The root alone is checked; child directory/file modes and StorageTempSpace's rules are unchanged.
+
+New Windows roots receive an inheritance-disabled ACL with inheritable full-control grants for
+the current user, SYSTEM and BUILTIN\Administrators only. Existing Windows roots are unchanged.
+The implementation uses guarded framework APIs and no reflection. Open/create/drop and all
+persisted formats are unchanged. PostgreSQL's root admission and empty-directory tightening are
+at src/backend/utils/init/miscinit.c:353-359 and src/bin/initdb/initdb.c:2922-2930.
+
+| Code | Root condition |
+|---|---|
+| CK06007 | Existing Unix engine root is wider than 0750 and cannot be tightened automatically |
+
 ## Disposable query spill substrate (#1789, EN-X1)
 
 StorageTempSpace, StorageTempStatement, StorageTempRun, StorageTempRunReader,

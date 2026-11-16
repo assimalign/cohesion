@@ -127,4 +127,7 @@
   <data name="FunctionNullValueRequired" xml:space="preserve"><value>A NULL function argument cannot be read as a non-nullable primitive.</value></data>
   <data name="SessionOperationActive" xml:space="preserve"><value>Another command or transaction begin is already active on this session.</value></data>
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
+  <data name="RootPermissionsInvalid" xml:space="preserve">
+    <value>Engine root directory '{0}' has mode {1}; allowed modes are 0700 or 0750. Use a dedicated engine root or run chmod 700 &quot;{0}&quot;.</value>
+  </data>
 </root>

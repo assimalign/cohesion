@@ -346,4 +346,7 @@
   </data>
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
   <data name="GraphTypeLabelOverlap" xml:space="preserve"><value>Label '{0}' is both an identifying and an implied label.</value></data>
+  <data name="RootPermissionsInvalid" xml:space="preserve">
+    <value>Engine root directory '{0}' has mode {1}; allowed modes are 0700 or 0750. Use a dedicated engine root or run chmod 700 &quot;{0}&quot;.</value>
+  </data>
 </root>

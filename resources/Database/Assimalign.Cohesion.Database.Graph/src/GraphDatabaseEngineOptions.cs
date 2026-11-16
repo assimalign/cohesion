@@ -162,6 +162,11 @@ public sealed class GraphDatabaseEngineOptions
 
     /// <summary>
     /// Gets or sets the root directory where per-database files are created.
+    /// A new root is owner-only: 0700 on Unix; on Windows an inheritance-disabled ACL grants
+    /// full control only to the current user, SYSTEM and BUILTIN\Administrators, inherited by children.
+    /// An existing Unix root wider than 0750 is tightened to 0700 with a warning when empty or
+    /// containing only this engine's recognized directories; otherwise startup refuses with CK06007.
+    /// Existing Unix modes within 0750 and existing Windows roots are used unchanged.
     /// </summary>
     /// <remarks>
     /// When a root is provided, each database's files live in a directory of its own under it.
