@@ -316,7 +316,7 @@ public sealed class EngineRootDirectoryTests : IDisposable
         CheckWarning(events, model, 493);
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(model switch
         { "Documents" => "CD06103", "Graph" => "CG06018", "Blob" => "CB06004", _ => "CK06004" });
-        error.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
+        error.Message.ShouldContain(model is "Sql" or "KeyValuePair" ? "without a database in it" : "DropDatabaseAsync", Case.Sensitive);
         await engine.DropDatabaseAsync("sales", CancellationToken.None);
         Directory.Exists(directory).ShouldBeFalse();
     }
