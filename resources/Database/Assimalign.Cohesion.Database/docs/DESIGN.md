@@ -16,15 +16,23 @@ DatabaseNotFoundException or engine disposal clears its record (#1790).
 FailedOpens is a non-virtual lock-free read of an immutable snapshot of DatabaseOpenFailure values:
 name, structured code when present, exception type name, UTC failure time and consecutive attempts.
 No exception or message is retained. Code selection reads structured carriers and coded causes,
-including aggregate branches, preserving CK06003 over additional model diagnostics. Argument
-errors, ObjectDisposedException and cancellation from the caller's token leave existing records
-unchanged; absence clears the name. The model open cores
+including aggregate branches, preserving CK06003 over additional model diagnostics. Name-validation
+ArgumentException (ParamName "name", excluding ArgumentOutOfRangeException) and any failure while
+the caller's token is cancelled leave existing records unchanged. Engine disposal prevents
+publication and clears records; absence clears the name. Internal argument errors
+and another object's ObjectDisposedException are recorded. The model open cores
 validate existence before storage open, and their DatabaseNotFoundException distinguishes absence.
 Documents, Graph and Blob enumeration already routes each stored open through this base path.
 
 A separate completion gate covers synchronous lifecycle core invocation and completion, with
 create/open/drop taking that gate before any leaf registry lock. It never holds the composition
-or worker gate around model work and no health reader acquires it. A deferred open retains
+or worker gate around model work and no health reader acquires it. Completed lifecycle calls take
+this engine-wide reentrant lock once, publishing success in the core's section. The base calls
+the synchronous part of every lifecycle core under that lock; cores run one at a time per engine.
+A core must not block on another thread that calls back into the same engine's lifecycle methods.
+Deferred completion paths force asynchronous continuations before taking the gate, including
+cleanup, so none takes it inline under a leaf's lock. The shipped leaves already serialize their
+cores under their registry locks. A deferred open retains
 a name-scoped completion token. Successful open/create/drop supersedes earlier deferred failures,
 even if the successful instance closes before the failure completes. A core returning a closing
 instance is not a successful public open; cancelling its close wait retains a prior record.

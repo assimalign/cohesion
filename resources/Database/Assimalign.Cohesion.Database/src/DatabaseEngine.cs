@@ -102,15 +102,21 @@ namespace Assimalign.Cohesion.Database;
 /// typed database with <c>new</c> members that await the public members here, never the cores.
 /// The hosting layer composes every model through this base (concrete-types plan, phase 6, #1262).
 /// </para>
+/// <para>
+/// The base calls the synchronous part of every create, open and drop core under one engine-wide
+/// reentrant completion lock; lifecycle cores run one at a time per engine. A core must not block
+/// on another thread that calls back into this engine's lifecycle methods. Deferred completion
+/// continuations yield before taking the gate, so none runs inline under a leaf's lock.
+/// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
 {
     /// <summary>Gets the immutable snapshot of the last failed opens of stored databases.</summary>
     /// <remarks>
-    /// Contains names refused by the open core, excluding absence, argument, disposal and caller
-    /// cancellation failures. Successful open, create or drop and a missing-database result clear
-    /// the name. Reading takes no lock, performs no I/O, and returns empty after disposal.
+    /// Contains names refused by the open core, excluding absence, name-validation errors, engine
+    /// disposal and failures while the caller token is cancelled. Successful open, create or drop and
+    /// a missing-database result clear the name. Reading takes no lock, performs no I/O, and returns empty after disposal.
     /// </remarks>
     public IReadOnlyList<DatabaseOpenFailure> FailedOpens => IsDisposed ? Array.Empty<DatabaseOpenFailure>() : Volatile.Read(ref _failedOpens);
 
@@ -1040,6 +1046,12 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <param name="creationState">The model-supplied state, unchanged; null selects model defaults.</param>
     /// <param name="cancellationToken">Not canceled when the call starts.</param>
     /// <returns>The newly created database.</returns>
+    /// <remarks>
+    /// The base calls the synchronous part under one engine-wide reentrant completion lock;
+    /// lifecycle cores run one at a time per engine. A core must not block on another thread
+    /// that calls back into this engine's lifecycle methods. Deferred completion continuations
+    /// yield before taking the gate, so no gate-taking continuation runs inline under a leaf lock.
+    /// </remarks>
     protected abstract ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken);
 
     /// <summary>
@@ -1053,6 +1065,12 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// as it is, without waiting and without touching the database's files:
     /// <see cref="OpenDatabaseAsync"/> waits for that close to end and calls the core again.
     /// </returns>
+    /// <remarks>
+    /// The base calls the synchronous part under one engine-wide reentrant completion lock;
+    /// lifecycle cores run one at a time per engine. A core must not block on another thread
+    /// that calls back into this engine's lifecycle methods. Deferred completion continuations
+    /// yield before taking the gate, so no gate-taking continuation runs inline under a leaf lock.
+    /// </remarks>
     protected abstract ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken);
 
     /// <summary>
@@ -1115,6 +1133,12 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <param name="name">The name of the database; never empty.</param>
     /// <param name="cancellationToken">Not canceled when the call starts.</param>
     /// <returns>A task that completes once the database is dropped.</returns>
+    /// <remarks>
+    /// The base calls the synchronous part under one engine-wide reentrant completion lock;
+    /// lifecycle cores run one at a time per engine. A core must not block on another thread
+    /// that calls back into this engine's lifecycle methods. Deferred completion continuations
+    /// yield before taking the gate, so no gate-taking continuation runs inline under a leaf lock.
+    /// </remarks>
     protected abstract ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken);
 
     /// <summary>
@@ -1552,7 +1576,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             }
 
             var closing = database;
-            await WaitForCloseAsync(closing.Closure, name, cancellationToken).ConfigureAwait(false);
+            await WaitForCloseAsync(closing.Closure, cancellationToken).ConfigureAwait(false);
             database = await OpenCheckedAsync(name, cancellationToken).ConfigureAwait(false);
             if (ReferenceEquals(database, closing))
             {
@@ -1562,30 +1586,22 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             }
         }
 
-        CompleteSuccessfulOpen(name);
         return database;
     }
 
     // Keep the public completed-open state machine's shape unchanged; waiting is a cold path.
-    private async Task WaitForCloseAsync(Task closure, DatabaseName name, CancellationToken cancellationToken)
+    private async Task WaitForCloseAsync(Task closure, CancellationToken cancellationToken)
     {
-        try
-        {
-            await closure.WaitAsync(cancellationToken).ConfigureAwait(false);
-            ThrowIfDisposed();
-        }
-        catch (Exception error)
-        {
-            lock (_openSync) { RecordFailedOpen(name, error, cancellationToken); }
-            throw;
-        }
+        await closure.WaitAsync(cancellationToken).ConfigureAwait(false);
+        ThrowIfDisposed();
     }
 
     private InvalidOperationException RefuseClosedOpen(DatabaseName name, CancellationToken cancellationToken)
     {
         var error = new InvalidOperationException(
             string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineOpenUnclosedAsyncFailure, _name, name));
-        lock (_openSync) { RecordFailedOpen(name, error, cancellationToken); }
+        if (!ExcludeFailedOpen(error, cancellationToken))
+        { lock (_openSync) { RecordFailedOpen(name, error, cancellationToken); } }
         return error;
     }
 
@@ -1622,7 +1638,9 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
                 var pending = OpenIntegrityCheckedAsync(name, cancellationToken);
                 if (pending.IsCompletedSuccessfully)
                 {
-                    return pending;
+                    var database = pending.Result;
+                    if (!database.IsClosing) { CompleteSuccessfulOpen(name); }
+                    return new ValueTask<DatabaseInstance>(database);
                 }
                 var attempt = new OpenAttempt(name);
                 (_pendingOpens ??= []).Add(attempt);
@@ -1661,12 +1679,20 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         try
         {
             var database = await CompleteCheckedAsync(pending, name).ConfigureAwait(false);
-            CompleteSuccessfulOpen(name);
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+            lock (_openSync) { CompleteSuccessfulOpen(name); }
             return database;
         }
         catch (DatabaseNotFoundException)
         {
-            CompleteSuccessfulOpen(name);
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+            lock (_openSync) { CompleteSuccessfulOpen(name); }
+            throw;
+        }
+        // Error delivery and its traced continuation must also leave a leaf's completion lock.
+        catch (Exception)
+        {
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
             throw;
         }
     }
@@ -1676,19 +1702,26 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         try
         {
             var database = await pending.ConfigureAwait(false);
+            // A leaf may complete pending under its registry lock with inline continuations.
+            // Leave that thread before taking the engine gate, including bookkeeping.
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+            lock (_openSync)
+            {
+                _pendingOpens!.Remove(attempt);
+                if (!database.IsClosing) { CompleteSuccessfulOpen(attempt.Name); }
+            }
             return database;
         }
         catch (Exception error)
         {
+            bool excluded = ExcludeFailedOpen(error, cancellationToken);
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
             lock (_openSync)
             {
-                if (!attempt.Superseded) { RecordFailedOpen(attempt.Name, error, cancellationToken); }
+                _pendingOpens!.Remove(attempt);
+                if (!excluded && !attempt.Superseded) { RecordFailedOpen(attempt.Name, error, cancellationToken); }
             }
             throw;
-        }
-        finally
-        {
-            lock (_openSync) { _pendingOpens!.Remove(attempt); }
         }
     }
 
@@ -1717,38 +1750,44 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         try
         {
             await pending.ConfigureAwait(false);
-            CompleteSuccessfulOpen(name);
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+            lock (_openSync) { CompleteSuccessfulOpen(name); }
         }
         catch (DatabaseNotFoundException)
         {
-            CompleteSuccessfulOpen(name);
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+            lock (_openSync) { CompleteSuccessfulOpen(name); }
+            throw;
+        }
+        // No state transition is needed, but the caller must not resume under a leaf's lock.
+        catch (Exception)
+        {
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
             throw;
         }
     }
 
+    // The caller owns _openSync: publish in the core's section, with one acquisition.
     private void CompleteSuccessfulOpen(DatabaseName name)
     {
-        lock (_openSync)
+        if (_pendingOpens is { } pending)
         {
-            if (_pendingOpens is { } pending)
+            foreach (var attempt in pending)
             {
-                foreach (var attempt in pending)
-                {
-                    if (attempt.Name == name) { attempt.Superseded = true; }
-                }
+                if (attempt.Name == name) { attempt.Superseded = true; }
             }
-            if (_failedOpens.Count > 0) { ClearFailedOpen(name); }
         }
+        if (_failedOpens.Count > 0) { ClearFailedOpen(name); }
     }
+
+    private bool ExcludeFailedOpen(Exception error, CancellationToken cancellationToken)
+        => IsDisposed || cancellationToken.IsCancellationRequested || error is ArgumentException { ParamName: "name" } and not ArgumentOutOfRangeException;
 
     // All snapshot changes except disposal run under _openSync. No exception object is retained.
     private void RecordFailedOpen(DatabaseName name, Exception error, CancellationToken cancellationToken)
     {
-        if (IsDisposed) { return; }
+        if (ExcludeFailedOpen(error, cancellationToken)) { return; }
         if (error is DatabaseNotFoundException) { CompleteSuccessfulOpen(name); return; }
-        if (error is ArgumentException or ObjectDisposedException ||
-            error is OperationCanceledException canceled && cancellationToken.IsCancellationRequested && canceled.CancellationToken == cancellationToken)
-        { return; }
         var records = _failedOpens;
         var updated = new List<DatabaseOpenFailure>(records.Count + 1);
         long attempts = 1;
