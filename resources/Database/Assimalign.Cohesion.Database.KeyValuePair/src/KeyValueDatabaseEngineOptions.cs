@@ -160,8 +160,8 @@ public sealed class KeyValueDatabaseEngineOptions
     /// New Unix roots use mode 0700. Existing Unix roots with no group write or access to others
     /// are admitted unchanged; setuid, setgid and sticky bits are not checked. A wider root holding
     /// only engine data from any model, interrupted file sets, .DS_Store files, the default
-    /// .cohesion-temp directory or the configured temp directory and its ancestors is tightened to
-    /// exactly 0700 with a warning. Foreign entries or a failed mode change refuse with CK06007,
+    /// .cohesion-temp directory is tightened to
+    /// exactly 0700 with a warning. Foreign entries, a failed inspection or a failed mode change refuse with CK06007,
     /// naming the entry or account failure and a chmod/RootPath remedy. New Windows roots grant
     /// inheritable full control only to the current user, SYSTEM and Administrators with inheritance
     /// disabled; missing parents inherit normally. Existing Windows roots are used unchanged.

@@ -21,11 +21,14 @@ ancestors under the root are recognized too, using Path.GetRelativePath's platfo
 .DS_Store files are recognized. Other root entries, including reparse points, are foreign.
 
 A foreign entry refuses construction with DatabaseException and structured CK06007. The message
-names the first blocking entry and says the engine will not change a directory holding it. Run
+names the first blocking entry and says the engine will not change the mode of a directory holding it. Run
 `chmod 700 "<path>"` if the directory belongs to this engine, or point RootPath at a new subdirectory,
 which the engine creates with mode 0700. A failed mode change uses the same code, retains its cause
 as the inner exception, and says this account cannot change the root's mode. Point RootPath at a
-new subdirectory, or make this account the directory's owner and run `chmod 700 "<path>"`.
+new subdirectory, or make this account the directory's owner and run `chmod 700 "<path>"`. A failed
+inspection has its own message naming the directory that could not be listed: the engine
+cannot confirm that the root holds only engine data, so it will not change the root's mode.
+It also uses CK06007, retains the I/O cause as the inner exception, and gives the same remedy.
 
 Only the root mode is checked; child directory/file modes retain process defaults. Inspection
 and the change both work on the path, leaving a check-then-change window; the change can only
@@ -128,6 +131,9 @@ It does not reserve blocks against unrelated writers.
 
 One directory belongs to one spilling engine. Two engines over one root start and can open
 different databases; the second spill refuses with CK05005 and names TempDirectory as the way out.
+On a shared root an earlier version left at 0755, run `chmod 700 "<RootPath>"` before using
+different TempDirectory values: another engine's custom temp directory is not engine data
+to this one, so it prevents automatic root tightening.
 Lease, probe and sweep I/O failures (including overlong optional paths) warn at startup when
 present, or at first failed use for a previously absent directory, and are retried by CreateRun, preserving
 database availability. All temporary I/O failures have CK05005 and retain their original cause.
@@ -5420,9 +5426,9 @@ Earlier transaction work remains protected and can still participate in ordinary
 Reversed multi-row upserts can still deadlock while acquiring keys (especially source-ordered
 defaults). Retained waited rows also permit row-against-row deadlocks when multi-row upserts
 reach rows in opposite orders; the lock manager chooses a retryable victim. This is the residual
-exposure of retaining locks to avoid symmetric back-off livelock (PostgreSQL
+deadlock risk of retaining locks to avoid symmetric back-off livelock (PostgreSQL
 src/backend/executor/execIndexing.c:85-95). Callers roll back/retry the victim transaction. Consistent input row order reduces
-that exposure, as PostgreSQL advises in doc/src/sgml/mvcc.sgml:1546-1555.
+that risk, as PostgreSQL advises in doc/src/sgml/mvcc.sgml:1546-1555.
 
 Every exception before ApplyStatementAsync begins releases grants acquired since the original
 statement mark and rethrows, including cancellation during or after a wait, CS05036,
@@ -9870,7 +9876,7 @@ SPARSE_FILE or INTEGRITY_STREAM on either, a UNC path (including extended UNC an
 or a remote/network volume counts as sparse. The volume is resolved from the file's actual
 mount point; unknown or inaccessible allocation modes conservatively count as sparse too.
 An ordinary local Windows file without those attributes uses eager SetLength allocation.
-Memory has no volume exposure; the capacity fake supplies
+Memory does not access a volume; the capacity fake supplies
 both NTFS and Unix behaviours independently of the host. E0=F+W+K and
 E=E0+max(1 MiB,ceil(E0/4)). F covers discard itself;
 W covers reclamation until the engine truncates its WAL; K covers engine dirty-page

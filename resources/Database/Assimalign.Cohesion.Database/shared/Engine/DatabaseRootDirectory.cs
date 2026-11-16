@@ -13,7 +13,9 @@ internal static class DatabaseRootDirectory
     private const UnixFileMode ownerMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
     private const UnixFileMode widerMode = UnixFileMode.GroupWrite | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
 
-    internal static ReadOnlySpan<string> DataFileSets => new[] { "sql", "keyvalue", "document", "graph", "blob" };
+    private static readonly string[] _dataFileSets = ["sql", "keyvalue", "document", "graph", "blob"];
+
+    internal static ReadOnlySpan<string> DataFileSets => _dataFileSets;
 
     internal static void Prepare(string path, Action<string, UnixFileMode, UnixFileMode> warn, string? tempDirectory = null)
     {
@@ -51,13 +53,13 @@ internal static class DatabaseRootDirectory
         Action<UnixFileMode> setMode, Action<string, UnixFileMode, UnixFileMode> warn)
     {
         if ((mode & widerMode) == 0) { return; }
+        if (InspectUnixDirectory(path, path, findForeignEntry) is { } entry)
+        {
+            throw DatabaseException.CreateEngineFailure(RefusalCode,
+                string.Format(CultureInfo.CurrentCulture, EngineErrorMessages.RootForeignEntry, path, Octal(mode), entry));
+        }
         try
         {
-            if (findForeignEntry() is { } entry)
-            {
-                throw DatabaseException.CreateEngineFailure(RefusalCode,
-                    string.Format(CultureInfo.CurrentCulture, EngineErrorMessages.RootForeignEntry, path, Octal(mode), entry));
-            }
             setMode(ownerMode);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -66,6 +68,16 @@ internal static class DatabaseRootDirectory
                 string.Format(CultureInfo.CurrentCulture, EngineErrorMessages.RootModeChangeFailed, path, Octal(mode)), error);
         }
         warn(path, mode, ownerMode);
+    }
+
+    internal static string? InspectUnixDirectory(string rootPath, string path, Func<string?> inspect)
+    {
+        try { return inspect(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw DatabaseException.CreateEngineFailure(RefusalCode,
+                string.Format(CultureInfo.CurrentCulture, EngineErrorMessages.RootInspectionFailed, path, rootPath), error);
+        }
     }
 
     internal static string? FindForeignEntry(string path, string? tempDirectory)
@@ -80,7 +92,9 @@ internal static class DatabaseRootDirectory
                 return entry.FullName;
             }
             if (entry.Name == ".cohesion-temp" || (tempPath is not null && ContainsTempDirectory(entry.FullName, tempPath))) { continue; }
-            if (!DatabaseFileNames.IsStorageName(entry.Name) || !IsEngineDataDirectory((DirectoryInfo)entry)) { return entry.FullName; }
+            if (!DatabaseFileNames.IsStorageName(entry.Name)) { return entry.FullName; }
+            if (InspectUnixDirectory(path, entry.FullName,
+                () => IsEngineDataDirectory((DirectoryInfo)entry) ? null : entry.FullName) is { } foreign) { return foreign; }
         }
         return null;
     }

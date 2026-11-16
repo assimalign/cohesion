@@ -214,7 +214,7 @@ public sealed class KeyValueDatabaseEngineBuilder
     /// </exception>
     /// <exception cref="DatabaseException">
     /// The Unix engine root cannot be tightened automatically (<c>CK06007</c>), or
-    /// A declared database's storage format was refused, or opening it failed with corruption
+    /// a declared database's storage format was refused, or opening it failed with corruption
     /// (<c>CK06003</c>) or coded I/O failure (<c>CV06105</c>); the engine was disposed.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>

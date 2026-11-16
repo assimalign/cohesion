@@ -8,6 +8,7 @@ namespace Assimalign.Cohesion.Database;
 internal static class EngineErrorMessages
 {
     internal static string RootForeignEntry => ModelErrorMessages.RootForeignEntry;
+    internal static string RootInspectionFailed => ModelErrorMessages.RootInspectionFailed;
     internal static string RootModeChangeFailed => ModelErrorMessages.RootModeChangeFailed;
     internal static string RecoveryProbeRequired => ModelErrorMessages.RecoveryProbeRequired;
     internal static string BuilderStateEnsureMutableFailure => ModelErrorMessages.BuilderStateEnsureMutableFailure;

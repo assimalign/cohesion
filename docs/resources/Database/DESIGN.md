@@ -257,16 +257,20 @@ Engine data includes lower-case storage-name directories holding any model's dat
 sql.dat, keyvalue.dat, document.dat, graph.dat or blob.dat. An empty storage-name directory or
 one holding only interrupted file sets is also recognized: those five sets' .dat/.log/.bak files,
 catalog.dat/catalog.log/catalog.bak and sql.create. The default .cohesion-temp directory is
-recognized even when another temp directory is configured; the configured directory and its
-ancestors under the root are recognized too, using Path.GetRelativePath's platform comparison.
+recognized by name in every model. Sql also recognizes its configured temp directory and
+ancestors under the root, using Path.GetRelativePath's platform comparison; the other four
+models have no configurable temp directory.
 .DS_Store files are recognized. Other root entries, including reparse points, are foreign.
 
 A foreign entry refuses construction with DatabaseException and structured CK06007. The message
-names the first blocking entry and says the engine will not change a directory holding it. Run
+names the first blocking entry and says the engine will not change the mode of a directory holding it. Run
 `chmod 700 "<path>"` if the directory belongs to this engine, or point RootPath at a new subdirectory,
 which the engine creates with mode 0700. A failed mode change uses the same code, retains its cause
 as the inner exception, and says this account cannot change the root's mode. Point RootPath at a
-new subdirectory, or make this account the directory's owner and run `chmod 700 "<path>"`.
+new subdirectory, or make this account the directory's owner and run `chmod 700 "<path>"`. A failed
+inspection has its own message naming the directory that could not be listed: the engine
+cannot confirm that the root holds only engine data, so it will not change the root's mode.
+It also uses CK06007, retains the I/O cause as the inner exception, and gives the same remedy.
 
 Only the root mode is checked; child directory/file modes retain process defaults. Inspection
 and the change both work on the path, leaving a check-then-change window; the change can only
