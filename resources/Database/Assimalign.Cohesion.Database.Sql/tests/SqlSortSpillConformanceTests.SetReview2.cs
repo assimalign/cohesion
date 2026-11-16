@@ -135,11 +135,20 @@ public sealed partial class SqlSortSpillConformanceTests
 
     private static bool CacheDamageCause(Exception failure)
     {
-        if (failure is DatabaseException database && database.Diagnostics.Any(diagnostic => diagnostic.Code == "CK05004")) { return true; }
-        if (failure is SqlExecutionException sql && sql.Diagnostics.Any(diagnostic => diagnostic.Code == "CK05004")) { return true; }
+        if (failure.Data[nameof(SqlOperatorSpillRefusal)] is Exception cause && ContainsCacheDamage(cause)) { return true; }
         if (failure.InnerException is { } inner && CacheDamageCause(inner)) { return true; }
         foreach (object? value in failure.Data.Values)
-        { if (value is Exception cause && CacheDamageCause(cause)) { return true; } }
+        { if (value is Exception nested && CacheDamageCause(nested)) { return true; } }
+        return false;
+    }
+
+    private static bool ContainsCacheDamage(Exception failure)
+    {
+        if (failure is DatabaseException database && database.Diagnostics.Any(diagnostic => diagnostic.Code == "CK05004")) { return true; }
+        if (failure is SqlExecutionException sql && sql.Diagnostics.Any(diagnostic => diagnostic.Code == "CK05004")) { return true; }
+        if (failure.InnerException is { } inner && ContainsCacheDamage(inner)) { return true; }
+        foreach (object? value in failure.Data.Values)
+        { if (value is Exception cause && ContainsCacheDamage(cause)) { return true; } }
         return false;
     }
 
