@@ -164,6 +164,8 @@ public sealed class GraphCatalogFormatTests
 
             // Assert
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06019");
+            reopened.FailedOpens.ShouldHaveSingleItem().FailureCode.ShouldBe("CG06019");
+            reopened.FailedOpens[0].ExceptionType.ShouldBe(failure.GetType().Name);
             failure.Message.ShouldContain("supports only format 5", Case.Sensitive);
             reopened.TryGetDatabase("graph", out _).ShouldBeFalse();
             await reopened.DisposeAsync();
