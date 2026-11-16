@@ -97,7 +97,16 @@ public sealed class DatabaseFailedOpenComponentTests
         var recorded = components.Single(component => component.Name.EndsWith("/alpha", StringComparison.Ordinal));
         recorded.Data["failureCode"].ShouldBe("CS06041");
         recorded.Data["reopenFault"].ShouldBe(nameof(DatabaseException));
+        recorded.Description.ShouldNotBeNull().ShouldStartWith("Open failed:");
         aggregate.Status.ShouldBe(HealthStatus.Unhealthy);
+        var data = aggregate.Data.ShouldNotBeNull();
+        data["engine.0.offlineDatabaseCount"].ShouldBe(1);
+        data["engine.0.offlineDatabases"].ShouldBe("middle");
+        data["engine.0.failedOpenDatabaseCount"].ShouldBe(1);
+        data["engine.0.failedOpenDatabases"].ShouldBe("alpha");
+        data["offlineDatabaseCount"].ShouldBe(1);
+        data["failedOpenDatabaseCount"].ShouldBe(1);
+        aggregate.Description.ShouldNotBeNull().ShouldContain("Each needs repair and an explicit open");
         foreach (var component in components)
         {
             component.Name.ShouldNotContain("SECRET", Case.Sensitive);
@@ -136,10 +145,96 @@ public sealed class DatabaseFailedOpenComponentTests
         failed.Status.ShouldBe(DatabaseHealthStatus.Unhealthy);
         failed.Data["reason"].ShouldBe("Open failed");
         aggregate.Status.ShouldBe(HealthStatus.Unhealthy);
+        aggregate.Data.ShouldNotBeNull()["engine.0.offlineDatabaseCount"].ShouldBe(0);
+        aggregate.Data["engine.0.failedOpenDatabaseCount"].ShouldBe(1);
+        aggregate.Data["engine.0.failedOpenDatabases"].ShouldBe("offline");
+        aggregate.Description.ShouldNotBeNull().ShouldNotContain("The application reopens each");
+        aggregate.Description.ShouldNotContain("Offline databases:");
         SetBeforeProvisioning(engine, null);
         await engine.OpenDatabaseAsync("offline", guard.Token);
         engine.FailedOpens.ShouldBeEmpty();
         (await application.Context.GetHealthAsync(failed.Name, guard.Token)).Status.ShouldBe(DatabaseHealthStatus.Healthy);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - An online instance outranks a stale pending reopen in aggregate and components (#1790)")]
+    public async Task GetHealthAsync_WithOnlineInstanceAndStalePending_ShouldBeHealthy()
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.CreateBuilder("online").Build();
+        await engine.CreateDatabaseAsync("stored", guard.Token);
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddEngine(engine);
+        await using var application = builder.Build(guard.Token);
+        Pending(application.Context.ReopenService.ShouldNotBeNull()) = Array.AsReadOnly(new[]
+        { new ReopenState(engine, "stored", StorageOfflineCause.CheckpointFailures, 7, new InvalidOperationException("stale"), TimeSpan.Zero) });
+
+        // Act
+        var aggregate = await application.Context.CheckAsync(guard.Token);
+        var database = await application.Context.GetHealthAsync("database/online/stored", guard.Token);
+
+        // Assert
+        aggregate.Status.ShouldBe(HealthStatus.Healthy);
+        aggregate.Data.ShouldNotBeNull()["offlineDatabaseCount"].ShouldBe(0);
+        database.Status.ShouldBe(DatabaseHealthStatus.Healthy);
+        database.Data.ContainsKey("reopenAttempts").ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Failed opens with no code have their own repair clause and no empty detail slot (#1790)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetHealthAsync_WithUncodedRecord_ShouldRequireExplicitOpen(bool automaticReopen)
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.CreateBuilder("uncoded").Build();
+        await (await engine.CreateDatabaseAsync("stored", guard.Token)).DisposeAsync();
+        SetBeforeProvisioning(engine, _ => throw new InvalidOperationException("SECRET-sentinel"));
+        await Should.ThrowAsync<InvalidOperationException>(async () => await engine.OpenDatabaseAsync("stored", guard.Token));
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = automaticReopen });
+        builder.AddEngine(engine);
+        await using var application = builder.Build(guard.Token);
+
+        // Act
+        var aggregate = await application.Context.CheckAsync(guard.Token);
+        var database = await application.Context.GetHealthAsync("database/uncoded/stored", guard.Token);
+
+        // Assert
+        aggregate.Description.ShouldNotBeNull().ShouldContain("open failed; InvalidOperationException;");
+        aggregate.Description.ShouldNotContain("; ;");
+        aggregate.Description.ShouldNotContain("The application reopens each");
+        aggregate.Description.ShouldContain("Each needs repair and an explicit open");
+        database.Description.ShouldNotBeNull().ShouldStartWith("Open failed:");
+        database.Data.ContainsKey("failureCode").ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - An unavailable engine does not hide a failed open's repair clause (#1790)")]
+    public async Task GetHealthAsync_WithUnavailableEngineAndRecord_ShouldKeepRepairClause()
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.CreateBuilder("recorded").Build();
+        await using var unavailable = SqlDatabaseEngine.CreateBuilder("unavailable").Build();
+        await (await engine.CreateDatabaseAsync("stored", guard.Token)).DisposeAsync();
+        SetBeforeProvisioning(engine, _ => throw new InvalidOperationException("SECRET-sentinel"));
+        await Should.ThrowAsync<InvalidOperationException>(async () => await engine.OpenDatabaseAsync("stored", guard.Token));
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddEngine(engine);
+        builder.AddEngine(unavailable);
+        await using var application = builder.Build(guard.Token);
+        await unavailable.DisposeAsync();
+
+        // Act
+        var aggregate = await application.Context.CheckAsync(guard.Token);
+
+        // Assert
+        aggregate.Status.ShouldBe(HealthStatus.Unhealthy);
+        aggregate.Description.ShouldNotBeNull().ShouldContain("Unavailable database engines:");
+        aggregate.Description.ShouldContain("Failed opens: recorded/stored");
+        aggregate.Description.ShouldContain("Each needs repair and an explicit open");
+        aggregate.Description.ShouldNotContain("The application reopens each");
+        aggregate.Description.ShouldNotContain("SECRET", Case.Sensitive);
+        aggregate.Data.ShouldNotBeNull()["engine.0.failedOpenDatabaseCount"].ShouldBe(1);
     }
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "set_BeforeProvisioning")]

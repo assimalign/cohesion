@@ -42,7 +42,8 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     /// The application's health is unhealthy while a database is open offline, pending in the
     /// reopen service or recorded in DatabaseEngine.FailedOpens. A failed manual reopen remains
     /// Unhealthy with safe failure metadata even when this option is false. Successful open,
-    /// create or drop, absence or engine disposal clears its record. A dropped database is never reopened.
+    /// create or drop, absence or engine disposal clears its record. Records need repair and an
+    /// explicit open; the service discovers only offline instances. A dropped database is never reopened.
     /// </remarks>
     public bool ReopenOfflineDatabases { get; set; } = true;
 

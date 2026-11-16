@@ -21,7 +21,9 @@ database is Unhealthy ("not open"). Each check evaluates only its engine, or the
 without opening or waiting for databases. Stored databases never attempted by this process are
 absent from health in every model. Failed stored opens remain Unhealthy through immutable
 DatabaseEngine.FailedOpens snapshots until successful open/create/drop, absence or disposal clears
-them; open instances outrank pending reopens, which outrank failed-open records (#1790). Gateway consumption and readiness separate from publication remain
+them; an offline instance merges its cause with pending reopen attempts and fault, and an online
+instance outranks a stale pending entry. Pending reopens outrank failed-open records (#1790),
+which need repair and an explicit open. Gateway consumption and readiness separate from publication remain
 ApplicationModel follow-ups (ApplicationModel.Hosting open questions 2 and 7; Gateway G18).
 
 ## Storage corruption diagnostics (#1160)

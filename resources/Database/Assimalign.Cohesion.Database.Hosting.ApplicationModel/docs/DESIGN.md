@@ -103,8 +103,8 @@ instance's durable catalog. Only the application's added actions are exposed. Da
 actions need an owner design follow-up rather than replaying catalog mutations as snapshots.
 
 **D4 — Health contributors use Hosting's observations (#1790).** The instance exposes one
-IApplicationInstanceHealthContributor per engine and open or pending-reopen database, followed
-by database.accepting. It resolves DatabaseApplicationContext once. HealthContributors reads
+IApplicationInstanceHealthContributor per engine and each open, pending-reopen or failed-open
+database, followed by database.accepting. It resolves DatabaseApplicationContext once. HealthContributors reads
 Hosting's synchronous HealthComponentNames membership; discovery is cheap and live, never
 evaluates health, awaits work or waits for database lifecycle operations, and contains
 an engine inventory failure except OutOfMemoryException, which propagates. Managed Build's control-plane validation therefore runs no health
@@ -120,6 +120,9 @@ OpenDatabases, pending reopens and FailedOpens in every model, without opening, 
 or taking an engine lock. A stored database never attempted by this process is absent. A failed
 stored open stays Unhealthy, including manual reopen with ReopenOfflineDatabases=false. Open
 instances outrank pending reopens, which outrank failed-open records; discovery includes all three.
+An offline instance merges its cause with pending reopen attempts and fault. An online instance
+remains Healthy despite a stale pending entry. Records need repair and an explicit open; the
+reopen service does not discover them.
 Records carry only safe code/type metadata, UTC time and consecutive attempts. Successful
 open/create/drop, absence or disposal clears the record (#1790).
 

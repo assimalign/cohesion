@@ -39,7 +39,8 @@ internal sealed class DatabaseHealthObservations
         {
             if (entry.Key.StartsWith(prefix, StringComparison.Ordinal) &&
                 !entry.Key.StartsWith(provisioningPrefix, StringComparison.Ordinal) &&
-                !entry.Key.StartsWith(offlinePrefix, StringComparison.Ordinal))
+                !entry.Key.StartsWith(offlinePrefix, StringComparison.Ordinal) &&
+                !entry.Key.AsSpan(prefix.Length).StartsWith("failedOpen.", StringComparison.Ordinal))
             {
                 detail.Add(entry.Key[prefix.Length..], entry.Value);
             }
@@ -74,7 +75,7 @@ internal sealed class DatabaseHealthObservations
         SetDatabase(componentName, new DatabaseHealthObservation(componentName, result));
     }
 
-    internal void Offline(string engine, string name, string description, Dictionary<string, object> data)
+    internal void Offline(string engine, string name, string description, Dictionary<string, object> data, bool openFailed = false)
     {
         string key = DatabaseName(engine, name);
         var detail = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -85,7 +86,7 @@ internal sealed class DatabaseHealthObservations
         foreach (var entry in data) { detail[entry.Key] = entry.Value; }
         detail["engine"] = engine;
         detail["database"] = name;
-        SetDatabase(key, new DatabaseHealthObservation(key, HealthCheckResult.Unhealthy($"Offline database: {description}.", data: detail)));
+        SetDatabase(key, new DatabaseHealthObservation(key, HealthCheckResult.Unhealthy($"{(openFailed ? "Open failed" : "Offline database")}: {description}.", data: detail)));
     }
 
     private void SetDatabase(string name, DatabaseHealthObservation result)

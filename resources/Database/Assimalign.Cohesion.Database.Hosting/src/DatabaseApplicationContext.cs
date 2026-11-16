@@ -278,6 +278,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         var failingWorkers = new List<string>();
         var unavailableEngines = new List<string>();
         var offlineDatabases = new List<string>();
+        List<string>? failedOpenDatabases = null;
         var provisioningDatabases = new List<string>();
         var pausedDatabases = new List<string>();
         int workerCount = 0;
@@ -423,7 +424,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     {
                         string database = offline[offlineIndex];
                         string prefix = $"engine.{engineIndex}.offline.{offlineIndex}";
-                        ReopenState? pending = HasOpenDatabase(databases, database) ? null : FindPending(reopening, engine, database);
+                        ReopenState? pending = FindPending(reopening, engine, database);
                         StorageOfflineCause? cause = DatabaseReopenService.GetCause(engine, database) ?? pending?.Cause;
                         observation?.ObserveOffline(engine, database, cause);
                         data[$"{prefix}.name"] = database;
@@ -466,12 +467,14 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                             components.Offline(engine.Name, database, offlineDatabases[^1], offlineData);
                         }
                     }
-                    int reportedOfflineCount = offline.Count;
+                    List<string>? failedNames = null;
                     foreach (var failure in engine.FailedOpens)
                     {
                         string database = failure.Name.ToString();
                         if (HasOpenDatabase(databases, database) || FindPending(reopening, engine, database) is not null) { continue; }
-                        string prefix = $"engine.{engineIndex}.offline.{reportedOfflineCount++}";
+                        string prefix = $"engine.{engineIndex}.failedOpen.{failedNames?.Count ?? 0}";
+                        (failedNames ??= []).Add(database);
+                        observation?.ObserveFailedOpen(engine, database);
                         string failedAt = failure.FailedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
                         data[$"{prefix}.name"] = database;
                         data[$"{prefix}.reason"] = "Open failed";
@@ -479,8 +482,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                         data[$"{prefix}.reopenFault"] = failure.ExceptionType;
                         data[$"{prefix}.failedAt"] = failedAt;
                         if (failure.FailureCode is { } code) { data[$"{prefix}.failureCode"] = code; }
-                        string description = $"{engine.Name}/{database} (open failed; {failure.FailureCode}; {failure.ExceptionType}; {failedAt}; {failure.Attempts} attempt(s))";
-                        offlineDatabases.Add(description);
+                        string codeDetail = failure.FailureCode is { } knownCode ? $"{knownCode}; " : string.Empty;
+                        string description = $"{engine.Name}/{database} (open failed; {codeDetail}{failure.ExceptionType}; {failedAt}; {failure.Attempts} attempt(s))";
+                        (failedOpenDatabases ??= []).Add(description);
                         if (components?.WantsDatabase(engine.Name, database) == true)
                         {
                             var detail = new Dictionary<string, object>(StringComparer.Ordinal)
@@ -491,12 +495,14 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                                 ["failedAt"] = failedAt,
                             };
                             if (failure.FailureCode is { } failureCode) { detail["failureCode"] = failureCode; }
-                            components.Offline(engine.Name, database, description, detail);
+                            components.Offline(engine.Name, database, description, detail, openFailed: true);
                         }
                     }
-                    if (reportedOfflineCount != offline.Count)
+                    if (failedNames is not null)
                     {
-                        data[$"engine.{engineIndex}.offlineDatabaseCount"] = reportedOfflineCount;
+                        data[$"engine.{engineIndex}.failedOpenDatabaseCount"] = failedNames.Count;
+                        if (components is null)
+                        { data[$"engine.{engineIndex}.failedOpenDatabases"] = string.Join(", ", failedNames); }
                     }
                 }
                 components?.Engine(engine.Name, state, data, $"engine.{engineIndex}.");
@@ -521,25 +527,30 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         }
         data["workerCount"] = workerCount;
         data["offlineDatabaseCount"] = offlineDatabases.Count;
+        if (failedOpenDatabases is not null) { data["failedOpenDatabaseCount"] = failedOpenDatabases.Count; }
         data["provisioningDatabaseCount"] = provisioningDatabases.Count;
         data["reopenOfflineDatabases"] = ReopenService is not null;
 
+        string failedDescription = failedOpenDatabases is null ? string.Empty :
+            $"Failed opens: {string.Join(", ", failedOpenDatabases)}. Each needs repair and an explicit open (OpenDatabaseAsync).";
         if (unavailableEngines.Count > 0)
         {
             return HealthCheckResult.Unhealthy(
-                $"Unavailable database engines: {string.Join(", ", unavailableEngines)}.",
+                $"Unavailable database engines: {string.Join(", ", unavailableEngines)}." +
+                (failedDescription.Length > 0 ? " " + failedDescription : string.Empty),
                 data: data);
         }
-        else if (offlineDatabases.Count > 0)
+        else if (offlineDatabases.Count > 0 || failedOpenDatabases is not null)
         {
-            return HealthCheckResult.Unhealthy(
+            string offlineDescription = offlineDatabases.Count == 0 ? string.Empty :
                 $"Offline databases: {string.Join(", ", offlineDatabases)}. A device operation of their storage failed, or their " +
                 "engine gave up on them after a background worker kept failing, so every operation on them is refused until " +
                 "each is reopened. " + (ReopenService is not null
                     ? "The application reopens each by itself, with backoff, until the reopen succeeds; the reopen's recovery " +
                       "decides every commit that was not confirmed."
-                    : "Reopen each (OpenDatabaseAsync), or restart the process to open them again; either runs recovery."),
-                data: data);
+                    : "Reopen each (OpenDatabaseAsync), or restart the process to open them again; either runs recovery.");
+            return HealthCheckResult.Unhealthy(offlineDescription +
+                (offlineDescription.Length > 0 && failedDescription.Length > 0 ? " " : string.Empty) + failedDescription, data: data);
         }
         else if (faultedEngines.Count > 0)
         {
