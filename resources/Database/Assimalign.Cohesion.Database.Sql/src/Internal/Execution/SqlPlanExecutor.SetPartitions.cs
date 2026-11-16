@@ -326,6 +326,7 @@ internal sealed partial class SqlPlanExecutor
                     if (!SqlTempRowCodec.TryEncode(record[1..], out var value) || value.Length + 24L > bound)
                     { Refuse(SqlExecutionException.StatementMemoryBudget(_budget)); }
                     sorter.Append(key, value, token);
+                    ObserveHashSpill?.Invoke("set-ordinal-append", grant - 32768);
                 }
                 sorted = sorter.Complete(token);
                 SqlHashSpillMetrics.Sort(_metrics, _statement, sorter);

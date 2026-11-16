@@ -83,8 +83,11 @@ points and pins fitting ARM64/x64 allocations. During-operation LiveHeap samples
 populations use separate lower pre-run/post-disposal baselines and the minimum of three
 executions. Every execution must reach the active workspace floor; a 64 KiB allowance
 beyond the grant and 131,072 B growth slack reject a retained decoded row per inner pass
-and a retained box per set input. UNION samples HashSpill replay and ordinal ordering,
-INTERSECT samples decoded rows inside tentative partition selection, UNION ALL samples
+and a retained box per set input. UNION samples HashSpill replay. UNION, INTERSECT and
+EXCEPT ordinal sorts sample after the last Append and before Complete releases the
+sorter arena, with a floor of the sorter's grant minus its 32,768 B overhead. The observer
+check runs per ordinal append on these spilled paths. INTERSECT also samples decoded rows
+inside tentative partition selection, UNION ALL samples
 its writer, and inners sample both writing and rereading. Live ledger assertions pin the
 79,616 B UNION stage, 25,344 B sequential writer, 8,704 B selected writer and each inner's
 8,192 + L + 256 + 2D reader allowance independently of those heap bounds.

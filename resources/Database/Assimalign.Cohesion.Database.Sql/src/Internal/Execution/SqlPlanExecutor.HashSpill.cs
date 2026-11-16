@@ -480,6 +480,7 @@ internal sealed partial class SqlPlanExecutor
                     if (value.Length + 24L > bound)
                     { throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode, ErrorMessages.HashSpillOrdinalRecordTooLarge); }
                     sorter.Append(key, value, token);
+                    Observe?.Invoke("ordinal-append", grant - 32768);
                 }
                 if (_stage) { _ = CloseResource(_outputs, null); } else { _outputs.Dispose(); }
                 sorted = sorter.Complete(token);
