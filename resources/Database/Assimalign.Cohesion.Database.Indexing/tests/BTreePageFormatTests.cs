@@ -55,7 +55,7 @@ public class BTreePageFormatTests
             ExistingIndexes = registrations,
         });
 
-    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Page format: new trees are stamped with format 2 and reattach")]
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Page format: new trees are stamped with format 3 and reattach")]
     public async Task Attach_CurrentFormat_ShouldSucceed()
     {
         // Arrange: a tree several leaves wide.
@@ -66,7 +66,7 @@ public class BTreePageFormatTests
         var manager = Attach(harness, registrations);
 
         // Assert
-        BTreeIndexManager.FormatVersion.ShouldBe(2);
+        BTreeIndexManager.FormatVersion.ShouldBe(3);
         manager.TryGetIndex(9, "ix_format", out var index).ShouldBeTrue();
         var reader = await harness.BeginAsync();
         int count = 0;
@@ -78,6 +78,31 @@ public class BTreePageFormatTests
             }
         }
         count.ShouldBe(2_000);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Page format: format-2 leaf and internal roots are refused before any write (#1809)")]
+    [InlineData(3)]
+    [InlineData(2000)]
+    public async Task Attach_Format2Root_ShouldRefuseWithoutWriting(int entries)
+    {
+        // Arrange
+        var (harness, registrations) = await CreateTreeAsync(entries);
+        await using var lifetime = harness;
+        long root = registrations.Single().RootPageId;
+        RewritePage(harness.Storage, root, body => LegacyBTreePages.StampVersion(body, 2));
+        using var page = harness.Storage.PageManager.GetPage((PageId)root);
+        byte[] before = page.Page.AsSpan().ToArray();
+        long journalLength = harness.Storage.Journal.Length;
+
+        // Act
+        var failure = Should.Throw<IndexFormatException>(() => Attach(harness, registrations));
+
+        // Assert
+        failure.FoundVersion.ShouldBe(2);
+        failure.SupportedVersion.ShouldBe(3);
+        failure.Message.ShouldStartWith("CK06101:", Case.Sensitive);
+        page.Page.AsSpan().ToArray().ShouldBe(before);
+        harness.Storage.Journal.Length.ShouldBe(journalLength);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Page format: a tree whose root is in format 1 is refused at attach with CK06101")]
@@ -96,10 +121,10 @@ public class BTreePageFormatTests
 
         // Assert
         refusal.Message.ShouldStartWith(IndexFormatException.ErrorCode + ":", Case.Sensitive);
-        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 3", Case.Sensitive);
         refusal.Message.ShouldContain("#1152");
         refusal.FoundVersion.ShouldBe(1);
-        refusal.SupportedVersion.ShouldBe(2);
+        refusal.SupportedVersion.ShouldBe(3);
         refusal.IndexName.ShouldBe("ix_format");
         refusal.ObjectId.ShouldBe(9UL);
         refusal.RootPageId.ShouldBe(root);
@@ -111,14 +136,14 @@ public class BTreePageFormatTests
         // Arrange
         var (harness, registrations) = await CreateTreeAsync(10);
         await using var harnessLifetime = harness;
-        RewritePage(harness.Storage, registrations.Single().RootPageId, body => LegacyBTreePages.StampVersion(body, 3));
+        RewritePage(harness.Storage, registrations.Single().RootPageId, body => LegacyBTreePages.StampVersion(body, 4));
 
         // Act
         var refusal = Should.Throw<IndexFormatException>(() => Attach(harness, registrations));
 
         // Assert
-        refusal.FoundVersion.ShouldBe(3);
-        refusal.Message.ShouldContain("uses B-tree page format 3, but this engine supports only format 2", Case.Sensitive);
+        refusal.FoundVersion.ShouldBe(4);
+        refusal.Message.ShouldContain("uses B-tree page format 4, but this engine supports only format 3", Case.Sensitive);
         refusal.Message.ShouldContain("newer engine");
     }
 
@@ -172,7 +197,7 @@ public class BTreePageFormatTests
         RewritePage(harness.Storage, registrations.Single(registration => registration.ObjectId == 2).RootPageId, LegacyBTreePages.DowngradeToFormat1);
         Should.Throw<IndexFormatException>(() => BTreeIndexManager.EnsureFormat(harness.Storage, registrations))
             .IndexName.ShouldBe("ix_second");
-        LegacyBTreePages.DowngradeIndexPages(harness.Storage).ShouldBe(1); // the other root: the only format-2 node left
+        LegacyBTreePages.DowngradeIndexPages(harness.Storage).ShouldBe(1); // the other root: the only format-3 node left
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Page format: one refused tree refuses the attach of every tree")]

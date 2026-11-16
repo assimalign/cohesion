@@ -46,8 +46,11 @@ internal static class SqlJsonAccess
         { throw new FormatException(_invalidJsonText, exception); }
     }
 
+    internal static Action? ValidationObserved { get; set; }
+
     internal static void Validate(object value)
     {
+        ValidationObserved?.Invoke();
         using var document = ReadChecked(value);
     }
 

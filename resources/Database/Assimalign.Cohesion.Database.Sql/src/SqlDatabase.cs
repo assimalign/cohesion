@@ -87,36 +87,13 @@ public sealed partial class SqlDatabase : DatabaseInstance
             }
             return;
         }
-        if (pending.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))
-        {
-            // SQL format 37 fences every per-step 49a kind-9 intent.
-            // Only the application that still declares this target may resume it.
-            // Recovery reclaims abandoned kind-14 owners; matching Build replans their
-            // preparation from the trusted old marker, retaining the durable intent.
-            // A rolled-back application (or a plain open) discards it without fencing.
-            var target = _engine.FindDeclaration(Name)?.Schema;
-            if (_engine.ProvisioningBuildComplete || target is null || !string.Equals(target.Hash, pending.ContentHash, StringComparison.Ordinal))
-            { await _schemaProvisioner.DiscardUnpublishedIntentAsync(target, cancellationToken).ConfigureAwait(false); }
-            return;
-        }
-        var schema = SqlCompiledSchemaSerializer.Deserialize(pending.CanonicalDocument);
-        if (!string.Equals(schema.Hash, pending.ContentHash, StringComparison.Ordinal))
-        {
-            throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResumeProvisioningAsyncFailure, SqlProvisioningCodes.PolicyRefused));
-        }
-        var declaration = _engine.FindDeclaration(Name);
-        if (declaration?.Mode == SqlProvisioningMode.Verify)
-        {
-            await _schemaProvisioner.VerifyAsync(schema, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            if (declaration?.Schema is { } declared && !string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
-            {
-                throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResumeProvisioningAsyncFailure2, SqlProvisioningCodes.PolicyRefused, Name));
-            }
-            await _schemaProvisioner.ApplyAsync(schema, cancellationToken, declaration?.RunMigrationsInline != true).ConfigureAwait(false);
-        }
+        // The sole production intent writer records Joint/ kinds. Preparation checks
+        // their classifications against the current plan before resuming work.
+        // Only a Build declaring the same target may resume unpublished work.
+        var targetSchema = _engine.FindDeclaration(Name)?.Schema;
+        if (_engine.ProvisioningBuildComplete || targetSchema is null ||
+            !string.Equals(targetSchema.Hash, pending.ContentHash, StringComparison.Ordinal))
+        { await _schemaProvisioner.DiscardUnpublishedIntentAsync(targetSchema, cancellationToken).ConfigureAwait(false); }
     }
     private readonly SqlBoundTableCache _definitions;
     private readonly SqlDatabaseEngine _engine;
@@ -604,6 +581,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     internal SqlDatabaseSession CreateSchemaSession(string provisioningSchema, CancellationToken cancellationToken,
         TransactionSequence? ddlLockOwner = null)
     {
+        // Test seam: retain one lock owner for parity/cost baselines and adjacent-FK lock probes.
         ThrowIfDisposed();
         ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
@@ -619,7 +597,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// Diffs the database against a compiled schema and applies the difference: the schema's
     /// tables, columns, keys, indexes and constraints, stamped
     /// <see cref="DatabaseObjectOwner.Schema"/>-owned, and the schema's hash and canonical document.
-    /// A plan containing a TYPE rewrite prepares all changes unpublished and publishes them together.
+    /// Every plan prepares all changes unpublished and publishes them together.
     /// </summary>
     /// <param name="schema">The desired schema; its name must be the database's.</param>
     /// <param name="cancellationToken">Observed before anything runs and between steps.</param>
@@ -627,6 +605,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="schema"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="SqlTimeoutException">A migration's checkpoint-admission wait was canceled or reached the engine lock timeout (<c>CK04014</c>).</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CS04004</c>, #1243).</exception>
     /// <exception cref="DatabaseObjectLockedException">
     /// The engine's builder declared the database with another schema: the declaration owns the
@@ -639,9 +618,8 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// The schema targets another database, declares what the engine has no DDL for (principals),
     /// declares a domain the engine does not register with that base type (<c>CS03105</c>: an
     /// imperative apply cannot add to the engine's frozen type catalog), would adopt an ad-hoc object
-    /// (<c>CS03105</c>), needs a destructive step it does not allow (<c>CS03105</c>), or a step
-    /// failed (<c>CS03104</c>, after the completed reversible steps were compensated), or unpublished
-    /// joint TYPE preparation failed (<c>CS03402</c>, with the old schema retained online
+    /// (<c>CS03105</c>), needs a destructive step it does not allow (<c>CS03105</c>), or unpublished
+    /// joint preparation failed (<c>CS03402</c>, with the old schema retained online
     /// unless a storage latch fired), or publication is unconfirmed (<c>CS03403</c>:
     /// recovery determines the committed schema).
     /// </exception>
@@ -656,6 +634,12 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// the token, then the offline refusal, then the declaration.
     /// Potentially lossy TYPE conversions, including reverse migrations after application rollback,
     /// require the declaration's destructive-change opt-in before any step runs.
+    /// Readers, writers and session DDL naming a touched table wait through the joint job before
+    /// binding the published schema. The engine's configured LockTimeout bounds reservation;
+    /// zero waits without a timeout. Imperative cancellation or reservation timeout clears the
+    /// provisioning observation because this caller receives the exception.
+    /// A transient checkpoint-admission refusal waits outside the physical and publication gates,
+    /// then resumes the same prepared job with completed copy and index work retained.
     /// </remarks>
     public ValueTask<SqlSchemaMigrationResult> ApplySchemaAsync(SqlCompiledSchema schema, CancellationToken cancellationToken = default)
     {

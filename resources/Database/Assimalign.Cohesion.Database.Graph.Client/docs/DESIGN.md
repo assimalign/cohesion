@@ -3,7 +3,9 @@
 ## Savepoint lifecycle conformance (#1726, XT-5)
 
 Explicit wire lifecycle probes require canceled-before-dispatch controls to take no kernel admission;
-the shared client breaks the canceled exchange, and lease return must scrub all scopes. They also require
+the shared client breaks the canceled exchange and aborts its transport (#1789), so root rollback
+and scope cleanup complete before the caller disposes the lease. The prior expectation that the
+transaction remains active until lease return is superseded by immediate transport teardown. They also require
 offline storage to outrank CK04009 with a complete Ready E exchange, and session/database close to
 drain a physically admitted control on both transports.
 
@@ -52,6 +54,14 @@ version or encoding changes are needed; only final columns govern scalar/path ad
 CALL regressions pin Int64 result-header types for both required values and optional NULL rows
 on InMemory and TCP. The current header contains only names and type bytes; it carries no
 nullability field. Static column nullability remains an in-process engine metadata contract.
+
+## Trigram text indexes (#1644)
+
+CREATE TEXT INDEX, its conditional create, DROP INDEX, Unicode predicates and EXPLAIN use
+existing Execute/Query exchanges on InMemory and TCP. Wire cases compare before/after rows
+for equality, CONTAINS, ENDS WITH and STARTS WITH, including a mandatory-recheck false
+positive and a two-code-point supplementary fallback, and retain the authenticated session.
+No client API, message, capability or protocol version changes.
 
 ## Schema text DDL (#1738, GQ-D2)
 

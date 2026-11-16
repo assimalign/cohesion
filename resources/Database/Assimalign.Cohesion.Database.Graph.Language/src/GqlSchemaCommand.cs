@@ -7,6 +7,8 @@ public sealed record GqlSchemaCommand
     public bool Drop { get; init; }
     /// <summary>Gets the schema object kind.</summary>
     public GqlSchemaObjectKind Kind { get; init; }
+    /// <summary>Gets whether an index uses case-sensitive Unicode trigrams.</summary>
+    public bool IsText { get; init; }
     /// <summary>Gets the explicit name, or null to generate a rule name deterministically.</summary>
     public string? Name { get; init; }
     /// <summary>Gets whether IF EXISTS or IF NOT EXISTS suppresses an absent drop or existing create.</summary>
@@ -27,7 +29,7 @@ public sealed record GqlSchemaCommand
     public override string ToString()
     {
         string kind = Kind switch { GqlSchemaObjectKind.RelationshipType => "RELATIONSHIP TYPE", _ => Kind.ToString().ToUpperInvariant() };
-        string prefix = (Drop ? "DROP " : "CREATE ") + kind + (Name is null ? "" : " " + Quote(Name)) +
+        string prefix = (Drop ? "DROP " : "CREATE ") + (IsText && !Drop ? "TEXT " : "") + kind + (Name is null ? "" : " " + Quote(Name)) +
             (IfExists ? Drop ? " IF EXISTS" : " IF NOT EXISTS" : "");
         if (Drop || Kind is GqlSchemaObjectKind.Label or GqlSchemaObjectKind.RelationshipType) { return prefix; }
         string variable = Quote(Variable ?? "n");

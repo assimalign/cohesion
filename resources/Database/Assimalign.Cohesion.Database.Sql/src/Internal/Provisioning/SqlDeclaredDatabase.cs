@@ -171,8 +171,8 @@ internal sealed partial class SqlDeclaredDatabase
     /// <returns>A task that completes once the database is provisioned.</returns>
     /// <exception cref="SqlSchemaMigrationException">
     /// The collation differs (<c>CS03102</c>), the database drifted from a Verify declaration or
-    /// does not exist (<c>CS03103</c>), or the schema's apply failed (<c>CS03104</c> for a
-    /// failed inline step, <c>CS03402</c> for failed joint preparation).
+    /// does not exist (<c>CS03103</c>), or the schema's apply failed (<c>CS03402</c> for failed joint preparation,
+    /// <c>CS03403</c> for an unconfirmed publication).
     /// </exception>
     internal async ValueTask ProvisionAsync(SqlDatabaseEngine engine, CancellationToken cancellationToken)
     {

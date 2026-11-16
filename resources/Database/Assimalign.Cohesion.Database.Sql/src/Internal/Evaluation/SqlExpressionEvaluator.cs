@@ -474,6 +474,32 @@ internal sealed partial class SqlExpressionEvaluator
         throw UnknownColumn(column, column.TableAlias is not null && _relations is SqlRelationReference);
     }
 
+    /// <summary>Expands a local relation's own columns, including columns hidden by USING.</summary>
+    internal IReadOnlyList<int> QualifiedStarOrdinals(SqlQualifiedStarExpression star)
+    {
+        if (_relations is IReadOnlyList<SqlRelationBinding> bindings)
+        {
+            var matches = bindings.Where(binding =>
+                (binding.Source.Derived is not { IsCommonTable: true } || star.SchemaName is null) &&
+                MatchesQualifier(binding.Reference, star.TableName, star.SchemaName)).ToArray();
+            if (matches.Length == 1)
+            {
+                return Enumerable.Range(matches[0].Offset, matches[0].Source.Columns.Count).ToArray();
+            }
+            if (matches.Length > 1)
+            {
+                throw new SqlPlanningException("CS01015", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.ResolveLocalColumnSqlPlanning, star.TableName + ".*"), star.Location);
+            }
+        }
+        else if (_relations is SqlRelationReference reference && MatchesQualifier(reference, star.TableName, star.SchemaName))
+        {
+            return Enumerable.Range(0, _columns.Count).ToArray();
+        }
+        throw new SqlPlanningException("CS01015", string.Format(CultureInfo.CurrentCulture,
+            ErrorMessages.MissingFromClauseEntry, star.SchemaName is null ? star.TableName : star.SchemaName + "." + star.TableName), star.Location);
+    }
+
     private static SqlPlanningException UnknownColumn(SqlColumnReferenceExpression column, bool localQualifier = false)
         => new("CS01015", string.Format(CultureInfo.CurrentCulture,
             !localQualifier && column.TableAlias is not null ? ErrorMessages.MissingFromClauseEntry : ErrorMessages.UnknownColumn,
@@ -710,19 +736,22 @@ internal sealed partial class SqlExpressionEvaluator
             && MatchesQualifier(binding.Reference, column);
 
     internal static bool MatchesQualifier(SqlRelationReference reference, SqlColumnReferenceExpression column)
+        => MatchesQualifier(reference, column.TableAlias, column.SchemaName);
+
+    internal static bool MatchesQualifier(SqlRelationReference reference, string? table, string? schema)
     {
-        if (column.TableAlias is null)
+        if (table is null)
         {
-            return column.SchemaName is null;
+            return schema is null;
         }
 
         if (reference.Alias is { } alias)
         {
-            return column.SchemaName is null && string.Equals(alias, column.TableAlias, StringComparison.OrdinalIgnoreCase);
+            return schema is null && string.Equals(alias, table, StringComparison.OrdinalIgnoreCase);
         }
 
-        return reference is SqlTableReference named && string.Equals(named.TableName, column.TableAlias, StringComparison.OrdinalIgnoreCase)
-            && (column.SchemaName is null || string.Equals(named.SchemaName ?? SqlPlanner.DefaultSchema, column.SchemaName, StringComparison.OrdinalIgnoreCase));
+        return reference is SqlTableReference named && string.Equals(named.TableName, table, StringComparison.OrdinalIgnoreCase)
+            && (schema is null || string.Equals(named.SchemaName ?? SqlPlanner.DefaultSchema, schema, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ColumnName(SqlColumnReferenceExpression column)

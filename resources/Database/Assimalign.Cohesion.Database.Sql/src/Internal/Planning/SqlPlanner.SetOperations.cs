@@ -62,7 +62,7 @@ internal sealed partial class SqlPlanner
                 ErrorMessages.SetColumnCount, set.Operator, first.Projections.Count, second.Projections.Count), set.Location);
         }
 
-        var projections = new List<SqlProjection>();
+        var projections = new List<SqlProjection>(first.Projections.Count);
         var columns = new List<SqlCatalogColumn>();
         var leftValues = new List<SqlBoundExpression>();
         var rightValues = new List<SqlBoundExpression>();
@@ -88,6 +88,7 @@ internal sealed partial class SqlPlanner
             {
                 Value = new SqlBoundSlot(i), Collation = collation, IsNullable = nullable,
                 HasOutputName = first.Projections[i].HasOutputName,
+                HasSynthesizedName = first.Projections[i].HasSynthesizedName,
                 MaxLength = type.MaxLength, Metadata = new SqlProjectionMetadata(candidate, null, type, domain),
             });
             columns.Add(new SqlCatalogColumn(projections[i].Name, type, nullable,

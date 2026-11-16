@@ -1,5 +1,51 @@
 # The Declared SQL Dialect
 
+## Root ORDER BY and ordered DISTINCT spilling (#1789, SQ-L2b)
+
+At the root of a plain SELECT, ORDER BY and ordered DISTINCT may use temporary runs when
+the statement grant would refuse. Stable ties, DISTINCT's first sorted representative,
+volatile/sequence evaluation, access paths and pagination are unchanged. In-memory engines
+need an explicit TempDirectory; file engines use their configured temp space. Fitting sorts
+retain their existing path. OFFSET + LIMIT heaps can spill too; delivered results decode
+lazily and can be read repeatedly or concurrently until disposed, the session closes, or
+the engine is disposed. A later statement does not invalidate them. Callers of ExecuteAsync
+must dispose results, including after completing or cancelling an enumeration. Cancellation
+releases only that enumeration's cursor. A real temporary read failure releases the result
+and every reader observes the same coded failure. A session permits eight undisposed spilled
+results; a further spill refuses CS05067 until one is disposed. Active reader workspace and retained decoded rows per
+result, including one row of decoding overlap, cannot exceed its sort grant. A new reader that would exceed it refuses CS05067 at
+its first MoveNextAsync, reporting live and requested bytes without affecting other readers.
+
+CS05067 remains for nested/subquery, derived/CTE operand bodies, correlated frames,
+recursion, windows, grouping sets, SQL/JSON statements, inferred SQL/JSON domain checks
+during CTAS assignment (a conservative exclusion using a private expression scope), deferred subqueries,
+plain ordered index scans without DISTINCT, ordered aggregates, ordered sequence deferral, and
+buffers belonging to operators preceding the root sort that have no handoff.
+Window and SQL/JSON owners keep their specific grant codes when they fill first.
+DML sources gain no spill permission. INSERT SELECT's existing source-budgeting gap
+is tracked by #1828 and is unchanged here. Spill also refuses CS05067 without temp space,
+for a nonfixed ordering collation, an unsupported
+row/key family, a binary value returned by an application function (including through CASE
+or a projected cell), or a row above the record bound. Binary columns, binary parameters and
+built-in binary results remain eligible. Fitting statements keep their existing results.
+A statement also refuses before publication if one reader and its maximum decoded row,
+including decoding overlap, would exceed the grant. For grant G the bound is
+(G - 32768) / 16 - 8192 bytes, including key, row and 16 framing bytes; G must be at least
+65,536 and the bound at least 16. Ordered DISTINCT's seen set must itself fit the grant.
+
+The default physical statement quota remains four grants. Ten grants of 20- and
+50-character ASCII rows complete; session and declared-script CTAS also complete ten grants
+of 20-character ASCII input. Twenty three-byte characters fit six grants but seven
+refuse CK05002 (6.66 grants of payload before rounding). Width, framing, run tails and
+intermediate merges determine capacity. CK05001 (engine quota), CK05002 (statement quota),
+CK05003 (free-space reserve), CK05004 (temp integrity), CK05005 (unavailable temp I/O) and
+CK05006 (sort record bound) are located statement/delivery errors and release temporary
+files without taking the database offline or aborting an explicit transaction. Temporary
+close failures retain CK05005 during evaluation; cleanup after completed wire delivery
+is counted by storage and does not replace completion. EXPLAIN changes no fields; EXPLAIN ANALYZE
+adds spilled_bytes, spill_peak_bytes, spill_runs and spill_merge_passes only after a spill.
+SqlSortSpillConformanceTests is the executable differential, lifetime, memory and wire corpus.
+
 ## COPY TO STDOUT (#1724, SQ-C1)
 
 `COPY table [(column, ...)] TO STDOUT [WITH] [(option, ...)]` exports a physical table
@@ -1159,8 +1205,27 @@ report zero. It follows existing self-committing DDL:
 inside BEGIN it fails with CS04003 (25001), leaving earlier work and the transaction active.
 This differs from PostgreSQL's statement-transaction publication. A completed catalog publication
 is irrevocable; cancellation after it returns the committed result. A disconnect may lose that
-response. The source uses one statement MVCC snapshot. Retained query output and encoded batch
-buffers share StatementMemoryBudget; exhaustion reports CS05067 and leaves no table.
+response. The source uses one statement MVCC snapshot. Its root ORDER BY and ordered DISTINCT may
+spill under the root SELECT rules above, in sessions and declared scripts. A fitting source
+retains its existing memory admission; a spilled source streams into 64-row copy brackets
+and is disposed before the statement ends, releasing its temporary files and result slot.
+An unordered CREATE TABLE a AS SELECT * FROM t still retains every output row and
+refuses CS05067 at the grant until SQ-L4 result spooling. The ordered index path, such as
+CREATE TABLE c AS SELECT * FROM t WHERE id >= 0 ORDER BY id over a primary key, also
+retains output and refuses at the grant until SQ-L4. Adding ORDER BY id to an unindexed
+source can instead spill and complete at ten times the grant. A fitting source just below
+the grant can still refuse during copying while a larger spilled source completes;
+this fitting-source window is unchanged and awaits follow-up. With 1,024-character notes
+at a 262,144 B grant, 85 rows fit, 86–113 refuse and 114 spill successfully. With
+7,000-character notes at the default 67,108,864 B grant, 4,696 fit, 4,697–4,707 refuse
+and 4,708 spill successfully. Retained fitting query output
+and encoded batch buffers share StatementMemoryBudget; exhaustion
+reports CS05067 and leaves no table. Temp quota and I/O failures retain CK05 codes and leave
+the database online; a declared script keeps its completed prefix and resumes at the failed
+CTAS on a later Build. After a completed copy, a counted temporary close failure does
+not prevent commit/publication; any leftover file is swept at the next open. Oversized
+records refuse CS05042 in row encoding before batch admission at both grants. WITH NO DATA
+executes no sort and creates no temp files.
 The destination remains absent until its entire data build and dedicated writer transaction
 are durable. Ordinary snapshot isolation follows the builder's single commit: a snapshot taken
 before that commit sees no destination rows; one taken after it sees every row once the live
@@ -1199,7 +1264,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), table COPY TO STDOUT (#1724, +1 clause), SQL/JSON path functions JSON_VALUE, JSON_QUERY and JSON_EXISTS (#1722, +3 clauses), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and named savepoints (+3 clauses, #1726), and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), the profile has **91 of 93 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), table COPY TO STDOUT (#1724, +1 clause), SQL/JSON path functions JSON_VALUE, JSON_QUERY and JSON_EXISTS (#1722, +3 clauses), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and named savepoints (+3 clauses, #1726), and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), NATURAL joins (#1792, SQ-J3, +1 clause), the profile has **92 of 93 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -1220,8 +1285,7 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **2 excluded clauses** are `NATURAL`,
-and `ALL`. Counts describe named clauses, not
+The **1 excluded clause** is `ALL`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
@@ -1251,13 +1315,13 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` | Supported accessor subset, measured (+3 clauses) | Lax/strict paths, RETURNING, wrappers, quotes, empty/error behavior and statement budgets; see SQL/JSON path functions below. |
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
-| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], RIGHT [OUTER], FULL [OUTER], CROSS and comma joins over stored/system/derived sources, with parenthesized join groups. INNER/LEFT/RIGHT/FULL require ON or USING; CROSS accepts neither. FULL requires hash-compatible conditions (CS05070 otherwise). NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
+| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], RIGHT [OUTER], FULL [OUTER], CROSS and comma joins over stored/system/derived sources, with parenthesized join groups. INNER/LEFT/RIGHT/FULL require ON or USING; CROSS accepts neither. FULL requires hash-compatible conditions (CS05070 otherwise). NATURAL and qualified SELECT wildcards execute as described below; LATERAL remains excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. GROUPING SETS, ROLLUP, CUBE, empty sets and GROUPING masks execute; aggregate windows execute; other ordered-set aggregates report `CK00001`. |
 | Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, and scalar `op ANY`, `op SOME` or `op ALL` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `CS00006`). Subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `CK00001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain CK00001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `CK00001` |
 | DML `RETURNING` | Supported subset, measured | Written-row SELECT list and affected count; see the RETURNING contract below |
-| `NATURAL JOIN` | Recognized, not supported | rejected with `CK00001` |
+| `NATURAL JOIN` | Supported, measured | Derives USING names in left-output order; frozen in views. No common names lowers INNER to CROSS and preserves LEFT/RIGHT with ON TRUE; FULL refuses with CS05070. |
 | `UNION` / `INTERSECT` / `EXCEPT` | Supported, measured | Each accepts ALL or DISTINCT (default); available in every query position, with parenthesized operands and combined ordering/paging. See [Set operations](#set-operations-1114). |
 | `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE, DELETE or MERGE; optional output column lists; also INSERT INTO t WITH ... SELECT |
 | `WITH RECURSIVE` | Supported subset, measured | Anchor-typed UNION ALL and DISTINCT fixpoints, demand-driven shared scans, budget/cancellation and EXPLAIN. WITH RECURSIVE before MERGE remains excluded. |
@@ -1456,8 +1520,10 @@ complete target in one catalog commit, including cheap additions and drops (#177
 Before publication a failure reports CS03402 and keeps the old schema online. Only a matching
 target Build resumes interrupted preparation; a different-target Build discards it and replans
 from the stored schema. A no-target open discards without a provisioning report or trace; a
-successful Verify clears a declared discard observation. Non-TYPE inline and empty-table paths retain their existing behavior
-until SQ-A6; default-only changes still refuse CS03105.
+successful Verify clears a declared discard observation. RunMigrationsInline, empty-table Build
+and ApplySchemaAsync use the same joint executor inline. Default-only changes publish jointly
+(SET or DROP DEFAULT) with destructive opt-in (CS03105 without it), with CS03402 before
+publication and CS03403 for an unconfirmed commit.
 
 Referential SET NULL and SET DEFAULT update only matching foreign-key columns, using the
 ordinary domain, nullability, CHECK, outgoing/incoming FK, MVCC and index machinery.
@@ -1551,10 +1617,10 @@ comment, and a string literal or block comment may span lines. `//` is not a
 comment: `/` is the division operator, so `//` is a syntax error.
 
 A recognized clause outside the profile keeps its `CK00001`, for example
-`NATURAL JOIN`. The parser stops at such a clause by design, so the text
+`JOIN LATERAL (SELECT ...) alias`. The parser stops at such a clause by design, so the text
 from that clause on adds no second diagnostic. Text the parser stopped at before
 it reached the clause still reports `CS00003`: `DELETE FROM t WHRE id = 1
-NATURAL JOIN u` reports both, so fixing the unsupported join does not reveal a new error. A
+JOIN LATERAL (SELECT id FROM u) x ON TRUE` reports both, so fixing the unsupported source does not reveal a new error. A
 derived table, `(SELECT ...) alias`, is parsed as a query relation; its alias is required.
 Named `:name` parameters are not part of the dialect; bind `@name` or `$1`.
 
@@ -1895,8 +1961,8 @@ Full-definition identity-type changes retain their refusal; use explicit TYPE fo
 Typed-schema plans containing a TYPE rewrite and every deferred migration prepare their complete target unpublished, using
 the same assignment conversion/copy path, then publish every table, index, constraint and applied
 marker in one commit (#1447, SQ-A3). Build defers populated work to the provisioning worker.
-For TYPE-rewrite plans, empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same
-joint executor inline; their non-TYPE paths retain their existing behavior until SQ-A6.
+Empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same
+joint executor inline for every plan, including default-only changes (#1778, SQ-A6).
 Before publication users on touched tables wait through the lock manager; DML on other tables
 proceeds. Definition DDL is refused database-wide from Build through queue time and worker completion.
 CREATE TABLE, CTAS, CREATE VIEW, CREATE SEQUENCE and ALTER TABLE RENAME TO cannot claim an
@@ -1913,10 +1979,13 @@ Narrowing length, precision or scale, rounding and every conversion not proven l
 destructive opt-in (CS03105 before any step); exact widening can run without it. Dependent-view
 refusals, old snapshots and retryable CS04006 writers retain the single-statement contract.
 VARCHAR narrowing always takes the joint TYPE path because assignment may trim excess spaces;
-CHAR width changes also rewrite. Default changes in a plan without any TYPE rewrite retain
-the base generator's CS03105 refusal before saving anything. The joint plan publishes all defaults.
-Metadata planning refusals report CS03105; joint reservation failures agree on CS03402 in the
-exception and provisioning report. Before intent save, Build checks only the metadata space floor, without owner snapshots or row
+CHAR width changes also rewrite. Default changes without a TYPE rewrite publish jointly,
+including SET and DROP DEFAULT with destructive opt-in (CS03105 without it); a frozen missing
+value retains its original value. Typed reconciliation preserves inherited SQL-domain defaults
+and explicit DEFAULT NULL overrides.
+Metadata planning refusals report CS03105; joint reservation failures throw CS03402. Imperative
+interruption clears Provisioning; deferred failures remain sticky. Before intent save, Build
+checks only the metadata space floor, without owner snapshots or row
 decodes. The worker measures actual rewritten record/key bytes and conversion growth before prepared writes.
 A volume watchdog checks each copy/index bracket and the catalog publication bracket after
 validation. An engine reserve covers discard, old/prepared-owner reclamation WAL up to the
@@ -1939,10 +2008,16 @@ offline. An unconfirmed publication uses CS03403 and leaves recovery to decide o
 Deferred Build does not copy data; RunMigrationsInline or any declared script forces the typed
 copy inline during Build. The executable SqlJointTypeMigrationTests corpus covers these edges.
 In every joint plan, additive indexes and CHECK, NOT NULL, UNIQUE and foreign-key constraint
-changes can keep the physical heap owner (#1777, SQ-A4). Stored column types and facets must
-remain identical, including native-domain bounds. Dropping or replacing a heap-owned index
-forces a rewrite; alternate-tree drops and replacements can keep the heap and reclaim kind-14
-owners. General heap-owned dropped-index reclamation is tracked by #1808.
+changes can keep the physical heap owner (#1777, SQ-A4). Nullable appends with immutable missing
+values, non-identity logical backfills, DROP COLUMN, VARCHAR widening, same-scale DECIMAL precision
+changes, aliases and defaults also keep it (#1778, SQ-A6). Surviving physical ordinals and value
+representations remain identical. Precision tightening scans and refuses invalid rows; dropped
+column bytes remain intact until publication. Reserved-table writers wait, then enforce the new
+declaration or receive a stale-plan retry. A statement naming a dropped column is refused.
+Dropping a heap-owned index without a same-name replacement keeps the heap; its pages remain
+until the table retires (DROP TABLE or a later TYPE rewrite). IX-S1 (#1808) will give indexes
+separate pages and reclaim them on drop. A same-name heap-owned replacement still rewrites;
+alternate-tree drops and replacements retain their heaps and retire separate owners.
 New trees build unpublished against that heap; added constraints validate existing rows under
 the joint X locks before tree builds. Index-only changes need no additional validation scan;
 unchanged foreign-key pairs are skipped. Drops, new trees and rewritten tables publish in the same single commit.
@@ -1989,9 +2064,13 @@ DROP DEFAULT affects later omitted-column writes. A NOT NULL
 column without a default requires an explicit value. Neither action changes old rows: ADD
 COLUMN freezes its missing value once, including NULL when it had no default. An old row still
 reads that value after changing/dropping the insert default and after restart. Explicit stored
-NULL stays NULL. A later column narrowing validates and binds the frozen literal under the new
-type before publication, even with no live rows; an unconvertible literal refuses the change
-with a coded error naming the column. This is PostgreSQL's separate missing attribute value
+NULL stays NULL. Precision tightening and VARBINARY narrowing validate visible values, including a visible row
+that still reads its frozen literal. Historical numeric/binary literals bind independently of current
+precision/length bounds; a literal used by no visible row does not block tightening. A compiled
+apply with an out-of-bound visible value refuses with CS03402 and retains the old schema online.
+Newly appended defaults and later assignments must fit their declaration. Character assignment
+retains its trimming/padding rules; joint character-width changes rewrite rows. The frozen value uses
+the separate missing attribute model described by PostgreSQL
 (src/backend/access/common/heaptuple.c:151-180) and column-default operation
 (src/backend/commands/tablecmds.c:8201-8268).
 
@@ -2175,8 +2254,80 @@ registered INFORMATION_SCHEMA/COHESION_SCHEMA relation or aliased derived query,
 (including bare JOIN), LEFT [OUTER], RIGHT [OUTER], FULL [OUTER], or CROSS joins. INNER, LEFT, RIGHT and FULL require exactly one
 ON predicate or USING (column [, column ...]); CROSS accepts neither. Missing ON/USING
 retains CK00001; malformed joins and CROSS with a condition fail
-with an error and never execute as a product. NATURAL, LATERAL and qualified wildcards
-such as t.* keep CK00001. Derived comma inputs, FROM t, (SELECT ...) d, execute.
+with an error and never execute as a product. LATERAL keeps CK00001.
+Derived comma inputs, FROM t, (SELECT ...) d, execute.
+
+NATURAL precedes bare JOIN, INNER, or LEFT/RIGHT/FULL [OUTER] JOIN.
+NATURAL CROSS JOIN is a syntax error (CS00003), as is an explicit ON or USING. Binding derives common
+visible output names in left-input order, comparing identifiers without case, then uses
+the ordinary USING type, collation, ordering and nullability rules. Repeated common names
+on either side fail CS01015. An input column with a synthesized display name (such as
+column1 for an unnamed CAST) also fails CS01015, naming the column and requesting an alias.
+That provenance follows derived tables (including FROM-less correlated inputs), CTEs,
+compound output names, views and both star forms;
+an explicit alias or column-alias list clears it. A stored table column literally named
+column1 is an authored identifier and remains valid. Existing wire-visible columnN names
+are unchanged. Stored, derived, persisted-view and system inputs all participate.
+In stored views, a same-name AS alias over a synthesized source can also have come from
+older frozen star expansion. That ambiguous stored shape conservatively requires a fresh alias;
+format 37 has no record of which spelling was authored.
+The same format-37 ambiguity affects an older explicit view column list whose name matches
+an unnamed expression's generated name: CREATE VIEW legacy(column1) AS SELECT CAST(1 AS BIGINT)
+stored only SELECT CAST(1 AS BIGINT) and the catalog name column1. NATURAL conservatively
+refuses that input with CS01015, even though the original list was authored. Wrap the view in
+a derived query with an explicit column-alias list, or recreate it: new views retain the list
+in the stored body.
+Dropped columns are absent from the catalog output. PostgreSQL
+src/backend/parser/parse_clause.c:1242-1274 supplies the common-name algorithm; unlike its
+strcmp, Cohesion uses its case-insensitive identifier rule. Zero common names lower INNER
+to CROSS; LEFT and RIGHT retain their join kind with ON TRUE, including null extension
+and nullable metadata when the opposite input is empty (parse_clause.c:1408-1411).
+FULL with no common names fails CS05070 under the executable FULL subset; PostgreSQL
+returns the product there. PostgreSQL gram.y:14062-14086,14169-14172 excludes NATURAL CROSS.
+
+Standalone SELECT list items t.* and schema.table.* expand that local input's own columns,
+in declared order, including its physical columns hidden from unqualified * by USING.
+Outer-extended inputs retain nullable metadata and NULL values, with their original types.
+Aliases hide base names and schema qualifiers as for qualified scalar references; unknown
+or ambiguous qualifiers fail CS01015 before reads. Expansion composes with other projections,
+DISTINCT, ordering aliases/ordinals, windows, derived/view/system inputs and compound operands.
+An alias on either star form is discarded, including in views and ORDER BY (PostgreSQL
+parse_target.c:148-152). Bare ORDER BY names still resolve explicit aliases, then source
+columns: SELECT b.* FROM a NATURAL LEFT JOIN b ORDER BY x DESC NULLS LAST sorts by
+the merged x here, whereas PostgreSQL sorts by the output b.x.
+A SELECT or RETURNING target list is limited to 1,664 entries after expansion; CS05097
+(54011) names the limit and attempted count before retaining an oversized target list.
+The parser also limits each syntactic target list to 1,664 entries, across all query bodies
+and INSERT/UPDATE/DELETE/MERGE RETURNING. At entry 1,665 it reports one located CS05097,
+abandons the remaining text without tokenizing it, places the lexer at EOF, and discards the partial
+tree. Whole-text lexical/capability diagnostics are deferred until parsing completes and are
+not built for that abandoned text; the lexer retains no tokens or input span after refusal.
+Supported text sources cannot expand a star to zero columns: stored tables and views require
+at least one live column, DROP COLUMN refuses the last, derived queries require a target,
+and a FROM-less star fails CS05013. The syntactic bound counts every star independently of
+its eventual width; binder checks still enforce expanded width for accepted syntax and ASTs.
+The same limit covers derived/CTE bodies, compound operands and view expansion.
+Grouped wildcard projections retain the existing CS05017 wildcard boundary. Row-valued uses,
+including COUNT(t.*), remain CK00001. UPDATE FROM, DELETE USING and MERGE USING do not
+accept a wildcard as a relation or scalar expression; SELECT bodies in those sources may
+project qualified wildcards. Qualified RETURNING wildcards retain CK00001, as do direct
+NATURAL mutation-source joins; ordinary RETURNING * and explicit qualified columns retain
+their existing behavior. LATERAL's refusal is unchanged.
+
+An aliased source group, UPDATE t SET v=1 FROM (a NATURAL JOIN b) AS j WHERE t.id=j.id,
+executes through its derived SELECT, matching PostgreSQL. INSERT SELECT can end a NATURAL
+join with ON CONFLICT; elsewhere a leftover ON is a syntax error. CROSS JOIN retains its
+existing ON consumption and therefore still refuses that ON CONFLICT form.
+
+CREATE VIEW freezes NATURAL into explicit USING names (or CROSS / LEFT or RIGHT ON TRUE)
+and expands both wildcard forms through the existing text edits. Later ADD COLUMN cannot
+add a join predicate or output column, including after reopen. PostgreSQL also deparses
+NATURAL as USING (ruleutils.c:12782-12804) or an outer ON TRUE (:12814-12818); freezing
+is not a departure. NATURAL is risky in an ad-hoc
+query under schema change (PostgreSQL doc/src/sgml/queries.sgml:391-405); views avoid that risk.
+The canonical audit of columns named natural and lateral retains the same quoting, so
+SQL format 37 and wire contracts are unchanged. SqlNaturalJoinTests records independent,
+hand-derived PostgreSQL-oracle rows, with the documented dialect departures.
 
 JOIN binds more tightly than comma: in FROM a, b JOIN c ON ..., ON can see b and c,
 but cannot see a. It also cannot reference a later input. Unknown/hidden qualifiers
@@ -2314,7 +2465,7 @@ index inner is freshly decoded. Earlier indexed inputs retained by later steps a
 copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
 Capability preflight skips advertised clauses and reports the first unadvertised
-one. Thus USING cannot mask a later NATURAL JOIN or a later FOR UPDATE/SHARE clause. MERGE INTO ... USING
+one. Thus USING cannot mask a later LATERAL source or a later FOR UPDATE/SHARE clause. MERGE INTO ... USING
 binds and explains; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
 
 ## MERGE syntax, binding and execution (#1715, SQ-M1/SQ-M2/SQ-M3)
@@ -2362,7 +2513,7 @@ RETURNING supports merge_action(), a contextual zero-argument text expression av
 in this projection (CS01053 elsewhere; CS01006 for arguments/modifiers), including nested
 scalar expressions. It is separate from the standalone executable-function profile. Bare *
 expands target columns then visible source columns, preserving source USING merges;
-qualified wildcards retain CK00001. Source metadata includes absent-side nullability,
+qualified RETURNING wildcards retain CK00001. Source metadata includes absent-side nullability,
 including merged USING outputs.
 RETURNING emits one row per applied action and none for DO NOTHING. merge_action() yields
 INSERT, UPDATE or DELETE. Target columns contain the new row for INSERT/UPDATE and the old
@@ -2544,7 +2695,9 @@ the database, the format it found and the format it supports. The check reads
 only the database's catalog and runs before the engine opens the data files, so
 a refused open never touches them. Catalog and data format checks read Storage's
 recovered read-only view before either original file set opens for writing (#1744).
-Clean and crashed databases are left byte-identical, including their journals. To move an older database to the current engine, export
+Clean and crashed databases are left byte-identical, including their journals. Separately,
+B-tree page format 3 (#1809) is required; format-2 trees are refused with CK06101
+through that same preflight, without changing the model marker. To move an older database to the current engine, export
 its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
@@ -2712,8 +2865,8 @@ sorts every input and projects every row before LIMIT 0 discards them, and a
 grouped query whose ORDER BY is correlated evaluates every group's HAVING and
 projection (but no ORDER BY key).
 DISTINCT still completes
-before pagination. Results remain fully evaluated before delivery; ordered index
-access and spillable sorting are separate work.
+before pagination. Results remain fully evaluated before delivery; ordered index access removes eligible sorts
+and eligible root sorts spill as described above.
 
 For ordinary SELECT ordering without output-alias or ordinal dependencies,
 nonvolatile projections and keys evaluate together in input order, projection
@@ -3327,7 +3480,7 @@ WITH inside subqueries, derived tables or CTE bodies, modifying CTE bodies,
 `AS [NOT] MATERIALIZED` and SEARCH/CYCLE report `CK00001`.
 A WITH list followed by another command kind reports `CS00003`.
 Capability scanning continues through advertised WITH lists, OVER and WINDOW;
-NATURAL JOIN and deferred window forms retain their capability diagnostics.
+Direct NATURAL mutation-source joins and deferred window forms retain their capability diagnostics.
 
 ## WITH RECURSIVE binding and fixpoints (#1719, SQ-R1/SQ-R2)
 
@@ -3408,7 +3561,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 91/93 declared-clause count.
+These contextual exclusions do not change the 92/93 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -4951,6 +5104,8 @@ pin in the same change.
 | `CS06041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
 | `CS05042` | Error | Encoded row, index key or catalog definition exceeds its size limit, or catalog DDL generation is exhausted (SQLSTATE 54000, program_limit_exceeded); the statement writes nothing and an explicit transaction remains active (#1266, #1653) |
 | `CS05043` | Error | Server-side statement timeout (SQLSTATE 57014, query_canceled); failed statement changes and new lock resources are rolled back/released, and the session and explicit transaction remain usable (#1231) |
+| `CK04014` | Error | Statement deadline at journal checkpoint admission, or immediate admission refusal while metadata/gates must be retained (SQLSTATE 57014, query_canceled); the statement remains atomic. Persistent worker failures retain the offline window (#1283) |
+| `CS05097` | Error | Syntactic or expanded target list exceeds 1,664 entries; names the limit and attempted count (SQLSTATE 54011, too_many_columns; #1792) |
 | `CS04044` | Error | Individual lock-wait timeout, including unique-key waits (SQLSTATE 55P03, lock_not_available); same statement-atomic failure contract as CS05043 (#1231) |
 | `CS05045` | Error | Result encoding/preparation failed. Writing statements prepare header/rows before commit and any result frame; DML failures roll back only the statement. Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery and may fail after partial frames, which the client discards. Includes encoding failures or a header/row above ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB); there is no aggregate result cap. Size refusals map to SQLSTATE 54000 and report encoded size and frame limit. The connection and explicit transaction remain usable on result failures; transport failures are terminal (#1651). |
 | `CS02034` | Error | Invalid LIKE/ILIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
@@ -4993,6 +5148,19 @@ both timeouts to zero; their caller/lifecycle cancellation still applies, includ
 index builds. CREATE/DROP FUNCTION and DOMAIN finish binding after self-commit without observing
 cancellation again. SqlTimeoutConformanceTests and SqlTimeoutRegressionTests are the executable conformance corpus for
 these engine-visible limits; no grammar/profile clause count changes.
+JournalAdmissionPauseTests and SqlJournalAdmissionWireTests cover CK04014 / SQLSTATE 57014
+(#1283): a pending checkpoint near the journal limit delays new write brackets; expiry at
+that admission point releases failed-statement work and new grants, while caller cancellation
+keeps its cancellation meaning. Metadata operations that cannot release their gates refuse
+admission immediately with CK04014. An explicit transaction and TCP session remain usable.
+Reads retain ordinary snapshot and locking behavior.
+Paused engines report Degraded health with CK06006; a pending pause alone leaves the database online.
+Session DDL keeps its immediate CK04014 refusal; a client can retry the statement.
+Code-first migrations instead wait outside the physical and publication gates and resume the
+same prepared job, preserving completed copy/index work. ApplySchemaAsync, inline Build and
+deferred Build retain cancellation and lock timeouts, with coded admission failures.
+CS03104 is retired: schema apply uses joint publication and CS03402/CS03403 for preparation
+failure and unconfirmed publication respectively (#1778).
 
 A refusal carries CS05042 / SQLSTATE 54000, naming the table, actual byte size and limit.
 The failure leaves the session usable and an explicit transaction active, with earlier statements
@@ -5010,7 +5178,7 @@ carried per node.
 the internal recognized-unsupported table (`SqlUnsupportedVocabulary`), either
 parses inside a supported clause or reports exactly one `CK00001` naming its
 construct. The table holds the clause keywords the preflight scan rejects,
-such as `NATURAL` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
+such as `SELECT ALL` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
 rejects with `CK00001`: `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`, SELECT-tail `FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` /
@@ -5090,9 +5258,13 @@ The ISO `DEFAULT X'007FFF'` spelling also works. Quoted backslash-x defaults kee
 resolving after reopen; COLUMN_DEFAULT reports the resolved value as X hex.
 General text-to-BYTEA conversion is separately defined by the [CAST contract](#explicit-conversion-cast-1022-e3).
 
-While a compiled-schema apply runs, ordinary session DDL is refused with
-`DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the
-apply, including any compensation, finishes; unrelated table reads and writes continue.
+While a compiled-schema apply runs, plain readers, writers and session DDL naming a touched
+table wait through the whole job and cleanup, then bind the published schema. This includes
+inline ApplySchemaAsync scans/builds. Unrelated table reads and writes continue; unrelated
+session DDL is refused with DatabaseObjectLockedException while apply admission is held.
+A configured engine LockTimeout bounds Build and ApplySchemaAsync reservation; zero has no
+timeout. Imperative cancellation/timeout clears its Provisioning report; deferred failures stay
+sticky. Build-time inline jobs have no user sessions. Sql DESIGN lists each step's lock window.
 
 ## SQL definitions and declared scripts (E4)
 
@@ -5397,7 +5569,8 @@ keep that owner. An independent cache first materialized in a window remains cha
 the statement. When plain bytes fill the grant first, refusal reports CS05067, including statements whose
 earlier ledger would later refuse with CS05079 or CS05094. With no plain bytes live, window
 and SQL/JSON grant refusals retain their specific code. Statement memory refusal aborts input
-immediately, including input with a later error. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
+immediately, including input with a later error, except when an eligible root sort hands
+its retained rows to temporary storage and continues under the same grant. A cell of at least 256 B (113 UTF-16 characters for a string) pays its payload once per
 buffer owner by reference identity, plus a fixed 64 B per distinct wide-cell map entry
 (#1776, SQ-L1c). Further references pay their array slots; smaller cells still pay per
 reference. Equal but separate objects, including binary clones, each pay. Output and ordering

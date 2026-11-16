@@ -2,6 +2,8 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
@@ -56,6 +58,35 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
     private readonly TaskCompletionSource _closure = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _disposed;
     private DatabaseProvisioningProgress? _provisioning;
+    private TransactionCheckpointInterlock[] _journalAdmissions = [];
+    private int _journalAdmissionConfigured;
+
+    /// <summary>Gets whether a storage of this database has paused new write brackets for a pending checkpoint.</summary>
+    /// <remarks>A pending pause leaves the database online; persistent worker failures retain the offline window. Reads use their ordinary snapshot and locking rules.</remarks>
+    public bool IsJournalAdmissionPaused
+    {
+        get
+        {
+            foreach (var admission in _journalAdmissions)
+            { if (admission.IsAdmissionPaused) { return true; } }
+            return false;
+        }
+    }
+
+    internal void AttachJournalAdmission(TransactionCheckpointInterlock[] admissions)
+    {
+        if (Interlocked.Exchange(ref _journalAdmissionConfigured, 1) != 0)
+        { throw new InvalidOperationException(ErrorMessages.JournalAdmissionAlreadyConfigured); }
+        _journalAdmissions = admissions;
+    }
+
+    private void DrainJournalAdmission()
+    {
+        // The model rejects new statements once closing. Already accepted catalog
+        // operations and cancellation cleanup must finish before storage disposal.
+        foreach (var admission in _journalAdmissions) { admission.JournalSizeLimit = 0; }
+        _engine.DetachJournalAdmission(this);
+    }
 
     /// <summary>
     /// Initializes a new database with its name and its owning engine.
@@ -147,6 +178,7 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
 
         try
         {
+            DrainJournalAdmission();
             DisposeCore();
         }
         finally
@@ -206,6 +238,7 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
     {
         try
         {
+            DrainJournalAdmission();
             await DisposeAsyncCore().ConfigureAwait(false);
         }
         finally

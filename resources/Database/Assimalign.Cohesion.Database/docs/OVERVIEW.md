@@ -89,6 +89,13 @@ the source boundary while the existing public construction and execution APIs re
   `DatabaseExecutionSession<TRequest>` adds typed execution; `DatabaseLanguageSession<TRequest>`
   adds text execution for Sql, Documents and Graph. KeyValuePair is typed-only, and Blob has
   no execute member. Sessions are single-threaded; disposal rolls back an active transaction.
+- **Journal admission** — half JournalSizeLimit requests a checkpoint even with the size trigger
+  off, and every model pauses new brackets while it is pending (Degraded/CK06006, #1283). A
+  non-failing pause never goes offline through time alone; persistent worker failures retain
+  the 100-second default offline window. Undo and checkpoints drain. Success inside the window
+  resumes admission; the offline fence wakes parked writers with its original cause. Reads retain
+  ordinary snapshot and locking rules while online; Blob refuses its failing database on the wire.
+  SQL admission deadlines and guarded pause refusals report CK04014.
 - **Error root** — `DatabaseException` for the contract root and everything built above it;
   `DatabaseNotFoundException` for the exact missing-database outcome of
   `DatabaseEngine.OpenDatabaseAsync`; `DatabaseParseException` for statement text a session's

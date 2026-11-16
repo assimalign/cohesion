@@ -210,7 +210,11 @@ internal static partial class GraphPlanExecutor
             { throw new InvalidOperationException(ErrorMessages.ConnectedNodeDeletion); }
             foreach (var edge in incident) { operation.Updates.DeletedRelationship(edge.Id); }
             if (!operation.Updates.IsCreated(true, id.Value))
-            { await database.Store.DeleteNodeAsync(id.Value, deletion.Detach, operation.Context, token).ConfigureAwait(false); }
+            {
+                if (database.Store.HasTextIndexes)
+                { await database.Store.DeleteNodeAsync(id.Value, deletion.Detach, operation.Context, token, operation.EnsureQueryBudget().Consume, operation.Updates.Charge).ConfigureAwait(false); }
+                else { await database.Store.DeleteNodeAsync(id.Value, deletion.Detach, operation.Context, token).ConfigureAwait(false); }
+            }
             operation.Updates.DeletedNode(id.Value);
         }
         foreach (var binding in bindings)

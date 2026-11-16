@@ -87,7 +87,9 @@ public sealed class BTreeCursorAllocationTests
             {
                 cursor.MoveNextAsync(CancellationToken.None).GetAwaiter().GetResult().ShouldBeTrue();
                 cursor.CurrentEntryReference.ShouldBe((ulong)i);
+                cursor.CurrentPayload.IsEmpty.ShouldBeTrue();
             }
+            cursor.HasPayloadStorage.ShouldBeFalse();
         }
         finally { cursor.DisposeAsync().GetAwaiter().GetResult(); }
         return GC.GetAllocatedBytesForCurrentThread() - before;

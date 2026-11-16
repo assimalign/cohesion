@@ -1,6 +1,7 @@
 using System;
-using System.IO;
 using System.Diagnostics.Tracing;
+using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -10,6 +11,7 @@ using Assimalign.Cohesion.Database.Blob;
 using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Documents;
 using Assimalign.Cohesion.Database.Documents.Storage;
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.KeyValuePair;
@@ -69,15 +71,64 @@ internal static class Program
         else { Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }
 
+    private static async Task SqlSpillStopAsync(string root)
+    {
+        var engine = SqlDatabaseEngine.Create("spill-stop", new() { RootPath = root, StatementMemoryBudget = 262144, CheckpointJournalSize = 65536 });
+        var database = await engine.CreateDatabaseAsync("db");
+        var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t(id INT)");
+        for (int first = 0; first < 4000; first += 200)
+        { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first,200).Select(i => $"({i})"))); }
+        var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id FROM t ORDER BY id DESC");
+        await using var reader = result.GetRowsAsync().GetAsyncEnumerator();
+        if (!await reader.MoveNextAsync()) { throw new InvalidOperationException("missing spilled row"); }
+        Console.WriteLine("SQL_SPILL_READY"); Console.Out.Flush();
+        await Task.Delay(Timeout.InfiniteTimeSpan);
+        GC.KeepAlive(result); GC.KeepAlive(session); GC.KeepAlive(engine);
+    }
+
+    private static async Task SqlTableAsStopAsync(string root, bool copying)
+    {
+        bool armed = false;
+        int calls = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("ctas-stop");
+        builder.Options.RootPath = root; builder.Options.StatementMemoryBudget = 262144;
+        builder.Options.CheckpointJournalSize = 65536;
+        builder.Functions.Add(SqlScalarFunction.Create("probe", (long value) =>
+        {
+            // Domain assignment observes the copy; projection observes sort input.
+            if (armed && ++calls == (copying ? 65 : 3000))
+            {
+                Console.WriteLine("SQL_CTAS_READY"); Console.Out.Flush();
+                Thread.Sleep(Timeout.Infinite);
+            }
+            return value;
+        }, volatility: SqlFunctionVolatility.Immutable));
+        var engine = await builder.BuildAsync();
+        var database = await engine.CreateDatabaseAsync("db");
+        var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE DOMAIN observed AS BIGINT CHECK(probe(VALUE)>=0)");
+        await session.ExecuteAsync("CREATE TABLE t(id observed)");
+        for (int first = 0; first < 4000; first += 200)
+        { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first, 200).Select(i => $"({i})"))); }
+        armed = true;
+        await session.ExecuteAsync(copying ? "CREATE TABLE archive AS SELECT id FROM t ORDER BY id DESC"
+            : "CREATE TABLE archive AS SELECT probe(id) AS id FROM t ORDER BY id DESC");
+        throw new InvalidOperationException("CTAS stop probe was not exercised");
+    }
+
     private static async Task Main(string[] args)
     {
+        if (args[0] == "sql-spill-stop") { await SqlSpillStopAsync(args[1]); return; }
+        if (args[0] == "sql-ctas-sort-stop" || args[0] == "sql-ctas-copy-stop")
+        { await SqlTableAsStopAsync(args[1], args[0] == "sql-ctas-copy-stop"); return; }
         if (args[0] == "temp-lease-probe") { await TempLeaseProbeAsync(args[1]); return; }
         // This process deliberately exits with live physical brackets. Never dispose them before Exit.
         string model = args[0];
         string root = args[1];
         bool clean = args[2].StartsWith("clean-", StringComparison.Ordinal);
         string mode = clean ? args[2][6..] : args[2];
-        bool legacy = mode == "legacy";
+        bool legacy = mode is "legacy" or "legacy-index2";
         string directory = Path.Combine(root, "probe");
         switch (model)
         {
@@ -172,8 +223,8 @@ internal static class Program
         else
         {
             dataSet = model == "Documents" ? "document" : model.ToLowerInvariant();
-            byte current = model == "Graph" ? (byte)3 : (byte)1;
-            byte[] record = Metadata(legacy ? (model == "Graph" ? (byte)2 : (byte)0) : current);
+            byte current = model == "Graph" ? (byte)4 : (byte)1;
+            byte[] record = Metadata(legacy ? (model == "Graph" ? (byte)3 : (byte)0) : current);
             if (model == "Graph")
             {
                 var typed = GraphStorage.Open(Open(dataSet, ".dat"), Open(dataSet, ".log"), Open(dataSet, ".bak"), checkpointOnOpen: false);
@@ -208,7 +259,7 @@ internal static class Program
                 using var read = storage.PageManager.GetPage((PageId)id);
                 if (read.Page.Type != PageType.Index) { continue; }
                 using var write = storage.OpenPageForWrite(bracket, (PageId)id);
-                if (mode == "index") { write.Page.AsBodySpan()[2] = 1; }
+                if (mode is "index" or "index2" or "legacy-index2") { write.Page.AsBodySpan()[2] = mode == "index" ? (byte)1 : (byte)2; }
                 write.MarkDirty();
             }
             bracket.Commit();

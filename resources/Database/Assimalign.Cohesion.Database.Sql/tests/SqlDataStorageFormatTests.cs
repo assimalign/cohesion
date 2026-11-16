@@ -417,7 +417,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         refusal.ShouldBeOfType<SqlDataStorageFormatException>();
         refusal.Message.ShouldStartWith($"Database '{testDatabase}' uses data-storage format 37, but one of its index trees does not: ", Case.Sensitive);
         refusal.Message.ShouldContain(IndexFormatException.ErrorCode + ": Index '", Case.Sensitive);
-        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 3", Case.Sensitive);
         var cause = refusal.InnerException.ShouldBeOfType<IndexFormatException>();
         cause.FoundVersion.ShouldBe(1);
 

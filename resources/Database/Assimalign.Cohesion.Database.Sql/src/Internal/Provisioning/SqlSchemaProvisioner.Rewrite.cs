@@ -25,7 +25,7 @@ internal sealed partial class SqlSchemaProvisioner
         lock (_rewriteSync)
         {
             ObjectDisposedException.ThrowIf(_database.IsClosed, _database);
-            if (!_applyGate.Wait(0, cancellationToken))
+            if (!TryEnterApply(cancellationToken))
             {
                 throw new DatabaseObjectLockedException(_database.Name, _database.Name, "REWRITE TABLE");
             }

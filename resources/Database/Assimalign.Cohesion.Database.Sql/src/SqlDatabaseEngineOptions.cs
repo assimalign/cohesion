@@ -60,7 +60,10 @@ public sealed class SqlDatabaseEngineOptions
     /// Plain ON DELETE CASCADE closures charge about 840 bytes per two-column row: the default
     /// 64 MiB grant caps such a closure at about 79,900 rows, less when other work retains memory.
     /// A 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget.
-    /// Budget exhaustion refuses the statement. CTAS publishes only after all copying succeeds; query buffers do not spill yet.</remarks>
+    /// Budget exhaustion refuses the statement unless an eligible root plain SELECT ORDER BY or ordered DISTINCT, including a CTAS source root, hands off to configured temporary space.
+    /// Nested plans, window/recursive/DML sources, grouping sets and ordered sequence deferral retain their current memory policy.
+    /// Spill requires fixed ordering collations, supported codecs and a remaining grant whose bound (grant - 32768) / 16 - 8192 holds each encoded record.
+    /// CTAS publishes only after all copying succeeds.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>Gets or sets a dedicated spill directory. File engines default to RootPath/.cohesion-temp;
@@ -84,7 +87,7 @@ public sealed class SqlDatabaseEngineOptions
 
     /// <summary>Gets or sets the statement's physical temporary-byte quota. Null uses four times
     /// StatementMemoryBudget, saturating at Int64.MaxValue. Zero refuses growth. Must be nonnegative.
-    /// SQL operators retain their existing CS05067 memory-budget refusal.</summary>
+    /// Eligible root SELECT and CTAS source-root sorts spill; other SQL buffers retain their CS05067 memory-budget refusal.</summary>
     public long? StatementTempSpaceQuota { get; set; }
 
     /// <summary>
@@ -149,19 +152,13 @@ public sealed class SqlDatabaseEngineOptions
     public int WorkerFailureMinimumPasses { get; set; } = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
 
     /// <summary>
-    /// Gets or sets the hard cap, in bytes, on a file set's journal while its checkpoints keep
-    /// failing (owner decision 25 of 2026-10-06): the second checkpoint in a row that fails while the journal holds
-    /// this much takes the database offline, before the journal fills the device. Zero,
-    /// the default, sets it to four times <see cref="CheckpointJournalSize"/> (1 GiB at the default
-    /// size, PostgreSQL's <c>max_wal_size</c> default), or to 1 GiB when that is zero. Must not be
-    /// negative, and when set, not below <see cref="CheckpointJournalSize"/>.
+    /// Gets or sets the journal admission limit in bytes. With a checkpoint pending,
+    /// new physical write brackets pause at half this limit until a checkpoint succeeds.
+    /// Zero resolves to four times CheckpointJournalSize (1 GiB at its default, or with
+    /// the size trigger disabled). Must be nonnegative and, when set, at least CheckpointJournalSize.
     /// </summary>
-    /// <remarks>
-    /// Only failed checkpoints are compared with the cap, and one is not enough: a journal that grows
-    /// while its checkpoints are deferred to running statements, or wait for a busy storage, never
-    /// takes the database offline by itself, and one transient failure of such a journal is retried
-    /// like any other.
-    /// </remarks>
+    /// <remarks>The pause keeps the database online and health Degraded. In-flight brackets and undo can finish;
+    /// a single huge bracket can still overshoot. Storage-safety failures retain their offline fence.</remarks>
     public long JournalSizeLimit { get; set; }
 
     /// <summary>

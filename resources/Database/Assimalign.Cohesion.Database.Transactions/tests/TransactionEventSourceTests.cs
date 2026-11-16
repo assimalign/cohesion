@@ -991,7 +991,7 @@ public sealed class TransactionEventSourceTests
     public async Task Counters_EnabledWithInterval_ShouldPublishEveryCounter()
     {
         // Arrange
-        string[] counters = ["current-transactions", "transactions-per-second", "commits-per-second", "rollbacks-per-second", "total-deadlocks", "lock-waits-per-second"];
+        string[] counters = ["current-transactions", "transactions-per-second", "commits-per-second", "rollbacks-per-second", "total-deadlocks", "lock-waits-per-second", "journal-admission-pauses", "journal-admission-waits", "journal-admission-pause-milliseconds"];
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         // Act

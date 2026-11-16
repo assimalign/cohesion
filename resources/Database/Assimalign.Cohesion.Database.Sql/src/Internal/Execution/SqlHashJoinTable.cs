@@ -146,7 +146,7 @@ internal sealed class SqlHashJoinTable : IDisposable
     {
         null => 0,
         string text => (24L + 2L * text.Length + 7) & ~7L,
-        byte[] binary => (24L + binary.Length + 7) & ~7L,
+        byte[] binary => ((24L + binary.Length + 7) & ~7L) + (SqlBinaryValue.IsApplicationValue(binary) ? 128 : 0),
         // CHAR retains both its padded payload and its trimmed comparison text.
         // Charge both conservatively even when the strings happen to be identical.
         SqlCharacter text => 32L + ((24L + 2L * text.Value.Length + 7) & ~7L)

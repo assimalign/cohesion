@@ -36,8 +36,8 @@ public sealed partial class SqlJointTypeMigrationTests
         database.OfflineError.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint reservation: timeout throws the same code as provisioning")]
-    public async Task ApplyAsync_ReservationTimeout_ShouldAgreeWithProvisioningCode()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Joint reservation: imperative timeout returns its code and clears the report")]
+    public async Task ApplyAsync_ReservationTimeout_ShouldClearImperativeReport()
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -51,8 +51,8 @@ public sealed partial class SqlJointTypeMigrationTests
         // Act
         var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(Target().Compile(), guard.Token));
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == database.Provisioning!.FailureCode);
-        database.Provisioning!.FailureCode.ShouldBe("CS03402");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+        database.Provisioning.ShouldBeNull();
         database.Catalog.PendingMigration.ShouldBeNull();
         database.OfflineError.ShouldBeNull();
         await transaction.RollbackAsync(guard.Token);

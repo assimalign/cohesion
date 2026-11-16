@@ -159,7 +159,7 @@ public sealed partial class SqlJointTypeMigrationTests
     [InlineData("TreesDurable")]
     [InlineData("BeforeTreeBuild")]
     [InlineData("AfterTreeBuild")]
-    [InlineData("TablePrepared")]
+    [InlineData("KeepPrepared")]
     [InlineData("Validated")]
     [InlineData("Publishing")]
     public async Task BuildAsync_DeferredOnlyStageFailure_ShouldKeepOldSchemaAndPermitRollback(string boundary)

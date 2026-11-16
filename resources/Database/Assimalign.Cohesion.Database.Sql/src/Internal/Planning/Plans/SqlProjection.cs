@@ -18,6 +18,9 @@ internal sealed record SqlProjection(string Name, int? ColumnOrdinal, SqlExpress
     /// <summary>Distinguishes real output names from display-only synthesized names for CTAS.</summary>
     internal bool HasOutputName { get; init; } = true;
 
+    /// <summary>Tracks a display-only name through pass-through projections without changing CTAS naming policy.</summary>
+    internal bool HasSynthesizedName { get; init; }
+
     internal int? MaxLength { get; init; }
 
     /// <summary>Gets the collation <c>DISTINCT</c> compares and hashes the output's values under.</summary>

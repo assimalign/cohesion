@@ -176,6 +176,7 @@ internal static class Program
             await listener.DisposeAsync();
             await RunJointMigrationAsync();
             await RunTempSpaceAsync();
+            await RunSpilledOrderAsync();
         }
         catch (Exception exception)
         {
@@ -184,6 +185,49 @@ internal static class Program
 
         Console.WriteLine($"smoke: {(_failed == 0 ? "passed" : "FAILED")} {_passed} of {_passed + _failed} checks (in process and over the wire)");
         return _failed == 0 ? 0 : 1;
+    }
+
+    private static async Task RunSpilledOrderAsync()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-sql-sort-aot-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var builder = SqlDatabaseEngine.CreateBuilder("aot-sort");
+            builder.Options.RootPath = root; builder.Options.StatementMemoryBudget = 262144;
+            builder.Functions.Add(SqlScalarFunction.Create("observe_value", (long value) => value));
+            await using var engine = await builder.BuildAsync();
+            var database = await engine.CreateDatabaseAsync("sort");
+            await using var session = await database.CreateSessionAsync();
+            await session.ExecuteAsync("CREATE TABLE t(id INT,k INT)");
+            for (int first = 0; first < 4000; first += 200)
+            { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first, 200).Select(i => $"({i},{3999 - i})"))); }
+            await using (var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,k FROM t ORDER BY k LIMIT 2500 OFFSET 10"))
+            {
+                Check("spilled ORDER BY has files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length > 0, true);
+                for (int read = 0; read < 2; read++)
+                {
+                    int count = 0;
+                    await foreach (var row in result.GetRowsAsync())
+                    { if (row.GetInt32(0) != 3989 - count || row.GetInt32(1) != count + 10) { throw new InvalidOperationException("spilled ORDER BY changed a row"); } count++; }
+                    Check("spilled ORDER BY repeatable rows", count, 2500);
+                }
+            }
+            Check("spilled ORDER BY releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
+            Check("spilled CTAS completion", (await session.ExecuteAsync("CREATE TABLE archive AS SELECT * FROM t ORDER BY id DESC")).AffectedCount, 4000L);
+            Check("spilled CTAS physical order", await RowsAsync(session, "SELECT id,k FROM archive LIMIT 3", CancellationToken.None), [[3999, 0], [3998, 1], [3997, 2]]);
+            Check("spilled DISTINCT CTAS completion", (await session.ExecuteAsync("CREATE TABLE distinct_archive AS SELECT DISTINCT k%3 AS n FROM t ORDER BY id DESC")).AffectedCount, 3L);
+            Check("spilled DISTINCT CTAS representatives", await RowsAsync(session, "SELECT n FROM distinct_archive", CancellationToken.None), [[0L], [1L], [2L]]);
+            Check("spilled CTAS releases files", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length, 0);
+            await using (var deferred = (DatabaseResultSet)await session.ExecuteAsync("SELECT observe_value(id),id FROM t WHERE id<1000 ORDER BY id"))
+            {
+                Check("deferred ORDER BY spills", Directory.GetFiles(Path.Combine(root, ".cohesion-temp"), "*.ctmp").Length > 0, true);
+                int count = 0;
+                await foreach (var row in deferred.GetRowsAsync())
+                { if (row.GetInt32(1) != count++) { throw new InvalidOperationException("deferred ORDER BY changed a row"); } }
+                Check("deferred ORDER BY rows", count, 1000);
+            }
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
 
     private static Task RunTempSpaceAsync()

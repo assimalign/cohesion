@@ -48,10 +48,10 @@ public sealed partial class GraphStore
         }
     }
 
-    internal IReadOnlyList<(string Label, string Property, ulong Id)> GetIndexIdentities(TransactionSnapshot snapshot)
+    internal IReadOnlyList<(string Label, string Property, ulong Id, bool Text)> GetIndexIdentities(TransactionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        return Definitions(snapshot).Select(definition => (definition.Label!, definition.PropertyKey!, definition.Id)).ToArray();
+        return Definitions(snapshot).Select(definition => (definition.Label!, definition.PropertyKey!, definition.Id, definition.Revision == 1)).ToArray();
     }
 
     internal long EstimateIndexCount(ulong indexId, string label, object value, TransactionSnapshot snapshot, CancellationToken token)

@@ -98,7 +98,7 @@ public sealed partial class SqlCatalog
                 if (dependency.StartsWith("C:", StringComparison.Ordinal) && !_tables.Values.Any(slot => slot.Table.Columns.Any(column => SqlObjectIdentity.Column(slot.Table.ObjectId, column.Name).Equals(dependency, StringComparison.OrdinalIgnoreCase))))
                 { throw new SqlCatalogException("CS03033", ErrorMessages.ViewDependencyChanged); }
             }
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             var orphan = StageOrphanSequenceName(transaction, view.Schema, view.Name);
             var location = UpsertRecord(transaction, previous?.Location, record);
@@ -164,12 +164,12 @@ public sealed partial class SqlCatalog
             if (_tables.ContainsKey((schema, name))) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewTargetIsTable); }
             if (!_views.TryGetValue(key, out var slot))
             {
-                if (publication is not null) { CommitScriptAbsence(publication, key); return default; }
+                if (publication is not null) { CommitScriptAbsence(publication, key, cancellationToken); return default; }
                 throw new SqlCatalogException("CS03033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewMissing, schema, name));
             }
             var dropped = _views.Where(pair => pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase) || Reaches(pair.Key, key, new(StringComparer.OrdinalIgnoreCase))).ToArray();
             if (!cascade && dropped.Length > 1) { RefuseViewDependency(dropped.First(pair => !pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).Value.Value, slot.Value.Schema + "." + slot.Value.Name); }
-            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             foreach (var pair in dropped) { _storage.DeleteRow(transaction, pair.Value.Location.PageId, pair.Value.Location.SlotIndex); }
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.View(slot.Value.Schema, slot.Value.Name));

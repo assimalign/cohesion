@@ -87,9 +87,10 @@ jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
-    # Latest three successful consolidated main runs (39656175267, 39625288435, 39285511469):
-    # slowest build 24m 1s; twice that, rounded up to 15 minutes, is 60 (#1470).
-    timeout-minutes: 60
+    # T3 batch 4's all-OS runs (42335218592, 42340437624, attempts 1 and 2): Windows took 44m 40s
+    # once and passed 60m twice, in the last three suites. About 62m is the slowest; twice that,
+    # rounded up to 15 minutes, is 135.
+    timeout-minutes: 135
     strategy:
       # Every leg reports its own result. With fail-fast, one failing leg cancels the others (#1093).
       fail-fast: false

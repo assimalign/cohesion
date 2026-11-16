@@ -67,8 +67,8 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
     protected override bool IsCheckpointDue(KeyValueDatabase database, TimeSpan interval, DatabaseWorkerPass.Visit? visit)
     {
         bool closed = database.IsClosed;
-        bool dataDue = !closed && database.DataStorage.IsCheckpointDue(interval);
-        bool catalogDue = !closed && !dataDue && database.CatalogStorage.IsCheckpointDue(interval);
+        bool dataDue = !closed && (database.DataStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage).ObserveAdmissionPause());
+        bool catalogDue = !closed && !dataDue && (database.CatalogStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.CatalogStorage).ObserveAdmissionPause());
         if (visit is not null)
         {
             visit.Due = new DatabaseWorkerPass.DueState(closed, dataDue, catalogDue,
@@ -80,17 +80,17 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
     /// <inheritdoc />
     protected override bool Checkpoint(KeyValueDatabase database, TimeSpan interval, CancellationToken cancellationToken)
     {
-        bool dataDue = database.DataStorage.IsCheckpointDue(interval);
-        bool catalogDue = database.CatalogStorage.IsCheckpointDue(interval);
+        bool dataDue = (database.DataStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage).ObserveAdmissionPause());
+        bool catalogDue = (database.CatalogStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.CatalogStorage).ObserveAdmissionPause());
         if (!dataDue && !catalogDue)
         {
             return true;
         }
 
-        // Re-export the index registrations first when they changed — a backstop: root pages stay
-        // fixed through splits (#1159), and the checkpoint is the engine's persistence point for
-        // re-attachment metadata.
-        database.SaveIndexRegistrationsIfChanged();
+        // The one primary registration is durably persisted at bootstrap, and
+        // its root stays fixed through splits (#1159). Checkpoint must not read
+        // or rewrite catalog metadata: storage checkpointing stays independent
+        // of catalog _sync, whose writers refuse an admission pause.
 
         // The data storage checkpoints through the transaction coordinator: the truncating
         // checkpoint record carries every in-flight logical transaction's sequence, so recovery
@@ -99,7 +99,7 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
         // above it and checkpoints directly.
         bool finished = !dataDue || database.TryCheckpointDataStorage(cancellationToken);
 
-        if (catalogDue || database.CatalogStorage.IsCheckpointDue(interval))
+        if (catalogDue || (database.CatalogStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.CatalogStorage).ObserveAdmissionPause()))
         {
             finished = TransactionCheckpointInterlock.ForStorage(database.CatalogStorage)
                 .TryCheckpoint(TimeSpan.Zero, cancellationToken) && finished;

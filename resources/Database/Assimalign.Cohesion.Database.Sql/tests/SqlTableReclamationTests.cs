@@ -441,7 +441,7 @@ public sealed class SqlTableReclamationTests
             engine.BeforeProvisioning = database =>
             {
                 database.TableReclamation.BeforeBatch = (_, token) => pause.Wait(token);
-                database.SchemaProvisioner.StepApplied = _ =>
+                database.SchemaProvisioner.BeforeJointPublication = _ =>
                 {
                     database.TableReclamation.RunBatch(timeout.Token);
                     database.TableReclamation.ReclaimedPages.ShouldBe(0);
@@ -700,7 +700,10 @@ public sealed class SqlTableReclamationTests
 
     private static async Task WaitDoneAsync(SqlDatabase database, CancellationToken cancellationToken)
     {
-        while (database.TableReclamation.HasWork) { await Task.Delay(5, cancellationToken); }
+        // The independently sampled progress fields can miss a discovery starting
+        // between reads. Its committed intent remains until durable retirement finishes.
+        while (database.TableReclamation.HasWork || database.Catalog.CaptureTableReclamations().Length != 0)
+        { await Task.Delay(5, cancellationToken); }
         database.OfflineError.ShouldBeNull();
     }
 

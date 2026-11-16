@@ -109,9 +109,23 @@ colons with label-expression operators or a wildcard (`:A:B|C`, `:A|B:C`, `:%:A`
 `<>`. Database, graph, schema, and session selection statements are outside the profile: all
 evaluation stays inside the already-bound logical database.
 
+## Text index grammar (#1644)
+
+CREATE TEXT INDEX uses a contextual TEXT modifier and the existing standalone schema AST,
+with GqlSchemaCommand.IsText retained by semantic rendering. TEXT is recognized only after
+CREATE; DROP TEXT INDEX keeps its own unsupported DROP diagnostic. Programmatic IsText
+commands are admitted only for a CREATE INDEX, never constraints or drops. It shares the CREATE INDEX
+node-only, single-property grammar, name and conditional rules; unsupported composite and
+relationship forms keep CK00001. CreateTextIndex is advertised beside CreateIndex and has
+parser, profile execution, Unicode differential and InMemory/TCP conformance cases. No
+ordinary query-expression layout, lexer keyword or wire encoding changes. Graph DESIGN owns
+posting maintenance, runtime parameter selection and the v4 catalog fence. Text access preserves
+the anchor node and label selected without text indexes, substituting only an eligible
+label scan after exact and relationship candidates compete. DIALECT records the tie rule.
+
 ## Schema DDL (#1738, GQ-D2)
 
-GQ-T1 (#1806) adds a typed, open GraphSchema API in the engine and catalog v3. Its node
+GQ-T1 (#1806) adds a typed, open GraphSchema API in the engine. Catalog v4 retains its v3 declaration kinds. Its node
 rules apply to existing INSERT/CREATE, MERGE and SET/REMOVE syntax; no parser, keyword,
 SHOW-column or wire contract changes here. GraphTypeTests supplies the engine conformance
 matrix, and the existing graph-type text refusal corpus stays in force. GQ-T2 supplies text

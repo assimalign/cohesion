@@ -67,8 +67,8 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
     protected override bool IsCheckpointDue(SqlDatabase database, TimeSpan interval, DatabaseWorkerPass.Visit? visit)
     {
         bool closed = database.IsClosed;
-        bool dataDue = !closed && database.DataStorage.IsCheckpointDue(interval);
-        bool catalogDue = !closed && !dataDue && database.CatalogStorage.IsCheckpointDue(interval);
+        bool dataDue = !closed && (database.DataStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage).ObserveAdmissionPause());
+        bool catalogDue = !closed && !dataDue && (database.CatalogStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.CatalogStorage).ObserveAdmissionPause());
         if (visit is not null)
         {
             visit.Due = new DatabaseWorkerPass.DueState(closed, dataDue, catalogDue,
@@ -80,8 +80,8 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
     /// <inheritdoc />
     protected override bool Checkpoint(SqlDatabase database, TimeSpan interval, CancellationToken cancellationToken)
     {
-        bool dataDue = database.DataStorage.IsCheckpointDue(interval);
-        bool catalogDue = database.CatalogStorage.IsCheckpointDue(interval);
+        bool dataDue = (database.DataStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.DataStorage).ObserveAdmissionPause());
+        bool catalogDue = (database.CatalogStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.CatalogStorage).ObserveAdmissionPause());
         if (!dataDue && !catalogDue)
         {
             return true;
@@ -94,7 +94,7 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
         // above it and checkpoints directly.
         bool finished = !dataDue || database.TryCheckpointDataStorage(cancellationToken);
 
-        if (catalogDue || database.CatalogStorage.IsCheckpointDue(interval))
+        if (catalogDue || (database.CatalogStorage.IsCheckpointDue(interval) || Transactions.TransactionCheckpointInterlock.ForStorage(database.CatalogStorage).ObserveAdmissionPause()))
         {
             finished = TransactionCheckpointInterlock.ForStorage(database.CatalogStorage)
                 .TryCheckpoint(TimeSpan.Zero, cancellationToken) && finished;
@@ -112,7 +112,7 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
             _target = value;
         }
 
-        public global::Assimalign.Cohesion.Database.DatabaseWorkerLanes<bool> Lanes => _target.Lanes;
+        public global::Assimalign.Cohesion.Database.DatabaseWorkerLanes<global::Assimalign.Cohesion.Database.DatabaseCheckpointWorker<SqlDatabase>.CheckpointAttempt> Lanes => _target.Lanes;
         public bool CompletionOnly => _target.CompletionOnly;
         public string Name => _target.Name;
         public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;

@@ -51,6 +51,8 @@ TRUNCATE table lists execute through atomic storage replacement, with recursive 
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
 CREATE TABLE AS infers output types and builds an unpublished owner before atomic publication;
 WITH NO DATA creates only the inferred definition. Failed builds leave no table and use deferred reclamation.
+Eligible source-root ORDER BY and ordered DISTINCT spill to temporary space and stream
+into bounded copy batches (#1789).
 
 MERGE executes ordered actions, BY SOURCE and RETURNING/merge_action() within one statement
 rollback bracket. Repeated target modifications fail with CS05036. USING retains the existing
@@ -106,7 +108,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   pending intent to the generation-stamped applied document. An unchanged applied hash/generation
   with no pending intent still skips in constant time. Every deferred preparation failure reports
   `CS03402`, discards its intent and keeps the old schema
-  online unless an unsafe-storage latch fired. Non-TYPE inline failures retain compensation until SQ-A6.
+  online unless an unsafe-storage latch fired. Inline and deferred applications both prepare unpublished work and publish once.
   Build checks a metadata-only space floor before intent save;
   the worker measures rewritten heap/index pages and bounded copy-WAL growth before prepared writes.
   Untouched tables never change the need. Refusals report needed/available bytes online; precise
@@ -114,8 +116,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   Unconfirmed publication uses `CS03403`; recovery decides old/new and retains the new trees.
   Definition DDL is excluded database-wide from Build through queue time and worker completion; DML on untouched tables proceeds.
   Pending names refuse relation creation/table rename (`CS03404`); planning and publication
-  check the table/view/sequence namespace. A successful apply or skip clears an earlier failure. A default change without a TYPE rewrite
-  retains the base `CS03105` refusal before any intent or inline change.
+  check the table/view/sequence namespace. A successful apply or skip clears an earlier failure. Default-only changes publish jointly with destructive opt-in; without it they refuse `CS03105`.
   Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
   database or apply a different schema than its declaration.
 - **Bounded DDL workspace** — validation streams rows; uniqueness compares adjacent live keys
@@ -123,7 +124,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   full pool, so unrelated runtime retention cannot decide its bound (DESIGN, bounded build validation).
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
-  projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST` and costed forward/backward matching index scans, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates, including GROUPING SETS, ROLLUP, CUBE and GROUPING masks;
+  projection, qualified SELECT wildcards, INNER/LEFT/RIGHT/FULL/CROSS joins with optional NATURAL and parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST` and costed forward/backward matching index scans, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates, including GROUPING SETS, ROLLUP, CUBE and GROUPING masks;
   `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE
   (recursive bodies execute demand-driven UNION ALL/DISTINCT fixpoints; WITH RECURSIVE
   before MERGE reports CK00001 at RECURSIVE), with ordered SELECT definitions
@@ -447,11 +448,19 @@ nested loops. LEFT semantics, duplicate matches, SQL equality and full residual 
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live
 hash builds, retained SELECT buffers and grouping-set aggregate states per statement.
 CTAS sources charge like any SELECT; CTAS itself admits only kept output after pagination.
-CS05067 (SQLSTATE 53200) refuses newly charged memory without spill and stops input promptly.
+CS05067 (SQLSTATE 53200) refuses newly charged memory and stops input promptly unless an
+eligible root plain SELECT ORDER BY or ordered DISTINCT, including a CTAS source root,
+hands off to configured temporary space. Its fully evaluated result decodes lazily and
+supports repeated or concurrent reads.
+Nested plans, windows, recursion, grouping sets and ordered sequence
+deferral retain their existing refusals; DISTINCT's retained representatives must still fit.
+DML sources gain no spill permission; their existing budgeting policy, including the
+INSERT SELECT gap tracked by #1828, is unchanged.
 Window and SQL/JSON grants retain their existing refusal codes when they fail without the
 plain SELECT charges.
 Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
-executes to report candidate work in the same eight-column description; unavailable counts remain
+executes to report candidate work in the same eight-column description; actual root sort spills
+add byte, run and merge-pass details. Unavailable counts remain
 NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;
 statement-wide totals include all invocations. No standalone ANALYZE, persisted statistics,
 format change or new wire message is added.

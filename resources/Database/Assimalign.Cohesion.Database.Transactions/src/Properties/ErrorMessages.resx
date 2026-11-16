@@ -17,6 +17,9 @@
   <data name="LockManagerDeadlockFailure" xml:space="preserve"><value>Transaction {0} was chosen as the deadlock victim requesting {1} on {2}.</value></data>
   <data name="LockManagerFailEndedFailure" xml:space="preserve"><value>Transaction {0} ended while it waited for {1} on {2}; the request was not granted.</value></data>
   <data name="CoordinatorThrowIfInsideApplyFailure" xml:space="preserve"><value>A checkpoint or version purge cannot run inside a statement apply: the statement holds the apply gate maintenance waits for. Run maintenance after the statement completes.</value></data>
+  <data name="JournalAdmissionCanceled" xml:space="preserve">
+    <value>The statement stopped waiting for a pending journal checkpoint to reopen write admission.</value>
+  </data>
   <data name="CheckpointInterlockRecursiveWait" xml:space="preserve"><value>An operation cannot wait for the checkpoint interlock held by its own scope. Complete the outer operation first.</value></data>
   <data name="CommitAbortedByDisposal" xml:space="preserve"><value>Transaction {0} aborted: manager disposal began while commit drained a failed statement compensation.</value></data>
   <data name="TransactionManagerCommitAsyncFailure" xml:space="preserve"><value>Transaction {0} aborted: the commit record could not be written.</value></data>

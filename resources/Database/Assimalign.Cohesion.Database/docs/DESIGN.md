@@ -58,6 +58,12 @@ hook. SQL supplies its early-statement policy; other model behavior remains unch
 is root state, manager registration, context end latch; coordinator tracking follows manager
 release. End cores run outside root state. Identity remains fixed throughout configuration. This intentionally deviates from database-area.md rule 6 (state fixed at construction): SQL SET TRANSACTION may change isolation before the first data statement (#1012), signed off by the owner on 2026-11-02 as rule 6's one exception (#1769). The protected seam stays non-virtual and field-backed; other construction state remains fixed.
 
+## Returned language results (#1789)
+
+ExecuteAsync XML states the caller's obligation to dispose result sets even after enumeration
+completes or is cancelled. SQL spilled results retain temporary files until disposal or
+session close; the SQL design records its bounded result and reader ownership.
+
 ## Shared row and language bases (#1264)
 
 Database.Execution owns the non-virtual ordinal row guards and protected typed cores used by
@@ -772,24 +778,29 @@ ordinary storage transaction contention is retried as busy.
     worker, and every failure is written to the event source for the whole window; Blob's
     server refuses only the failing database meanwhile ("A failing worker refuses its database
     alone", below).
-  - *The journal cap.* A checkpoint that fails for the second pass or more in a row while one
-    of the database's journals holds the engine's `JournalSizeLimit` (an engine option; zero,
-    the default, resolves to four times `CheckpointJournalSize`, 1 GiB at its default and
-    PostgreSQL's `max_wal_size` default, or to 1 GiB with the size trigger off;
-    `shared/Engine/DatabaseWorkerLimits.cs`) takes the database offline with
-    `StorageOfflineCause.JournalSizeLimit`, through the worker base's
-    `protected TakeDatabaseOffline`: under load the journal would fill the device long before
-    the failure window passes. One failure is not enough (owner decision 41), because a journal
-    reaches the cap with no
-    failure at all: a checkpoint deferred to a running statement or refused by a busy storage
-    (#1283), or a write burst, never takes a database offline by itself, however long its
-    journal grows, and a single transient failure of such a journal is retried like any
-    other. The second failure in a row, a backoff later, is what says the checkpoints keep
-    failing (`ReportFailure` returns the database's count of failed passes in a row; the
-    shared checkpointer's `JournalSizeLimitFailures` is two). The cap is not held back by the
-    window or its minimum of three passes: it is a count of two, whatever the clock says.
-    PostgreSQL's `max_wal_size` is a soft limit the WAL may pass under heavy load
-    (`doc/src/sgml/config.sgml:4010-4014`).
+  - *Journal admission (T3-27, #1283).* The limit still defaults to 4x CheckpointJournalSize
+    (1 GiB at the default trigger, or with the trigger off). Each model attaches every data
+    and catalog interlock through ConfigureJournalAdmission after open-time provisioning and before publishing DatabaseInstance.
+    IsJournalAdmissionPaused folds pure live-state reads for health. Reaching half the limit
+    requests a checkpoint even with the size trigger off; while it is pending, new physical brackets wait for a successful checkpoint. Undo
+    and nested scopes drain; readers retain ordinary snapshot and locking rules. The root disables
+    the backstop before server disposal or worker joins, then before individual database cleanup.
+    Engine entry points reject new work while model operations and unpublished
+    intent discard drain before storage disposal.
+    Its weak-key admission registry cannot retain failed unpublished instances and removes
+    closed databases rather than retaining their storages;
+    late registration during engine close has pausing disabled immediately. It also composes each
+    storage offline hook to wake paused
+    callers before forwarding its safety fence; undo can drain. Checkpoint
+    failures and page write-back failures count toward the existing offline window while paused too.
+    Persistent failures take the database offline at the window; the two-failure journal-cap path
+    remains for a single admitted bracket that crosses J. The offline transition wakes all parked
+    writers with the existing cause. A successful checkpoint inside the window resumes admission.
+    HasFailingWorker reads only the lock-free worker snapshot and retains Blob refusal for the
+    failing database, including while admission is paused. A non-failing pending pause never
+    takes the database offline, however long it lasts. Transactions DESIGN records exact counters,
+    lock order, CK04014 deadline and CK06006 health reason. One huge admitted bracket and mandatory
+    undo retain #1270's overshoot residual. No format change.
   - *The give-up never runs on a worker's thread.* Taking a storage offline latches its
     journal under the journal's lock, which a durable flush holds through its fsync. A worker
     that gave up on its own thread would wait out a hung fsync of that database, and so would
@@ -1399,7 +1410,7 @@ its allocated model diagnostic remains available through Diagnostics.
 
 ## Model architecture test support
 
-The root test project owns the stateless ModelArchitecture helper, linked into the five implemented model test assemblies by the Database-scoped ModelArchitecture.targets. Cache has no component source and no architecture test until implementation. Each model build exports actual compiler inputs, including generated sources, references and conditional symbols; the test reconstructs a complete Roslyn compilation and rejects Storage-to-Catalog/engine and Catalog-to-engine symbol references by source folder. Manifest copying asks the referenced model project for its evaluated IntermediateOutputPath, so configuration, RID and custom intermediate paths are respected.
+The root test project owns the stateless ModelArchitecture helper, linked into the five implemented model test assemblies by the Database-scoped ModelArchitecture.targets. Cache has no component source and no architecture test until implementation. Each model build exports actual compiler inputs, including generated sources, references and conditional symbols; the test reconstructs a complete Roslyn compilation and rejects Storage-to-Catalog/engine and Catalog-to-engine symbol references by source folder. Manifest copying asks the referenced model project for its evaluated IntermediateOutputPath. The query removes the test executable's RuntimeIdentifier, matching SDK library references, while preserving the model's own RID and custom intermediate paths (#1809).
 
 The guard checks owner.ContainingAssembly against per-layer external allowlists seeded with git show from the retired satellite csprojs at a64426436. Storage permits Database.Storage, Transactions and Indexing; Catalog also permits the Database root and Types. The BCL allowance is the exact assembly-name set in the compiler's Microsoft.NETCore.App reference-pack inputs, never a System.* wildcard. Graph Storage additionally permits Types for index-key encoding, already in its old Indexing reference closure. Protocol assemblies remain disallowed in both constrained layers; the current Protocol imports in Documents Catalog resolve no used types. Current model symbol checks validate these limits; engine code is unrestricted. The seed Storage projects referenced shared Storage (all five), Transactions (Blob/Documents/Graph) and Indexing (Graph); Catalog referenced the root and model/shared Storage, plus Transactions (Blob/Documents/Graph), Types (Sql/KeyValuePair/Documents/Graph) and Indexing (Sql/KeyValuePair/Documents). The layer-wide sets preserve this kernel vocabulary without admitting the root's other transitive dependencies.
 

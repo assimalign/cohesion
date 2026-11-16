@@ -48,7 +48,7 @@ public sealed partial class SqlJointTypeMigrationTests
         });
 
     // The public table.Key DSL accepts one direct member. Exercise composite keys
-    // through its compiled-schema contract, using the same empty per-step executor.
+    // through its compiled-schema contract; explicit ordinary fixtures retain the old key path.
     private static SqlCompiledSchema KeyTarget(bool target, bool composite = false, bool rewrite = false, bool created = false)
     {
         var compiled = KeyDeclaration(target, rewrite, created).Compile();
@@ -77,7 +77,7 @@ public sealed partial class SqlJointTypeMigrationTests
     [InlineData(false, true)]
     public async Task ApplyAsync_PrimaryKeyFixAdditiveCost_ShouldKeepHeapAndBoundWrites(bool composite, bool created)
     {
-        // Arrange: the initial empty Build takes the ordinary per-step CREATE route.
+        // Arrange: the initial empty Build creates the same keyed shape through joint publication.
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(4));
         var source = KeyTarget(false, composite);
         var target = KeyTarget(true, composite, created: created);
@@ -149,7 +149,7 @@ public sealed partial class SqlJointTypeMigrationTests
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         await using var ordinary = await Builder(new()).BuildAsync(guard.Token);
         var perStep = await ordinary.CreateDatabaseAsync("typed", guard.Token);
-        await perStep.ApplySchemaAsync(KeyTarget(true, composite, created: true), guard.Token);
+        await ApplyOrdinaryParityAsync(perStep, null, KeyTarget(true, composite, created: true), guard.Token);
         string Name(SqlDatabase database) => database.Catalog.GetIndexes(database.Catalog.Tables.Single(table => table.Name == "created").ObjectId).Single(index => index.IsPrimaryKey).Name;
         string expected = Name(perStep);
         await using var engine = await Builder(new()).AddDatabase("typed", db => { if (!composite) { db.Schema(KeyDeclaration(false)); } }).BuildAsync(guard.Token);

@@ -75,6 +75,25 @@ public sealed class StorageTempRun : IDisposable
         }
     }
     internal void UsePage(Memory<byte> page) { _page = page; }
+    internal void AppendParts(ReadOnlySpan<byte> first, ReadOnlySpan<byte> second, ReadOnlySpan<byte> third, CancellationToken token)
+    {
+        lock (Sync)
+        {
+            Check();
+            if (_sealed) { throw new InvalidOperationException(ErrorMessages.TempRunSealed); }
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                int size = checked(first.Length + second.Length + third.Length);
+                Span<byte> length = stackalloc byte[4]; BinaryPrimitives.WriteInt32LittleEndian(length, size);
+                Write(length, token); Write(first, token); Write(second, token); Write(third, token);
+                RecordCount++; MaximumRecordLength = Math.Max(MaximumRecordLength, size);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { DisposeAfterFailure(); throw StorageTempException.Unavailable(error); }
+            catch { DisposeAfterFailure(); throw; }
+        }
+    }
     private void Write(ReadOnlySpan<byte> bytes, CancellationToken token)
     {
         while (!bytes.IsEmpty)

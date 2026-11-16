@@ -420,7 +420,8 @@ public sealed class RecordSpaceVersionStore : VersionStore
         var batchSettled = new List<PrunableVersion>(Math.Min(mutationBatchSize, candidates.Count));
         ExceptionDispatchInfo? unreadable = null;
 
-        await _applyGate.WaitAsync(cancellationToken, "Prune").ConfigureAwait(false);
+        try { await _applyGate.WaitAsync(cancellationToken, "Prune", waitForAdmission: false).ConfigureAwait(false); }
+        catch (TransactionAdmissionCanceledException) when (!cancellationToken.IsCancellationRequested) { return 0; }
         try
         {
             for (int offset = 0; offset < candidates.Count; offset += mutationBatchSize)
@@ -643,7 +644,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     {
         long removed = 0;
 
-        await _applyGate.WaitAsync(cancellationToken, "Undo", unchecked((long)writer.Value)).ConfigureAwait(false);
+        await _applyGate.WaitAsync(cancellationToken, "Undo", unchecked((long)writer.Value), drain: true).ConfigureAwait(false);
         try
         {
             for (int end = entries.Count; end > 0;)

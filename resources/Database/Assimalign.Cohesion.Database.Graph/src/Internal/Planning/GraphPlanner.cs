@@ -1933,7 +1933,7 @@ internal sealed partial class GraphPlanner
                 }
                 var inline = FirstValues(node.Properties, merging);
                 var equalities = sources.GetEqualities(node.Variable);
-                if (inline.Count == 0 && equalities.Count == 0) { continue; }
+                if (inline.Count == 0 && equalities.Count == 0 && !sources.MayUseTextIndex) { continue; }
                 var indexes = sources.GetIndexedKeys();
                 if (indexes.Count == 0) { continue; }
                 var tried = new HashSet<string>(StringComparer.Ordinal);
@@ -1947,6 +1947,7 @@ internal sealed partial class GraphPlanner
                     FirstValue rowValue = new(int.MaxValue, null!);
                     foreach (var index in keys)
                     {
+                        if (index.Text) { continue; }
                         string key = index.Key;
                         // Inline positions precede every equality position, as the properties precede
                         // the WHERE clause.
@@ -1998,6 +1999,27 @@ internal sealed partial class GraphPlanner
             { cost = cost > long.MaxValue / 2 ? long.MaxValue : cost * 2; }
             if (scan is null || cost < scanCost)
             { scan = new GraphAnchor(i, null, null, null) { RelationshipTypes = types }; scanCost = cost; }
+        }
+        // Text estimates are label counts: substitute only at the anchor selected without
+        // text indexes, after exact seeks and relationship candidates have competed.
+        if (scan is { Property: null, Label: { } anchorLabel, UnionLabels: null, RelationshipTypes: null } && sources.HasTextIndexes)
+        {
+            foreach (var node in shape.Nodes[scan.NodeIndex])
+            {
+                if (!sources.GetRequiredLabels(node).Contains(anchorLabel)) { continue; }
+                var inline = FirstValues(node.Properties, merging);
+                if (inline.Count == 0 && sources.GetEqualities(node.Variable).Count == 0 && !sources.MayUseTextIndex) { continue; }
+                if (!sources.GetIndexedKeys().TryGetValue(anchorLabel, out var anchorKeys)) { continue; }
+                foreach (var index in anchorKeys)
+                {
+                    if (!index.Text) { continue; }
+                    GraphTextAnchor? predicate = inline.TryGetValue(index.Key, out var literal) && literal.Value is string text
+                        ? new GraphTextAnchor(text, "=", node.Properties[index.Key] is GqlParameterExpression)
+                        : sources.GetTextPredicate(node.Variable, index.Key, token);
+                    if (predicate is not { CanSeek: true }) { continue; }
+                    return scan with { Property = index.Key, Value = predicate, EstimatedRows = scanCost };
+                }
+            }
         }
         return scan is null ? new GraphAnchor(0, null, null, null) : scan with { EstimatedRows = scanCost };
     }
@@ -2054,8 +2076,9 @@ internal sealed partial class GraphPlanner
         private readonly TransactionSnapshot _snapshot;
         private readonly IReadOnlyDictionary<string, object?>? _parameters;
         private readonly GqlExpression? _predicate;
-        private Dictionary<string, List<(string Key, ulong Id)>>? _indexedKeys;
+        private Dictionary<string, List<(string Key, ulong Id, bool Text)>>? _indexedKeys;
         private Dictionary<string, Dictionary<string, FirstValue>>? _equalities;
+        private Dictionary<string, Dictionary<string, GraphTextAnchor>>? _textPredicates;
         private readonly Dictionary<string, List<string>> _labels = new(StringComparer.Ordinal);
 
         /// <summary>Initializes a new instance of the <see cref="AnchorSources"/> class.</summary>
@@ -2072,14 +2095,14 @@ internal sealed partial class GraphPlanner
         }
 
         /// <summary>The indexed property keys of each label with at least one visible index.</summary>
-        internal Dictionary<string, List<(string Key, ulong Id)>> GetIndexedKeys()
+        internal Dictionary<string, List<(string Key, ulong Id, bool Text)>> GetIndexedKeys()
         {
             if (_indexedKeys is not null) { return _indexedKeys; }
-            var indexed = new Dictionary<string, List<(string Key, ulong Id)>>(StringComparer.Ordinal);
+            var indexed = new Dictionary<string, List<(string Key, ulong Id, bool Text)>>(StringComparer.Ordinal);
             foreach (var index in _database.Store.GetIndexIdentities(_snapshot))
             {
                 if (!indexed.TryGetValue(index.Label, out var keys)) { indexed.Add(index.Label, keys = []); }
-                keys.Add((index.Property, index.Id));
+                keys.Add((index.Property, index.Id, index.Text));
             }
             return _indexedKeys = indexed;
         }
@@ -2093,6 +2116,66 @@ internal sealed partial class GraphPlanner
             if (variable is null) { return _none; }
             _equalities ??= Collect(_predicate);
             return _equalities.TryGetValue(variable, out var values) ? values : _none;
+        }
+
+        internal bool HasTextIndexes
+        {
+            get
+            {
+                if (_indexedKeys is null) { return false; }
+                foreach (var label in _indexedKeys)
+                { foreach (var index in label.Value) { if (index.Text) { return true; } } }
+                return false;
+            }
+        }
+
+        internal bool MayUseTextIndex => _predicate is GqlStringPredicateExpression or
+            GqlLogicalExpression { Operator: GqlLogicalOperator.And };
+
+        internal GraphTextAnchor? GetTextPredicate(string? variable, string property, CancellationToken token)
+        {
+            if (variable is null) { return null; }
+            if (_textPredicates is null)
+            {
+                var collected = new Dictionary<string, Dictionary<string, GraphTextAnchor>>(StringComparer.Ordinal);
+                var pending = new Stack<GqlExpression>();
+                if (_predicate is not null) { pending.Push(_predicate); }
+                while (pending.TryPop(out var expression))
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (expression is GqlLogicalExpression { Operator: GqlLogicalOperator.And, Operands: { } operands })
+                    {
+                        for (int i = operands.Count - 1; i >= 0; i--) { pending.Push(operands[i]); }
+                        continue;
+                    }
+                    GqlPropertyExpression receiver;
+                    GqlExpression pattern;
+                    string operation = "=";
+                    if (expression is GqlStringPredicateExpression predicate && predicate.Left is GqlPropertyExpression textProperty)
+                    {
+                        receiver = textProperty;
+                        pattern = predicate.Right;
+                        operation = predicate.Operator switch
+                        { GqlStringPredicateOperator.StartsWith => "STARTS WITH", GqlStringPredicateOperator.EndsWith => "ENDS WITH", _ => "CONTAINS" };
+                    }
+                    else if (expression is GqlBinaryExpression { Operator: "=" } binary)
+                    {
+                        if (binary.Left is GqlPropertyExpression left) { receiver = left; pattern = binary.Right; }
+                        else if (binary.Right is GqlPropertyExpression right) { receiver = right; pattern = binary.Left; }
+                        else { continue; }
+                    }
+                    else { continue; }
+                    if (pattern is not (GqlLiteralExpression or GqlParameterExpression) ||
+                        GraphExpressionEvaluator.ParameterOrLiteral(pattern, _parameters) is not string value) { continue; }
+                    if (!collected.TryGetValue(receiver.Variable, out var values))
+                    { collected.Add(receiver.Variable, values = new Dictionary<string, GraphTextAnchor>(StringComparer.Ordinal)); }
+                    var candidate = new GraphTextAnchor(value, operation, pattern is GqlParameterExpression);
+                    if (!values.TryGetValue(receiver.Property, out var prior) || !prior.CanSeek && candidate.CanSeek)
+                    { values[receiver.Property] = candidate; }
+                }
+                _textPredicates = collected;
+            }
+            return _textPredicates.TryGetValue(variable, out var predicates) ? predicates.GetValueOrDefault(property) : null;
         }
 
         /// <summary>The pattern's required labels followed by this clause's required WHERE labels.</summary>

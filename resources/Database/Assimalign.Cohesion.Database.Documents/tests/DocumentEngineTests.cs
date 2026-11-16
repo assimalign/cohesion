@@ -285,7 +285,7 @@ public sealed class DocumentEngineTests
             // Assert: the coded refusal, with the index manager's as its cause; the
             // check ran before recovery, so the database is left as it was.
             failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. " + IndexFormatException.ErrorCode + ": ", Case.Sensitive);
-            failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+            failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 3", Case.Sensitive);
             failure.InnerException.ShouldBeOfType<IndexFormatException>().FoundVersion.ShouldBe(1);
             reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
             await reopened.DisposeAsync();

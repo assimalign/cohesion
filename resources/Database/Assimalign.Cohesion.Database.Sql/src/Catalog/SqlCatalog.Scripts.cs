@@ -64,7 +64,7 @@ public sealed partial class SqlCatalog
                 }
                 return ValueTask.FromResult(existing.Value);
             }
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             var slot = StageScript(transaction, receipt);
             transaction.Commit();
@@ -91,7 +91,7 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             ValidateScriptPublication(publication, string.Empty);
-            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission2 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             var slot = StageScript(transaction, CreateScriptReceipt(publication, _ddlGeneration, string.Empty, false, false));
             transaction.Commit();
@@ -120,7 +120,7 @@ public sealed partial class SqlCatalog
             {
                 throw new SqlCatalogException("CS03201", ErrorMessages.CatalogSaveScriptStateAsyncSqlCatalog);
             }
-            using var checkpointAdmission3 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission3 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             var record = new DatabaseKeyWriter().AppendInt32(13).AppendString(state.ContentHash, Collation.Binary).AppendInt64((long)state.Generation).ToArray();
             var location = UpsertRecord(transaction, _scriptStateLocation, record);
@@ -174,10 +174,10 @@ public sealed partial class SqlCatalog
             actual.StatementParameterTypes.Select((types, position) =>
                 types.SequenceEqual(expected.StatementParameterTypes[position], StringComparer.Ordinal)).All(equal => equal);
 
-    private void CommitScriptAbsence(SqlCatalogScriptPublication publication, string actualObject)
+    private void CommitScriptAbsence(SqlCatalogScriptPublication publication, string actualObject, CancellationToken cancellationToken)
     {
         ValidateScriptPublication(publication, actualObject);
-        using var checkpointAdmission4 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog");
+        using var checkpointAdmission4 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
         using var transaction = _storage.BeginTransaction("SqlCatalog");
         var script = StageScript(transaction, CreateScriptReceipt(publication, _ddlGeneration, actualObject, false, false));
         transaction.Commit();

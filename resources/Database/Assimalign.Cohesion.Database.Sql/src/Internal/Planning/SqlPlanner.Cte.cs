@@ -15,6 +15,10 @@ internal sealed partial class SqlPlanner
         var evaluator = new SqlExpressionEvaluator([], _parameters, defaultCollation: _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
             outerScope: OuterScope, outerDependencies: OuterDependencies);
+        foreach (var column in select.Columns)
+        {
+            if (column.Expression is SqlQualifiedStarExpression star) { evaluator.QualifiedStarOrdinals(star); }
+        }
         if (select.Columns.Any(column => column.Expression is SqlStarExpression))
         {
             throw new SqlPlanningException("CS05013", ErrorMessages.ConstantQueryWildcard, select.Location);
@@ -26,16 +30,22 @@ internal sealed partial class SqlPlanner
         }
         ValidateWindowDefinitions(select, evaluator);
         if (HasWindows(select)) { return PlanWindowSelect(select, null, null, [], null, evaluator, []); }
-        var projections = new List<SqlProjection>();
+        var projections = new List<SqlProjection>(select.Columns.Count);
         foreach (var column in select.Columns)
         {
             ValidateExpression(column.Expression, evaluator, _subqueryTypes);
             var value = evaluator.Bind(column.Expression, out var collation, out var candidate);
-            projections.Add(new SqlProjection(column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
+            string name = column.Alias ?? $"column{projections.Count + 1}";
+            projections.Add(new SqlProjection(name, null, column.Expression,
                 GroupExpressionType(column.Expression, Array.Empty<SqlCatalogColumn>(), evaluator))
             {
                 Value = value, Collation = collation, Metadata = CaptureProjectionMetadata(candidate, expression: column.Expression, evaluator: evaluator),
                 HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression,
+                // Keep the existing wire name and CTAS policy, but flag a display name that
+                // differs from the correlated reference's name before it can feed NATURAL.
+                HasSynthesizedName = column.Alias is null && (column.Expression is not SqlColumnReferenceExpression reference ||
+                    !string.Equals(name, reference.ColumnName, StringComparison.OrdinalIgnoreCase) ||
+                    evaluator.ColumnMetadata(reference).HasSynthesizedName),
                 MaxLength = evaluator.MaximumLengthOf(column.Expression),
             });
         }

@@ -93,7 +93,9 @@ public abstract class SqlScalarFunction : SqlFunction
             throw SqlEvaluationException.FunctionFailed(Name, exception);
         }
 
-        return HasDeclaredResultType(result.Type, in arguments) ? result : CheckResultSlow(result, in arguments);
+        result = HasDeclaredResultType(result.Type, in arguments) ? result : CheckResultSlow(result, in arguments);
+        if (result.Type is DatabaseType.Binary or DatabaseType.JsonBinary) { SqlBinaryValue.FromFunction(result.ToObject(), this); }
+        return result;
     }
 
     /// <summary>
@@ -123,7 +125,7 @@ public abstract class SqlScalarFunction : SqlFunction
             throw SqlEvaluationException.FunctionFailed(Name, exception);
         }
 
-        return HasDeclaredResultType(result.Type, in arguments) ? result.ToObject() : CheckResultToObject(result, in arguments);
+        return SqlBinaryValue.FromFunction(HasDeclaredResultType(result.Type, in arguments) ? result.ToObject() : CheckResultToObject(result, in arguments), this);
     }
 
     /// <summary>
@@ -169,7 +171,7 @@ public abstract class SqlScalarFunction : SqlFunction
             throw SqlEvaluationException.FunctionFailed(Name, exception);
         }
 
-        return HasDeclaredResultType(result.Type, in arguments) ? result.ToObject() : CheckResultToObject(result, in arguments);
+        return SqlBinaryValue.FromFunction(HasDeclaredResultType(result.Type, in arguments) ? result.ToObject() : CheckResultToObject(result, in arguments), this);
     }
 
     // The slow check's converted result lives in this frame, not in the frame every call makes.

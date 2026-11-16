@@ -36,7 +36,6 @@ internal static class SqlUnsupportedVocabulary
         new("TIES", "WITH TIES", SqlWordPosition.Rule),
         new("OVER", SqlClauses.Over, SqlWordPosition.Clause),
         new("PARTITION", SqlClauses.Partition, SqlWordPosition.Clause),
-        new("NATURAL", SqlClauses.Natural, SqlWordPosition.Clause),
         new("USING", SqlClauses.Using, SqlWordPosition.Clause),
         new("ALL", SqlClauses.All, SqlWordPosition.Rule),
         new("COLLATION", "user-defined collations (CREATE COLLATION)", SqlWordPosition.Rule),

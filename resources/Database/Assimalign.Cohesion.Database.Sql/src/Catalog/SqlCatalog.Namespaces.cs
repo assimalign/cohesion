@@ -105,7 +105,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!_namespaces.TryGetValue(name, out var schema))
             {
-                if (publication is not null) { CommitScriptAbsence(publication, SqlObjectIdentity.Schema(name)); return default; }
+                if (publication is not null) { CommitScriptAbsence(publication, SqlObjectIdentity.Schema(name), cancellationToken); return default; }
                 throw new SqlCatalogException("CS01028", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceMissing, name));
             }
             var sequences = _sequences.Values.Where(slot => slot.Value.Schema.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -140,7 +140,7 @@ public sealed partial class SqlCatalog
             }
             var indexes = _indexes.Values.Where(slot => identities.Contains(slot.Index.TableObjectId)).ToArray();
             var registrations = _registrations.Where(registration => !identities.Contains(registration.ObjectId)).ToArray();
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             var pending = new Dictionary<ulong, (PageId PageId, int SlotIndex)>();
             var retireTrees = StageIndexRetirements(transaction, _registrations.Where(registration => identities.Contains(registration.ObjectId)), objects.Length);

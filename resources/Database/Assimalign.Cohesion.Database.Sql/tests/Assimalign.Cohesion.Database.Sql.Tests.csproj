@@ -21,6 +21,7 @@
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\WorkerPumpObservation.cs" Link="TestObjects\WorkerPumpObservation.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\CheckpointPace.cs" Link="TestObjects\CheckpointPace.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\LiveHeap.cs" Link="Shared\LiveHeap.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Sql.Language\tests\TestObjects\SqlTypeModifierCases.cs" Link="TestObjects\SqlTypeModifierCases.cs" />
 	</ItemGroup>
 	<ItemGroup>
@@ -57,6 +58,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Tcp" />
 		<!-- Health during SQL recovery uses the real host and the SQL-only recovery barrier. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
+		<!-- Reclamation-cap regressions inspect Hosting's real health result. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Health" />
 		<!-- The SqlDatabaseServer suite and the AddSqlServer verb test run over the
 		     in-memory Connections driver. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />

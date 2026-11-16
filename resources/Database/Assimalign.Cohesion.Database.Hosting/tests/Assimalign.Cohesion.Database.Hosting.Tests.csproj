@@ -6,6 +6,7 @@
 		<TieredCompilation>false</TieredCompilation>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DedicatedTestTask.cs" Link="TestObjects\DedicatedTestTask.cs" />
 	</ItemGroup>
 	<ItemGroup>

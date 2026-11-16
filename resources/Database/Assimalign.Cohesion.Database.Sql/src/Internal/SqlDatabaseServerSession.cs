@@ -489,7 +489,17 @@ internal sealed partial class SqlDatabaseServerSession : DatabaseServerSession
         await WriteResultAsync(result, preparation, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task WriteResultAsync(DatabaseResult result, SqlResultPreparation preparation, CancellationToken cancellationToken)
+    private Task WriteResultAsync(DatabaseResult result, SqlResultPreparation preparation, CancellationToken cancellationToken)
+        => result is SqlSpilledResultSet spilled ? WriteSpilledResultAsync(spilled, preparation, cancellationToken)
+            : WriteResultCoreAsync(result, preparation, cancellationToken);
+
+    private async Task WriteSpilledResultAsync(SqlSpilledResultSet result, SqlResultPreparation preparation, CancellationToken cancellationToken)
+    {
+        await using (result.ConfigureAwait(false))
+        { await WriteResultCoreAsync(result, preparation, cancellationToken).ConfigureAwait(false); }
+    }
+
+    private async Task WriteResultCoreAsync(DatabaseResult result, SqlResultPreparation preparation, CancellationToken cancellationToken)
     {
         if (!preparation.IsPrepared)
         {
@@ -547,7 +557,7 @@ internal sealed partial class SqlDatabaseServerSession : DatabaseServerSession
         byte[] completion;
         try
         {
-            await using (result.ConfigureAwait(false))
+            try
             {
                 await WriteAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader, encoder.EncodeHeader(result, cancellationToken)).ConfigureAwait(false);
                 await foreach (DatabaseRow row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
@@ -555,6 +565,17 @@ internal sealed partial class SqlDatabaseServerSession : DatabaseServerSession
                     await WriteAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow, encoder.EncodeRow(row, cancellationToken)).ConfigureAwait(false);
                 }
                 completion = new ProtocolResultCompleteMessage(result.AffectedCount).Encode();
+            }
+            finally
+            {
+                if (result is SqlSpilledResultSet spilled)
+                {
+                    // Temp storage counts close failures. Cleanup cannot replace completed
+                    // delivery or the initiating evaluation/transport failure.
+                    try { await spilled.DisposeAsync().ConfigureAwait(false); }
+                    catch (SqlExecutionException) { }
+                }
+                else { await result.DisposeAsync().ConfigureAwait(false); }
             }
         }
         catch (Exception exception) when (!transportFailed && exception is DatabaseException or DatabaseTypeException)

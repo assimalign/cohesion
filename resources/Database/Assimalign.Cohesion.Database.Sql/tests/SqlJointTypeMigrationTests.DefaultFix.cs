@@ -86,10 +86,10 @@ public sealed partial class SqlJointTypeMigrationTests
         (await RowsAsync(reader, "SELECT Code FROM items ORDER BY Code", guard.Token)).Select(row => row[0]).ShouldBe(new object?[] { "ok", "y" });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Non-TYPE Build: changed defaults refuse online and the old application opens")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Non-TYPE Build: changed defaults publish jointly and retain existing values")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task BuildAsync_NonTypeDefaultChange_ShouldKeepOldApplicationAvailable(bool notNull)
+    public async Task BuildAsync_NonTypeDefaultChange_ShouldPublishDefaultAndRetainRows(bool notNull)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -103,22 +103,18 @@ public sealed partial class SqlJointTypeMigrationTests
             await writer.ExecuteAsync("INSERT INTO items VALUES(1)", cancellationToken: guard.Token);
             storage = storage.CaptureDurableImages();
         }
-        SqlDatabase? observed = null;
-        var builder = Builder(storage);
-        builder.AddWorker(owner => { owner.BeforeProvisioning = database => observed = database; return new RecordingWorker(owner); });
         // Act
-        var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.AddDatabase(target).BuildAsync(guard.Token));
-        // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03105");
-        observed.ShouldNotBeNull().IsOffline.ShouldBeFalse();
-        observed.Catalog.PendingMigration.ShouldBeNull();
-        await using var rollback = await Builder(storage.CaptureDurableImages()).AddDatabase(source).BuildAsync(guard.Token);
-        var old = await rollback.OpenDatabaseAsync("typed", guard.Token);
-        old.Catalog.PendingMigration.ShouldBeNull();
-        old.Catalog.SchemaState!.ContentHash.ShouldBe(source.Compile().Hash);
-        old.SchemaProvisioner.CatalogWalkCount.ShouldBe(0);
-        await using var reader = await old.CreateSessionAsync(guard.Token);
-        (await RowsAsync(reader, "SELECT Code FROM items", guard.Token)).Single()[0].ShouldBe(1m);
+        await using var migrated = await Builder(storage).AddDatabase(target).BuildAsync(guard.Token);
+        var result = await migrated.OpenDatabaseAsync("typed", guard.Token);
+        await WaitDoneAsync(result, guard.Token);
+        // Assert: the changed default and facets publish in one commit.
+        result.IsOffline.ShouldBeFalse();
+        result.Catalog.PendingMigration.ShouldBeNull();
+        result.Catalog.SchemaState!.ContentHash.ShouldBe(target.Compile().Hash);
+        result.SchemaProvisioner.JointMetrics!.SelfCommits.ShouldBe(1);
+        await using var reader = await result.CreateSessionAsync(guard.Token);
+        await reader.ExecuteAsync("INSERT INTO items DEFAULT VALUES", cancellationToken: guard.Token);
+        (await RowsAsync(reader, "SELECT Code FROM items ORDER BY Code", guard.Token)).Select(row => row[0]).ShouldBe(new object?[] { 1m, 2m });
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - TYPE with defaults: VARCHAR narrowing carries the complete target default")]

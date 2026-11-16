@@ -65,8 +65,8 @@ internal readonly struct SqlStatementContext
 
     internal DateTimeOffset TransactionStart => new(_transactionStartTicks, TimeSpan.Zero);
 
-    // Schema steps keep their table locks until the entire apply and compensation end,
-    // while each statement's data/catalog brackets retain their existing commit lifetime.
+    // Joint jobs retain reservations through publication/discard. Ordinary session DDL
+    // uses its transaction owner; tests may supply a retained owner across statements.
     internal TransactionSequence DdlLockOwner { get; }
 
     internal Action<long, long?>? ProvisioningProgress { get; }
@@ -84,6 +84,11 @@ internal readonly struct SqlStatementContext
     internal bool CheckpointCopy => _names is JointProvisioningNames;
 
     internal long CopyCheckpointBytes => ((JointProvisioningNames)_names).CheckpointBytes;
+
+    internal Func<bool, CancellationToken, Task>? MigrationAdmission => (_names as JointProvisioningNames)?.Admission;
+
+    internal void ConfigureMigrationAdmission(Func<bool, CancellationToken, Task> admission)
+        => ((JointProvisioningNames)_names).Admission = admission;
 
     internal void ConfigureCopySpace(Action<long, long, long, long> check, Action<long> publication, Func<long> allocations,
         long checkpointBytes = SqlSchemaProvisioner.JointCopyCheckpointBytes)
@@ -213,6 +218,7 @@ internal readonly struct SqlStatementContext
 
     private sealed class JointProvisioningNames : ProvisioningNames
     {
+        internal Func<bool, CancellationToken, Task>? Admission { get; set; }
         internal Action<long, long, long, long>? CheckSpace { get; set; }
         internal Action<long>? CheckPublication { get; set; }
         internal Func<long>? CountAllocations { get; set; }

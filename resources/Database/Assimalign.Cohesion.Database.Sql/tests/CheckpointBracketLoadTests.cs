@@ -16,8 +16,10 @@ public sealed class CheckpointBracketLoadTests
     private readonly ITestOutputHelper _output;
     public CheckpointBracketLoadTests(ITestOutputHelper output) { _output = output; }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Checkpoint: four continuous writers on three Windows cores (#1283)")]
-    public async Task Checkpoint_FourContinuousWriters_ShouldRecordBoundedProgress()
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Checkpoint: four continuous writers on three Windows cores (#1283)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Checkpoint_FourContinuousWriters_ShouldRecordBoundedProgress(bool admissionPause)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("bracket-load", new()
@@ -40,7 +42,7 @@ public sealed class CheckpointBracketLoadTests
                 var session = sessions[writer];
                 var result = await session.ExecuteAsync($"INSERT INTO items VALUES ({next * 4 + writer}, 'payload')", cancellationToken: token);
                 result.Diagnostics.ShouldBeEmpty();
-            }, _output.WriteLine);
+            }, _output.WriteLine, admissionPause);
         }
         finally
         {

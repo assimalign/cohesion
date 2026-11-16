@@ -183,11 +183,13 @@ public sealed partial class SqlJointTypeMigrationTests
         // Assert.
         var trace = recorder.Events.Where(e => e.EventId is 13 or 14).ToArray();
         int restarted = Array.FindIndex(trace, e => e.EventId == 14 && Equals(e.Payload![5], "Restarted"));
-        if (staleSnapshot)
+        if (staleSnapshot && !initiallyJoint)
         {
-            // With every deferred plan joint, precision widening no longer commits
+            // Precision widening no longer commits
             // early. Both preparations must rewrite the unchanged old heap, so the
             // recorded RewriteOwner route still matches and needs no discard.
+            // The opposite registration now keeps the widened heap in SQ-A6,
+            // so that case must discard its stale RewriteOwner classification.
             restarted.ShouldBe(-1);
             trace.Length.ShouldBe(2);
             trace[0].Payload![4].ShouldBe("Apply");

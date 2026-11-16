@@ -213,7 +213,9 @@ public abstract class SqlAggregateAccumulator
             throw SqlEvaluationException.FunctionFailed(function.Name, exception);
         }
 
-        return function.CheckResult(result, default);
+        result = function.CheckResult(result, default);
+        if (result.Type is DatabaseType.Binary or DatabaseType.JsonBinary) { SqlBinaryValue.FromFunction(result.ToObject(), function); }
+        return result;
     }
 
     /// <summary>Reads a native aggregate's non-consuming frame result; application finish hooks remain once-only.</summary>

@@ -25,7 +25,7 @@ internal static class SqlScriptDataReceipt
             var location = database.DataStorage.InsertRow(bracket, _table.ObjectId, record);
             database.Coordinator.VersionStore.RecordCreated(transaction.Sequence, location.PageId, location.SlotIndex);
             return ValueTask.FromResult(true);
-        }, durable: false, cancellationToken).ConfigureAwait(false);
+        }, durable: false, cancellationToken, waitForAdmission: false).ConfigureAwait(false);
     }
 
     internal static async ValueTask<HashSet<(string Name, string Hash, int Position)>> ReadAsync(SqlDatabase database, CancellationToken cancellationToken)

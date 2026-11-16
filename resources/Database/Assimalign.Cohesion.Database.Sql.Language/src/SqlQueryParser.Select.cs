@@ -4,6 +4,7 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 public sealed partial class SqlQueryParser
@@ -115,7 +116,7 @@ public sealed partial class SqlQueryParser
             Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind, groupByDistinct, windows);
     }
 
-    private IReadOnlyList<SqlFromItem> ParseFromItems(ref TokenLexer lexer)
+    private IReadOnlyList<SqlFromItem> ParseFromItems(ref TokenLexer lexer, bool natural = true)
     {
         var items = new List<SqlFromItem>();
         do
@@ -125,7 +126,26 @@ public sealed partial class SqlQueryParser
             if (IsAtEnd(ref lexer) || lexer.Current.Type != TokenType.Comma) { break; }
             Advance(ref lexer);
         } while (true);
+        if (!natural) { RejectNaturalDmlSources(items); }
         return items;
+    }
+
+    private void RejectNaturalDmlSources(IReadOnlyList<SqlFromItem> sources)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        foreach (var item in sources)
+        {
+            if (item.Table is SqlJoinedTableReference left) { RejectNaturalDmlSources([left.Item]); }
+            foreach (var join in item.Joins)
+            {
+                if (join.IsNatural)
+                {
+                    AddUnsupportedSurfaceDiagnostic(join.KeywordLocation!.Start, join.KeywordLocation.End,
+                        ErrorMessages.NaturalDmlSource);
+                }
+                if (join.Table is SqlJoinedTableReference right) { RejectNaturalDmlSources([right.Item]); }
+            }
+        }
     }
 
     private SqlExpression ParseFetchCount(ref TokenLexer lexer)
@@ -186,7 +206,7 @@ public sealed partial class SqlQueryParser
         RejectPagingSuffix(ref lexer, "TOP");
     }
 
-    private List<SqlSelectColumn> ParseSelectColumns(ref TokenLexer lexer)
+    private List<SqlSelectColumn> ParseSelectColumns(ref TokenLexer lexer, bool qualifiedStar = true)
     {
         var columns = new List<SqlSelectColumn>();
 
@@ -195,20 +215,45 @@ public sealed partial class SqlQueryParser
             return columns;
         }
 
-        columns.Add(ParseSingleSelectColumn(ref lexer));
+        columns.Add(ParseSingleSelectColumn(ref lexer, qualifiedStar));
 
         while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
         {
             Advance(ref lexer);
-            columns.Add(ParseSingleSelectColumn(ref lexer));
+            if (columns.Count == SqlTargetListLimits.MaximumTargets)
+            {
+                _targetListDiagnostic = _parseDiagnostics.Count;
+                _parseDiagnostics.Add(new Diagnostic
+                {
+                    Code = SqlTargetListLimits.Code,
+                    Message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.TargetListLimit, SqlTargetListLimits.MaximumTargets, columns.Count + 1),
+                    Start = lexer.Current.Position,
+                    End = CurrentTokenEnd(ref lexer),
+                    Severity = DiagnosticSeverity.Error,
+                    Location = DiagnosticLocation.Absolute,
+                });
+                // The statement is refused. Drop the borrowed lexer input and put it at EOF
+                // without tokenizing, building expressions or diagnosing the abandoned tail.
+                lexer = default;
+                lexer.MoveNext();
+                _lastTokenEnd = _sourceText.Length;
+                break;
+            }
+            if (columns.Capacity == columns.Count)
+            {
+                columns.Capacity = System.Math.Min(SqlTargetListLimits.MaximumTargets, columns.Capacity * 2);
+            }
+            columns.Add(ParseSingleSelectColumn(ref lexer, qualifiedStar));
         }
 
         return columns;
     }
 
-    private SqlSelectColumn ParseSingleSelectColumn(ref TokenLexer lexer)
+    private SqlSelectColumn ParseSingleSelectColumn(ref TokenLexer lexer, bool qualifiedStar)
     {
-        var expr = ParseExpression(ref lexer);
+        var expr = qualifiedStar && StartsQualifiedStar(lexer)
+            ? ParseColumnRefOrFunction(ref lexer, qualifiedStar: true) : ParseExpression(ref lexer);
         string? alias = null;
 
         // Check for AS alias or just alias
@@ -230,7 +275,8 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
-        return new SqlSelectColumn(expr, alias);
+        // PostgreSQL parse_target.c:148-152 discards decoration on either star form.
+        return new SqlSelectColumn(expr, expr is SqlStarExpression or SqlQualifiedStarExpression ? null : alias);
     }
 
     private List<SqlJoinClause> ParseJoinClauses(ref TokenLexer lexer, bool mergeSource = false)
@@ -241,7 +287,8 @@ public sealed partial class SqlQueryParser
         {
             if (!IsKeyword(ref lexer, "JOIN") && !IsKeyword(ref lexer, "INNER") &&
                 !IsKeyword(ref lexer, "LEFT") && !IsKeyword(ref lexer, "RIGHT") &&
-                !IsKeyword(ref lexer, "FULL") && !IsKeyword(ref lexer, "CROSS"))
+                !IsKeyword(ref lexer, "FULL") && !IsKeyword(ref lexer, "CROSS") &&
+                !IsKeyword(ref lexer, "NATURAL"))
             {
                 break;
             }
@@ -261,10 +308,17 @@ public sealed partial class SqlQueryParser
                 joinEnd = joinLexer.Current.Position + joinLexer.Current.Value.Length;
             }
 
+            bool natural = IsKeyword(ref lexer, "NATURAL");
+            if (natural) { Advance(ref lexer); }
             SqlJoinType? joinType = TryParseJoinType(ref lexer);
             if (!joinType.HasValue)
             {
+                if (natural) { AddExpectedDiagnostic(ref lexer, "a join type after NATURAL"); }
                 break;
+            }
+            if (natural && joinType == SqlJoinType.Cross)
+            {
+                AddSyntaxDiagnostic(joinStart, joinEnd, ErrorMessages.NaturalCrossJoin);
             }
 
             // Expect table reference after JOIN keyword
@@ -273,7 +327,7 @@ public sealed partial class SqlQueryParser
             // ON condition
             SqlExpression? condition = null;
             // A top-level source CROSS JOIN has no condition; the next ON belongs to MERGE.
-            bool hasOn = !(mergeSource && joinType == SqlJoinType.Cross) &&
+            bool hasOn = !natural && !(mergeSource && joinType == SqlJoinType.Cross) &&
                 !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON");
             if (hasOn)
             {
@@ -326,16 +380,23 @@ public sealed partial class SqlQueryParser
             {
                 AddSyntaxDiagnostic(joinStart, joinEnd, ErrorMessages.SqlQueryParserParseJoinClausesVoid6);
             }
-            else if (joinType != SqlJoinType.Cross && !hasOn && !hasUsing)
+            else if (joinType != SqlJoinType.Cross && !natural && !hasOn && !hasUsing)
             {
                 AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd, ErrorMessages.SqlQueryParserParseJoinClausesVoid7);
+            }
+            if (natural && hasUsing)
+            {
+                AddSyntaxDiagnostic(joinStart, joinEnd, ErrorMessages.NaturalJoinCondition);
             }
             if (hasOn && hasUsing)
             {
                 AddSyntaxDiagnostic(joinStart, joinEnd, ErrorMessages.SqlQueryParserParseJoinClausesVoid8);
             }
 
-            joins.Add(new SqlJoinClause(joinType.Value, table, condition, usingColumns));
+            int end = IsAtEnd(ref lexer) ? _sourceText.Length : lexer.Current.Position;
+            while (end > joinEnd && char.IsWhiteSpace(_sourceText[end - 1])) { end--; }
+            joins.Add(new SqlJoinClause(joinType.Value, table, condition, usingColumns, natural,
+                Location.Create(1, 1, joinStart, end), Location.Create(1, 1, joinStart, joinEnd)));
         }
 
         return joins;

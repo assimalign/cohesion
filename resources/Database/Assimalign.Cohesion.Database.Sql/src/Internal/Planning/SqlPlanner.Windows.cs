@@ -378,7 +378,7 @@ internal sealed partial class SqlPlanner
             outerScope: OuterScope, outerDependencies: OuterDependencies, slotScope: scope,
             relation: select.From.Count == 0 ? null : select.From[0].Table);
         var projections = BindProjections(select.Columns, columns, outputScope, outputOrdinals);
-        var orderSlots = BindOrderByProjections(select, projections, columns.Count);
+        var orderSlots = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count, outputScope);
         foreach (var order in select.OrderBy) { ValidateExpression(order.Expression, outputScope, _subqueryTypes, orderSlots); }
         CaptureViewOrdering(select, columns, bindings, outputScope, orderSlots);
         var ordering = BindOrdering(select.OrderBy, outputScope.ForOrdering(projections, orderSlots, columns.Count + slots.Count));

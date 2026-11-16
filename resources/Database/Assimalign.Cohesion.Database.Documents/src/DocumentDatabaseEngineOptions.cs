@@ -120,19 +120,13 @@ public sealed class DocumentDatabaseEngineOptions
     public int WorkerFailureMinimumPasses { get; set; } = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
 
     /// <summary>
-    /// Gets or sets the hard cap, in bytes, on a database's journal while its checkpoints keep
-    /// failing (owner decision 25 of 2026-10-06): the second checkpoint in a row that fails while the journal holds
-    /// this much takes the database offline, before the journal fills the device. Zero,
-    /// the default, sets it to four times <see cref="CheckpointJournalSize"/> (1 GiB at the default
-    /// size, PostgreSQL's <c>max_wal_size</c> default), or to 1 GiB when that is zero. Must not be
-    /// negative, and when set, not below <see cref="CheckpointJournalSize"/>.
+    /// Gets or sets the journal admission limit in bytes. With a checkpoint pending,
+    /// new physical write brackets pause at half this limit until a checkpoint succeeds.
+    /// Zero resolves to four times CheckpointJournalSize (1 GiB at its default, or with
+    /// the size trigger disabled). Must be nonnegative and, when set, at least CheckpointJournalSize.
     /// </summary>
-    /// <remarks>
-    /// Only failed checkpoints are compared with the cap, and one is not enough: a journal that grows
-    /// while its checkpoints are deferred to running statements, or wait for a busy storage, never
-    /// takes the database offline by itself, and one transient failure of such a journal is retried
-    /// like any other.
-    /// </remarks>
+    /// <remarks>The pause keeps the database online and health Degraded. In-flight brackets and undo can finish;
+    /// a single huge bracket can still overshoot. Storage-safety failures retain their offline fence.</remarks>
     public long JournalSizeLimit { get; set; }
 
     /// <summary>

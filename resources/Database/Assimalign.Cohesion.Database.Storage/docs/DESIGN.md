@@ -6,7 +6,7 @@ StorageTempSpace, StorageTempStatement, StorageTempRun, StorageTempRunReader,
 StorageTempSorter, StorageTempSortReader and StorageTempPartitions are sealed public leaves.
 The model owns one space and supplies a required free-space reserve delegate; Storage references
 no model. StorageTempException carries an unprefixed message, a CK05 identity and the I/O cause.
-SQL keeps its space internal; SQL, OQL and GQL operators retain their existing memory refusals.
+SQL keeps its space internal and consumes it for eligible root SELECT and CTAS source-root sorts; OQL and GQL retain their existing memory refusals.
 
 A space fixes its engine quota after sweeping: an explicit nonnegative quota, or min(10 GiB,
 floor(available volume bytes / 4)). Leftovers do not shrink the quota for the engine's lifetime.
@@ -37,7 +37,10 @@ releases after the sample. Other processes and database writes can consume
 space inside that window; this is admission headroom, not an OS disk reservation.
 Gate covers accounting and the statement/run registries only. Each run locks its own reads,
 writes and disposal. Lock order is run lock, then _probeGate, then Gate, never the reverse;
-no syscall, sort, merge or event callback runs under Gate. Parent disposal snapshots registries under Gate,
+no syscall, sort, merge or event callback runs under Gate. The internal pre-create fault hook
+runs after directory setup, outside its monitor; creation rechecks disposal before opening.
+Injected cancellation therefore cannot carry directory ownership into asynchronous cleanup.
+Parent disposal snapshots registries under Gate,
 then releases it before disposing children, continuing after close failures. Callers must not
 hold a storage page latch across these calls. An unrelated statement can read, cancel, dispose
 or create a run while another statement is blocked in page I/O.
@@ -81,19 +84,32 @@ Keys encode direction, collation and NULL placement; a unique Int64 input ordina
 The sorter uses a grant of at least 64 KiB, an explicit maximum framed record (key + value + 16)
 and a grant-minus-32-KiB workspace. Its separate 8-KiB output page and bounded 64 * FanIn run
 directory fit the rest; one directory slot is reserved for merge output.
-FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2. Runs accumulate during
+FanIn = min(16, floor(workspace / (8192 + maximum record))), at least 2.
+Create and CreateWithSortedPrefix overloads accept maximumOpenRuns (at least FanIn + 1),
+reducing the directory and merging sooner; the ordinary overloads keep 64 * FanIn. SQL
+uses 64 including a merge-output slot. The ceiling is exercised by a counted 20,000-row
+test; concurrent sorts/results still add up across the process. Runs accumulate during
 generation until the directory is full apart from that output slot, then the FanIn smallest merge
 repeatedly until the directory is at most half full.
+CreateWithSortedPrefix writes a caller-sorted prefix before allocating the arena. The caller
+releases its original rows as enumeration advances; framing is written from three spans
+without an additional record-sized scratch array. Prefix ties precede subsequent appends.
 Complete flushes and merges
-the smallest remaining runs down to FanIn, doing the partial group first to minimize writes
+the smallest remaining runs down to FanIn (at most eight when actual records exceed grant / 64,
+leaving room for a decoded consumer row), doing the partial group first to minimize writes
 (Huffman-style); the global input ordinal makes merge-tree shape irrelevant to stability. It returns
 StorageTempSortReader owning those runs; the final heap merge runs in MoveNext without a new
 output file. At most FanIn initial runs write each row once. The reader retains count times
-(8 KiB + maximum record) and Complete releases the rest of the workspace. It refills the previous
+(8 KiB + actual maximum record) and Complete releases the rest of the workspace. It refills the previous
 winner at the next MoveNext, preserving borrowed Key/Value until then. An exhausted owned input
 immediately closes its reader and run, returning quota as the merge proceeds; a close failure is
 counted without failing MoveNext. Reader
-disposal deletes its remaining inputs; statement disposal also closes them. Statement
+disposal deletes its remaining inputs; statement disposal also closes them. OpenReader forks
+an unstarted owning final reader into independent nonowning cursors. Forking discards the
+template workspace and prohibits starting that template; it remains the file owner until
+all consumers finish. A fork releases only its own buffers, so rewind/concurrent delivery
+never deletes another reader's input. BufferBytes states the required read workspace.
+StorageTempSortPrefixTests pins its two-run physical peak exactly at 212,992 bytes. Statement
 PhysicalBytes/PeakBytes expose live and peak reservations. RecordsWritten/KeyComparisons are internal test counters; two input sizes
 bound merge depth and write growth, while differential cases cover several grants and levels.
 Hash partition instances require serialized use. Partitions are lazy files selected by hash
@@ -127,13 +143,14 @@ At most 64 * FanIn run handles are live per sorter (1,024 at FanIn 16), plus the
 concurrent statements add up. File handle exhaustion (EMFILE) surfaces as CK05005 and releases
 the failing sorter's owned runs. EMFILE is process-wide, so other opens in the process can fail
 while a sort is at the limit. FileStream objects, handles, paths and statement run-registry entries
-are outside the fixed-buffer grant and grow with the live run count. No handle virtualization or
-operator spilling is introduced. Failed closes return accounting but credit
+are outside the fixed-buffer grant and grow with the live run count. No handle virtualization is introduced. SQL's root consumer can additionally own a staged input/output run. Failed closes return accounting but credit
 only unwritten pages as free headroom, since disk reclamation was not confirmed.
-The arena is allocated for the full grant at creation; growing it on demand, multi-page
-merge input buffers and dynamic fan-in remain for SQ-L2 to measure with a real consumer. A record
+The arena is allocated for the full grant at creation after any sorted prefix is drained.
+Final readers use actual record sizes, and wide records cap the final fan-in at eight;
+growing the arena on demand and multi-page input buffers remain unimplemented. A record
 over the declared maximum is a coded CK05006 refusal. The engine quota and statement default
-(4 times the memory budget) bound capacity; ten grants requires an explicit larger statement quota.
+(4 times the memory budget) bound capacity; capacity depends on encoding width, page rounding and merge shape; SQL completes ten
+grants of compact ASCII rows at its default quota (see DIALECT), while wider encodings can refuse earlier.
 
 | Code | Temporary storage condition |
 |---|---|
@@ -1040,7 +1057,9 @@ object ids, so a table scan stops decoding the whole database.
   index-page owner directory. It never copies the whole owner's page set for a bounded call.
   `AllocatePageForWrite` can stamp an index owner before first touch; B-tree roots and every
   split allocation pass their object id. Index pages do not enter row iteration or empty-table
-  probes. Open rebuilds this second directory from existing header owner fields. Allocation
+  probes. `GetOwnerIndexPages(ownerId)` exposes a sorted snapshot of this directory so SQL
+  retirement admission can measure stranded-tree WAL in O(the retiring owners' index pages).
+  Open rebuilds this second directory from existing header owner fields. Allocation
   rollback retains that tag on its empty safe-leak page, so retiring the owner also reclaims
   abandoned trees. Each batch's free headers, directory removals and FSM updates use the existing
   commit protocol; interrupted frees undo, durable frees are skipped on reopen. Neither the
@@ -1604,8 +1623,11 @@ as it was before.
   every enlisted latch for the whole restore, record pages and the journal reads of their spilled
   pre-images included, so a large failed statement held off every reader of the indexes it
   changed for its whole restore. The record pages need no latch, and no reader needs them restored
-  together with the index pages: the failed bracket's index entries are invisible to every
-  snapshot, and the committed entries name committed records the restore leaves in place. For a
+  together with the index pages for versioned model records: the failed bracket's stamped
+  entries are invisible to other snapshots, and committed entries name committed records the
+  restore leaves in place. Unversioned physical index entries keep inline payload bytes on
+  their latched page; mutable pages referenced by an unversioned entry must share its
+  latch to restore atomically (#1809). For a
   failed 20,001-row `INSERT ... SELECT` into a table with two indexes (430 pages touched, 332 of
   them index pages) the latches are now held 0.39 to 1.39 ms, against 0.70 to 3.23 ms for the
   whole restore. `StoragePageLatchTests` checks the order: when the rollback waits for a reader's
@@ -2181,6 +2203,15 @@ tests assert retained-byte ceilings, per-page replay byte and call ceilings for 
 A missing image is checked before the physical redo cache can evict and write another page.
 
 ### Checkpoints
+
+The Transactions interlock adds T3-27 bounded admission at half the engine journal limit
+and requests a checkpoint even with the ordinary size trigger disabled (#1283, EN-C2). Persistent
+worker failures retain the existing offline window while paused. JournalBytesSinceCheckpoint is the public
+advisory appended-byte count, excluding the completed checkpoint record. Storage retains
+its sharp truncation, active-bracket refusal, blocker events and append-locked peak counter.
+Engine pauses affect admission rather than storage reads or the durable safety fence; one
+huge admitted bracket can still overshoot (#1270). Transactions DESIGN records lock order,
+undo/nesting/close exceptions, coded timeout, events and counter semantics. No format changes.
 
 `Checkpoint()` durably flushes all page state and **truncates** the journal, writing a
 fresh checkpoint record whose LSN continues the sequence (LSNs never restart — page
@@ -3231,6 +3262,11 @@ they share stays in every build for tests to call.
 ## Dedicated test actors (#1285)
 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Async actor completion is published by the dedicated thread after scheduler cleanup, using
+the task builder to retain exception/cancellation identity. It does not await the terminal
+LongRunning task: asynchronously dispatched completion could otherwise park behind a held pool.
+The guard forces an incomplete actor and asynchronous terminal completion (#1285).
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
 

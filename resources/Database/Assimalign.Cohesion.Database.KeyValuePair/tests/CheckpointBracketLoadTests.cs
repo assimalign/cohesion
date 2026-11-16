@@ -80,8 +80,10 @@ public sealed class CheckpointBracketLoadTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Checkpoint: four continuous writers on three Windows cores (#1283)")]
-    public async Task Checkpoint_FourContinuousWriters_ShouldRecordBoundedProgress()
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Checkpoint: four continuous writers on three Windows cores (#1283)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Checkpoint_FourContinuousWriters_ShouldRecordBoundedProgress(bool admissionPause)
     {
         // Arrange
         await using var engine = KeyValueDatabaseEngine.Create("bracket-load", new()
@@ -102,7 +104,7 @@ public sealed class CheckpointBracketLoadTests
             {
                 var session = sessions[writer];
                 await database.PutAsync(session, System.Text.Encoding.UTF8.GetBytes($"{writer}-{next}"), new byte[32], cancellationToken: token);
-            }, _output.WriteLine);
+            }, _output.WriteLine, admissionPause);
         }
         finally
         {

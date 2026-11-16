@@ -41,6 +41,14 @@ await Check("INSERT (a:ComprehensionProperty {k:[x IN [1] | x+10][0]}) SET a.k=[
 await Check("UNWIND [1,2,1] AS k MERGE (n:ComprehensionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0] RETURN count(*)", [[3L]]);
 await Check("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,coalesce(n.m,0) ORDER BY n.k", [[2L,11L,21L],[4L,12L,0L]]);
 await Check("RETURN 7", [[7L]]);
+await session.ExecuteAsync("INSERT (:TextSmoke {k:1,p:'abcXbcd'}),(:TextSmoke {k:2,p:'abcd'}),(:TextSmoke {k:3,p:'😀😀'})", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("CREATE TEXT INDEX text_smoke FOR (n:TextSmoke) ON (n.p)", cancellationToken: CancellationToken.None);
+await Check("MATCH (n:TextSmoke) WHERE n.p CONTAINS 'abcd' RETURN n.k", [[2L]]);
+await Check("MATCH (n:TextSmoke) WHERE n.p ENDS WITH 'bcd' RETURN n.k ORDER BY n.k", [[1L],[2L]]);
+await Check("MATCH (n:TextSmoke) WHERE n.p STARTS WITH 'abc' RETURN n.k ORDER BY n.k", [[1L],[2L]]);
+await Check("MATCH (n:TextSmoke) WHERE n.p='abcd' RETURN n.k", [[2L]]);
+await Check("MATCH (n:TextSmoke) WHERE n.p CONTAINS '😀😀' RETURN n.k", [[3L]]);
+await session.ExecuteAsync("DROP INDEX text_smoke", cancellationToken: CancellationToken.None);
 await Check("FOR x IN [1,1] RETURN x UNION FOR x IN [1,2] RETURN x", [[1L],[2L]]);
 await Check("RETURN 1 AS x UNION DISTINCT RETURN 1.0 AS x UNION RETURN 2 AS x", [[1L],[2L]]);
 await Check("FOR x IN [1,1,2] RETURN x EXCEPT ALL RETURN 1 AS x", [[1L],[2L]]);

@@ -1,5 +1,34 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Journal admission backstop (#1283, EN-C2)
+
+At ceil(JournalSizeLimit / 2), appended bytes request a sharp checkpoint even when the
+ordinary size trigger is disabled. New physical brackets wait while that checkpoint is
+pending. A long holder or a checkpoint that has not run never takes the database offline,
+regardless of the pause's duration. Undo and nested brackets drain; health reports
+Degraded/CK06006 while admission is paused.
+
+Checkpoint and page write-back failures retain owner decisions 25, 41 and 42: every operational
+failure counts while paused too. A persistent failure takes its database offline after the
+failure window (100 seconds by default, across at least three failed passes); two failed
+checkpoints with a journal past the cap can take it offline sooner. Every parked writer wakes
+with the existing offline error. A successful checkpoint inside the window resumes admission;
+a reopen recovers an offline database. Blob refuses its failing database while its worker
+failure is held. Storage safety fences and single-admitted-bracket/mandatory-undo overshoot
+remain. Reads retain ordinary MVCC and model-lock rules while the database remains online.
+
+The free-run four-writer phase asserts zero pauses. Three repeated blocked-checkpoint episodes
+compare the internal switch on/off with the same four writers: each writer records admission
+waits with the switch on and the peak stays at or below J; without the switch the peak passes J.
+Writers' wait counts and total pause duration per episode are diagnostics; no duration decides
+a test. Transactions DESIGN records the lock order, events and exact counters. No format change.
+
+Both catalog mutators refuse a pause immediately while retaining _sync, preserving their
+validated metadata. The checkpointer performs no catalog metadata read or registration re-export. Bootstrap durably
+persists the sole primary registration before database publication; BTreeIndex root IDs stay
+fixed through splits (Indexing/src/BTreeIndex.cs:132 and BTreeIndexManager.cs:27). The existing
+disposal-time registration backstop remains.
+
 ## Refused opens preserve every file (#1744)
 
 The catalog preflight checks the entry-space marker before opening even a read-only data view,
@@ -268,7 +297,7 @@ and explicit-transaction cases are regression guards, not proof of that session 
   tree that rides it. The engine opens and validates the catalog before opening
   the data set, so a catalog refusal cannot apply data recovery (#1270).
   Format 2 keeps format 1's entry records, but its primary
-  index is a tree of `Database.Indexing`'s B-tree page format 2 (entries ordered
+  index now uses `Database.Indexing`'s B-tree page format 3 (#1809; entries ordered
   by key, entry location and writer) instead of format 1 (ordered by key alone).
   The engine stamps the marker at creation before it registers the primary
   index, and at open, before it attaches the index or recovery writes anything,
@@ -284,7 +313,7 @@ and explicit-transaction cases are regression guards, not proof of that session 
   the root page's B-tree page format when the instance attaches the
   registration, and a tree the marker does not describe is refused with
   `DatabaseException` "Database 'x' cannot be opened. CK06101: Index … uses
-  B-tree page format 1, but this engine supports only format 2 …", the index
+  B-tree page format 2, but this engine supports only format 3 …", the index
   manager's `IndexFormatException` as its inner exception. Clean and crashed
   databases are left byte-identical by either refusal: catalog and tree checks precede all writes,
   using Storage's recovered read-only views when replay is needed (#1744). There is no upgrade path (owner decision of 2026-10-02; #1152).

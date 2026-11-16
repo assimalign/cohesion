@@ -501,6 +501,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 ConfigureStorage(catalogStorage, KeyValueStorageStrategy.GetLabel(name, catalog: true), catalog: true);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
                 var database = new KeyValueDatabase(name, this, storage, catalogStorage);
+                ConfigureJournalAdmission(database, JournalSizeLimit, storage, catalogStorage);
                 _databases[name] = database;
                 return new ValueTask<DatabaseInstance>(database);
             }
@@ -649,6 +650,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 // The spelling the database was created with, which its data set's header kept,
                 // whatever spelling opened it (#1392).
                 var database = new KeyValueDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, recover: true, catalog: catalog);
+                ConfigureJournalAdmission(database, JournalSizeLimit, storage, catalogStorage);
                 _databases[name] = database;
                 return new ValueTask<DatabaseInstance>(database);
             }

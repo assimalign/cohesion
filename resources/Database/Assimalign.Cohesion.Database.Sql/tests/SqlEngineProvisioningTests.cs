@@ -226,8 +226,8 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         fresh!.Catalog.DefaultCollation.ShouldBeSameAs(Collation.CaseInsensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a failed schema step names the engine, the database and the step, after compensation")]
-    public async Task BuildAsync_SchemaStepFails_ShouldNameTheEngineTheDatabaseAndTheStep()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a failed inline FK validation retains the old schema and permits rollback Build")]
+    public async Task BuildAsync_InlineConstraintFails_ShouldKeepOldSchemaAndPermitRollback()
     {
         // Arrange: a child row whose parent does not exist, then a schema that adds the reference.
         await using (var first = await CreateBuilder("steps").AddDatabase(_unreferenced).BuildAsync())
@@ -246,10 +246,17 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             }).BuildAsync());
 
         // Assert
-        failure.Message.ShouldStartWith(
-            "CS03104: SQL engine 'steps', database 'shop': applying schema 'shop': step 1 of 1 (AddConstraint 'children.",
-            Case.Sensitive);
-        failure.Message.ShouldEndWith("Every completed step was compensated.", Case.Sensitive);
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03402");
+        failure.Message.ShouldContain("SQL engine 'steps', database 'shop'", Case.Sensitive);
+        failure.Message.ShouldContain("applying schema 'shop'", Case.Sensitive);
+        failure.Message.ShouldContain("AddConstraint", Case.Sensitive);
+        failure.Message.ShouldContain("children", Case.Sensitive);
+        failure.InnerException.ShouldNotBeNull();
+        failure.Message.ShouldContain(failure.InnerException.InnerException!.Message, Case.Sensitive);
+        await using var rollback = await CreateBuilder("steps").AddDatabase(_unreferenced).BuildAsync();
+        rollback.TryGetDatabase("shop", out SqlDatabase? old).ShouldBeTrue();
+        old!.IsOffline.ShouldBeFalse();
+        old.Catalog.SchemaState!.ContentHash.ShouldBe(_unreferenced.Compile().Hash);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a schema principal is refused before any file is touched")]

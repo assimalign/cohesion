@@ -22,7 +22,9 @@ nested-loop buffers; moving a singleton ahead of the original three-row driver i
 ## Savepoint lifecycle conformance (#1726, XT-5)
 
 Explicit wire lifecycle probes require canceled-before-dispatch controls to take no kernel admission;
-the shared client breaks the canceled exchange, and lease return must scrub all scopes. They also require
+the shared client breaks the canceled exchange and aborts its transport (#1789), so root rollback
+and scope cleanup complete before the caller disposes the lease. The prior expectation that the
+transaction remains active until lease return is superseded by immediate transport teardown. They also require
 offline storage to outrank CK04009 with a complete Ready E exchange, and session/database close to
 drain a physically admitted control on both transports.
 
@@ -356,10 +358,15 @@ No wire or client API changes.
 
 ## Expanded joins (#1109)
 
+NATURAL and qualified SELECT wildcards (#1792, SQ-J3) use the existing result codec on
+InMemory and TCP. Wire tests compare complete typed rows after NATURAL and USING joins,
+including qualified physical columns. LATERAL and row-valued COUNT(t.*) retain CK00001
+ParseFailure and leave the connection reusable. There is no client API or protocol change.
+
 LEFT null values, N-way, CROSS, comma and USING results use the existing SQL frames and
 production materializer. No nullability field or frame-writing change is introduced.
 Wire tests run every join case over InMemory and loopback TCP, pin exact values and
-multiplicities, and retain FULL/NATURAL and qualified-wildcard exclusions. RIGHT [OUTER] and RIGHT USING (#1525) carry null-extended written-left values, merged right spelling, coerced decimal values, original column ordinals and cleared lengths on both transports; direct joined-DML refusals carry CS05069 and keep the connection usable. Engine nullability remains engine metadata; no nullability field is added to the wire. USING
+multiplicities, and retain the LATERAL and row-valued wildcard exclusions. RIGHT [OUTER] and RIGHT USING (#1525) carry null-extended written-left values, merged right spelling, coerced decimal values, original column ordinals and cleared lengths on both transports; direct joined-DML refusals carry CS05069 and keep the connection usable. Engine nullability remains engine metadata; no nullability field is added to the wire. USING
 wildcard alias/ordinal ordering, decimal common-type values in both input orders, qualified
 types and cleared character lengths use the same production frames and materializer.
 
@@ -838,3 +845,10 @@ Connection inspection reads its existing database name without checking connecti
 taking the shared exchange lock, dialing, or returning a lease. Result views read already
 materialized columns/diagnostics and row counts; row and parameter views do not enumerate values
 or call typed conversions. Client exchange behavior and wire framing remain unchanged.
+
+## Journal admission refusal (#1283)
+
+CK04014 crosses TCP as an execution failure with structured diagnostics. The refused statement
+leaves its explicit transaction active and authenticated session usable; a later table read,
+write and commit succeed after checkpoint admission resumes. SQLSTATE 57014 remains a
+documented mapping, not a new wire field.

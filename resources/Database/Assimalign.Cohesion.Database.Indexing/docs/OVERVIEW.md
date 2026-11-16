@@ -6,7 +6,7 @@ Shared index infrastructure for every Cohesion database engine: order-preserving
 
 - `IndexKey` / `IndexKeyRange` — byte-comparable key encoding (implemented, tested) and range scans
 - `BTreeIndex` — point/range operations bound to a transaction context (sealed)
-- `BTreeCursor` — incremental forward/reverse scans with bounded owned batches and cancellation (sealed)
+- `BTreeCursor` — incremental forward/reverse scans with bounded owned key/payload batches and cancellation (sealed)
 - `BTreeIndexManager` / `IndexDefinition` — create/drop/open per logical database, and the
   registrations a catalog persists (sealed; `BTreeIndexManager.Create`)
 - `IndexKind` — BTree (default), Hash (post-MVP)
@@ -23,10 +23,10 @@ own `IndexException` root (inherits `Exception`, not `DatabaseException`); model
 engines translate at their boundary.
 
 The package owns the B-tree page format (`BTreeIndexManager.FormatVersion`, format
-2 since #1194: entries ordered by key, entry reference and writer). Attaching a
+3 since #1809: optional leaf payloads up to 1,024 bytes; entries ordered by key, entry reference and writer). Attaching a
 tree written in any other format fails with `IndexFormatException` (`CK06101`);
 each model's open surfaces that refusal — see [DESIGN.md](DESIGN.md), "Page format
-2 and the format gate". An attached tree that reaches a damaged page fails the
+3 and the format gate". An attached tree that reaches a damaged page fails the
 operation with `IndexCorruptionException` (`CK06102`).
 
 ## Consumers
@@ -54,7 +54,7 @@ at most 64 leaf pages, preserving old snapshots and resuming after cancellation 
 The owning coordinator calls it under the apply gate. Unique inserts use the optional
 `BTreeIndexManagerOptions.PruneBound` provider to prune their key's history while reusing one
 descent and insertion position through splits. Read cursors stay read-only. Empty-leaf reclamation
-and merges remain deferred; B-tree format 2 is unchanged. Physical page rollback remains the
+and merges remain deferred. Physical page rollback remains the
 approved #1393 design; [DESIGN.md](DESIGN.md) records the alternatives and measurements.
 
 ## Bounded range counts (#1522)

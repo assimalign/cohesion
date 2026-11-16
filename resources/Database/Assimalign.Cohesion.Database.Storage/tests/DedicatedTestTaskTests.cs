@@ -13,18 +13,23 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 [Collection(ThreadPoolSaturationCollection.Name)]
 public sealed class DedicatedTestTaskTests
 {
-    [Fact(DisplayName = "Cohesion Test [Storage] - Test actors: async driver continuations progress on their own thread while the pool is held (#1285)")]
-    public async Task Run_AsyncYieldWhilePoolHeld_ShouldKeepTheActorThread()
+    [Theory(DisplayName = "Cohesion Test [Storage] - Test actors: async driver continuations progress on their own thread while the pool is held (#1285)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Run_AsyncYieldWhilePoolHeld_ShouldKeepTheActorThread(bool forcePending)
     {
         // Arrange
         using var saturation = ThreadPoolSaturation.Start();
         var threads = new int[4];
         bool pooled = false;
         bool context = false;
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
 
         // Act
         var actor = DedicatedTestTask.Run(async () =>
         {
+            if (forcePending) { entered.Set(); release.Wait(); }
             for (int index = 0; index < threads.Length; index++)
             {
                 await Task.Yield();
@@ -33,6 +38,9 @@ public sealed class DedicatedTestTaskTests
                 context |= SynchronizationContext.Current is not null;
             }
         });
+        // Force Run's returned task to be incomplete before the driver can finish.
+        bool started = !forcePending || entered.Wait(TimeSpan.FromSeconds(30));
+        release.Set();
         // Hang guard only; no duration decides the actor's correctness.
         bool completed = ((IAsyncResult)actor).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(30));
         bool held = saturation.HasHeld;
@@ -41,6 +49,7 @@ public sealed class DedicatedTestTaskTests
 
         // Assert
         held.ShouldBeTrue();
+        started.ShouldBeTrue();
         completed.ShouldBeTrue();
         pooled.ShouldBeFalse();
         context.ShouldBeFalse();

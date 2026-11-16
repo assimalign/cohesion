@@ -157,7 +157,7 @@ internal sealed partial class SqlPlanExecutor
 
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
                     : MaterializeProjected(plan.Returning!, returned, replacements.Count), cancellationToken).ConfigureAwait(false);
-            }, durable: false, cancellationToken).ConfigureAwait(false);
+            }, durable: false, cancellationToken, waitForAdmission: statement.ProvisioningSchema is null).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)
         {
@@ -284,7 +284,7 @@ internal sealed partial class SqlPlanExecutor
                         }
                         return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, targets.Count)
                             : MaterializeProjected(plan.Returning!, returned, targets.Count), cancellationToken).ConfigureAwait(false);
-                    }, durable: false, cancellationToken).ConfigureAwait(false);
+                    }, durable: false, cancellationToken, waitForAdmission: statement.ProvisioningSchema is null).ConfigureAwait(false);
                 }
                 catch (SqlCascadeLockRetry refused)
                 {

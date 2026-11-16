@@ -9,7 +9,20 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Joint deferred docs: every job publishes once, failures retain the old schema and default-only parity waits for SQ-A6")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Batch diagnostics distinguish target/deadline refusals, paused health and retired schema codes (#1792, #1283, #1778)")]
+    public void Documentation_BatchDiagnostics_ShouldDistinguishActiveAndRetiredCodes()
+    {
+        // Arrange
+        string dialect = ReadDialect();
+        // Act / Assert
+        dialect.ShouldContain("| `CS05097` | Error |", Case.Sensitive);
+        dialect.ShouldContain("| `CK04014` | Error |", Case.Sensitive);
+        dialect.ShouldContain("Degraded health with CK06006", Case.Sensitive);
+        dialect.ShouldContain("CS03104 is retired", Case.Sensitive);
+        dialect.ShouldNotContain("| `CS03104` | Error |", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Joint deferred docs: every job publishes once, failures retain the old schema and default-only and inline paths have joint parity")]
     public void Documentation_DeferredPublication_ShouldDescribeJointBoundary()
     {
         // Arrange
@@ -24,7 +37,8 @@ public sealed class SqlDialectDocumentationTests
         dialect.ShouldContain("A no-target open discards without a provisioning report or trace", Case.Sensitive);
         dialect.ShouldContain("successful Verify clears a declared discard observation", Case.Sensitive);
         dialect.ShouldContain("Statements naming a new table in the plan also wait before binding", Case.Sensitive);
-        dialect.ShouldContain("default-only changes still refuse CS03105", Case.Sensitive);
+        dialect.ShouldContain("Default-only changes publish jointly", Case.Sensitive);
+        dialect.ShouldContain("ApplySchemaAsync use the same joint executor inline", Case.Sensitive);
         design.ShouldContain("SQL record-space format 37 requires this joint kind-9 meaning", Case.Sensitive);
         design.ShouldContain("prepared target plus untouched objects", Case.Sensitive);
     }
@@ -109,6 +123,9 @@ public sealed class SqlDialectDocumentationTests
     [InlineData("Sql.Language", "DIALECT.md", "Format 37 requires joint publication for every deferred")]
     [InlineData("Sql", "DESIGN.md", "current format 37 and mandatory index")]
     [InlineData("Sql", "DESIGN.md", "Current format 37 also requires extension 8's OnUpdate byte")]
+    [InlineData("Indexing", "DESIGN.md", "B-tree page format 2, but this engine supports only format 3")]
+    [InlineData("Graph", "DESIGN.md", "catalog v3 and B-tree page format 2 therefore reports only CK06101")]
+    [InlineData("Graph", "DESIGN.md", "and roots, and catalog v4 records including")]
     [InlineData("Sql.Language", "DIALECT.md", "additive indexes and CHECK, NOT NULL, UNIQUE and foreign-key constraint")]
     [InlineData("Sql", "DESIGN.md", "SQL remains format 29: ordinary dense table records")]
     public void Documentation_FormatHistory_ShouldDistinguishHistoricalAndCurrentVersions(string project, string file, string expected)
@@ -126,7 +143,7 @@ public sealed class SqlDialectDocumentationTests
         // Arrange
         string dialect = ReadDialect();
         int supported = SqlLanguageProfile.Instance.Clauses.Count();
-        const int exclusions = 2;
+        const int exclusions = 1;
 
         // Act
         string matrix = dialect.Split("## Statement matrix")[1].Split("\n## ")[0];

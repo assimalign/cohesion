@@ -174,17 +174,22 @@ public sealed partial class SqlJointTypeMigrationTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joint space: worker admits the exact need and rejects one byte less, also on resume")]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task BuildAsync_PreciseSpaceBoundary_ShouldCheckOnWorker(bool below, bool resume)
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public async Task BuildAsync_PreciseSpaceBoundary_ShouldCheckOnWorker(bool below, bool resume, bool sparse)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var storage = await SeedAsync(guard.Token, 1);
         var target = Target().Compile();
-        long need = await MeasureNeedAsync(storage.CaptureDurableImages(), target, guard.Token);
+        var measured = storage.CaptureDurableImages(); measured.UnixSparseGrowth = sparse;
+        long need = await MeasureNeedAsync(measured, target, guard.Token);
         if (resume)
         {
             await using var seed = await Builder(storage).BuildAsync(guard.Token);
@@ -193,7 +198,7 @@ public sealed partial class SqlJointTypeMigrationTests
                 [new("Joint/AlterColumn", "items", "Value", 1), new("Joint/RewriteOwner", "items", "items", 2)], 2), guard.Token);
             storage = storage.CaptureDurableImages();
         }
-        storage.MigrationAvailableBytes = need - (below ? 1 : 0);
+        storage.UnixSparseGrowth = sparse;
         using var release = new ManualResetEventSlim();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int counts = 0, decoded = 0, owners = 0;
@@ -204,7 +209,11 @@ public sealed partial class SqlJointTypeMigrationTests
             {
                 db.SchemaProvisioner.JointSpaceCounting = () => Interlocked.Increment(ref counts);
                 db.SchemaProvisioner.BeforeDeferredStep = (_, token) => { entered.TrySetResult(); release.Wait(token); };
-                db.SchemaProvisioner.JointStage = stage => { if (stage == "OwnersDurable") { Interlocked.Increment(ref owners); } };
+                db.SchemaProvisioner.JointStage = stage =>
+                {
+                    if (stage == "Planning") { storage.VolumeCapacityBytes = storage.AllocatedBytes + need - (below ? 1 : 0); }
+                    if (stage == "OwnersDurable") { Interlocked.Increment(ref owners); }
+                };
             };
             return new RecordingWorker(owner);
         });

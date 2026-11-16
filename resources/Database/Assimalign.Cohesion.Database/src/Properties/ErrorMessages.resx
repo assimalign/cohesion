@@ -69,4 +69,7 @@
   <data name="ExceptionDescribeDatabaseOffline8" xml:space="preserve"><value>its journal grew past its engine's limit while its checkpoints kept failing</value></data>
   <data name="ExceptionDescribeDatabaseOffline9" xml:space="preserve"><value>a write</value></data>
   <data name="UnconfirmedExceptionCreateFailure" xml:space="preserve"><value>the durable flush of its commit record failed ({0})</value></data>
+  <data name="JournalAdmissionAlreadyConfigured" xml:space="preserve">
+    <value>Journal admission has already been configured for this database.</value>
+  </data>
 </root>

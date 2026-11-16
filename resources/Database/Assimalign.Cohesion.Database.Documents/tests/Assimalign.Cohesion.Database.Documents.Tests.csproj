@@ -14,6 +14,7 @@
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\WorkerPumpObservation.cs" Link="TestObjects\WorkerPumpObservation.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\CheckpointPace.cs" Link="TestObjects\CheckpointPace.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\LiveHeap.cs" Link="Shared\LiveHeap.cs" />
 		<!-- Rewrites index pages into the layouts the old-format refusal tests need (#1194). -->
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Indexing\tests\TestObjects\LegacyBTreePages.cs" Link="TestObjects\LegacyBTreePages.cs" />
 		<!-- Rewrites a data file's storage format version for the storage-format refusal tests (#1251). -->

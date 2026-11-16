@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
@@ -21,6 +22,7 @@ internal sealed partial class SqlSchemaProvisioner
     private long _jointReserveBase;
     private long _jointReclamationLimit;
     private long _jointReclamationOwners;
+    private long _jointMinimumReclamationBytes;
 
     // One new page per 3 KiB kind-9 chunk, plus image/delta frames for both
     // deleting the old intent and writing its replacement. Old pages are already
@@ -34,20 +36,23 @@ internal sealed partial class SqlSchemaProvisioner
         return checked(1024 * 1024 + (DivideUp(bytes, 3 * 1024) + 4) * (5 * Page.Size + 168));
     }
 
-    private void CheckJointSpace(long need)
+    private void CheckJointSpace(long need, long? availableAtBoundary = null)
     {
-        long available = _database.Engine.GetAvailableMigrationBytes(_database.Name);
+        long available = availableAtBoundary ?? _database.Engine.GetAvailableMigrationBytes(_database.Name);
         if (available >= need) { return; }
         string message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
             ErrorMessages.JointSpaceInsufficient, need, available);
         throw CodedMigrationFailure(SqlProvisioningCodes.JointFailed, message);
     }
 
-    private void AdmitJointSpace(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent, CancellationToken token)
+    private void AdmitJointSpace(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent, CancellationToken token, long? availableBeforeIntent = null)
     {
         JointSpaceCounting?.Invoke();
         long replacementPages = 0, actualIndexPages = 0, oldPages = 0, maximumChunkTouches = 0, totalTouches = 0, chunks = 1, roots = 0;
         var registrations = _database.IndexManager.ExportRegistrations();
+        var registeredHeapPages = new HashSet<long>();
+        var retiredHeaps = plan.Tables.Where(item => item.Previous is not null && !item.KeepsOwner)
+            .Select(item => item.Previous!.ObjectId).Concat(plan.Dropped.Select(table => table.ObjectId)).ToHashSet();
         checked
         {
             foreach (var item in plan.Tables)
@@ -58,6 +63,22 @@ internal sealed partial class SqlSchemaProvisioner
                 long[] keyColumnBytes = new long[columnBytes.Length];
                 long[] nonNullRows = new long[columnBytes.Length];
                 var trees = new Dictionary<string, (long Pages, int Height, long Bytes)>(StringComparer.OrdinalIgnoreCase);
+                // Metadata/validation-only keeps allocate no heap or trees. Admission
+                // depends on declaration size, without visiting a 500M-row heap.
+                if (item.KeepsOwner && item.Indexes.All(index => SqlPlanExecutor.SameJointIndex(index, _catalog.GetIndexes(item.Previous!.ObjectId))))
+                {
+                    // Heap-owned dropped trees stay on the heap until its retirement;
+                    // neither traverse them nor charge their pages as reclamation work.
+                    foreach (var registration in registrations.Where(value => value.ObjectId == item.Previous!.ObjectId &&
+                        _database.IndexManager.PageOwner(value) != item.Previous!.ObjectId &&
+                        !item.Indexes.Any(index => index.Name.Equals(value.Definition.Name, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        var size = CountJointIndexPages(registration.RootPageId, _database.IndexManager.PageOwner(registration), token);
+                        actualIndexPages += size.Pages;
+                        oldPages += size.Pages;
+                    }
+                    continue;
+                }
                 if (item.Previous is { } previous)
                 {
                     var missing = _database.Definitions.Get(previous, token).MissingValues;
@@ -83,7 +104,9 @@ internal sealed partial class SqlSchemaProvisioner
                     }
                     foreach (var registration in registrations.Where(value => value.ObjectId == previous.ObjectId))
                     {
-                        var size = CountJointIndexPages(registration.RootPageId, _database.IndexManager.PageOwner(registration), token);
+                        ulong pageOwner = _database.IndexManager.PageOwner(registration);
+                        var size = CountJointIndexPages(registration.RootPageId, pageOwner, token,
+                            retiredHeaps.Contains(pageOwner) ? registeredHeapPages : null);
                         trees.Add(registration.Definition.Name, size);
                         actualIndexPages += size.Pages;
                         if (!item.KeepsOwner || _database.IndexManager.PageOwner(registration) != previous.ObjectId &&
@@ -141,9 +164,38 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 oldPages += _database.DataStorage.GetOwnerPages(table.ObjectId).Count;
                 foreach (var registration in registrations.Where(value => value.ObjectId == table.ObjectId))
-                { oldPages += CountJointIndexPages(registration.RootPageId, _database.IndexManager.PageOwner(registration), token).Pages; }
+                {
+                    ulong pageOwner = _database.IndexManager.PageOwner(registration);
+                    oldPages += CountJointIndexPages(registration.RootPageId, pageOwner, token,
+                        retiredHeaps.Contains(pageOwner) ? registeredHeapPages : null).Pages;
+                }
             }
-            ConfigureJointEngineReserve(plan, intent, Math.Max(oldPages, replacementPages));
+            // The index directory includes dropped trees with no root registration.
+            // Visit only retiring owners, and count registered trees once via their walk.
+            long strandedPages = 0, strandedWal = 0;
+            if (retiredHeaps.Count != 0)
+            {
+                var cleared = new byte[Page.Size];
+                var zero = new byte[Page.Size];
+                foreach (ulong owner in retiredHeaps)
+                {
+                    foreach (var page in _database.DataStorage.GetOwnerIndexPages(owner))
+                    {
+                        token.ThrowIfCancellationRequested();
+                        if (registeredHeapPages.Contains((long)page)) { continue; }
+                        using var handle = _database.DataStorage.PageManager.GetPage(page);
+                        if (handle.Page.Type == PageType.Index && handle.Page.OwnerId == owner)
+                        {
+                            strandedPages++;
+                            strandedWal += JointStrandedPageWal(handle.Page, cleared, zero);
+                        }
+                    }
+                }
+            }
+            _jointMinimumReclamationBytes = Math.Max(oldPages * (Page.Size + 46) + strandedWal,
+                replacementPages * (Page.Size + 46));
+            oldPages += strandedPages;
+            ConfigureJointEngineReserve(plan, intent, Math.Max(oldPages, replacementPages), replacementPages != 0);
             long replacement = Math.Max(0, replacementPages - _database.DataStorage.PageManager.FreePageCount) * Page.Size;
             JointSpaceReplacementBytes = replacement;
             // RegisterTouch may log a full pre-image (including spill); commit logs
@@ -163,15 +215,29 @@ internal sealed partial class SqlSchemaProvisioner
             }
             JointCopyCheckpointThreshold = JointCopyCheckpointBytes;
             long preferred = _database.Engine.EngineOptions.CheckpointJournalSize;
+            long availableNow = _database.Engine.GetAvailableMigrationBytes(_database.Name);
+            // A whole budget available now also permits newly added space. Otherwise
+            // N is compared at its original pre-intent boundary; the live remainder
+            // check below protects against other writers and sparse pending growth.
+            long availableAtBoundary = Math.Max(availableBeforeIntent ?? availableNow, availableNow);
             // Kept heaps need only tree copies. Buy fewer forced flushes with the
             // engine's journal budget when admission can afford it; a small volume
             // retains the bounded 16 MiB route instead of refusing this optimization.
             if (plan.Tables.All(item => item.KeepsOwner || item.Previous is null) && preferred > JointCopyCheckpointBytes &&
-                Need(preferred) <= _database.Engine.GetAvailableMigrationBytes(_database.Name))
+                JointSpaceFloor(intent) + Need(preferred) <= availableAtBoundary && Need(preferred) <= availableNow)
             { JointCopyCheckpointThreshold = preferred; }
-            JointSpaceNeed = Need(JointCopyCheckpointThreshold);
+            // F separately pays for saving kind 9. V pays for publication and E
+            // for discard/reclamation: none of those later phase budgets is spent
+            // a second time by intent preparation. The reported boundary follows
+            // object reservations and precedes the intent bracket.
+            long intentBytes = JointSpaceFloor(intent);
+            JointSpaceNeed = intentBytes + (plan.Tables.Length == 0 && plan.Dropped.Length == 0
+                ? intentBytes : Need(JointCopyCheckpointThreshold));
+            if (plan.Tables.Length == 0 && plan.Dropped.Length == 0)
+            { JointSpaceDiscardBytes = intentBytes; JointSpacePublicationBytes = 0; }
             JointSpaceIndexPages = actualIndexPages;
-            CheckJointSpace(JointSpaceNeed);
+            CheckJointSpace(JointSpaceNeed, availableAtBoundary);
+            if (availableBeforeIntent is not null) { CheckJointSpace(JointSpaceNeed - intentBytes); }
         }
     }
 
@@ -199,7 +265,7 @@ internal sealed partial class SqlSchemaProvisioner
             using var handle = storage.PageManager.GetPage((PageId)root);
             var body = handle.Page.AsBodySpan();
             if (handle.Page.Type != PageType.Index || handle.Page.OwnerId != owner ||
-                BinaryPrimitives.ReadUInt16LittleEndian(body) != 0x5442 || body[2] != 2 || body[3] is not (1 or 2))
+                BinaryPrimitives.ReadUInt16LittleEndian(body) != 0x5442 || body[2] != BTreeIndexManager.FormatVersion || body[3] is not (1 or 2))
             { throw new StorageCorruptionException(handle.Id, ErrorMessages.JointIndexShapeInvalid); }
             if (height == 1)
             {
@@ -221,7 +287,7 @@ internal sealed partial class SqlSchemaProvisioner
     // checks before EVERY owner's bracket, independently of worker cadence.
     // Include both page images and bracket frames in that overshoot. Dirty
     // pools need extra disk blocks only on strategies with sparse data growth.
-    private void ConfigureJointEngineReserve(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent, long minimumPages)
+    private void ConfigureJointEngineReserve(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent, long minimumPages, bool allocatesPages)
     {
         checked
         {
@@ -241,7 +307,7 @@ internal sealed partial class SqlSchemaProvisioner
             long overshoot = JointBracketBytes(SqlTableReclamation.BatchSize, 0);
             long threshold = _database.Engine.EngineOptions.CheckpointJournalSize;
             _jointReclamationLimit = threshold == 0 ? long.MaxValue : threshold + overshoot;
-            long dirtyPools = _database.Engine.SparseDataGrowth(_database.Name)
+            long dirtyPools = allocatesPages && _database.Engine.SparseDataGrowth(_database.Name)
                 ? _database.Engine.EngineOptions.BufferPoolCapacity + SqlDatabaseEngine.CatalogBufferPoolPages * Page.Size : 0;
             _jointReserveBase = JointSpaceFloor(intent) + dirtyPools;
         }
@@ -252,7 +318,8 @@ internal sealed partial class SqlSchemaProvisioner
         checked
         {
             long pages = Math.Max(_jointMinimumPages, preparedPages);
-            long whole = pages * (Page.Size + 46) + (DivideUp(pages, SqlTableReclamation.BatchSize) + _jointReclamationOwners) * 152;
+            long whole = Math.Max(_jointMinimumReclamationBytes, preparedPages * (Page.Size + 46)) +
+                (DivideUp(pages, SqlTableReclamation.BatchSize) + _jointReclamationOwners) * 152;
             long components = _jointReserveBase + Math.Min(whole, _jointReclamationLimit);
             return components + Math.Max(1024 * 1024, DivideUp(components, 4));
         }
@@ -408,10 +475,10 @@ internal sealed partial class SqlSchemaProvisioner
     }
 
     // Storage's public owner snapshots contain only heap pages. Walk registered trees
-    // locally on the worker rather than adding a public Storage bridge. B-tree format 2:
+    // locally on the worker rather than adding a public Storage bridge. B-tree format 3:
     // BTreeNode.cs documents the 32-byte header, directory, tiebreakers and child slots.
     // Work/retention is O(index pages), independent of all other owners. No row decode.
-    private (long Pages, int Height, long Bytes) CountJointIndexPages(long root, ulong owner, CancellationToken token)
+    private (long Pages, int Height, long Bytes) CountJointIndexPages(long root, ulong owner, CancellationToken token, HashSet<long>? registered = null)
     {
         var pending = new Stack<(long Page, int Depth)>();
         var seen = new HashSet<long>();
@@ -423,10 +490,11 @@ internal sealed partial class SqlSchemaProvisioner
             token.ThrowIfCancellationRequested();
             if (next.Page <= 0 || next.Page >= _database.DataStorage.PageManager.PageCount || !seen.Add(next.Page))
             { throw new StorageCorruptionException((PageId)next.Page, ErrorMessages.JointIndexShapeInvalid); }
+            registered?.Add(next.Page);
             using var handle = _database.DataStorage.PageManager.GetPage((PageId)next.Page);
             var body = handle.Page.AsBodySpan();
             if (handle.Page.Type != PageType.Index || handle.Page.OwnerId != owner ||
-                BinaryPrimitives.ReadUInt16LittleEndian(body) != 0x5442 || body[2] != 2 || body[3] is not (1 or 2))
+                BinaryPrimitives.ReadUInt16LittleEndian(body) != 0x5442 || body[2] != BTreeIndexManager.FormatVersion || body[3] is not (1 or 2))
             { throw new StorageCorruptionException(handle.Id, ErrorMessages.JointIndexShapeInvalid); }
             height = Math.Max(height, next.Depth);
             int count = BinaryPrimitives.ReadUInt16LittleEndian(body[4..]);
@@ -458,5 +526,58 @@ internal sealed partial class SqlSchemaProvisioner
             }
         }
         return (seen.Count, height, leafBytes);
+    }
+
+    // A stranded tree is immutable: no registration can supply it to a writer or
+    // pruner. FreeOwnerPages clears the body, retypes the page, clears its owner,
+    // and initializes its slotted header. Measure both WAL encodings exactly:
+    // optional full pre-image + delta/committed image + 8-byte base + two frames.
+    // PageImageCodec's length-only walk masks bytes 8..19, uses 32-byte blocks,
+    // 4-byte run headers, and replaces deltas > B/2 when image <= delta+64.
+    private static unsafe long JointStrandedPageWal(Page page, Span<byte> cleared, ReadOnlySpan<byte> zero)
+    {
+        var before = new ReadOnlySpan<byte>(page.Pointer, Page.Size);
+        before[..Page.HeaderSize].CopyTo(cleared);
+        cleared[Page.HeaderSize..].Clear();
+        fixed (byte* pointer = cleared)
+        {
+            var after = new Page(pointer);
+            after.Type = PageType.Reclaimed; after.OwnerId = 0;
+            new SlottedPage(after).Initialize();
+        }
+        int image = JointRunBytes(zero, before);
+        int delta = JointRunBytes(before, cleared);
+        if (delta > Page.Size / 2)
+        {
+            int committed = JointRunBytes(zero, cleared);
+            if (committed <= delta + 64) { delta = committed; }
+        }
+        return image + delta + 8L + 2 * 38;
+    }
+
+    private static int JointRunBytes(ReadOnlySpan<byte> before, ReadOnlySpan<byte> after)
+    {
+        static int Segment(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+        {
+            int first = left.CommonPrefixLength(right);
+            if (first == left.Length) { return 0; }
+            int end = left.Length;
+            while (left[end - 1] == right[end - 1]) { end--; }
+            return 4 + end - first;
+        }
+        int bytes = Segment(before[..8], after[..8]) + Segment(before[20..32], after[20..32]);
+        int position = 32;
+        while (position < Page.Size)
+        {
+            position += before[position..].CommonPrefixLength(after[position..]);
+            if (position == Page.Size) { break; }
+            int start = position;
+            int end = (start / 32 + 1) * 32;
+            while (end < Page.Size && !before.Slice(end, 32).SequenceEqual(after.Slice(end, 32))) { end += 32; }
+            position = end;
+            while (before[end - 1] == after[end - 1]) { end--; }
+            bytes += 4 + end - start;
+        }
+        return bytes;
     }
 }

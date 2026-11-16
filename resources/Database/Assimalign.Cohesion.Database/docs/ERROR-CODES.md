@@ -69,6 +69,7 @@ error and has no production diagnostic code.
 | COHDBS001 | CK06001 | Storage format refusal |
 | COHDBS002 | CK06002 | Storage offline |
 | COHDBS003 | CK06003 | Record or page corruption |
+| New (#1283) | CK06006 | Write admission paused for a pending journal checkpoint (Degraded health) |
 | COHDBI001 | CK06101 | Index format refusal |
 | COHDBI002 | CK06102 | Index corruption |
 | COHDBP001 | CK07001 | Diagnostic truncation notice |
@@ -78,6 +79,13 @@ error and has no production diagnostic code.
 | COHDBO001 | CK08001 | Listener option refusal |
 | COHDBO002 | CK08002 | Session count refusal |
 | COHDBO003 | CK08003 | Server timeout refusal |
+
+SQL root sort spilling (#1789, SQ-L2b) carries CK05001–CK05006 as located SQL execution or
+delivery errors, retaining each identity. Temporary I/O never becomes a durable-storage
+failure, aborts an explicit transaction, or takes a database offline, including aggregated
+temporary close failures. CS05067 remains the memory/codec/eligibility refusal and also
+reports eight undisposed SQL spilled results or exhausted active-reader workspace;
+no new diagnostic identity is allocated.
 
 ## Sql migration
 
@@ -133,7 +141,7 @@ structured-carrier messages remain unprefixed.
 | SQL0001 | CS00001 | Language/syntax |
 | SQL0002 | CS00002 | Language/syntax |
 | SQL0003 | CS00003 | Language/syntax |
-| SQL0004 | CS00004 | Language/syntax |
+| SQL0004 | CS00004 | Retired (E3): non-built-in type names are left to the engine catalog; identity remains reserved |
 | SQL0005 | CS00005 | Language/syntax |
 | SQL0006 | CS00006 | Language/syntax |
 | SQL0007 | CS00007 | Language/syntax |
@@ -253,7 +261,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
-| COHSQLP004 | CS03104 | Inline per-step schema application/compensation failure; deferred jobs use CS03402 |
+| COHSQLP004 | CS03104 | Retired (#1778): every schema apply uses joint publication and CS03402/CS03403 |
 | COHSQLP005 | CS03105 | Schema/constraints |
 | New (#1447, SQ-A3) | CS03402 | Joint preparation/space admission failed or unpublished target/route discarded; old schema retained, unsafe-storage latches still apply |
 | New (#1447, SQ-A3 fix) | CS03403 | Joint publication commit unconfirmed; recovery determines old/new schema |
@@ -299,7 +307,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); plain SELECT join buffers, matches, groups, aggregate inputs, sorting/top-N, output/DISTINCT, retained results, relation/subquery caches and set state share the grant; CTAS admits kept rows, independent of capacity (#1776, #1762) |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); plain SELECT join buffers, matches, groups, aggregate inputs, sorting/top-N, output/DISTINCT, retained results, relation/subquery caches and set state share the grant; SQL spilled-result reader workspace, retained decoded rows and decoding overlap share the result grant; application-produced binary rows/keys and an undeliverable first reader refuse spilling and a session caps undisposed spilled results at eight; CTAS admits kept rows, independent of capacity (#1776, #1762) |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
@@ -328,6 +336,7 @@ structured-carrier messages remain unprefixed.
 | New (#1722, SQ-N2) | CS05094 | SQL/JSON path parse size, statement work or transient result memory budget exceeded (54000) |
 | New (#1724, SQ-C1) | CS05095 | A streaming COPY consumer was given another statement kind |
 | New (#1724, SQ-C1) | CS05096 | COPY TO requires its SQL outbound-stream capability and consumer API |
+| New (#1792, SQ-J3 fix) | CS05097 | Syntactic or expanded target list exceeds 1,664 entries (54011); reports limit and attempted count |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -511,7 +520,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
 | COHDBG018 | CG06018 | Storage/durability |
-| New (#1738, GQ-D1; #1806, GQ-T1) | CG06019 | Format — graph catalog record version differs from v3; recreate database, no legacy reader |
+| New (#1738, GQ-D1; #1806, GQ-T1) | CG06019 | Format — graph catalog record version differs from v4; recreate database, no legacy reader |
 | COHDBG005 | CG07005 | Protocol/transport |
 | COHDBG016 | CG07016 | Protocol/transport |
 | COHDBG021 | CG08021 | Configuration |
@@ -584,8 +593,10 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK04011 | A transaction has reached the supported limit of 65,535 open write streams (#1726) | — |
 | CK04012 | Savepoint control requires an explicit transaction with an owned kernel binding (#1726) | — |
 | CK04013 | The named savepoint does not exist in the current transaction (#1726) | — |
+| CK04014 | Journal checkpoint admission wait canceled by a statement deadline, or refused while retaining metadata/gates (#1283) | 57014 |
 | CK06004 | Interrupted creation/drop left an orphan directory | — |
 | CK06005 | Physical data or catalog file set is absent | — |
+| CK06006 | Write admission paused for a pending journal checkpoint; persistent failures retain the offline window (#1283) | — |
 | CK07003 | Session operations overlap | — |
 | CK07004 | Session is closed | — |
 | CK07005 | SQL outbound stream has invalid request parameters, ordering, payload size or terminal counters | — |

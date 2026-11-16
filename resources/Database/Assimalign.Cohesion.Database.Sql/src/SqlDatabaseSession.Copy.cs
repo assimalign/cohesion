@@ -89,9 +89,16 @@ public sealed partial class SqlDatabaseSession
     /// <inheritdoc />
     protected override async ValueTask DisposeAsyncCore()
     {
-        if (Volatile.Read(ref _copyOperation) is not { } operation) { return; }
-        try { await operation.CancelAsync().ConfigureAwait(false); }
-        finally { await operation.Completion.Task.ConfigureAwait(false); }
+        try { if (Database.Engine.TempSpace is not null) { SqlSpillLifetime.Close(this); } }
+        finally
+        {
+            // A failed temporary close must still cancel/join the session's active export.
+            if (Volatile.Read(ref _copyOperation) is { } operation)
+            {
+                try { await operation.CancelAsync().ConfigureAwait(false); }
+                finally { await operation.Completion.Task.ConfigureAwait(false); }
+            }
+        }
     }
 
     [System.Diagnostics.DebuggerDisplay("CopyOperation")]

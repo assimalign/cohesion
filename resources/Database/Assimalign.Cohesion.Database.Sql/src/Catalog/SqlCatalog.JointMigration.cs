@@ -53,7 +53,7 @@ public sealed partial class SqlCatalog
             token.ThrowIfCancellationRequested();
             ulong owner = _nextObjectId;
             using var admission = TransactionCheckpointInterlock.ForStorage(_storage)
-                .Enter("SqlCatalog", unchecked((long)owner), token);
+                .Enter("SqlCatalog", unchecked((long)owner), token, waitForAdmission: false);
             using var transaction = _storage.BeginTransaction("SqlCatalog", unchecked((long)owner));
             var location = _storage.InsertRow(transaction, owner, SqlReclamationRecord.Encode(owner, table.Schema, table.Name));
             var counter = PersistCounter(transaction, checked(owner + 1), _ddlGeneration);
@@ -135,7 +135,7 @@ public sealed partial class SqlCatalog
     }
 
     internal ValueTask DiscardJointIntentAsync(CancellationToken cancellationToken,
-        IReadOnlyList<SqlCatalogTable>? prepared = null, IReadOnlyList<ulong>? preparedTrees = null)
+        IReadOnlyList<SqlCatalogTable>? prepared = null, IReadOnlyList<ulong>? preparedTrees = null, bool drain = false)
     {
         BeforeJointDiscard?.Invoke();
         lock (_sync)
@@ -143,7 +143,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             if (_pendingMigration is null && prepared is not { Count: > 0 }) { return default; }
-            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken);
+            using var checkpointAdmission1 = TransactionCheckpointInterlock.ForStorage(_storage).Enter("SqlCatalog", cancellationToken: cancellationToken, waitForAdmission: false, drain: drain);
             using var transaction = _storage.BeginTransaction("SqlCatalog");
             foreach (var location in _pendingMigrationLocations)
             { _storage.DeleteRow(transaction, location.PageId, location.SlotIndex); }

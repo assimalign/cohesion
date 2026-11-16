@@ -343,7 +343,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// checkpoint record. Before the first checkpoint, includes the whole journal.
     /// </summary>
     /// <remarks>A concurrent checkpoint can make this advisory count briefly stale.</remarks>
-    internal long JournalBytesSinceCheckpoint => _journal?.BytesSinceCheckpoint ?? 0;
+    public long JournalBytesSinceCheckpoint => _journal?.BytesSinceCheckpoint ?? 0;
 
     /// <summary>
     /// Gets or sets the appended journal bytes at which the storage asks for a checkpoint
@@ -2339,6 +2339,37 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Gets a point-in-time snapshot of the index pages currently belonging to the
+    /// specified owner, in ascending page order, including unregistered trees.
+    /// </summary>
+    /// <param name="ownerId">The owner whose index pages to list.</param>
+    /// <returns>The owner's index pages; empty when the owner holds none.</returns>
+    /// <remarks>
+    /// The snapshot is independent of later allocations and releases. Released pages
+    /// leave the directory when their transaction commits. Open rebuilds the directory
+    /// from recovered page headers, including pages of trees no longer registered.
+    /// </remarks>
+    public IReadOnlyList<PageId> GetOwnerIndexPages(ulong ownerId)
+    {
+        lock (_ownerLock)
+        {
+            if (!_indexOwnerPages.TryGetValue(ownerId, out var pages) || pages.Count == 0)
+            {
+                return Array.Empty<PageId>();
+            }
+
+            var result = new PageId[pages.Count];
+            int index = 0;
+            foreach (long page in pages)
+            {
+                result[index++] = (PageId)page;
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>
     /// Releases a bounded batch of the specified owner's data and index pages inside a
     /// transaction: each page is retyped <see cref="PageType.Reclaimed"/> under the
     /// write-ahead log (a rollback restores the chain from the pre-image), and
@@ -2897,8 +2928,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         try
         {
             // Pages read under a pin first, with no latch held: their readers need no latch, and
-            // need not see them restored together with the latched structures' pages, because the
-            // failed bracket's index entries are invisible to every snapshot.
+            // need not see them restored together with the latched structures' pages. Stamped
+            // index versions use snapshot visibility; unversioned physical entries keep their
+            // inline payload on the latched page itself. Mutable pages referenced by an
+            // unversioned entry must share its latch to restore atomically.
             bool latchedPages = false;
             foreach (var (pageId, preImage) in transaction.PreImages)
             {

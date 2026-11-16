@@ -60,11 +60,11 @@ internal sealed partial class SqlPlanExecutor
             declaredDefault = BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on '{plan.Table.Name}'", _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
         }
 
-        if (column.MissingValueLiteral is { } missing &&
-            (previous.Type.MaxLength != column.Type.MaxLength || previous.Type.Precision != column.Type.Precision))
+        if (column.Type.Type is DatabaseType.String or DatabaseType.Character && column.MissingValueLiteral is { } missing &&
+            previous.Type.MaxLength != column.Type.MaxLength)
         {
-            // Invisible retained versions still decode missing tails through this definition.
-            // Validate and bind the literal under the replacement type before publishing it.
+            // Character assignment may trim or pad. Keep that existing facet
+            // contract; joint character-width changes use physical replacement.
             var frozen = new SqlCatalogColumn(column.Name, column.Type, true, missing, column.Collation);
             try
             {

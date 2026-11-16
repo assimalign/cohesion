@@ -233,10 +233,10 @@ public class BTreeEntryOrderTests
 
     /// <summary>
     /// Reads the separators of every internal node under <paramref name="root"/> from
-    /// the pages (format 2: kind at 3, entry count at 4, leftmost child at 24, directory
+    /// the pages (format 3: kind at 3, entry count at 4, leftmost child at 24, directory
     /// at 32; an internal entry is <c>[u16 keyLen | tiebreaker &lt;&lt; 14][key][8 bytes
     /// per tiebreaker attribute][i64 child]</c>): the tiebreaker attributes each keeps
-    /// and its key length. Every page visited must carry the format-2 stamp.
+    /// and its key length. Every page visited must carry the format-3 stamp.
     /// </summary>
     private static List<(int Tiebreaker, int KeyLength)> ReadSeparators(Storage.Storage storage, long root)
     {
@@ -249,7 +249,7 @@ public class BTreeEntryOrderTests
             long pageId = pending.Pop();
             using var handle = storage.PageManager.GetPage(pageId);
             var body = handle.Page.AsBodySpan();
-            LegacyBTreePages.IsFormat2Node(body).ShouldBeTrue($"page {pageId} carries the format-2 stamp");
+            LegacyBTreePages.IsCurrentNode(body).ShouldBeTrue($"page {pageId} carries the format-3 stamp");
 
             if (body[3] != 2)
             {
@@ -524,7 +524,7 @@ public class BTreeEntryOrderTests
 
     /// <summary>
     /// Descends from <paramref name="root"/> along the first or the last child of every
-    /// internal node (format 2: kind at 3, entry count at 4, leftmost child at 24,
+    /// internal node (format 3: kind at 3, entry count at 4, leftmost child at 24,
     /// directory at 32).
     /// </summary>
     private static long DescendEdge(Storage.Storage storage, long root, bool rightmost)

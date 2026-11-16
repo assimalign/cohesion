@@ -103,6 +103,7 @@ public static class GqlLanguageProfile
         GqlClauses.ReleaseSavepoint,
         GqlClauses.RollbackToSavepoint,
         GqlClauses.CreateIndex,
+        GqlClauses.CreateTextIndex,
         GqlClauses.DropIndex,
         GqlClauses.CreateConstraint,
         GqlClauses.DropConstraint,

@@ -6,7 +6,9 @@ connection open, and the exact authenticated server session accepts the next que
 ## Savepoint lifecycle conformance (#1726, XT-5)
 
 Explicit wire lifecycle probes require canceled-before-dispatch controls to take no kernel admission;
-the shared client breaks the canceled exchange, and lease return must scrub all scopes. They also require
+the shared client breaks the canceled exchange and aborts its transport (#1789), so root rollback
+and scope cleanup complete before the caller disposes the lease. The prior expectation that the
+transaction remains active until lease return is superseded by immediate transport teardown. They also require
 offline storage to outrank CK04009 with a complete Ready E exchange, and session/database close to
 drain a physically admitted control on both transports.
 

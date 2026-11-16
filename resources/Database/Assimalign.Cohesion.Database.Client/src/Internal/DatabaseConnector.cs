@@ -321,10 +321,14 @@ internal sealed class DatabaseConnector
         {
             throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ConnectorExecuteAsyncDatabaseClient2, exception));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            // Cancellation or a failed decoder may leave an unfinished response.
+            // A broken exchange cannot be reused. End the transport now so a peer blocked
+            // delivering its response can release server resources before this lease is disposed.
             _isOpen = false;
+            try { _connection?.Abort(); }
+            catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
+            { exception.Data[nameof(DatabaseConnector)] = cleanup; } // Preserve cancellation for open transport implementations.
             throw;
         }
         catch

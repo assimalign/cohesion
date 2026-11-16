@@ -402,6 +402,7 @@ public sealed class GqlProfileExecutionTests
             [
                 new("SHOW LABELS", [["audit", _personLabelId, "Person"], ["audit", _robotLabelId, "Robot"]]),
             ],
+            [GqlClauses.CreateTextIndex] = [Mutation("CREATE TEXT INDEX ix FOR (n:Fresh) ON (n.p)", 1)],
             [GqlClauses.CreateIndex] = [Mutation("CREATE INDEX ix FOR (n:Fresh) ON (n.p)", 1)],
             [GqlClauses.DropIndex] = [Mutation("DROP INDEX ix IF EXISTS", 0)],
             [GqlClauses.CreateConstraint] = [Mutation("CREATE CONSTRAINT c FOR (n:Fresh) REQUIRE n.p IS NOT NULL", 1)],
@@ -615,7 +616,8 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Intersect or GqlClauses.IntersectDistinct => query.Composite is { Operator: GqlCompositeOperator.Intersect },
         GqlClauses.IntersectAll => query.Composite is { Operator: GqlCompositeOperator.IntersectAll },
         GqlClauses.Otherwise => query.Composite is { Operator: GqlCompositeOperator.Otherwise },
-        GqlClauses.CreateIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false },
+        GqlClauses.CreateIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: false },
+        GqlClauses.CreateTextIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false, IsText: true },
         GqlClauses.DropIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: true },
         GqlClauses.CreateConstraint => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Constraint, Drop: false },
         GqlClauses.DropConstraint => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Constraint, Drop: true },

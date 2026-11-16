@@ -27,10 +27,11 @@ internal sealed class SqlSequenceExecution : IDisposable
     private object? _lastName;
     private SqlCatalogSequence? _lastResolved;
     private readonly CancellationToken _cancellationToken;
+    private readonly bool _waitForAdmission;
 
     private SqlSequenceExecution(SqlCatalog catalog, SqlSequenceSessionState session,
-        IReadOnlyList<SqlCatalogSequence> sequences, CancellationToken cancellationToken)
-    { _catalog = catalog; _session = session; _sequences = sequences; _previous = Current; _cancellationToken = cancellationToken; }
+        IReadOnlyList<SqlCatalogSequence> sequences, CancellationToken cancellationToken, bool waitForAdmission)
+    { _catalog = catalog; _session = session; _sequences = sequences; _previous = Current; _cancellationToken = cancellationToken; _waitForAdmission = waitForAdmission; }
 
     internal static SqlSequenceExecution? Current => _current.Value;
     internal static Action<TransactionContext>? AfterSequenceGrant { get; set; }
@@ -76,7 +77,7 @@ internal sealed class SqlSequenceExecution : IDisposable
     // Grants belong to that owner, including failed statements, cancellation and disposal;
     // the session/coordinator's existing commit/rollback/timeout cleanup releases them.
     internal static async ValueTask<SqlSequenceExecution> OpenAsync(SqlCatalog catalog, SqlStatementContext statement,
-        SqlSequenceSessionState session, CancellationToken cancellationToken, SqlSequenceUsage? usage = null)
+        SqlSequenceSessionState session, CancellationToken cancellationToken, SqlSequenceUsage? usage = null, bool waitForAdmission = true)
     {
         // Identity/default binding pins an object id. One immutable incarnation needs no
         // temporary directory, LINQ ordering buffers or copied singleton collection.
@@ -90,7 +91,7 @@ internal sealed class SqlSequenceExecution : IDisposable
                 CheckGrant(statement, statement.DdlLockOwner);
                 sequence = catalog.FindSequence(id);
             }
-            return new SqlSequenceExecution(catalog, session, sequence?.Singleton ?? Array.Empty<SqlCatalogSequence>(), cancellationToken);
+            return new SqlSequenceExecution(catalog, session, sequence?.Singleton ?? Array.Empty<SqlCatalogSequence>(), cancellationToken, waitForAdmission);
         }
         var captured = (usage is null || usage.DynamicNames ? catalog.Sequences : ResolveNames(catalog, session, usage))
             .DistinctBy(sequence => sequence.ObjectId).OrderBy(sequence => sequence.ObjectId).ToArray();
@@ -104,7 +105,7 @@ internal sealed class SqlSequenceExecution : IDisposable
             var resolved = catalog.FindSequence(sequence.ObjectId);
             if (resolved?.ObjectId == sequence.ObjectId) { current.Add(resolved); }
         }
-        return new SqlSequenceExecution(catalog, session, current, cancellationToken);
+        return new SqlSequenceExecution(catalog, session, current, cancellationToken, waitForAdmission);
     }
 
     private static IReadOnlyList<SqlCatalogSequence> ResolveNames(SqlCatalog catalog, SqlSequenceSessionState session, SqlSequenceUsage usage)
@@ -180,7 +181,7 @@ internal sealed class SqlSequenceExecution : IDisposable
             if (value is not (sbyte or short or int or long) || isCalled is not bool called)
             { throw new SqlPlanningException("CS03077", ErrorMessages.SequenceArgumentsInvalid); }
             long number = Convert.ToInt64(value, CultureInfo.InvariantCulture);
-            _catalog.SetSequence(sequence, number, called);
+            _catalog.SetSequence(sequence, number, called, _cancellationToken);
             if (called) { _session.Values[sequence.ObjectId] = number; }
             return number;
         }
@@ -188,7 +189,7 @@ internal sealed class SqlSequenceExecution : IDisposable
         {
             if (_rowValues?.TryGetValue(sequence.ObjectId, out long existing) == true) { return existing; }
         }
-        long next = _catalog.AllocateSequence(sequence.ObjectId);
+        long next = _catalog.AllocateSequence(sequence.ObjectId, _cancellationToken, _waitForAdmission);
         _session.Values[sequence.ObjectId] = next;
         _session.Last = sequence.ObjectId;
         if (operation == "NEXT VALUE FOR") { (_rowValues ??= new())[sequence.ObjectId] = next; }
@@ -197,7 +198,7 @@ internal sealed class SqlSequenceExecution : IDisposable
 
     internal long AllocatePreparedIdentity(SqlCatalogSequence sequence)
     {
-        long value = _catalog.AllocateSequence(sequence);
+        long value = _catalog.AllocateSequence(sequence, _cancellationToken, _waitForAdmission);
         _session.Values[sequence.ObjectId] = value; _session.Last = sequence.ObjectId;
         return value;
     }
@@ -208,7 +209,7 @@ internal sealed class SqlSequenceExecution : IDisposable
         for (int i = 0; i < _sequences.Count; i++)
         { var candidate = _sequences[i]; if (candidate.IsIdentity && candidate.OwnerTableId == tableId && string.Equals(candidate.OwnerColumn, column, StringComparison.OrdinalIgnoreCase)) { sequence = candidate; break; } }
         if (sequence is null) { throw new SqlPlanningException("CS04067", ErrorMessages.SequenceChanged); }
-        long value = _catalog.AllocateSequence(sequence.ObjectId);
+        long value = _catalog.AllocateSequence(sequence.ObjectId, _cancellationToken, _waitForAdmission);
         _session.Values[sequence.ObjectId] = value;
         _session.Last = sequence.ObjectId;
         return value;

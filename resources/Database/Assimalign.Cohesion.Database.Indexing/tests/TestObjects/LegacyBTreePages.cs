@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 /// <remarks>
 /// The offsets are the documented page layouts: the storage page header (96 bytes,
 /// checksum at 16, page type at 21, <c>PageType.Index</c> = 2) and the B-tree node
-/// body, format 2 (<c>"BT"</c> magic at 0, version at 2, kind at 3, entry count at 4,
+/// body, format 3 (<c>"BT"</c> magic at 0, version at 2, kind at 3, entry count at 4,
 /// data start at 6, next leaf at 8, previous leaf at 16, leftmost child at 24,
 /// directory at 32) and format 1 (kind at 0, entry count at 1, data start at 3, next
 /// leaf at 5, previous leaf at 13, leftmost child at 21, directory at 29). They are
@@ -40,23 +40,23 @@ public static class LegacyBTreePages
     public delegate void BodyRewriter(Span<byte> body);
 
     /// <summary>
-    /// Gets a value indicating whether <paramref name="body"/> is a format-2 node.
+    /// Gets a value indicating whether <paramref name="body"/> is a format-3 node.
     /// </summary>
-    public static bool IsFormat2Node(ReadOnlySpan<byte> body)
-        => body[0] == (byte)'B' && body[1] == (byte)'T' && body[2] == 2;
+    public static bool IsCurrentNode(ReadOnlySpan<byte> body)
+        => body[0] == (byte)'B' && body[1] == (byte)'T' && body[2] == 3;
 
     /// <summary>
-    /// Rewrites a format-2 node body into the format-1 layout: the header written by
+    /// Rewrites a format-3 node body into the format-1 layout: the header written by
     /// engines before #1194, which began with the node kind and had no magic or
     /// version. The entry bytes stay where they are; their offsets are relative to the
-    /// body, so a leaf, and an internal node whose separators keep no tiebreaker, are
+    /// body, so a payload-free leaf, and an internal node whose separators keep no tiebreaker, are
     /// then exactly the format-1 node an older engine wrote.
     /// </summary>
     public static void DowngradeToFormat1(Span<byte> body)
     {
-        if (!IsFormat2Node(body))
+        if (!IsCurrentNode(body))
         {
-            throw new InvalidOperationException("The page is not a format-2 B-tree node.");
+            throw new InvalidOperationException("The page is not a format-3 B-tree node.");
         }
 
         byte kind = body[3];
@@ -78,21 +78,21 @@ public static class LegacyBTreePages
     }
 
     /// <summary>
-    /// Stamps a format-2 node body with another format version, as a newer engine
+    /// Stamps a format-3 node body with another format version, as a newer engine
     /// would.
     /// </summary>
     public static void StampVersion(Span<byte> body, byte version)
     {
-        if (!IsFormat2Node(body))
+        if (!IsCurrentNode(body))
         {
-            throw new InvalidOperationException("The page is not a format-2 B-tree node.");
+            throw new InvalidOperationException("The page is not a format-3 B-tree node.");
         }
 
         body[2] = version;
     }
 
     /// <summary>
-    /// Applies <paramref name="rewrite"/> to every format-2 node page of a closed data
+    /// Applies <paramref name="rewrite"/> to every format-3 node page of a closed data
     /// file and recomputes its format-4 page checksum, so the test isolates the B-tree
     /// format refusal from physical page corruption.
     /// </summary>
@@ -105,7 +105,7 @@ public static class LegacyBTreePages
         for (int offset = 0; offset + PageSize <= file.Length; offset += PageSize)
         {
             var page = file.AsSpan(offset, PageSize);
-            if (page[pageTypeOffset] != indexPageType || !IsFormat2Node(page[PageHeaderSize..]))
+            if (page[pageTypeOffset] != indexPageType || !IsCurrentNode(page[PageHeaderSize..]))
             {
                 continue;
             }
@@ -133,7 +133,7 @@ public static class LegacyBTreePages
     }
 
     /// <summary>
-    /// Rewrites every format-2 node page of an open storage into the format-1 layout,
+    /// Rewrites every format-3 node page of an open storage into the format-1 layout,
     /// in one committed storage transaction (the page writes are journaled like any
     /// other, so the storage stays consistent).
     /// </summary>
@@ -148,7 +148,7 @@ public static class LegacyBTreePages
             bool candidate;
             using (var handle = storage.PageManager.GetPage(pageId))
             {
-                candidate = handle.Page.Type == PageType.Index && IsFormat2Node(handle.Page.AsBodySpan());
+                candidate = handle.Page.Type == PageType.Index && IsCurrentNode(handle.Page.AsBodySpan());
             }
 
             if (!candidate)

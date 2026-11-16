@@ -310,8 +310,8 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// Persists the index manager's current registrations when they differ from
     /// the stored set. A tree's root page stays fixed through splits (#1159), so
     /// this normally finds nothing to write; it runs at the engine's persistence
-    /// points (checkpoint passes and disposal), in addition to the creation
-    /// bootstrap itself, as a backstop.
+    /// point (disposal), in addition to the creation bootstrap itself, as a
+    /// backstop. Checkpoints never acquire catalog metadata locks.
     /// </summary>
     internal void SaveIndexRegistrationsIfChanged()
     {

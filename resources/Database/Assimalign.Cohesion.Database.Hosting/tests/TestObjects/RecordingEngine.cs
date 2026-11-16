@@ -63,6 +63,9 @@ internal sealed class RecordingEngine : DatabaseEngine
     /// <summary>Attaches a worker, whose pump starts at once.</summary>
     internal void AddWorker(DatabaseEngineWorker worker) => AttachWorker(worker);
 
+    internal void ConfigureAdmission(DatabaseInstance database, Storage.Storage storage)
+        => ConfigureJournalAdmission(database, 2, storage);
+
     protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
         => throw new NotSupportedException();
 

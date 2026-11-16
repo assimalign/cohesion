@@ -18,6 +18,101 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlLockWaitCollection.Name)]
 public sealed class SqlTableReclamationContextTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - A catalog pause interrupts physical acquisition under the metadata monitor (#1283)")]
+    public async Task CreateSchemaAsync_PhysicalWaitBecomesPaused_ShouldReleaseCatalogMonitor()
+    {
+        // Arrange: record entry into the ordinary physical semaphore wait.
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var queued = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var engine = SqlDatabaseEngine.Create("catalog-pause-race", new()
+        { CheckpointJournalSize = 0, CheckpointInterval = TimeSpan.FromHours(1), MaintenanceInterval = TimeSpan.FromHours(1) });
+        var database = await engine.CreateDatabaseAsync("db", ceiling.Token);
+        await using var reader = await database.CreateSessionAsync(ceiling.Token);
+        await reader.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY)", cancellationToken: ceiling.Token);
+        await reader.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: ceiling.Token);
+        var gate = TransactionCheckpointInterlock.ForStorage(database.CatalogStorage);
+        var holder = DedicatedTestTask.Run(() =>
+        {
+            using var admission = gate.Enter("LongHolder", cancellationToken: ceiling.Token);
+            held.Set(); release.Wait(ceiling.Token);
+        });
+        held.Wait(ceiling.Token);
+        var writing = DedicatedTestTask.Run(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new GateWaitSignal(queued));
+            database.Catalog.CreateSchemaAsync(new Catalog.SqlCatalogNamespace("refused"), ceiling.Token).GetAwaiter().GetResult();
+        });
+        try
+        {
+            await queued.Task.WaitAsync(ceiling.Token);
+            // Act: publishing a pause must interrupt that wait before the holder ends.
+            database.CatalogStorage.CheckpointJournalSize = 1; gate.JournalSizeLimit = 2;
+            gate.ObserveAdmissionPause().ShouldBeTrue();
+            await Should.ThrowAsync<TransactionAdmissionCanceledException>(() => writing.WaitAsync(ceiling.Token));
+            // Assert: _sync is available while the original physical holder still runs.
+            holder.IsCompleted.ShouldBeFalse();
+            await JournalAdmissionPauseTests.ReadRowsAsync(reader, "SELECT * FROM t", 1, ceiling.Token);
+            reader.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("scan");
+            await JournalAdmissionPauseTests.ReadRowsAsync(reader, "SELECT * FROM t WHERE id=1", 1, ceiling.Token);
+            reader.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldStartWith("seek:");
+            await reader.ExecuteAsync("BEGIN", cancellationToken: ceiling.Token);
+            await JournalAdmissionPauseTests.ReadRowsAsync(reader, "SELECT * FROM t", 1, ceiling.Token);
+            await reader.ExecuteAsync("ROLLBACK", cancellationToken: ceiling.Token);
+        }
+        finally
+        {
+            gate.JournalSizeLimit = 0; release.Set();
+            await holder.WaitAsync(ceiling.Token);
+            try { await writing.WaitAsync(ceiling.Token); } catch (TransactionAdmissionCanceledException) { }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - A data pause interrupts reclamation acquisition under its run lock (#1283)")]
+    public async Task RunBatch_PhysicalWaitBecomesPaused_ShouldReleaseRunLock()
+    {
+        // Arrange
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var queued = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var engine = SqlDatabaseEngine.Create("reclamation-pause-race", new()
+        { CheckpointJournalSize = 0, CheckpointInterval = TimeSpan.FromHours(1), MaintenanceInterval = TimeSpan.FromHours(1) });
+        var database = await engine.CreateDatabaseAsync("db", ceiling.Token);
+        await using var session = await database.CreateSessionAsync(ceiling.Token);
+        await session.ExecuteAsync("CREATE TABLE retired(id INT)", cancellationToken: ceiling.Token);
+        await session.ExecuteAsync("INSERT INTO retired VALUES(1)", cancellationToken: ceiling.Token);
+        var gate = TransactionCheckpointInterlock.ForStorage(database.DataStorage);
+        var holder = DedicatedTestTask.Run(() =>
+        {
+            using var admission = gate.Enter("LongHolder", cancellationToken: ceiling.Token);
+            held.Set(); release.Wait(ceiling.Token);
+        });
+        held.Wait(ceiling.Token);
+        await session.ExecuteAsync("DROP TABLE retired", cancellationToken: ceiling.Token);
+        database.TableReclamation.BeforeBatch = (_, _) => SynchronizationContext.SetSynchronizationContext(new GateWaitSignal(queued));
+        var running = DedicatedTestTask.Run(() => database.TableReclamation.RunBatch(ceiling.Token));
+        try
+        {
+            await queued.Task.WaitAsync(ceiling.Token);
+            // Act
+            database.DataStorage.CheckpointJournalSize = 1; gate.JournalSizeLimit = 2;
+            gate.ObserveAdmissionPause().ShouldBeTrue();
+            await running.WaitAsync(ceiling.Token);
+            // Assert: capture can take _runLock before the physical holder ends.
+            holder.IsCompleted.ShouldBeFalse();
+            database.TableReclamation.CaptureOpenContextsForTesting().ShouldBeEmpty();
+        }
+        finally
+        {
+            database.TableReclamation.BeforeBatch = null;
+            gate.JournalSizeLimit = 0; release.Set();
+            await holder.WaitAsync(ceiling.Token);
+            await running.WaitAsync(ceiling.Token);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Context barrier: waits while reclamation is queued at the data gate (#1283, #1764)")]
     public async Task CaptureOpenContextsForTesting_ReclamationQueuedAtGate_ShouldWaitWithoutLockInversion()
     {

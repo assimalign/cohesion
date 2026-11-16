@@ -332,7 +332,14 @@ public sealed class StorageTempSpaceTests : IDisposable
             {
                 events.Events.ShouldContain(e => e.EventId == 23);
                 using var statement = reopened.CreateStatement(8192);
-                using var retry = statement.CreateRun(); retry.Dispose();
+                // Process exit can precede the OS/filter driver's last lease-handle close.
+                // Require successful ownership, rather than racing one immediate retry.
+                while (true)
+                {
+                    try { using var retry = statement.CreateRun(); break; }
+                    catch (StorageTempException error) when (error.Code == StorageTempException.UnavailableCode)
+                    { await Task.Delay(10, timeout.Token); }
+                }
             }
             Directory.GetFiles(_directory, "*.ctmp").ShouldBeEmpty();
         }

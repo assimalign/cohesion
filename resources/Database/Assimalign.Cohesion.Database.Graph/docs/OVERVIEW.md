@@ -48,13 +48,19 @@ GQL selectors ANY/ALL, ANY/ALL SHORTEST and counted shortest paths/groups now pa
 EXPLAIN with endpoint-pair partitions and separate search prefilters
 under the statement work/memory budgets; see [selector execution](DESIGN.md#gql-path-selectors-execution-1734-gq-sp2sp3).
 
+CREATE TEXT INDEX builds ordinal, case-sensitive Unicode trigram postings for string equality,
+CONTAINS, STARTS WITH and ENDS WITH. Every seek rechecks the stored value; patterns shorter
+than three code points use a label scan. EXPLAIN reports the choice for bound parameters.
+Catalog v4 refuses earlier catalogs without writing; entity format remains 5. See
+[the text-index design](DESIGN.md#trigram-text-indexes-1644-ix-r1).
+
 `GraphSchema.Open` supplies session-bound label/type discovery, property metadata, ownership
 enforcement, database-wide node-property index names and independently named type/existence
 constraints. Named constraints validate existing data and share enforcement with property metadata;
 index/constraint drops preserve snapshot visibility. Its immutable GraphType model supports
 typed set/add/alter/drop/get and open node rules for implied labels, scalar types and NOT NULL.
 New types validate existing members before publication; edge enforcement and text graph-type
-DDL follow in GQ-T2. Catalog v3 refuses earlier catalogs. `AddGraph(name, graph => ...)` captures
+DDL follow in GQ-T2. Catalog v4 refuses earlier catalogs. `AddGraph(name, graph => ...)` captures
 construction through `IDatabaseApplicationBuilder` and returns that builder. At Build the callback
 configures the sealed `GraphDatabaseEngineBuilder`: its `Options` (copied at build), the databases
 it declares (`AddDatabase(name)`: opened or created by the build, never dropped while declared), a

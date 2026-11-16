@@ -376,6 +376,7 @@ public static partial class SqlExpressionRenderer
         SqlColumnReferenceExpression column => Column(column),
         SqlParameterExpression parameter => parameter.ParameterName,
         SqlStarExpression => "*",
+        SqlQualifiedStarExpression star => (star.SchemaName is null ? string.Empty : Identifier(star.SchemaName) + ".") + Identifier(star.TableName) + ".*",
         SqlDistinctExpression distinct => Operand(distinct.Left, concatLevel) +
             (distinct.IsNegated ? " IS NOT DISTINCT FROM " : " IS DISTINCT FROM ") + Operand(distinct.Right, comparisonLevel),
         SqlBooleanTestExpression test => Operand(test.Operand, concatLevel) + (test.IsNegated ? " IS NOT " : " IS ") + test.TruthValue.ToString().ToUpperInvariant(),
@@ -791,6 +792,7 @@ public static partial class SqlExpressionRenderer
             builder.Append(itemIndex == 0 ? clause : ", ").Append(Table(item.Table));
             foreach (var join in item.Joins)
             {
+                if (join.IsNatural) { builder.Append(" NATURAL"); }
                 builder.Append(join.JoinType switch
                 {
                     SqlJoinType.Inner => " INNER JOIN ",

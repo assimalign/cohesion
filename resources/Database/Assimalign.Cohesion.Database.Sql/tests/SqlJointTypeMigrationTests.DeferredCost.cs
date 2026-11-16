@@ -47,8 +47,8 @@ public sealed partial class SqlJointTypeMigrationTests
         _output.WriteLine($"Heap-owned replacement ({rows} rows, until #1808): 49a={measured.OldPages}; joint={measured.JointPages}; ratio={(double)measured.JointPages / measured.OldPages:P2}");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: nullable append inside another table's deferred plan rewrites until SQ-A6")]
-    public async Task ApplyAsync_DeferredFixNullableAppendUntilA6_ShouldRewritePopulatedOrders()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: nullable append inside another table's deferred plan keeps the heap")]
+    public async Task ApplyAsync_DeferredNullableAppend_ShouldKeepPopulatedOrders()
     {
         // Arrange: SQ-A6 extends KeepOwner to steps that were metadata-only at base.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -63,7 +63,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await writer.ExecuteAsync("INSERT INTO audit VALUES(1)", cancellationToken: guard.Token);
         long rewritten = 0;
         database.SchemaProvisioner.JointStage = phase =>
-        { if (phase == "IntentDurable") { database.Catalog.PendingMigration!.Steps.ShouldContain(step => step.Table == "orders" && step.Kind == "Joint/RewriteOwner"); } };
+        { if (phase == "IntentDurable") { database.Catalog.PendingMigration!.Steps.ShouldContain(step => step.Table == "orders" && step.Kind == "Joint/KeepOwner"); } };
         SqlPlanExecutor.RewriteStage = (phase, count) => { if (phase == "Copied") { rewritten = count; } };
         try
         {
@@ -71,7 +71,7 @@ public sealed partial class SqlJointTypeMigrationTests
             await database.SchemaProvisioner.ApplyAsync(Declare(true), guard.Token, deferDataScalingSteps: true);
             await WaitDoneAsync(database, guard.Token);
             // Assert
-            rewritten.ShouldBe(3);
+            rewritten.ShouldBe(0);
             (await RowsAsync(writer, "SELECT note FROM orders", guard.Token)).Length.ShouldBe(3);
         }
         finally { SqlPlanExecutor.RewriteStage = null; }

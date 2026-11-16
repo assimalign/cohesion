@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Shouldly;
 using Xunit;
@@ -16,6 +18,45 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </summary>
 public sealed class StorageOwnerChainTests
 {
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "GetOwnerIndexPages")]
+    private static extern IReadOnlyList<PageId> IndexDirectory(Storage storage, ulong owner);
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Index directory snapshots stay sorted and independent through commit and rollback (#1778)")]
+    public void GetOwnerIndexPages_AllocationAndRelease_ShouldReturnIndependentSortedSnapshots()
+    {
+        // Arrange
+        using var storage = ChainStorage.Create(new CrashSimulationStream(), new CrashSimulationStream(), poolCapacity: 64);
+        var expected = new List<long>();
+        foreach (ulong owner in new ulong[] { 17, 19, 17 })
+        {
+            using var transaction = storage.BeginTransaction();
+            using var page = storage.AllocatePageForWrite(transaction, PageType.Index, ownerId: owner);
+            if (owner == 17) { expected.Add((long)page.Id); }
+            page.MarkDirty(); transaction.Commit();
+        }
+        var snapshot = IndexDirectory(storage, 17);
+
+        // Act
+        using (var rollback = storage.BeginTransaction())
+        {
+            storage.FreeOwnerPages(rollback, 17).ShouldBe(2);
+            IndexDirectory(storage, 17).Select(page => (long)page).ShouldBe(expected);
+        }
+        IndexDirectory(storage, 17).Select(page => (long)page).ShouldBe(expected);
+        using (var release = storage.BeginTransaction())
+        {
+            storage.FreeOwnerPages(release, 17).ShouldBe(2);
+            release.Commit();
+        }
+
+        // Assert
+        snapshot.Select(page => (long)page).ShouldBe(expected.Order());
+        IndexDirectory(storage, 17).ShouldBeEmpty();
+        IndexDirectory(storage, 999).ShouldBeEmpty();
+        IndexDirectory(storage, 19).Count.ShouldBe(1);
+        storage.GetOwnerPages(17).ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Index owner pages survive allocation rollback and reclaim after reopen")]
     public void FreeOwnerPages_IndexOwners_ShouldRecoverAndReclaimWithoutJoiningRowScans()
     {

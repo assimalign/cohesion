@@ -447,13 +447,22 @@ internal sealed class SqlBoundTableCache
 
             if (column.MissingValueLiteral is { } text)
             {
-                var frozen = new SqlCatalogColumn(column.Name, column.Type, true, text, column.Collation);
+                // A historical missing value can outlive every visible row that used it.
+                // Numeric/binary values decode independently of today's assignment
+                // bounds; DDL checks visible rows and DML checks new assignments.
+                // Character assignment retains its established trimming/padding.
+                var storageType = new DatabaseTypeInfo(column.Type.Type,
+                    column.Type.Type is DatabaseType.String or DatabaseType.Character ? column.Type.MaxLength : null, scale: column.Type.Scale);
+                var frozen = new SqlCatalogColumn(column.Name, storageType, true, text, column.Collation);
                 if (!SqlPersistedExpression.IsDefaultLiteral(SqlPersistedExpression.Load(text, "Missing value")))
                 {
                     throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MissingValueNotLiteral, column.Name));
                 }
-                missing[ordinal] = string.Equals(text, column.DefaultLiteral, StringComparison.Ordinal) ? defaults[ordinal] : SqlPlanExecutor.BindDefaultExpression(frozen,
-                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnMissingValueSubject, column.Name, tableName), functions, _catalog.DefaultCollation, cancellationToken);
+                // A successfully converted identical literal already has its frozen
+                // storage value. Preserve the shared immutable constant in that case.
+                missing[ordinal] = string.Equals(text, column.DefaultLiteral, StringComparison.Ordinal) && defaults[ordinal] is SqlBoundConstant constant
+                    ? constant : SqlPlanExecutor.BindDefaultExpression(frozen,
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnMissingValueSubject, column.Name, tableName), functions, _catalog.DefaultCollation, cancellationToken);
             }
             if (column.DomainName is not null)
             {

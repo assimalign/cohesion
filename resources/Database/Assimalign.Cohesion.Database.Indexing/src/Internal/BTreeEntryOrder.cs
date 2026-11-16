@@ -72,6 +72,15 @@ internal static class BTreeEntryOrder
     /// </remarks>
     internal static Separator BuildSeparator(in BTreeNode leaf, int lastLeft, int firstRight)
     {
+        var separator = GetLeafSeparator(leaf, lastLeft, firstRight);
+        return new Separator(separator.Key.ToArray(), separator.Tiebreaker, separator.EntryReference, separator.Writer);
+    }
+
+    /// <summary>
+    /// Borrows a leaf separator's key bytes for comparisons before the split copies its owned separator.
+    /// </summary>
+    internal static BTreeSearchKey GetLeafSeparator(in BTreeNode leaf, int lastLeft, int firstRight)
+    {
         var leftKey = leaf.GetKey(lastLeft);
         var rightKey = leaf.GetKey(firstRight);
         int common = leftKey.CommonPrefixLength(rightKey);
@@ -80,16 +89,16 @@ internal static class BTreeEntryOrder
         {
             // The keys differ, first at byte `common` (or the left key ends there):
             // that byte decides, and nothing after it is needed.
-            return new Separator(rightKey[..(common + 1)].ToArray(), BTreeTiebreaker.None, 0, 0);
+            return BTreeSearchKey.AtKey(rightKey[..(common + 1)]);
         }
 
         ulong rightReference = leaf.GetEntryReference(firstRight);
         if (leaf.GetEntryReference(lastLeft) != rightReference)
         {
-            return new Separator(rightKey.ToArray(), BTreeTiebreaker.Reference, rightReference, 0);
+            return BTreeSearchKey.AtReference(rightKey, rightReference);
         }
 
-        return new Separator(rightKey.ToArray(), BTreeTiebreaker.Entry, rightReference, leaf.GetWriter(firstRight));
+        return BTreeSearchKey.AtEntry(rightKey, rightReference, leaf.GetWriter(firstRight));
     }
 
     /// <summary>

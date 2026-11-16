@@ -78,6 +78,11 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         PeakAllocatedBytes = Math.Max(PeakAllocatedBytes, next);
     }
 
+    internal void ObserveDataReads(string databaseName, Action<long, int>? observer)
+    {
+        lock (_sync) { _live[Key(databaseName, false)].Data.ReadStarting = observer; }
+    }
+
     internal int JournalFlushes(string databaseName)
     {
         lock (_sync) { return _live[Key(databaseName, false)].Journal.FlushCount; }
@@ -472,7 +477,13 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
             _onDurableChange();
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => _liveBuffer.Read(buffer, offset, count);
+        internal Action<long, int>? ReadStarting { get; set; }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            ReadStarting?.Invoke(_liveBuffer.Position, count);
+            return _liveBuffer.Read(buffer, offset, count);
+        }
 
         public override long Seek(long offset, SeekOrigin origin) => _liveBuffer.Seek(offset, origin);
 

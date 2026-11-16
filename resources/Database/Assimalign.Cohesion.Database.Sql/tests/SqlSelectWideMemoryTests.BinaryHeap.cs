@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -36,7 +37,7 @@ public sealed partial class SqlSelectWideMemoryTests
         {
             parameters = null;
             await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
-            long before = GC.GetTotalMemory(true);
+            long before = LiveHeap.Read();
             parameters = new Dictionary<string, object?> { ["p"] = new byte[1024] };
             bool captured = false;
             try
@@ -46,7 +47,7 @@ public sealed partial class SqlSelectWideMemoryTests
                     if (metrics.HashMemoryBytes != expected && metrics.HashMemoryBytes != legacy) { return; }
                     captured = true;
                     observed = metrics.HashMemoryBytes;
-                    largestGrowth = Math.Max(largestGrowth, GC.GetTotalMemory(true) - before);
+                    largestGrowth = Math.Max(largestGrowth, LiveHeap.Read() - before);
                 };
                 await Execute(parameters);
             }
