@@ -59,7 +59,8 @@ parameters, application casts or checked domains keep the base owner. Joined DML
 correlated/lateral inputs, recursion, SQL/JSON and window ledgers retain their paths.
 Temporary failures following a new handoff preserve the original CS05067 and message,
 with the temp cause in Data. Existing temp failures reached before a new handoff retain
-their original code. Relation-cache read failures retain their origin, so a cache created
+their original code. Relation-cache read failures retain their origin through located
+carriers, so a cache created
 outside the new operand permission keeps its located CK05 code even inside a set operand.
 Plain-key hash builds in mixed nested-loop trees also record their original refusal before
 handoff. Final set sorting/output has its own narrow refusal translation;

@@ -111,30 +111,37 @@ public sealed partial class SqlSortSpillConformanceTests
         finally { SqlRowCollector.ObserveBuffer = null; }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Pre-existing spilled CTE damage keeps located CK05004 inside a set operand (#1789)")]
-    public async Task ExecuteAsync_SetCachedRelationDamage_ShouldKeepBaseCode()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Pre-existing spilled CTE damage keeps located CK05004 inside a set operand (#1789)")]
+    [InlineData(false)] [InlineData(true)]
+    public async Task ExecuteAsync_SetCachedRelationDamage_ShouldKeepBaseCode(bool afterHandoff)
     {
         // Arrange
         await using var engine = await Create("set-cache-review", 262144, quota: 134217728);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session);
-        bool injected = false;
+        bool injected = false, handedOff = false;
+        SqlRowCollector.ObserveBuffer = (phase, _) => { if (phase == "set-append") { handedOff = true; } };
         BeforeRead(engine.TempSpace!, () =>
         {
-            if (injected) { return; }
-            var run = StatementRuns(engine.TempSpace!).First(run => run.IsSealed && run.RecordCount > 0);
+            if (injected || afterHandoff && !handedOff) { return; }
+            // The original two-column cache is wider than the first operand's
+            // one-column output. Its origin stays old even after a new handoff.
+            var run = StatementRuns(engine.TempSpace!).Where(run => run.IsSealed && run.RecordCount > 0)
+                .OrderByDescending(run => run.MaximumRecordLength).First();
             RandomAccess.Write(Handle(run), new byte[] { 255 }, 0); injected = true;
         });
         try
         {
             // Act
-            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
-                "WITH c AS (SELECT id,note FROM t) SELECT id FROM c UNION ALL SELECT id FROM c"));
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(afterHandoff
+                ? "WITH c AS (SELECT id,note FROM t) SELECT id FROM t UNION ALL SELECT id FROM c"
+                : "WITH c AS (SELECT id,note FROM t) SELECT id FROM c UNION ALL SELECT id FROM c"));
             // Assert
             injected.ShouldBeTrue(); failure.Diagnostics[0].Code.ShouldBe("CK05004");
+            if (afterHandoff) { handedOff.ShouldBeTrue(); }
             failure.Diagnostics[0].Start.ShouldNotBeNull(); failure.Diagnostics[0].End.ShouldNotBeNull();
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
-        finally { BeforeRead(engine.TempSpace!, null); }
+        finally { BeforeRead(engine.TempSpace!, null); SqlRowCollector.ObserveBuffer = null; }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - DISTINCT join output permits nested-loop buffer spooling (#1789)")]

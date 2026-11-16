@@ -293,7 +293,12 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     {
         // A cache materialized outside an admitted operand already spilled at the
         // base. Its read failure is independent of any later operator handoff.
-        if (IsRelationCache && !IsStageResult) { failure.Data["SqlExistingRelationTemp"] = true; }
+        if (IsRelationCache && !IsStageResult)
+        {
+            failure.Data["SqlExistingRelationTemp"] = true;
+            // Located carriers retain the storage cause rather than this carrier.
+            if (failure.InnerException is { } cause) { cause.Data["SqlExistingRelationTemp"] = true; }
+        }
         return failure;
     }
     // Cleanup must preserve the initiating cancellation, memory refusal or read/projection error.
