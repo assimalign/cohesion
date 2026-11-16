@@ -17,7 +17,7 @@ internal sealed partial class SqlPlanExecutor
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         cancellationToken.ThrowIfCancellationRequested();
-        _containsLike |= plan.ContainsLike;
+        ContainsLike |= plan.ContainsLike;
         if (plan is SqlWithPlan with)
         {
             await foreach (var row in ReadRecursiveQueryAsync(with.Input, frame, statement, cancellationToken).ConfigureAwait(false)) { yield return row; }

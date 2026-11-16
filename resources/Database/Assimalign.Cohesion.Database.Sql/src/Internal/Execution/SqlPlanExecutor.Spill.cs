@@ -28,11 +28,12 @@ internal sealed partial class SqlPlanExecutor
         => spillOwner?.Database.Engine.TempSpace is not null && !_isDml && RecursiveState is null
             && SqlWindowMemory.For(_metrics) is null
             && _subqueryValues is not { HasCorrelatedQueries: true }
-            && plan is SqlSelectPlan or SqlJoinPlan or SqlGroupPlan or SqlSystemViewPlan or SqlConstantPlan or SqlWithPlan or SqlSubqueryPlan or SqlWindowAggregatePlan
+            && plan is SqlSelectPlan or SqlJoinPlan or SqlGroupPlan or SqlSystemViewPlan or SqlConstantPlan or SqlWithPlan or SqlSubqueryPlan or SqlWindowAggregatePlan or SqlSetOperationPlan
             && StatementInput(plan) is SqlRelationPlan
             && plan is not SqlGroupingSetsPlan && !plan.ContainsRecursion && !PlanUsesJson(plan, cancellationToken)
             && (plan is not SqlSubqueryPlan subquery || !subquery.Queries.Any(query => query.IsCorrelated || query.IsDeferred))
-            && (plan is not SqlWindowAggregatePlan window || !_definitions.ForceSelectRetentionBasePath && CanSpillWindow(window));
+            && (plan is not SqlWindowAggregatePlan window || !_definitions.ForceSelectRetentionBasePath && CanSpillWindow(window))
+            && (plan is not SqlSetOperationPlan set || CanSpillSetOperation(set));
 
     private bool CanSpillTableAs(SqlCreateTableAsPlan plan, CancellationToken token)
     {
@@ -58,7 +59,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            _metrics = metrics; _containsLike |= plan.ContainsLike;
+            _metrics = metrics; ContainsLike |= plan.ContainsLike;
             var initialized = InitializeWindow(plan, cancellationToken);
             DatabaseResult result;
             if (initialized is SqlWithPlan with)
@@ -70,7 +71,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 result = initialized switch
                 {
-                    SqlPlan stage when stage is SqlCreateTableAsPlan or SqlWindowAggregatePlan => await ExecuteSpillStageAsync(stage, statement, cancellationToken, spillOwner).ConfigureAwait(false),
+                    SqlPlan stage when stage is SqlCreateTableAsPlan or SqlWindowAggregatePlan or SqlSetOperationPlan => await ExecuteSpillStageAsync(stage, statement, cancellationToken, spillOwner).ConfigureAwait(false),
                     SqlSelectPlan scan => ExecuteSelect(scan, statement, cancellationToken, null, plan, spillOwner, hashInput),
                     SqlSystemViewPlan view => ExecuteSystemView(view, statement, cancellationToken, plan, spillOwner, hashInput),
                     SqlConstantPlan constant => ExecuteRootConstant(constant, plan, cancellationToken, spillOwner),
@@ -91,14 +92,18 @@ internal sealed partial class SqlPlanExecutor
             if (statementRoot) { CloseJoinTemp(metrics, result, location); }
             return result;
         }
-        catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode)
+        catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == StorageTempException.DamageCode
+            && SqlOperatorSpillRefusal.For(metrics) is null)
         { throw CloseJoinFailure(metrics, exception.At(location), statementRoot, location); }
-        catch (StorageTempException exception)
+        catch (StorageTempException exception) when (SqlOperatorSpillRefusal.For(metrics) is null)
         { throw CloseJoinFailure(metrics, SqlSpilledResultSet.Translate(exception, location), statementRoot, location); }
         // Cleanup preserves the original evaluator/cancellation failure and releases the
         // shared owner even when no result was created.
         catch (System.Exception exception)
         {
+            if (SqlOperatorSpillRefusal.For(metrics) is not null && SqlOperatorSpillRefusal.IsTemporary(metrics, exception))
+            { throw CloseJoinFailure(metrics, SqlOperatorSpillRefusal.Preserve(metrics, exception, _definitions.StatementMemoryBudget).At(location), statementRoot, location); }
+            SqlOperatorSpillRefusal.AttachCleanup(metrics, exception);
             if (IsJoinTempCleanupFailure(exception))
             { throw CloseJoinFailure(metrics, SqlSpilledResultSet.TranslateCleanup((System.AggregateException)exception, location), statementRoot, location); }
             if (statementRoot) { CloseJoinTemp(metrics, exception, location); }
@@ -112,12 +117,13 @@ internal sealed partial class SqlPlanExecutor
     }
 
     // Keep one awaited stage arm: fitting roots retain the base async layout.
-    // Both kinds have an explicit owner; the default dispatcher would recurse for
-    // an admitted window plan.
+    // Stage kinds have an explicit owner; the default dispatcher would recurse for
+    // an admitted window or set plan.
     private Task<DatabaseResult> ExecuteSpillStageAsync(SqlPlan plan, SqlStatementContext statement,
         CancellationToken token, SqlDatabaseSession owner)
         => plan is SqlWindowAggregatePlan window
             ? ExecuteWindowAggregateAsync(window, statement, token, owner)
+            : plan is SqlSetOperationPlan set ? ExecuteSetOperationAsync(set, statement, token)
             : ExecuteCreateTableAsAsync((SqlCreateTableAsPlan)plan, statement, token, owner);
 
     private DatabaseResult ExecuteRootConstant(SqlConstantPlan constant, SqlPlan plan, CancellationToken token, SqlDatabaseSession owner)
@@ -132,7 +138,7 @@ internal sealed partial class SqlPlanExecutor
         SqlStatementContext statement, CancellationToken token, SqlDatabaseSession owner, Location? location)
     {
         // Independent scalar/EXISTS bodies inherit permission. Eager membership vectors
-        // retain their existing boundary for SQ-L4c.
+        // retain their existing vector ledger and refusal boundary.
         var parent = _subqueryValues;
         var frame = SqlSubqueryValues.WithMemory(parent, queries[0].ScopeId, queries, false, statement.Metrics, _definitions.StatementMemoryBudget);
         _subqueryValues = frame;
@@ -193,9 +199,13 @@ internal sealed partial class SqlPlanExecutor
         catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
         {
             if (hashInput is null && orderBy.Count == 0 && owner?.Database.Engine.TempSpace is not null)
-            { SqlOutputSpool.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner, token); return false; }
+            {
+                SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, exception);
+                SqlOutputSpool.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner, token); return false;
+            }
             if (hashInput is not null ? !CanSpillHashGroup(hashInput, owner)
                 : owner is null || orderBy.Count == 0 || orderBy.Any(order => !order.Collation.IsFixed)) { throw; }
+            SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, exception);
             SqlStagedSortSource.Add(rows, row, ref memory, _metrics!, _definitions.StatementMemoryBudget, owner!, token);
             return false;
         }
@@ -267,7 +277,7 @@ internal sealed partial class SqlPlanExecutor
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
             source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, grant, maximumDecodedRowBytes,
-            ownsStatement: !source.SharedStatement); }
+            ownsStatement: !source.SharedStatement, stageResult: _metrics!.IsStageResult); }
         catch (System.Exception exception) { if (!source.SharedStatement) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); } throw; }
         try
         {
@@ -289,7 +299,7 @@ internal sealed partial class SqlPlanExecutor
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
             source.Statement, source.TransferOutput(), offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, source.MaximumDecodedRowBytes,
-            ownsStatement: !source.SharedStatement); }
+            ownsStatement: !source.SharedStatement, stageResult: _metrics!.IsStageResult); }
         catch (System.Exception exception) { if (!source.SharedStatement) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); } throw; }
         try
         {

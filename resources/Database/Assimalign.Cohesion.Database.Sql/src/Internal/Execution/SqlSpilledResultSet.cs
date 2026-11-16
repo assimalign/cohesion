@@ -37,6 +37,7 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     private bool _relationLease;
     internal Location? Location { get; set; }
     internal bool IsRelationCache { get; private set; }
+    internal bool IsStageResult { get; }
 
     internal void RetainRelation(List<object?[]> rows, SqlStatementMetrics metrics)
     {
@@ -121,21 +122,21 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
 
     internal SqlSpilledResultSet(IReadOnlyList<DatabaseColumn> columns, StorageTempStatement statement,
         StorageTempSortReader sorted, long offset, long limit, SqlDatabaseSession owner, long readerGrant, long maximumDecodedRowBytes,
-        bool ownsStatement = true)
+        bool ownsStatement = true, bool stageResult = false)
     {
         _columns = columns; _statement = statement; _sorted = sorted; _offset = offset; _limit = limit; _owner = owner; _readerGrant = readerGrant;
         _maximumDecodedRowBytes = maximumDecodedRowBytes;
-        _ownsStatement = ownsStatement;
+        _ownsStatement = ownsStatement; IsStageResult = stageResult;
         try { ValidateFirstReader(); SqlSpillLifetime.Attach(owner, this); }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
     }
     internal SqlSpilledResultSet(IReadOnlyList<DatabaseColumn> columns, StorageTempStatement statement,
         StorageTempRun run, long offset, long limit, SqlDatabaseSession owner, long readerGrant, long maximumDecodedRowBytes,
-        bool ownsStatement = true)
+        bool ownsStatement = true, bool stageResult = false)
     {
         _columns = columns; _statement = statement; _distinct = run; _offset = offset; _limit = limit; _owner = owner; _readerGrant = readerGrant;
         _maximumDecodedRowBytes = maximumDecodedRowBytes;
-        _ownsStatement = ownsStatement;
+        _ownsStatement = ownsStatement; IsStageResult = stageResult;
         try { ValidateFirstReader(); SqlSpillLifetime.Attach(owner, this); }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
     }
@@ -258,7 +259,7 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
             }
             catch (OperationCanceledException) { throw; }
             catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode) { throw; }
-            catch (StorageTempException exception) { var failure = Translate(exception, Location); Fail(failure); throw failure; }
+            catch (StorageTempException exception) { var failure = RelationFailure(Translate(exception, Location)); Fail(failure); throw failure; }
             catch (Exception exception) { Fail(exception); throw; }
         }
     }
@@ -279,14 +280,26 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
                 row = Decode(bytes.Span); return true;
             }
             catch (OperationCanceledException) { throw; }
-            catch (StorageTempException exception) { var failure = Translate(exception, Location); Fail(failure); throw failure; }
+            catch (StorageTempException exception) { var failure = RelationFailure(Translate(exception, Location)); Fail(failure); throw failure; }
             catch (Exception exception) { Fail(exception); throw; }
         }
     }
     private object?[] Decode(ReadOnlySpan<byte> value)
     {
         if (SqlTempRowCodec.TryDecode(value, out var row)) { return row; }
-        throw new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged, location: Location);
+        throw RelationFailure(new SqlExecutionException(StorageTempException.DamageCode, ErrorMessages.SpillRowDamaged, location: Location));
+    }
+    private SqlExecutionException RelationFailure(SqlExecutionException failure)
+    {
+        // Preserve cache provenance through located carriers. The converter honors
+        // this tag only while the statement has no recorded new operator handoff.
+        if (IsRelationCache && !IsStageResult)
+        {
+            failure.Data["SqlExistingRelationTemp"] = true;
+            // Located carriers retain the storage cause rather than this carrier.
+            if (failure.InnerException is { } cause) { cause.Data["SqlExistingRelationTemp"] = true; }
+        }
+        return failure;
     }
     // Cleanup must preserve the initiating cancellation, memory refusal or read/projection error.
     internal void DisposeAfterFailure(Exception failure)

@@ -26,7 +26,7 @@ public sealed partial class SqlSortSpillConformanceTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "SELECT id,ROW_NUMBER() OVER(PARTITION BY id%100 ORDER BY id) FROM t"));
         // Assert
-        database.Definitions.CanSpillWindowValues.ShouldBeFalse();
+        database.Definitions.CanSpillValues.ShouldBeFalse();
         failure.Diagnostics[0].Code.ShouldBe("CS05079");
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
     }

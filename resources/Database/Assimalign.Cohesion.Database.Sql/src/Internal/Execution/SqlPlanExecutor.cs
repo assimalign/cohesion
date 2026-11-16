@@ -54,7 +54,11 @@ internal sealed partial class SqlPlanExecutor
     /// subquery plan.
     /// </summary>
     private SqlSubqueryValues? _subqueryValues;
-    private bool _containsLike;
+    // Preserve the fitting executor's byte slot. Eligibility is fixed for all
+    // bound expressions of this statement, even if another session refreshes DDL.
+    private byte _expressionFlags;
+    private bool ContainsLike { get => (_expressionFlags & 1) != 0; set { if (value) { _expressionFlags |= 1; } } }
+    private bool CanSpillValues => (_expressionFlags & 2) != 0;
     private bool _isDml;
     private SqlStatementMetrics? _metrics;
 
@@ -72,11 +76,17 @@ internal sealed partial class SqlPlanExecutor
     /// name while the statement runs.
     /// </remarks>
     internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, SqlIndexManager indexManager, SqlBoundTableCache definitions)
+        : this(storage, catalog, indexManager, definitions, definitions.CanSpillValues)
+    {
+    }
+
+    internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, SqlIndexManager indexManager, SqlBoundTableCache definitions, bool canSpillValues)
     {
         _storage = storage;
         _catalog = catalog;
         _indexManager = indexManager;
         _definitions = definitions;
+        _expressionFlags = canSpillValues ? (byte)2 : (byte)0;
     }
 
     /// <summary>
@@ -88,7 +98,7 @@ internal sealed partial class SqlPlanExecutor
     private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken,
         bool[]? sharedColumns = null, bool containsLike = false, DateTimeOffset? transactionTimestamp = null)
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
-            _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
+            ContainsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -143,7 +153,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            _containsLike |= plan.ContainsLike;
+            ContainsLike |= plan.ContainsLike;
             _metrics = statement.Metrics;
             if (RecursiveState is not null && StatementInput(plan) is SqlRelationPlan)
             { return await ExecuteRecursiveQueryAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
@@ -381,6 +391,7 @@ internal sealed partial class SqlPlanExecutor
         spilled = null;
         SqlSelectMemory outputBytes = default, sourceBytes = default, sortedBytes = default;
         List<object?[]>? unorderedRows = null;
+        SqlWindowInputSpool? windowSpool = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -390,7 +401,6 @@ internal sealed partial class SqlPlanExecutor
                 // for an unordered query, including the unlimited single-row lookup path.
                 var projected = new List<object?[]>();
                 SqlOutputSpool? outputSpool = null;
-                SqlWindowInputSpool? windowSpool = null;
                 unorderedRows = projected;
                 long skip = offset?.Count ?? 0;
                 long remaining = limit?.Count ?? long.MaxValue;
@@ -417,20 +427,24 @@ internal sealed partial class SqlPlanExecutor
                             catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
                                 && hashInput is not null && CanSpillHashGroup(hashInput, spillOwner))
                             {
+                                SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, failure);
                                 spilled = SpoolHashGroupInput(projected, output, inputs, projections, evaluator, ref outputBytes, spillOwner!, cancellationToken);
                                 return [];
                             }
                             catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
                                 && hashInput is null && spillOwner?.Database.Engine.TempSpace is not null && retainRows is null)
-                            { outputSpool = SqlOutputSpool.Add(projected, output, ref outputBytes, _metrics!, _definitions.StatementMemoryBudget, spillOwner, cancellationToken); }
+                            {
+                                SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, failure);
+                                outputSpool = SqlOutputSpool.Add(projected, output, ref outputBytes, _metrics!, _definitions.StatementMemoryBudget, spillOwner, cancellationToken);
+                            }
                         }
                     }
                     if (--remaining == 0) { break; }
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
-                if (SqlWindowInputSpool.For(projected) is not null)
-                { spilled = SqlWindowInputSpool.Take(projected, ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns); return []; }
+                if (windowSpool is not null)
+                { spilled = SqlWindowInputSpool.Take(projected, ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns); windowSpool = null; return []; }
                 if (outputSpool is { } completed)
                 {
                     var result = completed.Take(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns, cancellationToken,
@@ -556,7 +570,7 @@ internal sealed partial class SqlPlanExecutor
         catch (Exception failure) { if (unorderedRows is not null) { SqlOutputSpool.Release(unorderedRows, failure); } throw; }
         finally
         {
-            try { if (unorderedRows is not null) { SqlWindowInputSpool.Release(unorderedRows); SqlOutputSpool.Release(unorderedRows); } }
+            try { if (unorderedRows is not null) { SqlWindowInputSpool.Release(unorderedRows, windowSpool); SqlOutputSpool.Release(unorderedRows); } }
             finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref outputBytes); }
         }
     }

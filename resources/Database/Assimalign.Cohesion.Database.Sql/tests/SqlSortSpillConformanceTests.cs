@@ -138,7 +138,6 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
     [Theory(DisplayName = "Cohesion Test [Sql] - Spill admission: missing directory, small grants and excluded owners keep CS05067 (#1789)")]
     [InlineData(0)]
     [InlineData(1)]
-    [InlineData(4)]
     [InlineData(6)]
     [InlineData(7)]
     [InlineData(8)]
@@ -155,7 +154,6 @@ public sealed partial class SqlSortSpillConformanceTests : IDisposable
         await Seed(session);
         string sql = refusal switch
         {
-            4 => "(SELECT id FROM t ORDER BY k) UNION ALL SELECT id FROM t",
             6 => "SELECT id,COUNT(*) OVER() FROM (SELECT id,k FROM t ORDER BY k) d",
             7 => "SELECT t.id,(SELECT u.id FROM u WHERE u.id=t.id) AS value FROM t ORDER BY t.k",
             8 => "WITH RECURSIVE r(id) AS (SELECT 0 UNION ALL SELECT id+1 FROM r WHERE id<4000) SELECT id FROM r ORDER BY id",

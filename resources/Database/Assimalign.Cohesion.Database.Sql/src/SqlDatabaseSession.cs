@@ -814,14 +814,15 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
         }
         var parameters = SqlQueryExecutor.NormalizeParameters(request.Parameters);
         _database.Definitions.EnsureDefinitions(cancellationToken);
-        var planner = new SqlPlanner(_database.Catalog, parameters, _database.Definitions.Functions, cancellationToken, scope);
+        var functions = _database.Definitions.CaptureFunctions(out bool canSpillValues);
+        var planner = new SqlPlanner(_database.Catalog, parameters, functions, cancellationToken, scope);
         try
         {
             using var jsonPlanning = SqlJsonPathExecution.BeginPlanning(scope.Metrics, _database.Definitions.StatementMemoryBudget, cancellationToken);
             var plan = planner.Plan(explain.Statement, scope.Snapshot);
             var sequenceUsage = plan.SequenceUsage;
             if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
-            var executor = new SqlPlanExecutor(_database.DataStorage, _database.Catalog, _database.IndexManager, _database.Definitions);
+            var executor = new SqlPlanExecutor(_database.DataStorage, _database.Catalog, _database.IndexManager, _database.Definitions, canSpillValues);
             plan = executor.Cost(plan, scope, cancellationToken);
             scope.Metrics.IsPlanned = true;
             if (explain.Analyze)

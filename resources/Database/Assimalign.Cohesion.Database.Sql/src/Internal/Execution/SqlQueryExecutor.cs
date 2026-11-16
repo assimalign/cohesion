@@ -68,7 +68,8 @@ internal sealed partial class SqlQueryExecutor
         if (request.Statement.SqlExpression is SqlCopyToExpression copy)
         { return ExecuteCopyAsync(copy, statement, session?.CopyDestination(request), cancellationToken); }
         BeforePlan?.Invoke(request);
-        var planner = new SqlPlanner(_catalog, parameters, _definitions.Functions, cancellationToken, statement);
+        var functions = _definitions.CaptureFunctions(out bool canSpillValues);
+        var planner = new SqlPlanner(_catalog, parameters, functions, cancellationToken, statement);
         SqlPlan plan;
         try
         {
@@ -83,7 +84,7 @@ internal sealed partial class SqlQueryExecutor
 
         AfterPlan?.Invoke(request, plan);
         statement.Metrics.IsPlanned = true;
-        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
+        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions, canSpillValues);
         var sequenceUsage = plan.SequenceUsage;
         if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
         using (SqlJsonPathExecution.BeginPlanning(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken))

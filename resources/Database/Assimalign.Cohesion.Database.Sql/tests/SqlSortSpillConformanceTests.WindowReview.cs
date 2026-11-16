@@ -16,6 +16,26 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Window record capacity is distinct from codec eligibility (#1789)")]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Append_WindowRecordCapacity_ShouldIdentifyOnlyCodecFailure(bool unencodable)
+    {
+        // Arrange
+        await using var engine = await CreateWindowAsync("window-record-capacity", 262144);
+        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        using var spool = new SqlWindowInputSpool(new SqlStatementMetrics(), 262144, session, CancellationToken.None);
+        using var statement = spool.Statement;
+        object?[] row = [unencodable ? new object() : new string('x', 17000)];
+
+        // Act
+        var failure = Should.Throw<SqlExecutionException>(() => spool.Append(row, CancellationToken.None));
+
+        // Assert
+        failure.Diagnostics[0].Code.ShouldBe("CS05067");
+        failure.Data.Contains(nameof(SqlTempRowCodec)).ShouldBe(unencodable);
+        statement.PhysicalBytes.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Window append refuses an unreadable row before writing any record (#1789)")]
     public async Task Append_WindowUnreadableRow_ShouldRefuseBeforeWriting()
     {

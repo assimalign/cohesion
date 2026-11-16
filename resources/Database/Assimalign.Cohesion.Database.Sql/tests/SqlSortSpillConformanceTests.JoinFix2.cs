@@ -43,7 +43,8 @@ public sealed partial class SqlSortSpillConformanceTests
             var constructor = typeof(SqlSpilledResultSet).GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
                 .Single(candidate => candidate.GetParameters()[2].ParameterType == typeof(StorageTempRun));
             var arguments = new List<object?> { columns.Columns, statement, run, 0L, -1L, session, 262144L, SqlTempRowCodec.DecodedBytes(row) };
-            if (constructor.GetParameters().Length == 9) { arguments.Add(false); }
+            if (constructor.GetParameters().Length >= 9) { arguments.Add(false); }
+            if (constructor.GetParameters().Length == 10) { arguments.Add(false); }
             var result = (SqlSpilledResultSet)constructor.Invoke(arguments.ToArray());
             // Act
             await session.DisposeAsync();

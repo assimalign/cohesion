@@ -29,7 +29,7 @@ public sealed partial class SqlSortSpillConformanceTests
         var executor = new SqlPlanExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
         ExecutorMetrics(executor) = new SqlStatementMetrics();
         using var statement = engine.TempSpace!.CreateStatement(1048576);
-        var spill = NewReaderSpill(executor, session, [Collation.Binary, Collation.Binary], null, null, statement);
+        var spill = NewReaderSpill(executor, session, [Collation.Binary, Collation.Binary], null, null, statement, stage: false);
         using var owner = (IDisposable)spill;
         object?[] row = [1, new string('x', width)];
         ValidateReaderKey(spill, row);
@@ -76,7 +76,7 @@ public sealed partial class SqlSortSpillConformanceTests
     [UnsafeAccessor(UnsafeAccessorKind.Constructor)]
     [return: UnsafeAccessorType(hashSpillType)]
     private static extern object NewReaderSpill(SqlPlanExecutor executor, SqlDatabaseSession owner, Collation[] collations,
-        SqlGroupPlan? plan, SqlStatementContext? context, StorageTempStatement? shared);
+        SqlGroupPlan? plan, SqlStatementContext? context, StorageTempStatement? shared, bool stage);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "Validate")]
     private static extern void ValidateReaderKey([UnsafeAccessorType(hashSpillType)] object spill, object?[] row);

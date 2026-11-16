@@ -32,9 +32,9 @@ internal sealed class SqlOutputSpool : IDisposable
     {
         if (SqlWindowMemory.For(metrics) is { } window)
         { SqlWindowInputSpool.RecordRefusal(window, SqlExecutionException.StatementMemoryBudget(budget)); }
-        else { SqlSpillLifetime.CheckCapacity(owner); }
+        else if (!metrics.IsStageResult) { SqlSpillLifetime.CheckCapacity(owner); }
         _owner = owner; _metrics = metrics; _budget = budget;
-        var shared = SqlHashSpillMetrics.For(metrics)?.JoinStatement;
+        var shared = metrics.IsStageResult ? SqlHashSpillMetrics.JoinTemp(metrics, owner) : SqlHashSpillMetrics.For(metrics)?.JoinStatement;
         _shared = shared is not null;
         _statement = shared ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
         try { _run = _statement.CreateRun(); }
@@ -128,7 +128,7 @@ internal sealed class SqlOutputSpool : IDisposable
             SqlSortSpillMetrics.RecordOutput(_metrics, _statement);
             SqlRowCollector.ObserveSpill?.Invoke("output-spool");
             var result = new SqlSpilledResultSet(columns, _statement, _run, offset, limit, _owner,
-                _budget, _maximumDecoded, ownsStatement: !_shared);
+                _budget, _maximumDecoded, ownsStatement: !_shared, stageResult: _metrics.IsStageResult);
             _transferred = true; result.CaptureMetrics(_metrics); return result;
         }
         catch (StorageTempException failure) { throw SqlSpilledResultSet.Translate(failure); }
