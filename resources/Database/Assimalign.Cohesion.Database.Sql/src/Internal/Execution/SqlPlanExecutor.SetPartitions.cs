@@ -256,9 +256,13 @@ internal sealed partial class SqlPlanExecutor
             SqlSelectMemory countsBytes = default, seenBytes = default;
             var counts = new Dictionary<object?[], int>(_comparer);
             var seen = _plan.IsAll ? null : new HashSet<object?[]>(_comparer);
-            var selected = _statement.CreateRun(token);
+            const long selectedWriter = 8704;
+            _metrics.ReservePlainSelectMemory(selectedWriter, _budget);
+            StorageTempRun? selected = null;
             try
             {
+                selected = _statement.CreateRun(token);
+                SqlRowCollector.ObserveBuffer?.Invoke("set-selected", selected);
                 try
                 {
                     if (right is not null)
@@ -292,7 +296,15 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var record in ReadRun(selected, token)) { output.Append(Encode(record), token); }
                 return true;
             }
-            finally { Close(selected); }
+            finally
+            {
+                try { Close(selected); }
+                finally
+                {
+                    _metrics.ReleasePlainSelectMemory(selectedWriter);
+                    SqlRowCollector.ObserveBuffer?.Invoke("set-selected-end", selected!);
+                }
+            }
         }
 
         private StorageTempRun Order(StorageTempRun survivors, CancellationToken token)

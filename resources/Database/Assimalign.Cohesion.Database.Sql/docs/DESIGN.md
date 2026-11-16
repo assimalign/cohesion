@@ -45,6 +45,8 @@ current inner writer can use handoff scratch. Persistent set writers are charged
 another operand starts: sequential runs reserve their page, capped encoding buffer and
 bookkeeping, and UNION reserves partition pages, output writer and operator state.
 Partition replay charges its reader and possible next writers before admitting keys;
+INTERSECT/EXCEPT additionally reserve 8,704 B for tentative selected output while the
+survivor run can retain its writer page. That charge releases in the partition's finally;
 only sealed-partition metadata stays charged while descending to the next level. This
 keeps nested operators from accumulating uncharged pages with plan depth.
 
@@ -76,7 +78,11 @@ points and pins fitting ARM64/x64 allocations. During-operation LiveHeap samples
 populations use separate lower pre-run/post-disposal baselines and the minimum of three
 executions. Every execution must reach the active workspace floor; a 64 KiB allowance
 beyond the grant and 131,072 B growth slack reject a retained decoded row per inner pass
-and a retained box per set input.
+and a retained box per set input. UNION samples HashSpill replay and ordinal ordering,
+INTERSECT samples decoded rows inside tentative partition selection, UNION ALL samples
+its writer, and inners sample both writing and rereading. Live ledger assertions pin the
+79,616 B UNION stage, 25,344 B sequential writer, 8,704 B selected writer and each inner's
+8,192 + L + 256 + 2D reader allowance independently of those heap bounds.
 
 ## Retained SELECT output spooling (#1789; #1838)
 
