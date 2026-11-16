@@ -70,7 +70,7 @@ error and has no production diagnostic code.
 | COHDBS002 | CK06002 | Storage offline |
 | COHDBS003 | CK06003 | Record or page corruption |
 | New (#1283) | CK06006 | Write admission paused for a pending journal checkpoint (Degraded health) |
-| New (owner decisions 115 and 121) | CK06007 | Existing Unix engine root is wider than 0750 and cannot be tightened automatically |
+| New (owner decisions 115 and 121) | CK06007 | Unix root grants group write or access to others; a named foreign entry or failed mode change prevents automatic tightening |
 | COHDBI001 | CK06101 | Index format refusal |
 | COHDBI002 | CK06102 | Index corruption |
 | COHDBP001 | CK07001 | Diagnostic truncation notice |

@@ -125,7 +125,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
 
         if (options.RootPath is { IsEmpty: false } root)
         {
-            DatabaseRootDirectory.Prepare(root, KeyValueStorageStrategy.DataFileSet, KeyValueDatabaseEventSource.Log.RootPermissionsTightened);
+            DatabaseRootDirectory.Prepare(root, KeyValueDatabaseEventSource.Log.RootPermissionsTightened);
         }
 
         // Attach the built-in workers last, after every field they observe is initialized: the
@@ -246,7 +246,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <see cref="KeyValueDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
     /// <see cref="KeyValueDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
-    /// <exception cref="DatabaseException">An existing Unix root is wider than 0750 and cannot be tightened automatically (CK06007).</exception>
+    /// <exception cref="DatabaseException">The Unix root grants group write or access to others and cannot be tightened automatically (<c>CK06007</c>).</exception>
     public static KeyValueDatabaseEngine Create(string name, KeyValueDatabaseEngineOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

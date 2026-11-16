@@ -115,7 +115,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         _memory = options.StorageStrategy is null && _rootPath is null ? new DatabaseMemoryFiles() : null;
         if (_rootPath is not null)
         {
-            DatabaseRootDirectory.Prepare(_rootPath, DataFileSet, BlobDatabaseEventSource.Log.RootPermissionsTightened);
+            DatabaseRootDirectory.Prepare(_rootPath, BlobDatabaseEventSource.Log.RootPermissionsTightened);
         }
 
         // Attach the built-in workers last, after every field they observe is initialized: the
@@ -234,7 +234,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// passes is less than one, or the journal size limit is negative or set and below the
     /// checkpoint journal size.
     /// </exception>
-    /// <exception cref="DatabaseException">An existing Unix root is wider than 0750 and cannot be tightened automatically (CK06007).</exception>
+    /// <exception cref="DatabaseException">The Unix root grants group write or access to others and cannot be tightened automatically (<c>CK06007</c>).</exception>
     public static BlobDatabaseEngine Create(string name, BlobDatabaseEngineOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

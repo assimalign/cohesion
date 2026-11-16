@@ -58,6 +58,16 @@ public sealed class EngineRootDirectoryTests : IDisposable
     [InlineData("Documents", 504)]
     [InlineData("Graph", 504)]
     [InlineData("Blob", 504)]
+    [InlineData("Sql", 1528)]
+    [InlineData("Sql", 1533)]
+    [InlineData("KeyValuePair", 1528)]
+    [InlineData("KeyValuePair", 1533)]
+    [InlineData("Documents", 1528)]
+    [InlineData("Documents", 1533)]
+    [InlineData("Graph", 1528)]
+    [InlineData("Graph", 1533)]
+    [InlineData("Blob", 1528)]
+    [InlineData("Blob", 1533)]
     [UnsupportedOSPlatform("windows")]
     public void Create_WideEmptyUnixRoot_ShouldTightenAndWarnOnce(string model, int mode)
     {
@@ -72,7 +82,7 @@ public sealed class EngineRootDirectoryTests : IDisposable
 
         // Assert
         File.GetUnixFileMode(_root).ShouldBe(ownerMode);
-        CheckWarning(events, mode);
+        CheckWarning(events, model, mode);
     }
 
     [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: earlier database directories reopen after tightening")]
@@ -108,7 +118,7 @@ public sealed class EngineRootDirectoryTests : IDisposable
         File.GetUnixFileMode(_root).ShouldBe(ownerMode);
         File.GetUnixFileMode(directory).ShouldBe((UnixFileMode)493);
         File.GetUnixFileMode(data).ShouldBe((UnixFileMode)420);
-        CheckWarning(events, mode);
+        CheckWarning(events, model, mode);
     }
 
     [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: foreign files refuse 0755 and 0770 roots without chmod")]
@@ -122,6 +132,16 @@ public sealed class EngineRootDirectoryTests : IDisposable
     [InlineData("Documents", 504)]
     [InlineData("Graph", 504)]
     [InlineData("Blob", 504)]
+    [InlineData("Sql", 1528)]
+    [InlineData("Sql", 1533)]
+    [InlineData("KeyValuePair", 1528)]
+    [InlineData("KeyValuePair", 1533)]
+    [InlineData("Documents", 1528)]
+    [InlineData("Documents", 1533)]
+    [InlineData("Graph", 1528)]
+    [InlineData("Graph", 1533)]
+    [InlineData("Blob", 1528)]
+    [InlineData("Blob", 1533)]
     [UnsupportedOSPlatform("windows")]
     public void Create_WideUnixRootWithForeignFile_ShouldRefuseAndPreserveMode(string model, int mode)
     {
@@ -135,38 +155,53 @@ public sealed class EngineRootDirectoryTests : IDisposable
         var error = Should.Throw<DatabaseException>(() => Create(model, _root));
 
         // Assert
-        CheckRefusal(error, mode);
+        CheckRefusal(error, mode, Path.Combine(_root, "foreign"));
         File.GetUnixFileMode(_root).ShouldBe((UnixFileMode)mode);
         File.ReadAllBytes(Path.Combine(_root, "foreign")).ShouldBe([1, 2, 3]);
         Directory.GetFileSystemEntries(_root).Length.ShouldBe(1);
         events.Events.ShouldNotContain(e => e.EventName == "EngineRootPermissionsTightened" || e.EventId == 0);
     }
 
-    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: 0750 keeps its group bits and does not inspect foreign entries")]
-    [InlineData("Sql")]
-    [InlineData("KeyValuePair")]
-    [InlineData("Documents")]
-    [InlineData("Graph")]
-    [InlineData("Blob")]
+    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: 0750, 02700, 02750 and 01700 stay unchanged without inspecting foreign entries")]
+    [InlineData("Sql", 488)]
+    [InlineData("Sql", 1472)]
+    [InlineData("Sql", 1512)]
+    [InlineData("Sql", 960)]
+    [InlineData("KeyValuePair", 488)]
+    [InlineData("KeyValuePair", 1472)]
+    [InlineData("KeyValuePair", 1512)]
+    [InlineData("KeyValuePair", 960)]
+    [InlineData("Documents", 488)]
+    [InlineData("Documents", 1472)]
+    [InlineData("Documents", 1512)]
+    [InlineData("Documents", 960)]
+    [InlineData("Graph", 488)]
+    [InlineData("Graph", 1472)]
+    [InlineData("Graph", 1512)]
+    [InlineData("Graph", 960)]
+    [InlineData("Blob", 488)]
+    [InlineData("Blob", 1472)]
+    [InlineData("Blob", 1512)]
+    [InlineData("Blob", 960)]
     [UnsupportedOSPlatform("windows")]
-    public void Create_GroupReadableUnixRoot_ShouldKeepModeAndContents(string model)
+    public void Create_AdmittedUnixMode_ShouldKeepModeAndContents(string model, int mode)
     {
         // Arrange
         Directory.CreateDirectory(_root);
         File.WriteAllBytes(Path.Combine(_root, "foreign"), [5]);
-        File.SetUnixFileMode(_root, (UnixFileMode)488);
+        File.SetUnixFileMode(_root, (UnixFileMode)mode);
         using var events = Record(model);
 
         // Act
         using var engine = Create(model, _root);
 
         // Assert
-        File.GetUnixFileMode(_root).ShouldBe((UnixFileMode)488);
+        File.GetUnixFileMode(_root).ShouldBe((UnixFileMode)mode);
         File.ReadAllBytes(Path.Combine(_root, "foreign")).ShouldBe([5]);
         events.Events.ShouldNotContain(e => e.EventName == "EngineRootPermissionsTightened" || e.EventId == 0);
     }
 
-    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: foreign directories and another model's data are refused")]
+    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: a storage directory containing a foreign file is refused")]
     [InlineData("Sql")]
     [InlineData("KeyValuePair")]
     [InlineData("Documents")]
@@ -178,30 +213,249 @@ public sealed class EngineRootDirectoryTests : IDisposable
         // Arrange
         string directory = Path.Combine(_root, "sales");
         Directory.CreateDirectory(directory);
-        string otherSet = model == "Blob" ? "sql" : "blob";
-        File.WriteAllBytes(Path.Combine(directory, otherSet + ".dat"), [1]);
+        File.WriteAllBytes(Path.Combine(directory, "foreign"), [1]);
         File.SetUnixFileMode(_root, (UnixFileMode)493);
 
         // Act
         var error = Should.Throw<DatabaseException>(() => Create(model, _root));
 
         // Assert
-        CheckRefusal(error, 493);
+        CheckRefusal(error, 493, directory);
         File.GetUnixFileMode(_root).ShouldBe((UnixFileMode)493);
     }
 
-    [WindowsTheory(DisplayName = "Cohesion Test [Database] - Engine root: every file engine creates exactly three inheritable Windows grants")]
+    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: creation under a setgid parent emits no tightening warning")]
+    [InlineData("Sql")]
+    [InlineData("KeyValuePair")]
+    [InlineData("Documents")]
+    [InlineData("Graph")]
+    [InlineData("Blob")]
+    [UnsupportedOSPlatform("windows")]
+    public void Create_SetgidParent_ShouldCreateRootWithoutWarning(string model)
+    {
+        // Arrange
+        Directory.CreateDirectory(_root);
+        File.SetUnixFileMode(_root, (UnixFileMode)1472); // 02700
+        string root = Path.Combine(_root, "data");
+        using var events = Record(model);
+
+        // Act
+        using var engine = Create(model, root);
+
+        // Assert: the platform may propagate setgid; the engine does not check it.
+        (File.GetUnixFileMode(root) & (UnixFileMode)511).ShouldBe(ownerMode);
+        File.GetUnixFileMode(_root).ShouldBe((UnixFileMode)1472);
+        events.Events.ShouldNotContain(e => e.EventName == "EngineRootPermissionsTightened" || e.EventId == 0);
+    }
+
+    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: databases from two models reopen after shared-root tightening")]
+    [InlineData("Sql", "Blob")]
+    [InlineData("KeyValuePair", "Documents")]
+    [InlineData("Graph", "Sql")]
+    [UnsupportedOSPlatform("windows")]
+    public async Task Create_SharedUnixRoot_ShouldTightenAndOpenBothModels(string first, string second)
+    {
+        // Arrange
+        await using (var seed = Create(first, _root)) { await seed.CreateDatabaseAsync("first", CancellationToken.None); }
+        await using (var seed = Create(second, _root)) { await seed.CreateDatabaseAsync("second", CancellationToken.None); }
+        File.SetUnixFileMode(_root, (UnixFileMode)493);
+        using var firstEvents = Record(first);
+        using var secondEvents = Record(second);
+
+        // Act
+        await using var firstEngine = Create(first, _root);
+        await using var secondEngine = Create(second, _root);
+        var firstDatabase = await firstEngine.OpenDatabaseAsync("first", CancellationToken.None);
+        var secondDatabase = await secondEngine.OpenDatabaseAsync("second", CancellationToken.None);
+
+        // Assert
+        firstDatabase.Name.ToString().ShouldBe("first");
+        secondDatabase.Name.ToString().ShouldBe("second");
+        File.GetUnixFileMode(_root).ShouldBe(ownerMode);
+        CheckWarning(firstEvents, first, 493);
+        secondEvents.Events.ShouldNotContain(e => e.EventName == "EngineRootPermissionsTightened" || e.EventId == 0);
+    }
+
+    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: interrupted create and drop directories reach the existing coded action after tightening")]
+    [InlineData("Sql", false)]
+    [InlineData("KeyValuePair", false)]
+    [InlineData("Documents", false)]
+    [InlineData("Graph", false)]
+    [InlineData("Blob", false)]
+    [InlineData("Sql", true)]
+    [InlineData("KeyValuePair", true)]
+    [InlineData("Documents", true)]
+    [InlineData("Graph", true)]
+    [InlineData("Blob", true)]
+    [UnsupportedOSPlatform("windows")]
+    public async Task Create_UnixLeftoverDirectory_ShouldTightenThenReportDropAction(string model, bool interruptedDrop)
+    {
+        // Arrange
+        string directory = Path.Combine(_root, "sales");
+        Directory.CreateDirectory(directory);
+        if (interruptedDrop)
+        {
+            foreach (string file in new[] { DataFileSet(model) + ".log", DataFileSet(model) + ".bak" })
+            { File.WriteAllBytes(Path.Combine(directory, file), []); }
+            if (model is "Sql" or "KeyValuePair")
+            {
+                foreach (string file in new[] { "catalog.dat", "catalog.log", "catalog.bak" })
+                { File.WriteAllBytes(Path.Combine(directory, file), []); }
+            }
+            if (model == "Sql") { File.WriteAllBytes(Path.Combine(directory, "sql.create"), []); }
+        }
+        File.SetUnixFileMode(_root, (UnixFileMode)493);
+        using var events = Record(model);
+
+        // Act
+        await using var engine = Create(model, _root);
+        var error = await Should.ThrowAsync<DatabaseException>(() => engine.CreateDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+        // Assert
+        File.GetUnixFileMode(_root).ShouldBe(ownerMode);
+        CheckWarning(events, model, 493);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(model switch
+        { "Documents" => "CD06103", "Graph" => "CG06018", "Blob" => "CB06004", _ => "CK06004" });
+        error.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
+        await engine.DropDatabaseAsync("sales", CancellationToken.None);
+        Directory.Exists(directory).ShouldBeFalse();
+    }
+
+    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: Sql recognizes default and configured temp space beside an existing database")]
+    [InlineData(false)]
+    [InlineData(true)]
+    [UnsupportedOSPlatform("windows")]
+    public async Task Create_SqlUnixTempDirectory_ShouldTightenAndOpenDatabase(bool configured)
+    {
+        // Arrange
+        await using (var seed = Create("Sql", _root)) { await seed.CreateDatabaseAsync("sales", CancellationToken.None); }
+        Directory.CreateDirectory(Path.Combine(_root, ".cohesion-temp"));
+        string temp = Path.Combine(_root, ".spill", "runs");
+        if (configured) { Directory.CreateDirectory(temp); }
+        File.SetUnixFileMode(_root, (UnixFileMode)493);
+        using var events = Record("Sql");
+
+        // Act
+        await using var engine = SqlDatabaseEngine.Create("root-test", new()
+        { RootPath = _root, TempDirectory = configured ? (FileSystemPath?)temp : null });
+        var database = await engine.OpenDatabaseAsync("sales", CancellationToken.None);
+
+        // Assert
+        database.Name.ToString().ShouldBe("sales");
+        File.GetUnixFileMode(_root).ShouldBe(ownerMode);
+        CheckWarning(events, "Sql", 493);
+    }
+
+    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: a symbolic link blocks tightening and is named in the refusal")]
+    [InlineData("Sql")]
+    [InlineData("KeyValuePair")]
+    [InlineData("Documents")]
+    [InlineData("Graph")]
+    [InlineData("Blob")]
+    [UnsupportedOSPlatform("windows")]
+    public void Create_UnixRootWithSymbolicLink_ShouldNameEntryAndPreserveMode(string model)
+    {
+        // Arrange
+        string target = Path.Combine(_root, "sales");
+        Directory.CreateDirectory(target);
+        string link = Path.Combine(_root, "shortcut");
+        Directory.CreateSymbolicLink(link, target);
+        File.SetUnixFileMode(_root, (UnixFileMode)493);
+        using var events = Record(model);
+
+        // Act
+        var error = Should.Throw<DatabaseException>(() => Create(model, _root));
+
+        // Assert
+        CheckRefusal(error, 493, link);
+        File.GetUnixFileMode(_root).ShouldBe((UnixFileMode)493);
+        events.Events.ShouldNotContain(e => e.EventName == "EngineRootPermissionsTightened" || e.EventId == 0);
+    }
+
+    [UnixTheory(DisplayName = "Cohesion Test [Database] - Engine root: relative paths become absolute in warnings and refusals")]
+    [InlineData("Sql")]
+    [InlineData("KeyValuePair")]
+    [UnsupportedOSPlatform("windows")]
+    public void Create_RelativeUnixRoot_ShouldReportAbsolutePaths(string model)
+    {
+        // Arrange
+        string relative = "cohesion-relative-root-" + Guid.NewGuid().ToString("N");
+        string root = Path.GetFullPath(relative);
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.SetUnixFileMode(root, (UnixFileMode)493);
+            using var events = Record(model);
+
+            // Act
+            using (var engine = Create(model, relative)) { }
+            File.WriteAllBytes(Path.Combine(root, "foreign"), [1]);
+            File.SetUnixFileMode(root, (UnixFileMode)493);
+            var error = Should.Throw<DatabaseException>(() => Create(model, relative));
+
+            // Assert
+            CheckWarning(events, model, 493, root);
+            CheckRefusal(error, 493, Path.Combine(root, "foreign"), root);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [WindowsTheory(DisplayName = "Cohesion Test [Database] - Engine root: missing parents inherit normally and only the root receives protected grants")]
     [InlineData("Sql")]
     [InlineData("KeyValuePair")]
     [InlineData("Documents")]
     [InlineData("Graph")]
     [InlineData("Blob")]
     [SupportedOSPlatform("windows")]
-    public async Task Create_NewWindowsRoot_ShouldUseThreeProtectedGrants(string model)
+    public void Create_MissingWindowsParents_ShouldKeepInheritedGrantsOnParents(string model)
     {
         // Arrange
         using var identity = WindowsIdentity.GetCurrent();
-        string[] principals = [identity.User!.Value, "S-1-5-18", "S-1-5-32-544"];
+        var ancestor = Directory.CreateDirectory(_root);
+        var acl = new DirectorySecurity();
+        acl.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        var inheritance = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+        acl.AddAccessRule(new FileSystemAccessRule(identity.User!, FileSystemRights.FullControl,
+            inheritance, PropagationFlags.None, AccessControlType.Allow));
+        acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), FileSystemRights.ReadAndExecute,
+            inheritance, PropagationFlags.None, AccessControlType.Allow));
+        FileSystemAclExtensions.SetAccessControl(ancestor, acl);
+        string parent = Path.Combine(_root, "outer", "inner");
+        string root = Path.Combine(parent, "data");
+        Directory.Exists(Path.Combine(_root, "outer")).ShouldBeFalse();
+
+        // Act
+        using var engine = Create(model, root + Path.DirectorySeparatorChar);
+
+        // Assert
+        foreach (string directory in new[] { Path.Combine(_root, "outer"), parent })
+        {
+            var parentAcl = FileSystemAclExtensions.GetAccessControl(new DirectoryInfo(directory));
+            parentAcl.AreAccessRulesProtected.ShouldBeFalse();
+            var rules = parentAcl.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
+            rules.Length.ShouldBe(2);
+            rules.ShouldAllBe(r => r.IsInherited && r.AccessControlType == AccessControlType.Allow &&
+                r.InheritanceFlags == inheritance && r.PropagationFlags == PropagationFlags.None);
+            rules.Single(r => r.IdentityReference.Value == identity.User!.Value).FileSystemRights.ShouldBe(FileSystemRights.FullControl);
+            rules.Single(r => r.IdentityReference.Value == "S-1-1-0").FileSystemRights.ShouldBe(FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize);
+        }
+        var rootAcl = FileSystemAclExtensions.GetAccessControl(new DirectoryInfo(root));
+        rootAcl.AreAccessRulesProtected.ShouldBeTrue();
+        CheckGrants(rootAcl, new[] { identity.User!.Value, "S-1-5-18", "S-1-5-32-544" }.Distinct().ToArray(), inherited: false);
+    }
+
+    [WindowsTheory(DisplayName = "Cohesion Test [Database] - Engine root: every file engine grants inheritable Windows access to the distinct required principals")]
+    [InlineData("Sql")]
+    [InlineData("KeyValuePair")]
+    [InlineData("Documents")]
+    [InlineData("Graph")]
+    [InlineData("Blob")]
+    [SupportedOSPlatform("windows")]
+    public async Task Create_NewWindowsRoot_ShouldUseProtectedGrants(string model)
+    {
+        // Arrange
+        using var identity = WindowsIdentity.GetCurrent();
+        string[] principals = new[] { identity.User!.Value, "S-1-5-18", "S-1-5-32-544" }.Distinct().ToArray();
 
         // Act
         await using var engine = Create(model, _root);
@@ -216,7 +470,7 @@ public sealed class EngineRootDirectoryTests : IDisposable
         string data = Path.Combine(_root, "sales", DataFileSet(model) + ".dat");
         var fileAcl = FileSystemAclExtensions.GetAccessControl(new FileInfo(data));
         var rules = fileAcl.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
-        rules.Length.ShouldBe(3);
+        rules.Length.ShouldBe(principals.Length);
         rules.Select(r => r.IdentityReference.Value).Order().ShouldBe(principals.Order());
         rules.ShouldAllBe(r => r.IsInherited && r.AccessControlType == AccessControlType.Allow && r.FileSystemRights == FileSystemRights.FullControl);
     }
@@ -252,7 +506,7 @@ public sealed class EngineRootDirectoryTests : IDisposable
     private static void CheckGrants(DirectorySecurity acl, string[] principals, bool inherited)
     {
         var rules = acl.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
-        rules.Length.ShouldBe(3);
+        rules.Length.ShouldBe(principals.Length);
         rules.Select(r => r.IdentityReference.Value).Order().ShouldBe(principals.Order());
         foreach (var rule in rules)
         {
@@ -264,21 +518,24 @@ public sealed class EngineRootDirectoryTests : IDisposable
         }
     }
 
-    private void CheckRefusal(DatabaseException error, int mode)
+    private void CheckRefusal(DatabaseException error, int mode, string entry, string? root = null)
     {
+        root ??= _root;
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK06007");
-        error.Message.ShouldContain(_root, Case.Sensitive);
+        error.Message.ShouldContain("foreign entry '" + entry + "'", Case.Sensitive);
+        error.Message.ShouldContain(root, Case.Sensitive);
         error.Message.ShouldContain(Convert.ToString(mode, 8).PadLeft(4, '0'), Case.Sensitive);
         error.Message.ShouldContain("0700 or 0750", Case.Sensitive);
-        error.Message.ShouldContain("chmod 700 \"" + _root + "\"", Case.Sensitive);
+        error.Message.ShouldContain("chmod 700 \"" + root + "\"", Case.Sensitive);
     }
 
-    private void CheckWarning(EventSourceRecorder events, int oldMode)
+    private void CheckWarning(EventSourceRecorder events, string model, int oldMode, string? root = null)
     {
         var warning = events.Events.Where(e => e.EventName == "EngineRootPermissionsTightened").ShouldHaveSingleItem();
+        warning.EventId.ShouldBe(model switch { "Sql" => 31, "KeyValuePair" => 16, "Documents" => 18, "Graph" => 19, _ => 16 });
         warning.Level.ShouldBe(EventLevel.Warning);
         warning.PayloadNames.ShouldBe(["path", "oldMode", "newMode"]);
-        warning.Payload!.ShouldBe([_root, Convert.ToString(oldMode, 8).PadLeft(4, '0'), "0700"]);
+        warning.Payload!.ShouldBe([root ?? _root, Convert.ToString(oldMode, 8).PadLeft(4, '0'), "0700"]);
         events.Events.ShouldNotContain(e => e.EventId == 0);
     }
 

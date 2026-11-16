@@ -4,8 +4,6 @@ using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
 
-using Assimalign.Cohesion.Database.Types;
-
 // Deviates from RootNamespace: stateless shared source retains its owning namespace.
 namespace Assimalign.Cohesion.Database.Internal;
 
@@ -13,10 +11,13 @@ internal static class DatabaseRootDirectory
 {
     internal const string RefusalCode = "CK06007";
     private const UnixFileMode ownerMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
-    private const UnixFileMode allowedMode = ownerMode | UnixFileMode.GroupRead | UnixFileMode.GroupExecute;
+    private const UnixFileMode widerMode = UnixFileMode.GroupWrite | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
 
-    internal static void Prepare(string path, string dataFileSet, Action<string, UnixFileMode, UnixFileMode> warn, string? tempDirectory = null)
+    internal static ReadOnlySpan<string> DataFileSets => new[] { "sql", "keyvalue", "document", "graph", "blob" };
+
+    internal static void Prepare(string path, Action<string, UnixFileMode, UnixFileMode> warn, string? tempDirectory = null)
     {
+        path = Path.GetFullPath(path);
         if (OperatingSystem.IsWindows())
         {
             if (Directory.Exists(path)) { return; }
@@ -30,7 +31,9 @@ internal static class DatabaseRootDirectory
                 acl.AddAccessRule(new FileSystemAccessRule(principal, FileSystemRights.FullControl,
                     inheritance, PropagationFlags.None, AccessControlType.Allow));
             }
-            FileSystemAclExtensions.Create(new DirectoryInfo(path), acl);
+            var root = new DirectoryInfo(path);
+            if (root.Parent is { } parent) { Directory.CreateDirectory(parent.FullName); }
+            FileSystemAclExtensions.Create(root, acl);
             return;
         }
 
@@ -40,47 +43,78 @@ internal static class DatabaseRootDirectory
         }
 
         PrepareExistingUnix(path, File.GetUnixFileMode(path),
-            () => IsOwned(path, dataFileSet, tempDirectory), mode => { if (!OperatingSystem.IsWindows()) { File.SetUnixFileMode(path, mode); } }, warn);
+            () => FindForeignEntry(path, tempDirectory), mode => { if (!OperatingSystem.IsWindows()) { File.SetUnixFileMode(path, mode); } }, warn);
     }
 
     // Separate policy from the syscalls so a refused chmod can be exercised deterministically.
-    internal static void PrepareExistingUnix(string path, UnixFileMode mode, Func<bool> isOwned,
+    internal static void PrepareExistingUnix(string path, UnixFileMode mode, Func<string?> findForeignEntry,
         Action<UnixFileMode> setMode, Action<string, UnixFileMode, UnixFileMode> warn)
     {
-        if ((mode & ~allowedMode) == 0) { return; }
+        if ((mode & widerMode) == 0) { return; }
         try
         {
-            if (!isOwned()) { throw Refuse(path, mode); }
+            if (findForeignEntry() is { } entry)
+            {
+                throw DatabaseException.CreateEngineFailure(RefusalCode,
+                    string.Format(CultureInfo.CurrentCulture, EngineErrorMessages.RootForeignEntry, path, Octal(mode), entry));
+            }
             setMode(ownerMode);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            throw Refuse(path, mode, error);
+            throw DatabaseException.CreateEngineFailure(RefusalCode,
+                string.Format(CultureInfo.CurrentCulture, EngineErrorMessages.RootModeChangeFailed, path, Octal(mode)), error);
         }
         warn(path, mode, ownerMode);
     }
 
-    internal static bool IsOwned(string path, string dataFileSet, string? tempDirectory)
+    internal static string? FindForeignEntry(string path, string? tempDirectory)
     {
+        string? tempPath = tempDirectory is null ? null : Path.GetFullPath(tempDirectory);
         foreach (var entry in new DirectoryInfo(path).EnumerateFileSystemInfos())
         {
-            if ((entry.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != FileAttributes.Directory)
-            { return false; }
-            if (tempDirectory is not null && (string.Equals(entry.FullName, Path.GetFullPath(tempDirectory), StringComparison.Ordinal)
-                || Path.GetFullPath(tempDirectory).StartsWith(entry.FullName + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
-            { continue; }
-            if (!DatabaseFileNames.IsStorageName(entry.Name) || !File.Exists(Path.Combine(entry.FullName, dataFileSet + ".dat")))
-            { return false; }
+            if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) { return entry.FullName; }
+            if ((entry.Attributes & FileAttributes.Directory) == 0)
+            {
+                if (entry.Name == ".DS_Store") { continue; }
+                return entry.FullName;
+            }
+            if (entry.Name == ".cohesion-temp" || (tempPath is not null && ContainsTempDirectory(entry.FullName, tempPath))) { continue; }
+            if (!DatabaseFileNames.IsStorageName(entry.Name) || !IsEngineDataDirectory((DirectoryInfo)entry)) { return entry.FullName; }
+        }
+        return null;
+    }
+
+    private static bool ContainsTempDirectory(string entry, string tempPath)
+    {
+        // Match Sql option validation, including the platform's path case comparison.
+        string relative = Path.GetRelativePath(entry, tempPath);
+        return !Path.IsPathRooted(relative) && relative != ".."
+            && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    private static bool IsEngineDataDirectory(DirectoryInfo directory)
+    {
+        foreach (string set in DataFileSets)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, set + ".dat"))) { return true; }
+        }
+        // A create claims its directory before opening files; a drop removes data first.
+        foreach (var entry in directory.EnumerateFileSystemInfos())
+        {
+            if ((entry.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 || !IsFileSetFile(entry.Name)) { return false; }
         }
         return true;
     }
 
-    private static string Octal(UnixFileMode mode) => Convert.ToString((int)mode, 8).PadLeft(4, '0');
-
-    private static DatabaseException Refuse(string path, UnixFileMode mode, Exception? cause = null)
+    private static bool IsFileSetFile(string name)
     {
-        string message = string.Format(CultureInfo.CurrentCulture, EngineErrorMessages.RootPermissionsInvalid, path, Octal(mode));
-        return new DatabaseException(message,
-            [new Diagnostic { Code = RefusalCode, Message = message, Severity = DiagnosticSeverity.Error }], cause);
+        if (name == "sql.create") { return true; }
+        string extension = Path.GetExtension(name);
+        if (extension is not (".dat" or ".log" or ".bak")) { return false; }
+        string set = Path.GetFileNameWithoutExtension(name);
+        return set == DatabaseFileNames.CatalogFileSet || DataFileSets.Contains(set);
     }
+
+    internal static string Octal(UnixFileMode mode) => Convert.ToString((int)mode, 8).PadLeft(4, '0');
 }

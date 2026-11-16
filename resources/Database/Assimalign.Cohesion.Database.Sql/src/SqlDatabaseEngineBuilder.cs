@@ -281,6 +281,7 @@ public sealed class SqlDatabaseEngineBuilder
     /// <exception cref="ArgumentOutOfRangeException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="SqlSchemaMigrationException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="AggregateException">See <see cref="BuildAsync"/>.</exception>
+    /// <exception cref="DatabaseException">The Unix engine root cannot be tightened automatically (<c>CK06007</c>).</exception>
     public SqlDatabaseEngine Build(CancellationToken cancellationToken = default)
         => Task.Run(async () => await BuildAsync(cancellationToken).ConfigureAwait(false)).GetAwaiter().GetResult();
 
@@ -308,6 +309,7 @@ public sealed class SqlDatabaseEngineBuilder
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
+    /// <exception cref="DatabaseException">The Unix engine root cannot be tightened automatically (<c>CK06007</c>).</exception>
     public async ValueTask<SqlDatabaseEngine> BuildAsync(CancellationToken cancellationToken = default)
     {
         _state.BeginBuild();

@@ -39,8 +39,8 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            EngineRootPermissionsTightened(path, Convert.ToString((int)oldMode, 8).PadLeft(4, '0'),
-                Convert.ToString((int)newMode, 8).PadLeft(4, '0'));
+            EngineRootPermissionsTightened(path, global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.Octal(oldMode),
+                global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.Octal(newMode));
         }
     }
 

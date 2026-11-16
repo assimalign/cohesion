@@ -191,7 +191,7 @@ public sealed class GraphDatabaseEngineBuilder
     /// <exception cref="InvalidOperationException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="ArgumentException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">See <see cref="BuildAsync"/>.</exception>
-    /// <exception cref="DatabaseException">See <see cref="BuildAsync"/>.</exception>
+    /// <exception cref="DatabaseException">See <see cref="BuildAsync"/>, including root refusal <c>CK06007</c>.</exception>
     /// <exception cref="AggregateException">See <see cref="BuildAsync"/>.</exception>
     public GraphDatabaseEngine Build()
         => Task.Run(async () => await BuildAsync(CancellationToken.None).ConfigureAwait(false)).GetAwaiter().GetResult();
@@ -212,6 +212,7 @@ public sealed class GraphDatabaseEngineBuilder
     /// anything is created, and the refusal names the engine.
     /// </exception>
     /// <exception cref="DatabaseException">
+    /// The Unix engine root cannot be tightened automatically (<c>CK06007</c>), or
     /// A declared database's storage format was refused, or opening it failed with corruption
     /// (<c>CK06003</c>) or coded I/O failure (<c>CG06006</c>); the engine was disposed.
     /// </exception>

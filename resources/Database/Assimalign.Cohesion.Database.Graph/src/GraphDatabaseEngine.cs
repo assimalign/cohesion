@@ -113,7 +113,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
         _memory = options.StorageStrategy is null && _rootPath is null ? new DatabaseMemoryFiles() : null;
         if (_rootPath is not null)
         {
-            DatabaseRootDirectory.Prepare(_rootPath, DataFileSet, GraphDatabaseEventSource.Log.RootPermissionsTightened);
+            DatabaseRootDirectory.Prepare(_rootPath, GraphDatabaseEventSource.Log.RootPermissionsTightened);
         }
 
         // Attach the built-in workers last, after every field they observe is initialized: the
@@ -220,7 +220,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// passes is less than one, or the journal size limit is negative or set and below the
     /// checkpoint journal size.
     /// </exception>
-    /// <exception cref="DatabaseException">An existing Unix root is wider than 0750 and cannot be tightened automatically (CK06007).</exception>
+    /// <exception cref="DatabaseException">The Unix root grants group write or access to others and cannot be tightened automatically (<c>CK06007</c>).</exception>
     public static GraphDatabaseEngine Create(string name, GraphDatabaseEngineOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

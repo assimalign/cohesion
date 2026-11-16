@@ -2,25 +2,47 @@
 
 ## Engine root permissions (owner decisions 115 and 121)
 
-Before any file work, the constructor uses the internal DatabaseRootDirectory helper from
-Database's existing shared/Engine module. A new Unix root is created with mode 0700. An existing
-mode within 0750 is retained, allowing a backup group's read/execute bits. A wider root is
-changed to 0700 only when empty or holding this engine's recognized database directories
-(lower-case valid storage names with graph.dat).
-Foreign entries or a failed permission change refuse construction with DatabaseException and
-structured code CK06007; its message includes the path, octal mode, 0700/0750 and chmod 700.
-Only the root is checked; database directories and files retain process creation defaults.
+The model constructors prepare their roots before other file work through the internal
+DatabaseRootDirectory helper in Database/shared/Engine. All five engines already compile this
+stateless module; no new reference or public preparation API is needed.
 
-On Windows a new root receives a protected ACL granting inheritable full control only to the
-current user, SYSTEM and BUILTIN\Administrators. An existing Windows root is used unchanged.
-The helper uses guarded framework APIs without reflection. Open/create/drop, temporary-space
-rules and persisted formats remain unchanged. The Unix root-only admission policy follows
-PostgreSQL src/backend/utils/init/miscinit.c:353-359; tightening an empty root follows
-src/bin/initdb/initdb.c:2922-2930.
+A new Unix root is created with mode 0700. An existing root is admitted unchanged when it has
+no group write and no access to others. The setuid, setgid and sticky bits are not checked, so
+02700, 02750 and 01700 are admitted, including a new root under a setgid parent. A wider root
+is changed to exactly 0700 only when it holds only engine data. One model Warning event,
+EngineRootPermissionsTightened, reports the absolute path and old/new octal modes after the change.
+
+Engine data includes lower-case storage-name directories holding any model's data file:
+sql.dat, keyvalue.dat, document.dat, graph.dat or blob.dat. An empty storage-name directory or
+one holding only interrupted file sets is also recognized: those five sets' .dat/.log/.bak files,
+catalog.dat/catalog.log/catalog.bak and sql.create. The default .cohesion-temp directory is
+recognized even when another temp directory is configured; the configured directory and its
+ancestors under the root are recognized too, using Path.GetRelativePath's platform comparison.
+.DS_Store files are recognized. Other root entries, including reparse points, are foreign.
+
+A foreign entry refuses construction with DatabaseException and structured CK06007. The message
+names the first blocking entry and says the engine will not change a directory holding it. Run
+`chmod 700 "<path>"` if the directory belongs to this engine, or point RootPath at a new subdirectory,
+which the engine creates with mode 0700. A failed mode change uses the same code, retains its cause
+as the inner exception, and says this account cannot change the root's mode. Point RootPath at a
+new subdirectory, or make this account the directory's owner and run `chmod 700 "<path>"`.
+
+Only the root mode is checked; child directory/file modes retain process defaults. Inspection
+and the change both work on the path, leaving a check-then-change window; the change can only
+narrow a mode. The mask agrees with PostgreSQL src/include/common/file_perm.h:29, applied at
+src/backend/utils/init/miscinit.c:354. Two differences remain: the engine can tighten a wider
+root holding only engine data instead of refusing it, and it does not check the owner's user ID
+as PostgreSQL does at miscinit.c:334-339, because .NET has no managed API for that ID.
+
+On Windows missing parents are created with Directory.CreateDirectory and inherit normally.
+Only a new root receives a protected ACL granting inheritable full control to the current user,
+SYSTEM and BUILTIN\Administrators. Existing Windows roots are used unchanged. The helper uses
+guarded framework APIs without reflection. For admitted roots, temporary-space rules and
+open/create/drop behavior are unchanged; persisted formats are unchanged.
 
 | Code | Root condition |
 |---|---|
-| CK06007 | Existing Unix engine root is wider than 0750 and cannot be tightened automatically |
+| CK06007 | Unix root grants group write or access to others and cannot be tightened automatically |
 
 The existing Graph event source reports each successful tightening exactly once:
 
