@@ -87,70 +87,69 @@ public sealed partial class SqlJointTypeMigrationTests
         finally { SqlPlanExecutor.RewriteStage = null; }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: shuffled distinct keys cross copy checkpoints within ten percent of 49a")]
-    public async Task ApplyAsync_DeferredFixShuffledIndexCost_ShouldMeasureCopyCheckpoints()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint deferred cost: shuffled distinct keys cross copy checkpoints within ten percent of 49a")]
+    [InlineData(524288)]
+    [InlineData(393216)]
+    public async Task ApplyAsync_DeferredFixShuffledIndexCost_ShouldMeasureCopyCheckpoints(int rows)
     {
         // Arrange: a deterministic permutation spreads each bracket over many leaves.
-        const int rows = 524288;
-        const int createdRows = 393216;
         using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+        bool newTable = rows == 393216;
         SqlCompiledSchema Declare(bool target, bool created = false) => SqlSchema.Create("typed", schema =>
         {
             schema.Table<OtherRow>("items", table =>
             { table.Key(row => row.Id); if (target) { table.Index(row => row.Id); } });
             if (target && created) { schema.Table<DeferredCreated>("created", table => table.Key(row => row.Id)); }
         }).Compile();
+        var storage = await SeedShuffledIndexCostAsync(Declare(false), rows, guard.Token);
+        // Act: the smaller target also creates a keyed table, exercising its
+        // eligibility for the larger threshold at a size that crosses checkpoints.
+        var measured = await MeasureDeferredCostAsync(storage, Declare(false), Declare(true, newTable), guard.Token);
+        _output.WriteLine($"Shuffled {rows}-row PK additive index, new table={newTable} (64 MiB engine checkpoint budget): 49a={measured.OldPages}; joint={measured.JointPages}; rewritten={measured.Rewritten}; ratio={(double)measured.JointPages / measured.OldPages:P2}; copy-phase checkpoints={measured.Checkpoints}; forced copy checkpoints={measured.ForcedCheckpoints}");
+        // Assert
+        measured.Rewritten.ShouldBe(0);
+        measured.KeepsOwner.ShouldBeTrue();
+        measured.KeepsHeap.ShouldBeTrue();
+        measured.Threshold.ShouldBe(64L * 1024 * 1024);
+        measured.Checkpoints.ShouldBeGreaterThan(0);
+        // The engine services its size trigger at gate release. Nit 9 avoids
+        // following that checkpoint with a forced copy checkpoint on the empty WAL.
+        measured.ForcedCheckpoints.ShouldBe(0);
+        measured.JointPages.ShouldBeLessThanOrEqualTo(measured.OldPages * 110 / 100);
+    }
+
+    private static async Task<CrashCaptureSqlStorageStrategy> SeedShuffledIndexCostAsync(SqlCompiledSchema source, int rows, CancellationToken token)
+    {
+        const int fullRows = 524288;
+        const int createdRows = 393216;
         var storage = new CrashCaptureSqlStorageStrategy();
         CrashCaptureSqlStorageStrategy? smaller = null;
-        await using (var seed = await DeferredCostBuilder(storage).BuildAsync(guard.Token))
+        await using (var seed = await DeferredCostBuilder(storage).BuildAsync(token))
         {
-            await WithPausedMaintenanceAsync(seed, guard.Token, async () =>
+            await WithPausedMaintenanceAsync(seed, token, async () =>
             {
-                var database = await seed.CreateDatabaseAsync("typed", guard.Token);
-                await database.ApplySchemaAsync(Declare(false), guard.Token);
-                await SeedShuffledIndexRowsAsync(database, rows, guard.Token, copied =>
+                var database = await seed.CreateDatabaseAsync("typed", token);
+                await database.ApplySchemaAsync(source, token);
+                // Both populations use the full permutation; only the insertion prefix differs.
+                await SeedShuffledIndexRowsAsync(database, fullRows, token, copied =>
                 {
                     if (copied != createdRows) { return; }
-                    database.Coordinator.Checkpoint(guard.Token);
+                    database.Coordinator.Checkpoint(token);
                     smaller = storage.CaptureDurableImages();
-                });
+                }, rowsToInsert: rows);
                 database.Coordinator.Checkpoint();
                 storage = storage.CaptureDurableImages();
             });
         }
-        // Act: the second target also creates a keyed table, exercising its
-        // eligibility for the larger threshold at a size that crosses checkpoints.
-        var measurements = new[]
-        {
-            await MeasureDeferredCostAsync(storage, Declare(false), Declare(true), guard.Token),
-            await MeasureDeferredCostAsync(smaller.ShouldNotBeNull(), Declare(false), Declare(true, true), guard.Token),
-        };
-        for (int i = 0; i < measurements.Length; i++)
-        {
-            var measured = measurements[i];
-            _output.WriteLine($"Shuffled {(i == 0 ? rows : createdRows)}-row PK additive index, new table={i == 1} (64 MiB engine checkpoint budget): 49a={measured.OldPages}; joint={measured.JointPages}; rewritten={measured.Rewritten}; ratio={(double)measured.JointPages / measured.OldPages:P2}; copy-phase checkpoints={measured.Checkpoints}; forced copy checkpoints={measured.ForcedCheckpoints}");
-        }
-        // Assert
-        foreach (var measured in measurements)
-        {
-            measured.Rewritten.ShouldBe(0);
-            measured.KeepsOwner.ShouldBeTrue();
-            measured.KeepsHeap.ShouldBeTrue();
-            measured.Threshold.ShouldBe(64L * 1024 * 1024);
-            measured.Checkpoints.ShouldBeGreaterThan(0);
-            // The engine services its size trigger at gate release. Nit 9 avoids
-            // following that checkpoint with a forced copy checkpoint on the empty WAL.
-            measured.ForcedCheckpoints.ShouldBe(0);
-            measured.JointPages.ShouldBeLessThanOrEqualTo(measured.OldPages * 110 / 100);
-        }
+        return rows == createdRows ? smaller.ShouldNotBeNull() : storage;
     }
 
-    private static async Task SeedShuffledIndexRowsAsync(SqlDatabase database, int rows, CancellationToken token, Action<int>? afterBracket = null)
+    private static async Task SeedShuffledIndexRowsAsync(SqlDatabase database, int rows, CancellationToken token, Action<int>? afterBracket = null, int? rowsToInsert = null)
     {
         var keys = Enumerable.Range(0, rows).ToArray();
         new Random(1778).Shuffle(keys);
         await using var writer = await database.CreateSessionAsync(token);
-        for (int first = 0; first < rows; first += 64)
+        for (int first = 0; first < (rowsToInsert ?? rows); first += 64)
         {
             await writer.ExecuteAsync("INSERT INTO items VALUES " + string.Join(',', keys.Skip(first).Take(64)
                 .Select(key => $"({key})")), cancellationToken: token);
