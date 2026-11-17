@@ -33,6 +33,20 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 [EventSource(Name = "Assimalign.Cohesion.Database.Graph")]
 internal sealed class GraphDatabaseEventSource : EventSource
 {
+    [NonEvent]
+    internal void RootPermissionsTightened(string path, System.IO.UnixFileMode oldMode, System.IO.UnixFileMode newMode)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            EngineRootPermissionsTightened(path, global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.Octal(oldMode),
+                global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.Octal(newMode));
+        }
+    }
+
+    [Event(19, Level = EventLevel.Warning, Message = "Engine root directory '{0}' permissions tightened from {1} to {2}.")]
+    private void EngineRootPermissionsTightened(string path, string oldMode, string newMode)
+        => WriteEvent(19, path, oldMode, newMode);
+
     public static readonly GraphDatabaseEventSource Log = new();
 
     private long _pathExecuteCalls;

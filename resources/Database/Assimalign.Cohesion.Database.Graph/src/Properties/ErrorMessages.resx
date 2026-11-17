@@ -348,4 +348,13 @@
   </data>
   <data name="RecoveryProbeRequired" xml:space="preserve"><value>The storage strategy did not return a recovered read-only probe.</value></data>
   <data name="GraphTypeLabelOverlap" xml:space="preserve"><value>Label '{0}' is both an identifying and an implied label.</value></data>
+  <data name="RootForeignEntry" xml:space="preserve">
+    <value>Engine root directory '{0}' has mode {1} and holds the foreign entry '{2}'. The engine will not change the mode of a directory holding it. Use 0700 or 0750, with no group write and no access to others. If the directory belongs to this engine, run chmod 700 "{0}", or point RootPath at a new subdirectory, which the engine creates with mode 0700.</value>
+  </data>
+  <data name="RootInspectionFailed" xml:space="preserve">
+    <value>The engine could not list directory '{0}' and could not confirm that engine root directory '{1}' holds only engine data, so it will not change the root's mode. Point RootPath at a new subdirectory, which the engine creates with mode 0700, or make this account the directory's owner and run chmod 700 &quot;{1}&quot;.</value>
+  </data>
+  <data name="RootModeChangeFailed" xml:space="preserve">
+    <value>This account cannot change the mode of engine root directory '{0}' from {1} to 0700. Use 0700 or 0750, with no group write and no access to others. Point RootPath at a new subdirectory, which the engine creates with mode 0700, or make this account the directory's owner and run chmod 700 "{0}".</value>
+  </data>
 </root>

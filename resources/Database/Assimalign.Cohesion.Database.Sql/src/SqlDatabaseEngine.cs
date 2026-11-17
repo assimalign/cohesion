@@ -134,13 +134,13 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 ? new FileSystemSqlStorageStrategy(strategyRoot, options.Durability)
                 : new InMemorySqlStorageStrategy(options.Durability));
 
-        if (options.RootPath is { IsEmpty: false } root)
-        {
-            Directory.CreateDirectory(root);
-        }
-
         var tempDirectory = options.TempDirectory ?? (options.RootPath is { IsEmpty: false } tempRoot
             ? (FileSystemPath?)Path.Combine(tempRoot, ".cohesion-temp") : null);
+        if (options.RootPath is { IsEmpty: false } root)
+        {
+            DatabaseRootDirectory.Prepare(root, SqlDatabaseEventSource.Log.RootPermissionsTightened, tempDirectory?.ToString());
+        }
+
         if (tempDirectory is { } directory)
         { TempSpace = StorageTempSpace.Create(directory, options.TempSpaceQuota, TempFreeSpaceFloor); }
 
@@ -340,6 +340,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
     /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
+    /// <exception cref="DatabaseException">The Unix root grants group write or access to others and cannot be tightened automatically (<c>CK06007</c>).</exception>
     public static SqlDatabaseEngine Create(string name, SqlDatabaseEngineOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

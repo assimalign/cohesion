@@ -38,6 +38,20 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 [EventSource(Name = "Assimalign.Cohesion.Database.Blob")]
 internal sealed class BlobDatabaseEventSource : EventSource
 {
+    [NonEvent]
+    internal void RootPermissionsTightened(string path, System.IO.UnixFileMode oldMode, System.IO.UnixFileMode newMode)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            EngineRootPermissionsTightened(path, global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.Octal(oldMode),
+                global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.Octal(newMode));
+        }
+    }
+
+    [Event(16, Level = EventLevel.Warning, Message = "Engine root directory '{0}' permissions tightened from {1} to {2}.")]
+    private void EngineRootPermissionsTightened(string path, string oldMode, string newMode)
+        => WriteEvent(16, path, oldMode, newMode);
+
     public static readonly BlobDatabaseEventSource Log = new();
 
     // The longest name (database, principal, container) and text (a refusal's detail, a violation)

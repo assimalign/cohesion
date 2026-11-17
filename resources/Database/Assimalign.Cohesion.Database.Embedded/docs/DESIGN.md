@@ -16,6 +16,49 @@ The facade can only be thin because of an invariant this project *enforces by ex
 - **Typed over the root engine base (concrete-types plan, phase 6, #1262).** `EmbeddedDatabaseOptions.Engines`, `EmbeddedDatabase.Engines` and both `TryGetEngine` overloads name `DatabaseEngine`, the root base every model engine derives from; the `IDatabaseEngine` interface they named is deleted (plan §5.2). `TryGetEngine`'s engine is `[MaybeNullWhen(false)]`: null when the lookup fails. A caller that knows the model casts the engine it gets back to the model's sealed engine.
 - **Best-effort disposal with aggregation.** One failing engine must not leak the others' file handles; failures are collected and rethrown as `AggregateException`.
 
+## Engine roots
+
+Embedded receives engines whose model constructors have already prepared their roots through
+DatabaseRootDirectory. It adds no separate root or file policy. Several models may share one root.
+
+A new Unix root is created with mode 0700. An existing root is admitted unchanged when it has
+no group write and no access to others. The setuid, setgid and sticky bits are not checked, so
+02700, 02750 and 01700 are admitted, including a new root under a setgid parent. A wider root
+is changed to exactly 0700 only when it holds only engine data. One model Warning event,
+EngineRootPermissionsTightened, reports the absolute path and old/new octal modes after the change.
+
+Engine data includes lower-case storage-name directories holding any model's data file:
+sql.dat, keyvalue.dat, document.dat, graph.dat or blob.dat. An empty storage-name directory or
+one holding only interrupted file sets is also recognized: those five sets' .dat/.log/.bak files,
+catalog.dat/catalog.log/catalog.bak and sql.create. The default .cohesion-temp directory is
+recognized by name in every model. Sql also recognizes its configured temp directory and
+ancestors under the root, using Path.GetRelativePath's platform comparison; the other four
+models have no configurable temp directory.
+.DS_Store files are recognized. Other root entries, including reparse points, are foreign.
+
+A foreign entry refuses construction with DatabaseException and structured CK06007. The message
+names the first blocking entry and says the engine will not change the mode of a directory holding it. Run
+`chmod 700 "<path>"` if the directory belongs to this engine, or point RootPath at a new subdirectory,
+which the engine creates with mode 0700. A failed mode change uses the same code, retains its cause
+as the inner exception, and says this account cannot change the root's mode. Point RootPath at a
+new subdirectory, or make this account the directory's owner and run `chmod 700 "<path>"`. A failed
+inspection has its own message naming the directory that could not be listed: the engine
+cannot confirm that the root holds only engine data, so it will not change the root's mode.
+It also uses CK06007, retains the I/O cause as the inner exception, and gives the same remedy.
+
+Only the root mode is checked; child directory/file modes retain process defaults. Inspection
+and the change both work on the path, leaving a check-then-change window; the change can only
+narrow a mode. The mask agrees with PostgreSQL src/include/common/file_perm.h:29, applied at
+src/backend/utils/init/miscinit.c:354. Two differences remain: the engine can tighten a wider
+root holding only engine data instead of refusing it, and it does not check the owner's user ID
+as PostgreSQL does at miscinit.c:334-339, because .NET has no managed API for that ID.
+
+On Windows missing parents are created with Directory.CreateDirectory and inherit normally.
+Only a new root receives a protected ACL granting inheritable full control to the current user,
+SYSTEM and BUILTIN\Administrators. Existing Windows roots are used unchanged. The helper uses
+guarded framework APIs without reflection. For admitted roots, temporary-space rules and
+open/create/drop behavior are unchanged; persisted formats are unchanged.
+
 ## Non-goals
 
 - No cross-engine transactions — a transaction is scoped to one database in one engine.

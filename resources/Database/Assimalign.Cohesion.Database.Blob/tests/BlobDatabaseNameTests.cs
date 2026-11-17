@@ -41,6 +41,19 @@ public sealed class BlobDatabaseNameTests : IDisposable
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Engine root: the model's data file set is recognized")]
+    public void DataFileSet_EngineRootRecognition_ShouldIncludeModelSet()
+    {
+        // Arrange
+        string set = BlobDatabaseEngine.DataFileSet;
+
+        // Act
+        bool recognized = global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.DataFileSets.Contains(set);
+
+        // Assert
+        recognized.ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Blob] - Names: a database created as 'sales' and opened again as 'SALES' is the same database, with its data and its created name (#1392)")]
     [InlineData(true)]
     [InlineData(false)]

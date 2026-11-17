@@ -9,6 +9,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
@@ -38,6 +40,19 @@ public sealed class SqlDatabaseNameTests : IDisposable
                 // Best-effort cleanup.
             }
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Engine root: the model's data file set is recognized")]
+    public void DataFileSet_EngineRootRecognition_ShouldIncludeModelSet()
+    {
+        // Arrange
+        string set = SqlStorageStrategy.DataFileSet;
+
+        // Act
+        bool recognized = global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.DataFileSets.Contains(set);
+
+        // Assert
+        recognized.ShouldBeTrue();
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Names: a database created as 'sales' and opened again as 'SALES' is the same database, with its data and its created name (#1392)")]

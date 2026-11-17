@@ -19,6 +19,9 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed class SqlOnUpdateTests : IDisposable
 {
     private readonly string _rootPath = Path.Combine(Path.GetTempPath(), "cohesion-on-update", Guid.NewGuid().ToString("N"));
+    // Artifacts stay outside the engine root: on Linux and macOS a root that holds anything
+    // but engine data, created with the default 0755, is refused (CK06007).
+    private readonly string _artifactPath = Path.Combine(Path.GetTempPath(), "cohesion-on-update-artifacts", Guid.NewGuid().ToString("N"));
 
     public static IEnumerable<object[]> Actions()
     {
@@ -178,7 +181,7 @@ public sealed class SqlOnUpdateTests : IDisposable
     {
         // Arrange
         var schema = Schema(action);
-        string artifact = Path.Combine(_rootPath, "schema.json");
+        string artifact = Path.Combine(_artifactPath, "schema.json");
         await SqlCompiledSchemaSerializer.WriteAsync(artifact, schema, CancellationToken.None);
         await using (var engine = CreateEngine())
         {
@@ -372,5 +375,6 @@ public sealed class SqlOnUpdateTests : IDisposable
     public void Dispose()
     {
         if (Directory.Exists(_rootPath)) { Directory.Delete(_rootPath, recursive: true); }
+        if (Directory.Exists(_artifactPath)) { Directory.Delete(_artifactPath, recursive: true); }
     }
 }

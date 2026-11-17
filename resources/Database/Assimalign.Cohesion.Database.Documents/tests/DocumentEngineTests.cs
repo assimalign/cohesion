@@ -307,7 +307,8 @@ public sealed class DocumentEngineTests
     {
         // Arrange: hand-build the complete v1 layout, independently of the current catalog codec.
         string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-catalog-format-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        if (OperatingSystem.IsWindows()) { Directory.CreateDirectory(root); }
+        else { Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
         try
         {
             string dataPath = Path.Combine(root, "document.dat");

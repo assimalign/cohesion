@@ -34,6 +34,20 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [EventSource(Name = "Assimalign.Cohesion.Database.Sql")]
 internal sealed class SqlDatabaseEventSource : EventSource
 {
+    [NonEvent]
+    internal void RootPermissionsTightened(string path, System.IO.UnixFileMode oldMode, System.IO.UnixFileMode newMode)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            EngineRootPermissionsTightened(path, global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.Octal(oldMode),
+                global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.Octal(newMode));
+        }
+    }
+
+    [Event(31, Level = EventLevel.Warning, Message = "Engine root directory '{0}' permissions tightened from {1} to {2}.")]
+    private void EngineRootPermissionsTightened(string path, string oldMode, string newMode)
+        => WriteEvent(31, path, oldMode, newMode);
+
     public static readonly SqlDatabaseEventSource Log = new();
 
     // The longest name (database, principal) and text (a refusal's detail, a violation) a payload
