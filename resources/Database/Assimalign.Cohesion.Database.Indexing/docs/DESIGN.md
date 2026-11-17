@@ -627,7 +627,7 @@ upgrades are #1152). How each model surfaces the refusal:
 When both the model marker and B-tree page stamp are old, refusal order is stable for clean
 and abruptly stopped images: SQL reports CS06041, KeyValuePair CV06107, Documents CD06105,
 and Graph CK06101. SQL/KeyValuePair check their catalog marker first; Documents checks catalog
-headers before roots; Graph checks entity/registration and root formats before catalog v4.
+headers before roots; Graph checks entity/registration and root formats before catalog v5.
 Graph's CK06101 retains its existing message-only carrier. FormatOrderIntegrationTests in
 each model repeats the open and compares every file byte (#1809, #1644).
 
