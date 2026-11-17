@@ -30,6 +30,7 @@ internal sealed partial class SqlPlanExecutor
         var rows = new List<object?[]>();
         SqlSelectMemory retainedBytes = default;
         long resultBytes = 0;
+        statement.Metrics.BeginInternalResult();
         try
         {
             using var analysis = statement.Metrics.EnterRelationAnalysis(relation);
@@ -84,6 +85,7 @@ internal sealed partial class SqlPlanExecutor
         }
         finally
         {
+            statement.Metrics.EndInternalResult();
             ReleaseSelectMemory(ref resultBytes);
             ReleaseSelectMemory(ref retainedBytes);
             if (relation.CatalogView is not null && _materializedRelations is { } scoped)

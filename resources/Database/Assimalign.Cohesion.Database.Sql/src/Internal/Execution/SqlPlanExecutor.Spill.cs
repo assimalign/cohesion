@@ -277,7 +277,7 @@ internal sealed partial class SqlPlanExecutor
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
             source.Statement, reader, offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, grant, maximumDecodedRowBytes,
-            ownsStatement: !source.SharedStatement, stageResult: _metrics!.IsStageResult); }
+            ownsStatement: !source.SharedStatement, stageResult: _metrics!.IsStageResult, internalResult: _metrics.IsInternalResult); }
         catch (System.Exception exception) { if (!source.SharedStatement) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); } throw; }
         try
         {
@@ -299,7 +299,7 @@ internal sealed partial class SqlPlanExecutor
         try
         { result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns,
             source.Statement, source.TransferOutput(), offset?.Count ?? 0, limit?.Count ?? -1, source.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, source.MaximumDecodedRowBytes,
-            ownsStatement: !source.SharedStatement, stageResult: _metrics!.IsStageResult); }
+            ownsStatement: !source.SharedStatement, stageResult: _metrics!.IsStageResult, internalResult: _metrics.IsInternalResult); }
         catch (System.Exception exception) { if (!source.SharedStatement) { SqlSpilledResultSet.ReleaseAfterFailure(source.Statement, exception); } throw; }
         try
         {

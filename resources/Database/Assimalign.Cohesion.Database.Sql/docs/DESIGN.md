@@ -2,6 +2,14 @@
 
 ## Set-operation and nested-loop stage spooling (#1789)
 
+The combined window/set/join, shared-CTE, CTAS and INSERT SELECT corpus pins an independently
+built batch-5 reference (`ed48f2f61`), including fitting EXPLAIN text, grant/quota sweeps,
+evaluation order, sequence state and storage visits. INSERT SELECT retains #1828's source policy.
+Only a returned spilled result consumes one of the eight session slots. Relation caches,
+scalar/EXISTS bodies and CTAS source results remain registered for cleanup without consuming client slots; their
+internal-consumer flag is separate from shared-stage quota and refusal provenance. EXPLAIN
+unwraps sequence scopes when attributing actual spill fields, preserving fitting plan text.
+
 Eligible set operations and nested-loop buffers hand off only after the original CS05067
 admission fails. UNION ALL appends converted operands to an encounter-order run. UNION
 uses the fitting seen set before HashSpill, including a charged bounded filter after handoff.
@@ -111,7 +119,10 @@ Derived/view/CTE caches retain an already spilled result directly; a fitting res
 cache copy refuses is drained once to a run. ReadRelation decodes that cache in order,
 charging its reader, four decoded-row allowances for CHAR/binary conversion and consumer
 overlap, and 64 B per column to the outer statement. Cached runs
-join the existing temporary statement owner, so later operators share its physical quota. Relation caches count toward the session cap of eight live spilled results; CS05067 names active caches when they contribute to the limit. A correlated subquery over a spilled CTE re-reads and decodes its run for each outer row. Each rescan opens a reader workspace; CHAR and binary conversion repeats on each read.
+join the existing temporary statement owner, so later operators share its physical quota.
+Relation caches, scalar/EXISTS bodies and CTAS source spools do not consume the eight client-result slots.
+A correlated subquery over a spilled CTE re-reads and decodes its run for each outer row.
+Each rescan opens a reader workspace; CHAR and binary conversion repeats on each read.
 Root completion, error and cancellation close cached runs. Correlated/deferred frames,
 oversized or excluded window stages, recursive owners, every membership vector (IN, = ANY, > ALL and NOT IN), and joined DML keep their existing
 operator paths. INSERT SELECT does not spill and keeps its source uncharged (#1828); CREATE TABLE AS is the only table-writing statement whose source spools.

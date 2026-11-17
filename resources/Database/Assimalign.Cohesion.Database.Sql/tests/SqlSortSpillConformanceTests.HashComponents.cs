@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
@@ -90,16 +91,22 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Hash entries: +32 entry, group array and +64 DISTINCT overheads bound marginal live bytes (#1789)")]
-    public void HashEntries_TwoPopulations_ShouldBoundMarginalHeap()
+    public async Task HashEntries_TwoPopulations_ShouldBoundMarginalHeap()
     {
         // Arrange / Act
         MeasureEntries();
         MeasureEntries(padded: true);
+        // Unrelated pooled pages must stay rooted across every marginal heap sample.
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool); await QuiesceWindowPoolAsync(pool);
         long entry = long.MaxValue, replay = long.MaxValue, fitting = long.MaxValue;
         for (int round = 1; round <= 3; round++)
         {
+            images.Drain(pool);
             var measured = MeasureEntries();
             _output.WriteLine($"ENTRY_ROUND|round={round}|entry={measured.Entry}|replay={measured.Replay}|fitting={measured.Fitting}");
+            measured.Entry.ShouldBeGreaterThan(0); measured.Replay.ShouldBeGreaterThan(0); measured.Fitting.ShouldBeGreaterThan(0);
             entry = Math.Min(entry, measured.Entry);
             replay = Math.Min(replay, measured.Replay);
             fitting = Math.Min(fitting, measured.Fitting);

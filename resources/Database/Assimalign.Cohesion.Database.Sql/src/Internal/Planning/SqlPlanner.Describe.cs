@@ -112,8 +112,8 @@ internal sealed partial class SqlPlanner
     {
         var nodes = new List<DatabasePlanNode>();
         var spillPlan = plan;
-        while (spillPlan is SqlWithPlan or SqlSubqueryPlan)
-        { spillPlan = spillPlan is SqlWithPlan with ? with.Input : ((SqlSubqueryPlan)spillPlan).Input; }
+        while (spillPlan is SqlWithPlan or SqlSubqueryPlan or SqlSequenceScopePlan)
+        { spillPlan = spillPlan is SqlWithPlan with ? with.Input : spillPlan is SqlSequenceScopePlan sequence ? sequence.Input : ((SqlSubqueryPlan)spillPlan).Input; }
         bool recursiveDemand = plan.ContainsRecursion || plan is SqlSequenceScopePlan { Input.ContainsRecursion: true };
         Visit(plan, null);
         return DatabasePlanDescription.Create(nodes, diagnostics);

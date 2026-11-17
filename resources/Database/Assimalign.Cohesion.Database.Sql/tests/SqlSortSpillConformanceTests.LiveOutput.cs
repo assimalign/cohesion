@@ -22,8 +22,8 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData(true, true)]
     public async Task ExecuteAsync_OutputDuringOperation_ShouldBoundLiveHeap(bool grouped, bool mutant)
     {
-        // Arrange: each population uses three executions in one warmed engine, each
-        // with its own pre-statement baseline. The minimum excludes ambient heap drift.
+        // Arrange: each population uses three executions in one warmed engine. Root
+        // reusable pool images before each baseline so collections cannot reclaim them mid-sample.
         long grant = grouped ? 8388608 : 1048576;
         const long writer = 26392, slack = 524288;
         var peaks = new List<long>();
@@ -46,10 +46,14 @@ public sealed partial class SqlSortSpillConformanceTests
             await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session, count);
             string sql = grouped ? "SELECT id,MIN(k),fresh(id) FROM t GROUP BY id" : "SELECT id,fresh(id) FROM t";
             await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
+            using var pool = new HashPoolEvents();
+            using var images = new WindowPoolLease();
+            images.Drain(pool); await QuiesceWindowPoolAsync(pool);
             long minimum = long.MaxValue, minimumDrain = long.MaxValue;
             for (int execution = 0; execution < 3; execution++)
             {
                 retained.Clear();
+                images.Drain(pool);
                 long baseline = LiveHeap.Read(), peak = 0, drainPeak = 0;
                 int appended = 0, drained = 0, sampled = 0, drainSamples = 0;
                 SqlStatementMetrics? metrics = null;
@@ -74,6 +78,7 @@ public sealed partial class SqlSortSpillConformanceTests
                     // Assert
                     drained.ShouldBe(1); appended.ShouldBe(count); sampled.ShouldBeGreaterThan(1);
                     drainSamples.ShouldBeGreaterThan(1);
+                    peak.ShouldBeGreaterThan(0);
                     minimum = Math.Min(minimum, peak);
                     minimumDrain = Math.Min(minimumDrain, drainPeak);
                     session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);

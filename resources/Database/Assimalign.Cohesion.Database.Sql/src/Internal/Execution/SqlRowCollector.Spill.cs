@@ -48,7 +48,7 @@ internal sealed partial class SqlRowCollector
         var columns = new SqlTempSortKeyCodec.Column[_orderBy.Count];
         for (int i = 0; i < columns.Length; i++)
         { columns[i] = new(_orderBy[i].IsDescending, _orderBy[i].NullsFirst, _collations[i]); }
-        if (_metrics?.IsStageResult != true) { SqlSpillLifetime.CheckCapacity(owner); }
+        if (_metrics?.IsInternalResult != true) { SqlSpillLifetime.CheckCapacity(owner); }
         SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, refusal);
         var state = new Spill(owner, space, columns, (int)bound, grant, statement);
         try
@@ -184,7 +184,7 @@ internal sealed partial class SqlRowCollector
             state.Sorter.Dispose(); state.Sorter = null;
             Release(_memory.Bytes);
             var result = new SqlSpilledResultSet(columns, state.Statement, reader, offset, limit, state.Owner, state.Grant, state.MaximumDecodedRowBytes,
-                ownsStatement: !ReferenceEquals(state.Statement, SqlHashSpillMetrics.For(_metrics!)?.JoinStatement), stageResult: _metrics!.IsStageResult);
+                ownsStatement: !ReferenceEquals(state.Statement, SqlHashSpillMetrics.For(_metrics!)?.JoinStatement), stageResult: _metrics!.IsStageResult, internalResult: _metrics.IsInternalResult);
             _spills.Remove(this);
             return result;
         }

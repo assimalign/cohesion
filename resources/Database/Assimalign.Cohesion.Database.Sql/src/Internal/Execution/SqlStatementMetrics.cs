@@ -21,11 +21,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.DebugView))]
 internal sealed class SqlStatementMetrics
 {
-    // Bit zero records the catalog image; bits 1-30 count internal operand results.
+    // Bit zero records the catalog image; bits 1-15 count shared operand stages,
+    // and bits 16-30 count internally consumed results without changing temp ownership.
     // Bit 31 marks final set output, whose spill permission is also new.
     // Reuse the existing flag slot so fitting statement objects do not grow.
     private uint _contextFlags;
-    internal bool IsStageResult => (_contextFlags & 0x7FFFFFFE) != 0;
+    internal bool IsStageResult => (_contextFlags & 0xFFFE) != 0;
+    internal bool IsInternalResult => (_contextFlags & 0x7FFFFFFE) != 0;
     internal bool IsSetOutput
     {
         get => (_contextFlags & 0x80000000) != 0;
@@ -33,6 +35,8 @@ internal sealed class SqlStatementMetrics
     }
     internal void BeginStageResult() => _contextFlags += 2;
     internal void EndStageResult() => _contextFlags -= 2;
+    internal void BeginInternalResult() => _contextFlags += 0x10000;
+    internal void EndInternalResult() => _contextFlags -= 0x10000;
 
     // One slot for a scalar path or ordered join paths: plain stored queries pay no extra field.
     private object _accessPath = string.Empty;

@@ -422,24 +422,21 @@ the real-process E2E obtains the sample apphost through `ReferenceOutputAssembly
 
 ### 3.6 ACID, concretely
 
-Root SQL SELECT buffers obey the statement memory budget; DML-source charging retains the
-documented gap (#1828). T3-2 lifts T2 decision D3's no-spill
-rule: eligible root ORDER BY, bounded LIMIT/OFFSET sorts and ordered DISTINCT can spill,
-including a CTAS source root (#1789). Temporary files use engine and statement quotas;
-in-memory engines need an explicit temp directory. Delivery owns bounded readers and no
-database locks. Nested sorts, windows, grouping sets, unsupported codecs/collations,
-ineligible hash joins and unsupported DISTINCT owners still refuse. Plain root hash aggregation
-and unordered hash DISTINCT spill into eight partitions at up to eight levels, preserving first-seen
-order. Only fixed-size native states qualify; growing, ordered, DISTINCT, statistical and application
-aggregates retain CS05067, as do unproved SUM/AVG bounds and unsupported key codecs. General result
-spooling remains later work. The SQL project design records the precise eligibility and lifetime rules.
-Eligible root INNER, LEFT, RIGHT and FULL hash joins hand off only after their original statement-grant
-reservation refuses. All spilled joins and their staged buffers share one join temp reservation and
-statement quota. Optional build arenas yield down to their minimum M when free memory plus their extra can satisfy
-another reservation; probe caches target G/4 within the remaining grant. Temp consolidation and Seal
-can refuse CK05002. Spilling only adds capability: a statement that completes at the prior statement grant and temp
+SQL retained SELECT buffers share the statement memory grant. Eligible ORDER BY, hash aggregation,
+DISTINCT and joins spill after their original admission refuses. Every eligible retained SELECT
+output has a spill owner: final-result spools, unordered CTAS sources, primary-key scans, nested
+SELECTs and hash-aggregation output. Partitioned window stages spill one partition at a time;
+set operations and nested-loop inners spool in input order. INSERT SELECT keeps its existing
+uncharged-source policy (#1828). Temporary files share engine and statement quotas; in-memory
+engines need an explicit temp directory. Delivery owns bounded readers and no database locks.
+Membership vectors (`NOT IN`, `IN` and quantified comparisons), recursive CTEs, a single window
+partition larger than the grant, ordered DISTINCT's seen set, joined DML (#1828), SQL/JSON,
+deferred collations and cells the temp codec cannot encode retain their refusals. The planner
+refuses non-equi FULL joins with `CS05070`. The SQL project DESIGN holds the eligibility and
+lifetime details.
+Spilling only adds capability: a statement that completes at the prior statement grant and temp
 quota still completes there, with the same rows, CLR types and metadata; statements without a
-join keep their original memory arithmetic (#1789). EXPLAIN output differs only in the hash_budget value and the added hash_status field. Index builds are the exception: they charge
+join keep their original memory arithmetic (#1789). Index builds are the exception: they charge
 their build workspace (#1808), so a build whose chunk does not fit the grant refuses CS05067 (schema apply reports CS03402 with that cause).
 Result corrections are recorded under their own issue, including ungrouped typed-NULL
 CASE/COALESCE refusing CS02011 instead of returning text under Int64 metadata (#1788).
@@ -513,11 +510,18 @@ The integration architecture, in the order the work items landed:
   took offline stays unhealthy until it is reopened, and every lock wait on it ends with the coded
   refusal (`TransactionCoordinator.AbandonLockWaits`). Journal admission pauses, provisioning and
   held schemas are Degraded with their existing codes and bounded detail. Health reads
-  `OpenDatabases` and pending reopens without opening, reopening, waiting or taking engine
-  lifecycle locks. Stored databases this process has not opened are absent. A reopen outside the
-  reopen service is absent during recovery; if recovery fails, it remains absent until opened
-  again. With `ReopenOfflineDatabases = false`, check the manual reopen's own result, because
-  health keeps no failed-open record. The integration contributes these observations as
+  `OpenDatabases`, pending reopens and `FailedOpens` from immutable snapshots without opening,
+  reopening, waiting for databases or taking engine lifecycle locks. Create, open and drop
+  lifecycle calls take the engine's completion gate; success publishes its clear in the core's
+  section. Stored databases never attempted by this process are absent. A failed open of stored
+  data remains Unhealthy, including a manual reopen with `ReopenOfflineDatabases = false`, with
+  the structured failure code when present, exception type name, invariant UTC failure time and
+  consecutive attempt count; exception messages never enter health. Successful open or create,
+  successful drop, `DatabaseNotFoundException` or engine disposal clears the record. An online
+  instance outranks a stale pending reopen; an offline instance merges its cause with pending
+  reopen attempts and fault. Pending reopens outrank failed-open records, so each name contributes
+  one database component. Records need repair and an explicit open; the reopen service does not
+  retry them. The integration contributes these observations as
   `engine/<escaped engine>`, `database/<escaped engine>/<escaped database>` and
   `database.accepting`. Database names lower-case only ASCII letters before URI-escaping, and
   every inventory uses the same component spelling. Engine registration rejects invalid UTF-16.

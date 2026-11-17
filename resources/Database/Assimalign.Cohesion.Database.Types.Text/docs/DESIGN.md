@@ -249,7 +249,10 @@ Relevant PostgreSQL REL_17_11 sources: `src/include/tsearch/ts_type.h:43-93`
 
 `TextException.Code` is `UnknownAnalyzer`, `AnalyzerVersionMismatch`,
 `InvalidUnicode`, `InvalidLexeme`, or `VectorTooLarge` from `TextErrorCode`.
-Models translate these codes into their own diagnostics. Messages come from
+Future model consumers own their diagnostic translations; no model consumes Text
+or translates its codes yet. The
+[area registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md#text-analysis-conditions)
+lists every enum member separately from model diagnostic identities. Messages come from
 `Properties/ErrorMessages.resx`. Standard argument guards handle nulls,
 nonpositive positions and invalid weight values; persisted versions are values
 until resolution. No internal service or reflection seam is exported.

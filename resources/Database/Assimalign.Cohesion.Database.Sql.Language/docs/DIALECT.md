@@ -63,7 +63,10 @@ No sort is added to unordered delivery. A spooled result starts reading on enume
 supports rewind, and releases files on result/session/engine disposal and every server
 delivery exit. Early enumeration disposal frees its cursor. Quota, floor, integrity and
 temporary I/O failures retain located CK05 codes; codec/record/reader refusals retain
-CS05067. Relation caches count toward the session cap of eight live spilled results; the refusal names active relation caches when they contribute. EXPLAIN ANALYZE uses the existing spill byte/run fields. Nested hash joins under a permitted spill root print hash_budget=spill_on_refusal even when nothing spills. Temporary files have no
+CS05067. Only returned spilled results consume the eight client-result slots; relation caches,
+scalar/EXISTS bodies and CTAS source spools remain internally owned. EXPLAIN ANALYZE uses the existing spill
+byte/run fields on the operator that spilled, including beneath a sequence scope. Nested hash
+joins under a permitted spill root print hash_budget=spill_on_refusal even when nothing spills. Temporary files have no
 durable catalog or journal representation; startup sweeping removes crash leftovers.
 Staged unordered join sources report their run even when final output fits or LIMIT 0
 returns no rows.
