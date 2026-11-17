@@ -510,11 +510,18 @@ The integration architecture, in the order the work items landed:
   took offline stays unhealthy until it is reopened, and every lock wait on it ends with the coded
   refusal (`TransactionCoordinator.AbandonLockWaits`). Journal admission pauses, provisioning and
   held schemas are Degraded with their existing codes and bounded detail. Health reads
-  `OpenDatabases` and pending reopens without opening, reopening, waiting or taking engine
-  lifecycle locks. Stored databases this process has not opened are absent. A reopen outside the
-  reopen service is absent during recovery; if recovery fails, it remains absent until opened
-  again. With `ReopenOfflineDatabases = false`, check the manual reopen's own result, because
-  health keeps no failed-open record. The integration contributes these observations as
+  `OpenDatabases`, pending reopens and `FailedOpens` from immutable snapshots without opening,
+  reopening, waiting for databases or taking engine lifecycle locks. Create, open and drop
+  lifecycle calls take the engine's completion gate; success publishes its clear in the core's
+  section. Stored databases never attempted by this process are absent. A failed open of stored
+  data remains Unhealthy, including a manual reopen with `ReopenOfflineDatabases = false`, with
+  the structured failure code when present, exception type name, invariant UTC failure time and
+  consecutive attempt count; exception messages never enter health. Successful open or create,
+  successful drop, `DatabaseNotFoundException` or engine disposal clears the record. An online
+  instance outranks a stale pending reopen; an offline instance merges its cause with pending
+  reopen attempts and fault. Pending reopens outrank failed-open records, so each name contributes
+  one database component. Records need repair and an explicit open; the reopen service does not
+  retry them. The integration contributes these observations as
   `engine/<escaped engine>`, `database/<escaped engine>/<escaped database>` and
   `database.accepting`. Database names lower-case only ASCII letters before URI-escaping, and
   every inventory uses the same component spelling. Engine registration rejects invalid UTF-16.
