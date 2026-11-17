@@ -93,7 +93,7 @@ public sealed partial class SqlJointTypeMigrationTests
         // Arrange: a deterministic permutation spreads each bracket over many leaves.
         const int rows = 524288;
         const int createdRows = 393216;
-        using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(6));
+        using var guard = new CancellationTokenSource(TimeSpan.FromMinutes(4));
         SqlCompiledSchema Declare(bool target, bool created = false) => SqlSchema.Create("typed", schema =>
         {
             schema.Table<OtherRow>("items", table =>
