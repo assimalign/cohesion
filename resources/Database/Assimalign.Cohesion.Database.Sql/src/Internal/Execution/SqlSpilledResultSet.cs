@@ -37,7 +37,9 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
     private bool _relationLease;
     internal Location? Location { get; set; }
     internal bool IsRelationCache { get; private set; }
-    internal bool IsStageResult { get; }
+    private readonly byte _resultFlags;
+    internal bool IsStageResult => (_resultFlags & 1) != 0;
+    internal bool IsInternalResult => _resultFlags != 0 || IsRelationCache;
 
     internal void RetainRelation(List<object?[]> rows, SqlStatementMetrics metrics)
     {
@@ -122,21 +124,21 @@ internal sealed partial class SqlSpilledResultSet : DatabaseResultSet
 
     internal SqlSpilledResultSet(IReadOnlyList<DatabaseColumn> columns, StorageTempStatement statement,
         StorageTempSortReader sorted, long offset, long limit, SqlDatabaseSession owner, long readerGrant, long maximumDecodedRowBytes,
-        bool ownsStatement = true, bool stageResult = false)
+        bool ownsStatement = true, bool stageResult = false, bool internalResult = false)
     {
         _columns = columns; _statement = statement; _sorted = sorted; _offset = offset; _limit = limit; _owner = owner; _readerGrant = readerGrant;
         _maximumDecodedRowBytes = maximumDecodedRowBytes;
-        _ownsStatement = ownsStatement; IsStageResult = stageResult;
+        _ownsStatement = ownsStatement; _resultFlags = (byte)((stageResult ? 1 : 0) | (internalResult ? 2 : 0));
         try { ValidateFirstReader(); SqlSpillLifetime.Attach(owner, this); }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
     }
     internal SqlSpilledResultSet(IReadOnlyList<DatabaseColumn> columns, StorageTempStatement statement,
         StorageTempRun run, long offset, long limit, SqlDatabaseSession owner, long readerGrant, long maximumDecodedRowBytes,
-        bool ownsStatement = true, bool stageResult = false)
+        bool ownsStatement = true, bool stageResult = false, bool internalResult = false)
     {
         _columns = columns; _statement = statement; _distinct = run; _offset = offset; _limit = limit; _owner = owner; _readerGrant = readerGrant;
         _maximumDecodedRowBytes = maximumDecodedRowBytes;
-        _ownsStatement = ownsStatement; IsStageResult = stageResult;
+        _ownsStatement = ownsStatement; _resultFlags = (byte)((stageResult ? 1 : 0) | (internalResult ? 2 : 0));
         try { ValidateFirstReader(); SqlSpillLifetime.Attach(owner, this); }
         catch (Exception exception) { DisposeAfterFailure(exception); throw; }
     }

@@ -34,7 +34,7 @@ internal sealed class SqlStagedSortSource : IDisposable
     internal SqlStagedSortSource(SqlDatabaseSession owner, SqlStatementMetrics metrics, long budget, long grant)
     {
         System.Diagnostics.Debug.Assert(SqlHashSpillMetrics.For(metrics)?.HasOptionalArenas != true);
-        if (!metrics.IsStageResult) { SqlSpillLifetime.CheckCapacity(owner); }
+        if (!metrics.IsInternalResult) { SqlSpillLifetime.CheckCapacity(owner); }
         Owner = owner; _metrics = metrics; _budget = budget;
         long bound = (Math.Min(grant, int.MaxValue) - 32768) / 16 - 8192;
         if (grant < 65536 || bound < 16) { Refuse(); }

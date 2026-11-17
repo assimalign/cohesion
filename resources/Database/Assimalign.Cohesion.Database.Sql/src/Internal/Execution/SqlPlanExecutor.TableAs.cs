@@ -57,6 +57,7 @@ internal sealed partial class SqlPlanExecutor
                 // 64-row brackets. Temp reads finish outside every apply bracket/page latch.
                 long sourceBytes = 0, batchBytes = 0, bufferBytes = 0;
                 bool consumingSource = false;
+                statement.Metrics.BeginInternalResult();
                 try
                 {
                     TableAsStage?.Invoke("Selecting", table.ObjectId);
@@ -143,7 +144,11 @@ internal sealed partial class SqlPlanExecutor
                         throw;
                     }
                 }
-                finally { statement.Metrics.ReleaseHashMemory(sourceBytes + batchBytes + bufferBytes); }
+                finally
+                {
+                    statement.Metrics.EndInternalResult();
+                    statement.Metrics.ReleaseHashMemory(sourceBytes + batchBytes + bufferBytes);
+                }
             }
             TableAsStage?.Invoke("Prepared", table.ObjectId);
             var publication = statement.ScriptReceipt;

@@ -167,18 +167,24 @@ public sealed partial class SqlSortSpillConformanceTests
         finally { BeforeCreate(engine.TempSpace!, null); SqlRowCollector.ObserveSpill = null; }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Active relation caches count toward the session spill cap and explain refusal (#1789)")]
-    public async Task ExecuteAsync_RelationCacheCap_ShouldNameActiveCaches()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Internal relation caches leave client-result slots free (#1789)")]
+    public async Task ExecuteAsync_NineRelationCaches_ShouldLeaveClientSlotsFree()
     {
         // Arrange
         await using var engine = await Create("cache-cap", 262144);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync(); await Seed(session);
         string definitions = string.Join(',', Enumerable.Range(0, 9).Select(i => $"c{i} AS (SELECT id,k FROM t)"));
-        string joins = string.Join(" CROSS JOIN ", Enumerable.Range(0, 9).Select(i => "c" + i));
+        string counts = string.Join(',', Enumerable.Range(0, 9).Select(i => $"(SELECT COUNT(*) FROM c{i}) AS n{i}"));
+        int creates = 0;
+        BeforeCreate(engine.TempSpace!, () => creates++);
         // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("WITH " + definitions + " SELECT COUNT(*) FROM " + joins));
+        DatabaseResultSet result;
+        try { result = (DatabaseResultSet)await session.ExecuteAsync("WITH " + definitions + " SELECT " + counts); }
+        finally { BeforeCreate(engine.TempSpace!, null); }
+        await using var completed = result;
         // Assert
-        failure.Diagnostics[0].Code.ShouldBe("CS05067"); failure.Message.ShouldContain("8 active relation caches", Case.Sensitive);
+        (await Rows(result)).ShouldHaveSingleItem().Cells.ShouldBe(Enumerable.Repeat<object?>(4000L, 9));
+        creates.ShouldBe(9);
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         await using var next = (DatabaseResultSet)await session.ExecuteAsync("SELECT id,k FROM t");

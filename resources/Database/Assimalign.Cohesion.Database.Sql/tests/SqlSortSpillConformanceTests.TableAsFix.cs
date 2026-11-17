@@ -285,8 +285,8 @@ public sealed partial class SqlSortSpillConformanceTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - CTAS ninth spill refuses CS05067 and preserves eight live readable results (#1789)")]
-    public async Task ExecuteAsync_TableAsEightLiveResults_ShouldRefuseWithoutAffectingReaders()
+    [Fact(DisplayName = "Cohesion Test [Sql] - CTAS source spill preserves all eight client-result slots and readers (#1789)")]
+    public async Task ExecuteAsync_TableAsEightLiveResults_ShouldCompleteWithoutAffectingReaders()
     {
         // Arrange
         await using var engine = await Create("ctas-eight", 262144); var database = await engine.CreateDatabaseAsync("db");
@@ -297,9 +297,11 @@ public sealed partial class SqlSortSpillConformanceTests
             for (int i = 0; i < 8; i++) { results.Add((await session.ExecuteAsync("SELECT id,k FROM t ORDER BY id")).ShouldBeOfType<SqlSpilledResultSet>()); }
             long live = TempBytes(engine.TempSpace!);
             // Act / Assert
-            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE TABLE archive AS SELECT id,k FROM t ORDER BY id"));
-            failure.Diagnostics[0].Code.ShouldBe("CS05067"); database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse();
+            (await session.ExecuteAsync("CREATE TABLE archive AS SELECT id,k FROM t ORDER BY id")).AffectedCount.ShouldBe(4000);
+            database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeTrue();
             TempBytes(engine.TempSpace!).ShouldBe(live);
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT id,k FROM t ORDER BY id"));
+            failure.Diagnostics[0].Code.ShouldBe("CS05067");
             foreach (var result in results) { (await Rows(result)).Select(row => row.Cells[0]).ShouldBe(Enumerable.Range(0, 4000).Cast<object?>()); }
         }
         finally { foreach (var result in results) { await result.DisposeAsync(); } }

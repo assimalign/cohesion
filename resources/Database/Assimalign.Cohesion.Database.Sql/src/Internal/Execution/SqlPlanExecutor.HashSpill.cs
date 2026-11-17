@@ -299,7 +299,7 @@ internal sealed partial class SqlPlanExecutor
         }
         var result = new SqlSpilledResultSet(((DatabaseResultSet)MaterializeProjected(plan.Projections, [])).Columns,
             spill.Statement, output, offset, plan.Limit?.Count ?? -1, spill.Owner, _definitions.StatementMemoryBudget - _metrics!.HashMemoryBytes, maximumDecoded,
-            ownsStatement: !spill.SharedStatement, stageResult: _metrics!.IsStageResult);
+            ownsStatement: !spill.SharedStatement, stageResult: _metrics!.IsStageResult, internalResult: _metrics.IsInternalResult);
         result.CaptureMetrics(_metrics); SqlHashSpillMetrics.Refresh(_metrics, spill.Statement); spill.Transfer();
         return result;
     }
@@ -373,7 +373,7 @@ internal sealed partial class SqlPlanExecutor
             _outputTypes = new DatabaseType[plan?.Aggregates.Count ?? 0];
             _aggregateCollations = plan?.Aggregates.Select(a => a.Collation.Resolve(executor._subqueryValues)).ToArray() ?? [];
             bool windowInput = stage || executor._metrics!.IsStageResult || SqlWindowMemory.For(executor._metrics) is not null;
-            if (!windowInput) { SqlSpillLifetime.CheckCapacity(owner); }
+            if (!windowInput && !executor._metrics!.IsInternalResult) { SqlSpillLifetime.CheckCapacity(owner); }
             _statement = shared ?? (windowInput ? SqlHashSpillMetrics.JoinTemp(executor._metrics!, owner)
                 : SqlHashSpillMetrics.For(executor._metrics!)?.JoinStatement ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota));
             _sharedStatement = ReferenceEquals(_statement, SqlHashSpillMetrics.For(executor._metrics!)?.JoinStatement);
@@ -679,7 +679,7 @@ internal sealed partial class SqlPlanExecutor
             var output = Complete(token);
             var columns = ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns;
             var result = new SqlSpilledResultSet(columns, _statement, output, offset?.Count ?? 0, limit?.Count ?? -1, Owner,
-                _budget - _executor._metrics!.HashMemoryBytes, MaximumDecodedBytes, ownsStatement: !_sharedStatement, stageResult: _executor._metrics.IsStageResult);
+                _budget - _executor._metrics!.HashMemoryBytes, MaximumDecodedBytes, ownsStatement: !_sharedStatement, stageResult: _executor._metrics.IsStageResult, internalResult: _executor._metrics.IsInternalResult);
             result.CaptureMetrics(_executor._metrics);
             _disposed = true;
             return result;

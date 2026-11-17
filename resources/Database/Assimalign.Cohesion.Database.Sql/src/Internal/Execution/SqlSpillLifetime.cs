@@ -23,13 +23,9 @@ internal sealed class SqlSpillLifetime
     private void CheckCapacity()
     {
         int count = 0;
-        foreach (var result in _results) { if (!result.IsStageResult) { count++; } }
+        foreach (var result in _results) { if (!result.IsInternalResult) { count++; } }
         if (count < MaximumResultsPerSession) { return; }
-        int caches = 0;
-        foreach (var result in _results) { if (result.IsRelationCache) { caches++; } }
-        if (caches == 0) { throw SqlExecutionException.UndisposedResults(MaximumResultsPerSession); }
-        throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
-            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SpillRelationCachesLimit, MaximumResultsPerSession, caches));
+        throw SqlExecutionException.UndisposedResults(MaximumResultsPerSession);
     }
 
     internal static void Attach(SqlDatabaseSession owner, SqlSpilledResultSet result)
@@ -40,7 +36,7 @@ internal sealed class SqlSpillLifetime
     }
     private void Add(SqlSpilledResultSet result, bool session = false)
     {
-        lock (_results) { ObjectDisposedException.ThrowIf(_closed, this); if (session && !result.IsStageResult) { CheckCapacity(); } _results.Add(result); }
+        lock (_results) { ObjectDisposedException.ThrowIf(_closed, this); if (session && !result.IsInternalResult) { CheckCapacity(); } _results.Add(result); }
     }
     internal static void Detach(SqlDatabaseSession owner, SqlSpilledResultSet result)
     {

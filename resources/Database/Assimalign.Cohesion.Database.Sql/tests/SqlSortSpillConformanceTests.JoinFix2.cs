@@ -42,9 +42,10 @@ public sealed partial class SqlSortSpillConformanceTests
             // lends it until root delivery. Reflection keeps the ordering probe portable.
             var constructor = typeof(SqlSpilledResultSet).GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
                 .Single(candidate => candidate.GetParameters()[2].ParameterType == typeof(StorageTempRun));
+            var parameters = constructor.GetParameters();
             var arguments = new List<object?> { columns.Columns, statement, run, 0L, -1L, session, 262144L, SqlTempRowCodec.DecodedBytes(row) };
-            if (constructor.GetParameters().Length >= 9) { arguments.Add(false); }
-            if (constructor.GetParameters().Length == 10) { arguments.Add(false); }
+            if (parameters.Length >= 9) { arguments.Add(false); }
+            for (int parameter = 9; parameter < parameters.Length; parameter++) { arguments.Add(parameters[parameter].DefaultValue); }
             var result = (SqlSpilledResultSet)constructor.Invoke(arguments.ToArray());
             // Act
             await session.DisposeAsync();

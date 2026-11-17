@@ -49,6 +49,7 @@ internal sealed partial class SqlPlanExecutor
     {
         long resultBytes = 0;
         SqlSelectMemory retainedBytes = default, vectorBytes = default;
+        statement.Metrics.BeginInternalResult();
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -105,7 +106,11 @@ internal sealed partial class SqlPlanExecutor
             }
             finally { _subqueryValues = parent; }
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref vectorBytes); ReleaseSelectMemory(ref resultBytes); }
+        finally
+        {
+            statement.Metrics.EndInternalResult();
+            ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref vectorBytes); ReleaseSelectMemory(ref resultBytes);
+        }
     }
 
     // This separate state machine charges child result buffers only inside a window.
