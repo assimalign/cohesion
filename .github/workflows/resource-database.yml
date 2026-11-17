@@ -87,10 +87,10 @@ jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
-    # T3 batch 4's all-OS runs (42335218592, 42340437624, attempts 1 and 2): Windows took 44m 40s
-    # once and passed 60m twice, in the last three suites. About 62m is the slowest; twice that,
-    # rounded up to 15 minutes, is 135.
-    timeout-minutes: 135
+    # Twice the slowest whole job, rounded up to 15 minutes. T3 batch 4's all-OS runs (42335218592,
+    # 42340437624) took up to about 62m, which set 135. T3 batch 6's all-OS run 44137397071 took
+    # 129m 56s on Windows, 1h 36m of it in the Sql suite: twice that, rounded up, is 270.
+    timeout-minutes: 270
     strategy:
       # Every leg reports its own result. With fail-fast, one failing leg cancels the others (#1093).
       fail-fast: false
