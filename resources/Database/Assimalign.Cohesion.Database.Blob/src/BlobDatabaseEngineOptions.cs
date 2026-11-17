@@ -163,6 +163,14 @@ public sealed class BlobDatabaseEngineOptions
 
     /// <summary>
     /// Gets or sets the root directory where per-database files are created.
+    /// New Unix roots use mode 0700. Existing Unix roots with no group write or access to others
+    /// are admitted unchanged; setuid, setgid and sticky bits are not checked. A wider root holding
+    /// only engine data from any model, interrupted file sets, .DS_Store files, the default
+    /// .cohesion-temp directory is tightened to
+    /// exactly 0700 with a warning. Foreign entries, a failed inspection or a failed mode change refuse with CK06007,
+    /// naming the entry or account failure and a chmod/RootPath remedy. New Windows roots grant
+    /// inheritable full control only to the current user, SYSTEM and Administrators with inheritance
+    /// disabled; missing parents inherit normally. Existing Windows roots are used unchanged.
     /// </summary>
     /// <remarks>
     /// When a root is provided, each database's files live in a directory of its own under it.

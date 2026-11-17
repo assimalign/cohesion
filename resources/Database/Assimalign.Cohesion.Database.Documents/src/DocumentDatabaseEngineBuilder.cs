@@ -193,7 +193,7 @@ public sealed class DocumentDatabaseEngineBuilder
     /// <exception cref="InvalidOperationException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="ArgumentException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">See <see cref="BuildAsync"/>.</exception>
-    /// <exception cref="DatabaseException">See <see cref="BuildAsync"/>.</exception>
+    /// <exception cref="DatabaseException">See <see cref="BuildAsync"/>, including root refusal <c>CK06007</c>.</exception>
     /// <exception cref="AggregateException">See <see cref="BuildAsync"/>.</exception>
     public DocumentDatabaseEngine Build()
         => Task.Run(async () => await BuildAsync(CancellationToken.None).ConfigureAwait(false)).GetAwaiter().GetResult();
@@ -214,7 +214,8 @@ public sealed class DocumentDatabaseEngineBuilder
     /// anything is created, and the refusal names the engine.
     /// </exception>
     /// <exception cref="DatabaseException">
-    /// A declared database's storage format was refused, or opening it failed with corruption
+    /// The Unix engine root cannot be tightened automatically (<c>CK06007</c>), or
+    /// a declared database's storage format was refused, or opening it failed with corruption
     /// (<c>CK06003</c>) or coded I/O failure (<c>CD06104</c>); the engine was disposed.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>

@@ -72,7 +72,8 @@ public sealed class SqlDatabaseEngineOptions
     /// an override must remain below RootPath, with a first segment no database could take (a leading dot is safe) and without
     /// link components. In-memory engines have no spill space unless set.</summary>
     /// <remarks>One directory belongs to one spilling engine; choose a different TempDirectory for
-    /// each engine. A lease conflict warns at startup and refuses a later spill with CK05005.
+    /// each engine. On a shared root an earlier version left at 0755, run chmod 700 on the root
+    /// first: another engine's custom temp directory is not engine data to this one. A lease conflict warns at startup and refuses a later spill with CK05005.
     /// Unix directories are created 0700, files 0600; group/other-writable directories are refused.
     /// On Windows an explicit directory keeps its inherited ACL. Data is unencrypted. Unix runs survive a kill until the next sweep; Windows
     /// deletes runs on process exit. Power loss can leave runs on every OS. OS backups of RootPath can capture live temp files.
@@ -242,6 +243,14 @@ public sealed class SqlDatabaseEngineOptions
 
     /// <summary>
     /// Gets or sets the root directory where per-database files are created.
+    /// New Unix roots use mode 0700. Existing Unix roots with no group write or access to others
+    /// are admitted unchanged; setuid, setgid and sticky bits are not checked. A wider root holding
+    /// only engine data from any model, interrupted file sets, .DS_Store files, the default
+    /// .cohesion-temp directory or the configured temp directory and its ancestors is tightened to
+    /// exactly 0700 with a warning. Foreign entries, a failed inspection or a failed mode change refuse with CK06007,
+    /// naming the entry or account failure and a chmod/RootPath remedy. New Windows roots grant
+    /// inheritable full control only to the current user, SYSTEM and Administrators with inheritance
+    /// disabled; missing parents inherit normally. Existing Windows roots are used unchanged.
     /// </summary>
     /// <remarks>
     /// When <see cref="StorageStrategy"/> is null and <see cref="RootPath"/> is provided,

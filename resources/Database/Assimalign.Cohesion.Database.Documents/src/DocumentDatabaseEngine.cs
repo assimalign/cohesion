@@ -113,7 +113,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
         _memory = options.StorageStrategy is null && _rootPath is null ? new DatabaseMemoryFiles() : null;
         if (_rootPath is not null)
         {
-            Directory.CreateDirectory(_rootPath);
+            DatabaseRootDirectory.Prepare(_rootPath, DocumentDatabaseEventSource.Log.RootPermissionsTightened);
         }
 
         // Attach the built-in workers last, after every field they observe is initialized: the
@@ -220,6 +220,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     /// passes is less than one, or the journal size limit is negative or set and below the
     /// checkpoint journal size.
     /// </exception>
+    /// <exception cref="DatabaseException">The Unix root grants group write or access to others and cannot be tightened automatically (<c>CK06007</c>).</exception>
     public static DocumentDatabaseEngine Create(string name, DocumentDatabaseEngineOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

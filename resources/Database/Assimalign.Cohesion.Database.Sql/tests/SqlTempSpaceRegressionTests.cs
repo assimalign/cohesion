@@ -28,7 +28,7 @@ public sealed class SqlTempSpaceRegressionTests : IDisposable
     public async Task Create_UnavailableTempDirectory_ShouldKeepDatabasesOnline(bool heldLease)
     {
         // Arrange
-        string temp = Path.Combine(_root, ".cohesion-temp"); Directory.CreateDirectory(_root);
+        string temp = Path.Combine(_root, ".cohesion-temp"); TempTestDirectory.Create(_root);
         FileStream? lease = null;
         if (heldLease)
         {

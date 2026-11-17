@@ -42,6 +42,19 @@ public sealed class GraphDatabaseNameTests : IDisposable
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Engine root: the model's data file set is recognized")]
+    public void DataFileSet_EngineRootRecognition_ShouldIncludeModelSet()
+    {
+        // Arrange
+        string set = GraphDatabaseEngine.DataFileSet;
+
+        // Act
+        bool recognized = global::Assimalign.Cohesion.Database.Internal.DatabaseRootDirectory.DataFileSets.Contains(set);
+
+        // Assert
+        recognized.ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Names: a database created as 'sales' and opened again as 'SALES' is the same database, with its data and its created name (#1392)")]
     [InlineData(true)]
     [InlineData(false)]
