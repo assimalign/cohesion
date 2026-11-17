@@ -436,7 +436,7 @@ refuses non-equi FULL joins with `CS05070`. The SQL project DESIGN holds the eli
 lifetime details.
 Spilling only adds capability: a statement that completes at the prior statement grant and temp
 quota still completes there, with the same rows, CLR types and metadata; statements without a
-join keep their original memory arithmetic (#1789). Index builds are the exception: they charge
+join keep their original memory arithmetic (#1789). EXPLAIN output differs only in the hash_budget value and the added hash_status field. Index builds are the exception: they charge
 their build workspace (#1808), so a build whose chunk does not fit the grant refuses CS05067 (schema apply reports CS03402 with that cause).
 Result corrections are recorded under their own issue, including ungrouped typed-NULL
 CASE/COALESCE refusing CS02011 instead of returning text under Int64 metadata (#1788).
