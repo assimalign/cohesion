@@ -657,3 +657,17 @@ failures use the binding category; return-type failures use the value category.
 | CV01021 | More than one key-value function overload accepts the NULL-compatible arguments | — |
 | CV02016 | Key-value function result violates its declared return type | — |
 | CV05003 | Key-value application function callback failed | — |
+
+## Text analysis conditions
+
+`Database.Types.Text` is an independently consumable child root. Its `TextException.Code` uses
+`TextErrorCode`, outside the model diagnostic namespace, like the other typed child-root failures.
+No model translates these codes yet; model-owned diagnostics belong with the future text consumers.
+
+| Code | Condition |
+| --- | --- |
+| `UnknownAnalyzer` | Analyzer name is unavailable (names are case-sensitive) |
+| `AnalyzerVersionMismatch` | The requested analyzer version is unavailable |
+| `InvalidUnicode` | Input contains an invalid Unicode scalar sequence |
+| `InvalidLexeme` | An explicit lexeme is empty, contains a null or exceeds 2,047 UTF-8 bytes |
+| `VectorTooLarge` | The vector's lexeme/position payload exceeds 1,048,575 bytes |
