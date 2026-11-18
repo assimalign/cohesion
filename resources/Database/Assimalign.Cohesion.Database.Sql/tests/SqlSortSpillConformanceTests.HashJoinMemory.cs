@@ -87,9 +87,16 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var engine = await Create("join-live", 1048576);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         MeasureJoinReplay(session, 3000, mutant: false, sample: false, full: full);
+        // Keep pre-existing pooled images rooted across every baseline and sample.
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         var small = MeasurePopulation(6000);
         var large = MeasurePopulation(12000);
+        images.Drain(pool);
         var retainedSmall = MeasureJoinReplay(session, 6000, mutant: true, sample: true, full: full);
+        images.Drain(pool);
         var retainedLarge = MeasureJoinReplay(session, 12000, mutant: true, sample: true, full: full);
         // Assert
         small.Peak.ShouldBeLessThanOrEqualTo(1048576+262144); large.Peak.ShouldBeLessThanOrEqualTo(1048576+262144);
@@ -104,6 +111,7 @@ public sealed partial class SqlSortSpillConformanceTests
             long peak = long.MaxValue, replay = long.MaxValue;
             for (int execution = 1; execution <= 3; execution++)
             {
+                images.Drain(pool);
                 var measured = MeasureJoinReplay(session, count, mutant: false, sample: true, full: full, execution: execution);
                 measured.Peak.ShouldBeLessThanOrEqualTo(1048576 + 262144);
                 peak = Math.Min(peak, measured.Peak);
