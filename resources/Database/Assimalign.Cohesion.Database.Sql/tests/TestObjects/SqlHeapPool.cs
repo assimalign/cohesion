@@ -19,6 +19,7 @@ internal static class SqlHeapPool
     {
         private static readonly int _bytes = ArrayPool<byte>.Shared.GetHashCode(), _chars = ArrayPool<char>.Shared.GetHashCode(),
             _objects = ArrayPool<object>.Shared.GetHashCode(), _ints = ArrayPool<int>.Shared.GetHashCode(), _values = ArrayPool<SqlValue>.Shared.GetHashCode();
+        internal long TrimEvents;
         internal long Trimmed, Rented, Allocated, Dropped, Unknown;
         protected override void OnEventSourceCreated(EventSource source)
         {
@@ -26,6 +27,8 @@ internal static class SqlHeapPool
         }
         protected override void OnEventWritten(EventWrittenEventArgs args)
         {
+            // Count every pool and element type, before any payload sizing/filtering.
+            if (args.EventId == 4) { Interlocked.Increment(ref TrimEvents); }
             if (args.EventId is not (1 or 2 or 4 or 6) || args.Payload is null || args.Payload.Count < 3) { return; }
             int length = (int)args.Payload[1]!, pool = (int)args.Payload[2]!;
             int width = pool == _bytes ? 1 : pool == _chars ? 2 : pool == _objects ? IntPtr.Size : pool == _ints ? 4 : pool == _values ? Unsafe.SizeOf<SqlValue>() : 0;

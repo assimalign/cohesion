@@ -17,6 +17,7 @@ internal static class DocumentHeapPool
     internal sealed class PoolEvents : EventListener
     {
         private static readonly int _bytes = ArrayPool<byte>.Shared.GetHashCode();
+        internal long TrimEvents;
         internal long Allocated, Trimmed;
 
         protected override void OnEventSourceCreated(EventSource source)
@@ -26,6 +27,8 @@ internal static class DocumentHeapPool
 
         protected override void OnEventWritten(EventWrittenEventArgs args)
         {
+            // Count every pool and element type, before any payload sizing/filtering.
+            if (args.EventId == 4) { Interlocked.Increment(ref TrimEvents); }
             if (args.EventId is not (2 or 4) || args.Payload is null || args.Payload.Count < 3
                 || (int)args.Payload[2]! != _bytes) { return; }
             long size = (24L + (int)args.Payload[1]! + 7) & ~7L;
