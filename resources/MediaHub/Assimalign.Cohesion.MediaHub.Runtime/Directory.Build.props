@@ -17,6 +17,5 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.MediaHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub.Hosting.ApplicationModel" />
     </ItemGroup>
 </Project>

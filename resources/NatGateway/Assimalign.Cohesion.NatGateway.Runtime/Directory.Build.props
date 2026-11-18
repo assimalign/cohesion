@@ -17,6 +17,5 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.NatGateway" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway.Hosting.ApplicationModel" />
     </ItemGroup>
 </Project>

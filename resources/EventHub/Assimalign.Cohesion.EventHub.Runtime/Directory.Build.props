@@ -17,6 +17,5 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EventHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub.Hosting.ApplicationModel" />
     </ItemGroup>
 </Project>

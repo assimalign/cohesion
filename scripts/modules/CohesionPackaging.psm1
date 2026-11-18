@@ -204,13 +204,11 @@ $script:CohesionReleaseLibrary = @(
     # resources/ApiManager
     'resources/ApiManager/Assimalign.Cohesion.ApiManager'
     'resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting'
-    'resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel'
 
     # resources/ConfigurationStore
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting'
-    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel'
 
     # resources/Database
     'resources/Database/Assimalign.Cohesion.Database'
@@ -251,76 +249,62 @@ $script:CohesionReleaseLibrary = @(
     # resources/EmailHub
     'resources/EmailHub/Assimalign.Cohesion.EmailHub'
     'resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting'
-    'resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel'
 
     # resources/EventHub
     'resources/EventHub/Assimalign.Cohesion.EventHub'
     'resources/EventHub/Assimalign.Cohesion.EventHub.Hosting'
-    'resources/EventHub/Assimalign.Cohesion.EventHub.Hosting.ApplicationModel'
 
     # resources/IdentityHub
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting'
-    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models'
 
     # resources/IoTHub
     'resources/IoTHub/Assimalign.Cohesion.IoTHub'
     'resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting'
-    'resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting.ApplicationModel'
 
     # resources/LoadBalancer
     'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer'
     'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting'
-    'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel'
 
     # resources/LogSpace
     'resources/LogSpace/Assimalign.Cohesion.LogSpace'
     'resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting'
-    'resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel'
 
     # resources/MediaHub
     'resources/MediaHub/Assimalign.Cohesion.MediaHub'
     'resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting'
-    'resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting.ApplicationModel'
 
     # resources/MessageHub
     'resources/MessageHub/Assimalign.Cohesion.MessageHub'
     'resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting'
-    'resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting.ApplicationModel'
 
     # resources/NatGateway
     'resources/NatGateway/Assimalign.Cohesion.NatGateway'
     'resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting'
-    'resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting.ApplicationModel'
 
     # resources/NotificationHub
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub'
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting'
-    'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting.ApplicationModel'
 
     # resources/Rezolvr
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr'
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting'
-    'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel'
 
     # resources/Scheduler
     'resources/Scheduler/Assimalign.Cohesion.Scheduler'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting'
-    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer'
 
     # resources/SecretStore
     'resources/SecretStore/Assimalign.Cohesion.SecretStore'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Client'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting'
-    'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel'
 
     # resources/VpnGateway
     'resources/VpnGateway/Assimalign.Cohesion.VpnGateway'
     'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting'
-    'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel'
 
     # resources/Web
     'resources/Web/Assimalign.Cohesion.Web'
@@ -342,7 +326,6 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Health'
     'resources/Web/Assimalign.Cohesion.Web.HostFiltering'
     'resources/Web/Assimalign.Cohesion.Web.Hosting'
-    'resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel'
     'resources/Web/Assimalign.Cohesion.Web.HttpsPolicy'
     'resources/Web/Assimalign.Cohesion.Web.OpenApi'
     'resources/Web/Assimalign.Cohesion.Web.ProblemDetails'

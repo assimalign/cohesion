@@ -17,7 +17,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.LogSpace" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LogSpace" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LogSpace.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel" />
 
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
