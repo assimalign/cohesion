@@ -18,6 +18,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -69,6 +71,8 @@ public sealed partial class SqlSortSpillConformanceTests
         // Arrange: a warmed minimum pool excludes destination page growth from the sample.
         const long grant = 1048576, constant = 553240;
         var peaks = new List<long>();
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
         foreach (int count in new[] { 4000, 16000 })
         {
             var builder = SqlDatabaseEngine.CreateBuilder("ctas-live");
@@ -83,9 +87,11 @@ public sealed partial class SqlSortSpillConformanceTests
             await session.ExecuteAsync("CREATE TABLE warm AS " + query);
             database.DataStorage.BufferPoolCapacity.ShouldBe(128);
             TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
+            images.Drain(pool);
+            if (count == 4000) { await QuiesceWindowPoolAsync(pool); }
             long baseline = 0, peak = 0; int read = 0, encoded = 0, copies = 0; long workspace = 0;
             var weak = new List<WeakReference>(); var retained = new List<object>();
-            SqlPlanExecutor.TableAsSourceAdmitted = _ => baseline = LiveHeap.Read();
+            SqlPlanExecutor.TableAsSourceAdmitted = _ => { images.Drain(pool); baseline = LiveHeap.Read(); };
             SqlPlanExecutor.TableAsSourceReading = (source, row) =>
             {
                 read++; workspace = Math.Max(workspace, Sorted(source)!.BufferBytes);

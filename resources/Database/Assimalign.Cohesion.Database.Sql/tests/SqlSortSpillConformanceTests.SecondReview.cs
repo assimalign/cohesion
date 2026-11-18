@@ -19,6 +19,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -129,6 +131,10 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var engine = SqlDatabaseEngine.Create("decoded-reader", new() { RootPath = Path.Combine(_root,"decoded-reader"), StatementMemoryBudget = grant });
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         await using (var warm = BuildWideReaderResult(session, 3900000)) { }
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         long baseline = LiveHeap.Read();
         await using var result = BuildWideReaderResult(session, 3900000);
         await using var first = result.GetRowsAsync().GetAsyncEnumerator();

@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests

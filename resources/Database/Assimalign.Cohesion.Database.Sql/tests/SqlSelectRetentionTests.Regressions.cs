@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSelectRetentionTests
@@ -196,6 +198,10 @@ public sealed partial class SqlSelectRetentionTests
         var observations = new Dictionary<string, int>();
         database.Definitions.ObserveSelectRetention = (name, _, retained) =>
             observations[name] = Math.Max(observations.GetValueOrDefault(name), retained);
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         foreach (var shape in new[]
         {
             ("COUNT", "SELECT COUNT(*) FROM t WHERE sample_memory(k)>0", "group-input", -1),
@@ -210,6 +216,7 @@ public sealed partial class SqlSelectRetentionTests
             database.Definitions.ForceSelectRetentionBasePath = true;
             observations.Clear();
             calls = 0;
+            images.Drain(pool);
             long startingLive = LiveHeap.Read();
             var baseline = await Rows(session, shape.Item2);
             calls.ShouldBe(count);
@@ -226,6 +233,7 @@ public sealed partial class SqlSelectRetentionTests
             {
                 observations.Clear();
                 calls = 0;
+                images.Drain(pool);
                 startingLive = LiveHeap.Read();
                 actual = await Rows(session, shape.Item2);
                 calls.ShouldBe(count);

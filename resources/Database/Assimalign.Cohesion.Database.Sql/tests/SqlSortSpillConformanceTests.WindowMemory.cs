@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -172,67 +174,4 @@ public sealed partial class SqlSortSpillConformanceTests
 
     private static async Task WarmWindowHeapAsync(SqlDatabaseSession session, string sql)
     { await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql); }
-
-    private static async Task QuiesceWindowPoolAsync(HashPoolEvents events)
-    {
-        // Shared buckets stay held by the lease. Other threads' free TLS images can
-        // otherwise disappear during a later gen-2 collection. An untouched pooled
-        // probe must be collected before sampling; its weak reference decides readiness.
-        long trimmed = events.Trimmed;
-        using var release = new ManualResetEventSlim();
-        var ready = new TaskCompletionSource<WeakReference>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            // Keep this TLS owner alive until trimming, independently of pool-worker retirement.
-            try { ready.SetResult(ReturnWindowPoolProbe()); release.Wait(); }
-            catch (Exception failure) { ready.TrySetException(failure); }
-        }) { IsBackground = true, Name = "window-pool-probe" };
-        thread.Start();
-        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        try
-        {
-            var probe = await ready.Task.WaitAsync(guard.Token);
-            while (true)
-            {
-                LiveHeap.Read();
-                if (!probe.IsAlive) { break; }
-                await Task.Delay(100, guard.Token);
-            }
-            (events.Trimmed - trimmed).ShouldBeGreaterThanOrEqualTo(1048600);
-        }
-        finally { release.Set(); thread.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); }
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference ReturnWindowPoolProbe()
-    {
-        var buffer = ArrayPool<byte>.Shared.Rent(1048576);
-        var weak = new WeakReference(buffer);
-        ArrayPool<byte>.Shared.Return(buffer);
-        return weak;
-    }
-
-    private static List<byte[]> PinWindowPool(HashPoolEvents events)
-    {
-        // Hold pre-existing pooled page images across both baselines and every sample.
-        // A new allocation proves that each relevant shared bucket has been drained.
-        var held = new List<byte[]>();
-        foreach (int size in new[] { 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576 })
-        {
-            long allocated = events.Allocated;
-            int rents = 0;
-            do { held.Add(ArrayPool<byte>.Shared.Rent(size)); rents++; }
-            while (events.Allocated == allocated && rents < 1024);
-            events.Allocated.ShouldBeGreaterThan(allocated);
-        }
-        return held;
-    }
-
-    private sealed class WindowPoolLease : IDisposable
-    {
-        private readonly List<byte[]> _buffers = [];
-        internal void Drain(HashPoolEvents events) => _buffers.AddRange(PinWindowPool(events));
-        public void Dispose()
-        { foreach (var buffer in _buffers) { ArrayPool<byte>.Shared.Return(buffer); } _buffers.Clear(); }
-    }
 }

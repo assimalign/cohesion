@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -44,12 +46,16 @@ public sealed partial class SqlSortSpillConformanceTests
         // Arrange
         await using var engine = await Create("join-components", 67108864);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
-        await MeasureJoinComponent(session, component, 8, 32); // warm factories and metadata
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        await MeasureJoinComponent(session, component, 8, 32, images, pool); // warm factories and metadata
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         // Act
         (long Live, long Charge) measured = (long.MaxValue, 0);
         for (int round = 1; round <= 3; round++)
         {
-            var current = await MeasureJoinComponent(session, component, 128, 512);
+            var current = await MeasureJoinComponent(session, component, 128, 512, images, pool);
             _output.WriteLine($"JOIN_COMPONENT_ROUND|component={component}|round={round}|live={current.Live}|charged={current.Charge}");
             if (current.Live < measured.Live) { measured = current; }
         }
@@ -61,7 +67,7 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static async Task<(long Live, long Charge)> MeasureJoinComponent(SqlDatabaseSession owner, string component, int small, int large)
+    private static async Task<(long Live, long Charge)> MeasureJoinComponent(SqlDatabaseSession owner, string component, int small, int large, WindowPoolLease images, HashPoolEvents pool)
     {
         var roots = new object?[large];
         var cleanup = new List<IDisposable>(large);
@@ -87,6 +93,7 @@ public sealed partial class SqlSortSpillConformanceTests
         try
         {
             Fill(0, small);
+            images.Drain(pool);
             long baseline = LiveHeap.Read();
             Fill(small, large);
             long live = LiveHeap.Read() - baseline;
@@ -201,6 +208,10 @@ public sealed partial class SqlSortSpillConformanceTests
             _ => $"SELECT l.id,COUNT(t.id) c,CAST(l.id AS TEXT)||'{new string('z', 500)}' pad FROM jl l FULL JOIN jr r ON l.id=r.id FULL JOIN jt t ON r.id=t.id GROUP BY l.id ORDER BY c DESC,l.id",
         };
         if (!cold) { var warm = (DatabaseResultSet)await session.ExecuteAsync(sql); await DrainJoinHeap(warm); await warm.DisposeAsync(); }
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         long baseline = LiveHeap.Read(), peak = 0; int joins = 0, groups = 0, sorts = 0;
         var phases = new HashSet<string>();
         var peaks = new Dictionary<string, (long Live, long Charge)>();

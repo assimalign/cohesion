@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -32,13 +34,18 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData("TEXT")]
     [InlineData("BINARY")]
     [InlineData("CHAR")]
-    public void HashJoinEntries_TwoPopulations_ShouldBoundLiveHeap(string family)
+    public async Task HashJoinEntries_TwoPopulations_ShouldBoundLiveHeap(string family)
     {
         // Arrange / Act
         MeasureJoinEntries(family);
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         long live = long.MaxValue, charge = 0;
         for (int round = 1; round <= 3; round++)
         {
+            images.Drain(pool);
             var measured = MeasureJoinEntries(family);
             _output.WriteLine($"JOIN_ENTRY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charge}");
             live = Math.Min(live, measured.Live);

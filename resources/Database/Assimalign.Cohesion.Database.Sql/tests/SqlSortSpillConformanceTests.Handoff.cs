@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -41,6 +43,10 @@ public sealed partial class SqlSortSpillConformanceTests
         await Seed(session, 1000);
         const string sql = "SELECT observe_output(id) FROM t ORDER BY observe_key(id)";
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         baseline = LiveHeap.Read(); observe = true;
         SqlRowCollector.ObserveSpill = phase =>
         {

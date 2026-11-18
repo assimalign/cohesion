@@ -10,6 +10,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSelectWideMemoryTests
@@ -29,6 +31,10 @@ public sealed partial class SqlSelectWideMemoryTests
         await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(1, 8192).Select(k => $"({k})")), cancellationToken: CancellationToken.None);
         database.Definitions.ForceSelectRetentionBasePath = forceBase;
         await Execute(new Dictionary<string, object?> { ["p"] = new byte[1024] });
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         long largestGrowth = 0, observed = 0;
         Dictionary<string, object?>? parameters = null;
 
@@ -37,6 +43,7 @@ public sealed partial class SqlSelectWideMemoryTests
         {
             parameters = null;
             await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
+            images.Drain(pool);
             long before = LiveHeap.Read();
             parameters = new Dictionary<string, object?> { ["p"] = new byte[1024] };
             bool captured = false;

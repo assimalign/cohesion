@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -41,8 +43,14 @@ public sealed partial class SqlSortSpillConformanceTests
         string sql = "SELECT id," + arguments + " FROM t GROUP BY id";
         await ExecuteCorpusAsync(run, sql); // warm parsing, transitions, readers and output
 
+        // Keep 1 MiB MIN(INT) on its original sampler under the Release ceiling (#1883).
+        bool pinPool = grant != 1048576 || function != "MIN" || type != "INT";
+        using var pool = pinPool ? new HashPoolEvents() : null;
+        using var images = pinPool ? new WindowPoolLease() : null;
+        if (pinPool) { images!.Drain(pool!); await QuiesceWindowPoolAsync(pool!); }
+
         // Act
-        var actual = await ExecuteCorpusAsync(run, sql, sample: true, everyTransition: function == "MIN" && type == "INT");
+        var actual = await ExecuteCorpusAsync(run, sql, sample: true, everyTransition: function == "MIN" && type == "INT", images: images, pool: pool);
 
         // Assert
         long excess = actual.Live - grant - 262144;

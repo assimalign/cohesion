@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSelectWideMemoryTests
@@ -82,6 +84,10 @@ public sealed partial class SqlSelectWideMemoryTests
         int length = tableAs ? 8000 : comparesWide ? 2048 : 65536;
         (await Execute(hasParameter ? new Dictionary<string, object?> { ["p"] = new string('x', length) } : null)).ShouldBe(expectedPeak);
         if (tableAs) { await session.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None); }
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         long largestGrowth = long.MinValue, observedCharge = 0;
         Dictionary<string, object?>? parameters = null;
 
@@ -90,6 +96,7 @@ public sealed partial class SqlSelectWideMemoryTests
         {
             parameters = null;
             await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
+            images.Drain(pool);
             long before = LiveHeap.Read();
             if (hasParameter) { parameters = new Dictionary<string, object?> { ["p"] = new string('x', length) }; }
             SqlStatementMetrics? active = null;

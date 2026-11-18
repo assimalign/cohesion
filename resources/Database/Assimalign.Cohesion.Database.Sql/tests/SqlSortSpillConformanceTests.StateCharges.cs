@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -47,11 +49,16 @@ public sealed partial class SqlSortSpillConformanceTests
             $"SELECT id,{call} FROM state_input GROUP BY id").Statement.SqlExpression);
         var aggregate = plan.Aggregates.Single();
         MeasureStates(aggregate, type); // warm the exact factory, transition and accessors
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
 
         // Act: retain 4,096 then 16,384 states in the same preallocated root vector.
         long bytes = long.MaxValue;
         for (int round = 1; round <= 3; round++)
         {
+            images.Drain(pool);
             long measured = MeasureStates(aggregate, type);
             _output.WriteLine($"STATE_ROUND|function={function}|type={type}|round={round}|bytes={measured}");
             bytes = Math.Min(bytes, measured);

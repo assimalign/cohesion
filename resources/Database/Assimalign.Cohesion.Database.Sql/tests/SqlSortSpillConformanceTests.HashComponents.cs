@@ -9,6 +9,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -38,15 +40,20 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData("UINT")]
     [InlineData("ULONG")]
     [InlineData("CLRCHAR")]
-    public void RowBytes_KeyFamilies_ShouldBoundMarginalHeap(string family)
+    public async Task RowBytes_KeyFamilies_ShouldBoundMarginalHeap(string family)
     {
         // Arrange
         MeasureKeys(family);
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
 
         // Act
         long live = long.MaxValue, charged = 0;
         for (int round = 1; round <= 3; round++)
         {
+            images.Drain(pool);
             var measured = MeasureKeys(family);
             _output.WriteLine($"KEY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charged}");
             live = Math.Min(live, measured.Live);
@@ -191,14 +198,19 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Hash group header: dictionary growth and state-array headers fit the fixed group charge (#1789)")]
-    public void GroupHeaders_TwoPopulations_ShouldBoundMarginalHeap()
+    public async Task GroupHeaders_TwoPopulations_ShouldBoundMarginalHeap()
     {
         // Arrange / Act: array slots are measured with each state; isolate the array
         // header and dictionary here, with all key payloads allocated before either sample.
         MeasureGroupHeaders();
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         long live = long.MaxValue;
         for (int round = 1; round <= 3; round++)
         {
+            images.Drain(pool);
             long measured = MeasureGroupHeaders();
             _output.WriteLine($"GROUP_HEADER_ROUND|round={round}|live={measured}");
             live = Math.Min(live, measured);

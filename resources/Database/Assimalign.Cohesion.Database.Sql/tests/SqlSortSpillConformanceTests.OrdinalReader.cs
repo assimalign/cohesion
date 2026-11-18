@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -38,11 +40,16 @@ public sealed partial class SqlSortSpillConformanceTests
         var readers = new IEnumerator<object?[]>?[32];
         long live = long.MaxValue;
         long bound = StorageTempSpace.PageSize + run.MaximumRecordLength + SqlTempRowCodec.DecodedBytes(row) + 256;
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+        await QuiesceWindowPoolAsync(pool);
         for (int round = 1; round <= 3; round++)
         {
             try
             {
                 Fill(0, 8);
+                images.Drain(pool);
                 long small = LiveHeap.Read();
                 // Act
                 Fill(8, 32);

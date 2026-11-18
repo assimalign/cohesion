@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -193,11 +195,15 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var engine = await Create("output-live", grant);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         var populations = new List<long>();
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
         foreach (int count in new[] { 10000, 30000 })
         {
             long minimum = long.MaxValue;
             for (int execution = -1; execution < 3; execution++)
             {
+                images.Drain(pool);
+                if (count == 10000 && execution == 0) { await QuiesceWindowPoolAsync(pool); }
                 long before = LiveHeap.Read();
                 long during = MeasureOutputLiveRows(count, session, mutant && execution >= 0, grant);
                 long after = LiveHeap.Read();

@@ -19,6 +19,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -249,29 +251,6 @@ public sealed partial class SqlSortSpillConformanceTests
         finally { SqlPlanExecutor.ObserveHashSpill = null; retained.Clear(); }
         TempBytes(engine.TempSpace!).ShouldBe(0); session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         return (minimumReplay, smallMutant);
-    }
-
-    private sealed class HashPoolEvents : EventListener
-    {
-        private static readonly int _bytes = ArrayPool<byte>.Shared.GetHashCode(), _chars = ArrayPool<char>.Shared.GetHashCode(),
-            _objects = ArrayPool<object>.Shared.GetHashCode(), _ints = ArrayPool<int>.Shared.GetHashCode(), _values = ArrayPool<SqlValue>.Shared.GetHashCode();
-        internal long Trimmed, Rented, Allocated, Dropped, Unknown;
-        protected override void OnEventSourceCreated(EventSource source)
-        {
-            if (source.Name == "System.Buffers.ArrayPoolEventSource") { EnableEvents(source, EventLevel.Verbose); }
-        }
-        protected override void OnEventWritten(EventWrittenEventArgs args)
-        {
-            if (args.EventId is not (1 or 2 or 4 or 6) || args.Payload is null || args.Payload.Count < 3) { return; }
-            int length = (int)args.Payload[1]!, pool = (int)args.Payload[2]!;
-            int width = pool == _bytes ? 1 : pool == _chars ? 2 : pool == _objects ? IntPtr.Size : pool == _ints ? 4 : pool == _values ? Unsafe.SizeOf<SqlValue>() : 0;
-            if (width == 0) { Interlocked.Increment(ref Unknown); return; }
-            long size = (24L + (long)length * width + 7) & ~7L;
-            if (args.EventId == 1) { Interlocked.Add(ref Rented, size); }
-            if (args.EventId == 2) { Interlocked.Add(ref Allocated, size); }
-            if (args.EventId == 4) { Interlocked.Add(ref Trimmed, size); }
-            if (args.EventId == 6) { Interlocked.Add(ref Dropped, size); }
-        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Hash crash images: read-only spill boundaries preserve the exact durable state (#1789)")]

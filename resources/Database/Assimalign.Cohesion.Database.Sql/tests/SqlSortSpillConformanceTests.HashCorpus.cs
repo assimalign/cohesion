@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -52,11 +54,12 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     private sealed record CorpusOutcome(RowValues[] Rows, string? Error, long Visits, long Peak, int Passes, long Batches, long TempPeak, long[] Calls, long Live = 0);
-    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true)
+    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true, WindowPoolLease? images = null, HashPoolEvents? pool = null)
     {
         run.Log.Clear(); run.FailAt = fail;
         await run.Session.ExecuteAsync("ALTER SEQUENCE s RESTART WITH 1");
         RowValues[] rows = []; string? error = null; long live = 0;
+        if (sample) { images?.Drain(pool!); }
         long baseline = sample ? LiveHeap.Read() : 0;
         var phases = new HashSet<string>();
         string? previousPhase = null;
@@ -123,6 +126,12 @@ public sealed partial class SqlSortSpillConformanceTests
         foreach (long selectedGrant in grants) { spilled.Add(await CreateCorpusEngineAsync(selectedGrant, true)); }
         long[] excesses = grants.Select(_ => long.MinValue).ToArray();
         int spills = 0, matches = 0, refusals = 0;
+        // Keep the 1 MiB cases' original sampler: quiescence exceeds the Release ceiling (#1883).
+        // The default 4 MiB control never replays, so Sample never reads its baseline.
+        bool pinPool = grant != 1048576 && (grant != 4194304 || statements > 256);
+        using var pool = pinPool ? new HashPoolEvents() : null;
+        using var images = pinPool ? new WindowPoolLease() : null;
+        if (pinPool) { images!.Drain(pool!); await QuiesceWindowPoolAsync(pool!); }
         try
         {
             // Act / Assert: rows, exact temporal representatives, errors, visits and calls.
@@ -150,7 +159,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 CorpusEqual(expected, await ExecuteCorpusAsync(original, sql, fail)).ShouldBeTrue(customMessage: sql);
                 for (int index = 0; index < grants.Length; index++)
                 {
-                    var actual = await ExecuteCorpusAsync(spilled[index], sql, fail, sample: true);
+                    var actual = await ExecuteCorpusAsync(spilled[index], sql, fail, sample: true, images: images, pool: pool);
                     excesses[index] = Math.Max(excesses[index], actual.Live - grants[index] - 262144);
                     excesses[index].ShouldBeLessThanOrEqualTo(0, customMessage: sql);
                     actual.Peak.ShouldBeLessThanOrEqualTo(grants[index]);
