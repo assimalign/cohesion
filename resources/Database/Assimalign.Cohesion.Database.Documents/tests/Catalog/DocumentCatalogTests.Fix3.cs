@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 using Assimalign.Cohesion.Testing;
+using Assimalign.Cohesion.Database.Documents.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Indexing;
@@ -31,6 +32,10 @@ public sealed partial class DocumentCatalogTests
         await fixture.Write("one", json);
         fixture.Catalog.IndexBuildMemoryBudget = grant * 1024L * 1024;
         var context = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
+        using var pool = new DocumentHeapPool.PoolEvents();
+        using var images = new DocumentHeapPool.PoolLease();
+        images.Drain(pool);
+        await DocumentHeapPool.QuiesceAsync(pool, guard.Token);
         long before = LiveHeap.Read(), additional = -1;
         void Observe(object? sender, FirstChanceExceptionEventArgs args)
         {
