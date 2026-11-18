@@ -1,19 +1,11 @@
 using System.Text;
 
-using Assimalign.Cohesion.ApplicationModel.Hosting.InProcess;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Hosting;
-using Assimalign.Cohesion.Web.Hosting.ApplicationModel;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-// Acme.Gateway's model declares this application as the Web resource acme-api. Started by a gateway,
-// it publishes itself through the platform the gateway names and the gateway can manage it; started on
-// its own, no platform is named and this call registers nothing.
-builder.Services.AddResource("acme-api", resource => resource.UseInProcess());
-
-// Settings come from configuration: appsettings.json, environment variables, or the values a gateway
-// passes when it deploys the resource.
+// Settings come from configuration: appsettings.json or environment variables.
 string database = builder.Configuration["Database:Endpoint"] ?? "cohesion-db://localhost:5740";
 string pageSize = builder.Configuration["Customers:PageSize"] ?? "25";
 

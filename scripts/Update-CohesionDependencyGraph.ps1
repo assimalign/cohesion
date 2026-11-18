@@ -3,7 +3,7 @@
     Regenerates docs/DEPENDENCIES.md — the repository-wide reference graph.
 
 .DESCRIPTION
-    Walks every csproj under libraries/, resources/, analyzers/, tooling/, extensions/,
+    Walks every csproj under libraries/, fabric/, resources/, analyzers/, tooling/, extensions/,
     sdks/, build/ and fixtures/, reads the Cohesion reference items
     (CohesionProjectReference, CohesionPrivateProjectReference, CohesionAnalyzerReference,
     CohesionAnalyzerAsProjectReference, CohesionPackageReference, CohesionSharedSource) plus raw
@@ -53,7 +53,7 @@ if (-not $OutputPath) {
 }
 
 # Roots scanned, in the order their sections appear in the document.
-$scanRoots = @('libraries', 'resources', 'analyzers', 'sdks', 'tooling', 'extensions', 'build', 'fixtures')
+$scanRoots = @('libraries', 'fabric', 'resources', 'analyzers', 'sdks', 'tooling', 'extensions', 'build', 'fixtures')
 
 # ---------------------------------------------------------------------------
 # 1. Index every project.
@@ -75,7 +75,7 @@ function Get-ProjectKind {
 function Get-ProjectArea {
     param([string] $RelativePath)
     $segments = $RelativePath -split '/'
-    if ($segments.Length -ge 2 -and $segments[0] -in @('libraries', 'resources')) {
+    if ($segments.Length -ge 2 -and $segments[0] -in @('libraries', 'fabric', 'resources')) {
         return "$($segments[0])/$($segments[1])"
     }
     return $segments[0]
@@ -195,7 +195,7 @@ foreach ($project in $projects.Values) {
 # ---------------------------------------------------------------------------
 
 # Only shipped/buildable code participates in the graph; harnesses are listed separately.
-$graphProjects = @($projects.Values | Where-Object { $_.Kind -in @('src', 'other') -and $_.Root -in @('libraries', 'resources') -and -not $_.Producer })
+$graphProjects = @($projects.Values | Where-Object { $_.Kind -in @('src', 'other') -and $_.Root -in @('libraries', 'fabric', 'resources') -and -not $_.Producer })
 
 # Name -> project, for resolving a CohesionProjectReference's Include back to a project. Built
 # over the ordinally-sorted index, preferring a src/ project over a harness when a base name is
@@ -234,7 +234,7 @@ $edges = foreach ($project in $projects.Values) {
             FromArea  = $project.Area
             To        = $target
             ToArea    = Get-AreaOf $target
-            InGraph   = ($project.Kind -in @('src', 'other') -and $project.Root -in @('libraries', 'resources') -and -not $project.Producer)
+            InGraph   = ($project.Kind -in @('src', 'other') -and $project.Root -in @('libraries', 'fabric', 'resources') -and -not $project.Producer)
         }
     }
 }

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Storage</RootNamespace>
+		<Nullable>enable</Nullable>
+		<Description>The Storage fabric area: portable volume intent (capacity and access mode) that a workload mounts through a $ref and each platform provisions natively or emulates.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Fabric" />
+	</ItemGroup>
+</Project>

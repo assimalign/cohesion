@@ -18,7 +18,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Cron" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Timer" />
     </ItemGroup>
 </Project>

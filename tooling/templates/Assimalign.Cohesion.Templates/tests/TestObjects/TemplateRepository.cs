@@ -24,7 +24,7 @@ internal static partial class TemplateRepository
 
     internal static readonly string[] Roster =
     [
-        "cohesion-app", "cohesion-gateway",
+        "cohesion-app",
         "cohesion-web", "cohesion-spa", "cohesion-database", "cohesion-secretstore",
         "cohesion-configurationstore", "cohesion-identityhub", "cohesion-rezolvr"
     ];
@@ -61,13 +61,6 @@ internal static partial class TemplateRepository
             }
 
             string area = sdk["Assimalign.Cohesion.Sdk.".Length..];
-            if (area == "Gateway")
-            {
-                // Sdk.Gateway adds the gateway package and no framework.
-                AddPackageClosure("Assimalign.Cohesion.ApplicationModel.Gateway", required);
-                continue;
-            }
-
             families.Add("Assimalign.Cohesion.App");
             families.Add("Assimalign.Cohesion.App." + area);
         }

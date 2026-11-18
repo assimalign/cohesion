@@ -14,6 +14,3 @@ dotnet run -- --Database:Endpoint=cohesion-db://localhost:5741 --Database:DataPa
 ```
 
 Set the organization feed owner in `nuget.config`.
-
-The Database area supplies `Database.Hosting.ApplicationModel`; this scaffold runs as a plain
-executable until its Program.cs registers `builder.Services.AddResource(...)` with a platform client.

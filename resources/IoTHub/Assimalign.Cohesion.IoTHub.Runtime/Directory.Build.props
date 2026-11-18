@@ -17,6 +17,5 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IoTHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub.Hosting.ApplicationModel" />
     </ItemGroup>
 </Project>

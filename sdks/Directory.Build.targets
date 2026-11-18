@@ -108,7 +108,7 @@
     </Target>
 
     <!--
-        CohesionSdkPackTasks=false marks a props/targets-only SDK (Sdk.Gateway): its project
+        CohesionSdkPackTasks=false marks a props/targets-only SDK: its project
         compiles nothing, so the package carries no Tasks/ folder.
     -->
     <Target Name="CollectSdkTaskFiles" Condition="'$(CohesionSdkPackTasks)' != 'false'">

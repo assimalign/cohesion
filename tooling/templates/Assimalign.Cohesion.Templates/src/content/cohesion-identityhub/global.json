@@ -7,7 +7,6 @@
     "Assimalign.Cohesion.Sdk": "__COHESION_PACKAGE_VERSION__",
     "Assimalign.Cohesion.Sdk.Web": "__COHESION_PACKAGE_VERSION__",
     "Assimalign.Cohesion.Sdk.Database": "__COHESION_PACKAGE_VERSION__",
-    "Assimalign.Cohesion.Sdk.Gateway": "__COHESION_PACKAGE_VERSION__",
     "Assimalign.Cohesion.Sdk.ApiManager": "__COHESION_PACKAGE_VERSION__",
     "Assimalign.Cohesion.Sdk.ConfigurationStore": "__COHESION_PACKAGE_VERSION__",
     "Assimalign.Cohesion.Sdk.EmailHub": "__COHESION_PACKAGE_VERSION__",

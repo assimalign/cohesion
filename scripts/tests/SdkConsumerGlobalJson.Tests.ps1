@@ -13,7 +13,7 @@ Describe 'Isolated SDK consumer settings' {
         $version = '10.0.0-preview.1'
         $sdkIds = @(
             'Assimalign.Cohesion.Sdk'
-            'Assimalign.Cohesion.Sdk.Gateway'
+            'Assimalign.Cohesion.Sdk.Scheduler'
             'Assimalign.Cohesion.Sdk.Web'
             'Assimalign.Cohesion.Sdk.Database'
         )
@@ -25,7 +25,7 @@ Describe 'Isolated SDK consumer settings' {
         }
     }
 
-    It 'pins the Gateway consumer from the feed when repository Cohesion pins are absent' {
+    It 'pins the consumer from the feed when repository Cohesion pins are absent' {
         & $consumerSettingsScript -RepositoryDirectory $repository -PackageDirectory $feed `
             -Version $version -SdkPackageId $sdkIds -OutputDirectory $output
 
@@ -39,11 +39,11 @@ Describe 'Isolated SDK consumer settings' {
     }
 
     It 'rejects an unavailable SDK version before writing consumer settings' {
-        Remove-Item -LiteralPath (Join-Path $feed "Assimalign.Cohesion.Sdk.Gateway.$version.nupkg")
+        Remove-Item -LiteralPath (Join-Path $feed "Assimalign.Cohesion.Sdk.Scheduler.$version.nupkg")
 
         { & $consumerSettingsScript -RepositoryDirectory $repository -PackageDirectory $feed `
             -Version $version -SdkPackageId $sdkIds -OutputDirectory $output } |
-            Should -Throw '*Assimalign.Cohesion.Sdk.Gateway*was not produced*'
+            Should -Throw '*Assimalign.Cohesion.Sdk.Scheduler*was not produced*'
         Test-Path -LiteralPath (Join-Path $output 'global.json') | Should -BeFalse
     }
 }

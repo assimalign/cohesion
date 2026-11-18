@@ -11,12 +11,11 @@ internal static class Help
                 [--audience <a>] [--scope <s>] [--print]
           --help | --version
 
-        run discovers one Sdk.Gateway project below the current directory and runs it;
-        its Program.cs declares the model and the platform it runs on.
+        run and publish forward to dotnet run and dotnet publish for the named project, or for the
+        project in the current directory when none is named.
         Explicit shell environments bypass launch profiles. Development uses deployed security.
-        publish forwards to dotnet publish, discovering the gateway when no project is named.
         login uses IdentityHub device flow (Local + loopback at HEAD).
-        Login tokens are stored for a later IdentityHub bridge; gateways do not accept them yet.
+        Login tokens are stored for a later IdentityHub bridge; no service accepts them yet.
         --print emits only the login token to stdout; approval instructions go to stderr.
         Unknown child arguments and arguments after -- retain their order and spelling.
         """;

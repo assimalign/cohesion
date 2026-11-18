@@ -127,9 +127,8 @@ digits kept, a dot written as two underscores, and any other character written a
 four-digit hexadecimal code. Every underscore after the prefix therefore starts one of the two escapes,
 which makes the mapping injective: `Contoso.Pets` becomes `OpenApiMetadataProvider_Contoso__Pets` and
 `Contoso_Pets` becomes `OpenApiMetadataProvider_Contoso_x005FPets`. A plain replace-invalid-characters
-scheme would map both to the same name. The ApplicationModel SDK names its per-assembly anchor type
-with the hexadecimal encoding of the whole assembly name (`CohesionResourceEntry` plus hex), which is
-equally unique. This generator keeps the name readable instead, because the composed registry is where
+scheme would map both to the same name. A hexadecimal encoding of the whole assembly name would be
+equally unique; this generator keeps the name readable instead, because the composed registry is where
 a developer checks which assemblies contributed.
 
 ### Hand-written providers

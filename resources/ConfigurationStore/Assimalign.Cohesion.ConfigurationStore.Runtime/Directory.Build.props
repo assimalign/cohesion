@@ -17,7 +17,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ConfigurationStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel" />
 
         <!-- Deliberately EXCLUDED (NuGet-only, never an App.ConfigurationStore member):
              - ConfigurationStore.Client - no ConfigurationStore application consumes it at run

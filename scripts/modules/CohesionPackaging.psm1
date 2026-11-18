@@ -201,16 +201,21 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Security/Assimalign.Cohesion.Security'
     'libraries/Security/Assimalign.Cohesion.Security.DataProtection'
 
+    # fabric/ (the application model's root, .claude/rules/fabric.md)
+    'fabric/Fabric/Assimalign.Cohesion.Fabric'
+    'fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess'
+    'fabric/Networking/Assimalign.Cohesion.Networking'
+    'fabric/Storage/Assimalign.Cohesion.Storage'
+    'fabric/Workloads/Assimalign.Cohesion.Workloads'
+
     # resources/ApiManager
     'resources/ApiManager/Assimalign.Cohesion.ApiManager'
     'resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting'
-    'resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel'
 
     # resources/ConfigurationStore
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting'
-    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel'
 
     # resources/Database
     'resources/Database/Assimalign.Cohesion.Database'
@@ -251,76 +256,62 @@ $script:CohesionReleaseLibrary = @(
     # resources/EmailHub
     'resources/EmailHub/Assimalign.Cohesion.EmailHub'
     'resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting'
-    'resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel'
 
     # resources/EventHub
     'resources/EventHub/Assimalign.Cohesion.EventHub'
     'resources/EventHub/Assimalign.Cohesion.EventHub.Hosting'
-    'resources/EventHub/Assimalign.Cohesion.EventHub.Hosting.ApplicationModel'
 
     # resources/IdentityHub
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting'
-    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models'
 
     # resources/IoTHub
     'resources/IoTHub/Assimalign.Cohesion.IoTHub'
     'resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting'
-    'resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting.ApplicationModel'
 
     # resources/LoadBalancer
     'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer'
     'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting'
-    'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel'
 
     # resources/LogSpace
     'resources/LogSpace/Assimalign.Cohesion.LogSpace'
     'resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting'
-    'resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel'
 
     # resources/MediaHub
     'resources/MediaHub/Assimalign.Cohesion.MediaHub'
     'resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting'
-    'resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting.ApplicationModel'
 
     # resources/MessageHub
     'resources/MessageHub/Assimalign.Cohesion.MessageHub'
     'resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting'
-    'resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting.ApplicationModel'
 
     # resources/NatGateway
     'resources/NatGateway/Assimalign.Cohesion.NatGateway'
     'resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting'
-    'resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting.ApplicationModel'
 
     # resources/NotificationHub
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub'
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting'
-    'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting.ApplicationModel'
 
     # resources/Rezolvr
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr'
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting'
-    'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel'
 
     # resources/Scheduler
     'resources/Scheduler/Assimalign.Cohesion.Scheduler'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting'
-    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer'
 
     # resources/SecretStore
     'resources/SecretStore/Assimalign.Cohesion.SecretStore'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Client'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting'
-    'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel'
 
     # resources/VpnGateway
     'resources/VpnGateway/Assimalign.Cohesion.VpnGateway'
     'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting'
-    'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel'
 
     # resources/Web
     'resources/Web/Assimalign.Cohesion.Web'
@@ -342,7 +333,6 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Health'
     'resources/Web/Assimalign.Cohesion.Web.HostFiltering'
     'resources/Web/Assimalign.Cohesion.Web.Hosting'
-    'resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel'
     'resources/Web/Assimalign.Cohesion.Web.HttpsPolicy'
     'resources/Web/Assimalign.Cohesion.Web.OpenApi'
     'resources/Web/Assimalign.Cohesion.Web.ProblemDetails'
@@ -373,7 +363,6 @@ $script:CohesionReleaseSdk = @(
     'Assimalign.Cohesion.Sdk'
     'Assimalign.Cohesion.Sdk.Web'
     'Assimalign.Cohesion.Sdk.Database'
-    'Assimalign.Cohesion.Sdk.Gateway'
     'Assimalign.Cohesion.Sdk.ApiManager'
     'Assimalign.Cohesion.Sdk.ConfigurationStore'
     'Assimalign.Cohesion.Sdk.EmailHub'
@@ -470,10 +459,8 @@ $script:CohesionCiMatrixExclusion = [ordered]@{
     'resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj' = 'Example project is not an independently shipped CI matrix entry.'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Api/Acme.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Database/Acme.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Gateway/Acme.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-configurationstore/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-database/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-gateway/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-identityhub/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-rezolvr/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-secretstore/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
@@ -1175,6 +1162,7 @@ function Get-CohesionPackableSourceProject {
     $project = [System.Collections.Generic.List[object]]::new()
     foreach ($rootName in @(
             'libraries',
+            'fabric',
             'resources',
             'sdks',
             'analyzers',
@@ -1201,7 +1189,7 @@ function Get-CohesionPackableSourceProject {
             $segment = $relativePath.Split('/')
             $ciKey = $null
             if ($segment.Count -eq 5 -and
-                $segment[0] -in @('libraries', 'resources') -and
+                $segment[0] -in @('libraries', 'fabric', 'resources') -and
                 $segment[3] -eq 'src' -and
                 $segment[4] -eq "$($segment[2]).csproj") {
                 $ciKey = "$($segment[0])/$($segment[1])/$($segment[2])"
@@ -1222,7 +1210,7 @@ function Get-CohesionPackableSourceProject {
 function Get-CohesionSourceProjectPath {
     <#
     .SYNOPSIS
-        Resolves a Cohesion project name to its shipping csproj under libraries/ or resources/,
+        Resolves a Cohesion project name to its shipping csproj under libraries/, fabric/ or resources/,
         or $null when no such project exists.
 
     .DESCRIPTION
@@ -1240,7 +1228,7 @@ function Get-CohesionSourceProjectPath {
         [string] $ProjectName
     )
 
-    foreach ($area in @('libraries', 'resources')) {
+    foreach ($area in @('libraries', 'fabric', 'resources')) {
         $areaDirectory = Join-Path $RepositoryDirectory $area
         if (-not (Test-Path -LiteralPath $areaDirectory -PathType Container)) {
             continue
@@ -1469,7 +1457,7 @@ function Assert-CohesionReleaseInventory {
             Where-Object { $_ }
     }
 
-    foreach ($rootName in @('libraries', 'resources', 'sdks', 'analyzers', 'tooling', 'extensions', 'frameworks')) {
+    foreach ($rootName in @('libraries', 'fabric', 'resources', 'sdks', 'analyzers', 'tooling', 'extensions', 'frameworks')) {
         $rootDirectory = Join-Path $repositoryDirectory $rootName
         if (-not (Test-Path -LiteralPath $rootDirectory -PathType Container)) {
             continue
@@ -1606,6 +1594,7 @@ function Assert-CohesionReleaseInventory {
     # their area/category/project key even when a tests project happens to share the basename.
     foreach ($rootName in @(
             'libraries',
+            'fabric',
             'resources',
             'sdks',
             'analyzers',

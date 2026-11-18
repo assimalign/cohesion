@@ -17,6 +17,5 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EmailHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel" />
     </ItemGroup>
 </Project>
