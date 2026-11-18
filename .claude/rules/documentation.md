@@ -136,8 +136,7 @@ flowchart LR
     Auth -.->|"COHRES001 ✗"| Hosting
 ```
 
-Web.Hosting references the Web root and routing feature; its resource integration is the separate
-`Web.Hosting.ApplicationModel` package, which references the module. Solid edges are the
+Web.Hosting references the Web root and routing feature. Solid edges are the
 references the area permits; the dotted edge is the one `COHRES001` rejects —
 a feature library may never reference its area's runtime module, which the surrounding prose has
 to say in words as well.

@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Fabric</RootNamespace>
+		<Nullable>enable</Nullable>
+		<Description>The application model's fabric root: the resource envelope and identity, structural $ref values, the platform-neutral fault contract, the resource-provider contract, and the compile-time platform contract that the ResourceManager, the AppHost, the fabric areas, and every platform build on.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\ResourceUid.cs"
+						   ObjectRuntimeType="Guid"
+						   ObjectNamespace="Assimalign.Cohesion.Fabric"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="ValueObjects\ResourceId.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.Fabric"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="ValueObjects\ResourceName.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.Fabric"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="ValueObjects\ResourceTypeName.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.Fabric"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="ValueObjects\PlatformName.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.Fabric"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true" />
+		<CohesionValueType Include="ValueObjects\ApiVersion.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.Fabric"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true" />
+	</ItemGroup>
+</Project>

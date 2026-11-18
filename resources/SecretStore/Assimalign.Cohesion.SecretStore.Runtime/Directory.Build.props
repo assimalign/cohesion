@@ -17,7 +17,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.SecretStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.SecretStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.SecretStore.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel" />
 
         <!-- Deliberately EXCLUDED (NuGet-only, never an App.SecretStore member):
              - SecretStore.Client - no SecretStore application consumes it at run time; a

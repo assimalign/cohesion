@@ -9,9 +9,6 @@ on:
       - 'fixtures/Directory.Build.props'
       - '!resources/Web/**/*.slnx'
       - '!resources/Web/**/*.md'
-      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
-      # change to the application model reruns the area.
-      - 'libraries/ApplicationModel/**'
       - '.github/workflows/resource-web.yml'        # When Pipeline File Changes
       # Shared build infrastructure that every project in this workflow compiles with.
       - '.github/actions/build/**'
@@ -79,7 +76,6 @@ jobs:
             'Assimalign.Cohesion.Web.Health',
             'Assimalign.Cohesion.Web.HostFiltering',
             'Assimalign.Cohesion.Web.Hosting',
-            'Assimalign.Cohesion.Web.Hosting.ApplicationModel',
             'Assimalign.Cohesion.Web.HttpsPolicy',
             'Assimalign.Cohesion.Web.OpenApi',
             'Assimalign.Cohesion.Web.ProblemDetails',

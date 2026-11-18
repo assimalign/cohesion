@@ -163,7 +163,7 @@ internal sealed class DeviceLogin
                 {
                     CryptographicOperations.ZeroMemory(json);
                 }
-                _output.WriteLine("IdentityHub credential saved for the later gateway token bridge.");
+                _output.WriteLine("IdentityHub credential saved for the later token bridge.");
             }
             return 0;
         }

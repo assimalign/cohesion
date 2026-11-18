@@ -47,7 +47,7 @@
         implicit.
 
         Resolution is the same mechanism as CohesionProjectReference
-        (Build.References.Projects.targets): the same libraries\ + resources\ csproj glob,
+        (Build.References.Projects.targets): the same libraries\ + fabric\ + resources\ csproj glob,
         matched on the project file name, so a name that works for one works for the other
         and no consuming csproj ever spells a relative path. The glob string is deliberately
         identical to that file's so MSBuild's glob cache serves both.
@@ -58,7 +58,7 @@
         assembly boundary.
     -->
     <ItemGroup>
-        <_CohesionSharedSourceProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj;$(CohesionRepositoryDirectory)resources\**\*.csproj" />
+        <_CohesionSharedSourceProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj;$(CohesionRepositoryDirectory)fabric\**\*.csproj;$(CohesionRepositoryDirectory)resources\**\*.csproj" />
         <_CohesionSharedSourceProject Update="@(_CohesionSharedSourceProject)"
                                       ProjectId="%(_CohesionSharedSourceProject.Filename)"
                                       SharedDirectory="$([MSBuild]::NormalizeDirectory('%(_CohesionSharedSourceProject.RelativeDir)', '..', 'shared'))" />
@@ -87,7 +87,7 @@
             Condition="'@(CohesionSharedSource)' != ''">
         <Error Condition="'%(CohesionSharedSource.SharedDirectory)' == ''"
                Code="COHSHR001"
-               Text="CohesionSharedSource '%(CohesionSharedSource.Identity)' does not name a project under libraries\ or resources\. Use the project's file name without '.csproj', exactly as CohesionProjectReference does." />
+               Text="CohesionSharedSource '%(CohesionSharedSource.Identity)' does not name a project under libraries\, fabric\ or resources\. Use the project's file name without '.csproj', exactly as CohesionProjectReference does." />
 
         <Error Condition="'%(CohesionSharedSource.SharedDirectory)' != '' AND !Exists('%(CohesionSharedSource.SharedDirectory)')"
                Code="COHSHR002"

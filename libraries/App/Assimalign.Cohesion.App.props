@@ -35,7 +35,6 @@
         SDK policy:
             Sdk          -> no implicit framework (library SDK)
             Sdk.<Area>   -> App + App.<Area> (resource SDK)
-            Sdk.Gateway  -> no framework (it references the gateway package only)
         CohesionAutoIncludeAppFramework=false suppresses both resource-SDK
         references. The base SDK still registers every framework so direct
         consumers can add an explicit FrameworkReference.

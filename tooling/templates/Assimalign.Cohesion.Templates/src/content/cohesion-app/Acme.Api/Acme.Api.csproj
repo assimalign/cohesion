@@ -1,8 +1,3 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Web">
-  <!-- An ordinary Web application. Program.cs makes it the acme-api resource of Acme.Gateway's model; the in-process
-       platform's instance half is the one package it adds. Running on another platform means referencing that
-       platform's instance package as well and opting into it in Program.cs. -->
-  <ItemGroup>
-    <CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Hosting.InProcess" Version="$(CohesionVersion)" />
-  </ItemGroup>
+  <!-- An ordinary Web application: Program.cs composes it, and it carries no orchestration code. -->
 </Project>

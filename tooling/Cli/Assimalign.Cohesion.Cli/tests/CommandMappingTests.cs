@@ -16,31 +16,48 @@ namespace Assimalign.Cohesion.Cli.Tests;
 /// <summary>Tests thin wrapper arguments without spawning dotnet.</summary>
 public sealed class CommandMappingTests
 {
-    /// <summary>Run starts the discovered gateway and hands it every argument unchanged.</summary>
+    /// <summary>Run starts the named project and hands it every argument unchanged.</summary>
     /// <returns>A task representing command mapping verification.</returns>
-    [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - Run: Should run the discovered gateway and preserve passthrough")]
+    [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - Run: Should run the named project and preserve passthrough")]
     public async Task Run_WithArguments_ShouldPreserveArgumentsAsync()
     {
         // Arrange
         using var fixture = new CliFixture();
-        string project = fixture.Gateway();
+        string project = fixture.Project();
         fixture.Runner.ExitCode = 17;
 
         // Act
         int result = await fixture.Application().ExecuteAsync(
-            ["run", "--verbose", "--", "--parameter", "name=a b", "--gateway", "unregistered"], CancellationToken.None);
+            ["run", "--project", "Api/Api.csproj", "--verbose", "--", "--parameter", "name=a b"], CancellationToken.None);
 
         // Assert
         result.ShouldBe(17);
         fixture.Runner.Calls.Single().Arguments.ShouldBe(new[]
         {
-            "run", "--project", project, "--", "--verbose", "--parameter", "name=a b", "--gateway", "unregistered"
+            "run", "--project", project, "--", "--verbose", "--parameter", "name=a b"
         });
         fixture.Runner.Calls[0].Executable.ShouldBe("dotnet");
         fixture.Runner.Calls[0].Directory.ShouldBe(Path.GetDirectoryName(project));
     }
 
-    /// <summary>Unset and whitespace-only shell variables keep the gateway's launch profile.</summary>
+    /// <summary>Run without a project leaves the selection to dotnet in the working directory.</summary>
+    /// <returns>A task representing command mapping verification.</returns>
+    [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - Run: Should run the working directory's project when none is named")]
+    public async Task Run_WithoutProject_ShouldRunInWorkingDirectoryAsync()
+    {
+        // Arrange
+        using var fixture = new CliFixture();
+
+        // Act
+        int result = await fixture.Application().ExecuteAsync(["run", "--", "--verbose"], CancellationToken.None);
+
+        // Assert
+        result.ShouldBe(0);
+        fixture.Runner.Calls.Single().Arguments.ShouldBe(["run", "--", "--verbose"]);
+        fixture.Runner.Calls[0].Directory.ShouldBe(fixture.Root);
+    }
+
+    /// <summary>Unset and whitespace-only shell variables keep the project's launch profile.</summary>
     /// <param name="cohesionEnvironment">The Cohesion shell environment value.</param>
     /// <param name="dotnetEnvironment">The .NET shell environment value.</param>
     /// <returns>A task representing command mapping verification.</returns>
@@ -53,12 +70,12 @@ public sealed class CommandMappingTests
     {
         // Arrange
         using var fixture = new CliFixture();
-        string project = fixture.Gateway();
+        string project = fixture.Project();
         CliApplication application = fixture.Application(environment: name =>
             name == "COHESION_ENVIRONMENT" ? cohesionEnvironment : name == "DOTNET_ENVIRONMENT" ? dotnetEnvironment : null);
 
         // Act
-        int result = await application.ExecuteAsync(["run"], CancellationToken.None);
+        int result = await application.ExecuteAsync(["run", "--project", project], CancellationToken.None);
 
         // Assert
         result.ShouldBe(0);
@@ -78,34 +95,34 @@ public sealed class CommandMappingTests
     {
         // Arrange
         using var fixture = new CliFixture();
-        string project = fixture.Gateway();
+        string project = fixture.Project();
         CliApplication application = fixture.Application(environment: name =>
             name == "COHESION_ENVIRONMENT" ? cohesionEnvironment : name == "DOTNET_ENVIRONMENT" ? dotnetEnvironment : null);
 
         // Act
-        int result = await application.ExecuteAsync(["run", "--", "--verbose"], CancellationToken.None);
+        int result = await application.ExecuteAsync(["run", "--project", project, "--", "--verbose"], CancellationToken.None);
 
         // Assert
         result.ShouldBe(0);
         fixture.Runner.Calls.Single().Arguments.ShouldBe(["run", "--project", project, "--no-launch-profile", "--", "--verbose"]);
     }
 
-    /// <summary>Publishing accepts a positional project or discovers the gateway.</summary>
+    /// <summary>Publishing accepts a positional or named project, or defers to the working directory.</summary>
     /// <returns>A task representing command mapping verification.</returns>
     [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - Publish: Should map project and retain MSBuild arguments")]
     public async Task Publish_WithProject_ShouldForwardArgumentsAsync()
     {
         // Arrange
         using var fixture = new CliFixture();
-        string project = fixture.Gateway();
+        fixture.Project();
 
         // Act and assert
         (await fixture.Application().ExecuteAsync(["publish", "Api.csproj", "-c", "Release", "--", "-p:Value=a b"], CancellationToken.None)).ShouldBe(0);
         fixture.Runner.Calls.Last().Arguments.ShouldBe(new[] { "publish", "Api.csproj", "-c", "Release", "-p:Value=a b" });
         (await fixture.Application().ExecuteAsync(["publish"], CancellationToken.None)).ShouldBe(0);
-        fixture.Runner.Calls.Last().Arguments.ShouldBe(new[] { "publish", project });
-        (await fixture.Application().ExecuteAsync(["publish", "--project", "Gateway"], CancellationToken.None)).ShouldBe(0);
-        fixture.Runner.Calls.Last().Arguments.ShouldBe(new[] { "publish", Path.Combine(fixture.Root, "Gateway") });
+        fixture.Runner.Calls.Last().Arguments.ShouldBe(new[] { "publish" });
+        (await fixture.Application().ExecuteAsync(["publish", "--project", "Api"], CancellationToken.None)).ShouldBe(0);
+        fixture.Runner.Calls.Last().Arguments.ShouldBe(new[] { "publish", Path.Combine(fixture.Root, "Api") });
     }
 
     /// <summary>The accepted roster stays equal to the installed template package's source.</summary>
@@ -170,7 +187,7 @@ public sealed class CommandMappingTests
         {
             // Arrange
             using var fixture = new CliFixture();
-            fixture.Gateway();
+            fixture.Project();
 
             // Act and assert
             (await fixture.Application().ExecuteAsync(args, CancellationToken.None)).ShouldBe(2);

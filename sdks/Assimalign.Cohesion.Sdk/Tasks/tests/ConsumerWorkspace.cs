@@ -10,20 +10,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
-#if COHESION_GATEWAY_SDK_TESTS
-namespace Assimalign.Cohesion.Sdk.Gateway.Tests;
-#else
 namespace Assimalign.Cohesion.Sdk.Tests;
-#endif
 
 internal sealed class ConsumerWorkspace : IDisposable
 {
     private const string BaseSdkPackageId = "Assimalign.Cohesion.Sdk";
-#if COHESION_GATEWAY_SDK_TESTS
-    private const string TestSdkPackageId = "Assimalign.Cohesion.Sdk.Gateway";
-#else
     private const string TestSdkPackageId = BaseSdkPackageId;
-#endif
     private const string TestFeedEnvironmentVariable = "COHESION_SDK_TEST_FEED";
     private const string TestPackageVersionEnvironmentVariable = "COHESION_SDK_TEST_PACKAGE_VERSION";
     // The SDK archives the fixtures resolve: the SDK under test and the base SDK it chains to.

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="ResourceUidInvalid" xml:space="preserve"><value>A resource uid is a non-empty version 7 UUID that the ResourceManager assigns at create.</value></data>
+  <data name="ResourceIdInvalid" xml:space="preserve"><value>A resource id is an address of the form /environments/{env}[/groups/{group}|/applications/{app}[/providers/{Namespace}/{type}/{name}]|/operations/{operation}], with lowercase names.</value></data>
+  <data name="ResourceNameInvalid" xml:space="preserve"><value>A resource name is 1 to 63 lowercase letters, digits, and hyphens per dot-separated segment, starting with a letter and not ending with a hyphen.</value></data>
+  <data name="ResourceTypeNameInvalid" xml:space="preserve"><value>A resource type name is {Namespace}/{type}: dot-separated PascalCase namespace segments, a slash, and a camelCase type, such as Cohesion.Workloads/workloads.</value></data>
+  <data name="PlatformNameInvalid" xml:space="preserve"><value>A platform name is 1 to 63 lowercase letters, digits, and hyphens, starting with a letter, such as kubernetes.</value></data>
+  <data name="ApiVersionInvalid" xml:space="preserve"><value>An API version is a calendar date in the form yyyy-MM-dd, optionally followed by -preview.</value></data>
+  <data name="FabricValueAmbiguous" xml:space="preserve"><value>A fabric value holds either a literal or a $ref, never both and never neither.</value></data>
+  <data name="FabricRefShapeInvalid" xml:space="preserve"><value>A $ref object has a string '$ref' member, an optional string 'path' member, and no other members.</value></data>
+  <data name="PlatformResourceTypeDuplicate" xml:space="preserve"><value>The platform '{0}' registers the resource type '{1}' more than once.</value></data>
+  <data name="PlatformExtensionDuplicate" xml:space="preserve"><value>The platform '{0}' registers the extension for host type '{1}' more than once.</value></data>
+  <data name="PlatformExtensionForeign" xml:space="preserve"><value>The platform '{0}' cannot register an extension that belongs to the platform '{1}'.</value></data>
+  <data name="PlatformDefaultName" xml:space="preserve"><value>The platform's Name is the default value; a platform declares its name.</value></data>
+  <data name="PlatformDefaultContractVersion" xml:space="preserve"><value>The platform '{0}' declares no contract version.</value></data>
+  <data name="PlatformRegistrationCompleted" xml:space="preserve"><value>The platform '{0}' registered a component after its configuration ended. Register everything from Configure.</value></data>
+</root>

@@ -1,8 +1,0 @@
-<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
-  <!-- Sdk.Gateway references Assimalign.Cohesion.ApplicationModel.Gateway. The platform the model runs on is the one
-       package added here: the in-process platform. A cohesion-platforms gateway package, such as
-       Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes, replaces it (README.md). -->
-  <ItemGroup>
-    <CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" Version="$(CohesionVersion)" />
-  </ItemGroup>
-</Project>

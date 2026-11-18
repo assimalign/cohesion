@@ -17,6 +17,5 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.VpnGateway" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.VpnGateway" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.VpnGateway.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel" />
     </ItemGroup>
 </Project>

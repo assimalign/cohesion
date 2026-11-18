@@ -51,8 +51,8 @@ internal sealed class CliFixture : IDisposable
         return fullPath;
     }
 
-    internal string Gateway(string properties = "<OutputType>Exe</OutputType>",
-        string sdk = "Assimalign.Cohesion.Sdk.Gateway", string path = "Gateway/Gateway.csproj") =>
+    internal string Project(string properties = "<OutputType>Exe</OutputType>",
+        string sdk = "Assimalign.Cohesion.Sdk.Web", string path = "Api/Api.csproj") =>
         Write(path, $"<Project Sdk=\"{sdk}\"><PropertyGroup>{properties}</PropertyGroup></Project>");
 
     internal CliApplication Application(string stdin = "", string? token = null,
