@@ -268,7 +268,7 @@ jobs:
             throw "$(@($failed).Count) SDK task project(s) failed: $(@($failed) -join ', ')."
           }
 
-  gateway-packages:
+  sdk-boundary-packages:
     name: Prepare package-boundary feed
     needs: sdk-tasks
     runs-on: ubuntu-latest
@@ -302,67 +302,13 @@ jobs:
               -RuntimeIdentifier linux-x64,linux-arm64,win-x64,osx-arm64 `
               -SkipLibraries
 
-      - name: Pack Gateway package dependency closure
-        shell: pwsh
-        run: |
-          Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force
-          $repository = (Get-Location).Path
-          $packageDirectory = Join-Path $repository "_out/release/packages"
-          # The slim Sdk.Gateway references one package, ApplicationModel.Gateway, and its in-process
-          # test gateway adds ApplicationModel.Gateway.InProcess, whose Sdk.Web resource references
-          # ApplicationModel.Hosting.InProcess; these are those packages and their closure. Core also
-          # carries the source generator that binds the in-process programs. No other package-boundary
-          # consumer here restores a library package.
-          $packageIds = @(
-            "Assimalign.Cohesion.ApplicationModel"
-            "Assimalign.Cohesion.ApplicationModel.Definition"
-            "Assimalign.Cohesion.ApplicationModel.Gateway"
-            "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
-            "Assimalign.Cohesion.ApplicationModel.Hosting"
-            "Assimalign.Cohesion.ApplicationModel.Hosting.InProcess"
-            "Assimalign.Cohesion.ApplicationModel.Protocol"
-            "Assimalign.Cohesion.Core"
-            "Assimalign.Cohesion.Hosting"
-          )
-
-          $inventoryById = @{}
-          foreach ($item in @(Get-CohesionReleaseLibrary -RepositoryDirectory $repository)) {
-            $inventoryById[$item.PackageId] = $item
-          }
-
-          $missing = @($packageIds | Where-Object { -not $inventoryById.ContainsKey($_) })
-          if ($missing.Count -gt 0) {
-            throw "Gateway smoke dependency packages are absent from the release inventory: $($missing -join ', ')."
-          }
-
-          foreach ($packageId in $packageIds) {
-            $project = $inventoryById[$packageId].ProjectPath
-            dotnet pack $project `
-                --configuration Release `
-                --nologo `
-                "-p:PackageOutputPath=$packageDirectory"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Packing $packageId failed with exit code $LASTEXITCODE."
-            }
-          }
-
       - name: Verify package-boundary feed
         shell: pwsh
         run: |
           $version = & ./scripts/Get-CohesionVersion.ps1 -RepoRoot (Get-Location).Path
           $required = @(
-            "Assimalign.Cohesion.ApplicationModel"
-            "Assimalign.Cohesion.ApplicationModel.Definition"
-            "Assimalign.Cohesion.ApplicationModel.Gateway"
-            "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
-            "Assimalign.Cohesion.ApplicationModel.Hosting"
-            "Assimalign.Cohesion.ApplicationModel.Hosting.InProcess"
-            "Assimalign.Cohesion.ApplicationModel.Protocol"
-            "Assimalign.Cohesion.Core"
-            "Assimalign.Cohesion.Hosting"
             "Assimalign.Cohesion.Sdk"
             "Assimalign.Cohesion.Sdk.Database"
-            "Assimalign.Cohesion.Sdk.Gateway"
             "Assimalign.Cohesion.Sdk.Web"
           )
           $missing = @($required | Where-Object {
@@ -380,9 +326,9 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  gateway-smoke:
+  sdk-boundary:
     name: "SDK package-boundary tests [${{ matrix.os }}]"
-    needs: gateway-packages
+    needs: sdk-boundary-packages
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -439,20 +385,4 @@ jobs:
               --nologo
           if ($LASTEXITCODE -ne 0) {
             throw "Database SDK tests failed with exit code $LASTEXITCODE."
-          }
-
-      # The slim Gateway SDK: a package-only consumer compiles against the implicit gateway package, and
-      # an in-process consumer binds a top-level Sdk.Web resource from its CohesionResource reference,
-      # runs it in process and gets its answer over HTTP (App and App.Web runtime packs come from the
-      # gateway-packages job's strict framework pack).
-      - name: Run Gateway package-boundary tests
-        if: ${{ !cancelled() }}
-        shell: pwsh
-        run: |
-          dotnet test `
-              ./sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/tests/Assimalign.Cohesion.Sdk.Gateway.Tests.csproj `
-              --configuration Release `
-              --nologo
-          if ($LASTEXITCODE -ne 0) {
-            throw "Gateway package-boundary tests failed with exit code $LASTEXITCODE."
           }

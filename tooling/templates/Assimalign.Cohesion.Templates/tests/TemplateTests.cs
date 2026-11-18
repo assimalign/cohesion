@@ -23,8 +23,7 @@ namespace Assimalign.Cohesion.Templates.Tests;
 /// <summary>Verifies the package as a dotnet new consumer.</summary>
 public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
 {
-    // Elements of the retired generated application model. No template project may set one: a
-    // gateway declares its model in Program.cs, and a resource registers itself with AddResource.
+    // Elements of the retired generated application model. No template project may set one.
     private static readonly string[] _retiredElements =
     [
         "CohesionApplicationModel", "CohesionResourceReference", "CohesionResourceName", "CohesionEndpoint",
@@ -56,7 +55,7 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
             .ShouldBe(TemplateRepository.Roster.Order().ToArray());
         AssertNoRetiredContent(TemplateRepository.ContentRoot, emitted: false);
         string[] contentProjects = SourceProjects(TemplateRepository.ContentRoot);
-        contentProjects.Length.ShouldBe(TemplateRepository.Roster.Length + 2);
+        contentProjects.Length.ShouldBe(TemplateRepository.Roster.Length + 1);
         foreach (string project in contentProjects)
         {
             AssertLocalLaunchProfile(project);
@@ -71,18 +70,17 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
         }
     }
 
-    /// <summary>Checks name replacement and the explicit gateway-name override.</summary>
+    /// <summary>Checks name replacement across the multi-project scaffold.</summary>
     /// <returns>A task representing template instantiation and identity checks.</returns>
-    [Fact(DisplayName = "Cohesion Test [Templates] - Identity: Name replacement and gateway override are explicit")]
+    [Fact(DisplayName = "Cohesion Test [Templates] - Identity: Name replacement is explicit")]
     public async Task Instantiate_CustomIdentity_ShouldReplaceNamesAsync()
     {
         string application = await _workspace.InstantiateAsync("cohesion-app", "Northwind");
         AssertScaffold(application, "cohesion-app", "Northwind");
         File.Exists(Path.Combine(application, "Northwind.Api", "Northwind.Api.csproj")).ShouldBeTrue();
-        File.ReadAllText(Path.Combine(application, "Northwind.Api", "Program.cs"))
-            .ShouldContain("AddResource(\"northwind-api\"", Case.Sensitive);
-        string gateway = await _workspace.InstantiateAsync("cohesion-gateway", "Northwind.Gateway", applicationName: "orders");
-        AssertScaffold(gateway, "cohesion-gateway", "Northwind.Gateway", applicationName: "orders");
+        File.Exists(Path.Combine(application, "Northwind.Database", "Northwind.Database.csproj")).ShouldBeTrue();
+        File.ReadAllText(Path.Combine(application, "Northwind.slnx"))
+            .ShouldContain("Northwind.Api", Case.Sensitive);
     }
 
     private async Task BuildTemplateAsync(string template, CancellationToken cancellationToken = default)
@@ -111,7 +109,7 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
             body.ShouldContain(template == "cohesion-web" ? "Hello from" : "<html", Case.Insensitive);
         }
 
-        // Nothing is generated from a project file any more: no manifest and no resource or gateway surface.
+        // Nothing is generated from a project file: no manifest and no resource or gateway surface.
         foreach (string project in SourceProjects(output))
         {
             string obj = Path.Combine(Path.GetDirectoryName(project)!, "obj");
@@ -161,13 +159,13 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
         }
     }
 
-    private static void AssertScaffold(string output, string template, string name, string? applicationName = null)
+    private static void AssertScaffold(string output, string template, string name)
     {
         using JsonDocument global = TemplateRepository.ReadJson(Path.Combine(output, "global.json"));
         using JsonDocument repositoryGlobal = TemplateRepository.ReadJson(Path.Combine(TemplateRepository.Root, "global.json"));
         JsonProperty[] pins = global.RootElement.GetProperty("msbuild-sdks").EnumerateObject().ToArray();
         pins.Select(pin => pin.Name).Order().ToArray().ShouldBe(TemplateRepository.SdkIds().Order().ToArray());
-        pins.Length.ShouldBe(20);
+        pins.Length.ShouldBe(19);
         foreach (JsonProperty pin in pins)
         {
             pin.Value.GetString().ShouldBe(TemplateRepository.Version);
@@ -180,16 +178,9 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
         }
 
         string[] projects = SourceProjects(output);
-        projects.Length.ShouldBe(template == "cohesion-app" ? 3 : 1);
-        // The gateway's name is its own code: the lowercased solution name for the app, the explicit
-        // --applicationName or the lowercased first name segment for a standalone gateway.
-        string gatewayName = template == "cohesion-app"
-            ? name.ToLowerInvariant()
-            : applicationName ?? name.Split('.')[0].ToLowerInvariant();
-        int gateways = 0;
+        projects.Length.ShouldBe(template == "cohesion-app" ? 2 : 1);
         foreach (string project in projects)
         {
-            string program = File.ReadAllText(Path.Combine(Path.GetDirectoryName(project)!, "Program.cs"));
             AssertLocalLaunchProfile(project);
             XDocument document = XDocument.Load(project);
             foreach (string element in _retiredElements)
@@ -202,23 +193,7 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
             {
                 reference.Attribute("Version")?.Value.ShouldBe("$(CohesionVersion)", $"{project} must pin its package to the SDK version.");
             }
-
-            if (document.Root!.Attribute("Sdk")!.Value == "Assimalign.Cohesion.Sdk.Gateway")
-            {
-                gateways++;
-                program.ShouldContain($"ApplicationGateway.CreateBuilder(\"{gatewayName}\")", Case.Sensitive);
-                program.ShouldContain(".RunAsync(", Case.Sensitive);
-            }
-            else if (program.Contains(".AddResource(", StringComparison.Ordinal))
-            {
-                // A resource that registers itself opts into a platform whose instance half it references.
-                program.ShouldContain("UseInProcess()", Case.Sensitive);
-                document.Descendants("CohesionPackageReference").Select(reference => reference.Attribute("Include")!.Value)
-                    .ShouldContain("Assimalign.Cohesion.ApplicationModel.Hosting.InProcess");
-            }
         }
-
-        gateways.ShouldBe(template is "cohesion-app" or "cohesion-gateway" ? 1 : 0);
 
         foreach (string file in projects.Concat(Directory.GetFiles(output, "Directory.Build.props", SearchOption.AllDirectories)))
         {
@@ -261,12 +236,6 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
         JsonProperty profile = document.RootElement.GetProperty("profiles").EnumerateObject().Single();
         profile.Name.ShouldBe(Path.GetFileNameWithoutExtension(project));
         profile.Value.GetProperty("commandName").GetString().ShouldBe("Project");
-        if (XDocument.Load(project).Root!.Attribute("Sdk")!.Value == "Assimalign.Cohesion.Sdk.Gateway")
-        {
-            // A gateway profile must not override an explicit COHESION_ENVIRONMENT supplied by the caller.
-            profile.Value.TryGetProperty("environmentVariables", out _).ShouldBeFalse();
-            return;
-        }
         JsonProperty environment = profile.Value.GetProperty("environmentVariables").EnumerateObject().Single();
         environment.Name.ShouldBe("COHESION_ENVIRONMENT");
         environment.Value.GetString().ShouldBe("Local");
@@ -281,8 +250,9 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
             string text = File.ReadAllText(file);
             text.ShouldNotContain("Aspire");
             text.ShouldNotContain("!!REPLACE_WITH_", Case.Sensitive);
-            // The retired generated surface: manifests, generated accessors and gateway builders.
-            foreach (string retired in new[] { "Manifests.", "Resource.References", "Resource.Endpoints", "Resource.Mounts", "UseGateway(", "ResourceContext", "ApplicationModel.Orchestration" })
+            // The retired surfaces: generated manifests, accessors and gateway builders, and the
+            // gateway/instance application model (AddResource, platform opt-ins, Sdk.Gateway).
+            foreach (string retired in new[] { "Manifests.", "Resource.References", "Resource.Endpoints", "Resource.Mounts", "UseGateway(", "ResourceContext", "ApplicationModel.Orchestration", "AddResource(", "UseInProcess(", "ApplicationGateway.", "Assimalign.Cohesion.Sdk.Gateway", "Hosting.ApplicationModel" })
             {
                 text.ShouldNotContain(retired, Case.Sensitive);
             }
@@ -306,11 +276,6 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
     /// <returns>A task representing consumer build verification.</returns>
     [TemplateFeedFact("cohesion-app", DisplayName = "Cohesion Test [Templates] - Build: app builds with no generated resource surface")]
     public Task Build_App_ShouldBuildWithoutGeneratedSurfaceAsync() => BuildTemplateAsync("cohesion-app");
-
-    /// <summary>Builds the gateway scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build verification.</returns>
-    [TemplateFeedFact("cohesion-gateway", DisplayName = "Cohesion Test [Templates] - Build: gateway builds with no generated resource surface")]
-    public Task Build_Gateway_ShouldBuildWithoutGeneratedSurfaceAsync() => BuildTemplateAsync("cohesion-gateway");
 
     /// <summary>Builds the web scaffold against its available package closure.</summary>
     /// <returns>A task representing consumer build verification.</returns>

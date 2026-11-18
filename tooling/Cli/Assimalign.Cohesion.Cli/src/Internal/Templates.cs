@@ -8,7 +8,7 @@ internal static class Templates
     internal const string PackageId = "Assimalign.Cohesion.Templates";
     internal static readonly string[] Names =
     [
-        "cohesion-app", "cohesion-gateway",
+        "cohesion-app",
         "cohesion-web", "cohesion-spa", "cohesion-database", "cohesion-secretstore",
         "cohesion-configurationstore", "cohesion-identityhub", "cohesion-rezolvr"
     ];

@@ -26,7 +26,7 @@ internal sealed class ProcessRunner : IProcessRunner
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Console Ctrl+C also reaches dotnet. Allow the gateway's 30-second stop grace.
+            // Console Ctrl+C also reaches dotnet. Allow the program's 30-second stop grace.
             using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(35));
             try
             {

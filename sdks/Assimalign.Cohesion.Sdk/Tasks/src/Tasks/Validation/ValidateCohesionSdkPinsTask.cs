@@ -23,7 +23,6 @@ public sealed class ValidateCohesionSdkPinsTask : Task
         "Assimalign.Cohesion.Sdk.Database",
         "Assimalign.Cohesion.Sdk.EmailHub",
         "Assimalign.Cohesion.Sdk.EventHub",
-        "Assimalign.Cohesion.Sdk.Gateway",
         "Assimalign.Cohesion.Sdk.IdentityHub",
         "Assimalign.Cohesion.Sdk.IoTHub",
         "Assimalign.Cohesion.Sdk.LoadBalancer",

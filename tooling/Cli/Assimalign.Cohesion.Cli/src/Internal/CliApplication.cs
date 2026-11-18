@@ -154,10 +154,11 @@ internal sealed class CliApplication
         {
             throw new CliException("publish accepts one project, either positional or --project.");
         }
-        string project = positional ?? (selected is null
-            ? GatewayDiscovery.ResolveProject(_workingDirectory, null)
-            : Path.GetFullPath(selected, _workingDirectory));
-        return DotnetAsync(["publish", project, .. args.Remaining], cancellationToken);
+        // With no project named, dotnet publish selects the project in the working directory.
+        string? project = positional ?? (selected is null ? null : Path.GetFullPath(selected, _workingDirectory));
+        return project is null
+            ? DotnetAsync(["publish", .. args.Remaining], cancellationToken)
+            : DotnetAsync(["publish", project, .. args.Remaining], cancellationToken);
     }
 
     private Task<int> RunAsync(Arguments args, CancellationToken cancellationToken = default)
@@ -167,13 +168,21 @@ internal sealed class CliApplication
         bool hasEnvironmentVariable =
             !string.IsNullOrWhiteSpace(readEnvironment("COHESION_ENVIRONMENT"))
             || !string.IsNullOrWhiteSpace(readEnvironment("DOTNET_ENVIRONMENT"));
-        string project = GatewayDiscovery.ResolveProject(_workingDirectory, projectOption);
-        // SDK 10.0.401 retains the caller's cwd in the verified dotnet-run probe.
-        // Set it explicitly so relative arguments are project-local.
         // dotnet launch profiles override inherited variables; preserve an explicit shell environment.
         string[] launchOptions = hasEnvironmentVariable ? ["--no-launch-profile"] : [];
+        if (projectOption is null)
+        {
+            // With no project named, dotnet run selects the project in the working directory.
+            return _processes.RunAsync("dotnet", ["run", .. launchOptions, "--", .. args.Remaining],
+                _workingDirectory, cancellationToken);
+        }
+
+        string project = Path.GetFullPath(projectOption, _workingDirectory);
+        // SDK 10.0.401 retains the caller's cwd in the verified dotnet-run probe.
+        // Set it explicitly so relative arguments are project-local.
+        string directory = Directory.Exists(project) ? project : Path.GetDirectoryName(project)!;
         return _processes.RunAsync("dotnet", ["run", "--project", project, .. launchOptions, "--", .. args.Remaining],
-            Path.GetDirectoryName(project)!, cancellationToken);
+            directory, cancellationToken);
     }
 
     private Task<int> DotnetAsync(string[] arguments, CancellationToken cancellationToken = default) =>

@@ -1,8 +1,7 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" >
 	<!--
 		Every Cohesion framework a project needs is explicit: resource-area SDKs add App and
-		App.<Area>, a direct base-SDK consumer names its own framework references, and Gateway
-		adds none. No transitive framework reference therefore needs its own runtime-pack
+		App.<Area>, and a direct base-SDK consumer names its own framework references. No transitive framework reference therefore needs its own runtime-pack
 		download. Without this, a RID-specific or self-contained restore downloads the runtime
 		pack of every registered area.
 	-->

@@ -1,6 +1,0 @@
-<Project>
-  <!-- Repository-wide settings for every project below; executable and language defaults belong to the Cohesion SDK. -->
-  <PropertyGroup>
-    <VersionPrefix>0.1.0</VersionPrefix>
-  </PropertyGroup>
-</Project>

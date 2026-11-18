@@ -5,7 +5,7 @@ on:
       - "tooling/templates/**"
       - "sdks/**"
       - "libraries/App/**"
-      # Template gateway programs call the ApplicationModel APIs directly.
+      # The App framework still carries ApplicationModel.Hosting as a kernel root.
       - "libraries/ApplicationModel/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
@@ -99,38 +99,11 @@ jobs:
           "rid=$rid" >> $env:GITHUB_OUTPUT
           $version = ./scripts/Get-CohesionVersion.ps1
           "COHESION_TEMPLATES_TEST_PACKAGE_VERSION=$version" >> $env:GITHUB_ENV
-      - name: Pack template library closure
+      - name: Build build tasks
         shell: pwsh
         run: |
-          Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force
-          $repository = (Get-Location).Path
-          $packageDirectory = Join-Path $repository '_out/packages'
           dotnet build build/Tasks --configuration Release --nologo
           if ($LASTEXITCODE -ne 0) { throw 'Build tasks failed.' }
-          # The platform packages the app and gateway templates reference, with their closure: the
-          # in-process gateway half (and through it ApplicationModel.Gateway, which Sdk.Gateway
-          # references) and the in-process instance half. Resource templates otherwise take their
-          # libraries from the App frameworks.
-          $packageIds = @(
-            'Assimalign.Cohesion.Core'
-            'Assimalign.Cohesion.Hosting'
-            'Assimalign.Cohesion.ApplicationModel'
-            'Assimalign.Cohesion.ApplicationModel.Definition'
-            'Assimalign.Cohesion.ApplicationModel.Protocol'
-            'Assimalign.Cohesion.ApplicationModel.Hosting'
-            'Assimalign.Cohesion.ApplicationModel.Hosting.InProcess'
-            'Assimalign.Cohesion.ApplicationModel.Gateway'
-            'Assimalign.Cohesion.ApplicationModel.Gateway.InProcess'
-          )
-          $inventoryById = @{}
-          foreach ($item in @(Get-CohesionReleaseLibrary -RepositoryDirectory $repository)) {
-            $inventoryById[$item.PackageId] = $item
-          }
-          foreach ($packageId in $packageIds) {
-            if (-not $inventoryById.ContainsKey($packageId)) { throw "Missing inventory package $packageId." }
-            dotnet pack $inventoryById[$packageId].ProjectPath --configuration Release --nologo "-p:PackageOutputPath=$packageDirectory"
-            if ($LASTEXITCODE -ne 0) { throw "Packing $packageId failed." }
-          }
       - uses: ./.github/actions/build
         with:
           area: 'tooling'

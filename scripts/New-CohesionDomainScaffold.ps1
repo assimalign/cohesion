@@ -40,12 +40,6 @@
     detail. That file imports the area's own Directory.Build.props, which
     the scaffold writes too when the area has none.
 
-    The area's application-model integration,
-    Assimalign.Cohesion.<Name>.Hosting.ApplicationModel, is not scaffolded: it
-    references the area's runtime module, so it is written once
-    Assimalign.Cohesion.<Name>.Hosting exists (precedent:
-    resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel).
-
     Existing files are not overwritten unless -Force is passed.
 
 .PARAMETER Name
@@ -331,5 +325,3 @@ Write-Host "     scripts/modules/CohesionPackaging.psm1" -ForegroundColor DarkGr
 Write-Host "  4. Add each new producer pair and the new Directory.Build.props files to" -ForegroundColor DarkGray
 Write-Host "     resources/<Name>/Assimalign.Cohesion.<Name>.slnx, resources/Assimalign.Cohesion.Resources.slnx," -ForegroundColor DarkGray
 Write-Host "     and the root Assimalign.Cohesion.slnx" -ForegroundColor DarkGray
-Write-Host "  5. Once resources/<Name>/Assimalign.Cohesion.<Name>.Hosting exists, add the area's" -ForegroundColor DarkGray
-Write-Host "     Assimalign.Cohesion.<Name>.Hosting.ApplicationModel integration (EmailHub is the precedent)" -ForegroundColor DarkGray

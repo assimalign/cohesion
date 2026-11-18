@@ -2480,13 +2480,6 @@
 	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.EventHub/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.EventHub/Tasks/src/Assimalign.Cohesion.Sdk.EventHub.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Gateway/" />
-	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/">
-		<Project Path="sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/src/Assimalign.Cohesion.Sdk.Gateway.Tasks.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/tests/">
-		<Project Path="sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/tests/Assimalign.Cohesion.Sdk.Gateway.Tests.csproj" />
-	</Folder>
 	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.IdentityHub/" />
 	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.IdentityHub/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.IdentityHub/Tasks/src/Assimalign.Cohesion.Sdk.IdentityHub.Tasks.csproj" />

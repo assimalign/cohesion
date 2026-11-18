@@ -17,11 +17,10 @@ public sealed class SdkPinValidationTests
         Dictionary<string, string> pins = ConsumerWorkspace.CreateMatchingSdkPins();
 
         // Assert
-        pins.Count.ShouldBe(20);
+        pins.Count.ShouldBe(19);
         pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk");
         pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk.Web");
         pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk.Database");
-        pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk.Gateway");
         foreach (string version in pins.Values)
         {
             version.ShouldBe(ConsumerWorkspace.SdkPackageVersion);
@@ -35,8 +34,8 @@ public sealed class SdkPinValidationTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create("SdkPinValidationConsumer");
         Dictionary<string, string> pins = ConsumerWorkspace.CreateMatchingSdkPins();
-        pins.Count.ShouldBe(20);
-        pins["Assimalign.Cohesion.Sdk.Gateway"] = "10.0.0-preview.1.gateway";
+        pins.Count.ShouldBe(19);
+        pins["Assimalign.Cohesion.Sdk.Database"] = "10.0.0-preview.1.database";
         pins["Assimalign.Cohesion.Sdk.Web"] = "10.0.0-preview.1.web";
         workspace.WriteGlobalJson("10.0.300", pins);
 
@@ -48,12 +47,12 @@ public sealed class SdkPinValidationTests
         // Assert
         invalidResult.ExitCode.ShouldNotBe(0, invalidResult.Output);
         invalidResult.Output.ShouldContain("COHSDK002");
-        invalidResult.Output.ShouldContain("Assimalign.Cohesion.Sdk.Gateway='10.0.0-preview.1.gateway'");
+        invalidResult.Output.ShouldContain("Assimalign.Cohesion.Sdk.Database='10.0.0-preview.1.database'");
         invalidResult.Output.ShouldContain("Assimalign.Cohesion.Sdk.Web='10.0.0-preview.1.web'");
         invalidResult.Output.ShouldContain($"expected '{ConsumerWorkspace.SdkPackageVersion}'");
 
         // Arrange
-        pins["Assimalign.Cohesion.Sdk.Gateway"] = ConsumerWorkspace.SdkPackageVersion;
+        pins["Assimalign.Cohesion.Sdk.Database"] = ConsumerWorkspace.SdkPackageVersion;
         pins["Assimalign.Cohesion.Sdk.Web"] = ConsumerWorkspace.SdkPackageVersion;
         workspace.WriteGlobalJson("10.0.300", pins);
 
@@ -74,7 +73,7 @@ public sealed class SdkPinValidationTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create("SdkPinValidationConsumer");
         Dictionary<string, string> pins = ConsumerWorkspace.CreateMatchingSdkPins();
-        pins["Assimalign.Cohesion.Sdk.Gateway"] = "10.0.0-preview.1.mismatch";
+        pins["Assimalign.Cohesion.Sdk.Database"] = "10.0.0-preview.1.mismatch";
         workspace.WriteGlobalJson("10.0.200", pins);
 
         // Act
