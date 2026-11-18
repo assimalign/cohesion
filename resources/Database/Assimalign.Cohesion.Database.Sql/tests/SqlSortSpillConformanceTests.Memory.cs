@@ -76,15 +76,16 @@ public sealed partial class SqlSortSpillConformanceTests
                 count.ShouldBe(4000);
 
                 // Assert
+                foreach (string phase in new[] { "handoff", "drained", "arena", "input", "before-delivery", "delivery" })
+                {
+                    samples.ContainsKey(phase).ShouldBeTrue();
+                    _output.WriteLine($"LIVE|{phase}|bytes={samples[phase]}|grant={grant}|constant={constant}");
+                }
+                session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
                 return (Action)(() =>
                 {
                     foreach (string phase in new[] { "handoff", "drained", "arena", "input", "before-delivery", "delivery" })
-                    {
-                        samples.ContainsKey(phase).ShouldBeTrue();
-                        _output.WriteLine($"LIVE|{phase}|bytes={samples[phase]}|grant={grant}|constant={constant}");
-                        samples[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant);
-                    }
-                    session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+                    { samples[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant); }
                 });
             }
             finally { SqlRowCollector.ObserveSpill = null; }
