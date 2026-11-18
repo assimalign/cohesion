@@ -31,7 +31,7 @@ public interface IFabricPlatformBuilder
     /// </summary>
     /// <param name="provider">The provider.</param>
     /// <returns>This builder.</returns>
-    IFabricPlatformBuilder AddResourceType(IResourceProvider provider);
+    IFabricPlatformBuilder AddResourceType(IFabricResourceProvider provider);
 
     /// <summary>
     /// Registers the classifier that maps the platform's reasons onto <see cref="FaultCode"/>.

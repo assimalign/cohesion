@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Fabric;
 /// <param name="ApiVersion">The version <paramref name="Spec"/> is written in.</param>
 /// <param name="Generation">The spec generation this view carries.</param>
 /// <param name="Owner">The owning application's or composite's uid.</param>
-/// <param name="Spec">The desired state, with every <c>$ref</c> already resolved when the view is handed to a reconcile, and unresolved when it is handed to <see cref="IResourceProvider.Validate"/> or <see cref="IResourceProvider.Plan"/>.</param>
+/// <param name="Spec">The desired state, with every <c>$ref</c> already resolved when the view is handed to a reconcile, and unresolved when it is handed to <see cref="IFabricResourceProvider.Validate"/> or <see cref="IFabricResourceProvider.Plan"/>.</param>
 public sealed record ResourceView(
     ResourceId Id,
     ResourceUid Uid,

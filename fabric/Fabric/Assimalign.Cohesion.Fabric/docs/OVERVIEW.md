@@ -13,7 +13,7 @@ build on it.
 | References | `FabricRef`, `FabricValue<T>` |
 | Faults | `FabricFault`, `FaultCode`, `FaultDisposition`, `PlatformDetail`, `PlatformEvent`, `IFabricFaultClassifier` |
 | Validation | `FabricDiagnostic`, `FabricDiagnostics`, `FabricValidationContext` |
-| Providers | `IResourceProvider` and its inputs and results, `ResourceTypeAttribute`, `ResourceActionAttribute` |
+| Providers | `IFabricResourceProvider` and its inputs and results, `ResourceTypeAttribute`, `ResourceActionAttribute` |
 | Platforms | `IFabricPlatform`, `FabricPlatform`, `IFabricPlatformBuilder`, `IFabricExtension`, `FabricExtension<THub>`, `FabricPlatformRegistration` |
 | JSON | `FabricJsonContext`, `FabricRefJsonConverter`, `FabricStringValueJsonConverter` |
 

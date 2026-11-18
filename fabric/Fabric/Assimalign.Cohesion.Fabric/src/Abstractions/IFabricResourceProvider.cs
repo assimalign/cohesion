@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Fabric;
 /// level-triggered and idempotent: they observe, act, and report, and never write the store.
 /// A service provider never contains platform code; it produces fabric children.
 /// </remarks>
-public interface IResourceProvider
+public interface IFabricResourceProvider
 {
     /// <summary>
     /// Gets the types and actions the provider serves.

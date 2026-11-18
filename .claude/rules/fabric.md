@@ -55,7 +55,7 @@ are exempt. None has an opt-out property.
   name is refused where a reference belongs.
 - **Specs grow; contracts stay small.** Spec types (`WorkloadSpec`, `ExposureSpec`, `VolumeSpec`)
   are init-property records so portable fields can be added. Driver and provider contracts
-  (`IResourceProvider`, `IWorkloadDriver<T>`, `IFabricPlatform`) are a cross-repository API that
+  (`IFabricResourceProvider`, `IWorkloadDriver<T>`, `IFabricPlatform`) are a cross-repository API that
   `cohesion-platforms` pins: change them deliberately.
 - **Platforms add reasons, never fault codes.** `FaultCode` is closed.
 - **Identity is the uid.** Store an edge by `ResourceUid`, never by `ResourceId`.

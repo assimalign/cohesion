@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Fabric;
 public sealed class FabricPlatformRegistration
 {
     private readonly List<IFabricExtension> _extensions = [];
-    private readonly List<IResourceProvider> _resourceProviders = [];
+    private readonly List<IFabricResourceProvider> _resourceProviders = [];
     private readonly List<IFabricFaultClassifier> _faultClassifiers = [];
 
     private FabricPlatformRegistration(IFabricPlatform platform)
@@ -50,7 +50,7 @@ public sealed class FabricPlatformRegistration
     /// <summary>
     /// Gets the platform-native providers, in registration order.
     /// </summary>
-    public IReadOnlyList<IResourceProvider> ResourceProviders => _resourceProviders;
+    public IReadOnlyList<IFabricResourceProvider> ResourceProviders => _resourceProviders;
 
     /// <summary>
     /// Gets the fault classifiers, in registration order.
@@ -118,7 +118,7 @@ public sealed class FabricPlatformRegistration
             return this;
         }
 
-        public IFabricPlatformBuilder AddResourceType(IResourceProvider provider)
+        public IFabricPlatformBuilder AddResourceType(IFabricResourceProvider provider)
         {
             ArgumentNullException.ThrowIfNull(provider);
             EnsureOpen();
@@ -168,7 +168,7 @@ public sealed class FabricPlatformRegistration
 
         public IReadOnlyList<IFabricExtension> Extensions => _registration.Extensions;
 
-        public IReadOnlyList<IResourceProvider> ResourceProviders => _registration.ResourceProviders;
+        public IReadOnlyList<IFabricResourceProvider> ResourceProviders => _registration.ResourceProviders;
 
         public IReadOnlyList<IFabricFaultClassifier> FaultClassifiers => _registration.FaultClassifiers;
     }

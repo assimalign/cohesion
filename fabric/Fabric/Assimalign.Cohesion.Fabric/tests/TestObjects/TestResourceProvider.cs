@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Fabric.Tests.TestObjects;
 
-internal sealed class TestResourceProvider : IResourceProvider
+internal sealed class TestResourceProvider : IFabricResourceProvider
 {
     public TestResourceProvider(string type)
     {
