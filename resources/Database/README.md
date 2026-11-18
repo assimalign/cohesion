@@ -2,29 +2,24 @@
 
 The multi-model OLTP database engine family for Cohesion: five independent database engines — **SQL**, **Documents**, **Graph**, **Blob**, and **KeyValuePair** — sharing one durable kernel (storage, write-ahead logging, transactions, indexing). A hosted database is an ordinary customer-owned `Sdk.Database` executable whose `Program.cs` composes its engines, code-first schema, servers, and provisioning. See [DESIGN.md](../../docs/resources/Database/DESIGN.md) for the architecture, requirements, and decision log; sequencing lives in [docs/programs/DATABASE_PROGRAM_PLAN.md](../../docs/programs/DATABASE_PROGRAM_PLAN.md).
 
-A Database application becomes a managed resource instance with
-[Assimalign.Cohesion.Database.Hosting.ApplicationModel](Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/OVERVIEW.md):
-`builder.Services.AddResource("orders-db", resource => resource.UseInProcess())` joins the gateway
-through the selected platform, publishes the instance and restores added actions before servers
-start. The [integration design](Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md)
-records lifecycle details and the remaining platform allocation/readiness gaps. A model server
-without an explicit listener consumes its named runtime endpoint when COHESION_GATEWAY is nonempty (sql, documents, graph, kv or
-blob); explicit Listen wins. Managed HTTP health binds the platform's plain http endpoint at a
-bindable host, reporting and skipping unsuitable assignments. Unmanaged
-applications opt in with builder.AddHealthEndpoint(uri). The in-process platform still allocates
-only http, so wire addresses remain explicit there. Managed instances expose health contributors
-for each engine and database, plus the database.accepting host accept gate, from Hosting's existing health
-observations. Offline databases are Unhealthy; provisioning and held schemas are Degraded with
-their existing refusal details. Consumers read `IApplicationInstance.HealthContributors` for cheap
-live membership and re-read it to follow opens and drops. A retained contributor of a vanished
-database is Unhealthy ("not open"). Each check evaluates only its engine, or the host accept gate,
+A model server without an explicit listener consumes its named runtime endpoint when
+COHESION_GATEWAY is nonempty (sql, documents, graph, kv or blob); explicit Listen wins. Managed
+HTTP health binds the platform's plain http endpoint at a bindable host, reporting and skipping
+unsuitable assignments. Unmanaged applications opt in with builder.AddHealthEndpoint(uri).
+Hosting's health observations cover each engine and database, plus the database.accepting host
+accept gate. Offline databases are Unhealthy; provisioning and held schemas are Degraded with
+their existing refusal details. Each check evaluates only its engine, or the host accept gate,
 without opening or waiting for databases. Stored databases never attempted by this process are
 absent from health in every model. Failed stored opens remain Unhealthy through immutable
 DatabaseEngine.FailedOpens snapshots until successful open/create/drop, absence or disposal clears
 them; an offline instance merges its cause with pending reopen attempts and fault, and an online
 instance outranks a stale pending entry. Pending reopens outrank failed-open records (#1790),
-which need repair and an explicit open. Gateway consumption and readiness separate from publication remain
-ApplicationModel follow-ups (ApplicationModel.Hosting open questions 2 and 7; Gateway G18).
+which need repair and an explicit open.
+
+The old application model's Database integration, `Database.Hosting.ApplicationModel`
+(`builder.Services.AddResource(...)` and its health contributors), was removed in #1869 with the
+old model. Its replacement is the resource-provider design in `fabric/`; Database adopts it once
+that design is in main.
 
 ## Storage corruption diagnostics (#1160)
 
@@ -78,7 +73,6 @@ flowchart LR
     P2["Database.Client"]
     P3["Database.Hosting — runtime module"]
     P4["Database.Testing"]
-    AM["Database.Hosting.ApplicationModel"]
     GRAPH["Database.Graph"]
     GRAPHCLI["Database.Graph.Client — NuGet-only"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
@@ -94,15 +88,11 @@ flowchart LR
     P3 -->|"private"| PRIV
     P4 --> P3
     P4 --> HOSTFAM
-    AM --> P3
-    AM --> P0
-    AM --> HOSTFAM
     P0 -.->|"COHRES001 ✗"| P3
 ```
 
 Solid edges are the references this area permits. The dotted edge is the one `COHRES001`
 rejects: **the area root and feature libraries may not reference `Database.Hosting`**.
-`Database.Hosting.ApplicationModel` references the runtime by COHRES001's exact-name sanction.
 The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
@@ -208,7 +198,6 @@ Each implemented remote client references its model Protocol and shared Client/P
 | `Assimalign.Cohesion.Database.Client` | Shared client core: connection settings, pooling, handshake, framing, and model-exchange lifetime; model clients materialize results |
 | `Assimalign.Cohesion.Database.Security` | Child root — the authentication contract (`DatabaseAuthenticator`, an abstract base the application implements, and its `AllowAll`) |
 | `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's runtime DI seam; implements `DatabaseApplication.CreateBuilder(args)`. Engine Build opens and provisions declared databases before servers accept. AddService and container lifecycle services start before the reopen service and servers; servers drain first. The internal admin service privately hosts Web health routes. |
-| `Assimalign.Cohesion.Database.Hosting.ApplicationModel` | [Managed-resource integration](Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/OVERVIEW.md): AddResource on Services, provider Database, application-added actions, platform-selected publication/restore and control plane; [design](Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md). Public App.Database member. |
 | `Assimalign.Cohesion.Database.Testing` | The area's sole hosting-isolation exemption holder; `DatabaseApplicationTestFactory.FromProgram<Program>()` runs the resource's real entry point |
 | `resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost` | Non-packable `Sdk.Database` executable with build-time schema compilation; composes a SQL table/index schema and the TCP server in `Program.cs` and provisions that compiled schema before accept |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |
@@ -220,7 +209,6 @@ Each implemented remote client references its model Protocol and shared Client/P
   menu exposed by the concrete `DatabaseApplicationBuilder.AddService` verb in
   `Database.Hosting`. The Database root and feature libraries reference no hosting library (O34).
 - `libraries/Connections` — transport drivers for the per-model servers (`Database.Sql`'s `SqlDatabaseServer`, and every future model's server)
-- `libraries/ApplicationModel` — managed-instance contracts through `Database.Hosting.ApplicationModel`; gateways declare Database resources generically
 - `resources/Web` — private implementation details: the root's existing Web dependency plus
   `Web.Hosting`/`Web.Health` in `Database.Hosting` for the `admin` control plane. The coordinated
   `CohesionPrivateProjectReference`/`CohesionFrameworkPrivateAssembly` path keeps that closure in
