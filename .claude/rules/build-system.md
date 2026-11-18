@@ -117,7 +117,7 @@ No installer required. Resource consumers get the hosting kernel and their area 
 | `Assimalign.Cohesion.Sdk.Database` | `App` + `App.Database` |
 | `Assimalign.Cohesion.Sdk.<Domain>` | `App` + `App.<Domain>` |
 
-The base SDK declares `KnownFrameworkReference` entries for every framework in `sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props`, so explicit references resolve even in a base-only project. Each resource-area SDK sets its executable marker before importing the base props, then adds both implicit references under `CohesionAutoIncludeAppFramework != false`. `Sdk.Gateway` adds no framework: a gateway takes the `Assimalign.Cohesion.ApplicationModel.Gateway` package (see *What `Sdk.Gateway` references*).
+The base SDK declares `KnownFrameworkReference` entries for every framework in `sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props`, so explicit references resolve even in a base-only project. Each resource-area SDK sets its executable marker before importing the base props, then adds both implicit references under `CohesionAutoIncludeAppFramework != false`.
 
 ## Each framework is two NuGet packages
 
@@ -204,9 +204,10 @@ The Runtime csproj converts the public items to `<CohesionProjectReference>` ite
 
 Base App is different: never add a library directly to its assembly list. `@(CohesionAppKernelRoot)` in `App.props` is the sole policy input, and `App.targets` derives the transitive Assimalign project-reference closure plus the umbrella assembly. The roots are Hosting, ApplicationModel.Hosting, Connections and its StreamAbort, StreamLimits, and Tls siblings, the host-composed configuration providers, Logging.Console, Logging.EventSource, OpenTelemetry, DependencyInjection, and FileSystem.Physical. Everything outside that hosting kernel remains an ordinary package. The derivation walks project references only, so the kernel's package-delivered assemblies would be App's one explicit list, as `CohesionFrameworkPrivateAssembly` items in App's group; the kernel references no package today.
 
-`Assimalign.Cohesion.ApplicationModel.Hosting` is a kernel root because every area's
-`<Area>.Hosting.ApplicationModel` integration (an `App.<Area>` member) builds on it; carrying it
-once in App keeps it out of all 18 area frameworks. Its closure (the ApplicationModel identity and
+`Assimalign.Cohesion.ApplicationModel.Hosting` is a kernel root because the remaining
+`<Area>.Hosting.ApplicationModel` integration (Database's, an `App.Database` member, until phase 2
+of the application-model rebuild removes it; `fabric.md`) builds on it; carrying it once in App
+keeps it out of the area frameworks. Its closure (the ApplicationModel identity and
 Protocol packages) arrives with it. The platform packages a resource opts into
 (`ApplicationModel.Hosting.InProcess`, the `cohesion-platforms` instance halves) are not in the
 kernel: the application references the ones it uses. Every area hosting module reaches
@@ -288,8 +289,8 @@ non-harness project under `libraries/**` or `sdks/**`:
 may reference `resources/<Area>/**`: an area SDK's build tasks may reuse that area's own
 declaration contract. The precedent is `Sdk.Database.Tasks → Database.Sql.Schema`. The exception is
 decided by path in both layers. It never covers another area. The base SDK
-(`sdks/Assimalign.Cohesion.Sdk/`) has no area, and `Sdk.Gateway` has no `resources/` folder to
-match, so neither may reference `resources/**` at all.
+(`sdks/Assimalign.Cohesion.Sdk/`) has no area, so it may not reference `resources/**` at all. The
+guard's scope also includes `fabric/**`, which never references `resources/` (rule F1, `fabric.md`).
 
 - **Harnesses are exempt by path:** `tests`, `examples`, `samples`, and `fixtures` as complete
   path segments, matched case-insensitively. This is why test projects under
@@ -307,28 +308,6 @@ match, so neither may reference `resources/**` at all.
 
 Relaxing COHLIB001 beyond the same-area SDK exception is an architectural decision, on the same
 terms as the resource guards (`resource-areas.md`).
-
-## What `Sdk.Gateway` references
-
-A gateway is an executable on `Assimalign.Cohesion.Sdk.Gateway`, a slim SDK chained to the base
-`Assimalign.Cohesion.Sdk`. It sets executable output and references one package,
-`Assimalign.Cohesion.ApplicationModel.Gateway`, at `$(CohesionVersion)`. That is all it does:
-
-- **No generated sources.** There is no manifest, accessor, or gateway-builder generation; the
-  gateway's `Program.cs` declares its model in code and builds the gateway with
-  `ApplicationGateway.CreateBuilder(name)`, then runs it (`RunAsync`).
-- **No framework.** A gateway takes no `App` or `App.<Area>` framework and no area package: it
-  manages resources through their platform without loading their runtimes.
-- **Self-contained by default.** `Sdk/Sdk.targets` gives an executable gateway the resource
-  executables' defaults (`SelfContained=true`, `RuntimeIdentifier=$(NETCoreSdkRuntimeIdentifier)`,
-  `ValidateExecutableReferencesMatchSelfContained=false`), because an in-process gateway that
-  references a self-contained `Sdk.<Area>` project otherwise fails NETSDK1151, and with that check
-  off cannot start: the referenced program's App frameworks flow in and ship only as runtime packs.
-- **Platforms are explicit references.** The gateway references each platform's gateway half it
-  uses (`ApplicationModel.Gateway.InProcess`, or a `cohesion-platforms` package such as
-  `ApplicationModel.Gateway.Kubernetes`) and registers it on the builder, for example
-  `UseInProcess(infrastructure)`. The in-process platform runs each resource's program in the
-  gateway's process, so an in-process gateway also references the resource programs it runs.
 
 ## Adding a new framework + SDK domain
 
@@ -500,7 +479,7 @@ any branch (or all successful runs when fewer exist). Double the maximum, round 
 of 15 minutes, and use at least 45 minutes. A job without measurements gets 120 minutes and a YAML
 comment explaining the missing evidence. The SDK sample (`38567999606`, `38567990958`,
 `38546428166`, `38534939095`, `38534930255`) gives `consumer-smoke` 33m35s (75-minute limit) and
-`gateway-smoke` 9m19s (45-minute limit). Release runs `36659700651` (preview.1) and `32994864088`
+`gateway-smoke` 9m19s (45-minute limit; the job is now `sdk-boundary`). Release runs `36659700651` (preview.1) and `32994864088`
 (beta.1), including every page of matrix jobs, give `validate-release` 11m34s and `validate-consumer`
 1m17s (45-minute limits). SDK task builds and package-feed preparation do not run tests.
 
@@ -541,7 +520,7 @@ Every external `uses:` in `release.yml`, `ci-packages.yml`, `ci-packages-prune.y
 
 On pull requests and relevant pushes, a matrix (Linux, plus Windows and macOS on `main` or a manual `all-os` run) runs strict `Pack-Release.ps1 -SkipLibraries` for the host RID and packs the Core/ObjectMapping packages used by the analyzer sample. The shared `scripts/sdks/Invoke-SdkConsumerSmoke.ps1` harness then materializes isolated base, Web, Database, and analyzer-bearing consumers against that feed. The base executables explicitly reference App; the analyzer references ObjectMapping as an ordinary package. The harness builds, asserts generated source, publishes self-contained, runs each apphost, and asserts its output. The same job runs the framework closure tests, which check each area's member list against its project-graph closure.
 
-A second pair of jobs packs the SDKs and the `ApplicationModel.Gateway` package closure and runs the base, Database, and Gateway SDK package-boundary tests on each OS leg; the Gateway test builds a package-only consumer of the slim `Sdk.Gateway`. The generated-gateway publish, in-process, NativeAOT, and container smoke left with the generated surface (2026-10-31). Its permissions remain `contents: read`; artifact uploads are run-local test inputs, never package-feed publication.
+A second pair of jobs, `sdk-boundary-packages` and `sdk-boundary`, packs the SDKs and runs the base and Database SDK package-boundary tests on each OS leg. The Gateway boundary test left with `Sdk.Gateway` (2026-11-18), and the generated-gateway publish, in-process, NativeAOT, and container smoke left with the generated surface (2026-10-31). Its permissions remain `contents: read`; artifact uploads are run-local test inputs, never package-feed publication.
 
 `release.yml` repeats the same package-only consumer harness as `validate-consumer`, using the exact full release artifact, before staging or promotion. The former publishing overlap is resolved: nuget.org has one writer, `release.yml`. GitHub Packages has two, `release.yml` for release versions and `ci-packages.yml` for CI versions, and their versions cannot collide because a CI version extends the canonical version's predecessor. Neither replaces a published version.
 
