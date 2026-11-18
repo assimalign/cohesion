@@ -4,7 +4,7 @@
 
         Lets a library/resource/analyzer csproj reference another by its
         assembly name instead of by relative csproj path. Resolution walks
-        libraries/ + resources/ (for code refs) and analyzers/ (for analyzer
+        libraries/ + fabric/ + resources/ (for code refs) and analyzers/ (for analyzer
         refs) once, matches each item's Include to the csproj whose filename
         matches, and emits a regular <ProjectReference Include="<resolved-path>" />
         with the appropriate per-flavor metadata.
@@ -41,13 +41,16 @@
     <ItemGroup>
         <!-- Index code projects ONCE.
 
+             fabric\ is the application model's root (.claude/rules/fabric.md): its
+             projects resolve by name like any library.
+
              libraries\ and resources\ cover the executable acceptance fixtures too:
              a fixture lives in a fixtures\ folder inside the project whose tests
              drive it (.claude/rules/resource-areas.md), so a test project resolves
              it by name through this same index - e.g. Database.Testing.Tests ->
              Assimalign.Cohesion.Database.SampleHost. Fixtures are IsPackable=false,
              so one can never become a .nuspec <dependency> of a shipped library. -->
-        <_CohesionProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj;$(CohesionRepositoryDirectory)resources\**\*.csproj" />
+        <_CohesionProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj;$(CohesionRepositoryDirectory)fabric\**\*.csproj;$(CohesionRepositoryDirectory)resources\**\*.csproj" />
         <_CohesionProject Update="@(_CohesionProject)" ProjectId="%(_CohesionProject.Filename)" ProjectPath="%(_CohesionProject.Identity)" />
 
         <!-- Public refs -->

@@ -201,6 +201,13 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Security/Assimalign.Cohesion.Security'
     'libraries/Security/Assimalign.Cohesion.Security.DataProtection'
 
+    # fabric/ (the application model's root, .claude/rules/fabric.md)
+    'fabric/Fabric/Assimalign.Cohesion.Fabric'
+    'fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess'
+    'fabric/Networking/Assimalign.Cohesion.Networking'
+    'fabric/Storage/Assimalign.Cohesion.Storage'
+    'fabric/Workloads/Assimalign.Cohesion.Workloads'
+
     # resources/ApiManager
     'resources/ApiManager/Assimalign.Cohesion.ApiManager'
     'resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting'
@@ -1155,6 +1162,7 @@ function Get-CohesionPackableSourceProject {
     $project = [System.Collections.Generic.List[object]]::new()
     foreach ($rootName in @(
             'libraries',
+            'fabric',
             'resources',
             'sdks',
             'analyzers',
@@ -1181,7 +1189,7 @@ function Get-CohesionPackableSourceProject {
             $segment = $relativePath.Split('/')
             $ciKey = $null
             if ($segment.Count -eq 5 -and
-                $segment[0] -in @('libraries', 'resources') -and
+                $segment[0] -in @('libraries', 'fabric', 'resources') -and
                 $segment[3] -eq 'src' -and
                 $segment[4] -eq "$($segment[2]).csproj") {
                 $ciKey = "$($segment[0])/$($segment[1])/$($segment[2])"
@@ -1202,7 +1210,7 @@ function Get-CohesionPackableSourceProject {
 function Get-CohesionSourceProjectPath {
     <#
     .SYNOPSIS
-        Resolves a Cohesion project name to its shipping csproj under libraries/ or resources/,
+        Resolves a Cohesion project name to its shipping csproj under libraries/, fabric/ or resources/,
         or $null when no such project exists.
 
     .DESCRIPTION
@@ -1220,7 +1228,7 @@ function Get-CohesionSourceProjectPath {
         [string] $ProjectName
     )
 
-    foreach ($area in @('libraries', 'resources')) {
+    foreach ($area in @('libraries', 'fabric', 'resources')) {
         $areaDirectory = Join-Path $RepositoryDirectory $area
         if (-not (Test-Path -LiteralPath $areaDirectory -PathType Container)) {
             continue
@@ -1449,7 +1457,7 @@ function Assert-CohesionReleaseInventory {
             Where-Object { $_ }
     }
 
-    foreach ($rootName in @('libraries', 'resources', 'sdks', 'analyzers', 'tooling', 'extensions', 'frameworks')) {
+    foreach ($rootName in @('libraries', 'fabric', 'resources', 'sdks', 'analyzers', 'tooling', 'extensions', 'frameworks')) {
         $rootDirectory = Join-Path $repositoryDirectory $rootName
         if (-not (Test-Path -LiteralPath $rootDirectory -PathType Container)) {
             continue
@@ -1586,6 +1594,7 @@ function Assert-CohesionReleaseInventory {
     # their area/category/project key even when a tests project happens to share the basename.
     foreach ($rootName in @(
             'libraries',
+            'fabric',
             'resources',
             'sdks',
             'analyzers',

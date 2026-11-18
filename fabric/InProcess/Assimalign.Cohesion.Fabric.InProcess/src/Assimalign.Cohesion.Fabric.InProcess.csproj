@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Fabric.InProcess</RootNamespace>
+		<Nullable>enable</Nullable>
+		<Description>The in-process platform: runs an application's programs inside one process for local development, through the same platform contract as the Docker and Kubernetes platforms in cohesion-platforms.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Workloads" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Networking" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Storage" />
+	</ItemGroup>
+</Project>

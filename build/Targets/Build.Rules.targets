@@ -57,10 +57,36 @@
 	        * COHNS001 - A project declares <RootNamespace> in its own project file.
 	          dotnet new template content (tooling/templates/**/content/) is exempt.
 
-	    Library and SDK boundary (projects under libraries/ and sdks/):
+	        * COHRES005 - Only Assimalign.Cohesion.ResourceManager.Hosting and an
+	          area's Assimalign.Cohesion.<Area>.ResourceProvider may resolve a
+	          fabric/ assembly (rule F3, .claude/rules/fabric.md). The
+	          ResourceManager area's own framework producers carry RM.Hosting, and
+	          with it the fabric closure, so they are exempt by exact identity.
+	          Every other shipped resource project is a program's runtime and
+	          never sees the application model. No opt-out.
+
+	        * COHRES006 - An <Area>.ResourceProvider never resolves its own area
+	          root, Assimalign.Cohesion.<Area>: the RM and the AppHost carry the
+	          provider, and must not carry the area's runtime with it. It shares
+	          what it needs with the area through CohesionSharedSource. Hosting
+	          assemblies are already refused to it by COHRES001 and COHRES004,
+	          because a provider is not in the hosting family. No opt-out.
+
+	    Fabric boundary (projects under fabric/; .claude/rules/fabric.md):
+
+	        * COHFAB001 - Fabric areas do not reference each other (rule F4). A
+	          project under fabric/<Area>/ may reference the fabric root
+	          (fabric/Fabric/) and libraries/, never another fabric area. Areas
+	          meet through $ref values in the resource document. The fabric root
+	          and the in-process platform (fabric/InProcess/) are not areas: the
+	          root references no area, and a platform implements all of them.
+	          Harness folders are exempt. Checked in the same two layers as
+	          COHLIB001.
+
+	    Library and SDK boundary (projects under libraries/, fabric/ and sdks/):
 
 	        * COHLIB001 - Libraries and SDKs never depend on resources. A project
-	          under libraries/ or sdks/ may not reference a project under
+	          under libraries/, fabric/ or sdks/ may not reference a project under
 	          resources/, and may not resolve an assembly whose name is a
 	          resources/ project. Sole exception, the same-area SDK: a project
 	          under sdks/Assimalign.Cohesion.Sdk.<Area>/ may reference
@@ -79,8 +105,8 @@
 	    harnesses. The gate deliberately keys on those harness folders rather than
 	    on a 'src' folder name, so a project scaffolded with a nonstandard layout
 	    is guarded rather than silently exempt. Projects outside resources/
-	    (libraries/, sdks/, build/) are untouched by them; COHLIB001 is the
-	    guard for libraries/ and sdks/.
+	    (libraries/, fabric/, sdks/, build/) are untouched by them; COHLIB001 is the
+	    guard for libraries/, fabric/ and sdks/ (fabric/ joined it as rule F1).
 
 	    Framework producers are inside an area but are not libraries.
 	    resources/<Area>/Assimalign.Cohesion.<Area>.Refs and .Runtime are the
@@ -224,7 +250,7 @@
 		<_CohesionResourcesDirectoryNormalized>$(_CohesionRepositoryRootNormalized)resources/</_CohesionResourcesDirectoryNormalized>
 
 		<_CohesionLibraryRuleApplies>false</_CohesionLibraryRuleApplies>
-		<_CohesionLibraryRuleApplies Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionRepositoryRelativeDirectory)', '(?i)^(libraries|sdks)/'))
+		<_CohesionLibraryRuleApplies Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionRepositoryRelativeDirectory)', '(?i)^(libraries|fabric|sdks)/'))
 		                                        AND !$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionRepositoryRelativeDirectory)', '(?i)(^|/)(tests|examples|samples|fixtures)(/|$)'))">true</_CohesionLibraryRuleApplies>
 
 		<!-- The same-area SDK exception: a project under sdks/Assimalign.Cohesion.Sdk.<Area>/ may
@@ -234,6 +260,37 @@
 		                                    AND $([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionRepositoryRelativeDirectory)', '(?i)^sdks/Assimalign\.Cohesion\.Sdk\.[^/]+/'))">$([System.Text.RegularExpressions.Regex]::Replace('$(_CohesionRepositoryRelativeDirectory)', '(?i)^sdks/Assimalign\.Cohesion\.Sdk\.([^/]+)/.*$', '$1'))</_CohesionLibrarySdkArea>
 		<_CohesionLibrarySdkAreaDirectory></_CohesionLibrarySdkAreaDirectory>
 		<_CohesionLibrarySdkAreaDirectory Condition="'$(_CohesionLibrarySdkArea)' != ''">$(_CohesionResourcesDirectoryNormalized.ToLowerInvariant())$(_CohesionLibrarySdkArea.ToLowerInvariant())/</_CohesionLibrarySdkAreaDirectory>
+	</PropertyGroup>
+
+	<!-- COHFAB001 scope (rule F4). The fabric area is the path segment after fabric/, relative to
+	     the repository root. The fabric root (fabric/Fabric/) and the in-process platform
+	     (fabric/InProcess/) are not areas. Harness segments are exempt, as for COHLIB001. -->
+	<PropertyGroup>
+		<_CohesionFabricDirectoryNormalized>$(_CohesionRepositoryRootNormalized)fabric/</_CohesionFabricDirectoryNormalized>
+		<_CohesionFabricArea></_CohesionFabricArea>
+		<_CohesionFabricArea Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionRepositoryRelativeDirectory)', '(?i)^fabric/[^/]+/'))">$([System.Text.RegularExpressions.Regex]::Replace('$(_CohesionRepositoryRelativeDirectory)', '(?i)^fabric/([^/]+)/.*$', '$1'))</_CohesionFabricArea>
+		<_CohesionFabricAreaRuleApplies>false</_CohesionFabricAreaRuleApplies>
+		<_CohesionFabricAreaRuleApplies Condition="'$(_CohesionFabricArea)' != ''
+		                                           AND '$(_CohesionFabricArea.ToLowerInvariant())' != 'fabric'
+		                                           AND '$(_CohesionFabricArea.ToLowerInvariant())' != 'inprocess'
+		                                           AND !$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionRepositoryRelativeDirectory)', '(?i)(^|/)(tests|examples|samples|fixtures)(/|$)'))">true</_CohesionFabricAreaRuleApplies>
+		<_CohesionFabricOwnAreaDirectoryLower Condition="'$(_CohesionFabricAreaRuleApplies)' == 'true'">$(_CohesionFabricDirectoryNormalized.ToLowerInvariant())$(_CohesionFabricArea.ToLowerInvariant())/</_CohesionFabricOwnAreaDirectoryLower>
+		<_CohesionFabricRootDirectoryLower>$(_CohesionFabricDirectoryNormalized.ToLowerInvariant())fabric/</_CohesionFabricRootDirectoryLower>
+
+		<!-- COHRES005 scope (rule F3): every shipped resource project except the ResourceManager's
+		     hosting module, the area's own resource provider, and the ResourceManager area's
+		     framework producers, all by exact name. -->
+		<_CohesionIsResourceProviderProject>false</_CohesionIsResourceProviderProject>
+		<_CohesionIsResourceProviderProject Condition="'$(_CohesionResourceArea)' != ''
+		                                             AND '$(MSBuildProjectName)' == '$(_CohesionAreaRootProject).ResourceProvider'">true</_CohesionIsResourceProviderProject>
+		<_CohesionFabricResourceRuleApplies>false</_CohesionFabricResourceRuleApplies>
+		<_CohesionFabricResourceRuleApplies Condition="'$(_CohesionResourceBoundaryRulesApply)' == 'true'
+		                                             AND '$(_CohesionIsResourceProviderProject)' != 'true'
+		                                             AND '$(MSBuildProjectName)' != 'Assimalign.Cohesion.ResourceManager.Hosting'
+		                                             AND !('$(_CohesionResourceArea)' == 'ResourceManager' AND '$(_CohesionIsFrameworkProducerProject)' == 'true')">true</_CohesionFabricResourceRuleApplies>
+		<_CohesionResourceProviderRuleApplies>false</_CohesionResourceProviderRuleApplies>
+		<_CohesionResourceProviderRuleApplies Condition="'$(_CohesionResourceBoundaryRulesApply)' == 'true'
+		                                               AND '$(_CohesionIsResourceProviderProject)' == 'true'">true</_CohesionResourceProviderRuleApplies>
 	</PropertyGroup>
 
 	<!-- The opt-out list as items, for filtering the per-assembly COHRES001/002 candidates. -->
@@ -426,7 +483,7 @@
 
 		<Error Condition="'@(_CohesionLibraryResourceProjectReferenceViolation)' != ''"
 		       Code="COHLIB001"
-		       Text="Library resource-isolation rule: '$(MSBuildProjectName)' references resources/** project(s) '@(_CohesionLibraryResourceProjectReferenceViolation->'%(Filename)', ', ')'. Projects under libraries/ and sdks/ never depend on resources/**: move the contract they need into libraries/ and let the resource package reference it. The only exception is the same-area SDK - sdks/Assimalign.Cohesion.Sdk.&lt;Area&gt;/ may reference resources/&lt;Area&gt;/ - and there is no opt-out property. See .claude/rules/build-system.md." />
+		       Text="Library resource-isolation rule: '$(MSBuildProjectName)' references resources/** project(s) '@(_CohesionLibraryResourceProjectReferenceViolation->'%(Filename)', ', ')'. Projects under libraries/, fabric/ and sdks/ never depend on resources/**: move the contract they need into libraries/ and let the resource package reference it. The only exception is the same-area SDK - sdks/Assimalign.Cohesion.Sdk.&lt;Area&gt;/ may reference resources/&lt;Area&gt;/ - and there is no opt-out property. See .claude/rules/build-system.md." />
 	</Target>
 
 	<!-- Resolved-assembly closure layer for COHLIB001: catches the routes that never surface
@@ -461,7 +518,117 @@
 
 		<Error Condition="'@(_CohesionLibraryResourceResolvedReferenceViolation)' != ''"
 		       Code="COHLIB001"
-		       Text="Library resource-isolation rule: '$(MSBuildProjectName)' resolves resources/** assembly/assemblies '@(_CohesionLibraryResourceResolvedReferenceViolation, ', ')' through its direct/transitive/package/HintPath closure. Projects under libraries/ and sdks/ never depend on resources/**: move the contract they need into libraries/ and let the resource package reference it. The only exception is the same-area SDK - sdks/Assimalign.Cohesion.Sdk.&lt;Area&gt;/ may reference resources/&lt;Area&gt;/ - and there is no opt-out property. See .claude/rules/build-system.md." />
+		       Text="Library resource-isolation rule: '$(MSBuildProjectName)' resolves resources/** assembly/assemblies '@(_CohesionLibraryResourceResolvedReferenceViolation, ', ')' through its direct/transitive/package/HintPath closure. Projects under libraries/, fabric/ and sdks/ never depend on resources/**: move the contract they need into libraries/ and let the resource package reference it. The only exception is the same-area SDK - sdks/Assimalign.Cohesion.Sdk.&lt;Area&gt;/ may reference resources/&lt;Area&gt;/ - and there is no opt-out property. See .claude/rules/build-system.md." />
+	</Target>
+
+	<!-- Project-reference graph layer for COHFAB001 (rule F4): a fabric area references the fabric
+	     root and libraries/, never another fabric area. Judged by the referenced project's full
+	     path, like COHLIB001, so every reference flavor and the transitive closure count. -->
+	<Target Name="ValidateCohesionFabricAreaProjectReferences"
+	        BeforeTargets="ResolveAssemblyReferences;CoreCompile"
+	        Condition="'$(_CohesionFabricAreaRuleApplies)' == 'true'">
+
+		<ItemGroup>
+			<_CohesionFabricAreaProjectReferenceViolation
+				Include="@(ProjectReference)"
+				Condition="$([System.String]::Copy('%(FullPath)').Replace('\', '/').ToLowerInvariant().StartsWith('$(_CohesionFabricDirectoryNormalized.ToLowerInvariant())'))
+				           AND !$([System.String]::Copy('%(FullPath)').Replace('\', '/').ToLowerInvariant().StartsWith('$(_CohesionFabricRootDirectoryLower)'))
+				           AND !$([System.String]::Copy('%(FullPath)').Replace('\', '/').ToLowerInvariant().StartsWith('$(_CohesionFabricOwnAreaDirectoryLower)'))" />
+		</ItemGroup>
+
+		<Error Condition="'@(_CohesionFabricAreaProjectReferenceViolation)' != ''"
+		       Code="COHFAB001"
+		       Text="Fabric area-isolation rule: '$(MSBuildProjectName)' in the '$(_CohesionFabricArea)' fabric area references '@(_CohesionFabricAreaProjectReferenceViolation->'%(Filename)', ', ')' from another fabric area or platform. Fabric areas reference only the fabric root (fabric/Fabric/) and libraries/; they meet through `$ref` values in the resource document (rule F4). There is no opt-out property. See .claude/rules/fabric.md." />
+	</Target>
+
+	<!-- Resolved-assembly closure layer for COHFAB001: a package-delivered or HintPath copy of
+	     another fabric area's assembly. The name set is every fabric/ project outside this area
+	     and the fabric root. -->
+	<Target Name="ValidateCohesionFabricAreaResolvedReferences"
+	        AfterTargets="ResolveAssemblyReferences"
+	        Condition="'$(_CohesionFabricAreaRuleApplies)' == 'true'">
+
+		<ItemGroup>
+			<_CohesionFabricProjectIndex Include="$(CohesionRepositoryDirectory)fabric\**\*.csproj" />
+			<_CohesionOtherFabricAssemblyName
+				Include="@(_CohesionFabricProjectIndex->'%(Filename)')"
+				Condition="!$([System.String]::Copy('%(FullPath)').Replace('\', '/').ToLowerInvariant().StartsWith('$(_CohesionFabricRootDirectoryLower)'))
+				           AND !$([System.String]::Copy('%(FullPath)').Replace('\', '/').ToLowerInvariant().StartsWith('$(_CohesionFabricOwnAreaDirectoryLower)'))" />
+		</ItemGroup>
+
+		<PropertyGroup>
+			<_CohesionOtherFabricAssemblyNames>;@(_CohesionOtherFabricAssemblyName, ';');</_CohesionOtherFabricAssemblyNames>
+			<_CohesionOtherFabricAssemblyNames>$(_CohesionOtherFabricAssemblyNames.ToLowerInvariant())</_CohesionOtherFabricAssemblyNames>
+		</PropertyGroup>
+
+		<ItemGroup>
+			<_CohesionFabricAreaResolvedReferenceViolation
+				Include="@(ReferencePath->'%(Filename)')"
+				Condition="$(_CohesionOtherFabricAssemblyNames.Contains(';$([System.String]::Copy('%(Filename)').ToLowerInvariant());'))" />
+		</ItemGroup>
+
+		<Error Condition="'@(_CohesionFabricAreaResolvedReferenceViolation)' != ''"
+		       Code="COHFAB001"
+		       Text="Fabric area-isolation rule: '$(MSBuildProjectName)' in the '$(_CohesionFabricArea)' fabric area resolves '@(_CohesionFabricAreaResolvedReferenceViolation, ', ')' from another fabric area or platform through its direct/transitive/package/HintPath closure. Fabric areas reference only the fabric root (fabric/Fabric/) and libraries/ (rule F4). See .claude/rules/fabric.md." />
+	</Target>
+
+	<!-- Project-reference graph layer for COHRES005 (rule F3) and COHRES006. -->
+	<Target Name="ValidateCohesionResourceFabricProjectReferences"
+	        BeforeTargets="ResolveAssemblyReferences;CoreCompile"
+	        Condition="'$(_CohesionFabricResourceRuleApplies)' == 'true' OR '$(_CohesionResourceProviderRuleApplies)' == 'true'">
+
+		<ItemGroup>
+			<_CohesionResourceFabricProjectReferenceViolation
+				Include="@(ProjectReference)"
+				Condition="'$(_CohesionFabricResourceRuleApplies)' == 'true'
+				           AND $([System.String]::Copy('%(FullPath)').Replace('\', '/').ToLowerInvariant().StartsWith('$(_CohesionFabricDirectoryNormalized.ToLowerInvariant())'))" />
+			<_CohesionResourceProviderRootProjectReferenceViolation
+				Include="@(ProjectReference)"
+				Condition="'$(_CohesionResourceProviderRuleApplies)' == 'true'
+				           AND '%(Filename)' == '$(_CohesionAreaRootProject)'" />
+		</ItemGroup>
+
+		<Error Condition="'@(_CohesionResourceFabricProjectReferenceViolation)' != ''"
+		       Code="COHRES005"
+		       Text="Resource fabric-isolation rule: '$(MSBuildProjectName)' references fabric/ project(s) '@(_CohesionResourceFabricProjectReferenceViolation->'%(Filename)', ', ')'. Inside resources/, only 'Assimalign.Cohesion.ResourceManager.Hosting' and an area's '$(_CohesionAreaRootProject).ResourceProvider' may depend on the application model's fabric (rule F3); a program's runtime never does. There is no opt-out property. See .claude/rules/fabric.md." />
+
+		<Error Condition="'@(_CohesionResourceProviderRootProjectReferenceViolation)' != ''"
+		       Code="COHRES006"
+		       Text="Resource provider rule: '$(MSBuildProjectName)' references its own area root '$(_CohesionAreaRootProject)'. A resource provider is carried by the ResourceManager and the AppHost, which must not carry the area's runtime with it; share what the provider needs with the area through CohesionSharedSource. There is no opt-out property. See .claude/rules/fabric.md." />
+	</Target>
+
+	<!-- Resolved-assembly closure layer for COHRES005 and COHRES006. -->
+	<Target Name="ValidateCohesionResourceFabricResolvedReferences"
+	        AfterTargets="ResolveAssemblyReferences"
+	        Condition="'$(_CohesionFabricResourceRuleApplies)' == 'true' OR '$(_CohesionResourceProviderRuleApplies)' == 'true'">
+
+		<ItemGroup>
+			<_CohesionResourceFabricProjectIndex Include="$(CohesionRepositoryDirectory)fabric\**\*.csproj" />
+		</ItemGroup>
+
+		<PropertyGroup>
+			<_CohesionFabricAssemblyNames>;@(_CohesionResourceFabricProjectIndex->'%(Filename)', ';');</_CohesionFabricAssemblyNames>
+			<_CohesionFabricAssemblyNames>$(_CohesionFabricAssemblyNames.ToLowerInvariant())</_CohesionFabricAssemblyNames>
+		</PropertyGroup>
+
+		<ItemGroup>
+			<_CohesionResourceFabricResolvedReferenceViolation
+				Include="@(ReferencePath->'%(Filename)')"
+				Condition="'$(_CohesionFabricResourceRuleApplies)' == 'true'
+				           AND $(_CohesionFabricAssemblyNames.Contains(';$([System.String]::Copy('%(Filename)').ToLowerInvariant());'))" />
+			<_CohesionResourceProviderRootResolvedReferenceViolation
+				Include="@(ReferencePath->'%(Filename)')"
+				Condition="'$(_CohesionResourceProviderRuleApplies)' == 'true'
+				           AND '%(Filename)' == '$(_CohesionAreaRootProject)'" />
+		</ItemGroup>
+
+		<Error Condition="'@(_CohesionResourceFabricResolvedReferenceViolation)' != ''"
+		       Code="COHRES005"
+		       Text="Resource fabric-isolation rule: '$(MSBuildProjectName)' resolves fabric/ assembly/assemblies '@(_CohesionResourceFabricResolvedReferenceViolation, ', ')' through its direct/transitive/package/HintPath closure. Inside resources/, only 'Assimalign.Cohesion.ResourceManager.Hosting' and an area's '$(_CohesionAreaRootProject).ResourceProvider' may depend on the application model's fabric (rule F3). See .claude/rules/fabric.md." />
+
+		<Error Condition="'@(_CohesionResourceProviderRootResolvedReferenceViolation)' != ''"
+		       Code="COHRES006"
+		       Text="Resource provider rule: '$(MSBuildProjectName)' resolves its own area root '$(_CohesionAreaRootProject)' through its direct/transitive/package/HintPath closure. A resource provider must not carry the area's runtime; share what it needs through CohesionSharedSource. See .claude/rules/fabric.md." />
 	</Target>
 
 </Project>

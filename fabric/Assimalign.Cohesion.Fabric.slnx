@@ -1,0 +1,82 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/fabric/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/fabric/Fabric/">
+		<File Path="Fabric/Directory.Build.props" />
+		<File Path="Fabric/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/fabric/Fabric/Assimalign.Cohesion.Fabric/docs/">
+		<File Path="Fabric/Assimalign.Cohesion.Fabric/docs/DESIGN.md" />
+		<File Path="Fabric/Assimalign.Cohesion.Fabric/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/fabric/Fabric/Assimalign.Cohesion.Fabric/src/">
+		<Project Path="Fabric/Assimalign.Cohesion.Fabric/src/Assimalign.Cohesion.Fabric.csproj" />
+	</Folder>
+	<Folder Name="/fabric/Fabric/Assimalign.Cohesion.Fabric/tests/">
+		<Project Path="Fabric/Assimalign.Cohesion.Fabric/tests/Assimalign.Cohesion.Fabric.Tests.csproj" />
+	</Folder>
+	<Folder Name="/fabric/InProcess/">
+		<File Path="InProcess/Directory.Build.props" />
+		<File Path="InProcess/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/docs/">
+		<File Path="InProcess/Assimalign.Cohesion.Fabric.InProcess/docs/DESIGN.md" />
+		<File Path="InProcess/Assimalign.Cohesion.Fabric.InProcess/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/src/">
+		<Project Path="InProcess/Assimalign.Cohesion.Fabric.InProcess/src/Assimalign.Cohesion.Fabric.InProcess.csproj" />
+	</Folder>
+	<Folder Name="/fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/tests/">
+		<Project Path="InProcess/Assimalign.Cohesion.Fabric.InProcess/tests/Assimalign.Cohesion.Fabric.InProcess.Tests.csproj" />
+	</Folder>
+	<Folder Name="/fabric/Networking/">
+		<File Path="Networking/Directory.Build.props" />
+		<File Path="Networking/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/fabric/Networking/Assimalign.Cohesion.Networking/docs/">
+		<File Path="Networking/Assimalign.Cohesion.Networking/docs/DESIGN.md" />
+		<File Path="Networking/Assimalign.Cohesion.Networking/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/fabric/Networking/Assimalign.Cohesion.Networking/src/">
+		<Project Path="Networking/Assimalign.Cohesion.Networking/src/Assimalign.Cohesion.Networking.csproj" />
+	</Folder>
+	<Folder Name="/fabric/Networking/Assimalign.Cohesion.Networking/tests/">
+		<Project Path="Networking/Assimalign.Cohesion.Networking/tests/Assimalign.Cohesion.Networking.Tests.csproj" />
+	</Folder>
+	<Folder Name="/fabric/Storage/">
+		<File Path="Storage/Directory.Build.props" />
+		<File Path="Storage/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/fabric/Storage/Assimalign.Cohesion.Storage/docs/">
+		<File Path="Storage/Assimalign.Cohesion.Storage/docs/DESIGN.md" />
+		<File Path="Storage/Assimalign.Cohesion.Storage/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/fabric/Storage/Assimalign.Cohesion.Storage/src/">
+		<Project Path="Storage/Assimalign.Cohesion.Storage/src/Assimalign.Cohesion.Storage.csproj" />
+	</Folder>
+	<Folder Name="/fabric/Storage/Assimalign.Cohesion.Storage/tests/">
+		<Project Path="Storage/Assimalign.Cohesion.Storage/tests/Assimalign.Cohesion.Storage.Tests.csproj" />
+	</Folder>
+	<Folder Name="/fabric/Workloads/">
+		<File Path="Workloads/Directory.Build.props" />
+		<File Path="Workloads/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/fabric/Workloads/Assimalign.Cohesion.Workloads/docs/">
+		<File Path="Workloads/Assimalign.Cohesion.Workloads/docs/DESIGN.md" />
+		<File Path="Workloads/Assimalign.Cohesion.Workloads/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/fabric/Workloads/Assimalign.Cohesion.Workloads/src/">
+		<Project Path="Workloads/Assimalign.Cohesion.Workloads/src/Assimalign.Cohesion.Workloads.csproj" />
+	</Folder>
+	<Folder Name="/fabric/Workloads/Assimalign.Cohesion.Workloads/tests/">
+		<Project Path="Workloads/Assimalign.Cohesion.Workloads/tests/Assimalign.Cohesion.Workloads.Tests.csproj" />
+	</Folder>
+</Solution>

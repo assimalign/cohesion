@@ -139,6 +139,81 @@
 		     Microsoft.VsSDK.targets. It requires a Visual Studio install and is excluded from the
 		     root solution; tracked by #985. -->
 	</Folder>
+	<Folder Name="/cohesion/fabric/">
+		<File Path="fabric/Directory.Build.props" />
+		<File Path="fabric/Directory.Build.targets" />
+		<File Path="fabric/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Fabric/">
+		<File Path="fabric/Fabric/Directory.Build.props" />
+		<File Path="fabric/Fabric/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Fabric/Assimalign.Cohesion.Fabric/docs/">
+		<File Path="fabric/Fabric/Assimalign.Cohesion.Fabric/docs/DESIGN.md" />
+		<File Path="fabric/Fabric/Assimalign.Cohesion.Fabric/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Fabric/Assimalign.Cohesion.Fabric/src/">
+		<Project Path="fabric/Fabric/Assimalign.Cohesion.Fabric/src/Assimalign.Cohesion.Fabric.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Fabric/Assimalign.Cohesion.Fabric/tests/">
+		<Project Path="fabric/Fabric/Assimalign.Cohesion.Fabric/tests/Assimalign.Cohesion.Fabric.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/InProcess/">
+		<File Path="fabric/InProcess/Directory.Build.props" />
+		<File Path="fabric/InProcess/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/docs/">
+		<File Path="fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/docs/DESIGN.md" />
+		<File Path="fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/src/">
+		<Project Path="fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/src/Assimalign.Cohesion.Fabric.InProcess.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/tests/">
+		<Project Path="fabric/InProcess/Assimalign.Cohesion.Fabric.InProcess/tests/Assimalign.Cohesion.Fabric.InProcess.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Networking/">
+		<File Path="fabric/Networking/Directory.Build.props" />
+		<File Path="fabric/Networking/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Networking/Assimalign.Cohesion.Networking/docs/">
+		<File Path="fabric/Networking/Assimalign.Cohesion.Networking/docs/DESIGN.md" />
+		<File Path="fabric/Networking/Assimalign.Cohesion.Networking/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Networking/Assimalign.Cohesion.Networking/src/">
+		<Project Path="fabric/Networking/Assimalign.Cohesion.Networking/src/Assimalign.Cohesion.Networking.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Networking/Assimalign.Cohesion.Networking/tests/">
+		<Project Path="fabric/Networking/Assimalign.Cohesion.Networking/tests/Assimalign.Cohesion.Networking.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Storage/">
+		<File Path="fabric/Storage/Directory.Build.props" />
+		<File Path="fabric/Storage/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Storage/Assimalign.Cohesion.Storage/docs/">
+		<File Path="fabric/Storage/Assimalign.Cohesion.Storage/docs/DESIGN.md" />
+		<File Path="fabric/Storage/Assimalign.Cohesion.Storage/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Storage/Assimalign.Cohesion.Storage/src/">
+		<Project Path="fabric/Storage/Assimalign.Cohesion.Storage/src/Assimalign.Cohesion.Storage.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Storage/Assimalign.Cohesion.Storage/tests/">
+		<Project Path="fabric/Storage/Assimalign.Cohesion.Storage/tests/Assimalign.Cohesion.Storage.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Workloads/">
+		<File Path="fabric/Workloads/Directory.Build.props" />
+		<File Path="fabric/Workloads/Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Workloads/Assimalign.Cohesion.Workloads/docs/">
+		<File Path="fabric/Workloads/Assimalign.Cohesion.Workloads/docs/DESIGN.md" />
+		<File Path="fabric/Workloads/Assimalign.Cohesion.Workloads/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Workloads/Assimalign.Cohesion.Workloads/src/">
+		<Project Path="fabric/Workloads/Assimalign.Cohesion.Workloads/src/Assimalign.Cohesion.Workloads.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/fabric/Workloads/Assimalign.Cohesion.Workloads/tests/">
+		<Project Path="fabric/Workloads/Assimalign.Cohesion.Workloads/tests/Assimalign.Cohesion.Workloads.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/">
 		<File Path="libraries/Directory.Build.props" />
 		<File Path="libraries/Directory.Build.targets" />

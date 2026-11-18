@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="ExtensionVersionUnsupported" xml:space="preserve"><value>The in-process workload extension has no version '{0}'.</value></data>
+  <data name="ExtensionBlockInvalid" xml:space="preserve"><value>The in-process workload extension block is not a valid object.</value></data>
+  <data name="WorkloadCrashed" xml:space="preserve"><value>The workload '{0}' stopped: its entry point threw or exited.</value></data>
+  <data name="ProgramMissing" xml:space="preserve"><value>The workload '{0}' names a program this process does not contain.</value></data>
+  <data name="PlatformFailed" xml:space="preserve"><value>The in-process platform reported '{1}' for the workload '{0}'.</value></data>
+</root>

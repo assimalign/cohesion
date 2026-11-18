@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Workloads</RootNamespace>
+		<Nullable>enable</Nullable>
+		<Description>The Workloads fabric area: the portable workload spec (what to run, replicas, ports, settings, probes), the workload driver contract each platform implements, and the capability model that makes every portable field Native, Emulated, or Unsupported on a platform.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Fabric" />
+	</ItemGroup>
+</Project>

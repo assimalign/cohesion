@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Networking</RootNamespace>
+		<Nullable>enable</Nullable>
+		<Description>The Networking fabric area: exposure intent for a workload's port (internal or public), which each platform implements natively or emulates. Workloads are reached through $ref values, never a type reference.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Fabric" />
+	</ItemGroup>
+</Project>
