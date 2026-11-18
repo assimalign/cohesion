@@ -12,6 +12,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -87,42 +88,49 @@ public sealed partial class SqlSelectWideMemoryTests
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
         images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
+
         long largestGrowth = long.MinValue, observedCharge = 0;
         Dictionary<string, object?>? parameters = null;
 
         // Act
         for (int round = 0; round < 3; round++)
         {
-            parameters = null;
-            await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
-            images.Drain(pool);
-            long before = LiveHeap.Read();
-            if (hasParameter) { parameters = new Dictionary<string, object?> { ["p"] = new string('x', length) }; }
-            SqlStatementMetrics? active = null;
-            bool captured = false;
-            try
+            long growth = await MeasureAsync(pool, _output, nameof(ExecuteAsync_BufferHeap_ShouldReportMeasuredGrowth), $"shape={shape}|base={forceBase}|round={round}", async readBaseline =>
             {
-                SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
+                long growth = long.MinValue;
+                parameters = null;
+                await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
+                images.Drain(pool);
+                long before = readBaseline();
+                if (hasParameter) { parameters = new Dictionary<string, object?> { ["p"] = new string('x', length) }; }
+                SqlStatementMetrics? active = null;
+                bool captured = false;
+                try
                 {
-                    active = metrics;
-                    if (!tableAs && !captured && metrics.HashMemoryBytes == expectedPeak)
-                    { Capture(metrics.HashMemoryBytes); }
-                };
-                // Observe CTAS admission before writes add persistent storage to GC growth.
-                if (tableAs) { SqlPlanExecutor.TableAsSourceAdmitted = _ => Capture(active!.HashMemoryBytes); }
-                (await Execute(parameters)).ShouldBe(expectedPeak);
-            }
-            finally { SqlStatementMetrics.AfterMemoryReservation = null; SqlPlanExecutor.TableAsSourceAdmitted = null; }
-            captured.ShouldBeTrue();
-            if (tableAs) { await session.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None); }
+                    SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
+                    {
+                        active = metrics;
+                        if (!tableAs && !captured && metrics.HashMemoryBytes == expectedPeak)
+                        { Capture(metrics.HashMemoryBytes); }
+                    };
+                    // Observe CTAS admission before writes add persistent storage to GC growth.
+                    if (tableAs) { SqlPlanExecutor.TableAsSourceAdmitted = _ => Capture(active!.HashMemoryBytes); }
+                    (await Execute(parameters)).ShouldBe(expectedPeak);
+                }
+                finally { SqlStatementMetrics.AfterMemoryReservation = null; SqlPlanExecutor.TableAsSourceAdmitted = null; }
+                captured.ShouldBeTrue();
+                if (tableAs) { await session.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None); }
 
-            void Capture(long charge)
-            {
-                captured = true;
-                largestGrowth = Math.Max(largestGrowth, LiveHeap.Read() - before);
-                observedCharge = charge;
-            }
+                return growth;
+
+                void Capture(long charge)
+                {
+                    captured = true;
+                    growth = Math.Max(growth, LiveHeap.Read() - before);
+                    observedCharge = charge;
+                }
+            });
+            largestGrowth = Math.Max(largestGrowth, growth);
         }
 
         // Assert: raw GC growth deliberately remains visible, including uncharged fixed state.

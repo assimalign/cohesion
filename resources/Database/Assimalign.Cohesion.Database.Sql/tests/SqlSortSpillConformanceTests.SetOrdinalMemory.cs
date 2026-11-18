@@ -9,6 +9,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -25,7 +26,7 @@ public sealed partial class SqlSortSpillConformanceTests
         await Seed(session, 32768);
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        await RunAsync(32768); images.Drain(pool); await QuiesceWindowPoolAsync(pool);
+        await RunAsync(32768); images.Drain(pool);
         var peaks = new long[2];
         int[] populations = [8192, 32768];
         for (int population = 0; population < populations.Length; population++)
@@ -35,29 +36,36 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue;
             for (int execution = 0; execution < 3; execution++)
             {
-                images.Drain(pool);
-                long peak = 0, floor = 0; int appends = 0, samples = 0;
-                SqlPlanExecutor.ObserveHashSpill = (phase, workspace) =>
+                var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_SetOrdinalLiveHeap_ShouldBoundAppendPeak), $"shape={shape}|population={count}|execution={execution}", async readBaseline =>
                 {
-                    if (phase != (shape == 0 ? "ordinal-append" : "set-ordinal-append")) { return; }
-                    if (++appends != count) { return; }
-                    floor = workspace; samples++; peak = LiveHeap.Read();
-                };
-                try
-                {
-                    long before = LiveHeap.Read();
-                    // Act: sample after the final Append, while the sorter arena is live.
-                    await RunAsync(count);
-                    long after = LiveHeap.Read();
-                    long measured = peak - Math.Min(before, after);
-                    // Assert: neither the grant allowance nor the growth slack is raised.
-                    appends.ShouldBe(count); samples.ShouldBe(1);
-                    floor.ShouldBeGreaterThan(0); measured.ShouldBeGreaterThanOrEqualTo(floor);
-                    measured.ShouldBeLessThanOrEqualTo(grant + 65536);
-                    minimum = Math.Min(minimum, measured);
-                    _output.WriteLine($"SET_ORDINAL_HEAP|shape={shape}|population={count}|execution={execution}|peak={measured}|floor={floor}|G={grant}");
-                }
-                finally { SqlPlanExecutor.ObserveHashSpill = null; }
+                    images.Drain(pool);
+                    long peak = 0, floor = 0; int appends = 0, samples = 0;
+                    SqlPlanExecutor.ObserveHashSpill = (phase, workspace) =>
+                    {
+                        if (phase != (shape == 0 ? "ordinal-append" : "set-ordinal-append")) { return; }
+                        if (++appends != count) { return; }
+                        floor = workspace; samples++; peak = LiveHeap.Read();
+                    };
+                    try
+                    {
+                        long before = readBaseline();
+                        // Act: sample after the final Append, while the sorter arena is live.
+                        await RunAsync(count);
+                        long after = LiveHeap.Read();
+                        long measured = peak - Math.Min(before, after);
+                        // Assert: neither the grant allowance nor the growth slack is raised.
+                        return (Action)(() =>
+                        {
+                            appends.ShouldBe(count); samples.ShouldBe(1);
+                            floor.ShouldBeGreaterThan(0); measured.ShouldBeGreaterThanOrEqualTo(floor);
+                            measured.ShouldBeLessThanOrEqualTo(grant + 65536);
+                            minimum = Math.Min(minimum, measured);
+                            _output.WriteLine($"SET_ORDINAL_HEAP|shape={shape}|population={count}|execution={execution}|peak={measured}|floor={floor}|G={grant}");
+                        });
+                    }
+                    finally { SqlPlanExecutor.ObserveHashSpill = null; }
+                });
+                accepted();
             }
             peaks[population] = minimum;
         }

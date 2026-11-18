@@ -12,6 +12,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -201,7 +202,7 @@ public sealed partial class SqlSelectRetentionTests
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
         images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
+
         foreach (var shape in new[]
         {
             ("COUNT", "SELECT COUNT(*) FROM t WHERE sample_memory(k)>0", "group-input", -1),
@@ -214,16 +215,20 @@ public sealed partial class SqlSelectRetentionTests
         {
             // Act
             database.Definitions.ForceSelectRetentionBasePath = true;
-            observations.Clear();
-            calls = 0;
-            images.Drain(pool);
-            long startingLive = LiveHeap.Read();
-            var baseline = await Rows(session, shape.Item2);
-            calls.ShouldBe(count);
-            long beforeLive = sampledLive - startingLive;
-            int before = observations[shape.Item3];
-            long reads = session.LastStatementMetrics!.RecordsExamined;
-            long pairs = session.LastStatementMetrics.JoinCandidatePairs;
+            var measuredBase = await MeasureAsync(pool, _output, nameof(ExecuteAsync_LargeInput_ShouldBoundIntermediateRetention), $"shape={shape.Item1}|base=True", async readBaseline =>
+            {
+                observations.Clear(); calls = 0; sampledLive = 0;
+                images.Drain(pool);
+                long startingLive = readBaseline();
+                var rows = await Rows(session, shape.Item2);
+                calls.ShouldBe(count);
+                return (Rows: rows, Live: sampledLive - startingLive, Retained: observations[shape.Item3],
+                    Reads: session.LastStatementMetrics!.RecordsExamined, Pairs: session.LastStatementMetrics.JoinCandidatePairs);
+            });
+            var baseline = measuredBase.Rows;
+            long beforeLive = measuredBase.Live;
+            int before = measuredBase.Retained;
+            long reads = measuredBase.Reads, pairs = measuredBase.Pairs;
             database.Definitions.ForceSelectRetentionBasePath = false;
             // Minimum of up to 3 rounds: a retained list reads high in every round, and the heap is
             // process-wide, so transient background work only ever adds to one reading.
@@ -231,13 +236,17 @@ public sealed partial class SqlSelectRetentionTests
             long afterLive = long.MaxValue;
             for (int round = 0; round < 3 && afterLive >= 2_000_000; round++)
             {
-                observations.Clear();
-                calls = 0;
-                images.Drain(pool);
-                startingLive = LiveHeap.Read();
-                actual = await Rows(session, shape.Item2);
-                calls.ShouldBe(count);
-                afterLive = Math.Min(afterLive, sampledLive - startingLive);
+                var measured = await MeasureAsync(pool, _output, nameof(ExecuteAsync_LargeInput_ShouldBoundIntermediateRetention), $"shape={shape.Item1}|base=False|round={round}", async readBaseline =>
+                {
+                    observations.Clear(); calls = 0; sampledLive = 0;
+                    images.Drain(pool);
+                    long startingLive = readBaseline();
+                    var rows = await Rows(session, shape.Item2);
+                    calls.ShouldBe(count);
+                    return (Rows: rows, Live: sampledLive - startingLive);
+                });
+                actual = measured.Rows;
+                afterLive = Math.Min(afterLive, measured.Live);
             }
 
             // Assert: bounded retention via independent GC evidence, identical rows and complete work.

@@ -12,6 +12,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -52,14 +53,17 @@ public sealed partial class SqlSortSpillConformanceTests
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
         images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
+
 
         // Act: retain 4,096 then 16,384 states in the same preallocated root vector.
         long bytes = long.MaxValue;
         for (int round = 1; round <= 3; round++)
         {
-            images.Drain(pool);
-            long measured = MeasureStates(aggregate, type);
+            long measured = Measure(pool, _output, nameof(HashGroupStateBytes_ReplayNativeFamilies_ShouldBoundRetainedStates), $"function={function}|type={type}|round={round}", readBaseline =>
+            {
+                images.Drain(pool);
+                return MeasureStates(aggregate, type, readBaseline);
+            });
             _output.WriteLine($"STATE_ROUND|function={function}|type={type}|round={round}|bytes={measured}");
             bytes = Math.Min(bytes, measured);
         }
@@ -71,11 +75,11 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static long MeasureStates(SqlGroupAggregate aggregate, string type)
+    private static long MeasureStates(SqlGroupAggregate aggregate, string type, Func<long>? readBaseline = null)
     {
         var roots = new object?[16384];
         Fill(0, 4096);
-        long small = LiveHeap.Read();
+        long small = (readBaseline ?? LiveHeap.Read)();
         Fill(4096, 16384);
         long bytes = LiveHeap.Read() - small;
         GC.KeepAlive(roots);

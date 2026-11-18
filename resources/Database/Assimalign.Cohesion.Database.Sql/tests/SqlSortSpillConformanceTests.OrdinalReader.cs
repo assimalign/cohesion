@@ -13,6 +13,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -43,26 +44,30 @@ public sealed partial class SqlSortSpillConformanceTests
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
         images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
+
         for (int round = 1; round <= 3; round++)
         {
-            try
+            long measured = Measure(pool, _output, nameof(Read_HashOrdinalSource_ShouldBoundMarginalReaders), $"width={width}|round={round}", readBaseline =>
             {
-                Fill(0, 8);
-                images.Drain(pool);
-                long small = LiveHeap.Read();
-                // Act
-                Fill(8, 32);
-                long measured = LiveHeap.Read() - small;
-                _output.WriteLine($"ORDINAL_READER_ROUND|width={width}|round={round}|live={measured}|bound={24 * bound}");
-                live = Math.Min(live, measured);
-                GC.KeepAlive(readers);
-            }
-            finally
-            {
-                foreach (var reader in readers) { reader?.Dispose(); }
-                Array.Clear(readers);
-            }
+                try
+                {
+                    Fill(0, 8);
+                    images.Drain(pool);
+                    long small = readBaseline();
+                    // Act
+                    Fill(8, 32);
+                    long measured = LiveHeap.Read() - small;
+                    _output.WriteLine($"ORDINAL_READER_ROUND|width={width}|round={round}|live={measured}|bound={24 * bound}");
+                    GC.KeepAlive(readers);
+                    return measured;
+                }
+                finally
+                {
+                    foreach (var reader in readers) { reader?.Dispose(); }
+                    Array.Clear(readers);
+                }
+            });
+            live = Math.Min(live, measured);
         }
         // Assert: marginal bytes per reader against the unchanged per-reader bound.
         _output.WriteLine($"ORDINAL_READER|width={width}|live={live / 24d}|bound={bound}");

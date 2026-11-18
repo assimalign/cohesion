@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -91,7 +92,7 @@ public sealed partial class SqlSortSpillConformanceTests
         }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        await WarmAsync(populations[1]); images.Drain(pool); await QuiesceWindowPoolAsync(pool);
+        await WarmAsync(populations[1]); images.Drain(pool);
         var peaks = new long[2];
         for (int population = 0; population < 2; population++)
         {
@@ -99,78 +100,85 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue;
             for (int execution = 0; execution < 3; execution++)
             {
-                images.Drain(pool);
-                var retained = new List<object>();
-                long peak = 0, before = 0;
-                long replayPeak = 0, orderedPeak = 0, appendPeak = 0, partitionPeak = 0;
-                int visits = 0, samples = 0, replaySamples = 0, orderedSamples = 0, appendSamples = 0, partitionSamples = 0;
-                bool partition = false;
-                SqlRowCollector.ObserveBuffer = (phase, value) =>
+                var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_SetInnerLiveHeap_ShouldRejectRetentionMutant), $"shape={shape}|population={populations[population]}|mutant={mutant}|execution={execution}", async readBaseline =>
                 {
-                    if (inner)
+                    images.Drain(pool);
+                    var retained = new List<object>();
+                    long peak = 0, before = 0;
+                    long replayPeak = 0, orderedPeak = 0, appendPeak = 0, partitionPeak = 0;
+                    int visits = 0, samples = 0, replaySamples = 0, orderedSamples = 0, appendSamples = 0, partitionSamples = 0;
+                    bool partition = false;
+                    SqlRowCollector.ObserveBuffer = (phase, value) =>
                     {
-                        if (phase == "inner-append" && appendSamples == 0)
-                        { appendSamples++; appendPeak = LiveHeap.Read(); peak = Math.Max(peak, appendPeak); }
-                        if (phase != "inner-decoded" || ((object?[])value)[0] is not int id || id != 0) { return; }
-                        var row = (object?[])value;
-                        SqlTempRowCodec.TryGetLength(row, out int length).ShouldBeTrue();
-                        session.LastStatementMetrics!.PlainSelectMemoryBytes.ShouldBeGreaterThanOrEqualTo(
-                            8192 + length + 256 + 2 * SqlTempRowCodec.DecodedBytes(row));
-                        if (mutant != 0) { retained.Add(value); } // One decoded row per actual pass.
-                    }
-                    else
+                        if (inner)
+                        {
+                            if (phase == "inner-append" && appendSamples == 0)
+                            { appendSamples++; appendPeak = LiveHeap.Read(); peak = Math.Max(peak, appendPeak); }
+                            if (phase != "inner-decoded" || ((object?[])value)[0] is not int id || id != 0) { return; }
+                            var row = (object?[])value;
+                            SqlTempRowCodec.TryGetLength(row, out int length).ShouldBeTrue();
+                            session.LastStatementMetrics!.PlainSelectMemoryBytes.ShouldBeGreaterThanOrEqualTo(
+                                8192 + length + 256 + 2 * SqlTempRowCodec.DecodedBytes(row));
+                            if (mutant != 0) { retained.Add(value); } // One decoded row per actual pass.
+                        }
+                        else
+                        {
+                            if (phase == "set-selected") { partition = true; }
+                            if (phase == "set-selected-end") { partition = false; }
+                            if (phase == "set-append" && mutant != 0) { retained.Add(((object?[])value)[0]!); }
+                            if (phase != "set-append" && !(shape == 2 && phase == "set-decoded" && partition)) { return; }
+                        }
+                        if (++visits % (inner ? 64 : 512) != 0) { return; }
+                        samples++; long live = LiveHeap.Read(); peak = Math.Max(peak, live);
+                        if (shape == 2 && phase == "set-decoded")
+                        { partitionSamples++; partitionPeak = Math.Max(partitionPeak, live); }
+                    };
+                    SqlPlanExecutor.ObserveHashSpill = (phase, _) =>
                     {
-                        if (phase == "set-selected") { partition = true; }
-                        if (phase == "set-selected-end") { partition = false; }
-                        if (phase == "set-append" && mutant != 0) { retained.Add(((object?[])value)[0]!); }
-                        if (phase != "set-append" && !(shape == 2 && phase == "set-decoded" && partition)) { return; }
-                    }
-                    if (++visits % (inner ? 64 : 512) != 0) { return; }
-                    samples++; long live = LiveHeap.Read(); peak = Math.Max(peak, live);
-                    if (shape == 2 && phase == "set-decoded")
-                    { partitionSamples++; partitionPeak = Math.Max(partitionPeak, live); }
-                };
-                SqlPlanExecutor.ObserveHashSpill = (phase, _) =>
-                {
-                    if (shape != 0 || phase is not ("batch-live" or "ordered")) { return; }
-                    long live = LiveHeap.Read(); peak = Math.Max(peak, live);
-                    if (phase == "batch-live") { replayPeak = Math.Max(replayPeak, live); replaySamples++; }
-                    else { orderedPeak = Math.Max(orderedPeak, live); orderedSamples++; }
-                };
-                try
-                {
-                    before = LiveHeap.Read(); peak = before;
-                    // Act: callbacks sample while the real spool/partition owns its workspace.
-                    await WarmAsync(populations[population]);
-                    long after = LiveHeap.Read();
-                    long measured = peak - Math.Min(before, after);
-                    // Assert: every execution must exercise a known live workspace.
-                    samples.ShouldBeGreaterThan(0); measured.ShouldBeGreaterThanOrEqualTo(floor);
-                    if (shape == 0)
+                        if (shape != 0 || phase is not ("batch-live" or "ordered")) { return; }
+                        long live = LiveHeap.Read(); peak = Math.Max(peak, live);
+                        if (phase == "batch-live") { replayPeak = Math.Max(replayPeak, live); replaySamples++; }
+                        else { orderedPeak = Math.Max(orderedPeak, live); orderedSamples++; }
+                    };
+                    try
                     {
-                        replaySamples.ShouldBeGreaterThan(0); orderedSamples.ShouldBeGreaterThan(0);
-                        (replayPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
-                        // Complete retired the arena; the final merge still owns a page.
-                        (orderedPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(8192);
+                        before = readBaseline(); peak = before;
+                        // Act: callbacks sample while the real spool/partition owns its workspace.
+                        await WarmAsync(populations[population]);
+                        long after = LiveHeap.Read();
+                        long measured = peak - Math.Min(before, after);
+                        // Assert: every execution must exercise a known live workspace.
+                        return (Action)(() =>
+                        {
+                            samples.ShouldBeGreaterThan(0); measured.ShouldBeGreaterThanOrEqualTo(floor);
+                            if (shape == 0)
+                            {
+                                replaySamples.ShouldBeGreaterThan(0); orderedSamples.ShouldBeGreaterThan(0);
+                                (replayPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
+                                // Complete retired the arena; the final merge still owns a page.
+                                (orderedPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(8192);
+                            }
+                            if (inner)
+                            {
+                                appendSamples.ShouldBe(1);
+                                (appendPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(16384 + 8192);
+                            }
+                            if (shape == 2)
+                            {
+                                partitionSamples.ShouldBeGreaterThan(0);
+                                (partitionPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
+                            }
+                            minimum = Math.Min(minimum, measured);
+                            long baseline = Math.Min(before, after);
+                            _output.WriteLine($"SET_INNER_HEAP|shape={shape}|population={populations[population]}|mutant={mutant}|execution={execution}|peak={measured}|floor={floor}|G={grant}"
+                                + $"|replay={(replaySamples == 0 ? 0 : replayPeak - baseline)}|ordered={(orderedSamples == 0 ? 0 : orderedPeak - baseline)}"
+                                + $"|append={(appendSamples == 0 ? 0 : appendPeak - baseline)}|decoded={(partitionSamples == 0 ? 0 : partitionPeak - baseline)}");
+                            GC.KeepAlive(retained);
+                        });
                     }
-                    if (inner)
-                    {
-                        appendSamples.ShouldBe(1);
-                        (appendPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(16384 + 8192);
-                    }
-                    if (shape == 2)
-                    {
-                        partitionSamples.ShouldBeGreaterThan(0);
-                        (partitionPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
-                    }
-                    minimum = Math.Min(minimum, measured);
-                    long baseline = Math.Min(before, after);
-                    _output.WriteLine($"SET_INNER_HEAP|shape={shape}|population={populations[population]}|mutant={mutant}|execution={execution}|peak={measured}|floor={floor}|G={grant}"
-                        + $"|replay={(replaySamples == 0 ? 0 : replayPeak - baseline)}|ordered={(orderedSamples == 0 ? 0 : orderedPeak - baseline)}"
-                        + $"|append={(appendSamples == 0 ? 0 : appendPeak - baseline)}|decoded={(partitionSamples == 0 ? 0 : partitionPeak - baseline)}");
-                    GC.KeepAlive(retained);
-                }
-                finally { SqlRowCollector.ObserveBuffer = null; SqlPlanExecutor.ObserveHashSpill = null; }
+                    finally { SqlRowCollector.ObserveBuffer = null; SqlPlanExecutor.ObserveHashSpill = null; }
+                });
+                accepted();
             }
             peaks[population] = minimum;
         }

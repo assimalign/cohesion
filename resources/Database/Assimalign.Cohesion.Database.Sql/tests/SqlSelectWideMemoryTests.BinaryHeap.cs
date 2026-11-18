@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -34,32 +35,38 @@ public sealed partial class SqlSelectWideMemoryTests
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
         images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
+
         long largestGrowth = 0, observed = 0;
         Dictionary<string, object?>? parameters = null;
 
         // Act: warm first, then retain three fresh sets of clones and force GC at peak.
         for (int round = 0; round < 3; round++)
         {
-            parameters = null;
-            await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
-            images.Drain(pool);
-            long before = LiveHeap.Read();
-            parameters = new Dictionary<string, object?> { ["p"] = new byte[1024] };
-            bool captured = false;
-            try
+            long growth = await MeasureAsync(pool, _output, nameof(ExecuteAsync_BinaryCloneHeap_ShouldReportMeasuredGrowth), $"base={forceBase}|round={round}", async readBaseline =>
             {
-                SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
+                long growth = 0;
+                parameters = null;
+                await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
+                images.Drain(pool);
+                long before = readBaseline();
+                parameters = new Dictionary<string, object?> { ["p"] = new byte[1024] };
+                bool captured = false;
+                try
                 {
-                    if (metrics.HashMemoryBytes != expected && metrics.HashMemoryBytes != legacy) { return; }
-                    captured = true;
-                    observed = metrics.HashMemoryBytes;
-                    largestGrowth = Math.Max(largestGrowth, LiveHeap.Read() - before);
-                };
-                await Execute(parameters);
-            }
-            finally { SqlStatementMetrics.AfterMemoryReservation = null; }
-            captured.ShouldBeTrue();
+                    SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
+                    {
+                        if (metrics.HashMemoryBytes != expected && metrics.HashMemoryBytes != legacy) { return; }
+                        captured = true;
+                        observed = metrics.HashMemoryBytes;
+                        growth = Math.Max(growth, LiveHeap.Read() - before);
+                    };
+                    await Execute(parameters);
+                }
+                finally { SqlStatementMetrics.AfterMemoryReservation = null; }
+                captured.ShouldBeTrue();
+                return growth;
+            });
+            largestGrowth = Math.Max(largestGrowth, growth);
         }
 
         // Assert

@@ -15,6 +15,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -48,30 +49,36 @@ public sealed partial class SqlSortSpillConformanceTests
                 continue;
             }
             await WarmWindowHeapAsync(session, sql);
-            pooledImages.Drain(pool);
-            if (count == 32768) { await QuiesceWindowPoolAsync(pool); }
-            long before = LiveHeap.Read(), peak = before, pending = -1;
-            int decoded = 0, resets = 0, drains = 0;
-            SqlRowCollector.ObserveBuffer = (phase, value) =>
+            var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_WindowCachedInputLiveHeap_ShouldCountPendingVectors), $"rows={count}", async readBaseline =>
             {
-                if (phase == "window-reset") { resets++; pending = ((SqlSubqueryValues)value).PendingStatementMemoryBytes; }
-                if (phase == "window-drain" && drains++ == 0 || phase == "window-decoded" && ++decoded % 4096 == 0)
-                { peak = Math.Max(peak, LiveHeap.Read()); }
-            };
-            try
-            {
-                // Act
-                await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
-                long after = LiveHeap.Read(), measured = peak - Math.Min(before, after);
-                _output.WriteLine($"WINDOW_CACHE_HEAP|rows={count}|peak={measured}|floor={floor}|before={before}|after={after}|pending={pending}|resets={resets}|drains={drains}");
-                // Assert: the floor includes the cache plus the sort's remaining workspace.
-                measured.ShouldBeGreaterThanOrEqualTo(floor);
-                measured.ShouldBeLessThanOrEqualTo(grant + 131072 + 65536);
-                resets.ShouldBe(1); drains.ShouldBeGreaterThan(0); pending.ShouldBe(0);
-                session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
-                TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
-            }
-            finally { SqlRowCollector.ObserveBuffer = null; }
+                pooledImages.Drain(pool);
+                long before = readBaseline(), peak = before, pending = -1;
+                int decoded = 0, resets = 0, drains = 0;
+                SqlRowCollector.ObserveBuffer = (phase, value) =>
+                {
+                    if (phase == "window-reset") { resets++; pending = ((SqlSubqueryValues)value).PendingStatementMemoryBytes; }
+                    if (phase == "window-drain" && drains++ == 0 || phase == "window-decoded" && ++decoded % 4096 == 0)
+                    { peak = Math.Max(peak, LiveHeap.Read()); }
+                };
+                try
+                {
+                    // Act
+                    await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
+                    long after = LiveHeap.Read(), measured = peak - Math.Min(before, after);
+                    _output.WriteLine($"WINDOW_CACHE_HEAP|rows={count}|peak={measured}|floor={floor}|before={before}|after={after}|pending={pending}|resets={resets}|drains={drains}");
+                    // Assert: the floor includes the cache plus the sort's remaining workspace.
+                    return (Action)(() =>
+                    {
+                        measured.ShouldBeGreaterThanOrEqualTo(floor);
+                        measured.ShouldBeLessThanOrEqualTo(grant + 131072 + 65536);
+                        resets.ShouldBe(1); drains.ShouldBeGreaterThan(0); pending.ShouldBe(0);
+                        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+                        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+                    });
+                }
+                finally { SqlRowCollector.ObserveBuffer = null; }
+            });
+            accepted();
         }
     }
 
@@ -95,7 +102,6 @@ public sealed partial class SqlSortSpillConformanceTests
         using var pooledImages = new WindowPoolLease();
         await WarmWindowHeapAsync(session, "SELECT id,note,ROW_NUMBER() OVER(PARTITION BY id%2048 ORDER BY id) FROM t WHERE id<16384");
         pooledImages.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
         foreach (int count in new[] { 16384, 32768 })
         {
             string sql = $"SELECT id,note,ROW_NUMBER() OVER(PARTITION BY id%{count / 8} ORDER BY id) FROM t WHERE id<{count}";
@@ -105,57 +111,64 @@ public sealed partial class SqlSortSpillConformanceTests
                 long minimum = long.MaxValue;
                 for (int execution = 0; execution < 1; execution++)
                 {
-                    pooledImages.Drain(pool);
-                    var retained = new List<object>();
-                    WeakReference? sample = null;
-                    long before = LiveHeap.Read(), peak = before, trimmed = pool.Trimmed;
-                    int decoded = 0, partitions = 0, samples = 0, drains = 0, weakChecks = 0;
-                    SqlRowCollector.ObserveBuffer = (phase, value) =>
+                    var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_WindowLiveHeap_ShouldRejectRetentionMutants), $"rows={count}|mutant={mutant}|execution={execution}", async readBaseline =>
                     {
-                        if (phase == "window-decoded")
+                        pooledImages.Drain(pool);
+                        var retained = new List<object>();
+                        WeakReference? sample = null;
+                        long before = readBaseline(), peak = before, trimmed = pool.Trimmed;
+                        int decoded = 0, partitions = 0, samples = 0, drains = 0, weakChecks = 0;
+                        SqlRowCollector.ObserveBuffer = (phase, value) =>
                         {
-                            var row = (object?[])value;
-                            if (mutant == 2) { retained.Add(row[0]!); }
-                            if (++decoded % 4096 == 0) { Sample(); }
-                        }
-                        if (phase == "window-partition")
-                        {
-                            var row = ((List<object?[]>)value)[0];
-                            if (sample is not null && partitions == 1)
+                            if (phase == "window-decoded")
                             {
-                                LiveHeap.Read(); weakChecks++;
-                                if (mutant == 1) { sample.IsAlive.ShouldBeTrue(); }
-                                else { sample.IsAlive.ShouldBeFalse(); }
+                                var row = (object?[])value;
+                                if (mutant == 2) { retained.Add(row[0]!); }
+                                if (++decoded % 4096 == 0) { Sample(); }
                             }
-                            if (partitions == 0) { sample = new WeakReference(row); }
-                            if (mutant == 1) { retained.Add(row); }
-                            if (mutant == 3)
-                            { foreach (var inputRow in (List<object?[]>)value) { retained.Add(inputRow[0]!); } }
-                            if (++partitions % 128 == 0) { Sample(); }
+                            if (phase == "window-partition")
+                            {
+                                var row = ((List<object?[]>)value)[0];
+                                if (sample is not null && partitions == 1)
+                                {
+                                    LiveHeap.Read(); weakChecks++;
+                                    if (mutant == 1) { sample.IsAlive.ShouldBeTrue(); }
+                                    else { sample.IsAlive.ShouldBeFalse(); }
+                                }
+                                if (partitions == 0) { sample = new WeakReference(row); }
+                                if (mutant == 1) { retained.Add(row); }
+                                if (mutant == 3)
+                                { foreach (var inputRow in (List<object?[]>)value) { retained.Add(inputRow[0]!); } }
+                                if (++partitions % 128 == 0) { Sample(); }
+                            }
+                            if (phase == "window-drain" && drains++ == 0) { Sample(); }
+                        };
+                        try
+                        {
+                            // Act: mutants retain objects from the actual decode/partition path.
+                            await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
+                            // Assert
+                            decoded.ShouldBeGreaterThan(count); partitions.ShouldBe(count / 8); samples.ShouldBeGreaterThan(1);
+                            weakChecks.ShouldBe(1); drains.ShouldBeGreaterThan(0);
+                            if (mutant == 3) { retained.Count.ShouldBe(count); }
+                            GC.KeepAlive(retained);
+                            retained.Clear();
+                            long after = LiveHeap.Read();
+                            long measured = peak - Math.Min(before, after);
+                            return (Action)(() =>
+                            {
+                                measured.ShouldBeGreaterThanOrEqualTo(floor);
+                                minimum = Math.Min(minimum, measured);
+                                _output.WriteLine($"WINDOW_HEAP_SAMPLE|rows={count}|mutant={mutant}|execution={execution}|peak={measured}|floor={floor}|before={before}|after={after}|pool_trimmed={pool.Trimmed-trimmed}|drains={drains}");
+                            });
                         }
-                        if (phase == "window-drain" && drains++ == 0) { Sample(); }
-                    };
-                    try
-                    {
-                        // Act: mutants retain objects from the actual decode/partition path.
-                        await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
-                        // Assert
-                        decoded.ShouldBeGreaterThan(count); partitions.ShouldBe(count / 8); samples.ShouldBeGreaterThan(1);
-                        weakChecks.ShouldBe(1); drains.ShouldBeGreaterThan(0);
-                        if (mutant == 3) { retained.Count.ShouldBe(count); }
-                        GC.KeepAlive(retained);
-                        retained.Clear();
-                        long after = LiveHeap.Read();
-                        long measured = peak - Math.Min(before, after);
-                        measured.ShouldBeGreaterThanOrEqualTo(floor);
-                        minimum = Math.Min(minimum, measured);
-                        _output.WriteLine($"WINDOW_HEAP_SAMPLE|rows={count}|mutant={mutant}|execution={execution}|peak={measured}|floor={floor}|before={before}|after={after}|pool_trimmed={pool.Trimmed-trimmed}|drains={drains}");
-                    }
-                    finally
-                    {
-                        SqlRowCollector.ObserveBuffer = null; retained.Clear();
-                    }
-                    void Sample() { samples++; peak = Math.Max(peak, LiveHeap.Read()); }
+                        finally
+                        {
+                            SqlRowCollector.ObserveBuffer = null; retained.Clear();
+                        }
+                        void Sample() { samples++; peak = Math.Max(peak, LiveHeap.Read()); }
+                    });
+                    accepted();
                 }
                 _output.WriteLine($"WINDOW_HEAP|rows={count}|partitions={count / 8}|mutant={mutant}|peak={minimum}|grant={grant}|handoff={handoff}|runtime_slack={runtimeSlack}");
                 void Bound() => minimum.ShouldBeLessThanOrEqualTo(grant + handoff + runtimeSlack);

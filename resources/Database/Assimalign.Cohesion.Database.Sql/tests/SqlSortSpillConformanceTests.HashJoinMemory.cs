@@ -13,6 +13,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -34,19 +35,22 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData("TEXT")]
     [InlineData("BINARY")]
     [InlineData("CHAR")]
-    public async Task HashJoinEntries_TwoPopulations_ShouldBoundLiveHeap(string family)
+    public Task HashJoinEntries_TwoPopulations_ShouldBoundLiveHeap(string family)
     {
         // Arrange / Act
         MeasureJoinEntries(family);
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
         images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
+
         long live = long.MaxValue, charge = 0;
         for (int round = 1; round <= 3; round++)
         {
-            images.Drain(pool);
-            var measured = MeasureJoinEntries(family);
+            var measured = Measure(pool, _output, nameof(HashJoinEntries_TwoPopulations_ShouldBoundLiveHeap), $"family={family}|round={round}", readBaseline =>
+            {
+                images.Drain(pool);
+                return MeasureJoinEntries(family, readBaseline);
+            });
             _output.WriteLine($"JOIN_ENTRY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charge}");
             live = Math.Min(live, measured.Live);
             charge = measured.Charge;
@@ -54,17 +58,18 @@ public sealed partial class SqlSortSpillConformanceTests
         // Assert
         (live / 12288).ShouldBeLessThanOrEqualTo(charge / 12288);
         _output.WriteLine($"JOIN_ENTRY_CHARGE|family={family}|live={live}|charged={charge}|population_delta=12288");
+        return Task.CompletedTask;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (long Live, long Charge) MeasureJoinEntries(string family)
+    private static (long Live, long Charge) MeasureJoinEntries(string family, Func<long>? readBaseline = null)
     {
         var metrics = new SqlStatementMetrics();
         using var table = new SqlHashJoinTable(new([0], [0], [Collation.Binary]), metrics, long.MaxValue, trackUnmatched: true);
         // A larger marginal population dominates process-wide runner/diagnostic roots.
         // Compare marginal bytes per entry against the unchanged per-entry charge.
         Fill(0, 4096);
-        long baseline = LiveHeap.Read(), charge = metrics.HashMemoryBytes;
+        long baseline = (readBaseline ?? LiveHeap.Read)(), charge = metrics.HashMemoryBytes;
         Fill(4096, 16384);
         long live = LiveHeap.Read() - baseline;
         charge = metrics.HashMemoryBytes - charge;
@@ -98,13 +103,11 @@ public sealed partial class SqlSortSpillConformanceTests
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
         images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
+
         var small = MeasurePopulation(6000);
         var large = MeasurePopulation(12000);
-        images.Drain(pool);
-        var retainedSmall = MeasureJoinReplay(session, 6000, mutant: true, sample: true, full: full);
-        images.Drain(pool);
-        var retainedLarge = MeasureJoinReplay(session, 12000, mutant: true, sample: true, full: full);
+        var retainedSmall = MeasureExecution(6000, true, 0);
+        var retainedLarge = MeasureExecution(12000, true, 0);
         // Assert
         small.Peak.ShouldBeLessThanOrEqualTo(1048576+262144); large.Peak.ShouldBeLessThanOrEqualTo(1048576+262144);
         (large.Peak-small.Peak).ShouldBeLessThanOrEqualTo(131072);
@@ -113,13 +116,19 @@ public sealed partial class SqlSortSpillConformanceTests
         _output.WriteLine($"JOIN_LIVE|full={full}|small={small.Peak}|large={large.Peak}|delta={large.Peak-small.Peak}|replay_delta={large.Replay-small.Replay}|mutant_replay_delta={retainedLarge.Replay-retainedSmall.Replay}");
         TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
 
+        (long Peak, long Replay) MeasureExecution(int count, bool mutant, int execution) =>
+            Measure(pool, _output, nameof(HashJoinReplay_TwoPopulations_ShouldRejectRetainingMutant), $"rows={count}|execution={execution}|full={full}|mutant={mutant}", readBaseline =>
+            {
+                images.Drain(pool);
+                return MeasureJoinReplay(session, count, mutant, sample: true, full: full, execution: execution, readBaseline: readBaseline);
+            });
+
         (long Peak, long Replay) MeasurePopulation(int count)
         {
             long peak = long.MaxValue, replay = long.MaxValue;
             for (int execution = 1; execution <= 3; execution++)
             {
-                images.Drain(pool);
-                var measured = MeasureJoinReplay(session, count, mutant: false, sample: true, full: full, execution: execution);
+                var measured = MeasureExecution(count, false, execution);
                 measured.Peak.ShouldBeLessThanOrEqualTo(1048576 + 262144);
                 peak = Math.Min(peak, measured.Peak);
                 replay = Math.Min(replay, measured.Replay);
@@ -177,10 +186,10 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private (long Peak, long Replay) MeasureJoinReplay(SqlDatabaseSession session, int count, bool mutant, bool sample, bool full, int execution = 0)
+    private (long Peak, long Replay) MeasureJoinReplay(SqlDatabaseSession session, int count, bool mutant, bool sample, bool full, int execution = 0, Func<long>? readBaseline = null)
     {
         var retained = new List<object>();
-        long baseline = LiveHeap.Read(), peak = 0, replay = 0;
+        long baseline = (readBaseline ?? LiveHeap.Read)(), peak = 0, replay = 0;
         int replaySamples = 0, unmatchedSamples = 0, callbacks = 0;
         SqlPlanExecutor.ObserveHashSpill = (phase, ordinal) =>
         {

@@ -15,6 +15,7 @@ using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -202,16 +203,19 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue;
             for (int execution = -1; execution < 3; execution++)
             {
-                images.Drain(pool);
-                if (count == 10000 && execution == 0) { await QuiesceWindowPoolAsync(pool); }
-                long before = LiveHeap.Read();
-                long during = MeasureOutputLiveRows(count, session, mutant && execution >= 0, grant);
-                long after = LiveHeap.Read();
-                // The helper has released its objects before the second quiescent reading.
-                // The lower baseline prevents ambient reclamation from hiding retention.
-                long live = Math.Max(0, during - Math.Min(before, after));
+                long live = Measure(pool, _output, nameof(Add_OutputLiveHeap_ShouldRejectKeptPrefixAndPerRowRetention), $"rows={count}|mutant={mutant}|execution={execution}", readBaseline =>
+                {
+                    images.Drain(pool);
+                    long before = readBaseline();
+                    long during = MeasureOutputLiveRows(count, session, mutant && execution >= 0, grant);
+                    long after = LiveHeap.Read();
+                    // The helper has released its objects before the second quiescent reading.
+                    // The lower baseline prevents ambient reclamation from hiding retention.
+                    long live = Math.Max(0, during - Math.Min(before, after));
+                    _output.WriteLine($"OUTPUT_LIVE_ROUND|rows={count}|mutant={mutant}|execution={execution}|baseline_before={before}|during={during}|baseline_after={after}|live={live}");
+                    return live;
+                });
                 if (execution >= 0) { minimum = Math.Min(minimum, live); }
-                _output.WriteLine($"OUTPUT_LIVE_ROUND|rows={count}|mutant={mutant}|execution={execution}|baseline_before={before}|during={during}|baseline_after={after}|live={live}");
             }
             minimum.ShouldBeLessThanOrEqualTo(grant + 524288);
             populations.Add(minimum);

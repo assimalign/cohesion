@@ -20,6 +20,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -185,7 +186,7 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
         // Keep pre-existing pool images from disappearing during either population.
         using var images = new WindowPoolLease();
-        images.Drain(pool); await QuiesceWindowPoolAsync(pool);
+        images.Drain(pool);
         long minimumReplay = long.MaxValue;
         var smallMutant = new long[3];
         try
@@ -194,57 +195,64 @@ public sealed partial class SqlSortSpillConformanceTests
             {
                 for (int execution = 1; execution <= (mode == 1 ? 1 : 3); execution++)
                 {
-                    weak.Clear(); retained.Clear(); mutant = mode;
-                    images.Drain(pool);
-                    long before = LiveHeap.Read(), peak = 0, replayPeak = 0, replayDepth = 0;
-                    long trimmedBefore = pool.Trimmed, rentedBefore = pool.Rented, allocatedBefore = pool.Allocated, droppedBefore = pool.Dropped, unknownBefore = pool.Unknown;
-                    bool replaySampled = false;
-                    var phasePeaks = new Dictionary<string, long>();
-                    observe = true;
-                    SqlPlanExecutor.ObserveHashSpill = (phase, ordinal) =>
+                    var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_HashLiveObjects_ShouldRejectRetainingMutant), $"rows={count}|execution={execution}|mutant={mode}", async readBaseline =>
                     {
-                        if (phase is "batch" or "batch-live") { replaySampled = true; }
-                        if (phase == "batch") { replayDepth = Math.Max(replayDepth, ordinal); }
-                        if (phase == "input" && ordinal % 2000 == 0 || phase is "ordered" or "batch" or "batch-live")
+                        weak.Clear(); retained.Clear(); mutant = mode;
+                        images.Drain(pool);
+                        long before = readBaseline(), peak = 0, replayPeak = 0, replayDepth = 0;
+                        long trimmedBefore = pool.Trimmed, rentedBefore = pool.Rented, allocatedBefore = pool.Allocated, droppedBefore = pool.Dropped, unknownBefore = pool.Unknown;
+                        bool replaySampled = false;
+                        var phasePeaks = new Dictionary<string, long>();
+                        observe = true;
+                        SqlPlanExecutor.ObserveHashSpill = (phase, ordinal) =>
                         {
-                            long live = LiveHeap.Read();
-                            peak = Math.Max(peak, live);
-                            if (phase is "batch" or "batch-live" or "ordered") { replayPeak = Math.Max(replayPeak, live); }
-                            phasePeaks[phase] = Math.Max(phasePeaks.GetValueOrDefault(phase), live);
-                        }
-                        if (phase == "ordered") { weak.Count.ShouldBe(200); weak.Count(w => w.IsAlive).ShouldBe(0); }
-                    };
-                    // Act: every execution has its own quiescent readings in this warmed engine.
-                    await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql))
-                    { int visited = 0; await foreach (var row in result.GetRowsAsync()) { row.GetString(0).ShouldNotBeNull(); visited++; } visited.ShouldBe(count); }
+                            if (phase is "batch" or "batch-live") { replaySampled = true; }
+                            if (phase == "batch") { replayDepth = Math.Max(replayDepth, ordinal); }
+                            if (phase == "input" && ordinal % 2000 == 0 || phase is "ordered" or "batch" or "batch-live")
+                            {
+                                long live = LiveHeap.Read();
+                                peak = Math.Max(peak, live);
+                                if (phase is "batch" or "batch-live" or "ordered") { replayPeak = Math.Max(replayPeak, live); }
+                                phasePeaks[phase] = Math.Max(phasePeaks.GetValueOrDefault(phase), live);
+                            }
+                            if (phase == "ordered") { weak.Count.ShouldBe(200); weak.Count(w => w.IsAlive).ShouldBe(0); }
+                        };
+                        // Act: every execution has its own quiescent readings in this warmed engine.
+                        await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql))
+                        { int visited = 0; await foreach (var row in result.GetRowsAsync()) { row.GetString(0).ShouldNotBeNull(); visited++; } visited.ShouldBe(count); }
 
-                    // Assert
-                    long after = LiveHeap.Read();
-                    // Absolute bound: the pre-run baseline; ambient reclamation cannot fail it falsely.
-                    peak = Math.Max(0, peak - before);
-                    // Compare with memory present before this execution. Subtracting a lower
-                    // after-reading would charge reclaimed pre-existing pool buffers as replay.
-                    // Three executions minimize transient roots; the 64 B/row mutant below
-                    // exercises the same sampling and comparison under that reclamation.
-                    long baseline = before;
-                    replayPeak = Math.Max(0, replayPeak - baseline);
-                    _output.WriteLine($"HASH_LIVE|rows={count}|execution={execution}|mutant={mode}|bytes={peak}|grant={grant}|constant={allowance}|replay={replayPeak}|depth={replayDepth}|baseline_before={before}|baseline_after={after}|trimmed_bytes={pool.Trimmed - trimmedBefore}|rented_bytes={pool.Rented - rentedBefore}|allocated_bytes={pool.Allocated - allocatedBefore}|dropped_bytes={pool.Dropped - droppedBefore}|unknown_events={pool.Unknown - unknownBefore}|phases={string.Join(',', phasePeaks.Select(p => p.Key + ":" + Math.Max(0, p.Value - baseline)))}");
-                    replaySampled.ShouldBeTrue(); replayDepth.ShouldBeGreaterThan(1);
-                    replayPeak.ShouldBeGreaterThan(0);
-                    peak.ShouldBeGreaterThan(0);
-                    if (mode == 0)
-                    {
-                        peak.ShouldBeLessThanOrEqualTo(grant + allowance);
-                        minimumReplay = Math.Min(minimumReplay, replayPeak);
-                    }
-                    else
-                    {
-                        retained.Count.ShouldBe(count);
-                        if (mode == 1) { (phasePeaks["ordered"] - before).ShouldBeGreaterThan(grant + allowance); }
-                        else { smallMutant[execution - 1] = replayPeak; }
-                        _output.WriteLine($"HASH_MUTANT|rows={count}|execution={execution}|object_bytes={(mode == 1 ? 1048 : 64)}|bytes={peak}|objects={retained.Count}");
-                    }
-                    SqlPlanExecutor.ObserveHashSpill = null; observe = false;
+                        // Assert
+                        long after = LiveHeap.Read();
+                        // Absolute bound: the pre-run baseline; ambient reclamation cannot fail it falsely.
+                        peak = Math.Max(0, peak - before);
+                        // Compare with memory present before this execution. Subtracting a lower
+                        // after-reading would charge reclaimed pre-existing pool buffers as replay.
+                        // Three executions minimize transient roots; the 64 B/row mutant below
+                        // exercises the same sampling and comparison under that reclamation.
+                        long baseline = before;
+                        replayPeak = Math.Max(0, replayPeak - baseline);
+                        _output.WriteLine($"HASH_LIVE|rows={count}|execution={execution}|mutant={mode}|bytes={peak}|grant={grant}|constant={allowance}|replay={replayPeak}|depth={replayDepth}|baseline_before={before}|baseline_after={after}|trimmed_bytes={pool.Trimmed - trimmedBefore}|rented_bytes={pool.Rented - rentedBefore}|allocated_bytes={pool.Allocated - allocatedBefore}|dropped_bytes={pool.Dropped - droppedBefore}|unknown_events={pool.Unknown - unknownBefore}|phases={string.Join(',', phasePeaks.Select(p => p.Key + ":" + Math.Max(0, p.Value - baseline)))}");
+                        SqlPlanExecutor.ObserveHashSpill = null; observe = false;
+                        return (Action)(() =>
+                        {
+                            replaySampled.ShouldBeTrue(); replayDepth.ShouldBeGreaterThan(1);
+                            replayPeak.ShouldBeGreaterThan(0);
+                            peak.ShouldBeGreaterThan(0);
+                            if (mode == 0)
+                            {
+                                peak.ShouldBeLessThanOrEqualTo(grant + allowance);
+                                minimumReplay = Math.Min(minimumReplay, replayPeak);
+                            }
+                            else
+                            {
+                                retained.Count.ShouldBe(count);
+                                if (mode == 1) { (phasePeaks["ordered"] - before).ShouldBeGreaterThan(grant + allowance); }
+                                else { smallMutant[execution - 1] = replayPeak; }
+                                _output.WriteLine($"HASH_MUTANT|rows={count}|execution={execution}|object_bytes={(mode == 1 ? 1048 : 64)}|bytes={peak}|objects={retained.Count}");
+                            }
+                        });
+                    });
+                    accepted();
                 }
             }
         }

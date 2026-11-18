@@ -20,6 +20,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -133,57 +134,67 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = BuildWideReaderResult(session, 3900000)) { }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
-        long baseline = LiveHeap.Read();
-        await using var result = BuildWideReaderResult(session, 3900000);
-        await using var first = result.GetRowsAsync().GetAsyncEnumerator();
-        await using var second = result.GetRowsAsync().GetAsyncEnumerator();
-        await using var third = result.GetRowsAsync().GetAsyncEnumerator();
-        (await first.MoveNextAsync()).ShouldBeTrue(); (await second.MoveNextAsync()).ShouldBeTrue();
-        long admitted = ReaderBytes(result);
-        // Act
-        var failure = await Record.ExceptionAsync(async () => await third.MoveNextAsync());
-        long live = LiveHeap.Read() - baseline;
-        // Assert
-        _output.WriteLine($"DECODED_READER_PROBE|workspace={3 * Sorted(result)!.BufferBytes}|live={live}|allowance={allowance}|third_refused={failure is not null}");
-        failure.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics[0].Code.ShouldBe("CS05067"); ReaderBytes(result).ShouldBe(admitted);
-        live.ShouldBeLessThanOrEqualTo(allowance);
-        // Concurrent readers publish Current before leaving the decoding gate, so their
-        // previous rows cannot accumulate multiple uncharged old/new overlaps.
-        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
-        using var attempted = new ManualResetEventSlim(); int publications = 0;
-        Task<bool>? firstAdvance = null, secondAdvance = null;
-        SqlRowCollector.ObserveSpill = phase =>
+        var accepted = await MeasureAsync(pool, _output, nameof(GetRowsAsync_DefaultGrantWideReaders_ShouldStayWithinLiveAllowance), $"characters=3900000|readers=2", async readBaseline =>
         {
-            if (phase == "reader-publish" && Interlocked.Increment(ref publications) == 1)
-            { entered.Set(); release.Wait(ceiling.Token); }
-        };
-        try
-        {
-            firstAdvance = Task.Run(async () => await first.MoveNextAsync()); entered.Wait(ceiling.Token);
-            secondAdvance = Task.Run(async () => { attempted.Set(); return await second.MoveNextAsync(); }); attempted.Wait(ceiling.Token);
-            bool acquired = Monitor.TryEnter(SpillReaderGate(result));
-            if (acquired) { Monitor.Exit(SpillReaderGate(result)); }
-            acquired.ShouldBeFalse();
-            long overlapLive = LiveHeap.Read() - baseline;
-            _output.WriteLine($"DECODED_PUBLICATION|live={overlapLive}|allowance={allowance}|gate_held=true|paused_decodes=1");
-            overlapLive.ShouldBeLessThanOrEqualTo(allowance);
-        }
-        finally
-        {
-            release.Set();
+            images.Drain(pool);
+
+            long baseline = readBaseline();
+            await using var result = BuildWideReaderResult(session, 3900000);
+            await using var first = result.GetRowsAsync().GetAsyncEnumerator();
+            await using var second = result.GetRowsAsync().GetAsyncEnumerator();
+            await using var third = result.GetRowsAsync().GetAsyncEnumerator();
+            (await first.MoveNextAsync()).ShouldBeTrue(); (await second.MoveNextAsync()).ShouldBeTrue();
+            long admitted = ReaderBytes(result);
+            // Act
+            var failure = await Record.ExceptionAsync(async () => await third.MoveNextAsync());
+            long live = LiveHeap.Read() - baseline;
+            // Assert
+            _output.WriteLine($"DECODED_READER_PROBE|workspace={3 * Sorted(result)!.BufferBytes}|live={live}|allowance={allowance}|third_refused={failure is not null}");
+            failure.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics[0].Code.ShouldBe("CS05067"); ReaderBytes(result).ShouldBe(admitted);
+
+            // Concurrent readers publish Current before leaving the decoding gate, so their
+            // previous rows cannot accumulate multiple uncharged old/new overlaps.
+            using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+            using var attempted = new ManualResetEventSlim(); int publications = 0;
+            Task<bool>? firstAdvance = null, secondAdvance = null;
+            long overlapLive = 0;
+            SqlRowCollector.ObserveSpill = phase =>
+            {
+                if (phase == "reader-publish" && Interlocked.Increment(ref publications) == 1)
+                { entered.Set(); release.Wait(ceiling.Token); }
+            };
             try
             {
-                if (firstAdvance is not null) { (await firstAdvance.WaitAsync(ceiling.Token)).ShouldBeTrue(); }
-                if (secondAdvance is not null) { (await secondAdvance.WaitAsync(ceiling.Token)).ShouldBeTrue(); }
+                firstAdvance = Task.Run(async () => await first.MoveNextAsync()); entered.Wait(ceiling.Token);
+                secondAdvance = Task.Run(async () => { attempted.Set(); return await second.MoveNextAsync(); }); attempted.Wait(ceiling.Token);
+                bool acquired = Monitor.TryEnter(SpillReaderGate(result));
+                if (acquired) { Monitor.Exit(SpillReaderGate(result)); }
+                acquired.ShouldBeFalse();
+                overlapLive = LiveHeap.Read() - baseline;
+                _output.WriteLine($"DECODED_PUBLICATION|live={overlapLive}|allowance={allowance}|gate_held=true|paused_decodes=1");
+
             }
-            finally { SqlRowCollector.ObserveSpill = null; }
-        }
-        publications.ShouldBe(2);
-        first.Current.GetString(1)!.Length.ShouldBe(3900000); second.Current.GetString(1)!.Length.ShouldBe(3900000);
-        _output.WriteLine($"DECODED_READERS|workspace={2 * Sorted(result)!.BufferBytes}|charged={admitted}|live={live}|allowance={allowance}|readers=2");
+            finally
+            {
+                release.Set();
+                try
+                {
+                    if (firstAdvance is not null) { (await firstAdvance.WaitAsync(ceiling.Token)).ShouldBeTrue(); }
+                    if (secondAdvance is not null) { (await secondAdvance.WaitAsync(ceiling.Token)).ShouldBeTrue(); }
+                }
+                finally { SqlRowCollector.ObserveSpill = null; }
+            }
+            publications.ShouldBe(2);
+            first.Current.GetString(1)!.Length.ShouldBe(3900000); second.Current.GetString(1)!.Length.ShouldBe(3900000);
+            _output.WriteLine($"DECODED_READERS|workspace={2 * Sorted(result)!.BufferBytes}|charged={admitted}|live={live}|allowance={allowance}|readers=2");
+            return (Action)(() =>
+            {
+                live.ShouldBeLessThanOrEqualTo(allowance);
+                overlapLive.ShouldBeLessThanOrEqualTo(allowance);
+            });
+        });
+        accepted();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

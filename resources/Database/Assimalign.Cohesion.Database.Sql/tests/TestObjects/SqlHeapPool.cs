@@ -4,12 +4,10 @@ using System.Collections.Generic;
 using System.Diagnostics.Tracing;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using System.Threading.Tasks;
 
 using Shouldly;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
-using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
@@ -39,45 +37,6 @@ internal static class SqlHeapPool
             if (args.EventId == 4) { Interlocked.Add(ref Trimmed, size); }
             if (args.EventId == 6) { Interlocked.Add(ref Dropped, size); }
         }
-    }
-
-    internal static async Task QuiesceWindowPoolAsync(HashPoolEvents events)
-    {
-        // Shared buckets stay held by the lease. Other threads' free TLS images can
-        // otherwise disappear during a later gen-2 collection. An untouched pooled
-        // probe must be collected before sampling; its weak reference decides readiness.
-        long trimmed = events.Trimmed;
-        using var release = new ManualResetEventSlim();
-        var ready = new TaskCompletionSource<WeakReference>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            // Keep this TLS owner alive until trimming, independently of pool-worker retirement.
-            try { ready.SetResult(ReturnWindowPoolProbe()); release.Wait(); }
-            catch (Exception failure) { ready.TrySetException(failure); }
-        }) { IsBackground = true, Name = "window-pool-probe" };
-        thread.Start();
-        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        try
-        {
-            var probe = await ready.Task.WaitAsync(guard.Token);
-            while (true)
-            {
-                LiveHeap.Read();
-                if (!probe.IsAlive) { break; }
-                await Task.Delay(100, guard.Token);
-            }
-            (events.Trimmed - trimmed).ShouldBeGreaterThanOrEqualTo(1048600);
-        }
-        finally { release.Set(); thread.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); }
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference ReturnWindowPoolProbe()
-    {
-        var buffer = ArrayPool<byte>.Shared.Rent(1048576);
-        var weak = new WeakReference(buffer);
-        ArrayPool<byte>.Shared.Return(buffer);
-        return weak;
     }
 
     private static List<byte[]> PinWindowPool(HashPoolEvents events)

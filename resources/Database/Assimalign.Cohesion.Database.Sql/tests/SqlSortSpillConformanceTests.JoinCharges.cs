@@ -15,6 +15,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -50,12 +51,13 @@ public sealed partial class SqlSortSpillConformanceTests
         using var images = new WindowPoolLease();
         await MeasureJoinComponent(session, component, 8, 32, images, pool); // warm factories and metadata
         images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
+
         // Act
         (long Live, long Charge) measured = (long.MaxValue, 0);
         for (int round = 1; round <= 3; round++)
         {
-            var current = await MeasureJoinComponent(session, component, 128, 512, images, pool);
+            var current = await MeasureAsync(pool, _output, nameof(JoinFixCharges_TwoPopulations_ShouldBoundComponent), $"component={component}|round={round}",
+                readBaseline => MeasureJoinComponent(session, component, 128, 512, images, pool, readBaseline));
             _output.WriteLine($"JOIN_COMPONENT_ROUND|component={component}|round={round}|live={current.Live}|charged={current.Charge}");
             if (current.Live < measured.Live) { measured = current; }
         }
@@ -67,7 +69,7 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static async Task<(long Live, long Charge)> MeasureJoinComponent(SqlDatabaseSession owner, string component, int small, int large, WindowPoolLease images, HashPoolEvents pool)
+    private static async Task<(long Live, long Charge)> MeasureJoinComponent(SqlDatabaseSession owner, string component, int small, int large, WindowPoolLease images, HashPoolEvents pool, Func<long>? readBaseline = null)
     {
         var roots = new object?[large];
         var cleanup = new List<IDisposable>(large);
@@ -94,7 +96,7 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             Fill(0, small);
             images.Drain(pool);
-            long baseline = LiveHeap.Read();
+            long baseline = (readBaseline ?? LiveHeap.Read)();
             Fill(small, large);
             long live = LiveHeap.Read() - baseline;
             GC.KeepAlive(roots); GC.KeepAlive(cleanup);
@@ -210,70 +212,81 @@ public sealed partial class SqlSortSpillConformanceTests
         if (!cold) { var warm = (DatabaseResultSet)await session.ExecuteAsync(sql); await DrainJoinHeap(warm); await warm.DisposeAsync(); }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
-        long baseline = LiveHeap.Read(), peak = 0; int joins = 0, groups = 0, sorts = 0;
-        var phases = new HashSet<string>();
-        var peaks = new Dictionary<string, (long Live, long Charge)>();
-        SqlStatementMetrics? active = null; int deferred = 0;
-        DatabaseResultSet? delivered = null;
-        SqlStatementMetrics.AfterMemoryReservation = (metrics, _) => active = metrics;
-        int chunks = 0;
-        SqlPlanExecutor.ObserveHashSpill = (phase, value) =>
+        var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_JoinFixCombinedHeap_ShouldUseOneAllowance), $"shape={shape}|cold={cold}", async readBaseline =>
         {
-            if (phase == "join-handoff") { joins++; }
-            if (phase == "input") { groups++; }
-            if (phases.Add(phase) || phase is "join-handoff" or "join-partitioned" or "groups-live" or "batch-live"
-                || phase == "join-input" && value % 1000 == 0 || phase == "join-batch-live" && ++chunks % 64 == 0) { Sample(phase); }
-        };
-        SqlRowCollector.ObserveSpill = phase =>
-        {
-            if (phase == "arena") { sorts++; }
-            if (phase == "deferred") { deferred++; }
-            if (phases.Add("sort-" + phase)) { Sample("sort-" + phase); }
-        };
-        try
-        {
-            // Act
-            var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
-            delivered = result;
-            Sample("delivered");
-            await DrainJoinHeap(result); Sample("delivery");
-            await result.DisposeAsync();
-            // Assert
-            joins.ShouldBe(shape is "ownership" or "yield" ? 1 : 2);
-            if (shape == "yield") { phases.ShouldContain("join-sorter-minimum"); phases.ShouldContain("sort-staged-drained"); }
-            else if (shape != "deferred")
-            {
-                sorts.ShouldBeGreaterThan(0);
-                if (shape == "group") { groups.ShouldBeGreaterThan(0); }
-                else { phases.ShouldContain("groups-live"); }
-            }
-            else { deferred.ShouldBeGreaterThan(0); }
-            foreach (var phase in peaks)
-            { _output.WriteLine($"JOIN_COMBINED_PEAK|shape={shape}|cold={cold}|phase={phase.Key}|live={phase.Value.Live}|charged={phase.Value.Charge}|bound={budget + 262144}"); }
-            _output.WriteLine($"JOIN_COMBINED_RESIDUE|shape={shape}|cold={cold}|live={Math.Max(0, LiveHeap.Read() - baseline)}");
-            peak.ShouldBeLessThanOrEqualTo(budget + 262144);
-            Statements(engine.TempSpace!).ShouldBeEmpty();
-        }
-        finally { SqlPlanExecutor.ObserveHashSpill = null; SqlRowCollector.ObserveSpill = null; SqlStatementMetrics.AfterMemoryReservation = null; }
+            images.Drain(pool);
 
-        void Sample(string phase)
-        {
-            long live = Math.Max(0, LiveHeap.Read() - baseline); peak = Math.Max(peak, live);
-            string category = phase is "delivered" or "delivery" or "sort-reader-publish" ? "delivery"
-                : phase.StartsWith("sort-", StringComparison.Ordinal) ? "sort"
-                : phase is "join-match-sort-live" or "join-unmatched-live" or "join-ordered" ? "unmatched"
-                : phase is "join-batch-live" or "join-partitioned" or "join-index-chunks" ? "probe"
-                : phase.StartsWith("join-", StringComparison.Ordinal) ? "build" : "group";
-            bool measured = peaks.TryGetValue(category, out var previous);
-            long charged = active?.HashMemoryBytes ?? 0;
-            if (category == "delivery" && delivered is SqlSpilledResultSet spilled)
-            { charged += DeliveredReaderBytes(spilled); }
-            if (!measured || live > previous.Live) { peaks[category] = (live, charged); }
-            _output.WriteLine($"JOIN_COMBINED|shape={shape}|cold={cold}|phase={phase}|live={live}|charged={charged}|difference={live - charged}");
-            (live - charged).ShouldBeLessThanOrEqualTo(262144, customMessage: phase);
-        }
+            var heapSamples = new List<(string Phase, long Live, long Charge)>(4096);
+            long baseline = readBaseline(), peak = 0; int joins = 0, groups = 0, sorts = 0;
+            var phases = new HashSet<string>();
+            var peaks = new Dictionary<string, (long Live, long Charge)>();
+            SqlStatementMetrics? active = null; int deferred = 0;
+            DatabaseResultSet? delivered = null;
+            SqlStatementMetrics.AfterMemoryReservation = (metrics, _) => active = metrics;
+            int chunks = 0;
+            SqlPlanExecutor.ObserveHashSpill = (phase, value) =>
+            {
+                if (phase == "join-handoff") { joins++; }
+                if (phase == "input") { groups++; }
+                if (phases.Add(phase) || phase is "join-handoff" or "join-partitioned" or "groups-live" or "batch-live"
+                    || phase == "join-input" && value % 1000 == 0 || phase == "join-batch-live" && ++chunks % 64 == 0) { Sample(phase); }
+            };
+            SqlRowCollector.ObserveSpill = phase =>
+            {
+                if (phase == "arena") { sorts++; }
+                if (phase == "deferred") { deferred++; }
+                if (phases.Add("sort-" + phase)) { Sample("sort-" + phase); }
+            };
+            try
+            {
+                // Act
+                var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                delivered = result;
+                Sample("delivered");
+                await DrainJoinHeap(result); Sample("delivery");
+                await result.DisposeAsync();
+                // Assert
+                joins.ShouldBe(shape is "ownership" or "yield" ? 1 : 2);
+                if (shape == "yield") { phases.ShouldContain("join-sorter-minimum"); phases.ShouldContain("sort-staged-drained"); }
+                else if (shape != "deferred")
+                {
+                    sorts.ShouldBeGreaterThan(0);
+                    if (shape == "group") { groups.ShouldBeGreaterThan(0); }
+                    else { phases.ShouldContain("groups-live"); }
+                }
+                else { deferred.ShouldBeGreaterThan(0); }
+                foreach (var phase in peaks)
+                { _output.WriteLine($"JOIN_COMBINED_PEAK|shape={shape}|cold={cold}|phase={phase.Key}|live={phase.Value.Live}|charged={phase.Value.Charge}|bound={budget + 262144}"); }
+                _output.WriteLine($"JOIN_COMBINED_RESIDUE|shape={shape}|cold={cold}|live={Math.Max(0, LiveHeap.Read() - baseline)}");
+
+                Statements(engine.TempSpace!).ShouldBeEmpty();
+                return (Action)(() =>
+                {
+                    peak.ShouldBeLessThanOrEqualTo(budget + 262144);
+                    foreach (var (phase, live, charged) in heapSamples)
+                    { (live - charged).ShouldBeLessThanOrEqualTo(262144, customMessage: phase); }
+                });
+            }
+            finally { SqlPlanExecutor.ObserveHashSpill = null; SqlRowCollector.ObserveSpill = null; SqlStatementMetrics.AfterMemoryReservation = null; }
+
+            void Sample(string phase)
+            {
+                long live = Math.Max(0, LiveHeap.Read() - baseline); peak = Math.Max(peak, live);
+                string category = phase is "delivered" or "delivery" or "sort-reader-publish" ? "delivery"
+                    : phase.StartsWith("sort-", StringComparison.Ordinal) ? "sort"
+                    : phase is "join-match-sort-live" or "join-unmatched-live" or "join-ordered" ? "unmatched"
+                    : phase is "join-batch-live" or "join-partitioned" or "join-index-chunks" ? "probe"
+                    : phase.StartsWith("join-", StringComparison.Ordinal) ? "build" : "group";
+                bool measured = peaks.TryGetValue(category, out var previous);
+                long charged = active?.HashMemoryBytes ?? 0;
+                if (category == "delivery" && delivered is SqlSpilledResultSet spilled)
+                { charged += DeliveredReaderBytes(spilled); }
+                if (!measured || live > previous.Live) { peaks[category] = (live, charged); }
+                _output.WriteLine($"JOIN_COMBINED|shape={shape}|cold={cold}|phase={phase}|live={live}|charged={charged}|difference={live - charged}");
+                heapSamples.Add((phase, live, charged));
+            }
+        });
+        accepted();
     }
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_readerBytes")]

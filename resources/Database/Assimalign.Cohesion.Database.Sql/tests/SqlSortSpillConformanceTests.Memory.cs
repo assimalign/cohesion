@@ -15,6 +15,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -52,35 +53,43 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        images.Drain(pool);
-        await QuiesceWindowPoolAsync(pool);
-        baseline = LiveHeap.Read(); observe = true;
-        SqlRowCollector.ObserveSpill = phase =>
+        var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_LiveObjects_ShouldFitGrantAcrossHandoffAndDelivery), $"rows=4000", async readBaseline =>
         {
-            if (phase is "handoff" or "drained" or "arena") { Sample(phase); }
-            if (phase == "drained") { weak.Count.ShouldBe(200); weak.Count(w => w.IsAlive).ShouldBe(0); afterHandoff = true; }
-        };
-        try
-        {
-            // Act
-            await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
-            result.ShouldBeOfType<SqlSpilledResultSet>();
-            Sample("before-delivery");
-            int count = 0;
-            await foreach (var row in result.GetRowsAsync())
-            { row.GetString(0)!.Length.ShouldBe(512); if (++count % 701 == 0) { Sample("delivery"); } }
-            count.ShouldBe(4000);
+            weak.Clear(); samples.Clear(); afterHandoff = false; observe = false;
+            images.Drain(pool);
 
-            // Assert
-            foreach (string phase in new[] { "handoff", "drained", "arena", "input", "before-delivery", "delivery" })
+            baseline = readBaseline(); observe = true;
+            SqlRowCollector.ObserveSpill = phase =>
             {
-                samples.ContainsKey(phase).ShouldBeTrue();
-                _output.WriteLine($"LIVE|{phase}|bytes={samples[phase]}|grant={grant}|constant={constant}");
-                samples[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant);
+                if (phase is "handoff" or "drained" or "arena") { Sample(phase); }
+                if (phase == "drained") { weak.Count.ShouldBe(200); weak.Count(w => w.IsAlive).ShouldBe(0); afterHandoff = true; }
+            };
+            try
+            {
+                // Act
+                await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                result.ShouldBeOfType<SqlSpilledResultSet>();
+                Sample("before-delivery");
+                int count = 0;
+                await foreach (var row in result.GetRowsAsync())
+                { row.GetString(0)!.Length.ShouldBe(512); if (++count % 701 == 0) { Sample("delivery"); } }
+                count.ShouldBe(4000);
+
+                // Assert
+                return (Action)(() =>
+                {
+                    foreach (string phase in new[] { "handoff", "drained", "arena", "input", "before-delivery", "delivery" })
+                    {
+                        samples.ContainsKey(phase).ShouldBeTrue();
+                        _output.WriteLine($"LIVE|{phase}|bytes={samples[phase]}|grant={grant}|constant={constant}");
+                        samples[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant);
+                    }
+                    session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+                });
             }
-            session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
-        }
-        finally { SqlRowCollector.ObserveSpill = null; }
+            finally { SqlRowCollector.ObserveSpill = null; }
+        });
+        accepted();
 
         // Watch the row vectors themselves as well as their payload identities. Clearing
         // cells in a still-rooted buffer is insufficient evidence that drained rows died.
