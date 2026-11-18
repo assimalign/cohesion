@@ -89,7 +89,7 @@ public sealed partial class SqlSortSpillConformanceTests
             database.DataStorage.BufferPoolCapacity.ShouldBe(128);
             TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
             bool remeasure = false;
-            var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_TableAsLiveCopy_ShouldReleaseDrainedRowsWithinBound), $"mutant={mutant}|rows={count}", async readBaseline =>
+            await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_TableAsLiveCopy_ShouldReleaseDrainedRowsWithinBound), $"mutant={mutant}|rows={count}", async readHeap =>
             {
                 images.Drain(pool);
 
@@ -97,7 +97,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 remeasure = true;
                 long baseline = 0, peak = 0; int read = 0, encoded = 0, copies = 0; long workspace = 0;
                 var weak = new List<WeakReference>(); var retained = new List<object>();
-                SqlPlanExecutor.TableAsSourceAdmitted = _ => { images.Drain(pool); baseline = readBaseline(); };
+                SqlPlanExecutor.TableAsSourceAdmitted = _ => { images.Drain(pool); baseline = readHeap(); };
                 SqlPlanExecutor.TableAsSourceReading = (source, row) =>
                 {
                     read++; workspace = Math.Max(workspace, Sorted(source)!.BufferBytes);
@@ -108,11 +108,11 @@ public sealed partial class SqlSortSpillConformanceTests
                 SqlPlanExecutor.TableAsRecordEncoded = record =>
                 {
                     if (++encoded % 97 == 0) { weak.Add(new(record)); }
-                    if (encoded % 256 == 0) { peak = Math.Max(peak, LiveHeap.Read() - baseline); }
+                    if (encoded % 256 == 0) { peak = Math.Max(peak, readHeap() - baseline); }
                 };
                 SqlPlanExecutor.TableAsStage = (phase, _) =>
                 {
-                    if (phase == "Copied" && ++copies % 7 == 0) { peak = Math.Max(peak, LiveHeap.Read() - baseline); }
+                    if (phase == "Copied" && ++copies % 7 == 0) { peak = Math.Max(peak, readHeap() - baseline); }
                 };
                 try
                 {
@@ -128,16 +128,15 @@ public sealed partial class SqlSortSpillConformanceTests
                     TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
                     return (Action)(() =>
                     {
+                        _output.WriteLine($"CTAS_LIVE|mutant={mutant}|rows={count}|peak={peak}|workspace={workspace}|weak={weak.Count}|alive={weak.Count(w => w.IsAlive)}|poolPages=128");
                         void AssertBound() => peak.ShouldBeLessThanOrEqualTo(grant + constant);
                         if (mutant) { Should.Throw<ShouldAssertException>(AssertBound); }
                         else { AssertBound(); }
                         peaks.Add(peak);
-                        _output.WriteLine($"CTAS_LIVE|mutant={mutant}|rows={count}|peak={peak}|workspace={workspace}|weak={weak.Count}|alive={weak.Count(w => w.IsAlive)}|poolPages=128");
                     });
                 }
                 finally { SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; SqlPlanExecutor.TableAsStage = null; GC.KeepAlive(retained); }
             });
-            accepted();
         }
         if (!mutant) { Math.Abs(peaks[1] - peaks[0]).ShouldBeLessThanOrEqualTo(524288); }
     }

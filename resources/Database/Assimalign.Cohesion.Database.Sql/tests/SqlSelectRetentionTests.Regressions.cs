@@ -179,13 +179,14 @@ public sealed partial class SqlSelectRetentionTests
         const int count = 262144;
         int calls = 0;
         long sampledLive = 0;
+        Func<long> readSample = LiveHeap.Read;
         var builder = SqlDatabaseEngine.CreateBuilder("retention-size");
         builder.Options.CheckpointInterval = TimeSpan.FromHours(1);
         builder.Options.MaintenanceInterval = TimeSpan.FromHours(1);
         builder.Options.PageWriteBackInterval = TimeSpan.FromHours(1);
         builder.Functions.Add(SqlScalarFunction.Create("sample_memory", (long value) =>
         {
-            if (++calls == count - 8) { sampledLive = LiveHeap.Read(); }
+            if (++calls == count - 8) { sampledLive = readSample(); }
             return value;
         }));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
@@ -215,11 +216,12 @@ public sealed partial class SqlSelectRetentionTests
         {
             // Act
             database.Definitions.ForceSelectRetentionBasePath = true;
-            var measuredBase = await MeasureAsync(pool, _output, nameof(ExecuteAsync_LargeInput_ShouldBoundIntermediateRetention), $"shape={shape.Item1}|base=True", async readBaseline =>
+            var measuredBase = await MeasureAsync(pool, _output, nameof(ExecuteAsync_LargeInput_ShouldBoundIntermediateRetention), $"shape={shape.Item1}|base=True", async readHeap =>
             {
+                readSample = readHeap;
                 observations.Clear(); calls = 0; sampledLive = 0;
                 images.Drain(pool);
-                long startingLive = readBaseline();
+                long startingLive = readHeap();
                 var rows = await Rows(session, shape.Item2);
                 calls.ShouldBe(count);
                 return (Rows: rows, Live: sampledLive - startingLive, Retained: observations[shape.Item3],
@@ -236,11 +238,12 @@ public sealed partial class SqlSelectRetentionTests
             long afterLive = long.MaxValue;
             for (int round = 0; round < 3 && afterLive >= 2_000_000; round++)
             {
-                var measured = await MeasureAsync(pool, _output, nameof(ExecuteAsync_LargeInput_ShouldBoundIntermediateRetention), $"shape={shape.Item1}|base=False|round={round}", async readBaseline =>
+                var measured = await MeasureAsync(pool, _output, nameof(ExecuteAsync_LargeInput_ShouldBoundIntermediateRetention), $"shape={shape.Item1}|base=False|round={round}", async readHeap =>
                 {
+                    readSample = readHeap;
                     observations.Clear(); calls = 0; sampledLive = 0;
                     images.Drain(pool);
-                    long startingLive = readBaseline();
+                    long startingLive = readHeap();
                     var rows = await Rows(session, shape.Item2);
                     calls.ShouldBe(count);
                     return (Rows: rows, Live: sampledLive - startingLive);

@@ -54,10 +54,10 @@ public sealed partial class SqlSortSpillConformanceTests
         long live = long.MaxValue, charged = 0;
         for (int round = 1; round <= 3; round++)
         {
-            var measured = Measure(pool, _output, nameof(RowBytes_KeyFamilies_ShouldBoundMarginalHeap), $"family={family}|round={round}", readBaseline =>
+            var measured = Measure(pool, _output, nameof(RowBytes_KeyFamilies_ShouldBoundMarginalHeap), $"family={family}|round={round}", readHeap =>
             {
                 images.Drain(pool);
-                return MeasureKeys(family, readBaseline: readBaseline);
+                return MeasureKeys(family, readHeap: readHeap);
             });
             _output.WriteLine($"KEY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charged}");
             live = Math.Min(live, measured.Live);
@@ -71,15 +71,15 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (long Live, long Charged) MeasureKeys(string family, Func<long>? readBaseline = null)
+    private static (long Live, long Charged) MeasureKeys(string family, Func<long>? readHeap = null)
     {
         var roots = new object?[4096][];
         SqlSelectMemory memory = default;
         long charge = 0;
         Fill(0, 1024);
-        long small = (readBaseline ?? LiveHeap.Read)();
+        long small = (readHeap ?? LiveHeap.Read)();
         Fill(1024, 4096);
-        long live = LiveHeap.Read() - small;
+        long live = (readHeap ?? LiveHeap.Read)() - small;
         GC.KeepAlive(roots); GC.KeepAlive(memory);
         return (live, charge);
 
@@ -115,10 +115,10 @@ public sealed partial class SqlSortSpillConformanceTests
         long entry = long.MaxValue, replay = long.MaxValue, fitting = long.MaxValue;
         for (int round = 1; round <= 3; round++)
         {
-            var measured = Measure(pool, _output, nameof(HashEntries_TwoPopulations_ShouldBoundMarginalHeap), $"round={round}|padded=False", readBaseline =>
+            var measured = Measure(pool, _output, nameof(HashEntries_TwoPopulations_ShouldBoundMarginalHeap), $"round={round}|padded=False", readHeap =>
             {
                 images.Drain(pool);
-                return MeasureEntries(readBaseline: readBaseline);
+                return MeasureEntries(readHeap: readHeap);
             });
             _output.WriteLine($"ENTRY_ROUND|round={round}|entry={measured.Entry}|replay={measured.Replay}|fitting={measured.Fitting}");
             measured.Entry.ShouldBeGreaterThan(0); measured.Replay.ShouldBeGreaterThan(0); measured.Fitting.ShouldBeGreaterThan(0);
@@ -126,10 +126,10 @@ public sealed partial class SqlSortSpillConformanceTests
             replay = Math.Min(replay, measured.Replay);
             fitting = Math.Min(fitting, measured.Fitting);
 
-            var mutant = Measure(pool, _output, nameof(HashEntries_TwoPopulations_ShouldBoundMarginalHeap), $"round={round}|padded=True", readBaseline =>
+            var mutant = Measure(pool, _output, nameof(HashEntries_TwoPopulations_ShouldBoundMarginalHeap), $"round={round}|padded=True", readHeap =>
             {
                 images.Drain(pool);
-                return MeasureEntries(padded: true, readBaseline: readBaseline);
+                return MeasureEntries(padded: true, readHeap: readHeap);
             });
             _output.WriteLine($"ENTRY_MUTANT|round={round}|entry={mutant.Entry}|bytes_per_entry={mutant.Entry / 3072}|added_per_entry=8");
             (mutant.Entry / 3072).ShouldBeGreaterThan(32);
@@ -154,13 +154,13 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (long Entry, long Replay, long Fitting) MeasureEntries(bool padded = false, Func<long>? readBaseline = null)
+    private static (long Entry, long Replay, long Fitting) MeasureEntries(bool padded = false, Func<long>? readHeap = null)
     {
         bool diagnose = Environment.GetEnvironmentVariable("T3_ENTRY_HEAP_DIAGNOSTICS") == "1";
         var keys = new object?[4096][]; var entries = new object?[4096];
         for (int i = 0; i < keys.Length; i++) { keys[i] = [i]; }
         for (int i = 0; i < 1024; i++) { entries[i] = Entry(padded, i); }
-        long small = (readBaseline ?? LiveHeap.Read)();
+        long small = (readHeap ?? LiveHeap.Read)();
         var generationsBefore = diagnose ? EntryGenerations() : default;
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         long processBefore = GC.GetTotalAllocatedBytes(precise: true);
@@ -168,7 +168,7 @@ public sealed partial class SqlSortSpillConformanceTests
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         long processAllocated = GC.GetTotalAllocatedBytes(precise: true) - processBefore;
         long readBefore = GC.GetTotalAllocatedBytes(precise: true);
-        long entry = LiveHeap.Read() - small;
+        long entry = (readHeap ?? LiveHeap.Read)() - small;
         long readAllocated = GC.GetTotalAllocatedBytes(precise: true) - readBefore;
         var generationsAfter = diagnose ? EntryGenerations() : default;
         if (padded) { allocated.ShouldBe(40L * 3072); }
@@ -176,14 +176,14 @@ public sealed partial class SqlSortSpillConformanceTests
         Console.WriteLine($"ENTRY_ALLOCATION|padded={padded}|allocated={allocated}|process_allocated={processAllocated}|read_allocated={readAllocated}|heap={entry}|extra={entry - allocated}{generations}");
         var replay = new Dictionary<object?[], object>();
         for (int i = 0; i < 1024; i++) { replay.Add(keys[i], NewHashEntry(null!, i)); }
-        small = LiveHeap.Read();
+        small = (readHeap ?? LiveHeap.Read)();
         for (int i = 1024; i < 4096; i++) { replay.Add(keys[i], NewHashEntry(null!, i)); }
-        long replayBytes = LiveHeap.Read() - small;
+        long replayBytes = (readHeap ?? LiveHeap.Read)() - small;
         var seen = new HashSet<object?[]>(); var representatives = new List<object?[]>();
         for (int i = 0; i < 1024; i++) { seen.Add(keys[i]); representatives.Add(keys[i]); }
-        small = LiveHeap.Read();
+        small = (readHeap ?? LiveHeap.Read)();
         for (int i = 1024; i < 4096; i++) { seen.Add(keys[i]); representatives.Add(keys[i]); }
-        long fitting = LiveHeap.Read() - small;
+        long fitting = (readHeap ?? LiveHeap.Read)() - small;
         GC.KeepAlive(keys); GC.KeepAlive(entries); GC.KeepAlive(replay); GC.KeepAlive(seen); GC.KeepAlive(representatives);
         return (entry, replayBytes, fitting);
 
@@ -223,10 +223,10 @@ public sealed partial class SqlSortSpillConformanceTests
         long live = long.MaxValue;
         for (int round = 1; round <= 3; round++)
         {
-            long measured = Measure(pool, _output, nameof(GroupHeaders_TwoPopulations_ShouldBoundMarginalHeap), $"round={round}", readBaseline =>
+            long measured = Measure(pool, _output, nameof(GroupHeaders_TwoPopulations_ShouldBoundMarginalHeap), $"round={round}", readHeap =>
             {
                 images.Drain(pool);
-                return MeasureGroupHeaders(readBaseline: readBaseline);
+                return MeasureGroupHeaders(readHeap: readHeap);
             });
             _output.WriteLine($"GROUP_HEADER_ROUND|round={round}|live={measured}");
             live = Math.Min(live, measured);
@@ -240,15 +240,15 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static long MeasureGroupHeaders(Func<long>? readBaseline = null)
+    private static long MeasureGroupHeaders(Func<long>? readHeap = null)
     {
         var keys = new object?[4096][];
         for (int i = 0; i < keys.Length; i++) { keys[i] = [i]; }
         var groups = new Dictionary<object?[], object?[]>();
         for (int i = 0; i < 1024; i++) { groups.Add(keys[i], new object?[0]); }
-        long small = (readBaseline ?? LiveHeap.Read)();
+        long small = (readHeap ?? LiveHeap.Read)();
         for (int i = 1024; i < 4096; i++) { groups.Add(keys[i], new object?[0]); }
-        long live = LiveHeap.Read() - small;
+        long live = (readHeap ?? LiveHeap.Read)() - small;
         GC.KeepAlive(keys); GC.KeepAlive(groups);
         return live;
     }

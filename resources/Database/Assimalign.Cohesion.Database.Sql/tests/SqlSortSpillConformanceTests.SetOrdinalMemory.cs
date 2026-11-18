@@ -36,7 +36,7 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue;
             for (int execution = 0; execution < 3; execution++)
             {
-                var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_SetOrdinalLiveHeap_ShouldBoundAppendPeak), $"shape={shape}|population={count}|execution={execution}", async readBaseline =>
+                await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_SetOrdinalLiveHeap_ShouldBoundAppendPeak), $"shape={shape}|population={count}|execution={execution}", async readHeap =>
                 {
                     images.Drain(pool);
                     long peak = 0, floor = 0; int appends = 0, samples = 0;
@@ -44,14 +44,14 @@ public sealed partial class SqlSortSpillConformanceTests
                     {
                         if (phase != (shape == 0 ? "ordinal-append" : "set-ordinal-append")) { return; }
                         if (++appends != count) { return; }
-                        floor = workspace; samples++; peak = LiveHeap.Read();
+                        floor = workspace; samples++; peak = readHeap();
                     };
                     try
                     {
-                        long before = readBaseline();
+                        long before = readHeap();
                         // Act: sample after the final Append, while the sorter arena is live.
                         await RunAsync(count);
-                        long after = LiveHeap.Read();
+                        long after = readHeap();
                         long measured = peak - Math.Min(before, after);
                         // Assert: neither the grant allowance nor the growth slack is raised.
                         appends.ShouldBe(count); samples.ShouldBe(1); floor.ShouldBeGreaterThan(0);
@@ -65,7 +65,6 @@ public sealed partial class SqlSortSpillConformanceTests
                     }
                     finally { SqlPlanExecutor.ObserveHashSpill = null; }
                 });
-                accepted();
             }
             peaks[population] = minimum;
         }
@@ -74,9 +73,9 @@ public sealed partial class SqlSortSpillConformanceTests
         async Task RunAsync(int count)
         {
             string operation = shape == 0 ? "UNION" : shape == 1 ? "INTERSECT" : "EXCEPT";
-            string predicate = shape == 2 ? "id<0" : $"id<{count}";
+            string predicate = shape == 2 ? "id<0" : string.Concat("id<", count.ToString());
             await using (var result = (DatabaseResultSet)await session.ExecuteAsync(
-                $"SELECT id FROM t WHERE id<{count} {operation} SELECT id FROM t WHERE {predicate}")) { }
+                string.Concat("SELECT id FROM t WHERE id<", count.ToString(), " ", operation, " SELECT id FROM t WHERE ", predicate))) { }
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }

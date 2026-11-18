@@ -195,11 +195,11 @@ public sealed partial class SqlSortSpillConformanceTests
             {
                 for (int execution = 1; execution <= (mode == 1 ? 1 : 3); execution++)
                 {
-                    var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_HashLiveObjects_ShouldRejectRetainingMutant), $"rows={count}|execution={execution}|mutant={mode}", async readBaseline =>
+                    await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_HashLiveObjects_ShouldRejectRetainingMutant), $"rows={count}|execution={execution}|mutant={mode}", async readHeap =>
                     {
                         weak.Clear(); retained.Clear(); mutant = mode;
                         images.Drain(pool);
-                        long before = readBaseline(), peak = 0, replayPeak = 0, replayDepth = 0;
+                        long before = readHeap(), peak = 0, replayPeak = 0, replayDepth = 0;
                         long trimmedBefore = pool.Trimmed, rentedBefore = pool.Rented, allocatedBefore = pool.Allocated, droppedBefore = pool.Dropped, unknownBefore = pool.Unknown;
                         bool replaySampled = false;
                         var phasePeaks = new Dictionary<string, long>();
@@ -210,7 +210,7 @@ public sealed partial class SqlSortSpillConformanceTests
                             if (phase == "batch") { replayDepth = Math.Max(replayDepth, ordinal); }
                             if (phase == "input" && ordinal % 2000 == 0 || phase is "ordered" or "batch" or "batch-live")
                             {
-                                long live = LiveHeap.Read();
+                                long live = readHeap();
                                 peak = Math.Max(peak, live);
                                 if (phase is "batch" or "batch-live" or "ordered") { replayPeak = Math.Max(replayPeak, live); }
                                 phasePeaks[phase] = Math.Max(phasePeaks.GetValueOrDefault(phase), live);
@@ -222,7 +222,7 @@ public sealed partial class SqlSortSpillConformanceTests
                         { int visited = 0; await foreach (var row in result.GetRowsAsync()) { row.GetString(0).ShouldNotBeNull(); visited++; } visited.ShouldBe(count); }
 
                         // Assert
-                        long after = LiveHeap.Read();
+                        long after = readHeap();
                         // Absolute bound: the pre-run baseline; ambient reclamation cannot fail it falsely.
                         peak = Math.Max(0, peak - before);
                         // Compare with memory present before this execution. Subtracting a lower
@@ -252,7 +252,6 @@ public sealed partial class SqlSortSpillConformanceTests
                             }
                         });
                     });
-                    accepted();
                 }
             }
         }

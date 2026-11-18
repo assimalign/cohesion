@@ -50,7 +50,7 @@ public sealed partial class SqlSortSpillConformanceTests
 
         // Act
         var actual = await MeasureAsync(pool, _output, nameof(ExecuteAsync_WideNativeStates_ShouldStayWithinGrant), $"function={function}|type={type}|grant={grant}",
-            readBaseline => ExecuteCorpusAsync(run, sql, sample: true, everyTransition: function == "MIN" && type == "INT", images: images, pool: pool, readBaseline: readBaseline));
+            readHeap => ExecuteCorpusAsync(run, sql, sample: true, everyTransition: function == "MIN" && type == "INT", images: images, pool: pool, readHeap: readHeap));
 
         // Assert
         long excess = actual.Live - grant - 262144;

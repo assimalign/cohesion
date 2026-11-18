@@ -59,10 +59,10 @@ public sealed partial class SqlSortSpillConformanceTests
         long bytes = long.MaxValue;
         for (int round = 1; round <= 3; round++)
         {
-            long measured = Measure(pool, _output, nameof(HashGroupStateBytes_ReplayNativeFamilies_ShouldBoundRetainedStates), $"function={function}|type={type}|round={round}", readBaseline =>
+            long measured = Measure(pool, _output, nameof(HashGroupStateBytes_ReplayNativeFamilies_ShouldBoundRetainedStates), $"function={function}|type={type}|round={round}", readHeap =>
             {
                 images.Drain(pool);
-                return MeasureStates(aggregate, type, readBaseline);
+                return MeasureStates(aggregate, type, readHeap);
             });
             _output.WriteLine($"STATE_ROUND|function={function}|type={type}|round={round}|bytes={measured}");
             bytes = Math.Min(bytes, measured);
@@ -75,13 +75,13 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static long MeasureStates(SqlGroupAggregate aggregate, string type, Func<long>? readBaseline = null)
+    private static long MeasureStates(SqlGroupAggregate aggregate, string type, Func<long>? readHeap = null)
     {
         var roots = new object?[16384];
         Fill(0, 4096);
-        long small = (readBaseline ?? LiveHeap.Read)();
+        long small = (readHeap ?? LiveHeap.Read)();
         Fill(4096, 16384);
-        long bytes = LiveHeap.Read() - small;
+        long bytes = (readHeap ?? LiveHeap.Read)() - small;
         GC.KeepAlive(roots);
         return bytes;
 

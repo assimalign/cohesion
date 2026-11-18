@@ -260,15 +260,15 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_AdditionalLiveStages_ShouldFitGrant), $"shape={shape}", async readBaseline =>
+        await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_AdditionalLiveStages_ShouldFitGrant), $"shape={shape}", async readHeap =>
         {
             images.Drain(pool);
 
-            long baseline = readBaseline(); var samples = new Dictionary<string, long>();
+            long baseline = readHeap(); var samples = new Dictionary<string, long>();
             SqlRowCollector.ObserveSpill = phase =>
             {
                 if (phase != required && !(shape == 0 && phase == "staged-sort")) { return; }
-                samples[phase] = Math.Max(samples.GetValueOrDefault(phase),Math.Max(0, LiveHeap.Read()-baseline));
+                samples[phase] = Math.Max(samples.GetValueOrDefault(phase),Math.Max(0, readHeap()-baseline));
             };
             try
             {
@@ -288,7 +288,6 @@ public sealed partial class SqlSortSpillConformanceTests
             }
             finally { SqlRowCollector.ObserveSpill = null; }
         });
-        accepted();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Nested loop inner lists are collectible after input is drained (#1789)")]

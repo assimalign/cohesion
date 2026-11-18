@@ -1,4 +1,6 @@
 using System;
+using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,60 +15,108 @@ namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
 internal static class SqlHeapMeasurement
 {
-    internal static T Measure<T>(HashPoolEvents events, ITestOutputHelper output, string test, string labels, Func<Func<long>, T> measure)
+    internal static T Measure<T>(HashPoolEvents events, ITestOutputHelper output, string test, FormattableString labels, Func<Func<long>, T> measure)
     {
         var gate = new TrimGate(events, output, test, labels);
         for (int attempt = 1; ; attempt++)
         {
-            T result = measure(gate.ReadBaseline);
-            if (gate.Accept(attempt)) { return result; }
+            var measured = MeasureAttempt(gate, attempt, measure);
+            if (measured.Accepted) { return measured.Result; }
         }
     }
 
-    internal static async Task<T> MeasureAsync<T>(HashPoolEvents events, ITestOutputHelper output, string test, string labels,
+    internal static async Task<T> MeasureAsync<T>(HashPoolEvents events, ITestOutputHelper output, string test, FormattableString labels,
         Func<Func<long>, Task<T>> measure, CancellationToken cancellationToken = default)
     {
         var gate = new TrimGate(events, output, test, labels);
         for (int attempt = 1; ; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            T result = await measure(gate.ReadBaseline);
-            if (gate.Accept(attempt)) { return result; }
+            var measured = await MeasureAttemptAsync(gate, attempt, measure);
+            if (measured.Accepted) { return measured.Result; }
         }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static async Task MeasureAndAssertAsync(HashPoolEvents events, ITestOutputHelper output, string test, FormattableString labels,
+        Func<Func<long>, Task<Action>> measure, CancellationToken cancellationToken = default)
+    {
+        // Return no result graph to the caller's next measured execution.
+        Action accepted = await MeasureAsync(events, output, test, labels, measure, cancellationToken);
+        accepted();
+    }
+
+    // Return from each attempt before starting another baseline. A rejected
+    // result can own a retained graph; it must not survive on the measuring frame.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (bool Accepted, T Result) MeasureAttempt<T>(TrimGate gate, int attempt, Func<Func<long>, T> measure)
+    {
+        gate.BeginAttempt();
+        T result = measure(gate.Read);
+        return gate.Accept(attempt) ? (true, result) : default;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<(bool Accepted, T Result)> MeasureAttemptAsync<T>(TrimGate gate, int attempt, Func<Func<long>, Task<T>> measure)
+    {
+        gate.BeginAttempt();
+        T result = await measure(gate.Read);
+        return gate.Accept(attempt) ? (true, result) : default;
     }
 
     private sealed class TrimGate
     {
         private readonly HashPoolEvents _events;
         private readonly ITestOutputHelper _output;
-        private readonly string _execution;
+        private readonly string _test;
+        private readonly FormattableString _labels;
         private readonly long[] _trims = new long[4];
-        private long _before;
+        private long _before, _after;
+        private bool _started;
 
-        internal TrimGate(HashPoolEvents events, ITestOutputHelper output, string test, string labels)
+        internal TrimGate(HashPoolEvents events, ITestOutputHelper output, string test, FormattableString labels)
         {
             _events = events;
             _output = output;
-            _execution = $"test={test}|{labels}";
+            // Eager interpolation rents a char buffer that can itself trim during
+            // a long execution. Keep fixture labels unformatted until rejection.
+            _test = test;
+            _labels = labels;
         }
 
-        internal long ReadBaseline()
+        internal void BeginAttempt()
         {
-            _before = Volatile.Read(ref _events.TrimEvents);
-            return LiveHeap.Read();
+            _started = false;
+            _before = _after = 0;
+        }
+
+        internal long Read()
+        {
+            if (!_started)
+            {
+                _started = true;
+                _before = Volatile.Read(ref _events.TrimEvents);
+            }
+            long live = LiveHeap.Read();
+            long count = Volatile.Read(ref _events.TrimEvents), previous;
+            do { previous = Volatile.Read(ref _after); }
+            while (previous < count && Interlocked.CompareExchange(ref _after, count, previous) != previous);
+            return live;
         }
 
         internal bool Accept(int attempt)
         {
             // LiveHeap.Read waits for pending finalizers. A trim that freed a buffer
             // before a reading has therefore delivered its event before that read returns.
-            long trims = Volatile.Read(ref _events.TrimEvents) - _before;
+            long trims = Volatile.Read(ref _after) - _before;
             if (trims == 0) { return true; }
             _trims[attempt - 1] = trims;
-            _output.WriteLine($"POOL_TRIM_REMEASURE|{_execution}|attempt={attempt}|trims={trims}");
+            string execution = string.Concat("test=", _test, "|", _labels.ToString(CultureInfo.CurrentCulture));
+            _output.WriteLine(string.Concat("POOL_TRIM_REMEASURE|", execution,
+                "|attempt=", attempt.ToString(CultureInfo.CurrentCulture), "|trims=", trims.ToString(CultureInfo.CurrentCulture)));
             if (attempt == _trims.Length)
             {
-                trims.ShouldBe(0, $"Pool trims invalidated all 4 attempts of {_execution}; attempt trim counts: {string.Join(", ", _trims)}");
+                trims.ShouldBe(0, $"Pool trims invalidated all 4 attempts of {execution}; attempt trim counts: {string.Join(", ", _trims)}");
             }
             return false;
         }

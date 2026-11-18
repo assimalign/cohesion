@@ -57,7 +57,7 @@ public sealed partial class SqlSortSpillConformanceTests
         for (int round = 1; round <= 3; round++)
         {
             var current = await MeasureAsync(pool, _output, nameof(JoinFixCharges_TwoPopulations_ShouldBoundComponent), $"component={component}|round={round}",
-                readBaseline => MeasureJoinComponent(session, component, 128, 512, images, pool, readBaseline));
+                readHeap => MeasureJoinComponent(session, component, 128, 512, images, pool, readHeap));
             _output.WriteLine($"JOIN_COMPONENT_ROUND|component={component}|round={round}|live={current.Live}|charged={current.Charge}");
             if (current.Live < measured.Live) { measured = current; }
         }
@@ -69,7 +69,7 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static async Task<(long Live, long Charge)> MeasureJoinComponent(SqlDatabaseSession owner, string component, int small, int large, WindowPoolLease images, HashPoolEvents pool, Func<long>? readBaseline = null)
+    private static async Task<(long Live, long Charge)> MeasureJoinComponent(SqlDatabaseSession owner, string component, int small, int large, WindowPoolLease images, HashPoolEvents pool, Func<long>? readHeap = null)
     {
         var roots = new object?[large];
         var cleanup = new List<IDisposable>(large);
@@ -96,9 +96,9 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             Fill(0, small);
             images.Drain(pool);
-            long baseline = (readBaseline ?? LiveHeap.Read)();
+            long baseline = (readHeap ?? LiveHeap.Read)();
             Fill(small, large);
-            long live = LiveHeap.Read() - baseline;
+            long live = (readHeap ?? LiveHeap.Read)() - baseline;
             GC.KeepAlive(roots); GC.KeepAlive(cleanup);
             return (live, unit * (large - small));
         }
@@ -212,12 +212,12 @@ public sealed partial class SqlSortSpillConformanceTests
         if (!cold) { var warm = (DatabaseResultSet)await session.ExecuteAsync(sql); await DrainJoinHeap(warm); await warm.DisposeAsync(); }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_JoinFixCombinedHeap_ShouldUseOneAllowance), $"shape={shape}|cold={cold}", async readBaseline =>
+        await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_JoinFixCombinedHeap_ShouldUseOneAllowance), $"shape={shape}|cold={cold}", async readHeap =>
         {
             images.Drain(pool);
 
             var heapSamples = new List<(string Phase, long Live, long Charge)>(4096);
-            long baseline = readBaseline(), peak = 0; int joins = 0, groups = 0, sorts = 0;
+            long baseline = readHeap(), peak = 0; int joins = 0, groups = 0, sorts = 0;
             var phases = new HashSet<string>();
             var peaks = new Dictionary<string, (long Live, long Charge)>();
             SqlStatementMetrics? active = null; int deferred = 0;
@@ -257,7 +257,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 else { deferred.ShouldBeGreaterThan(0); }
                 foreach (var phase in peaks)
                 { _output.WriteLine($"JOIN_COMBINED_PEAK|shape={shape}|cold={cold}|phase={phase.Key}|live={phase.Value.Live}|charged={phase.Value.Charge}|bound={budget + 262144}"); }
-                _output.WriteLine($"JOIN_COMBINED_RESIDUE|shape={shape}|cold={cold}|live={Math.Max(0, LiveHeap.Read() - baseline)}");
+                _output.WriteLine($"JOIN_COMBINED_RESIDUE|shape={shape}|cold={cold}|live={Math.Max(0, readHeap() - baseline)}");
 
                 Statements(engine.TempSpace!).ShouldBeEmpty();
                 return (Action)(() =>
@@ -271,7 +271,7 @@ public sealed partial class SqlSortSpillConformanceTests
 
             void Sample(string phase)
             {
-                long live = Math.Max(0, LiveHeap.Read() - baseline); peak = Math.Max(peak, live);
+                long live = Math.Max(0, readHeap() - baseline); peak = Math.Max(peak, live);
                 string category = phase is "delivered" or "delivery" or "sort-reader-publish" ? "delivery"
                     : phase.StartsWith("sort-", StringComparison.Ordinal) ? "sort"
                     : phase is "join-match-sort-live" or "join-unmatched-live" or "join-ordered" ? "unmatched"
@@ -286,7 +286,6 @@ public sealed partial class SqlSortSpillConformanceTests
                 heapSamples.Add((phase, live, charged));
             }
         });
-        accepted();
     }
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_readerBytes")]

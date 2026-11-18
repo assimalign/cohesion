@@ -57,11 +57,11 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue, minimumDrain = long.MaxValue;
             for (int execution = 0; execution < 3; execution++)
             {
-                var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_OutputDuringOperation_ShouldBoundLiveHeap), $"grouped={grouped}|mutant={mutant}|rows={count}|execution={execution}", async readBaseline =>
+                await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_OutputDuringOperation_ShouldBoundLiveHeap), $"grouped={grouped}|mutant={mutant}|rows={count}|execution={execution}", async readHeap =>
                 {
                     retained.Clear();
                     images.Drain(pool);
-                    long baseline = readBaseline(), peak = 0, drainPeak = 0;
+                    long baseline = readHeap(), peak = 0, drainPeak = 0;
                     int appended = 0, drained = 0, sampled = 0, drainSamples = 0;
                     SqlStatementMetrics? metrics = null;
                     SqlStatementMetrics.AfterMemoryReservation = (current, _) => metrics = current;
@@ -104,7 +104,7 @@ public sealed partial class SqlSortSpillConformanceTests
                     void Sample(bool duringDrain)
                     {
                         sampled++;
-                        long live = LiveHeap.Read() - baseline;
+                        long live = readHeap() - baseline;
                         peak = Math.Max(peak, live);
                         if (duringDrain)
                         {
@@ -113,7 +113,6 @@ public sealed partial class SqlSortSpillConformanceTests
                         }
                     }
                 });
-                accepted();
             }
             peaks.Add(minimum); drainPeaks.Add(minimumDrain);
             _output.WriteLine($"OUTPUT_DURING|grouped={grouped}|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|writer={writer}|slack={slack}|drainExcess={minimumDrain}");
@@ -174,17 +173,17 @@ public sealed partial class SqlSortSpillConformanceTests
             for (int execution = 0; execution < 3; execution++)
             {
                 bool remeasure = false;
-                var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_CopyCreditDuringOperation_ShouldBoundLiveHeap), $"mutant={mutant}|rows={count}|execution={execution}", async readBaseline =>
+                await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_CopyCreditDuringOperation_ShouldBoundLiveHeap), $"mutant={mutant}|rows={count}|execution={execution}", async readHeap =>
                 {
                     retained.Clear();
-                    if (remeasure) { await session.ExecuteAsync($"DROP TABLE archive{execution}"); }
+                    if (remeasure) { await session.ExecuteAsync(string.Concat("DROP TABLE archive", execution.ToString())); }
                     remeasure = true;
                     images.Drain(pool); copyImages.Prepare();
-                    long baseline = readBaseline(), copyBaseline = 0, peak = 0, copyPeak = 0, admitted = 0, smallest = long.MaxValue;
+                    long baseline = readHeap(), copyBaseline = 0, peak = 0, copyPeak = 0, admitted = 0, smallest = long.MaxValue;
                     int encoded = 0, sampled = 0;
                     SqlStatementMetrics? metrics = null;
                     SqlStatementMetrics.AfterMemoryReservation = (current, _) => metrics = current;
-                    SqlPlanExecutor.TableAsSourceAdmitted = bytes => { admitted = bytes; copyImages.Drain(pool); copyBaseline = LiveHeap.Read(); };
+                    SqlPlanExecutor.TableAsSourceAdmitted = bytes => { admitted = bytes; copyImages.Drain(pool); copyBaseline = readHeap(); };
                     SqlPlanExecutor.TableAsRecordEncoded = record =>
                     {
                         // Models a copy implementation that lets uncharged batches grow
@@ -192,7 +191,7 @@ public sealed partial class SqlSortSpillConformanceTests
                         if (mutant) { retained.Add(record); }
                         if (++encoded % 512 == 0)
                         {
-                            sampled++; long live = LiveHeap.Read();
+                            sampled++; long live = readHeap();
                             peak = Math.Max(peak, live - baseline); copyPeak = Math.Max(copyPeak, live - copyBaseline);
                         }
                     };
@@ -201,7 +200,7 @@ public sealed partial class SqlSortSpillConformanceTests
                     try
                     {
                         // Act
-                        (await session.ExecuteAsync($"CREATE TABLE archive{execution} AS SELECT note FROM t")).AffectedCount.ShouldBe(count);
+                        (await session.ExecuteAsync(string.Concat("CREATE TABLE archive", execution.ToString(), " AS SELECT note FROM t"))).AffectedCount.ShouldBe(count);
                         // Assert: completing with the source at G and no temp run proves that
                         // the fixed copy-refusal allowance ran; NULL cells release no payload.
                         admitted.ShouldBe(64L * count); smallest.ShouldBe(admitted);
@@ -222,7 +221,6 @@ public sealed partial class SqlSortSpillConformanceTests
                         SqlPlanExecutor.TableAsRecordEncoded = null; SqlPlanExecutor.TableAsStage = null;
                     }
                 });
-                accepted();
             }
             long excess = minimum - grant - batch - slack; excesses.Add(excess); copyPeaks.Add(minimumCopy);
             _output.WriteLine($"COPY_CREDIT_DURING|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|batch={batch}|slack={slack}|copyPeak={minimumCopy}");

@@ -47,16 +47,16 @@ public sealed partial class SqlSortSpillConformanceTests
 
         for (int round = 1; round <= 3; round++)
         {
-            long measured = Measure(pool, _output, nameof(Read_HashOrdinalSource_ShouldBoundMarginalReaders), $"width={width}|round={round}", readBaseline =>
+            long measured = Measure(pool, _output, nameof(Read_HashOrdinalSource_ShouldBoundMarginalReaders), $"width={width}|round={round}", readHeap =>
             {
                 try
                 {
                     Fill(0, 8);
                     images.Drain(pool);
-                    long small = readBaseline();
+                    long small = readHeap();
                     // Act
                     Fill(8, 32);
-                    long measured = LiveHeap.Read() - small;
+                    long measured = readHeap() - small;
                     _output.WriteLine($"ORDINAL_READER_ROUND|width={width}|round={round}|live={measured}|bound={24 * bound}");
                     GC.KeepAlive(readers);
                     return measured;

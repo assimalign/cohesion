@@ -100,7 +100,7 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue;
             for (int execution = 0; execution < 3; execution++)
             {
-                var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_SetInnerLiveHeap_ShouldRejectRetentionMutant), $"shape={shape}|population={populations[population]}|mutant={mutant}|execution={execution}", async readBaseline =>
+                await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_SetInnerLiveHeap_ShouldRejectRetentionMutant), $"shape={shape}|population={populations[population]}|mutant={mutant}|execution={execution}", async readHeap =>
                 {
                     images.Drain(pool);
                     var retained = new List<object>();
@@ -113,7 +113,7 @@ public sealed partial class SqlSortSpillConformanceTests
                         if (inner)
                         {
                             if (phase == "inner-append" && appendSamples == 0)
-                            { appendSamples++; appendPeak = LiveHeap.Read(); peak = Math.Max(peak, appendPeak); }
+                            { appendSamples++; appendPeak = readHeap(); peak = Math.Max(peak, appendPeak); }
                             if (phase != "inner-decoded" || ((object?[])value)[0] is not int id || id != 0) { return; }
                             var row = (object?[])value;
                             SqlTempRowCodec.TryGetLength(row, out int length).ShouldBeTrue();
@@ -129,23 +129,23 @@ public sealed partial class SqlSortSpillConformanceTests
                             if (phase != "set-append" && !(shape == 2 && phase == "set-decoded" && partition)) { return; }
                         }
                         if (++visits % (inner ? 64 : 512) != 0) { return; }
-                        samples++; long live = LiveHeap.Read(); peak = Math.Max(peak, live);
+                        samples++; long live = readHeap(); peak = Math.Max(peak, live);
                         if (shape == 2 && phase == "set-decoded")
                         { partitionSamples++; partitionPeak = Math.Max(partitionPeak, live); }
                     };
                     SqlPlanExecutor.ObserveHashSpill = (phase, _) =>
                     {
                         if (shape != 0 || phase is not ("batch-live" or "ordered")) { return; }
-                        long live = LiveHeap.Read(); peak = Math.Max(peak, live);
+                        long live = readHeap(); peak = Math.Max(peak, live);
                         if (phase == "batch-live") { replayPeak = Math.Max(replayPeak, live); replaySamples++; }
                         else { orderedPeak = Math.Max(orderedPeak, live); orderedSamples++; }
                     };
                     try
                     {
-                        before = readBaseline(); peak = before;
+                        before = readHeap(); peak = before;
                         // Act: callbacks sample while the real spool/partition owns its workspace.
                         await WarmAsync(populations[population]);
-                        long after = LiveHeap.Read();
+                        long after = readHeap();
                         long measured = peak - Math.Min(before, after);
                         // Assert: every execution must exercise a known live workspace.
                         samples.ShouldBeGreaterThan(0);
@@ -179,7 +179,6 @@ public sealed partial class SqlSortSpillConformanceTests
                     }
                     finally { SqlRowCollector.ObserveBuffer = null; SqlPlanExecutor.ObserveHashSpill = null; }
                 });
-                accepted();
             }
             peaks[population] = minimum;
         }
@@ -192,10 +191,10 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             string sql = shape switch
             {
-                1 => $"SELECT o.id FROM outer_rows o JOIN live t ON t.id<o.id*0 WHERE o.id<{count}",
-                2 => $"SELECT id FROM live WHERE id<{count} INTERSECT SELECT id FROM live WHERE id<{count}",
-                3 => $"SELECT id FROM live WHERE id<{count} UNION ALL SELECT id FROM live WHERE id<{count}",
-                _ => $"SELECT id FROM live WHERE id<{count} UNION SELECT id FROM live WHERE id<{count}",
+                1 => string.Concat("SELECT o.id FROM outer_rows o JOIN live t ON t.id<o.id*0 WHERE o.id<", count.ToString()),
+                2 => string.Concat("SELECT id FROM live WHERE id<", count.ToString(), " INTERSECT SELECT id FROM live WHERE id<", count.ToString()),
+                3 => string.Concat("SELECT id FROM live WHERE id<", count.ToString(), " UNION ALL SELECT id FROM live WHERE id<", count.ToString()),
+                _ => string.Concat("SELECT id FROM live WHERE id<", count.ToString(), " UNION SELECT id FROM live WHERE id<", count.ToString()),
             };
             await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);

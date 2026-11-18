@@ -33,15 +33,15 @@ public sealed partial class DocumentCatalogTests
         fixture.Catalog.IndexBuildMemoryBudget = grant * 1024L * 1024;
         using var pool = new DocumentHeapPool.PoolEvents();
         using var images = new DocumentHeapPool.PoolLease();
-        long additional = await DocumentHeapMeasurement.MeasureAsync(pool, _output, nameof(CreateIndexAsync_Fix3OversizedKey_ShouldRefuseBeforeMaterialization), $"MiB={mib}|composite={composite}|grant={fixture.Catalog.IndexBuildMemoryBudget}", async readBaseline =>
+        long additional = await DocumentHeapMeasurement.MeasureAsync(pool, _output, nameof(CreateIndexAsync_Fix3OversizedKey_ShouldRefuseBeforeMaterialization), $"MiB={mib}|composite={composite}|grant={fixture.Catalog.IndexBuildMemoryBudget}", async readHeap =>
         {
             var context = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
             images.Drain(pool);
-            long before = readBaseline(), additional = -1;
+            long before = readHeap(), additional = -1;
             void Observe(object? sender, FirstChanceExceptionEventArgs args)
             {
                 if (args.Exception is DocumentCatalogException { Code: "CD02026" } && additional < 0)
-                { additional = LiveHeap.Read() - before; }
+                { additional = readHeap() - before; }
             }
             AppDomain.CurrentDomain.FirstChanceException += Observe;
             try

@@ -42,13 +42,13 @@ public sealed partial class SqlSelectWideMemoryTests
         // Act: warm first, then retain three fresh sets of clones and force GC at peak.
         for (int round = 0; round < 3; round++)
         {
-            long growth = await MeasureAsync(pool, _output, nameof(ExecuteAsync_BinaryCloneHeap_ShouldReportMeasuredGrowth), $"base={forceBase}|round={round}", async readBaseline =>
+            long growth = await MeasureAsync(pool, _output, nameof(ExecuteAsync_BinaryCloneHeap_ShouldReportMeasuredGrowth), $"base={forceBase}|round={round}", async readHeap =>
             {
                 long growth = 0;
                 parameters = null;
                 await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
                 images.Drain(pool);
-                long before = readBaseline();
+                long before = readHeap();
                 parameters = new Dictionary<string, object?> { ["p"] = new byte[1024] };
                 bool captured = false;
                 try
@@ -58,7 +58,7 @@ public sealed partial class SqlSelectWideMemoryTests
                         if (metrics.HashMemoryBytes != expected && metrics.HashMemoryBytes != legacy) { return; }
                         captured = true;
                         observed = metrics.HashMemoryBytes;
-                        growth = Math.Max(growth, LiveHeap.Read() - before);
+                        growth = Math.Max(growth, readHeap() - before);
                     };
                     await Execute(parameters);
                 }

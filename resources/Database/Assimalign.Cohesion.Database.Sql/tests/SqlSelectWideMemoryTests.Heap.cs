@@ -95,13 +95,13 @@ public sealed partial class SqlSelectWideMemoryTests
         // Act
         for (int round = 0; round < 3; round++)
         {
-            long growth = await MeasureAsync(pool, _output, nameof(ExecuteAsync_BufferHeap_ShouldReportMeasuredGrowth), $"shape={shape}|base={forceBase}|round={round}", async readBaseline =>
+            long growth = await MeasureAsync(pool, _output, nameof(ExecuteAsync_BufferHeap_ShouldReportMeasuredGrowth), $"shape={shape}|base={forceBase}|round={round}", async readHeap =>
             {
                 long growth = long.MinValue;
                 parameters = null;
                 await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
                 images.Drain(pool);
-                long before = readBaseline();
+                long before = readHeap();
                 if (hasParameter) { parameters = new Dictionary<string, object?> { ["p"] = new string('x', length) }; }
                 SqlStatementMetrics? active = null;
                 bool captured = false;
@@ -126,7 +126,7 @@ public sealed partial class SqlSelectWideMemoryTests
                 void Capture(long charge)
                 {
                     captured = true;
-                    growth = Math.Max(growth, LiveHeap.Read() - before);
+                    growth = Math.Max(growth, readHeap() - before);
                     observedCharge = charge;
                 }
             });

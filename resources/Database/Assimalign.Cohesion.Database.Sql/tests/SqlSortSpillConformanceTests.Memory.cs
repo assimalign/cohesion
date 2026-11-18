@@ -29,9 +29,10 @@ public sealed partial class SqlSortSpillConformanceTests
         var weak = new List<WeakReference>();
         var samples = new Dictionary<string, long>();
         long baseline = 0; bool observe = false, afterHandoff = false;
+        Func<long> readSample = LiveHeap.Read;
         long Sample(string phase)
         {
-            long live = Math.Max(0, LiveHeap.Read() - baseline);
+            long live = Math.Max(0, readSample() - baseline);
             samples[phase] = Math.Max(samples.GetValueOrDefault(phase), live);
             return live;
         }
@@ -53,12 +54,13 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_LiveObjects_ShouldFitGrantAcrossHandoffAndDelivery), $"rows=4000", async readBaseline =>
+        await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_LiveObjects_ShouldFitGrantAcrossHandoffAndDelivery), $"rows=4000", async readHeap =>
         {
+            readSample = readHeap;
             weak.Clear(); samples.Clear(); afterHandoff = false; observe = false;
             images.Drain(pool);
 
-            baseline = readBaseline(); observe = true;
+            baseline = readHeap(); observe = true;
             SqlRowCollector.ObserveSpill = phase =>
             {
                 if (phase is "handoff" or "drained" or "arena") { Sample(phase); }
@@ -90,7 +92,6 @@ public sealed partial class SqlSortSpillConformanceTests
             }
             finally { SqlRowCollector.ObserveSpill = null; }
         });
-        accepted();
 
         // Watch the row vectors themselves as well as their payload identities. Clearing
         // cells in a still-rooted buffer is insufficient evidence that drained rows died.

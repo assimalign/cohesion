@@ -83,18 +83,18 @@ public sealed partial class SqlSortSpillConformanceTests
             await using var engine = await builder.BuildAsync();
             var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync(); await Seed(session, 60);
-            var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_TableAsOversizedRecord_ShouldKeepPageRefusal), $"width={width}|grant={grant}", async readBaseline =>
+            await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_TableAsOversizedRecord_ShouldKeepPageRefusal), $"width={width}|grant={grant}", async readHeap =>
             {
                 images.Drain(pool);
                 long baseline = 0, peak = 0; int encoded = 0, decoded = 0, sampling = 0, samples = 0;
                 using var started = new ManualResetEventSlim(); Thread? sampler = null;
                 SqlPlanExecutor.TableAsSourceAdmitted = _ =>
                 {
-                    images.Drain(pool); baseline = readBaseline(); Volatile.Write(ref sampling, 1);
+                    images.Drain(pool); baseline = readHeap(); Volatile.Write(ref sampling, 1);
                     sampler = new Thread(() =>
                     {
                         while (Volatile.Read(ref sampling) != 0)
-                        { peak = Math.Max(peak, LiveHeap.Read() - baseline); samples++; started.Set(); }
+                        { peak = Math.Max(peak, readHeap() - baseline); samples++; started.Set(); }
                     }) { IsBackground = true };
                     sampler.Start(); started.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
                 };
@@ -118,7 +118,6 @@ public sealed partial class SqlSortSpillConformanceTests
                 }
                 finally { Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); } SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; }
             });
-            accepted();
         }
     }
 

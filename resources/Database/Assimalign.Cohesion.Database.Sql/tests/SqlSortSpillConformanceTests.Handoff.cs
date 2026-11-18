@@ -27,7 +27,8 @@ public sealed partial class SqlSortSpillConformanceTests
         const long grant = 1048576, constant = 524288;
         var weak = new List<WeakReference>(); var samples = new Dictionary<string, long>();
         bool observe = false, drained = false; long baseline = 0;
-        void Sample(string phase) => samples[phase] = Math.Max(samples.GetValueOrDefault(phase), Math.Max(0, LiveHeap.Read() - baseline));
+        Func<long> readSample = LiveHeap.Read;
+        void Sample(string phase) => samples[phase] = Math.Max(samples.GetValueOrDefault(phase), Math.Max(0, readSample() - baseline));
         var builder = SqlDatabaseEngine.CreateBuilder("deferred-key-live");
         builder.Options.RootPath = System.IO.Path.Combine(_root, "deferred-live");
         builder.Options.StatementMemoryBudget = grant; builder.Options.StatementTempSpaceQuota = 64 * 1024 * 1024;
@@ -46,12 +47,13 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        var accepted = await MeasureAsync(pool, _output, nameof(ExecuteAsync_DeferredKeyHandoff_ShouldReleaseLiveKeys), $"rows=1000", async readBaseline =>
+        await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_DeferredKeyHandoff_ShouldReleaseLiveKeys), $"rows=1000", async readHeap =>
         {
+            readSample = readHeap;
             weak.Clear(); samples.Clear(); drained = false; observe = false;
             images.Drain(pool);
 
-            baseline = readBaseline(); observe = true;
+            baseline = readHeap(); observe = true;
             SqlRowCollector.ObserveSpill = phase =>
             {
                 if (phase is "handoff" or "drained" or "arena") { Sample(phase); }
@@ -80,7 +82,6 @@ public sealed partial class SqlSortSpillConformanceTests
             }
             finally { SqlRowCollector.ObserveSpill = null; }
         });
-        accepted();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Spill fitting sort: lending LINQ its buffer preserves warm allocation exactly (#1789)")]

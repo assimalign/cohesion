@@ -134,11 +134,11 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = BuildWideReaderResult(session, 3900000)) { }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        var accepted = await MeasureAsync(pool, _output, nameof(GetRowsAsync_DefaultGrantWideReaders_ShouldStayWithinLiveAllowance), $"characters=3900000|readers=2", async readBaseline =>
+        await MeasureAndAssertAsync(pool, _output, nameof(GetRowsAsync_DefaultGrantWideReaders_ShouldStayWithinLiveAllowance), $"characters=3900000|readers=2", async readHeap =>
         {
             images.Drain(pool);
 
-            long baseline = readBaseline();
+            long baseline = readHeap();
             await using var result = BuildWideReaderResult(session, 3900000);
             await using var first = result.GetRowsAsync().GetAsyncEnumerator();
             await using var second = result.GetRowsAsync().GetAsyncEnumerator();
@@ -147,7 +147,7 @@ public sealed partial class SqlSortSpillConformanceTests
             long admitted = ReaderBytes(result);
             // Act
             var failure = await Record.ExceptionAsync(async () => await third.MoveNextAsync());
-            long live = LiveHeap.Read() - baseline;
+            long live = readHeap() - baseline;
             // Assert
             _output.WriteLine($"DECODED_READER_PROBE|workspace={3 * Sorted(result)!.BufferBytes}|live={live}|allowance={allowance}|third_refused={failure is not null}");
             failure.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics[0].Code.ShouldBe("CS05067"); ReaderBytes(result).ShouldBe(admitted);
@@ -171,7 +171,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 bool acquired = Monitor.TryEnter(SpillReaderGate(result));
                 if (acquired) { Monitor.Exit(SpillReaderGate(result)); }
                 acquired.ShouldBeFalse();
-                overlapLive = LiveHeap.Read() - baseline;
+                overlapLive = readHeap() - baseline;
                 _output.WriteLine($"DECODED_PUBLICATION|live={overlapLive}|allowance={allowance}|gate_held=true|paused_decodes=1");
 
             }
@@ -194,7 +194,6 @@ public sealed partial class SqlSortSpillConformanceTests
                 overlapLive.ShouldBeLessThanOrEqualTo(allowance);
             });
         });
-        accepted();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

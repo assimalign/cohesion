@@ -203,12 +203,12 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue;
             for (int execution = -1; execution < 3; execution++)
             {
-                long live = Measure(pool, _output, nameof(Add_OutputLiveHeap_ShouldRejectKeptPrefixAndPerRowRetention), $"rows={count}|mutant={mutant}|execution={execution}", readBaseline =>
+                long live = Measure(pool, _output, nameof(Add_OutputLiveHeap_ShouldRejectKeptPrefixAndPerRowRetention), $"rows={count}|mutant={mutant}|execution={execution}", readHeap =>
                 {
                     images.Drain(pool);
-                    long before = readBaseline();
-                    long during = MeasureOutputLiveRows(count, session, mutant && execution >= 0, grant);
-                    long after = LiveHeap.Read();
+                    long before = readHeap();
+                    long during = MeasureOutputLiveRows(count, session, mutant && execution >= 0, grant, readHeap: readHeap);
+                    long after = readHeap();
                     // The helper has released its objects before the second quiescent reading.
                     // The lower baseline prevents ambient reclamation from hiding retention.
                     long live = Math.Max(0, during - Math.Min(before, after));
@@ -227,7 +227,7 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static long MeasureOutputLiveRows(int count, SqlDatabaseSession owner, bool mutant, long grant, bool keptPrefix = false)
+    private static long MeasureOutputLiveRows(int count, SqlDatabaseSession owner, bool mutant, long grant, bool keptPrefix = false, Func<long>? readHeap = null)
     {
         _outputPrefixAlive = -1;
         var retained = mutant ? new List<object>() : null;
@@ -241,7 +241,7 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             if (phase != "output-drained") { return; }
             drained++;
-            LiveHeap.Read();
+            (readHeap ?? LiveHeap.Read)();
             // Drained arrays and payloads must die before Take, even if a retained prefix fits G.
             _outputPrefixAlive = weak.Count(reference => reference.IsAlive);
             _outputPrefixAlive.ShouldBe(0);
@@ -256,7 +256,7 @@ public sealed partial class SqlSortSpillConformanceTests
         var result = collector.TakeSpilled([], 0, -1);
         try
         {
-            long live = LiveHeap.Read();
+            long live = (readHeap ?? LiveHeap.Read)();
             // Assert: retaining boxed values cannot keep their row arrays or wide payloads alive.
             weak.Count(reference => reference.IsAlive).ShouldBe(0);
             metrics.HashMemoryBytes.ShouldBe(0); metrics.PlainSelectMemoryBytes.ShouldBe(0);

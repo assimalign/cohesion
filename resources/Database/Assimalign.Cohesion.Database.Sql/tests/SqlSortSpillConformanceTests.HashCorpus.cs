@@ -55,18 +55,18 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     private sealed record CorpusOutcome(RowValues[] Rows, string? Error, long Visits, long Peak, int Passes, long Batches, long TempPeak, long[] Calls, long Live = 0);
-    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true, WindowPoolLease? images = null, HashPoolEvents? pool = null, Func<long>? readBaseline = null)
+    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true, WindowPoolLease? images = null, HashPoolEvents? pool = null, Func<long>? readHeap = null)
     {
         run.Log.Clear(); run.FailAt = fail;
         await run.Session.ExecuteAsync("ALTER SEQUENCE s RESTART WITH 1");
         RowValues[] rows = []; string? error = null; long live = 0;
         if (sample) { images?.Drain(pool!); }
-        long baseline = sample ? (readBaseline ?? LiveHeap.Read)() : 0;
+        long baseline = sample ? (readHeap ?? LiveHeap.Read)() : 0;
         var phases = new HashSet<string>();
         string? previousPhase = null;
         long depth = 0, population = 0;
         bool replay = false;
-        void Sample() { if (replay) { live = Math.Max(live, LiveHeap.Read() - baseline); } }
+        void Sample() { if (replay) { live = Math.Max(live, (readHeap ?? LiveHeap.Read)() - baseline); } }
         if (sample)
         {
             SqlPlanExecutor.ObserveHashSpill = (phase, value) =>
@@ -161,7 +161,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 {
                     var actual = pinPool
                         ? await MeasureAsync(pool!, _output, nameof(ExecuteAsync_SeededHashHeapCorpus_ShouldMatchWithinGrant), $"seed={corpusSeed}|statements={statements}|range=[{first},{last})|statement={test}|grant={grants[index]}|shard={shard}|shards={shards}",
-                            readBaseline => ExecuteCorpusAsync(spilled[index], sql, fail, sample: true, images: images, pool: pool, readBaseline: readBaseline))
+                            readHeap => ExecuteCorpusAsync(spilled[index], sql, fail, sample: true, images: images, pool: pool, readHeap: readHeap))
                         : await ExecuteCorpusAsync(spilled[index], sql, fail, sample: true, images: images, pool: pool);
                     excesses[index] = Math.Max(excesses[index], actual.Live - grants[index] - 262144);
                     excesses[index].ShouldBeLessThanOrEqualTo(0, customMessage: sql);

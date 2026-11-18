@@ -46,10 +46,10 @@ public sealed partial class SqlSortSpillConformanceTests
         long live = long.MaxValue, charge = 0;
         for (int round = 1; round <= 3; round++)
         {
-            var measured = Measure(pool, _output, nameof(HashJoinEntries_TwoPopulations_ShouldBoundLiveHeap), $"family={family}|round={round}", readBaseline =>
+            var measured = Measure(pool, _output, nameof(HashJoinEntries_TwoPopulations_ShouldBoundLiveHeap), $"family={family}|round={round}", readHeap =>
             {
                 images.Drain(pool);
-                return MeasureJoinEntries(family, readBaseline);
+                return MeasureJoinEntries(family, readHeap);
             });
             _output.WriteLine($"JOIN_ENTRY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charge}");
             live = Math.Min(live, measured.Live);
@@ -62,16 +62,16 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (long Live, long Charge) MeasureJoinEntries(string family, Func<long>? readBaseline = null)
+    private static (long Live, long Charge) MeasureJoinEntries(string family, Func<long>? readHeap = null)
     {
         var metrics = new SqlStatementMetrics();
         using var table = new SqlHashJoinTable(new([0], [0], [Collation.Binary]), metrics, long.MaxValue, trackUnmatched: true);
         // A larger marginal population dominates process-wide runner/diagnostic roots.
         // Compare marginal bytes per entry against the unchanged per-entry charge.
         Fill(0, 4096);
-        long baseline = (readBaseline ?? LiveHeap.Read)(), charge = metrics.HashMemoryBytes;
+        long baseline = (readHeap ?? LiveHeap.Read)(), charge = metrics.HashMemoryBytes;
         Fill(4096, 16384);
-        long live = LiveHeap.Read() - baseline;
+        long live = (readHeap ?? LiveHeap.Read)() - baseline;
         charge = metrics.HashMemoryBytes - charge;
         GC.KeepAlive(table);
         return (live, charge);
@@ -117,10 +117,10 @@ public sealed partial class SqlSortSpillConformanceTests
         TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
 
         (long Peak, long Replay) MeasureExecution(int count, bool mutant, int execution) =>
-            Measure(pool, _output, nameof(HashJoinReplay_TwoPopulations_ShouldRejectRetainingMutant), $"rows={count}|execution={execution}|full={full}|mutant={mutant}", readBaseline =>
+            Measure(pool, _output, nameof(HashJoinReplay_TwoPopulations_ShouldRejectRetainingMutant), $"rows={count}|execution={execution}|full={full}|mutant={mutant}", readHeap =>
             {
                 images.Drain(pool);
-                return MeasureJoinReplay(session, count, mutant, sample: true, full: full, execution: execution, readBaseline: readBaseline);
+                return MeasureJoinReplay(session, count, mutant, sample: true, full: full, execution: execution, readHeap: readHeap);
             });
 
         (long Peak, long Replay) MeasurePopulation(int count)
@@ -186,10 +186,10 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private (long Peak, long Replay) MeasureJoinReplay(SqlDatabaseSession session, int count, bool mutant, bool sample, bool full, int execution = 0, Func<long>? readBaseline = null)
+    private (long Peak, long Replay) MeasureJoinReplay(SqlDatabaseSession session, int count, bool mutant, bool sample, bool full, int execution = 0, Func<long>? readHeap = null)
     {
         var retained = new List<object>();
-        long baseline = (readBaseline ?? LiveHeap.Read)(), peak = 0, replay = 0;
+        long baseline = (readHeap ?? LiveHeap.Read)(), peak = 0, replay = 0;
         int replaySamples = 0, unmatchedSamples = 0, callbacks = 0;
         SqlPlanExecutor.ObserveHashSpill = (phase, ordinal) =>
         {
@@ -198,7 +198,7 @@ public sealed partial class SqlSortSpillConformanceTests
             if (phase == "join-unmatched-live") { unmatchedSamples++; }
             if (phase == "join-input" && ordinal%1000==0 || phase == "join-batch-live" && ++callbacks%16==0 || phase is "join-partitioned" or "join-match-sort-live" or "join-unmatched-live")
             {
-                long live = LiveHeap.Read();
+                long live = (readHeap ?? LiveHeap.Read)();
                 peak = Math.Max(peak, live);
                 if (phase != "join-input") { replay = Math.Max(replay, live); }
             }
@@ -240,7 +240,7 @@ public sealed partial class SqlSortSpillConformanceTests
             table.Dispose(); SqlHashSpillMetrics.DetachJoinTemp(metrics)?.Dispose(); SqlPlanExecutor.ObserveHashSpill = null;
             metrics.HashMemoryBytes.ShouldBe(0);
         }
-        long after = LiveHeap.Read();
+        long after = (readHeap ?? LiveHeap.Read)();
         peak = Math.Max(0, peak - baseline);
         replay = Math.Max(0, replay - Math.Min(baseline, after));
         if (sample)
