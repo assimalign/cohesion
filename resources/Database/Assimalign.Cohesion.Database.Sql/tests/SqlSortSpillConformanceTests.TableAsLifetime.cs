@@ -120,17 +120,19 @@ public sealed partial class SqlSortSpillConformanceTests
                     (await session.ExecuteAsync("CREATE TABLE archive AS " + query)).AffectedCount.ShouldBe(count);
                     GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
                     // Assert: the exact same guard rejects retaining one decoded string per row.
+                    if (mutant) { retained.Count.ShouldBe(count); }
+                    else { weak.Count(w => w.IsAlive).ShouldBe(0); }
+                    read.ShouldBe(count); encoded.ShouldBe(count); copies.ShouldBe((count + 63) / 64);
+                    workspace.ShouldBeGreaterThan(0); // the merge fork was actually opened
+                    TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
+                    TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
                     return (Action)(() =>
                     {
                         void AssertBound() => peak.ShouldBeLessThanOrEqualTo(grant + constant);
-                        if (mutant) { Should.Throw<ShouldAssertException>(AssertBound); retained.Count.ShouldBe(count); }
-                        else { AssertBound(); weak.Count(w => w.IsAlive).ShouldBe(0); }
-                        read.ShouldBe(count); encoded.ShouldBe(count); copies.ShouldBe((count + 63) / 64);
-                        workspace.ShouldBeGreaterThan(0); // the merge fork was actually opened
-                        TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
+                        if (mutant) { Should.Throw<ShouldAssertException>(AssertBound); }
+                        else { AssertBound(); }
                         peaks.Add(peak);
                         _output.WriteLine($"CTAS_LIVE|mutant={mutant}|rows={count}|peak={peak}|workspace={workspace}|weak={weak.Count}|alive={weak.Count(w => w.IsAlive)}|poolPages=128");
-                        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
                     });
                 }
                 finally { SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; SqlPlanExecutor.TableAsStage = null; GC.KeepAlive(retained); }

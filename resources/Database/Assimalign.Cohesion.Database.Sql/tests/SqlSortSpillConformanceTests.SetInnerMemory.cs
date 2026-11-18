@@ -148,24 +148,25 @@ public sealed partial class SqlSortSpillConformanceTests
                         long after = LiveHeap.Read();
                         long measured = peak - Math.Min(before, after);
                         // Assert: every execution must exercise a known live workspace.
+                        samples.ShouldBeGreaterThan(0);
+                        if (shape == 0) { replaySamples.ShouldBeGreaterThan(0); orderedSamples.ShouldBeGreaterThan(0); }
+                        if (inner) { appendSamples.ShouldBe(1); }
+                        if (shape == 2) { partitionSamples.ShouldBeGreaterThan(0); }
                         return (Action)(() =>
                         {
-                            samples.ShouldBeGreaterThan(0); measured.ShouldBeGreaterThanOrEqualTo(floor);
+                            measured.ShouldBeGreaterThanOrEqualTo(floor);
                             if (shape == 0)
                             {
-                                replaySamples.ShouldBeGreaterThan(0); orderedSamples.ShouldBeGreaterThan(0);
                                 (replayPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
                                 // Complete retired the arena; the final merge still owns a page.
                                 (orderedPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(8192);
                             }
                             if (inner)
                             {
-                                appendSamples.ShouldBe(1);
                                 (appendPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(16384 + 8192);
                             }
                             if (shape == 2)
                             {
-                                partitionSamples.ShouldBeGreaterThan(0);
                                 (partitionPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
                             }
                             minimum = Math.Min(minimum, measured);

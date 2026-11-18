@@ -233,9 +233,10 @@ public sealed partial class SqlSortSpillConformanceTests
                         replayPeak = Math.Max(0, replayPeak - baseline);
                         _output.WriteLine($"HASH_LIVE|rows={count}|execution={execution}|mutant={mode}|bytes={peak}|grant={grant}|constant={allowance}|replay={replayPeak}|depth={replayDepth}|baseline_before={before}|baseline_after={after}|trimmed_bytes={pool.Trimmed - trimmedBefore}|rented_bytes={pool.Rented - rentedBefore}|allocated_bytes={pool.Allocated - allocatedBefore}|dropped_bytes={pool.Dropped - droppedBefore}|unknown_events={pool.Unknown - unknownBefore}|phases={string.Join(',', phasePeaks.Select(p => p.Key + ":" + Math.Max(0, p.Value - baseline)))}");
                         SqlPlanExecutor.ObserveHashSpill = null; observe = false;
+                        replaySampled.ShouldBeTrue(); replayDepth.ShouldBeGreaterThan(1);
+                        if (mode != 0) { retained.Count.ShouldBe(count); }
                         return (Action)(() =>
                         {
-                            replaySampled.ShouldBeTrue(); replayDepth.ShouldBeGreaterThan(1);
                             replayPeak.ShouldBeGreaterThan(0);
                             peak.ShouldBeGreaterThan(0);
                             if (mode == 0)
@@ -245,7 +246,6 @@ public sealed partial class SqlSortSpillConformanceTests
                             }
                             else
                             {
-                                retained.Count.ShouldBe(count);
                                 if (mode == 1) { (phasePeaks["ordered"] - before).ShouldBeGreaterThan(grant + allowance); }
                                 else { smallMutant[execution - 1] = replayPeak; }
                                 _output.WriteLine($"HASH_MUTANT|rows={count}|execution={execution}|object_bytes={(mode == 1 ? 1048 : 64)}|bytes={peak}|objects={retained.Count}");

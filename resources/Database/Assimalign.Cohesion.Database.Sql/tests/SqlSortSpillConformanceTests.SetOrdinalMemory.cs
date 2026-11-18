@@ -54,10 +54,10 @@ public sealed partial class SqlSortSpillConformanceTests
                         long after = LiveHeap.Read();
                         long measured = peak - Math.Min(before, after);
                         // Assert: neither the grant allowance nor the growth slack is raised.
+                        appends.ShouldBe(count); samples.ShouldBe(1); floor.ShouldBeGreaterThan(0);
                         return (Action)(() =>
                         {
-                            appends.ShouldBe(count); samples.ShouldBe(1);
-                            floor.ShouldBeGreaterThan(0); measured.ShouldBeGreaterThanOrEqualTo(floor);
+                            measured.ShouldBeGreaterThanOrEqualTo(floor);
                             measured.ShouldBeLessThanOrEqualTo(grant + 65536);
                             minimum = Math.Min(minimum, measured);
                             _output.WriteLine($"SET_ORDINAL_HEAP|shape={shape}|population={count}|execution={execution}|peak={measured}|floor={floor}|G={grant}");

@@ -67,13 +67,13 @@ public sealed partial class SqlSortSpillConformanceTests
                     long after = LiveHeap.Read(), measured = peak - Math.Min(before, after);
                     _output.WriteLine($"WINDOW_CACHE_HEAP|rows={count}|peak={measured}|floor={floor}|before={before}|after={after}|pending={pending}|resets={resets}|drains={drains}");
                     // Assert: the floor includes the cache plus the sort's remaining workspace.
+                    resets.ShouldBe(1); drains.ShouldBeGreaterThan(0); pending.ShouldBe(0);
+                    session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+                    TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
                     return (Action)(() =>
                     {
                         measured.ShouldBeGreaterThanOrEqualTo(floor);
                         measured.ShouldBeLessThanOrEqualTo(grant + 131072 + 65536);
-                        resets.ShouldBe(1); drains.ShouldBeGreaterThan(0); pending.ShouldBe(0);
-                        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
-                        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
                     });
                 }
                 finally { SqlRowCollector.ObserveBuffer = null; }

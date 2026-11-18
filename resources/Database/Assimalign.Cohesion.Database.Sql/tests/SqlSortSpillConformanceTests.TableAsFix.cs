@@ -110,9 +110,10 @@ public sealed partial class SqlSortSpillConformanceTests
                     failure.Diagnostics[0].Code.ShouldBe("CS05042"); encoded.ShouldBe(0); samples.ShouldBeGreaterThan(0);
                     database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse(); database.IsOffline.ShouldBeFalse();
                     TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+                    if (grant == 67108864) { decoded.ShouldBe(1); }
                     return (Action)(() =>
                     {
-                        if (grant == 67108864) { decoded.ShouldBe(1); peak.ShouldBeLessThanOrEqualTo(grant + 553240); }
+                        if (grant == 67108864) { peak.ShouldBeLessThanOrEqualTo(grant + 553240); }
                     });
                 }
                 finally { Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); } SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; }

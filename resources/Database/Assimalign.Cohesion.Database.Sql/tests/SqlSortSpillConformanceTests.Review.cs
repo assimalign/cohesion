@@ -276,9 +276,9 @@ public sealed partial class SqlSortSpillConformanceTests
                 await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
                 await foreach (var row in result.GetRowsAsync()) { _ = row.FieldCount; }
                 // Assert
+                samples.ShouldContainKey(required);
                 return (Action)(() =>
                 {
-                    samples.ShouldContainKey(required);
                     foreach (var sample in samples)
                     {
                         _output.WriteLine($"LIVE_STAGE|{sample.Key}|bytes={sample.Value}|grant={grant}|constant={constant}");
