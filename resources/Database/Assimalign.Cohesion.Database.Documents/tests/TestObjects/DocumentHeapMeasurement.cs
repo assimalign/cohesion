@@ -13,16 +13,6 @@ namespace Assimalign.Cohesion.Database.Documents.Tests.TestObjects;
 
 internal static class DocumentHeapMeasurement
 {
-    internal static T Measure<T>(PoolEvents events, ITestOutputHelper output, string test, string labels, Func<Func<long>, T> measure)
-    {
-        var gate = new TrimGate(events, output, test, labels);
-        for (int attempt = 1; ; attempt++)
-        {
-            T result = measure(gate.ReadBaseline);
-            if (gate.Accept(attempt)) { return result; }
-        }
-    }
-
     internal static async Task<T> MeasureAsync<T>(PoolEvents events, ITestOutputHelper output, string test, string labels,
         Func<Func<long>, Task<T>> measure, CancellationToken cancellationToken = default)
     {

@@ -2,13 +2,9 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics.Tracing;
-using System.Runtime.CompilerServices;
 using System.Threading;
-using System.Threading.Tasks;
 
 using Shouldly;
-
-using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests.TestObjects;
 
@@ -18,7 +14,7 @@ internal static class DocumentHeapPool
     {
         private static readonly int _bytes = ArrayPool<byte>.Shared.GetHashCode();
         internal long TrimEvents;
-        internal long Allocated, Trimmed;
+        internal long Allocated;
 
         protected override void OnEventSourceCreated(EventSource source)
         {
@@ -29,11 +25,10 @@ internal static class DocumentHeapPool
         {
             // Count every pool and element type, before any payload sizing/filtering.
             if (args.EventId == 4) { Interlocked.Increment(ref TrimEvents); }
-            if (args.EventId is not (2 or 4) || args.Payload is null || args.Payload.Count < 3
+            if (args.EventId != 2 || args.Payload is null || args.Payload.Count < 3
                 || (int)args.Payload[2]! != _bytes) { return; }
             long size = (24L + (int)args.Payload[1]! + 7) & ~7L;
-            if (args.EventId == 2) { Interlocked.Add(ref Allocated, size); }
-            else { Interlocked.Add(ref Trimmed, size); }
+            Interlocked.Add(ref Allocated, size);
         }
     }
 
@@ -59,41 +54,5 @@ internal static class DocumentHeapPool
             foreach (var buffer in _buffers) { ArrayPool<byte>.Shared.Return(buffer); }
             _buffers.Clear();
         }
-    }
-
-    internal static async Task QuiesceAsync(PoolEvents events, CancellationToken cancellationToken = default)
-    {
-        long trimmed = events.Trimmed;
-        using var release = new ManualResetEventSlim();
-        var ready = new TaskCompletionSource<WeakReference>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            try { ready.SetResult(ReturnProbe()); release.Wait(); }
-            catch (Exception failure) { ready.TrySetException(failure); }
-        }) { IsBackground = true, Name = "document-pool-probe" };
-        thread.Start();
-        using var guard = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        guard.CancelAfter(TimeSpan.FromSeconds(90));
-        try
-        {
-            var probe = await ready.Task.WaitAsync(guard.Token);
-            while (true)
-            {
-                LiveHeap.Read();
-                if (!probe.IsAlive) { break; }
-                await Task.Delay(100, guard.Token);
-            }
-            (events.Trimmed - trimmed).ShouldBeGreaterThanOrEqualTo(1048600);
-        }
-        finally { release.Set(); thread.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); }
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference ReturnProbe()
-    {
-        var buffer = ArrayPool<byte>.Shared.Rent(1048576);
-        var weak = new WeakReference(buffer);
-        ArrayPool<byte>.Shared.Return(buffer);
-        return weak;
     }
 }
