@@ -66,7 +66,7 @@ concurrency:
 jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
     timeout-minutes: 30
     continue-on-error: false
     strategy:
@@ -99,7 +99,7 @@ jobs:
 
   integration-check:
     name: "IntegrationCheck [ubuntu-latest]"
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-latest'] || 'ubuntu-latest' }}
     continue-on-error: false
     steps:
       - uses: actions/checkout@v7

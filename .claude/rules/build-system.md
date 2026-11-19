@@ -381,6 +381,23 @@ If a consumer build complains about an `Assimalign.Cohesion.Sdk` it can't resolv
 
 Per-area CI and the publish-less SDK consumer smoke prove the branch; **the release pipeline alone ships release versions.** The one other publisher, `ci-packages.yml`, stages CI-channel builds of `main` and of open pull requests in GitHub Packages and nowhere else. Nothing else publishes.
 
+### Runner selection — the `CI_RUNNERS` variable
+
+A job never names a runner label directly. It writes the GitHub-hosted label it wants and looks it
+up in the `CI_RUNNERS` organization variable, a JSON object from hosted label to replacement label:
+
+```yaml
+runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
+runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+```
+
+A label the variable omits, or an unset variable, runs on the GitHub-hosted runner. So the runner
+provider (Blacksmith since 2026-11) changes in the variable, per OS, without editing a workflow,
+and `matrix.os` keeps the hosted label, so job names and required-check names do not change.
+`release.yml` stays on GitHub-hosted runners: it holds the nuget.org publishing credential.
+`sdk-smoke.yml` joins once PR #1869 merges. `resource-database.yml` also widens its OS list
+(below) when the variable carries `macos-latest`.
+
 ### Per-area CI — `library-*.yml`, `resource-*.yml`
 
 Path-filtered on push, each workflow lists its area's projects and hands the whole list to the shared composite action at `.github/actions/build/action.yml`, one job per OS. The action restores, builds, and tests. **It does not pack or push** — publishing from there had every area workflow racing to push a package built from whatever was on `main`, at a version that had passed no release gate. These workflows declare `permissions: contents: read` only.
@@ -420,7 +437,10 @@ waiting 66 to 108 minutes on average. The settings that follow from that:
   Other pushes and pull requests run Linux only. Every workflow takes `workflow_dispatch` with a
   boolean `all-os` input, so a branch with platform-specific changes (paths, sockets, TLS,
   processes) can run all three before it merges. `release.yml`'s `validate-consumer` job stays
-  three-OS unconditionally.
+  three-OS unconditionally. **`resource-database.yml` runs all three on every push and pull
+  request** once `CI_RUNNERS` maps `macos-latest` (its condition adds
+  `|| fromJSON(vars.CI_RUNNERS || '{}')['macos-latest']`): the Linux-only default exists for
+  GitHub's 5-job macOS cap, which a runner provider without one removes.
 - **Superseded runs are cancelled.** Each per-area workflow's `concurrency` group is the workflow
   plus the ref, with `cancel-in-progress: true`, so a newer push to a branch or pull request
   cancels the older run. Every `main` commit gets its own group (the run id), so no `main` run is

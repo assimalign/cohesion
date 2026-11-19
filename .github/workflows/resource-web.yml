@@ -41,7 +41,7 @@ concurrency:
 jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
     timeout-minutes: 30
     strategy:
       # Every leg reports its own result. With fail-fast, one failing project cancelled the rest
@@ -117,7 +117,7 @@ jobs:
   # WebSockets (#765): a permessage-deflate echo behind the UseWebSockets origin policy.
   aot-guard:
     name: "Web NativeAOT guard [ubuntu-latest]"
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-latest'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0

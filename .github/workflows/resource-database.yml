@@ -69,7 +69,7 @@ on:
   workflow_dispatch:
     inputs:
       all-os:
-        description: Also run the Windows and macOS legs, which otherwise run only on main.
+        description: Also run the Windows and macOS legs while macOS is on GitHub-hosted runners, which otherwise run them only on main.
         type: boolean
         default: false
 
@@ -86,7 +86,7 @@ concurrency:
 jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
     # T3 batch 4's all-OS runs (42335218592, 42340437624, attempts 1 and 2): Windows took 44m 40s
     # once and passed 60m twice, in the last three suites. About 62m is the slowest; twice that,
     # rounded up to 15 minutes, is 135.
@@ -95,9 +95,11 @@ jobs:
       # Every leg reports its own result. With fail-fast, one failing leg cancels the others (#1093).
       fail-fast: false
       matrix:
-        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes run
-        # Linux only, because the organization's plan runs at most 5 macOS jobs at once.
-        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        # Every push and pull request runs all three OSes once the CI_RUNNERS variable moves macOS
+        # off GitHub-hosted runners (build-system.md, "Runner selection"). While macOS is
+        # GitHub-hosted, whose plan runs at most 5 macOS jobs at once, Windows and macOS legs run
+        # on main or on a manual run with all-os set, and other pushes run Linux only.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os || fromJSON(vars.CI_RUNNERS || '{}')['macos-latest']) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
         # Every delivered Database project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Database.Hosting, which nothing else pulls in
@@ -182,7 +184,7 @@ jobs:
   # output, whatever the project promotes to an error (the guard also makes ILC's warnings errors).
   sql-benchmarks:
     name: "Database NativeAOT harnesses (linux-x64)"
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-latest'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -327,7 +329,7 @@ jobs:
 
   database-testing-pack:
     name: "Prepare Database SDK E2E packages"
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-latest'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -336,11 +338,11 @@ jobs:
         with:
           global-json-file: global.json
 
-      # One runtime pack per E2E leg's RID: only the Linux leg runs off main without all-os.
+      # One runtime pack per E2E leg's RID, under the build job's OS selection.
       - name: Pack local SDK and framework closure
         shell: pwsh
         env:
-          COHESION_RIDS: ${{ (github.ref == 'refs/heads/main' || inputs.all-os) && 'linux-x64,win-x64,osx-arm64' || 'linux-x64' }}
+          COHESION_RIDS: ${{ (github.ref == 'refs/heads/main' || inputs.all-os || fromJSON(vars.CI_RUNNERS || '{}')['macos-latest']) && 'linux-x64,win-x64,osx-arm64' || 'linux-x64' }}
         run: |
           ./scripts/Install-Local.ps1 `
               -Configuration Release `
@@ -360,14 +362,14 @@ jobs:
   database-testing:
     name: "Database.Testing E2E [${{ matrix.os }}]"
     needs: database-testing-pack
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
     # Same healthy runs: slowest E2E 3m 15s; the #1470 minimum for this job is 45 minutes.
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         # Same OS selection as the build job; the pack job packs a runtime pack for each leg here.
-        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os || fromJSON(vars.CI_RUNNERS || '{}')['macos-latest']) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -391,7 +393,7 @@ jobs:
     # Runtime producers' Directory.Build.props and needs no packs, but its test project builds
     # through the shared targets, whose code generation loads the build tasks.
     name: "App.Database framework closure"
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-latest'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
 
