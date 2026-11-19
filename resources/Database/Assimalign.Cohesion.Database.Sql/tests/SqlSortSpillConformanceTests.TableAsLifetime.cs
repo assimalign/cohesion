@@ -19,7 +19,7 @@ using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -71,13 +71,14 @@ public sealed partial class SqlSortSpillConformanceTests
     {
         // Arrange: a warmed minimum pool excludes destination page growth from the sample.
         const long grant = 1048576, constant = 553240;
-        var peaks = new List<long>();
+        var peaks = new List<Sample<(long Peak, long Workspace, int Weak, int Alive)>>();
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_TableAsLiveCopy_ShouldReleaseDrainedRowsWithinBound));
         foreach (int count in new[] { 4000, 16000 })
         {
             int measurement = 0;
-            await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_TableAsLiveCopy_ShouldReleaseDrainedRowsWithinBound), $"mutant={mutant}|rows={count}", async readHeap =>
+            var sampled = await batch.MeasureAsync($"mutant={mutant}|rows={count}", async readHeap =>
             {
                 var builder = SqlDatabaseEngine.CreateBuilder("ctas-live");
                 builder.Options.RootPath = Path.Combine(_root, "live-" + count + "-" + measurement++);
@@ -124,19 +125,28 @@ public sealed partial class SqlSortSpillConformanceTests
                     workspace.ShouldBeGreaterThan(0); // the merge fork was actually opened
                     TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
                     TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
-                    return (Action)(() =>
-                    {
-                        _output.WriteLine($"CTAS_LIVE|mutant={mutant}|rows={count}|peak={peak}|workspace={workspace}|weak={weak.Count}|alive={weak.Count(w => w.IsAlive)}|poolPages=128");
-                        void AssertBound() => peak.ShouldBeLessThanOrEqualTo(grant + constant);
-                        if (mutant) { Should.Throw<ShouldAssertException>(AssertBound); }
-                        else { AssertBound(); }
-                        peaks.Add(peak);
-                    });
+                    return (Peak: peak, Workspace: workspace, Weak: weak.Count, Alive: weak.Count(w => w.IsAlive));
                 }
                 finally { SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; SqlPlanExecutor.TableAsStage = null; GC.KeepAlive(retained); }
             });
+            peaks.Add(sampled);
+            await batch.CheckAsync(() => mutant
+                ? [Floor("CTAS retaining mutant", sampled.Value.Peak, grant + constant, sampled.Term, true)]
+                : [Ceiling("CTAS copy peak", sampled.Value.Peak, grant + constant, sampled.Term)], () =>
+            {
+                long peak = sampled.Value.Peak, workspace = sampled.Value.Workspace;
+                _output.WriteLine($"CTAS_LIVE|mutant={mutant}|rows={count}|peak={peak}|workspace={workspace}|weak={sampled.Value.Weak}|alive={sampled.Value.Alive}|poolPages=128");
+                void AssertBound() => peak.ShouldBeLessThanOrEqualTo(grant + constant);
+                if (mutant) { Should.Throw<ShouldAssertException>(AssertBound); }
+                else { AssertBound(); }
+            });
         }
-        if (!mutant) { Math.Abs(peaks[1] - peaks[0]).ShouldBeLessThanOrEqualTo(524288); }
+        if (!mutant)
+        {
+            await batch.CheckAsync(() => [Ceiling("CTAS absolute population growth", Math.Abs(peaks[1].Value.Peak - peaks[0].Value.Peak),
+                524288, peaks[1].Term + peaks[0].Term)], () => Math.Abs(peaks[1].Value.Peak - peaks[0].Value.Peak).ShouldBeLessThanOrEqualTo(524288));
+        }
+        await batch.CompleteAsync();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - CTAS brackets keep metadata during admission pause and copy each row once (#1283, #1789)")]

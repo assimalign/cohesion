@@ -20,7 +20,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -134,7 +134,8 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = BuildWideReaderResult(session, 3900000)) { }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        await MeasureAndAssertAsync(pool, _output, nameof(GetRowsAsync_DefaultGrantWideReaders_ShouldStayWithinLiveAllowance), $"characters=3900000|readers=2", async readHeap =>
+        var batch = new Batch(pool, _output, nameof(GetRowsAsync_DefaultGrantWideReaders_ShouldStayWithinLiveAllowance));
+        var sampled = await batch.MeasureAsync($"characters=3900000|readers=2", async readHeap =>
         {
             images.Drain(pool);
 
@@ -188,12 +189,14 @@ public sealed partial class SqlSortSpillConformanceTests
             publications.ShouldBe(2);
             first.Current.GetString(1)!.Length.ShouldBe(3900000); second.Current.GetString(1)!.Length.ShouldBe(3900000);
             _output.WriteLine($"DECODED_READERS|workspace={2 * Sorted(result)!.BufferBytes}|charged={admitted}|live={live}|allowance={allowance}|readers=2");
-            return (Action)(() =>
-            {
-                live.ShouldBeLessThanOrEqualTo(allowance);
-                overlapLive.ShouldBeLessThanOrEqualTo(allowance);
-            });
+            return (Live: live, OverlapLive: overlapLive);
         });
+        await batch.CheckAsync(() => [Ceiling("reader probe", sampled.Value.Live, allowance, sampled.Term), Ceiling("publication overlap", sampled.Value.OverlapLive, allowance, sampled.Term)], () =>
+        {
+                sampled.Value.Live.ShouldBeLessThanOrEqualTo(allowance);
+                sampled.Value.OverlapLive.ShouldBeLessThanOrEqualTo(allowance);
+        });
+        await batch.CompleteAsync();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

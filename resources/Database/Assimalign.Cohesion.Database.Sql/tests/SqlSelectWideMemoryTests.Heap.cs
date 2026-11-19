@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -89,13 +89,15 @@ public sealed partial class SqlSelectWideMemoryTests
         using var images = new WindowPoolLease();
         images.Drain(pool);
 
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_BufferHeap_ShouldReportMeasuredGrowth));
+        var rounds = new List<Sample<long>>();
         long largestGrowth = long.MinValue, observedCharge = 0;
         Dictionary<string, object?>? parameters = null;
 
         // Act
         for (int round = 0; round < 3; round++)
         {
-            long growth = await MeasureAsync(pool, _output, nameof(ExecuteAsync_BufferHeap_ShouldReportMeasuredGrowth), $"shape={shape}|base={forceBase}|round={round}", async readHeap =>
+            var sampled = await batch.MeasureAsync($"shape={shape}|base={forceBase}|round={round}", async readHeap =>
             {
                 long growth = long.MinValue;
                 parameters = null;
@@ -130,11 +132,17 @@ public sealed partial class SqlSelectWideMemoryTests
                     observedCharge = charge;
                 }
             });
-            largestGrowth = Math.Max(largestGrowth, growth);
+            rounds.Add(sampled);
+            largestGrowth = Math.Max(largestGrowth, sampled.Value);
         }
 
         // Assert: raw GC growth deliberately remains visible, including uncharged fixed state.
-        largestGrowth.ShouldBeGreaterThan(0);
+        await batch.CheckAsync(() => [Floor("largest heap growth > 0", rounds.Max(x => x.Value), 0, Term.Maximum(rounds), true)], () =>
+        {
+            largestGrowth = rounds.Max(x => x.Value);
+            largestGrowth.ShouldBeGreaterThan(0);
+        });
+        await batch.CompleteAsync();
         observedCharge.ShouldBe(expectedObserved);
         _output.WriteLine($"BUFFER_HEAP|{shape}|base={forceBase}|peak={expectedPeak}|observedCharge={observedCharge}|heap={largestGrowth}|ratio={observedCharge / (double)largestGrowth:F6}");
         GC.KeepAlive(parameters);

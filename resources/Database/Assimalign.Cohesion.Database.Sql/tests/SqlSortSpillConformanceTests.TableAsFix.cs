@@ -16,7 +16,7 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -83,7 +83,8 @@ public sealed partial class SqlSortSpillConformanceTests
             await using var engine = await builder.BuildAsync();
             var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync(); await Seed(session, 60);
-            await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_TableAsOversizedRecord_ShouldKeepPageRefusal), $"width={width}|grant={grant}", async readHeap =>
+            var batch = new Batch(pool, _output, nameof(ExecuteAsync_TableAsOversizedRecord_ShouldKeepPageRefusal));
+            var sampled = await batch.MeasureAsync($"width={width}|grant={grant}", async readHeap =>
             {
                 images.Drain(pool);
                 long baseline = 0, peak = 0; int encoded = 0, decoded = 0, sampling = 0, samples = 0;
@@ -111,13 +112,15 @@ public sealed partial class SqlSortSpillConformanceTests
                     database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse(); database.IsOffline.ShouldBeFalse();
                     TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
                     if (grant == 67108864) { decoded.ShouldBe(1); }
-                    return (Action)(() =>
-                    {
-                        if (grant == 67108864) { peak.ShouldBeLessThanOrEqualTo(grant + 553240); }
-                    });
+                    return peak;
                 }
                 finally { Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); } SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; }
             });
+            await batch.CheckAsync(() => grant == 67108864 ? [Ceiling("oversized CTAS peak", sampled.Value, grant + 553240, sampled.Term)] : [], () =>
+            {
+                        if (grant == 67108864) { sampled.Value.ShouldBeLessThanOrEqualTo(grant + 553240); }
+            });
+            await batch.CompleteAsync();
         }
     }
 

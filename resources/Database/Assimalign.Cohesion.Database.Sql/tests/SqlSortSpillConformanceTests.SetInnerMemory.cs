@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -94,13 +94,17 @@ public sealed partial class SqlSortSpillConformanceTests
         using var images = new WindowPoolLease();
         await WarmAsync(populations[1]); images.Drain(pool);
         var peaks = new long[2];
-        for (int population = 0; population < 2; population++)
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_SetInnerLiveHeap_ShouldRejectRetentionMutant));
+        List<Sample<SetHeapReading>>[] rounds = [[], []];
+        for (int populationIndex = 0; populationIndex < 2; populationIndex++)
         {
+            int population = populationIndex;
             await WarmAsync(populations[population]);
             long minimum = long.MaxValue;
-            for (int execution = 0; execution < 3; execution++)
+            for (int executionIndex = 0; executionIndex < 3; executionIndex++)
             {
-                await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_SetInnerLiveHeap_ShouldRejectRetentionMutant), $"shape={shape}|population={populations[population]}|mutant={mutant}|execution={execution}", async readHeap =>
+                int execution = executionIndex;
+                var sampled = await batch.MeasureAsync($"shape={shape}|population={populations[population]}|mutant={mutant}|execution={execution}", async readHeap =>
                 {
                     images.Drain(pool);
                     var retained = new List<object>();
@@ -152,40 +156,62 @@ public sealed partial class SqlSortSpillConformanceTests
                         if (shape == 0) { replaySamples.ShouldBeGreaterThan(0); orderedSamples.ShouldBeGreaterThan(0); }
                         if (inner) { appendSamples.ShouldBe(1); }
                         if (shape == 2) { partitionSamples.ShouldBeGreaterThan(0); }
-                        return (Action)(() =>
-                        {
-                            measured.ShouldBeGreaterThanOrEqualTo(floor);
-                            if (shape == 0)
-                            {
-                                (replayPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
-                                // Complete retired the arena; the final merge still owns a page.
-                                (orderedPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(8192);
-                            }
-                            if (inner)
-                            {
-                                (appendPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(16384 + 8192);
-                            }
-                            if (shape == 2)
-                            {
-                                (partitionPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
-                            }
-                            minimum = Math.Min(minimum, measured);
-                            long baseline = Math.Min(before, after);
-                            _output.WriteLine($"SET_INNER_HEAP|shape={shape}|population={populations[population]}|mutant={mutant}|execution={execution}|peak={measured}|floor={floor}|G={grant}"
-                                + $"|replay={(replaySamples == 0 ? 0 : replayPeak - baseline)}|ordered={(orderedSamples == 0 ? 0 : orderedPeak - baseline)}"
-                                + $"|append={(appendSamples == 0 ? 0 : appendPeak - baseline)}|decoded={(partitionSamples == 0 ? 0 : partitionPeak - baseline)}");
-                            GC.KeepAlive(retained);
-                        });
+                        long baseline = Math.Min(before, after);
+                        _output.WriteLine($"SET_INNER_HEAP|shape={shape}|population={populations[population]}|mutant={mutant}|execution={execution}|peak={measured}|floor={floor}|G={grant}"
+                            + $"|replay={(replaySamples == 0 ? 0 : replayPeak - baseline)}|ordered={(orderedSamples == 0 ? 0 : orderedPeak - baseline)}"
+                            + $"|append={(appendSamples == 0 ? 0 : appendPeak - baseline)}|decoded={(partitionSamples == 0 ? 0 : partitionPeak - baseline)}");
+                        GC.KeepAlive(retained);
+                        return new SetHeapReading(measured, before, after, replayPeak, orderedPeak, appendPeak, partitionPeak);
                     }
                     finally { SqlRowCollector.ObserveBuffer = null; SqlPlanExecutor.ObserveHashSpill = null; }
                 });
+                rounds[population].Add(sampled);
+                await batch.CheckAsync(() =>
+                {
+                    var value = sampled.Value;
+                    long baseline = Math.Min(value.Before, value.After);
+                    return [Floor("set/inner peak floor", value.Measured, floor, sampled.Term),
+                        ..(shape == 0 ? new[] { Floor("set replay floor", value.ReplayPeak - baseline, floor, sampled.Term),
+                            Floor("set ordered floor", value.OrderedPeak - baseline, 8192, sampled.Term) } : []),
+                        ..(inner ? new[] { Floor("inner append floor", value.AppendPeak - baseline, 16384 + 8192, sampled.Term) } : []),
+                        ..(shape == 2 ? new[] { Floor("set partition floor", value.PartitionPeak - baseline, floor, sampled.Term) } : [])];
+                }, () =>
+                {
+                    var value = sampled.Value;
+                    long measured = value.Measured, before = value.Before, after = value.After;
+                    long replayPeak = value.ReplayPeak, orderedPeak = value.OrderedPeak, appendPeak = value.AppendPeak, partitionPeak = value.PartitionPeak;
+                    measured.ShouldBeGreaterThanOrEqualTo(floor);
+                    if (shape == 0)
+                    {
+                        (replayPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
+                        (orderedPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(8192);
+                    }
+                    if (inner) { (appendPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(16384 + 8192); }
+                    if (shape == 2) { (partitionPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor); }
+                });
+                minimum = Math.Min(minimum, sampled.Value.Measured);
             }
             peaks[population] = minimum;
         }
         // Growth slack is identical for both paths and both mutants. Neither bound
         // is adjusted from a failed run; the real-path mutant must fail it.
-        bool rejected = peaks[0] > grant + 65536 || peaks[1] > grant + 65536 || peaks[1] - peaks[0] > 131072;
-        rejected.ShouldBe(mutant != 0);
+        long Peak(int p) => rounds[p].Min(x => x.Value.Measured);
+        await batch.CheckAsync(() =>
+        {
+            Term small = Term.Maximum(rounds[0]), large = Term.Maximum(rounds[1]);
+            return mutant == 0
+                ? [Ceiling("small set/inner peak", Peak(0), grant + 65536, small),
+                    Ceiling("large set/inner peak", Peak(1), grant + 65536, large),
+                    Ceiling("set/inner growth", Peak(1) - Peak(0), 131072, small + large)]
+                : [Floor("set/inner mutant violation", Math.Max(Math.Max(Peak(0) - grant - 65536, Peak(1) - grant - 65536), Peak(1) - Peak(0) - 131072),
+                    0, small + large, true)];
+        }, () =>
+        {
+            peaks[0] = Peak(0); peaks[1] = Peak(1);
+            bool rejected = peaks[0] > grant + 65536 || peaks[1] > grant + 65536 || peaks[1] - peaks[0] > 131072;
+            rejected.ShouldBe(mutant != 0);
+        });
+        await batch.CompleteAsync();
 
         async Task WarmAsync(int count)
         {
@@ -201,4 +227,6 @@ public sealed partial class SqlSortSpillConformanceTests
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
     }
+    private sealed record SetHeapReading(long Measured, long Before, long After, long ReplayPeak, long OrderedPeak, long AppendPeak, long PartitionPeak);
+
 }

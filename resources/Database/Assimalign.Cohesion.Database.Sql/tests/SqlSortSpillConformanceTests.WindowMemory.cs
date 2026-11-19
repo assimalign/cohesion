@@ -15,7 +15,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -49,7 +49,8 @@ public sealed partial class SqlSortSpillConformanceTests
                 continue;
             }
             await WarmWindowHeapAsync(session, sql);
-            await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_WindowCachedInputLiveHeap_ShouldCountPendingVectors), $"rows={count}", async readHeap =>
+            var batch = new Batch(pool, _output, nameof(ExecuteAsync_WindowCachedInputLiveHeap_ShouldCountPendingVectors));
+            var sampled = await batch.MeasureAsync($"rows={count}", async readHeap =>
             {
                 pooledImages.Drain(pool);
                 long before = readHeap(), peak = before, pending = -1;
@@ -70,14 +71,18 @@ public sealed partial class SqlSortSpillConformanceTests
                     resets.ShouldBe(1); drains.ShouldBeGreaterThan(0); pending.ShouldBe(0);
                     session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
                     TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
-                    return (Action)(() =>
-                    {
-                        measured.ShouldBeGreaterThanOrEqualTo(floor);
-                        measured.ShouldBeLessThanOrEqualTo(grant + 131072 + 65536);
-                    });
+                    return measured;
                 }
                 finally { SqlRowCollector.ObserveBuffer = null; }
             });
+            await batch.CheckAsync(() => [Floor("window cached workspace", sampled.Value, floor, sampled.Term),
+                Ceiling("window cached peak", sampled.Value, grant + 131072 + 65536, sampled.Term)], () =>
+            {
+                long measured = sampled.Value;
+                measured.ShouldBeGreaterThanOrEqualTo(floor);
+                measured.ShouldBeLessThanOrEqualTo(grant + 131072 + 65536);
+            });
+            await batch.CompleteAsync();
         }
     }
 
@@ -88,6 +93,7 @@ public sealed partial class SqlSortSpillConformanceTests
         // This is a real heap bound, including all decoded objects, not a ledger peak.
         const long grant = 1048576, handoff = 131072, runtimeSlack = 65536, floor = grant - 131072;
         var peaks = new long[4, 2];
+        var readings = new Sample<long>[4, 2];
         var builder = SqlDatabaseEngine.CreateBuilder("window-live");
         builder.Options.RootPath = Path.Combine(_root, "window-live");
         builder.Options.StatementMemoryBudget = grant; builder.Options.StatementTempSpaceQuota = 536870912;
@@ -101,16 +107,19 @@ public sealed partial class SqlSortSpillConformanceTests
         using var pooledImages = new WindowPoolLease();
         await WarmWindowHeapAsync(session, "SELECT id,note,ROW_NUMBER() OVER(PARTITION BY id%2048 ORDER BY id) FROM t WHERE id<16384");
         pooledImages.Drain(pool);
+        var acceptance = new Batch(pool, _output, nameof(ExecuteAsync_WindowLiveHeap_ShouldRejectRetentionMutants));
         foreach (int count in new[] { 16384, 32768 })
         {
             string sql = $"SELECT id,note,ROW_NUMBER() OVER(PARTITION BY id%{count / 8} ORDER BY id) FROM t WHERE id<{count}";
             await WarmWindowHeapAsync(session, sql);
-            for (int mutant = 0; mutant < 4; mutant++)
+            for (int mutantIndex = 0; mutantIndex < 4; mutantIndex++)
             {
+                int mutant = mutantIndex;
                 long minimum = long.MaxValue;
-                for (int execution = 0; execution < 1; execution++)
+                for (int executionIndex = 0; executionIndex < 1; executionIndex++)
                 {
-                    await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_WindowLiveHeap_ShouldRejectRetentionMutants), $"rows={count}|mutant={mutant}|execution={execution}", async readHeap =>
+                    int execution = executionIndex;
+                    var sampled = await acceptance.MeasureAsync($"rows={count}|mutant={mutant}|execution={execution}", async readHeap =>
                     {
                         pooledImages.Drain(pool);
                         var retained = new List<object>();
@@ -154,12 +163,8 @@ public sealed partial class SqlSortSpillConformanceTests
                             retained.Clear();
                             long after = readHeap();
                             long measured = peak - Math.Min(before, after);
-                            return (Action)(() =>
-                            {
-                                measured.ShouldBeGreaterThanOrEqualTo(floor);
-                                minimum = Math.Min(minimum, measured);
-                                _output.WriteLine($"WINDOW_HEAP_SAMPLE|rows={count}|mutant={mutant}|execution={execution}|peak={measured}|floor={floor}|before={before}|after={after}|pool_trimmed={pool.Trimmed-trimmed}|drains={drains}");
-                            });
+                            _output.WriteLine($"WINDOW_HEAP_SAMPLE|rows={count}|mutant={mutant}|execution={execution}|peak={measured}|floor={floor}|before={before}|after={after}|pool_trimmed={pool.Trimmed-trimmed}|drains={drains}");
+                            return measured;
                         }
                         finally
                         {
@@ -167,19 +172,40 @@ public sealed partial class SqlSortSpillConformanceTests
                         }
                         void Sample() { samples++; peak = Math.Max(peak, readHeap()); }
                     });
+                    readings[mutant, count == 16384 ? 0 : 1] = sampled;
+                    await acceptance.CheckAsync(() => [Floor("window live workspace", sampled.Value, floor, sampled.Term)],
+                        () => sampled.Value.ShouldBeGreaterThanOrEqualTo(floor));
+                    minimum = Math.Min(minimum, sampled.Value);
                 }
+                var current = readings[mutant, count == 16384 ? 0 : 1];
+                await acceptance.CheckAsync(() => mutant == 0
+                    ? [Ceiling("window peak", current.Value, grant + handoff + runtimeSlack, current.Term)]
+                    : [Floor("window retaining mutant", current.Value, grant + handoff + runtimeSlack, current.Term, true)], () =>
+                {
+                minimum = current.Value;
                 _output.WriteLine($"WINDOW_HEAP|rows={count}|partitions={count / 8}|mutant={mutant}|peak={minimum}|grant={grant}|handoff={handoff}|runtime_slack={runtimeSlack}");
                 void Bound() => minimum.ShouldBeLessThanOrEqualTo(grant + handoff + runtimeSlack);
                 peaks[mutant, count == 16384 ? 0 : 1] = minimum;
                 if (mutant == 0) { Bound(); }
                 else { Should.Throw<ShouldAssertException>(Bound); }
+                });
             }
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
-        Growth(0);
-        Should.Throw<ShouldAssertException>(() => Growth(1));
-        Should.Throw<ShouldAssertException>(() => Growth(2));
-        Should.Throw<ShouldAssertException>(() => Growth(3));
+        await acceptance.CheckAsync(() => Enumerable.Range(0, 4).Select(mutant => mutant == 0
+            ? Ceiling("window population growth", readings[mutant, 1].Value - readings[mutant, 0].Value, 131072,
+                readings[mutant, 1].Term + readings[mutant, 0].Term)
+            : Floor("window mutant population growth", readings[mutant, 1].Value - readings[mutant, 0].Value, 131072,
+                readings[mutant, 1].Term + readings[mutant, 0].Term, true)).ToArray(), () =>
+        {
+            for (int mutant = 0; mutant < 4; mutant++)
+            { for (int population = 0; population < 2; population++) { peaks[mutant, population] = readings[mutant, population].Value; } }
+            Growth(0);
+            Should.Throw<ShouldAssertException>(() => Growth(1));
+            Should.Throw<ShouldAssertException>(() => Growth(2));
+            Should.Throw<ShouldAssertException>(() => Growth(3));
+        });
+        await acceptance.CompleteAsync();
         void Growth(int mutant) => (peaks[mutant, 1] - peaks[mutant, 0]).ShouldBeLessThanOrEqualTo(131072);
     }
 

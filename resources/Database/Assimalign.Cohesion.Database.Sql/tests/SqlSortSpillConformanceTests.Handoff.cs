@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -47,7 +47,8 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_DeferredKeyHandoff_ShouldReleaseLiveKeys), $"rows=1000", async readHeap =>
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_DeferredKeyHandoff_ShouldReleaseLiveKeys));
+        var sampled = await batch.MeasureAsync($"rows=1000", async readHeap =>
         {
             readSample = readHeap;
             weak.Clear(); samples.Clear(); drained = false; observe = false;
@@ -74,14 +75,16 @@ public sealed partial class SqlSortSpillConformanceTests
                     _output.WriteLine($"LIVE_DEFERRED|{phase}|bytes={samples[phase]}|grant={grant}|constant={constant}");
                 }
                 session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
-                return (Action)(() =>
-                {
-                    foreach (string phase in new[] { "handoff", "drained", "arena", "input", "delivery" })
-                    { samples[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant); }
-                });
+                return new Dictionary<string, long>(samples);
             }
             finally { SqlRowCollector.ObserveSpill = null; }
         });
+        await batch.CheckAsync(() => sampled.Value.Select(sample => Ceiling(sample.Key, sample.Value, (long)(grant * 1.1) + constant, sampled.Term)).ToArray(), () =>
+        {
+                    foreach (string phase in new[] { "handoff", "drained", "arena", "input", "delivery" })
+                    { sampled.Value[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant); }
+        });
+        await batch.CompleteAsync();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Spill fitting sort: lending LINQ its buffer preserves warm allocation exactly (#1789)")]

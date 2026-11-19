@@ -15,7 +15,7 @@ using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -196,14 +196,19 @@ public sealed partial class SqlSortSpillConformanceTests
         await using var engine = await Create("output-live", grant);
         await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
         var populations = new List<long>();
+        var measuredPopulations = new List<List<Sample<long>>>();
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
+        var batch = new Batch(pool, _output, nameof(Add_OutputLiveHeap_ShouldRejectKeptPrefixAndPerRowRetention));
         foreach (int count in new[] { 10000, 30000 })
         {
             long minimum = long.MaxValue;
-            for (int execution = -1; execution < 3; execution++)
+            var rounds = new List<Sample<long>>();
+            measuredPopulations.Add(rounds);
+            for (int executionIndex = -1; executionIndex < 3; executionIndex++)
             {
-                long live = Measure(pool, _output, nameof(Add_OutputLiveHeap_ShouldRejectKeptPrefixAndPerRowRetention), $"rows={count}|mutant={mutant}|execution={execution}", readHeap =>
+                int execution = executionIndex;
+                var sampled = batch.Measure($"rows={count}|mutant={mutant}|execution={execution}", readHeap =>
                 {
                     images.Drain(pool);
                     long before = readHeap();
@@ -215,15 +220,30 @@ public sealed partial class SqlSortSpillConformanceTests
                     _output.WriteLine($"OUTPUT_LIVE_ROUND|rows={count}|mutant={mutant}|execution={execution}|baseline_before={before}|during={during}|baseline_after={after}|live={live}");
                     return live;
                 });
-                if (execution >= 0) { minimum = Math.Min(minimum, live); }
+                if (execution >= 0) { rounds.Add(sampled); minimum = Math.Min(minimum, sampled.Value); }
             }
-            minimum.ShouldBeLessThanOrEqualTo(grant + 524288);
+            batch.Check(() => [Ceiling("output population peak", rounds.Min(x => x.Value), grant + 524288, Term.Maximum(rounds))], () =>
+            {
+                minimum = rounds.Min(x => x.Value);
+                minimum.ShouldBeLessThanOrEqualTo(grant + 524288);
+                _output.WriteLine($"OUTPUT_LIVE|rows={count}|mutant={mutant}|live={minimum}");
+            });
             populations.Add(minimum);
-            _output.WriteLine($"OUTPUT_LIVE|rows={count}|mutant={mutant}|live={minimum}");
         }
         void AssertGrowth() => (populations[1] - populations[0]).ShouldBeLessThanOrEqualTo(65536);
-        if (mutant) { Should.Throw<ShouldAssertException>(AssertGrowth); }
-        else { AssertGrowth(); }
+        batch.Check(() =>
+        {
+            long growth = measuredPopulations[1].Min(x => x.Value) - measuredPopulations[0].Min(x => x.Value);
+            Term term = Term.Maximum(measuredPopulations[1]) + Term.Maximum(measuredPopulations[0]);
+            return mutant ? [Floor("output retaining mutant growth", growth, 65536, term, true)]
+                : [Ceiling("output population growth", growth, 65536, term)];
+        }, () =>
+        {
+            for (int p = 0; p < 2; p++) { populations[p] = measuredPopulations[p].Min(x => x.Value); }
+            if (mutant) { Should.Throw<ShouldAssertException>(AssertGrowth); }
+            else { AssertGrowth(); }
+        });
+        batch.Complete();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

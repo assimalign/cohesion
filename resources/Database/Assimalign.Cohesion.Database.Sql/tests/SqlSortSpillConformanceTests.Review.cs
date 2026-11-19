@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -260,7 +260,8 @@ public sealed partial class SqlSortSpillConformanceTests
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_AdditionalLiveStages_ShouldFitGrant), $"shape={shape}", async readHeap =>
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_AdditionalLiveStages_ShouldFitGrant));
+        var sampled = await batch.MeasureAsync($"shape={shape}", async readHeap =>
         {
             images.Drain(pool);
 
@@ -277,17 +278,19 @@ public sealed partial class SqlSortSpillConformanceTests
                 await foreach (var row in result.GetRowsAsync()) { _ = row.FieldCount; }
                 // Assert
                 samples.ShouldContainKey(required);
-                return (Action)(() =>
-                {
-                    foreach (var sample in samples)
+                return new Dictionary<string, long>(samples);
+            }
+            finally { SqlRowCollector.ObserveSpill = null; }
+        });
+        await batch.CheckAsync(() => sampled.Value.Select(sample => Ceiling(sample.Key, sample.Value, (long)(grant * 1.1) + constant, sampled.Term)).ToArray(), () =>
+        {
+                    foreach (var sample in sampled.Value)
                     {
                         _output.WriteLine($"LIVE_STAGE|{sample.Key}|bytes={sample.Value}|grant={grant}|constant={constant}");
                         sample.Value.ShouldBeLessThanOrEqualTo((long)(grant*1.1)+constant);
                     }
-                });
-            }
-            finally { SqlRowCollector.ObserveSpill = null; }
         });
+        await batch.CompleteAsync();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Nested loop inner lists are collectible after input is drained (#1789)")]

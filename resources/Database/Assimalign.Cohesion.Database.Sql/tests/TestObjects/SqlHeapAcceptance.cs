@@ -41,13 +41,14 @@ internal static class SqlHeapAcceptance
     internal static HeapCheck Ceiling(string name, double raw, double bound, Term term, bool strict = false) => new(name, raw, bound, term, true, strict);
     internal static HeapCheck Floor(string name, double raw, double bound, Term term, bool strict = false) => new(name, raw, bound, term, false, strict);
 
-    internal sealed class Batch
+    internal sealed class Batch : IAsyncDisposable
     {
         private readonly HashPoolEvents _events;
         private readonly ITestOutputHelper _output;
         private readonly string _test;
         private readonly List<Execution> _executions = [];
         private readonly List<CheckGroup> _groups = [];
+        private readonly List<Func<ValueTask>> _release = [];
 
         internal Batch(HashPoolEvents events, ITestOutputHelper output, string test)
         { _events = events; _output = output; _test = test; }
@@ -71,23 +72,34 @@ internal static class SqlHeapAcceptance
 
         internal void Check(Func<HeapCheck[]> checks, Action assert) => CheckAsync(checks, assert).GetAwaiter().GetResult();
 
-        internal async Task CheckAsync(Func<HeapCheck[]> checks, Action assert)
+        internal Task CheckAsync(Func<HeapCheck[]> checks, Action assert) =>
+            CheckAsync(checks, () => { assert(); return Task.CompletedTask; });
+
+        internal async Task CheckAsync(Func<HeapCheck[]> checks, Func<Task> assert)
         {
             _groups.Add(new CheckGroup(checks, assert));
-            await ValidateAsync();
+            await ValidateAsync(all: false);
         }
 
-        private async Task ValidateAsync()
+        internal async Task SettleAsync(Func<HeapCheck[]> checks)
+        {
+            var group = new CheckGroup(checks, () => Task.CompletedTask);
+            _groups.Add(group);
+            try { await ValidateAsync(all: false); }
+            finally { _groups.Remove(group); }
+        }
+
+        private async Task ValidateAsync(bool all = true)
         {
             while (true)
             {
-                var checks = _groups.Select(g => (Group: g, Checks: g.Checks())).ToArray();
+                var checks = (all ? _groups : _groups.TakeLast(1)).Select(g => (Group: g, Checks: g.Checks())).ToArray();
                 var failed = checks.SelectMany(g => g.Checks.Select(c => (g.Group, Check: c))).Where(x => !x.Check.Holds).ToArray();
                 // A clean execution retains the original Shouldly expression and fails
                 // at the original check. Only a nonzero term can cause remeasurement.
                 foreach (var item in failed.Where(x => x.Check.Term.Bytes == 0))
                 {
-                    item.Group.AssertOnce();
+                    await item.Group.AssertOnceAsync();
                     false.ShouldBeTrue(item.Check.Failure);
                 }
                 if (failed.Length != 0)
@@ -98,11 +110,43 @@ internal static class SqlHeapAcceptance
                         execution.Reject(failed.Where(x => x.Check.Term.Sources.Contains(execution)).Select(x => x.Check.Failure));
                     }
                     foreach (Execution execution in retry) { await execution.LoadAsync(); }
+                    all = true;
                     continue;
                 }
-                foreach (var group in checks.Where(x => x.Checks.All(c => c.Term.Bytes == 0))) { group.Group.AssertOnce(); }
+                foreach (var group in checks.Where(x => x.Checks.All(c => c.Term.Bytes == 0))) { await group.Group.AssertOnceAsync(); }
                 return;
             }
+        }
+
+        // Clean executions can never be selected by a combined check for remeasurement.
+        // Dispose their fixture at its original boundary; keep only fixtures whose
+        // nonzero terms can still require another execution after this scope ends.
+        internal async ValueTask ReleaseOrRetainAsync(IEnumerable<Execution> executions, Func<ValueTask> release)
+        {
+            if (executions.Any(x => x.TrimmedBytes > 0)) { _release.Add(release); }
+            else { await release(); }
+        }
+
+        internal IAsyncDisposable LeaseAsync(IAsyncDisposable resource, IEnumerable<Execution> executions) =>
+            new FixtureLease(this, executions, resource.DisposeAsync);
+
+        internal IAsyncDisposable Lease(IDisposable resource, IEnumerable<Execution> executions) =>
+            new FixtureLease(this, executions, () => { resource.Dispose(); return ValueTask.CompletedTask; });
+
+        private sealed class FixtureLease : IAsyncDisposable
+        {
+            private readonly Batch _batch;
+            private readonly IEnumerable<Execution> _executions;
+            private readonly Func<ValueTask> _release;
+            internal FixtureLease(Batch batch, IEnumerable<Execution> executions, Func<ValueTask> release)
+            { _batch = batch; _executions = executions; _release = release; }
+            public ValueTask DisposeAsync() => _batch.ReleaseOrRetainAsync(_executions, _release);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            foreach (var release in _release) { await release(); }
+            _release.Clear();
         }
 
         internal void Complete() => CompleteAsync().GetAwaiter().GetResult();
@@ -110,7 +154,7 @@ internal static class SqlHeapAcceptance
         internal async Task CompleteAsync()
         {
             await ValidateAsync();
-            foreach (CheckGroup group in _groups) { group.AssertOnce(); }
+            foreach (CheckGroup group in _groups) { await group.AssertOnceAsync(); }
             HeapCheck[] checks = _groups.SelectMany(g => g.Checks()).ToArray();
             foreach (Execution execution in _executions.Where(x => x.TrimmedBytes > 0))
             {
@@ -124,11 +168,11 @@ internal static class SqlHeapAcceptance
 
         private sealed class CheckGroup
         {
-            private readonly Action _assert;
+            private readonly Func<Task> _assert;
             private bool _asserted;
             internal Func<HeapCheck[]> Checks { get; }
-            internal CheckGroup(Func<HeapCheck[]> checks, Action assert) { Checks = checks; _assert = assert; }
-            internal void AssertOnce() { if (!_asserted) { _asserted = true; _assert(); } }
+            internal CheckGroup(Func<HeapCheck[]> checks, Func<Task> assert) { Checks = checks; _assert = assert; }
+            internal async Task AssertOnceAsync() { if (!_asserted) { _asserted = true; await _assert(); } }
         }
 
         internal HashPoolEvents Events => _events;
@@ -157,13 +201,18 @@ internal static class SqlHeapAcceptance
             {
                 _cancellationToken.ThrowIfCancellationRequested();
                 var window = new Window(_batch.Events);
-                if (await LoadAttemptAsync(window)) { return; }
+                if (await LoadAttemptAsync(window))
+                {
+                    if (window.TrimmedBytes == 0) { SealClean(); }
+                    return;
+                }
                 Reject(["unsized trims"]);
             }
         }
 
         internal void Record(Window window) => _history.Add(new(window.Trims, window.TrimmedBytes, window.UnsizedTrims));
         private protected abstract void Clear();
+        private protected abstract void SealClean();
         private protected abstract Task<bool> LoadAttemptAsync(Window window);
 
         internal void Reject(IEnumerable<string> failures)
@@ -193,19 +242,20 @@ internal static class SqlHeapAcceptance
 
     internal sealed class Sample<T> : Execution
     {
-        private readonly Func<Func<long>, Task<T>> _measure;
+        private Func<Func<long>, Task<T>>? _measure;
         internal T Value { get; private set; } = default!;
         internal Sample(Batch batch, FormattableString labels, Func<Func<long>, Task<T>> measure, CancellationToken cancellationToken = default)
             : base(batch, labels, cancellationToken) { _measure = measure; }
 
         private protected override void Clear() => Value = default!;
+        private protected override void SealClean() => _measure = null;
 
         // Returning from this frame drops a rejected attempt's result graph before
         // the next drain/baseline, including unsized-trim remeasurements.
         [MethodImpl(MethodImplOptions.NoInlining)]
         private protected override async Task<bool> LoadAttemptAsync(Window window)
         {
-            T result = await _measure(window.Read);
+            T result = await _measure!(window.Read);
             Record(window);
             if (window.UnsizedTrims != 0) { return false; }
             Value = result;

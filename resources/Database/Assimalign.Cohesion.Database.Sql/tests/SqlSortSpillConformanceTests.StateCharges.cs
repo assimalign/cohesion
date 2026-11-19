@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -56,22 +56,27 @@ public sealed partial class SqlSortSpillConformanceTests
 
 
         // Act: retain 4,096 then 16,384 states in the same preallocated root vector.
-        long bytes = long.MaxValue;
-        for (int round = 1; round <= 3; round++)
+        var batch = new Batch(pool, _output, nameof(HashGroupStateBytes_ReplayNativeFamilies_ShouldBoundRetainedStates));
+        var rounds = new List<Sample<long>>();
+        for (int index = 1; index <= 3; index++)
         {
-            long measured = Measure(pool, _output, nameof(HashGroupStateBytes_ReplayNativeFamilies_ShouldBoundRetainedStates), $"function={function}|type={type}|round={round}", readHeap =>
+            int round = index;
+            rounds.Add(batch.Measure($"function={function}|type={type}|round={round}", readHeap =>
             {
                 images.Drain(pool);
-                return MeasureStates(aggregate, type, readHeap);
-            });
-            _output.WriteLine($"STATE_ROUND|function={function}|type={type}|round={round}|bytes={measured}");
-            bytes = Math.Min(bytes, measured);
+                long measured = MeasureStates(aggregate, type, readHeap);
+                _output.WriteLine($"STATE_ROUND|function={function}|type={type}|round={round}|bytes={measured}");
+                return measured;
+            }));
         }
         long charged = GroupStateBytes(null!, [aggregate]) - GroupStateBytes(null!, []);
-
-        // Assert: compare the marginal bytes per state, including its 8 B array slot.
-        _output.WriteLine($"STATE_CHARGE|{function}|{type}|bytes_per_state={bytes / 12288d}|charged={charged}");
-        (bytes / 12288 + 8).ShouldBeLessThanOrEqualTo(charged);
+        batch.Check(() => [Ceiling("state bytes plus slot", rounds.Min(x => x.Value) / 12288 + 8, charged, Term.Maximum(rounds) / 12288)], () =>
+        {
+            long bytes = rounds.Min(x => x.Value);
+            _output.WriteLine($"STATE_CHARGE|{function}|{type}|bytes_per_state={bytes / 12288d}|charged={charged}");
+            (bytes / 12288 + 8).ShouldBeLessThanOrEqualTo(charged);
+        });
+        await batch.CompleteAsync();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

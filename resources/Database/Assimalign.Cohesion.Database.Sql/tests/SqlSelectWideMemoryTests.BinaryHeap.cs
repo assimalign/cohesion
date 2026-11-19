@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -36,13 +36,15 @@ public sealed partial class SqlSelectWideMemoryTests
         using var images = new WindowPoolLease();
         images.Drain(pool);
 
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_BinaryCloneHeap_ShouldReportMeasuredGrowth));
+        var rounds = new List<Sample<long>>();
         long largestGrowth = 0, observed = 0;
         Dictionary<string, object?>? parameters = null;
 
         // Act: warm first, then retain three fresh sets of clones and force GC at peak.
         for (int round = 0; round < 3; round++)
         {
-            long growth = await MeasureAsync(pool, _output, nameof(ExecuteAsync_BinaryCloneHeap_ShouldReportMeasuredGrowth), $"base={forceBase}|round={round}", async readHeap =>
+            var sampled = await batch.MeasureAsync($"base={forceBase}|round={round}", async readHeap =>
             {
                 long growth = 0;
                 parameters = null;
@@ -66,13 +68,19 @@ public sealed partial class SqlSelectWideMemoryTests
                 captured.ShouldBeTrue();
                 return growth;
             });
-            largestGrowth = Math.Max(largestGrowth, growth);
+            rounds.Add(sampled);
+            largestGrowth = Math.Max(largestGrowth, sampled.Value);
         }
 
         // Assert
         _output.WriteLine($"BINARY_HEAP|base={forceBase}|charged={observed}|heap={largestGrowth}|ratio={observed / (double)Math.Max(1, largestGrowth):F6}");
         observed.ShouldBe(expected);
-        largestGrowth.ShouldBeGreaterThan(0);
+        await batch.CheckAsync(() => [Floor("largest heap growth > 0", rounds.Max(x => x.Value), 0, Term.Maximum(rounds), true)], () =>
+        {
+            largestGrowth = rounds.Max(x => x.Value);
+            largestGrowth.ShouldBeGreaterThan(0);
+        });
+        await batch.CompleteAsync();
         GC.KeepAlive(parameters);
 
         async Task Execute(Dictionary<string, object?> arguments)

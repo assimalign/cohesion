@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -43,21 +43,27 @@ public sealed partial class SqlSortSpillConformanceTests
         using var images = new WindowPoolLease();
         images.Drain(pool);
 
-        long live = long.MaxValue, charge = 0;
-        for (int round = 1; round <= 3; round++)
+        var batch = new Batch(pool, _output, nameof(HashJoinEntries_TwoPopulations_ShouldBoundLiveHeap));
+        var rounds = new List<Sample<(long Live, long Charge)>>();
+        for (int index = 1; index <= 3; index++)
         {
-            var measured = Measure(pool, _output, nameof(HashJoinEntries_TwoPopulations_ShouldBoundLiveHeap), $"family={family}|round={round}", readHeap =>
+            int round = index;
+            rounds.Add(batch.Measure($"family={family}|round={round}", readHeap =>
             {
                 images.Drain(pool);
-                return MeasureJoinEntries(family, readHeap);
-            });
-            _output.WriteLine($"JOIN_ENTRY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charge}");
-            live = Math.Min(live, measured.Live);
-            charge = measured.Charge;
+                var measured = MeasureJoinEntries(family, readHeap);
+                _output.WriteLine($"JOIN_ENTRY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charge}");
+                return measured;
+            }));
         }
-        // Assert
-        (live / 12288).ShouldBeLessThanOrEqualTo(charge / 12288);
-        _output.WriteLine($"JOIN_ENTRY_CHARGE|family={family}|live={live}|charged={charge}|population_delta=12288");
+        batch.Check(() => [Ceiling("join entry bytes", rounds.Min(x => x.Value.Live) / 12288,
+            rounds[^1].Value.Charge / 12288, Term.Maximum(rounds) / 12288)], () =>
+        {
+            long live = rounds.Min(x => x.Value.Live), charge = rounds[^1].Value.Charge;
+            (live / 12288).ShouldBeLessThanOrEqualTo(charge / 12288);
+            _output.WriteLine($"JOIN_ENTRY_CHARGE|family={family}|live={live}|charged={charge}|population_delta=12288");
+        });
+        batch.Complete();
         return Task.CompletedTask;
     }
 
@@ -104,36 +110,54 @@ public sealed partial class SqlSortSpillConformanceTests
         using var images = new WindowPoolLease();
         images.Drain(pool);
 
+        var batch = new Batch(pool, _output, nameof(HashJoinReplay_TwoPopulations_ShouldRejectRetainingMutant));
         var small = MeasurePopulation(6000);
         var large = MeasurePopulation(12000);
         var retainedSmall = MeasureExecution(6000, true, 0);
         var retainedLarge = MeasureExecution(12000, true, 0);
+        long Peak(Sample<(long Peak, long Replay)>[] population) => population.Min(x => x.Value.Peak);
+        long Replay(Sample<(long Peak, long Replay)>[] population) => population.Min(x => x.Value.Replay);
         // Assert
-        small.Peak.ShouldBeLessThanOrEqualTo(1048576+262144); large.Peak.ShouldBeLessThanOrEqualTo(1048576+262144);
-        (large.Peak-small.Peak).ShouldBeLessThanOrEqualTo(131072);
-        (large.Replay-small.Replay).ShouldBeLessThanOrEqualTo(131072);
-        (retainedLarge.Replay-retainedSmall.Replay).ShouldBeGreaterThan(131072);
-        _output.WriteLine($"JOIN_LIVE|full={full}|small={small.Peak}|large={large.Peak}|delta={large.Peak-small.Peak}|replay_delta={large.Replay-small.Replay}|mutant_replay_delta={retainedLarge.Replay-retainedSmall.Replay}");
+        batch.Check(() =>
+        {
+            Term smallTerm = Term.Maximum(small), largeTerm = Term.Maximum(large);
+            return [Ceiling("small peak", Peak(small), 1048576 + 262144, smallTerm),
+                Ceiling("large peak", Peak(large), 1048576 + 262144, largeTerm),
+                Ceiling("population peak growth", Peak(large) - Peak(small), 131072, largeTerm + smallTerm),
+                Ceiling("population replay growth", Replay(large) - Replay(small), 131072, largeTerm + smallTerm),
+                Floor("retaining mutant replay growth", retainedLarge.Value.Replay - retainedSmall.Value.Replay, 131072,
+                    retainedLarge.Term + retainedSmall.Term, true)];
+        }, () =>
+        {
+            var smallValue = (Peak: Peak(small), Replay: Replay(small));
+            var largeValue = (Peak: Peak(large), Replay: Replay(large));
+            smallValue.Peak.ShouldBeLessThanOrEqualTo(1048576+262144); largeValue.Peak.ShouldBeLessThanOrEqualTo(1048576+262144);
+            (largeValue.Peak-smallValue.Peak).ShouldBeLessThanOrEqualTo(131072);
+            (largeValue.Replay-smallValue.Replay).ShouldBeLessThanOrEqualTo(131072);
+            (retainedLarge.Value.Replay-retainedSmall.Value.Replay).ShouldBeGreaterThan(131072);
+            _output.WriteLine($"JOIN_LIVE|full={full}|small={smallValue.Peak}|large={largeValue.Peak}|delta={largeValue.Peak-smallValue.Peak}|replay_delta={largeValue.Replay-smallValue.Replay}|mutant_replay_delta={retainedLarge.Value.Replay-retainedSmall.Value.Replay}");
+        });
+        batch.Complete();
         TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);
 
-        (long Peak, long Replay) MeasureExecution(int count, bool mutant, int execution) =>
-            Measure(pool, _output, nameof(HashJoinReplay_TwoPopulations_ShouldRejectRetainingMutant), $"rows={count}|execution={execution}|full={full}|mutant={mutant}", readHeap =>
+        Sample<(long Peak, long Replay)> MeasureExecution(int count, bool mutant, int execution) =>
+            batch.Measure($"rows={count}|execution={execution}|full={full}|mutant={mutant}", readHeap =>
             {
                 images.Drain(pool);
                 return MeasureJoinReplay(session, count, mutant, sample: true, full: full, execution: execution, readHeap: readHeap);
             });
 
-        (long Peak, long Replay) MeasurePopulation(int count)
+        Sample<(long Peak, long Replay)>[] MeasurePopulation(int count)
         {
-            long peak = long.MaxValue, replay = long.MaxValue;
+            var rounds = new Sample<(long Peak, long Replay)>[3];
             for (int execution = 1; execution <= 3; execution++)
             {
                 var measured = MeasureExecution(count, false, execution);
-                measured.Peak.ShouldBeLessThanOrEqualTo(1048576 + 262144);
-                peak = Math.Min(peak, measured.Peak);
-                replay = Math.Min(replay, measured.Replay);
+                rounds[execution - 1] = measured;
+                batch.Check(() => [Ceiling("execution peak", measured.Value.Peak, 1048576 + 262144, measured.Term)],
+                    () => measured.Value.Peak.ShouldBeLessThanOrEqualTo(1048576 + 262144));
             }
-            return (peak, replay);
+            return rounds;
         }
     }
 

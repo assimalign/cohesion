@@ -20,7 +20,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -139,31 +139,45 @@ public sealed partial class SqlSortSpillConformanceTests
     public async Task ExecuteAsync_HashLiveObjects_ShouldRejectRetainingMutant()
     {
         // Arrange: both populations fill a replay batch before repartitioning. Keep later hash bits.
+        using var pool = new HashPoolEvents();
+        await using var batch = new Batch(pool, _output, nameof(ExecuteAsync_HashLiveObjects_ShouldRejectRetainingMutant));
         var partitionHash = SqlPlanExecutor.HashSpillPartitionHash;
         SqlPlanExecutor.HashSpillPartitionHash = hash => hash & ~7;
         try
         {
             // Act: separate fully warmed engines exclude table storage from each sample.
-            var small = await MeasureHashLiveAsync(12000);
-            var large = await MeasureHashLiveAsync(24000);
+            var small = await MeasureHashLiveAsync(12000, batch, pool);
+            var large = await MeasureHashLiveAsync(24000, batch, pool);
 
             // Assert: doubling row count must not retain another row-sized replay population.
-            (large.Replay - small.Replay).ShouldBeLessThanOrEqualTo(131072);
-            _output.WriteLine($"HASH_LIVE_DELTA|small={small.Replay}|large={large.Replay}|delta={large.Replay-small.Replay}|maximum=131072");
-            for (int execution = 0; execution < small.SmallMutant.Length; execution++)
+            long Replay(Sample<HashHeapReading>[] population) => population.Min(x => x.Value.Replay);
+            await batch.CheckAsync(() => [Ceiling("hash replay population growth", Replay(large.Normal) - Replay(small.Normal), 131072,
+                Term.Maximum(large.Normal) + Term.Maximum(small.Normal)),
+                ..Enumerable.Range(0, 3).Select(execution => Floor("small hash mutant growth " + execution,
+                    large.SmallMutant[execution].Value.Replay - small.SmallMutant[execution].Value.Replay, 131072,
+                    large.SmallMutant[execution].Term + small.SmallMutant[execution].Term, true))], () =>
             {
-                long delta = large.SmallMutant[execution] - small.SmallMutant[execution];
-                _output.WriteLine($"HASH_SMALL_MUTANT_DELTA|execution={execution + 1}|small={small.SmallMutant[execution]}|large={large.SmallMutant[execution]}|delta={delta}|maximum=131072");
-                delta.ShouldBeGreaterThan(131072);
-                Should.Throw<ShouldAssertException>(() => delta.ShouldBeLessThanOrEqualTo(131072));
-            }
+                long smallReplay = Replay(small.Normal), largeReplay = Replay(large.Normal);
+                (largeReplay - smallReplay).ShouldBeLessThanOrEqualTo(131072);
+                _output.WriteLine($"HASH_LIVE_DELTA|small={smallReplay}|large={largeReplay}|delta={largeReplay-smallReplay}|maximum=131072");
+                for (int execution = 0; execution < small.SmallMutant.Length; execution++)
+                {
+                    long delta = large.SmallMutant[execution].Value.Replay - small.SmallMutant[execution].Value.Replay;
+                    _output.WriteLine($"HASH_SMALL_MUTANT_DELTA|execution={execution + 1}|small={small.SmallMutant[execution].Value.Replay}|large={large.SmallMutant[execution].Value.Replay}|delta={delta}|maximum=131072");
+                    delta.ShouldBeGreaterThan(131072);
+                    Should.Throw<ShouldAssertException>(() => delta.ShouldBeLessThanOrEqualTo(131072));
+                }
+            });
+            await batch.CompleteAsync();
         }
         finally { SqlPlanExecutor.HashSpillPartitionHash = partitionHash; }
     }
 
-    private async Task<(long Replay, long[] SmallMutant)> MeasureHashLiveAsync(int count)
+    private async Task<(Sample<HashHeapReading>[] Normal, Sample<HashHeapReading>[] SmallMutant)> MeasureHashLiveAsync(int count, Batch batch, HashPoolEvents pool)
     {
-        using var pool = new HashPoolEvents();
+        var measurements = new List<Sample<HashHeapReading>>();
+        var normal = new Sample<HashHeapReading>[3];
+        var smallMutant = new Sample<HashHeapReading>[3];
         // Arrange
         const long grant = 1048576, allowance = 262144;
         bool observe = false;
@@ -179,23 +193,27 @@ public sealed partial class SqlSortSpillConformanceTests
             if (mutant != 0) { retained.Add(new byte[mutant == 1 ? 1024 : 40]); }
             return value;
         }));
-        await using var engine = await builder.BuildAsync();
-        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        var engine = await builder.BuildAsync();
+        await using var engineLease = batch.LeaseAsync(engine, measurements);
+        var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+        await using var sessionLease = batch.LeaseAsync(session, measurements);
         await Seed(session, count);
         const string sql = "SELECT fresh_key(id),COUNT(*) FROM t GROUP BY fresh_key(id)";
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
         // Keep pre-existing pool images from disappearing during either population.
-        using var images = new WindowPoolLease();
+        var images = new WindowPoolLease();
+        await using var imagesLease = batch.Lease(images, measurements);
         images.Drain(pool);
-        long minimumReplay = long.MaxValue;
-        var smallMutant = new long[3];
+
         try
         {
-            for (int mode = 0; mode <= 2; mode++)
+            for (int modeIndex = 0; modeIndex <= 2; modeIndex++)
             {
-                for (int execution = 1; execution <= (mode == 1 ? 1 : 3); execution++)
+                int mode = modeIndex;
+                for (int executionIndex = 1; executionIndex <= (mode == 1 ? 1 : 3); executionIndex++)
                 {
-                    await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_HashLiveObjects_ShouldRejectRetainingMutant), $"rows={count}|execution={execution}|mutant={mode}", async readHeap =>
+                    int execution = executionIndex;
+                    var sampled = await batch.MeasureAsync($"rows={count}|execution={execution}|mutant={mode}", async readHeap =>
                     {
                         weak.Clear(); retained.Clear(); mutant = mode;
                         images.Drain(pool);
@@ -235,29 +253,33 @@ public sealed partial class SqlSortSpillConformanceTests
                         SqlPlanExecutor.ObserveHashSpill = null; observe = false;
                         replaySampled.ShouldBeTrue(); replayDepth.ShouldBeGreaterThan(1);
                         if (mode != 0) { retained.Count.ShouldBe(count); }
-                        return (Action)(() =>
+                        GC.KeepAlive(retained);
+                        return new HashHeapReading(peak, replayPeak, mode == 1 ? phasePeaks["ordered"] - before : 0, retained.Count);
+                    });
+                    measurements.Add(sampled);
+                    if (mode == 0) { normal[execution - 1] = sampled; }
+                    if (mode == 2) { smallMutant[execution - 1] = sampled; }
+                    await batch.CheckAsync(() => [Floor("hash replay > 0", sampled.Value.Replay, 0, sampled.Term, true),
+                        Floor("hash peak > 0", sampled.Value.Peak, 0, sampled.Term, true),
+                        ..(mode == 0 ? new[] { Ceiling("hash execution peak", sampled.Value.Peak, grant + allowance, sampled.Term) } : []),
+                        ..(mode == 1 ? new[] { Floor("large hash mutant ordered peak", sampled.Value.Ordered, grant + allowance, sampled.Term, true) } : [])], () =>
+                    {
+                        long replayPeak = sampled.Value.Replay, peak = sampled.Value.Peak;
+                        replayPeak.ShouldBeGreaterThan(0);
+                        peak.ShouldBeGreaterThan(0);
+                        if (mode == 0) { peak.ShouldBeLessThanOrEqualTo(grant + allowance); }
+                        else
                         {
-                            replayPeak.ShouldBeGreaterThan(0);
-                            peak.ShouldBeGreaterThan(0);
-                            if (mode == 0)
-                            {
-                                peak.ShouldBeLessThanOrEqualTo(grant + allowance);
-                                minimumReplay = Math.Min(minimumReplay, replayPeak);
-                            }
-                            else
-                            {
-                                if (mode == 1) { (phasePeaks["ordered"] - before).ShouldBeGreaterThan(grant + allowance); }
-                                else { smallMutant[execution - 1] = replayPeak; }
-                                _output.WriteLine($"HASH_MUTANT|rows={count}|execution={execution}|object_bytes={(mode == 1 ? 1048 : 64)}|bytes={peak}|objects={retained.Count}");
-                            }
-                        });
+                            if (mode == 1) { sampled.Value.Ordered.ShouldBeGreaterThan(grant + allowance); }
+                            _output.WriteLine($"HASH_MUTANT|rows={count}|execution={execution}|object_bytes={(mode == 1 ? 1048 : 64)}|bytes={peak}|objects={sampled.Value.Retained}");
+                        }
                     });
                 }
             }
         }
         finally { SqlPlanExecutor.ObserveHashSpill = null; retained.Clear(); }
         TempBytes(engine.TempSpace!).ShouldBe(0); session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
-        return (minimumReplay, smallMutant);
+        return (normal, smallMutant);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Hash crash images: read-only spill boundaries preserve the exact durable state (#1789)")]
@@ -302,4 +324,6 @@ public sealed partial class SqlSortSpillConformanceTests
             (await Rows(schema)).ShouldHaveSingleItem().Cells[0].ShouldBe(1L);
         }
     }
+    private sealed record HashHeapReading(long Peak, long Replay, long Ordered, int Retained);
+
 }

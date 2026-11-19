@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -15,7 +16,7 @@ using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
 using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
-using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapMeasurement;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -53,18 +54,27 @@ public sealed partial class SqlSortSpillConformanceTests
         images.Drain(pool);
 
         // Act
-        (long Live, long Charge) measured = (long.MaxValue, 0);
-        for (int round = 1; round <= 3; round++)
+        var batch = new Batch(pool, _output, nameof(JoinFixCharges_TwoPopulations_ShouldBoundComponent));
+        var rounds = new List<Sample<(long Live, long Charge)>>();
+        for (int index = 1; index <= 3; index++)
         {
-            var current = await MeasureAsync(pool, _output, nameof(JoinFixCharges_TwoPopulations_ShouldBoundComponent), $"component={component}|round={round}",
+            int round = index;
+            var sample = await batch.MeasureAsync($"component={component}|round={round}",
                 readHeap => MeasureJoinComponent(session, component, 128, 512, images, pool, readHeap));
+            rounds.Add(sample);
+            var current = sample.Value;
             _output.WriteLine($"JOIN_COMPONENT_ROUND|component={component}|round={round}|live={current.Live}|charged={current.Charge}");
-            if (current.Live < measured.Live) { measured = current; }
         }
-        // Assert: marginal bytes per component. Mutation runs halve the actual product charge.
-        _output.WriteLine($"JOIN_COMPONENT|{component}|live={measured.Live}|charged={measured.Charge}|units=384");
-        measured.Live.ShouldBeGreaterThan(0);
-        (measured.Live / 384).ShouldBeLessThanOrEqualTo(measured.Charge / 384);
+        (long Live, long Charge) Minimum() => rounds.OrderBy(x => x.Value.Live).First().Value;
+        await batch.CheckAsync(() => [Floor("component live > 0", Minimum().Live, 0, Term.Maximum(rounds), true),
+            Ceiling("component bytes", Minimum().Live / 384, Minimum().Charge / 384, Term.Maximum(rounds) / 384)], () =>
+        {
+            var measured = Minimum();
+            _output.WriteLine($"JOIN_COMPONENT|{component}|live={measured.Live}|charged={measured.Charge}|units=384");
+            measured.Live.ShouldBeGreaterThan(0);
+            (measured.Live / 384).ShouldBeLessThanOrEqualTo(measured.Charge / 384);
+        });
+        await batch.CompleteAsync();
         Statements(engine.TempSpace!).ShouldBeEmpty();
     }
 
@@ -188,32 +198,35 @@ public sealed partial class SqlSortSpillConformanceTests
     {
         // Arrange
         long budget = shape == "yield" ? 262144 : 1048576;
-        await using var engine = await Create("join-combined", budget);
-        await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
-        if (shape == "yield") { await SeedYieldJoin(session); }
-        else
-        {
-            await SeedJoinFix(session, shape == "ownership" ? 5000 : 3000);
-            await session.ExecuteAsync("CREATE TABLE jt(id INT,payload TEXT)");
-            for (int start = 1000; start < 4000; start += 100)
-            {
-                var values = new List<string>();
-                for (int i = start; i < start + 100; i++) { values.Add($"({i},'{new string('y', 512)}')"); }
-                await session.ExecuteAsync("INSERT INTO jt VALUES" + string.Join(',', values));
-            }
-        }
-        string sql = shape switch
-        {
-            "yield" => "SELECT jl.id,jr.id FROM jl FULL JOIN jr ON jl.id=jr.id",
-            "deferred" => "SELECT l.id,r.payload,t.id FROM jl l FULL JOIN jr r ON l.id=r.id FULL JOIN jt t ON r.id=t.id ORDER BY t.id IS NULL LIMIT 600",
-            "ownership" => $"SELECT l.id/4 g,BOOL_AND(r.payload IS NULL) b,CAST(l.id/4 AS TEXT)||'{new string('z', 1000)}' pad FROM jl l LEFT JOIN jr r ON l.id=r.id GROUP BY l.id/4 ORDER BY g",
-            _ => $"SELECT l.id,COUNT(t.id) c,CAST(l.id AS TEXT)||'{new string('z', 500)}' pad FROM jl l FULL JOIN jr r ON l.id=r.id FULL JOIN jt t ON r.id=t.id GROUP BY l.id ORDER BY c DESC,l.id",
-        };
-        if (!cold) { var warm = (DatabaseResultSet)await session.ExecuteAsync(sql); await DrainJoinHeap(warm); await warm.DisposeAsync(); }
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_JoinFixCombinedHeap_ShouldUseOneAllowance), $"shape={shape}|cold={cold}", async readHeap =>
+        int measurement = 0;
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_JoinFixCombinedHeap_ShouldUseOneAllowance));
+        var sampled = await batch.MeasureAsync($"shape={shape}|cold={cold}", async readHeap =>
         {
+            await using var engine = await Create(measurement++ == 0 ? "join-combined" : "join-combined-attempt-" + measurement, budget);
+            await using var session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+            if (shape == "yield") { await SeedYieldJoin(session); }
+            else
+            {
+                await SeedJoinFix(session, shape == "ownership" ? 5000 : 3000);
+                await session.ExecuteAsync("CREATE TABLE jt(id INT,payload TEXT)");
+                for (int start = 1000; start < 4000; start += 100)
+                {
+                    var values = new List<string>();
+                    for (int i = start; i < start + 100; i++) { values.Add($"({i},'{new string('y', 512)}')"); }
+                    await session.ExecuteAsync("INSERT INTO jt VALUES" + string.Join(',', values));
+                }
+            }
+            string sql = shape switch
+            {
+                "yield" => "SELECT jl.id,jr.id FROM jl FULL JOIN jr ON jl.id=jr.id",
+                "deferred" => "SELECT l.id,r.payload,t.id FROM jl l FULL JOIN jr r ON l.id=r.id FULL JOIN jt t ON r.id=t.id ORDER BY t.id IS NULL LIMIT 600",
+                "ownership" => $"SELECT l.id/4 g,BOOL_AND(r.payload IS NULL) b,CAST(l.id/4 AS TEXT)||'{new string('z', 1000)}' pad FROM jl l LEFT JOIN jr r ON l.id=r.id GROUP BY l.id/4 ORDER BY g",
+                _ => $"SELECT l.id,COUNT(t.id) c,CAST(l.id AS TEXT)||'{new string('z', 500)}' pad FROM jl l FULL JOIN jr r ON l.id=r.id FULL JOIN jt t ON r.id=t.id GROUP BY l.id ORDER BY c DESC,l.id",
+            };
+            if (!cold) { var warm = (DatabaseResultSet)await session.ExecuteAsync(sql); await DrainJoinHeap(warm); await warm.DisposeAsync(); }
+
             images.Drain(pool);
 
             var heapSamples = new List<(string Phase, long Live, long Charge)>(4096);
@@ -260,12 +273,7 @@ public sealed partial class SqlSortSpillConformanceTests
                 _output.WriteLine($"JOIN_COMBINED_RESIDUE|shape={shape}|cold={cold}|live={Math.Max(0, readHeap() - baseline)}");
 
                 Statements(engine.TempSpace!).ShouldBeEmpty();
-                return (Action)(() =>
-                {
-                    peak.ShouldBeLessThanOrEqualTo(budget + 262144);
-                    foreach (var (phase, live, charged) in heapSamples)
-                    { (live - charged).ShouldBeLessThanOrEqualTo(262144, customMessage: phase); }
-                });
+                return (Peak: peak, Samples: heapSamples.ToArray());
             }
             finally { SqlPlanExecutor.ObserveHashSpill = null; SqlRowCollector.ObserveSpill = null; SqlStatementMetrics.AfterMemoryReservation = null; }
 
@@ -286,6 +294,13 @@ public sealed partial class SqlSortSpillConformanceTests
                 heapSamples.Add((phase, live, charged));
             }
         });
+        await batch.CheckAsync(() => [Ceiling("combined peak", sampled.Value.Peak, budget + 262144, sampled.Term), ..sampled.Value.Samples.Select(sample => Ceiling(sample.Phase, sample.Live - sample.Charge, 262144, sampled.Term))], () =>
+        {
+                    sampled.Value.Peak.ShouldBeLessThanOrEqualTo(budget + 262144);
+                    foreach (var (phase, live, charged) in sampled.Value.Samples)
+                    { (live - charged).ShouldBeLessThanOrEqualTo(262144, customMessage: phase); }
+        });
+        await batch.CompleteAsync();
     }
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_readerBytes")]
