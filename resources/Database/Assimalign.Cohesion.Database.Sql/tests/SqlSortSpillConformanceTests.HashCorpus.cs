@@ -55,7 +55,7 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     private sealed record CorpusOutcome(RowValues[] Rows, string? Error, long Visits, long Peak, int Passes, long Batches, long TempPeak, long[] Calls, long Live = 0);
-    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true, WindowPoolLease? images = null, HashPoolEvents? pool = null, Func<long>? readHeap = null, int? logCapacity = null)
+    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true, WindowPoolLease? images = null, HashPoolEvents? pool = null, Func<long>? readHeap = null, int? logCapacity = null, (int Shard, int Shards)? transitions = null)
     {
         run.Log.Clear();
         if (logCapacity is int capacity) { run.Log.Capacity = capacity; }
@@ -67,6 +67,7 @@ public sealed partial class SqlSortSpillConformanceTests
         var phases = new HashSet<string>();
         string? previousPhase = null;
         long depth = 0, population = 0;
+        int transition = 0;
         bool replay = false;
         void Sample() { if (replay) { live = Math.Max(live, (readHeap ?? LiveHeap.Read)() - baseline); } }
         if (sample)
@@ -82,7 +83,9 @@ public sealed partial class SqlSortSpillConformanceTests
                     previousPhase = phase;
                     if (phase == "batch") { depth = value; }
                     if (phase == "batch-live") { population = value; }
-                    Sample();
+                    // A shard samples every Shards-th selected transition from its own offset, so the
+                    // shards of one statement together sample every transition.
+                    if (transitions is not { } shard || transition++ % shard.Shards == shard.Shard) { Sample(); }
                 }
             };
             run.Session.Database.Definitions.ObserveSelectRetention = (phase, _, _) =>
