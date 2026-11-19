@@ -19,14 +19,23 @@ internal static class DocumentHeapAcceptance
 {
     internal readonly record struct Term(double Bytes, Execution[] Sources)
     {
+        // Plain loops, not LINQ, here and below: LINQ materialization rents its segments from
+        // ArrayPool<T>.Shared, and a later trim of those arrays is an unsized trim that forces a remeasure.
         internal static Term Maximum(IEnumerable<Execution> sources)
         {
-            Execution[] items = sources.ToArray();
-            return new(items.Length == 0 ? 0 : items.Max(x => x.TrimmedBytes), items);
+            var items = new List<Execution>();
+            long bytes = 0;
+            foreach (Execution source in sources) { items.Add(source); bytes = Math.Max(bytes, source.TrimmedBytes); }
+            return new(bytes, items.ToArray());
         }
 
-        public static Term operator +(Term left, Term right) =>
-            new(left.Bytes + right.Bytes, left.Sources.Concat(right.Sources).Distinct().ToArray());
+        public static Term operator +(Term left, Term right)
+        {
+            var sources = new List<Execution>();
+            foreach (Execution source in left.Sources) { if (!sources.Contains(source)) { sources.Add(source); } }
+            foreach (Execution source in right.Sources) { if (!sources.Contains(source)) { sources.Add(source); } }
+            return new(left.Bytes + right.Bytes, sources.ToArray());
+        }
         public static Term operator /(Term value, double divisor) => new(value.Bytes / divisor, value.Sources);
     }
 
@@ -93,27 +102,47 @@ internal static class DocumentHeapAcceptance
         {
             while (true)
             {
-                var checks = (all ? _groups : _groups.TakeLast(1)).Select(g => (Group: g, Checks: g.Checks())).ToArray();
-                var failed = checks.SelectMany(g => g.Checks.Select(c => (g.Group, Check: c))).Where(x => !x.Check.Holds).ToArray();
+                var checks = new List<(CheckGroup Group, HeapCheck[] Checks)>();
+                for (int i = all ? 0 : Math.Max(0, _groups.Count - 1); i < _groups.Count; i++) { checks.Add((_groups[i], _groups[i].Checks())); }
+                var failed = new List<(CheckGroup Group, HeapCheck Check)>();
+                foreach (var (group, groupChecks) in checks)
+                {
+                    foreach (HeapCheck check in groupChecks) { if (!check.Holds) { failed.Add((group, check)); } }
+                }
                 // A clean execution retains the original Shouldly expression and fails
                 // at the original check. Only a nonzero term can cause remeasurement.
-                foreach (var item in failed.Where(x => x.Check.Term.Bytes == 0))
+                foreach (var item in failed)
                 {
+                    if (item.Check.Term.Bytes != 0) { continue; }
                     await item.Group.AssertOnceAsync();
                     false.ShouldBeTrue(item.Check.Failure);
                 }
-                if (failed.Length != 0)
+                if (failed.Count != 0)
                 {
-                    Execution[] retry = failed.SelectMany(x => x.Check.Term.Sources).Where(x => x.TrimmedBytes > 0).Distinct().ToArray();
+                    var retry = new List<Execution>();
+                    foreach (var item in failed)
+                    {
+                        foreach (Execution source in item.Check.Term.Sources)
+                        {
+                            if (source.TrimmedBytes > 0 && !retry.Contains(source)) { retry.Add(source); }
+                        }
+                    }
                     foreach (Execution execution in retry)
                     {
-                        execution.Reject(failed.Where(x => x.Check.Term.Sources.Contains(execution)).Select(x => x.Check.Failure));
+                        var failures = new List<string>();
+                        foreach (var item in failed) { if (Array.IndexOf(item.Check.Term.Sources, execution) >= 0) { failures.Add(item.Check.Failure); } }
+                        execution.Reject(failures);
                     }
                     foreach (Execution execution in retry) { await execution.LoadAsync(); }
                     all = true;
                     continue;
                 }
-                foreach (var group in checks.Where(x => x.Checks.All(c => c.Term.Bytes == 0))) { await group.Group.AssertOnceAsync(); }
+                foreach (var (group, groupChecks) in checks)
+                {
+                    bool clean = true;
+                    foreach (HeapCheck check in groupChecks) { clean &= check.Term.Bytes == 0; }
+                    if (clean) { await group.AssertOnceAsync(); }
+                }
                 return;
             }
         }
@@ -155,10 +184,13 @@ internal static class DocumentHeapAcceptance
         {
             await ValidateAsync();
             foreach (CheckGroup group in _groups) { await group.AssertOnceAsync(); }
-            HeapCheck[] checks = _groups.SelectMany(g => g.Checks()).ToArray();
-            foreach (Execution execution in _executions.Where(x => x.TrimmedBytes > 0))
+            var checks = new List<HeapCheck>();
+            foreach (CheckGroup group in _groups) { checks.AddRange(group.Checks()); }
+            foreach (Execution execution in _executions)
             {
-                double margin = checks.Where(c => c.Term.Sources.Contains(execution)).Select(c => c.Margin).DefaultIfEmpty(double.PositiveInfinity).Min();
+                if (execution.TrimmedBytes <= 0) { continue; }
+                double margin = double.PositiveInfinity;
+                foreach (HeapCheck check in checks) { if (Array.IndexOf(check.Term.Sources, execution) >= 0) { margin = Math.Min(margin, check.Margin); } }
                 _output.WriteLine(string.Concat("POOL_TRIM_ACCEPT|", execution.Name,
                     "|attempt=", execution.Attempt.ToString(CultureInfo.InvariantCulture),
                     "|trimmedBytes=", execution.TrimmedBytes.ToString(CultureInfo.InvariantCulture),
@@ -279,6 +311,12 @@ internal static class DocumentHeapAcceptance
             if (!_started)
             {
                 _started = true;
+                // A trim during this first collection frees its arrays before the baseline's own
+                // collections, so it lowers the baseline and every later reading alike and cannot
+                // move a measured delta. Run that pass first and open the window after it; a later
+                // trim lowers only the readings after it, so it still counts.
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
                 _bytesBefore = Volatile.Read(ref _events.Trimmed);
                 _unsizedBefore = Volatile.Read(ref _events.UnsizedTrims);
                 _trimsBefore = Volatile.Read(ref _events.TrimEvents);
