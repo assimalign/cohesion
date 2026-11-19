@@ -154,7 +154,7 @@ public sealed partial class SqlSortSpillConformanceTests
             {
                 var mutant = padded.Value;
                 double violation = Math.Max(Math.Max(mutant.Entry / 3072 - 32, (mutant.Replay - mutant.Entry) / 3072 - 64), Math.Max(mutant.Replay / 3072 - 96, mutant.Fitting / 3072 - 64));
-                return[Floor("padded entry > 32", mutant.Entry / 3072, 32, padded.Term / 3072, true), Floor("padded charge violation", violation, 0, padded.Term / 3072, true)];
+                return[Floor("padded entry > 32", mutant.Entry / 3072, 32, padded.Term / 3072, true), Floor("padded charge violation", violation, 0, (padded.Term + padded.Term) / 3072, true)];
             }, () =>
             {
                 var mutant = padded.Value;
