@@ -37,7 +37,7 @@ concurrency:
 jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
     timeout-minutes: 30
     continue-on-error: false
     strategy:

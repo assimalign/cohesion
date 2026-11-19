@@ -37,7 +37,7 @@ concurrency:
 jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
     timeout-minutes: 30
     strategy:
       # Every leg reports its own result: with fail-fast, one failing leg cancels the rest of the
@@ -76,7 +76,7 @@ jobs:
   # half of the family's NativeAOT evidence. The point-in-time publish-and-run evidence is
   # recorded in the family docs (root DESIGN.md, AOT posture).
   aot-analyzers:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-latest'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
         name: "Checkout: AotSample"
