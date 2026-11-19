@@ -184,7 +184,7 @@ public sealed partial class SqlSortSpillConformanceTests
         int mutant = 0;
         var retained = new List<object>(count); var weak = new List<WeakReference>();
         var builder = SqlDatabaseEngine.CreateBuilder("hash-live");
-        builder.Options.TempDirectory = Path.Combine(_root, ".hash-live");
+        builder.Options.TempDirectory = Path.Combine(_root, string.Concat(".hash-live-", count.ToString(CultureInfo.InvariantCulture)));
         builder.Options.StatementMemoryBudget = grant; builder.Options.StatementTempSpaceQuota = 268435456;
         builder.Functions.Add(SqlScalarFunction.Create("fresh_key", (long id) =>
         {
