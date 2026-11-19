@@ -14,6 +14,9 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -26,9 +29,10 @@ public sealed partial class SqlSortSpillConformanceTests
         var weak = new List<WeakReference>();
         var samples = new Dictionary<string, long>();
         long baseline = 0; bool observe = false, afterHandoff = false;
+        Func<long> readSample = LiveHeap.Read;
         long Sample(string phase)
         {
-            long live = Math.Max(0, LiveHeap.Read() - baseline);
+            long live = Math.Max(0, readSample() - baseline);
             samples[phase] = Math.Max(samples.GetValueOrDefault(phase), live);
             return live;
         }
@@ -48,33 +52,64 @@ public sealed partial class SqlSortSpillConformanceTests
         await Seed(session);
         const string sql = "SELECT fresh(id) AS value FROM t ORDER BY value,id";
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
-        baseline = LiveHeap.Read(); observe = true;
-        SqlRowCollector.ObserveSpill = phase =>
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_LiveObjects_ShouldFitGrantAcrossHandoffAndDelivery));
+        int weakCapacity = weak.Capacity, sampleCapacity = samples.EnsureCapacity(0);
+        var sampled = await batch.MeasureAsync($"rows=4000", async readHeap =>
         {
-            if (phase is "handoff" or "drained" or "arena") { Sample(phase); }
-            if (phase == "drained") { weak.Count.ShouldBe(200); weak.Count(w => w.IsAlive).ShouldBe(0); afterHandoff = true; }
-        };
-        try
-        {
-            // Act
-            await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
-            result.ShouldBeOfType<SqlSpilledResultSet>();
-            Sample("before-delivery");
-            int count = 0;
-            await foreach (var row in result.GetRowsAsync())
-            { row.GetString(0)!.Length.ShouldBe(512); if (++count % 701 == 0) { Sample("delivery"); } }
-            count.ShouldBe(4000);
+            readSample = readHeap;
+            weak.Clear(); weak.Capacity = weakCapacity; samples.Clear();
+            if (samples.EnsureCapacity(0) != sampleCapacity) { samples = new Dictionary<string, long>(sampleCapacity); }
+            afterHandoff = false; observe = false;
+            images.Drain(pool);
 
-            // Assert
-            foreach (string phase in new[] { "handoff", "drained", "arena", "input", "before-delivery", "delivery" })
+            baseline = readHeap(); observe = true;
+            SqlRowCollector.ObserveSpill = phase =>
             {
-                samples.ContainsKey(phase).ShouldBeTrue();
-                _output.WriteLine($"LIVE|{phase}|bytes={samples[phase]}|grant={grant}|constant={constant}");
-                samples[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant);
+                if (phase is "handoff" or "drained" or "arena") { Sample(phase); }
+                if (phase == "drained") { weak.Count.ShouldBe(200); weak.Count(w => w.IsAlive).ShouldBe(0); afterHandoff = true; }
+            };
+            try
+            {
+                // Act
+                await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                result.ShouldBeOfType<SqlSpilledResultSet>();
+                Sample("before-delivery");
+                int count = 0;
+                await foreach (var row in result.GetRowsAsync())
+                { row.GetString(0)!.Length.ShouldBe(512); if (++count % 701 == 0) { Sample("delivery"); } }
+                count.ShouldBe(4000);
+
+                // Assert
+                foreach (string phase in new[] { "handoff", "drained", "arena", "input", "before-delivery", "delivery" })
+                {
+                    samples.ContainsKey(phase).ShouldBeTrue();
+                    _output.WriteLine($"LIVE|{phase}|bytes={samples[phase]}|grant={grant}|constant={constant}");
+                }
+                session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+                return new Dictionary<string, long>(samples);
             }
-            session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
-        }
-        finally { SqlRowCollector.ObserveSpill = null; }
+            finally { SqlRowCollector.ObserveSpill = null; }
+        });
+        await batch.CheckAsync(() => sampled.Value.Select(sample => Ceiling(sample.Key, sample.Value, (long)(grant * 1.1) + constant, sampled.Term)).ToArray(), () =>
+        {
+            foreach (string phase in new[]
+            {
+                "handoff",
+                "drained",
+                "arena",
+                "input",
+                "before-delivery",
+                "delivery"
+            }
+
+            )
+            {
+                sampled.Value[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant);
+            }
+        });
+        await batch.CompleteAsync();
 
         // Watch the row vectors themselves as well as their payload identities. Clearing
         // cells in a still-rooted buffer is insufficient evidence that drained rows died.

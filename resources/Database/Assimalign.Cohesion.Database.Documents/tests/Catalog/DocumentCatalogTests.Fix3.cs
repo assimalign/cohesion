@@ -9,11 +9,14 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 using Assimalign.Cohesion.Testing;
+using Assimalign.Cohesion.Database.Documents.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
+
+using static Assimalign.Cohesion.Database.Documents.Tests.TestObjects.DocumentHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
 
@@ -26,36 +29,51 @@ public sealed partial class DocumentCatalogTests
     {
         // Arrange.
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        await using var fixture = await Fixture.Create();
         string json = "{\"w\":1,\"v\":\"" + new string('x', mib * 1024 * 1024) + "\"}";
-        await fixture.Write("one", json);
-        fixture.Catalog.IndexBuildMemoryBudget = grant * 1024L * 1024;
-        var context = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
-        long before = LiveHeap.Read(), additional = -1;
-        void Observe(object? sender, FirstChanceExceptionEventArgs args)
+        long budget = grant * 1024L * 1024;
+        using var pool = new DocumentHeapPool.PoolEvents();
+        using var images = new DocumentHeapPool.PoolLease();
+        var batch = new Batch(pool, _output, nameof(CreateIndexAsync_Fix3OversizedKey_ShouldRefuseBeforeMaterialization));
+        var sampled = await batch.MeasureAsync($"MiB={mib}|composite={composite}|grant={budget}", async readHeap =>
         {
-            if (args.Exception is DocumentCatalogException { Code: "CD02026" } && additional < 0)
-            { additional = LiveHeap.Read() - before; }
-        }
-        AppDomain.CurrentDomain.FirstChanceException += Observe;
-        try
+            await using var fixture = await Fixture.Create();
+            await fixture.Write("one", json);
+            fixture.Catalog.IndexBuildMemoryBudget = budget;
+            var context = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, guard.Token);
+            images.Drain(pool);
+            long before = readHeap(), additional = -1;
+            void Observe(object? sender, FirstChanceExceptionEventArgs args)
+            {
+                if (args.Exception is DocumentCatalogException { Code: "CD02026" } && additional < 0)
+                { additional = readHeap() - before; }
+            }
+            AppDomain.CurrentDomain.FirstChanceException += Observe;
+            try
+            {
+                // Act.
+                var error = await Should.ThrowAsync<DocumentCatalogException>(async () =>
+                    await fixture.Catalog.CreateIndexAsync(fixture.Collection.Id, "ix",
+                        composite ? [DocumentIndexKey.Scalar("w"), DocumentIndexKey.Scalar("v")] : [DocumentIndexKey.Scalar("v")],
+                        false, false, context, guard.Token));
+                error.Code.ShouldBe("CD02026");
+                return additional;
+            }
+            finally
+            {
+                AppDomain.CurrentDomain.FirstChanceException -= Observe;
+                await fixture.Coordinator.RollbackAsync(context, guard.Token);
+                GC.KeepAlive(json);
+            }
+        }, guard.Token);
+        // Assert.
+        await batch.CheckAsync(() => [Floor("document live floor", sampled.Value, 0, sampled.Term),
+            Ceiling("document live grant", sampled.Value, budget, sampled.Term)], () =>
         {
-            // Act.
-            var error = await Should.ThrowAsync<DocumentCatalogException>(async () =>
-                await fixture.Catalog.CreateIndexAsync(fixture.Collection.Id, "ix",
-                    composite ? [DocumentIndexKey.Scalar("w"), DocumentIndexKey.Scalar("v")] : [DocumentIndexKey.Scalar("v")],
-                    false, false, context, guard.Token));
-            // Assert.
-            error.Code.ShouldBe("CD02026");
-            _output.WriteLine($"KEY_HEAP|MiB={mib}|composite={composite}|grant={fixture.Catalog.IndexBuildMemoryBudget}|live={additional}");
-            additional.ShouldBeInRange(0, fixture.Catalog.IndexBuildMemoryBudget);
-        }
-        finally
-        {
-            AppDomain.CurrentDomain.FirstChanceException -= Observe;
-            await fixture.Coordinator.RollbackAsync(context, guard.Token);
-            GC.KeepAlive(json);
-        }
+            long additional = sampled.Value;
+            _output.WriteLine($"KEY_HEAP|MiB={mib}|composite={composite}|grant={budget}|live={additional}");
+            additional.ShouldBeInRange(0, budget);
+        });
+        await batch.CompleteAsync();
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Raw invalid index content keeps CK06003 (#1808)")]

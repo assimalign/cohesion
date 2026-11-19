@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
@@ -8,6 +9,9 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
+
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -38,36 +42,53 @@ public sealed partial class SqlSortSpillConformanceTests
     [InlineData("UINT")]
     [InlineData("ULONG")]
     [InlineData("CLRCHAR")]
-    public void RowBytes_KeyFamilies_ShouldBoundMarginalHeap(string family)
+    public Task RowBytes_KeyFamilies_ShouldBoundMarginalHeap(string family)
     {
         // Arrange
         MeasureKeys(family);
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+
 
         // Act
-        long live = long.MaxValue, charged = 0;
-        for (int round = 1; round <= 3; round++)
+        var batch = new Batch(pool, _output, nameof(RowBytes_KeyFamilies_ShouldBoundMarginalHeap));
+        var rounds = new List<Sample<(long Live, long Charged)>>();
+        for (int index = 1; index <= 3; index++)
         {
-            var measured = MeasureKeys(family);
-            _output.WriteLine($"KEY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charged}");
-            live = Math.Min(live, measured.Live);
-            charged = measured.Charged;
+            int round = index;
+            var sample = batch.Measure($"family={family}|round={round}", readHeap =>
+            {
+                images.Drain(pool);
+                var measured = MeasureKeys(family, readHeap: readHeap);
+                _output.WriteLine($"KEY_ROUND|family={family}|round={round}|live={measured.Live}|charged={measured.Charged}");
+                return measured;
+            });
+            rounds.Add(sample);
         }
-
+        long Live() => rounds.Min(x => x.Value.Live);
+        long Charged() => rounds[^1].Value.Charged;
         // Assert
-        _output.WriteLine($"KEY_CHARGE|{family}|live_per_row={live / 3072d}|charged_per_row={charged / 3072d}");
-        (live / 3072).ShouldBeLessThanOrEqualTo(charged / 3072);
+        batch.Check(() => [Ceiling("key bytes per row", Live() / 3072, Charged() / 3072, Term.Maximum(rounds) / 3072)], () =>
+        {
+            long live = Live(), charged = Charged();
+            _output.WriteLine($"KEY_CHARGE|{family}|live_per_row={live / 3072d}|charged_per_row={charged / 3072d}");
+            (live / 3072).ShouldBeLessThanOrEqualTo(charged / 3072);
+        });
+        batch.Complete();
+        return Task.CompletedTask;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (long Live, long Charged) MeasureKeys(string family)
+    private static (long Live, long Charged) MeasureKeys(string family, Func<long>? readHeap = null)
     {
         var roots = new object?[4096][];
         SqlSelectMemory memory = default;
         long charge = 0;
         Fill(0, 1024);
-        long small = LiveHeap.Read();
+        long small = (readHeap ?? LiveHeap.Read)();
         Fill(1024, 4096);
-        long live = LiveHeap.Read() - small;
+        long live = (readHeap ?? LiveHeap.Read)() - small;
         GC.KeepAlive(roots); GC.KeepAlive(memory);
         return (live, charge);
 
@@ -91,7 +112,7 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Hash entries: +32 entry, group array and +64 DISTINCT overheads bound marginal live bytes (#1789)")]
-    public async Task HashEntries_TwoPopulations_ShouldBoundMarginalHeap()
+    public Task HashEntries_TwoPopulations_ShouldBoundMarginalHeap()
     {
         // Arrange / Act
         MeasureEntries();
@@ -99,28 +120,64 @@ public sealed partial class SqlSortSpillConformanceTests
         // Unrelated pooled pages must stay rooted across every marginal heap sample.
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
-        images.Drain(pool); await QuiesceWindowPoolAsync(pool);
-        long entry = long.MaxValue, replay = long.MaxValue, fitting = long.MaxValue;
-        for (int round = 1; round <= 3; round++)
+        images.Drain(pool);
+        var batch = new Batch(pool, _output, nameof(HashEntries_TwoPopulations_ShouldBoundMarginalHeap));
+        var rounds = new List<Sample<(long Entry, long Replay, long Fitting)>>();
+        for (int index = 1; index <= 3; index++)
         {
-            images.Drain(pool);
-            var measured = MeasureEntries();
-            _output.WriteLine($"ENTRY_ROUND|round={round}|entry={measured.Entry}|replay={measured.Replay}|fitting={measured.Fitting}");
-            measured.Entry.ShouldBeGreaterThan(0); measured.Replay.ShouldBeGreaterThan(0); measured.Fitting.ShouldBeGreaterThan(0);
-            entry = Math.Min(entry, measured.Entry);
-            replay = Math.Min(replay, measured.Replay);
-            fitting = Math.Min(fitting, measured.Fitting);
-
-            var mutant = MeasureEntries(padded: true);
-            _output.WriteLine($"ENTRY_MUTANT|round={round}|entry={mutant.Entry}|bytes_per_entry={mutant.Entry / 3072}|added_per_entry=8");
-            (mutant.Entry / 3072).ShouldBeGreaterThan(32);
-            Should.Throw<ShouldAssertException>(() => CheckEntryCharges(mutant.Entry, mutant.Replay, mutant.Fitting));
+            int round = index;
+            var sample = batch.Measure($"round={round}|padded=False", readHeap =>
+            {
+                images.Drain(pool);
+                var measured = MeasureEntries(readHeap: readHeap);
+                _output.WriteLine($"ENTRY_ROUND|round={round}|entry={measured.Entry}|replay={measured.Replay}|fitting={measured.Fitting}");
+                return measured;
+            });
+            rounds.Add(sample);
+            batch.Check(() => [Floor("entry > 0", sample.Value.Entry, 0, sample.Term, true),
+                Floor("replay > 0", sample.Value.Replay, 0, sample.Term, true),
+                Floor("fitting > 0", sample.Value.Fitting, 0, sample.Term, true)], () =>
+            {
+                var measured = sample.Value;
+                measured.Entry.ShouldBeGreaterThan(0);
+                measured.Replay.ShouldBeGreaterThan(0);
+                measured.Fitting.ShouldBeGreaterThan(0);
+            });
+            var padded = batch.Measure($"round={round}|padded=True", readHeap =>
+            {
+                images.Drain(pool);
+                var mutant = MeasureEntries(padded: true, readHeap: readHeap);
+                _output.WriteLine($"ENTRY_MUTANT|round={round}|entry={mutant.Entry}|bytes_per_entry={mutant.Entry / 3072}|added_per_entry=8");
+                return mutant;
+            });
+            batch.Check(() =>
+            {
+                var mutant = padded.Value;
+                double violation = Math.Max(Math.Max(mutant.Entry / 3072 - 32, (mutant.Replay - mutant.Entry) / 3072 - 64), Math.Max(mutant.Replay / 3072 - 96, mutant.Fitting / 3072 - 64));
+                return[Floor("padded entry > 32", mutant.Entry / 3072, 32, padded.Term / 3072, true), Floor("padded charge violation", violation, 0, (padded.Term + padded.Term) / 3072, true)];
+            }, () =>
+            {
+                var mutant = padded.Value;
+                (mutant.Entry / 3072).ShouldBeGreaterThan(32);
+                Should.Throw<ShouldAssertException>(() => CheckEntryCharges(mutant.Entry, mutant.Replay, mutant.Fitting));
+            });
         }
-
-        // Assert: +32 is the replay entry itself. RowBytes adds 32 for its container;
-        // plain groups also charge 128 for their dictionary and state-array header.
-        _output.WriteLine($"ENTRY_CHARGE|entry={entry / 3072d}|replay={replay / 3072d}|distinct={fitting / 3072d}|bound=32/96/64");
-        CheckEntryCharges(entry, replay, fitting);
+        long Entry() => rounds.Min(x => x.Value.Entry);
+        long Replay() => rounds.Min(x => x.Value.Replay);
+        long Fitting() => rounds.Min(x => x.Value.Fitting);
+        // Assert: preserve every per-entry charge, including the difference of minima.
+        batch.Check(() =>
+        {
+            Term term = Term.Maximum(rounds);
+            return[Ceiling("entry <= 32", Entry() / 3072, 32, term / 3072), Ceiling("replay overhead <= 64", (Replay() - Entry()) / 3072, 64, (term + term) / 3072), Ceiling("replay <= 96", Replay() / 3072, 96, term / 3072), Ceiling("fitting <= 64", Fitting() / 3072, 64, term / 3072)];
+        }, () =>
+        {
+            long entry = Entry(), replay = Replay(), fitting = Fitting();
+            _output.WriteLine($"ENTRY_CHARGE|entry={entry / 3072d}|replay={replay / 3072d}|distinct={fitting / 3072d}|bound=32/96/64");
+            CheckEntryCharges(entry, replay, fitting);
+        });
+        batch.Complete();
+        return Task.CompletedTask;
     }
 
     private static void CheckEntryCharges(long entry, long replay, long fitting)
@@ -134,13 +191,13 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (long Entry, long Replay, long Fitting) MeasureEntries(bool padded = false)
+    private static (long Entry, long Replay, long Fitting) MeasureEntries(bool padded = false, Func<long>? readHeap = null)
     {
         bool diagnose = Environment.GetEnvironmentVariable("T3_ENTRY_HEAP_DIAGNOSTICS") == "1";
         var keys = new object?[4096][]; var entries = new object?[4096];
         for (int i = 0; i < keys.Length; i++) { keys[i] = [i]; }
         for (int i = 0; i < 1024; i++) { entries[i] = Entry(padded, i); }
-        long small = LiveHeap.Read();
+        long small = (readHeap ?? LiveHeap.Read)();
         var generationsBefore = diagnose ? EntryGenerations() : default;
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         long processBefore = GC.GetTotalAllocatedBytes(precise: true);
@@ -148,7 +205,7 @@ public sealed partial class SqlSortSpillConformanceTests
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         long processAllocated = GC.GetTotalAllocatedBytes(precise: true) - processBefore;
         long readBefore = GC.GetTotalAllocatedBytes(precise: true);
-        long entry = LiveHeap.Read() - small;
+        long entry = (readHeap ?? LiveHeap.Read)() - small;
         long readAllocated = GC.GetTotalAllocatedBytes(precise: true) - readBefore;
         var generationsAfter = diagnose ? EntryGenerations() : default;
         if (padded) { allocated.ShouldBe(40L * 3072); }
@@ -156,14 +213,14 @@ public sealed partial class SqlSortSpillConformanceTests
         Console.WriteLine($"ENTRY_ALLOCATION|padded={padded}|allocated={allocated}|process_allocated={processAllocated}|read_allocated={readAllocated}|heap={entry}|extra={entry - allocated}{generations}");
         var replay = new Dictionary<object?[], object>();
         for (int i = 0; i < 1024; i++) { replay.Add(keys[i], NewHashEntry(null!, i)); }
-        small = LiveHeap.Read();
+        small = (readHeap ?? LiveHeap.Read)();
         for (int i = 1024; i < 4096; i++) { replay.Add(keys[i], NewHashEntry(null!, i)); }
-        long replayBytes = LiveHeap.Read() - small;
+        long replayBytes = (readHeap ?? LiveHeap.Read)() - small;
         var seen = new HashSet<object?[]>(); var representatives = new List<object?[]>();
         for (int i = 0; i < 1024; i++) { seen.Add(keys[i]); representatives.Add(keys[i]); }
-        small = LiveHeap.Read();
+        small = (readHeap ?? LiveHeap.Read)();
         for (int i = 1024; i < 4096; i++) { seen.Add(keys[i]); representatives.Add(keys[i]); }
-        long fitting = LiveHeap.Read() - small;
+        long fitting = (readHeap ?? LiveHeap.Read)() - small;
         GC.KeepAlive(keys); GC.KeepAlive(entries); GC.KeepAlive(replay); GC.KeepAlive(seen); GC.KeepAlive(representatives);
         return (entry, replayBytes, fitting);
 
@@ -191,35 +248,49 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Hash group header: dictionary growth and state-array headers fit the fixed group charge (#1789)")]
-    public void GroupHeaders_TwoPopulations_ShouldBoundMarginalHeap()
+    public Task GroupHeaders_TwoPopulations_ShouldBoundMarginalHeap()
     {
         // Arrange / Act: array slots are measured with each state; isolate the array
         // header and dictionary here, with all key payloads allocated before either sample.
         MeasureGroupHeaders();
-        long live = long.MaxValue;
-        for (int round = 1; round <= 3; round++)
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+
+        var batch = new Batch(pool, _output, nameof(GroupHeaders_TwoPopulations_ShouldBoundMarginalHeap));
+        var rounds = new List<Sample<long>>();
+        for (int index = 1; index <= 3; index++)
         {
-            long measured = MeasureGroupHeaders();
-            _output.WriteLine($"GROUP_HEADER_ROUND|round={round}|live={measured}");
-            live = Math.Min(live, measured);
+            int round = index;
+            rounds.Add(batch.Measure($"round={round}", readHeap =>
+            {
+                images.Drain(pool);
+                long measured = MeasureGroupHeaders(readHeap: readHeap);
+                _output.WriteLine($"GROUP_HEADER_ROUND|round={round}|live={measured}");
+                return measured;
+            }));
         }
         long charged = GroupStateBytes(null!, []);
-
-        // Assert
-        _output.WriteLine($"GROUP_HEADER|live={live / 3072d}|charged={charged}");
-        (live / 3072).ShouldBeLessThanOrEqualTo(charged);
+        batch.Check(() => [Ceiling("group header bytes", rounds.Min(x => x.Value) / 3072, charged, Term.Maximum(rounds) / 3072)], () =>
+        {
+            long live = rounds.Min(x => x.Value);
+            _output.WriteLine($"GROUP_HEADER|live={live / 3072d}|charged={charged}");
+            (live / 3072).ShouldBeLessThanOrEqualTo(charged);
+        });
+        batch.Complete();
+        return Task.CompletedTask;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static long MeasureGroupHeaders()
+    private static long MeasureGroupHeaders(Func<long>? readHeap = null)
     {
         var keys = new object?[4096][];
         for (int i = 0; i < keys.Length; i++) { keys[i] = [i]; }
         var groups = new Dictionary<object?[], object?[]>();
         for (int i = 0; i < 1024; i++) { groups.Add(keys[i], new object?[0]); }
-        long small = LiveHeap.Read();
+        long small = (readHeap ?? LiveHeap.Read)();
         for (int i = 1024; i < 4096; i++) { groups.Add(keys[i], new object?[0]); }
-        long live = LiveHeap.Read() - small;
+        long live = (readHeap ?? LiveHeap.Read)() - small;
         GC.KeepAlive(keys); GC.KeepAlive(groups);
         return live;
     }

@@ -11,6 +11,9 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSelectRetentionTests
@@ -176,13 +179,14 @@ public sealed partial class SqlSelectRetentionTests
         const int count = 262144;
         int calls = 0;
         long sampledLive = 0;
+        Func<long> readSample = LiveHeap.Read;
         var builder = SqlDatabaseEngine.CreateBuilder("retention-size");
         builder.Options.CheckpointInterval = TimeSpan.FromHours(1);
         builder.Options.MaintenanceInterval = TimeSpan.FromHours(1);
         builder.Options.PageWriteBackInterval = TimeSpan.FromHours(1);
         builder.Functions.Add(SqlScalarFunction.Create("sample_memory", (long value) =>
         {
-            if (++calls == count - 8) { sampledLive = LiveHeap.Read(); }
+            if (++calls == count - 8) { sampledLive = readSample(); }
             return value;
         }));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
@@ -196,6 +200,10 @@ public sealed partial class SqlSelectRetentionTests
         var observations = new Dictionary<string, int>();
         database.Definitions.ObserveSelectRetention = (name, _, retained) =>
             observations[name] = Math.Max(observations.GetValueOrDefault(name), retained);
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+
         foreach (var shape in new[]
         {
             ("COUNT", "SELECT COUNT(*) FROM t WHERE sample_memory(k)>0", "group-input", -1),
@@ -207,41 +215,80 @@ public sealed partial class SqlSelectRetentionTests
         })
         {
             // Act
+            var batch = new Batch(pool, _output, nameof(ExecuteAsync_LargeInput_ShouldBoundIntermediateRetention));
             database.Definitions.ForceSelectRetentionBasePath = true;
-            observations.Clear();
-            calls = 0;
-            long startingLive = LiveHeap.Read();
-            var baseline = await Rows(session, shape.Item2);
-            calls.ShouldBe(count);
-            long beforeLive = sampledLive - startingLive;
-            int before = observations[shape.Item3];
-            long reads = session.LastStatementMetrics!.RecordsExamined;
-            long pairs = session.LastStatementMetrics.JoinCandidatePairs;
-            database.Definitions.ForceSelectRetentionBasePath = false;
-            // Minimum of up to 3 rounds: a retained list reads high in every round, and the heap is
-            // process-wide, so transient background work only ever adds to one reading.
-            var actual = baseline;
-            long afterLive = long.MaxValue;
-            for (int round = 0; round < 3 && afterLive >= 2_000_000; round++)
+            int baseObservationCapacity = observations.EnsureCapacity(0);
+            var measuredBase = await batch.MeasureAsync($"shape={shape.Item1}|base=True", async readHeap =>
             {
+                database.Definitions.ForceSelectRetentionBasePath = true;
+                readSample = readHeap;
                 observations.Clear();
-                calls = 0;
-                startingLive = LiveHeap.Read();
-                actual = await Rows(session, shape.Item2);
+                if (observations.EnsureCapacity(0) != baseObservationCapacity) { observations = new Dictionary<string, int>(baseObservationCapacity); }
+                calls = 0; sampledLive = 0;
+                images.Drain(pool);
+                long startingLive = readHeap();
+                var rows = await Rows(session, shape.Item2);
                 calls.ShouldBe(count);
-                afterLive = Math.Min(afterLive, sampledLive - startingLive);
+                return (Rows: rows, Live: sampledLive - startingLive, Retained: observations[shape.Item3],
+                    Reads: session.LastStatementMetrics!.RecordsExamined, Pairs: session.LastStatementMetrics.JoinCandidatePairs);
+            });
+            database.Definitions.ForceSelectRetentionBasePath = false;
+            var optimized = new List<Sample<(object?[][] Rows, long Live, int Retained, long Reads, long Pairs)>>();
+            long afterLive = long.MaxValue;
+            for (int roundIndex = 0; roundIndex < 3 && afterLive >= 2_000_000; roundIndex++)
+            {
+                int round = roundIndex, observationCapacity = observations.EnsureCapacity(0);
+                var measured = await batch.MeasureAsync($"shape={shape.Item1}|base=False|round={round}", async readHeap =>
+                {
+                    database.Definitions.ForceSelectRetentionBasePath = false;
+                    readSample = readHeap;
+                    observations.Clear();
+                    if (observations.EnsureCapacity(0) != observationCapacity) { observations = new Dictionary<string, int>(observationCapacity); }
+                    calls = 0; sampledLive = 0;
+                    images.Drain(pool);
+                    long startingLive = readHeap();
+                    var rows = await Rows(session, shape.Item2);
+                    calls.ShouldBe(count);
+                    return (Rows: rows, Live: sampledLive - startingLive, Retained: observations[shape.Item3],
+                        Reads: session.LastStatementMetrics!.RecordsExamined, Pairs: session.LastStatementMetrics.JoinCandidatePairs);
+                });
+                optimized.Add(measured);
+                afterLive = optimized.Min(x => x.Value.Live);
+                if (afterLive < 2_000_000)
+                {
+                    // A contaminated early minimum must be settled before deciding
+                    // whether the original up-to-three-round loop has finished.
+                    await batch.SettleAsync(() => optimized.Min(x => x.Value.Live) < 2_000_000
+                        ? [Ceiling("streamed early minimum", optimized.Min(x => x.Value.Live), 2_000_000, Term.Maximum(optimized), true)] : []);
+                    afterLive = optimized.Min(x => x.Value.Live);
+                }
             }
+            await batch.CheckAsync(() => [Floor("legacy retained heap", measuredBase.Value.Live, 8_000_000, measuredBase.Term, true),
+                Ceiling("streamed retained heap", optimized.Min(x => x.Value.Live), 2_000_000, Term.Maximum(optimized), true)], () =>
+            {
+                // Assert: bounded retention, identical rows, observations and complete work.
+                var original = measuredBase.Value;
+                var last = optimized[^1].Value;
+                var baseline = original.Rows;
+                var actual = last.Rows;
+                long beforeLive = original.Live;
+                afterLive = optimized.Min(x => x.Value.Live);
+                int before = original.Retained;
+                long reads = original.Reads, pairs = original.Pairs;
+                actual.ShouldBe(baseline);
+                before.ShouldBe(count);
+                if (shape.Item4 >= 0)
+                {
+                    last.Retained.ShouldBe(shape.Item4);
+                }
 
-            // Assert: bounded retention via independent GC evidence, identical rows and complete work.
-            actual.ShouldBe(baseline);
-            before.ShouldBe(count);
-            if (shape.Item4 >= 0) { observations[shape.Item3].ShouldBe(shape.Item4); }
-            // Independent forced-GC evidence detects a hidden list even if its observation is wrong.
-            beforeLive.ShouldBeGreaterThan(8_000_000);
-            afterLive.ShouldBeLessThan(2_000_000);
-            session.LastStatementMetrics!.RecordsExamined.ShouldBe(reads);
-            session.LastStatementMetrics.JoinCandidatePairs.ShouldBe(pairs);
-            _output.WriteLine($"{shape.Item1}: retained input/results {before} -> {(shape.Item4 < 0 ? "streamed" : observations[shape.Item3].ToString())}; live-byte delta {beforeLive} -> {afterLive}; reads={reads}; pairs={pairs}");
+                beforeLive.ShouldBeGreaterThan(8_000_000);
+                afterLive.ShouldBeLessThan(2_000_000);
+                last.Reads.ShouldBe(reads);
+                last.Pairs.ShouldBe(pairs);
+                _output.WriteLine($"{shape.Item1}: retained input/results {before} -> {(shape.Item4 < 0 ? "streamed" : last.Retained.ToString())}; live-byte delta {beforeLive} -> {afterLive}; reads={reads}; pairs={pairs}");
+            });
+            await batch.CompleteAsync();
         }
     }
 }

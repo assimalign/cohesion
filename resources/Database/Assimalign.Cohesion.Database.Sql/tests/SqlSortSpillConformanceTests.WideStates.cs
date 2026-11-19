@@ -7,6 +7,9 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -41,15 +44,37 @@ public sealed partial class SqlSortSpillConformanceTests
         string sql = "SELECT id," + arguments + " FROM t GROUP BY id";
         await ExecuteCorpusAsync(run, sql); // warm parsing, transitions, readers and output
 
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+
         // Act
-        var actual = await ExecuteCorpusAsync(run, sql, sample: true, everyTransition: function == "MIN" && type == "INT");
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_WideNativeStates_ShouldStayWithinGrant));
+        var sampled = await batch.MeasureAsync($"function={function}|type={type}|grant={grant}",
+            readHeap => ExecuteCorpusAsync(run, sql, sample: true, everyTransition: function == "MIN" && type == "INT", images: images, pool: pool, readHeap: readHeap));
 
         // Assert
-        long excess = actual.Live - grant - 262144;
-        _output.WriteLine($"WIDE_STATES|{function}|{type}|grant={grant}|live={actual.Live}|excess={excess}|levels={actual.Passes}|rows={actual.Rows.Length}|error={actual.Error}");
-        excess.ShouldBeLessThanOrEqualTo(0);
-        if (function is "SUM" or "AVG" && type == "DATE") { actual.Error.ShouldStartWith("CS01006|"); }
-        else if (function is "SUM" or "AVG" && type == "DOUBLE PRECISION") { actual.Error.ShouldStartWith("CS05067|"); }
-        else { actual.Error.ShouldBeNull(); actual.Rows.Length.ShouldBe(12000); actual.Passes.ShouldBeGreaterThan(0); }
+        await batch.CheckAsync(() => [Ceiling("wide-state excess", sampled.Value.Live - grant - 262144, 0, sampled.Term)], () =>
+        {
+            var actual = sampled.Value;
+            long excess = actual.Live - grant - 262144;
+            _output.WriteLine($"WIDE_STATES|{function}|{type}|grant={grant}|live={actual.Live}|excess={excess}|levels={actual.Passes}|rows={actual.Rows.Length}|error={actual.Error}");
+            excess.ShouldBeLessThanOrEqualTo(0);
+            if (function is "SUM" or "AVG" && type == "DATE")
+            {
+                actual.Error.ShouldStartWith("CS01006|");
+            }
+            else if (function is "SUM" or "AVG" && type == "DOUBLE PRECISION")
+            {
+                actual.Error.ShouldStartWith("CS05067|");
+            }
+            else
+            {
+                actual.Error.ShouldBeNull();
+                actual.Rows.Length.ShouldBe(12000);
+                actual.Passes.ShouldBeGreaterThan(0);
+            }
+        });
+        await batch.CompleteAsync();
     }
 }

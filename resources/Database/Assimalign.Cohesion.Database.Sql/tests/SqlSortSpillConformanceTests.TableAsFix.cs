@@ -15,6 +15,9 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -69,42 +72,60 @@ public sealed partial class SqlSortSpillConformanceTests
         // Arrange: the review's seven RPAD columns, 60 rows and default grant/quota.
         string query = "SELECT id," + string.Join(',', Enumerable.Range(0, 7).Select(i =>
             $"RPAD(CAST(id AS TEXT),{width},'{"xyzpqrs"[i]}') AS c{i + 1}")) + " FROM t ORDER BY id";
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
         foreach (long grant in new[] { 1073741824L, 67108864L })
         {
-            var builder = SqlDatabaseEngine.CreateBuilder("ctas-oversized");
-            builder.Options.RootPath = Path.Combine(_root, "oversized-" + grant);
-            builder.Options.StatementMemoryBudget = grant;
-            builder.Options.BufferPoolCapacity = 1048576;
-            await using var engine = await builder.BuildAsync();
-            var database = await engine.CreateDatabaseAsync("db");
-            await using var session = await database.CreateSessionAsync(); await Seed(session, 60);
-            long baseline = 0, peak = 0; int encoded = 0, decoded = 0, sampling = 0, samples = 0;
-            using var started = new ManualResetEventSlim(); Thread? sampler = null;
-            SqlPlanExecutor.TableAsSourceAdmitted = _ =>
+            int measurement = 0;
+            var batch = new Batch(pool, _output, nameof(ExecuteAsync_TableAsOversizedRecord_ShouldKeepPageRefusal));
+            var sampled = await batch.MeasureAsync($"width={width}|grant={grant}", async readHeap =>
             {
-                baseline = LiveHeap.Read(); Volatile.Write(ref sampling, 1);
-                sampler = new Thread(() =>
+                var builder = SqlDatabaseEngine.CreateBuilder("ctas-oversized");
+                builder.Options.RootPath = Path.Combine(_root, measurement++ == 0 ? "oversized-" + grant : "oversized-" + grant + "-attempt-" + measurement);
+                builder.Options.StatementMemoryBudget = grant;
+                builder.Options.BufferPoolCapacity = 1048576;
+                await using var engine = await builder.BuildAsync();
+                var database = await engine.CreateDatabaseAsync("db");
+                await using var session = await database.CreateSessionAsync(); await Seed(session, 60);
+
+                images.Drain(pool);
+                long baseline = 0, peak = 0; int encoded = 0, decoded = 0, sampling = 0, samples = 0;
+                using var started = new ManualResetEventSlim(); Thread? sampler = null;
+                SqlPlanExecutor.TableAsSourceAdmitted = _ =>
                 {
-                    while (Volatile.Read(ref sampling) != 0)
-                    { peak = Math.Max(peak, LiveHeap.Read() - baseline); samples++; started.Set(); }
-                }) { IsBackground = true };
-                sampler.Start(); started.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
-            };
-            SqlPlanExecutor.TableAsSourceReading = (_, _) => decoded++;
-            SqlPlanExecutor.TableAsRecordEncoded = _ => encoded++;
-            try
+                    images.Drain(pool); baseline = readHeap(); Volatile.Write(ref sampling, 1);
+                    sampler = new Thread(() =>
+                    {
+                        while (Volatile.Read(ref sampling) != 0)
+                        { peak = Math.Max(peak, readHeap() - baseline); samples++; started.Set(); }
+                    }) { IsBackground = true };
+                    sampler.Start(); started.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+                };
+                SqlPlanExecutor.TableAsSourceReading = (_, _) => decoded++;
+                SqlPlanExecutor.TableAsRecordEncoded = _ => encoded++;
+                try
+                {
+                    // Act
+                    var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE TABLE archive AS " + query));
+                    Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); }
+                    _output.WriteLine($"CTAS_OVERSIZED|width={width}|grant={grant}|peak={peak}|decoded={decoded}|encoded={encoded}|samples={samples}|code={failure.Diagnostics[0].Code}");
+                    // Assert
+                    failure.Diagnostics[0].Code.ShouldBe("CS05042"); encoded.ShouldBe(0); samples.ShouldBeGreaterThan(0);
+                    database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse(); database.IsOffline.ShouldBeFalse();
+                    TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+                    if (grant == 67108864) { decoded.ShouldBe(1); }
+                    return peak;
+                }
+                finally { Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); } SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; }
+            });
+            await batch.CheckAsync(() => grant == 67108864 ? [Ceiling("oversized CTAS peak", sampled.Value, grant + 553240, sampled.Term)] : [], () =>
             {
-                // Act
-                var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE TABLE archive AS " + query));
-                Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); }
-                _output.WriteLine($"CTAS_OVERSIZED|width={width}|grant={grant}|peak={peak}|decoded={decoded}|encoded={encoded}|samples={samples}|code={failure.Diagnostics[0].Code}");
-                // Assert
-                failure.Diagnostics[0].Code.ShouldBe("CS05042"); encoded.ShouldBe(0); samples.ShouldBeGreaterThan(0);
-                database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse(); database.IsOffline.ShouldBeFalse();
-                TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
-                if (grant == 67108864) { decoded.ShouldBe(1); peak.ShouldBeLessThanOrEqualTo(grant + 553240); }
-            }
-            finally { Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); } SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; }
+                if (grant == 67108864)
+                {
+                    sampled.Value.ShouldBeLessThanOrEqualTo(grant + 553240);
+                }
+            });
+            await batch.CompleteAsync();
         }
     }
 

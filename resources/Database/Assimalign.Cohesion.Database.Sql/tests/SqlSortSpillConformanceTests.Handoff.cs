@@ -13,6 +13,9 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -24,7 +27,8 @@ public sealed partial class SqlSortSpillConformanceTests
         const long grant = 1048576, constant = 524288;
         var weak = new List<WeakReference>(); var samples = new Dictionary<string, long>();
         bool observe = false, drained = false; long baseline = 0;
-        void Sample(string phase) => samples[phase] = Math.Max(samples.GetValueOrDefault(phase), Math.Max(0, LiveHeap.Read() - baseline));
+        Func<long> readSample = LiveHeap.Read;
+        void Sample(string phase) => samples[phase] = Math.Max(samples.GetValueOrDefault(phase), Math.Max(0, readSample() - baseline));
         var builder = SqlDatabaseEngine.CreateBuilder("deferred-key-live");
         builder.Options.RootPath = System.IO.Path.Combine(_root, "deferred-live");
         builder.Options.StatementMemoryBudget = grant; builder.Options.StatementTempSpaceQuota = 64 * 1024 * 1024;
@@ -41,30 +45,60 @@ public sealed partial class SqlSortSpillConformanceTests
         await Seed(session, 1000);
         const string sql = "SELECT observe_output(id) FROM t ORDER BY observe_key(id)";
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
-        baseline = LiveHeap.Read(); observe = true;
-        SqlRowCollector.ObserveSpill = phase =>
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_DeferredKeyHandoff_ShouldReleaseLiveKeys));
+        int weakCapacity = weak.Capacity, sampleCapacity = samples.EnsureCapacity(0);
+        var sampled = await batch.MeasureAsync($"rows=1000", async readHeap =>
         {
-            if (phase is "handoff" or "drained" or "arena") { Sample(phase); }
-            if (phase == "drained") { weak.Count.ShouldBe(100); weak.Count(w => w.IsAlive).ShouldBe(0); drained = true; }
-        };
-        try
-        {
-            // Act
-            await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
-            result.ShouldBeOfType<SqlSpilledResultSet>(); int count = 0;
-            await foreach (var row in result.GetRowsAsync()) { if (++count % 317 == 0) { Sample("delivery"); } }
+            readSample = readHeap;
+            weak.Clear(); weak.Capacity = weakCapacity; samples.Clear();
+            if (samples.EnsureCapacity(0) != sampleCapacity) { samples = new Dictionary<string, long>(sampleCapacity); }
+            drained = false; observe = false;
+            images.Drain(pool);
 
-            // Assert
-            count.ShouldBe(1000);
-            foreach (string phase in new[] { "handoff", "drained", "arena", "input", "delivery" })
+            baseline = readHeap(); observe = true;
+            SqlRowCollector.ObserveSpill = phase =>
             {
-                samples.ContainsKey(phase).ShouldBeTrue();
-                _output.WriteLine($"LIVE_DEFERRED|{phase}|bytes={samples[phase]}|grant={grant}|constant={constant}");
-                samples[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant);
+                if (phase is "handoff" or "drained" or "arena") { Sample(phase); }
+                if (phase == "drained") { weak.Count.ShouldBe(100); weak.Count(w => w.IsAlive).ShouldBe(0); drained = true; }
+            };
+            try
+            {
+                // Act
+                await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                result.ShouldBeOfType<SqlSpilledResultSet>(); int count = 0;
+                await foreach (var row in result.GetRowsAsync()) { if (++count % 317 == 0) { Sample("delivery"); } }
+
+                // Assert
+                count.ShouldBe(1000);
+                foreach (string phase in new[] { "handoff", "drained", "arena", "input", "delivery" })
+                {
+                    samples.ContainsKey(phase).ShouldBeTrue();
+                    _output.WriteLine($"LIVE_DEFERRED|{phase}|bytes={samples[phase]}|grant={grant}|constant={constant}");
+                }
+                session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+                return new Dictionary<string, long>(samples);
             }
-            session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
-        }
-        finally { SqlRowCollector.ObserveSpill = null; }
+            finally { SqlRowCollector.ObserveSpill = null; }
+        });
+        await batch.CheckAsync(() => sampled.Value.Select(sample => Ceiling(sample.Key, sample.Value, (long)(grant * 1.1) + constant, sampled.Term)).ToArray(), () =>
+        {
+            foreach (string phase in new[]
+            {
+                "handoff",
+                "drained",
+                "arena",
+                "input",
+                "delivery"
+            }
+
+            )
+            {
+                sampled.Value[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant);
+            }
+        });
+        await batch.CompleteAsync();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Spill fitting sort: lending LINQ its buffer preserves warm allocation exactly (#1789)")]

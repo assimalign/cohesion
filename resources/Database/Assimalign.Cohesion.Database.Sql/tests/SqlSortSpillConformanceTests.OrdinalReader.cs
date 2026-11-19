@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -11,6 +12,9 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
+
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -36,30 +40,46 @@ public sealed partial class SqlSortSpillConformanceTests
         SqlTempRowCodec.TryEncode(row, out var encoded).ShouldBeTrue();
         using var run = statement.CreateRun(); run.Append(encoded); run.Seal();
         var readers = new IEnumerator<object?[]>?[32];
-        long live = long.MaxValue;
+        var rounds = new List<Sample<long>>();
         long bound = StorageTempSpace.PageSize + run.MaximumRecordLength + SqlTempRowCodec.DecodedBytes(row) + 256;
-        for (int round = 1; round <= 3; round++)
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+
+        var batch = new Batch(pool, _output, nameof(Read_HashOrdinalSource_ShouldBoundMarginalReaders));
+        for (int index = 1; index <= 3; index++)
         {
-            try
+            int round = index;
+            var sample = batch.Measure($"width={width}|round={round}", readHeap =>
             {
-                Fill(0, 8);
-                long small = LiveHeap.Read();
-                // Act
-                Fill(8, 32);
-                long measured = LiveHeap.Read() - small;
-                _output.WriteLine($"ORDINAL_READER_ROUND|width={width}|round={round}|live={measured}|bound={24 * bound}");
-                live = Math.Min(live, measured);
-                GC.KeepAlive(readers);
-            }
-            finally
-            {
-                foreach (var reader in readers) { reader?.Dispose(); }
-                Array.Clear(readers);
-            }
+                try
+                {
+                    Fill(0, 8);
+                    images.Drain(pool);
+                    long small = readHeap();
+                    // Act
+                    Fill(8, 32);
+                    long measured = readHeap() - small;
+                    _output.WriteLine($"ORDINAL_READER_ROUND|width={width}|round={round}|live={measured}|bound={24 * bound}");
+                    GC.KeepAlive(readers);
+                    return measured;
+                }
+                finally
+                {
+                    foreach (var reader in readers) { reader?.Dispose(); }
+                    Array.Clear(readers);
+                }
+            });
+            rounds.Add(sample);
         }
         // Assert: marginal bytes per reader against the unchanged per-reader bound.
-        _output.WriteLine($"ORDINAL_READER|width={width}|live={live / 24d}|bound={bound}");
-        (live / 24).ShouldBeLessThanOrEqualTo(bound);
+        await batch.CheckAsync(() => [Ceiling("reader bytes", rounds.Min(x => x.Value) / 24, bound, Term.Maximum(rounds) / 24)], () =>
+        {
+            long live = rounds.Min(x => x.Value);
+            _output.WriteLine($"ORDINAL_READER|width={width}|live={live / 24d}|bound={bound}");
+            (live / 24).ShouldBeLessThanOrEqualTo(bound);
+        });
+        await batch.CompleteAsync();
 
         void Fill(int first, int last)
         {
