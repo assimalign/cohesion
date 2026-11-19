@@ -24,8 +24,7 @@ builder.AddSql("orders-sql", sql =>
 
 The build never treats `.sql` or another declarative file as a second schema source.
 
-The SDK emits no resource manifest, and a Database application becomes a managed resource with
-`builder.Services.AddResource(...)` from `Database.Hosting.ApplicationModel`.
+The SDK emits no resource manifest.
 
 Set `CohesionDatabaseProject` to `true` and select one of the exact model names:
 
@@ -71,6 +70,12 @@ SQL schema compilation uses the `cohesion/database-schema/v12` contract in `Data
 without loading the SQL engine into MSBuild. Migration generation uses `Database.Sql.Language`
 to validate and render DEFAULT literals, and supports required column additions with non-null
 literal defaults, matching runtime migrations.
+Column changes share the engine's ALTER COLUMN lowering: old-default removal before TYPE,
+the target default next, and nullability last. Compatible facets retain the engine's full-definition
+ALTER statement. Domain names stay declared names for engine validation. DEFAULT-only changes
+still require destructive-change opt-in. Each file explains in its header that typed schema
+application publishes jointly while the exported file applies per statement. Unsupported changes
+fail before the SQL file or baseline is written, with COHDBSDK206 and the lowering refusal reason.
 Index migration SQL omits ASC NULLS FIRST and DESC NULLS LAST, matching ORDER BY defaults;
 explicit ASC NULLS LAST and DESC NULLS FIRST remain visible. V11 artifacts and baselines are
 refused before creating migration files or their directory (#1787).

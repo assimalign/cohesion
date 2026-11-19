@@ -49,6 +49,7 @@ internal sealed partial class SqlPlanExecutor
     {
         long resultBytes = 0;
         SqlSelectMemory retainedBytes = default, vectorBytes = default;
+        statement.Metrics.BeginInternalResult();
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -64,6 +65,8 @@ internal sealed partial class SqlPlanExecutor
                     ? ExecuteBoundedSubqueryBodyAsync(query.Query, statement, cancellationToken, 2)
                     : ExecuteAsync(query.Query, statement, cancellationToken)).ConfigureAwait(false);
                 resultBytes += AdmitSelectResult(result, cancellationToken);
+                if (result is SqlSpilledResultSet spilled)
+                { resultBytes += spilled.ReserveReader(statement.Metrics, _definitions.StatementMemoryBudget); }
                 if (!boundedBody && result is SqlMaterializedResultSet body)
                 { _definitions.ObserveSelectRetention?.Invoke("subquery-body", false, body.Rows.Count); }
                 var rows = new List<object?>();
@@ -96,13 +99,18 @@ internal sealed partial class SqlPlanExecutor
                     materialized.ClearRows();
                     ReleaseSelectMemory(ref resultBytes);
                 }
+                if (result is SqlSpilledResultSet) { ReleaseSelectMemory(ref resultBytes); }
                 ReserveSelectMemory(ref vectorBytes, 24L + 8L * rows.Count);
                 foreach (var value in rows) { RetainSelectValue(ref vectorBytes, value); }
                 return rows.ToArray();
             }
             finally { _subqueryValues = parent; }
         }
-        finally { ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref vectorBytes); ReleaseSelectMemory(ref resultBytes); }
+        finally
+        {
+            statement.Metrics.EndInternalResult();
+            ReleaseSelectMemory(ref retainedBytes); ReleaseSelectMemory(ref vectorBytes); ReleaseSelectMemory(ref resultBytes);
+        }
     }
 
     // This separate state machine charges child result buffers only inside a window.

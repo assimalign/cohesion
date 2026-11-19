@@ -1,12 +1,9 @@
 using System;
-using System.Globalization;
 using System.Collections.Generic;
 using System.Text;
 
-using Assimalign.Cohesion.Database.Sql.Language;
-using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Sql.Schema;
-using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -70,23 +67,6 @@ internal static class SqlSchemaStatementRenderer
 
     internal static string DropColumn(string tableName, string columnName)
         => $"ALTER TABLE {QualifiedTable(tableName)} DROP COLUMN {Identifier(columnName)};";
-
-    internal static string AlterColumn(string tableName, CompiledSchemaColumn column)
-    {
-        var builder = new StringBuilder($"ALTER TABLE {QualifiedTable(tableName)} ALTER COLUMN ");
-        AppendColumn(builder, column, isPrimaryKey: false);
-        return builder.Append(';').ToString();
-    }
-
-    internal static string AlterColumnType(string tableName, CompiledSchemaColumn column)
-        => $"ALTER TABLE {QualifiedTable(tableName)} ALTER COLUMN {Identifier(column.Name)} TYPE {TypeName(column)};";
-
-    internal static string SetNullability(string tableName, CompiledSchemaColumn column)
-        => $"ALTER TABLE {QualifiedTable(tableName)} ALTER COLUMN {Identifier(column.Name)} {(column.IsNullable ? "DROP" : "SET")} NOT NULL;";
-
-    internal static string SetDefault(string tableName, CompiledSchemaColumn column)
-        => $"ALTER TABLE {QualifiedTable(tableName)} ALTER COLUMN {Identifier(column.Name)} " +
-            (column.DefaultLiteral is null ? "DROP DEFAULT;" : $"SET DEFAULT {SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral) ?? "NULL"};");
 
     internal static string AddConstraint(string tableName, CompiledSchemaConstraint constraint)
     {
@@ -223,108 +203,11 @@ internal static class SqlSchemaStatementRenderer
     }
 
     private static string TypeName(CompiledSchemaColumn column)
-    {
-        if (column.CustomType is { } declared)
-        {
-            // A domain's name or a built-in type name as declared (phase E3), which the engine's DDL
-            // resolves as it resolves any type name. Only the name's shape is checked here: rewritten
-            // from its parts, so the text written into the statement is nothing but a type name.
-            if (!SqlTypeRules.TrySplit(declared, out string name, out int? first, out int? second) ||
-                !SqlTypeModifiers.IsTypeName(name) || (second is not null && first is null))
-            {
-                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementRendererTypeNameDatabase, column.Name, declared));
-            }
-
-            return first is null
-                ? name
-                : second is null
-                    ? $"{name}({first.Value.ToString(CultureInfo.InvariantCulture)})"
-                    : $"{name}({first.Value.ToString(CultureInfo.InvariantCulture)}, {second.Value.ToString(CultureInfo.InvariantCulture)})";
-        }
-
-        return column.Type switch
-        {
-            DatabaseType.Boolean => "BOOLEAN",
-            DatabaseType.Int8 => "TINYINT",
-            DatabaseType.Int16 => "SMALLINT",
-            DatabaseType.Int32 => "INT",
-            DatabaseType.Int64 => "BIGINT",
-            DatabaseType.Float32 => "REAL",
-            DatabaseType.Float64 => "DOUBLE",
-            DatabaseType.Decimal => DecimalTypeName(column),
-            DatabaseType.Character => SizedTypeName("CHAR", "CHAR", column.MaxLength ?? 1),
-            DatabaseType.String => SizedTypeName("VARCHAR", "TEXT", column.MaxLength),
-            DatabaseType.Binary => SizedTypeName("VARBINARY", "BLOB", column.MaxLength),
-            DatabaseType.Date => "DATE",
-            DatabaseType.Time => "TIME",
-            DatabaseType.DateTime => "TIMESTAMP",
-            DatabaseType.DateTimeOffset => "TIMESTAMPTZ",
-            DatabaseType.TimeSpan => "INTERVAL",
-            DatabaseType.Guid => "UUID",
-            DatabaseType.Json => "JSON",
-            DatabaseType.JsonBinary => "JSONB",
-            _ => throw new DatabaseException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementRendererTypeNameDatabase2, column.Name, column.Type)),
-        };
-    }
-
-    private static string DecimalTypeName(CompiledSchemaColumn column)
-    {
-        if (column.Scale is not null && column.Precision is null)
-        {
-            throw new DatabaseException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RendererDecimalTypeNameDatabase, column.Name));
-        }
-
-        if (column.Precision is null)
-        {
-            return "DECIMAL";
-        }
-
-        string precision = column.Precision.Value.ToString(CultureInfo.InvariantCulture);
-        return column.Scale is null
-            ? $"DECIMAL({precision})"
-            : $"DECIMAL({precision},{column.Scale.Value.ToString(CultureInfo.InvariantCulture)})";
-    }
-
-    private static string SizedTypeName(string sizedName, string unboundedName, int? maxLength)
-        => maxLength is null
-            ? unboundedName
-            : $"{sizedName}({maxLength.Value.ToString(CultureInfo.InvariantCulture)})";
+        => SqlMigrationLowering.TypeName(column);
 
     private static string QualifiedTable(string tableName)
         => $"{defaultSchema}.{Identifier(tableName)}";
 
     private static string Identifier(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-
-        if (value.IndexOfAny(['\0', '"']) >= 0)
-        {
-            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementRendererIdentifierDatabase, value));
-        }
-
-        bool requiresQuotes = !(char.IsLetter(value[0]) || value[0] == '_');
-        for (int index = 1; index < value.Length; index++)
-        {
-            if (!(char.IsLetterOrDigit(value[index]) || value[index] == '_'))
-            {
-                requiresQuotes = true;
-            }
-        }
-
-        foreach (string keyword in SqlLanguageProfile.Instance.Keywords)
-        {
-            requiresQuotes |= string.Equals(value, keyword, StringComparison.OrdinalIgnoreCase);
-        }
-        foreach (string word in SqlLanguageProfile.RecognizedUnsupportedVocabulary)
-        {
-            requiresQuotes |= string.Equals(value, word, StringComparison.OrdinalIgnoreCase);
-        }
-        foreach (string function in SqlLanguageProfile.Instance.Functions)
-        {
-            requiresQuotes |= string.Equals(value, function, StringComparison.OrdinalIgnoreCase);
-        }
-        return requiresQuotes ? "\"" + value + "\"" : value;
-    }
+        => SqlMigrationLowering.Identifier(value);
 }

@@ -45,7 +45,7 @@ scans or kills other dotnet processes. No allocation, timing ratio or duration m
 is an acceptance assertion. No product behavior, error code, storage format or wire byte changes.
 
 Run `pwsh scripts/Install-Local.ps1 -Configuration Release -SkipLibraries` before the parent suite.
-The fixture runs unmanaged without AddResource and leaves schema tooling off; SampleHost
+The fixture runs unmanaged and leaves schema tooling off; SampleHost
 continues to own SQL schema compilation and durable restart coverage.
 
 All three fixture engines retain their default in-memory storage: no RootPath or storage

@@ -24,7 +24,8 @@ internal sealed partial class SqlPlanExecutor
 
     private bool CanSpillJoinBuild(SqlJoinPlan plan, SqlHashJoinPath? keys,
         SqlDatabaseSession? owner, SqlExecutionException error)
-        => keys is { InnerExpressions: null, OuterExpressions: null } && CanSpillJoinRows(plan, owner, error);
+        => keys is { InnerExpressions: null, OuterExpressions: null }
+            && error.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode && CanSpillMixedJoinBuild(plan, owner);
 
     private static bool IsJoinTempCleanupFailure(Exception failure)
         => failure is AggregateException aggregate && aggregate.Flatten().InnerExceptions.All(error => error is StorageTempException);

@@ -234,7 +234,6 @@ $script:CohesionReleaseLibrary = @(
     'resources/Database/Assimalign.Cohesion.Database.Graph.Language'
     'resources/Database/Assimalign.Cohesion.Database.Graph.Protocol'
     'resources/Database/Assimalign.Cohesion.Database.Hosting'
-    'resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel'
     'resources/Database/Assimalign.Cohesion.Database.Indexing'
     'resources/Database/Assimalign.Cohesion.Database.KeyValuePair'
     'resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client'
@@ -252,6 +251,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Database/Assimalign.Cohesion.Database.Testing'
     'resources/Database/Assimalign.Cohesion.Database.Transactions'
     'resources/Database/Assimalign.Cohesion.Database.Types'
+    'resources/Database/Assimalign.Cohesion.Database.Types.Text'
 
     # resources/EmailHub
     'resources/EmailHub/Assimalign.Cohesion.EmailHub'

@@ -1612,17 +1612,6 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Hosting/tests/Assimalign.Cohesion.Database.Hosting.Tests.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/" />
-	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/">
-		<File Path="resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md" />
-		<File Path="resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/src/">
-		<Project Path="resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/src/Assimalign.Cohesion.Database.Hosting.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/tests/">
-		<Project Path="resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/tests/Assimalign.Cohesion.Database.Hosting.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Indexing/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Indexing/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Indexing/src/Assimalign.Cohesion.Database.Indexing.csproj" />
@@ -1766,6 +1755,20 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Types/src/Assimalign.Cohesion.Database.Types.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types.Text/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types.Text/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Types.Text/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Types.Text/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types.Text/src/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Types.Text/src/Assimalign.Cohesion.Database.Types.Text.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types.Text/tests/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Types.Text/tests/Assimalign.Cohesion.Database.Types.Text.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types.Text/samples/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Types.Text/samples/Assimalign.Cohesion.Database.Types.Text.AotSample/Assimalign.Cohesion.Database.Types.Text.AotSample.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Refs/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Refs/Directory.Build.props" />

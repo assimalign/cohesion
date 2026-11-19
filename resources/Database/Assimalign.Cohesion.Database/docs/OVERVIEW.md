@@ -11,7 +11,7 @@ the area's five kept interfaces), object ownership (`DatabaseObjectOwner`,
 `DatabaseObjectLockedException`), the area's exception
 root (`DatabaseException`, `DatabaseNotFoundException`, `DatabaseParseException`), and shared value
 objects (`DatabaseName`, `EngineState`, `EngineModel`). The root is also the area's **rollup**: it
-references every child root (Types, Language, Storage, Transactions, Execution, Indexing,
+references all nine child roots (Types, Text, Language, Storage, Transactions, Execution, Indexing,
 Protocol, Security), so one reference to the root delivers the whole base surface — including
 child-owned vocabulary the contracts speak (`TransactionId` and `TransactionState` from
 `Database.Transactions`, `ProtocolVersion` from `Database.Protocol`).
@@ -111,9 +111,9 @@ the source boundary while the existing public construction and execution APIs re
 
 ## Dependencies
 
-`Core`, the eight child roots the root rolls up (`Database.Execution`, `Database.Indexing`,
+`Core`, the nine child roots the root rolls up (`Database.Execution`, `Database.Indexing`,
 `Database.Language`, `Database.Protocol`, `Database.Security`, `Database.Storage`,
-`Database.Transactions`, `Database.Types` — child roots never reference the root), and the
+`Database.Transactions`, `Database.Types`, `Database.Types.Text` — child roots never reference the root), and the
 existing private `Web` implementation reference (excluded from the package dependency list). The
 HTTP `admin` control plane is a separate Hosting concern implemented through that project's
 private `Web.Hosting`/`Web.Health` references.

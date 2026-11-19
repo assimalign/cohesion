@@ -26,8 +26,12 @@ public sealed partial class SqlJointTypeMigrationTests
         for (long page = 1; page < database.DataStorage.PageManager.PageCount; page++)
         {
             if (!database.DataStorage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
-            using var handle = database.DataStorage.PageManager.GetPage((PageId)page);
-            if (handle.Page.Type == PageType.Index && handle.Page.OwnerId == owner) { count++; }
+            // The purge worker reclaims retired objects in the background, so a page can be freed between
+            // the allocation check and the read. A freed page belongs to no owner, so it is skipped.
+            StoragePageHandle handle;
+            try { handle = database.DataStorage.PageManager.GetPage((PageId)page); }
+            catch (StorageIOException) when (!database.DataStorage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
+            using (handle) { if (handle.Page.Type == PageType.Index && handle.Page.OwnerId == owner) { count++; } }
         }
         return count;
     }

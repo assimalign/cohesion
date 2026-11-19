@@ -309,7 +309,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, index-build chunk workspace (CREATE [UNIQUE] INDEX, UNIQUE/PRIMARY KEY constraints and migration/rollback rebuilds; #1808), rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); plain SELECT join buffers, matches, groups, aggregate inputs, sorting/top-N, output/DISTINCT, retained results, relation/subquery caches and set state share the grant; SQL spilled-result reader workspace, retained decoded rows and decoding overlap share the result grant; application-produced binary rows/keys and an undeliverable first reader refuse spilling and a session caps undisposed spilled results at eight; CTAS admits kept rows, independent of capacity (#1776, #1762); plain hash aggregation/DISTINCT spill eligibility, key/record codec limits, an over-budget single group and eight-level repartition exhaustion retain this code; hash joins retain it for ineligible or oversized build records, decoded records that cannot fit G/4, insufficient minimum working sets, and reservations that optional arenas cannot satisfy (#1789) |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, index-build chunk workspace (CREATE [UNIQUE] INDEX, UNIQUE/PRIMARY KEY constraints and migration/rollback rebuilds; #1808), rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); plain SELECT join buffers, matches, groups, aggregate inputs, sorting/top-N, output/DISTINCT, retained results, relation/subquery caches and set state share the grant; SQL spilled-result reader workspace, retained decoded rows and decoding overlap share the result grant; application-produced binary rows/keys and an undeliverable first reader refuse spilling and a session caps undisposed spilled client results at eight; CTAS admits kept rows, independent of capacity (#1776, #1762); plain hash aggregation/DISTINCT spill eligibility, key/record codec limits, an over-budget single group and eight-level repartition exhaustion retain this code; hash joins retain it for ineligible or oversized build records, decoded records that cannot fit G/4, insufficient minimum working sets, and reservations that optional arenas cannot satisfy (#1789) |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
@@ -502,9 +502,10 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1735, GQ-M2 fixes) | CG03007 | Constraints — MERGE relationship variable is already declared before the clause |
 | New (#1738, GQ-D1) | CG03008 | Schema — database-wide index/constraint name is already used |
 | New (#1738, GQ-D1) | CG03009 | Constraints — duplicate constraint kind or incompatible property type rule |
-| New (#1738, GQ-D1; #1806, GQ-T1) | CG03010 | Constraints — existing data violates a newly created named constraint or proposed graph type |
-| New (#1806, GQ-T1) | CG03011 | Schema — graph-type ADD/ALTER/DROP element name is invalid, an edge references an absent node type, or identifying and implied labels overlap |
+| New (#1738, GQ-D1; #1806, GQ-T1) | CG03010 | Constraints — existing data violates a newly created named constraint or proposed graph type, including edge endpoints and properties |
+| New (#1806, GQ-T1) | CG03011 | Schema — graph-type declaration or ADD/ALTER/DROP element name is invalid, an edge references an absent node type, or identifying and implied labels overlap |
 | New (#1806, GQ-T1) | CG03012 | Constraints — a node write omits an implied label required by its node type |
+| New (#1806, GQ-T2) | CG03013 | Constraints — a relationship or endpoint-label write violates its edge type's source/target node-type membership |
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
@@ -529,7 +530,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
 | COHDBG018 | CG06018 | Storage/durability |
-| New (#1738, GQ-D1; #1806, GQ-T1) | CG06019 | Format — graph catalog record version differs from v4; recreate database, no legacy reader |
+| New (#1738, GQ-D1; #1806, GQ-T1) | CG06019 | Format — graph catalog record version differs from v5; recreate database, no legacy reader |
 | COHDBG005 | CG07005 | Protocol/transport |
 | COHDBG016 | CG07016 | Protocol/transport |
 | COHDBG021 | CG08021 | Configuration |
@@ -657,3 +658,17 @@ failures use the binding category; return-type failures use the value category.
 | CV01021 | More than one key-value function overload accepts the NULL-compatible arguments | — |
 | CV02016 | Key-value function result violates its declared return type | — |
 | CV05003 | Key-value application function callback failed | — |
+
+## Text analysis conditions
+
+`Database.Types.Text` is an independently consumable child root. Its `TextException.Code` uses
+`TextErrorCode`, outside the model diagnostic namespace, like the other typed child-root failures.
+No model translates these codes yet; model-owned diagnostics belong with the future text consumers.
+
+| Code | Condition |
+| --- | --- |
+| `UnknownAnalyzer` | Analyzer name is unavailable (names are case-sensitive) |
+| `AnalyzerVersionMismatch` | The requested analyzer version is unavailable |
+| `InvalidUnicode` | Input contains an invalid Unicode scalar sequence |
+| `InvalidLexeme` | An explicit lexeme is empty, contains a null or exceeds 2,047 UTF-8 bytes |
+| `VectorTooLarge` | The vector's lexeme/position payload exceeds 1,048,575 bytes |

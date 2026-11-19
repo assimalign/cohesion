@@ -18,6 +18,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlMaterializedResultSet.DebugView))]
 internal sealed class SqlMaterializedResultSet : DatabaseResultSet
 {
+    private static ConditionalWeakTable<SqlMaterializedResultSet, ConsumedMemory>? _consumed;
     private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly List<object?[]> _rows;
 
@@ -48,6 +49,38 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     internal long RowBufferBytes => 24L + 8L * _rows.Capacity;
     internal void ClearRow(int index) => _rows[index] = [];
     internal void ClearRows() { _rows.Clear(); _rows.Capacity = 0; }
+
+    // CTAS begins consuming ownership only after its original copy admission fails.
+    // Keep the result's arrays/list (and their charges) until enumeration ends; clearing
+    // consumed cells does not invalidate List's enumerator or retain wide identities.
+    internal void ReleaseConsumedMemory(SqlStatementMetrics metrics, ref long reserved, long count)
+    {
+        if (_consumed?.TryGetValue(this, out var consumed) != true)
+        {
+            consumed = new ConsumedMemory();
+            foreach (var row in _rows)
+            {
+                consumed.Memory.Bytes += consumed.Memory.RowBytes(row, out bool wide);
+                if (wide) { consumed.Memory.AddRow(row); }
+            }
+            LazyInitializer.EnsureInitialized(ref _consumed).Add(this, consumed);
+        }
+        while (consumed!.Count < count)
+        {
+            var row = _rows[consumed.Count++];
+            long bytes = consumed.Memory.RemoveConsumedPayload(row);
+            Array.Clear(row); metrics.ReleaseHashMemory(bytes); reserved -= bytes;
+        }
+    }
+
+    [System.Diagnostics.DebuggerDisplay("SQL consumed result memory")]
+    [System.Diagnostics.DebuggerTypeProxy(typeof(ConsumedMemory.DebugView))]
+    private sealed class ConsumedMemory
+    {
+        internal SqlSelectMemory Memory;
+        internal int Count;
+        private sealed class DebugView { public DebugView(ConsumedMemory value) { } }
+    }
 
     // Admit query output retained by CTAS alongside its encoded batch and any other
     // statement reservations. The caller releases this grant after source disposal.
@@ -94,7 +127,11 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     }
 
     /// <inheritdoc />
-    public override ValueTask DisposeAsync() => default;
+    public override ValueTask DisposeAsync()
+    {
+        if (_consumed?.Remove(this) == true) { ClearRows(); }
+        return default;
+    }
 
     private sealed class DebugView
     {

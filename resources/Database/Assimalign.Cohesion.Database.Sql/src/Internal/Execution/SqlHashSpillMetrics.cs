@@ -22,6 +22,7 @@ internal sealed class SqlHashSpillMetrics
     internal void BeginFullJoin() => _fullJoinDebts++;
     internal void EndFullJoin() => _fullJoinDebts--;
     internal bool JoinSpilled => _joinPhysicalBytes != 0;
+    internal bool HasOperatorSpill => JoinSpilled || Batches != 0 || Runs != 0;
     internal StorageTempStatement? JoinStatement { get; private set; }
     internal bool FullJoin => _fullJoinDebts != 0;
     internal Exception? JoinCleanupFailure { get; private set; }
@@ -29,6 +30,7 @@ internal sealed class SqlHashSpillMetrics
     private int _fullJoinDebts;
     private SqlHashJoinSpill? _optionalArenas;
     private bool _yielding;
+    private bool _resultOwner;
     internal bool HasOptionalArenas => _optionalArenas is not null;
     internal void AddOptionalArena(SqlHashJoinSpill arena)
     { arena.NextOptionalArena = _optionalArenas; _optionalArenas = arena; }
@@ -67,7 +69,15 @@ internal sealed class SqlHashSpillMetrics
     {
         Begin(metrics);
         var value = For(metrics)!;
+        value._resultOwner = false;
         return value.JoinStatement ??= owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
+    }
+    internal static bool AdoptTemp(SqlStatementMetrics metrics, StorageTempStatement statement)
+    {
+        Begin(metrics);
+        var value = For(metrics)!;
+        if (value.JoinStatement is null) { value.JoinStatement = statement; value._resultOwner = true; }
+        return ReferenceEquals(value.JoinStatement, statement);
     }
     internal static StorageTempStatement? DetachJoinTemp(SqlStatementMetrics metrics)
     {
@@ -87,6 +97,7 @@ internal sealed class SqlHashSpillMetrics
     internal static void RefreshJoin(SqlStatementMetrics metrics, StorageTempStatement statement)
     {
         var value = For(metrics)!;
+        if (value._resultOwner) { Refresh(metrics, statement); return; }
         value._joinPhysicalBytes = Math.Max(value._joinPhysicalBytes, statement.PhysicalBytes);
         value.PhysicalBytes = Math.Max(value.PhysicalBytes, value._joinPhysicalBytes);
         value.PeakBytes = statement.PeakBytes;

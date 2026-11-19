@@ -101,15 +101,24 @@ internal static partial class GraphPlanExecutor
                     if (operation.Updates.IsCreated(true, node.Id.Value))
                     { await database.ValidateNodeAsync(operation, node.Labels, node.Properties, token).ConfigureAwait(false); }
                 }
-                foreach (var edgePattern in path.Relationships)
-                {
-                    var edge = (GraphRelationship)operation.Updates.Current(row[edgePattern.Variable!])!;
-                    await database.ValidateRelationshipAsync(operation, edge.Type, edge.Properties, token).ConfigureAwait(false);
-                }
+                await ValidateEdgesAsync(row).ConfigureAwait(false);
                 rowMemory.ReleaseValue(row);
                 foreach (string name in hidden) { row.Remove(name); }
                 rowMemory.RetainValue(row, token);
                 yield return row;
+            }
+
+            async ValueTask ValidateEdgesAsync(Dictionary<string, object?> row)
+            {
+                for (int i = 0; i < path.Relationships.Count; i++)
+                {
+                    var edge = (GraphRelationship)operation.Updates.Current(row[path.Relationships[i].Variable!])!;
+                    var first = (GraphNode)operation.Updates.Current(row[path.Nodes[i].Variable!])!;
+                    var last = (GraphNode)operation.Updates.Current(row[path.Nodes[i + 1].Variable!])!;
+                    var source = first.Id == edge.From ? first : last;
+                    var target = first.Id == edge.From ? last : first;
+                    await database.ValidateRelationshipAsync(operation, edge.Type, edge.Properties, token, false, source.Labels, target.Labels).ConfigureAwait(false);
+                }
             }
 
             string Hidden()
@@ -228,8 +237,8 @@ internal static partial class GraphPlanExecutor
             token.ThrowIfCancellationRequested();
             var pattern = path.Relationships[i];
             bool reverse = pattern.Direction == GqlPatternDirection.Incoming;
-            var edge = await operation.Updates.CreateRelationshipAsync(nodes[reverse ? i + 1 : i].Id,
-                nodes[reverse ? i : i + 1].Id, GraphLabelEvaluator.InsertType(pattern),
+            var edge = await operation.Updates.CreateRelationshipAsync(nodes[reverse ? i + 1 : i],
+                nodes[reverse ? i : i + 1], GraphLabelEvaluator.InsertType(pattern),
                 EvaluateProperties(pattern.Properties, row, operation.EvaluationContext, parameters), token, deferRequired: true).ConfigureAwait(false);
             row.Add(pattern.Variable!, edge);
             created++;

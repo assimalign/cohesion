@@ -121,6 +121,10 @@ internal sealed class TestEngine : DatabaseEngine
     /// </summary>
     public Task? OpenBarrier { get; set; }
 
+    public Func<DatabaseName, CancellationToken, ValueTask<DatabaseInstance>>? OpenOperation { get; set; }
+
+    public Func<ValueTask>? DropOperation { get; set; }
+
     public override IReadOnlyList<DatabaseName> OfflineDatabases => Offline;
 
     public bool Disposed => IsDisposed;
@@ -188,6 +192,7 @@ internal sealed class TestEngine : DatabaseEngine
     protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _coreCalls);
+        if (OpenOperation is { } operation) { return operation(name, cancellationToken); }
         if (OpenBarrier is { } barrier)
         {
             return OpenAfterAsync(barrier, name);
@@ -229,6 +234,7 @@ internal sealed class TestEngine : DatabaseEngine
     protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _coreCalls);
+        if (DropOperation is { } operation) { return operation(); }
         lock (_databases)
         {
             if (!_existing.Remove(name))
@@ -247,6 +253,8 @@ internal sealed class TestEngine : DatabaseEngine
 
         return ValueTask.CompletedTask;
     }
+
+    protected override IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore() => Volatile.Read(ref _snapshot);
 
     protected override async IAsyncEnumerable<DatabaseInstance> GetDatabasesCore([EnumeratorCancellation] CancellationToken cancellationToken)
     {

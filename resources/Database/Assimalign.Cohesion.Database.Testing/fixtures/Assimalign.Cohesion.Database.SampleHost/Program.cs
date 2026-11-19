@@ -60,9 +60,9 @@ else
     Console.WriteLine("STOPPED");
 }
 
-// Match Hosting.ApplicationModel/tests/TestObjects/TestPorts.cs: bind(0) and outgoing
-// connections cannot claim ports below the platform ephemeral ranges. Retain the reservation
-// through Build, and retry occupied or Windows-reserved ports before selecting a candidate.
+// bind(0) and outgoing connections cannot claim ports below the platform ephemeral ranges.
+// Retain the reservation through Build, and retry occupied or Windows-reserved ports before
+// selecting a candidate.
 static Socket ReserveTestPort()
 {
     const int firstPort = 20000;

@@ -152,7 +152,7 @@ public sealed class GraphMergeConcurrencyTests
         await database.RunAsync(first, async operation =>
         {
             (await GraphMergeConcurrency.MatchAsync(database, operation, directed, ProbeEdge, token)).Matches.ShouldBeEmpty();
-            await operation.Updates.CreateRelationshipAsync(from.Id, to.Id, "KNOWS", _empty, token);
+            await operation.Updates.CreateRelationshipAsync(from, to, "KNOWS", _empty, token);
             await operation.Updates.PublishAsync(token);
             return true;
         }, token);

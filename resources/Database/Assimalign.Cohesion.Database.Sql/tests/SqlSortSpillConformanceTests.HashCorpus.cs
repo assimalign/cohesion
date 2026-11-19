@@ -13,6 +13,9 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -52,17 +55,21 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     private sealed record CorpusOutcome(RowValues[] Rows, string? Error, long Visits, long Peak, int Passes, long Batches, long TempPeak, long[] Calls, long Live = 0);
-    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true)
+    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true, WindowPoolLease? images = null, HashPoolEvents? pool = null, Func<long>? readHeap = null, int? logCapacity = null, (int Shard, int Shards)? transitions = null)
     {
-        run.Log.Clear(); run.FailAt = fail;
+        run.Log.Clear();
+        if (logCapacity is int capacity) { run.Log.Capacity = capacity; }
+        run.FailAt = fail;
         await run.Session.ExecuteAsync("ALTER SEQUENCE s RESTART WITH 1");
         RowValues[] rows = []; string? error = null; long live = 0;
-        long baseline = sample ? LiveHeap.Read() : 0;
+        if (sample) { images?.Drain(pool!); }
+        long baseline = sample ? (readHeap ?? LiveHeap.Read)() : 0;
         var phases = new HashSet<string>();
         string? previousPhase = null;
         long depth = 0, population = 0;
+        int transition = 0;
         bool replay = false;
-        void Sample() { if (replay) { live = Math.Max(live, LiveHeap.Read() - baseline); } }
+        void Sample() { if (replay) { live = Math.Max(live, (readHeap ?? LiveHeap.Read)() - baseline); } }
         if (sample)
         {
             SqlPlanExecutor.ObserveHashSpill = (phase, value) =>
@@ -76,7 +83,9 @@ public sealed partial class SqlSortSpillConformanceTests
                     previousPhase = phase;
                     if (phase == "batch") { depth = value; }
                     if (phase == "batch-live") { population = value; }
-                    Sample();
+                    // A shard samples every Shards-th selected transition from its own offset, so the
+                    // shards of one statement together sample every transition.
+                    if (transitions is not { } shard || transition++ % shard.Shards == shard.Shard) { Sample(); }
                 }
             };
             run.Session.Database.Definitions.ObserveSelectRetention = (phase, _, _) =>
@@ -122,12 +131,20 @@ public sealed partial class SqlSortSpillConformanceTests
         var spilled = new List<CorpusRun>();
         foreach (long selectedGrant in grants) { spilled.Add(await CreateCorpusEngineAsync(selectedGrant, true)); }
         long[] excesses = grants.Select(_ => long.MinValue).ToArray();
-        int spills = 0, matches = 0;
+        int spills = 0, matches = 0, refusals = 0;
+        // The default 4 MiB control never replays, so Sample never reads its baseline.
+        bool pinPool = grant != 4194304 || statements > 256;
+        using var pool = pinPool ? new HashPoolEvents() : null;
+        using var images = pinPool ? new WindowPoolLease() : null;
+        if (pinPool) { images!.Drain(pool!);  }
+        await using var acceptance = pinPool ? new Batch(pool!, _output, nameof(ExecuteAsync_SeededHashHeapCorpus_ShouldMatchWithinGrant)) : null;
+        var recordings = grants.Select(_ => new List<Sample<CorpusHeapReading>>()).ToArray();
         try
         {
             // Act / Assert: rows, exact temporal representatives, errors, visits and calls.
-            for (int test = 0; test < statements; test++)
+            for (int caseIndex = 0; caseIndex < statements; caseIndex++)
             {
+                int test = caseIndex;
                 int dimensions = 1 + random.Next(4), modulus = new[] { 1000, 1200, 1600 }[random.Next(3)];
                 string[] expressions = [ $"CASE WHEN id%10=0 THEN NULL ELSE id%{modulus} END", "dec_key(id)", "nan_key(id)", "(note COLLATE case_accent_insensitive)", "CAST(id%997 AS TEXT)", "CAST('2026-01-01' AS TIMESTAMPTZ)", "id%2=0" ];
                 var keys = new List<string> { expressions[0] };
@@ -150,12 +167,57 @@ public sealed partial class SqlSortSpillConformanceTests
                 CorpusEqual(expected, await ExecuteCorpusAsync(original, sql, fail)).ShouldBeTrue(customMessage: sql);
                 for (int index = 0; index < grants.Length; index++)
                 {
-                    var actual = await ExecuteCorpusAsync(spilled[index], sql, fail, sample: true);
+                    if (pinPool)
+                    {
+                        int grantIndex = index, logCapacity = spilled[index].Log.Capacity;
+                        CorpusOutcome? expectedForAttempt = expected;
+                        var sampled = await acceptance!.MeasureAsync($"seed={corpusSeed}|statements={statements}|range=[{first},{last})|statement={test}|grant={grants[grantIndex]}|shard={shard}|shards={shards}", async readHeap =>
+                        {
+                            var candidateExpected = expectedForAttempt ?? await ExecuteCorpusAsync(unlimited, sql, fail);
+                            expectedForAttempt = null;
+                            var outcome = await ExecuteCorpusAsync(spilled[grantIndex], sql, fail, sample: true, images: images, pool: pool, readHeap: readHeap, logCapacity: logCapacity);
+                            return new CorpusHeapReading(candidateExpected, outcome);
+                        });
+                        recordings[grantIndex].Add(sampled);
+                        Sample<CorpusHeapReading>[] prefix = recordings[grantIndex].ToArray();
+                        await acceptance.CheckAsync(() => [Ceiling("corpus prefix largest excess", prefix.Max(x => x.Value.Live) - grants[grantIndex] - 262144,
+                            0, Term.Maximum(prefix))], async () =>
+                        {
+                            excesses[grantIndex] = prefix.Max(x => x.Value.Live) - grants[grantIndex] - 262144;
+                            excesses[grantIndex].ShouldBeLessThanOrEqualTo(0, customMessage: sql);
+                            var accepted = sampled.Value.Actual!;
+                            accepted.Peak.ShouldBeLessThanOrEqualTo(grants[grantIndex]);
+                            if (accepted.Error?.StartsWith("CS05067|", StringComparison.Ordinal) == true)
+                            {
+                                refusals++;
+                                _output.WriteLine($"HASH_CORPUS_REFUSAL|test={test}|grant={grants[grantIndex]}|{sql}");
+                                await using var baseline = await CreateCorpusEngineAsync(grants[grantIndex], false);
+                                (await ExecuteCorpusAsync(baseline, sql, fail)).Error.ShouldStartWith("CS05067|");
+                            }
+                            else
+                            {
+                                CorpusEqual(sampled.Value.Expected!, accepted).ShouldBeTrue(customMessage: sql);
+                                matches++;
+                            }
+
+                            if (accepted.Passes > 0)
+                            {
+                                spills++;
+                            }
+
+                            sampled.Value.ReleaseRows();
+                        });
+                        excesses[grantIndex] = prefix.Max(x => x.Value.Live) - grants[grantIndex] - 262144;
+                        continue;
+                    }
+                    var actual = await ExecuteCorpusAsync(spilled[index], sql, fail, sample: true, images: images, pool: pool);
                     excesses[index] = Math.Max(excesses[index], actual.Live - grants[index] - 262144);
                     excesses[index].ShouldBeLessThanOrEqualTo(0, customMessage: sql);
                     actual.Peak.ShouldBeLessThanOrEqualTo(grants[index]);
                     if (actual.Error?.StartsWith("CS05067|", StringComparison.Ordinal) == true)
                     {
+                        refusals++;
+                        _output.WriteLine($"HASH_CORPUS_REFUSAL|test={test}|grant={grants[index]}|{sql}");
                         await using var baseline = await CreateCorpusEngineAsync(grants[index], false);
                         (await ExecuteCorpusAsync(baseline, sql, fail)).Error.ShouldStartWith("CS05067|");
                     }
@@ -165,12 +227,30 @@ public sealed partial class SqlSortSpillConformanceTests
                 if (test % 200 == 0 && Environment.GetEnvironmentVariable("SQL_HASH_CORPUS_PROGRESS") is { Length: > 0 } progress)
                 { File.WriteAllText(progress, $"completed={test + 1}/{statements}|matches={matches}|spills={spills}|largest_excess={string.Join(',', excesses)}"); }
             }
+            if (acceptance is not null)
+            {
+                await acceptance.CompleteAsync();
+                for (int index = 0; index < grants.Length; index++)
+                { excesses[index] = recordings[index].Max(x => x.Value.Live) - grants[index] - 262144; }
+            }
         }
         finally { foreach (var run in spilled) { await run.DisposeAsync(); } }
         // Each replaying range needs a spill witness; the default 4 MiB corpus must fit.
         if (grant < 4194304) { spills.ShouldBeGreaterThan(0); }
         else if (statements == 256) { spills.ShouldBe(0); }
+        if (statements == 256 && grant == 1048576 && shards == 2)
+        { refusals.ShouldBe(shard == 0 ? 3 : 1); } // four of 256, versus 30 on c9ac0df64
         for (int index = 0; index < grants.Length; index++)
-        { _output.WriteLine($"HASH_CORPUS_HEAP|seed={corpusSeed}|statements={statements}|range=[{first},{last})|grant={grants[index]}|largest_excess={excesses[index]}|matches={matches}|spills={spills}"); }
+        { _output.WriteLine($"HASH_CORPUS_HEAP|seed={corpusSeed}|statements={statements}|range=[{first},{last})|grant={grants[index]}|largest_excess={excesses[index]}|matches={matches}|spills={spills}|refusals={refusals}"); }
     }
+    private sealed class CorpusHeapReading
+    {
+        internal long Live { get; }
+        internal CorpusOutcome? Expected { get; private set; }
+        internal CorpusOutcome? Actual { get; private set; }
+        internal CorpusHeapReading(CorpusOutcome expected, CorpusOutcome actual)
+        { Live = actual.Live; Expected = expected; Actual = actual; }
+        internal void ReleaseRows() { Expected = null; Actual = null; }
+    }
+
 }

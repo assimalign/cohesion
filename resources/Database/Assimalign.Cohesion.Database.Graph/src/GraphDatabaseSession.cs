@@ -358,7 +358,13 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
 
     private static bool ValidSchemaCommand(GqlSchemaCommand command)
     {
-        if (command.IsText && (command.Drop || command.Kind != GqlSchemaObjectKind.Index)) { return false; }
+        if (command.GraphType is { } graphType)
+        {
+            return command.Kind == GqlSchemaObjectKind.GraphType && Enum.IsDefined(graphType.Operation) && graphType.Nodes is not null && graphType.Edges is not null &&
+                !command.Drop && !command.IsText && !command.IfExists && command.Name is null && command.Definition is null &&
+                command.Variable is null && command.Property is null && command.Type is null && !command.Relationship;
+        }
+        if (command.Kind == GqlSchemaObjectKind.GraphType || command.IsText && (command.Drop || command.Kind != GqlSchemaObjectKind.Index)) { return false; }
         if (!Enum.IsDefined(command.Kind) || command.Name is not null && string.IsNullOrWhiteSpace(command.Name)) { return false; }
         if (command.Drop || command.Kind is GqlSchemaObjectKind.Label or GqlSchemaObjectKind.RelationshipType)
         {

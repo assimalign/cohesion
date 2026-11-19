@@ -23,17 +23,26 @@ public sealed partial class SqlSortSpillConformanceTests
         await Seed(session, 100);
         await session.ExecuteAsync("UPDATE t SET note=@note", new System.Collections.Generic.Dictionary<string, object?> { ["note"] = new string('x', 5800) });
 
-        // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT id,COUNT(*) FROM t GROUP BY id,note"));
+        // Each spilled key is unique and is partitioned once. Round-robin routing
+        // pins the first-level population independently of System.HashCode's seed.
+        int partition = 0;
+        var partitionHash = SqlPlanExecutor.HashSpillPartitionHash;
+        SqlPlanExecutor.HashSpillPartitionHash = _ => partition++ % SqlHashSpillPartitioning.Count;
+        try
+        {
+            // Act
+            var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT id,COUNT(*) FROM t GROUP BY id,note"));
 
-        // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
-        var spill = SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull();
-        spill.Batches.ShouldBeGreaterThan(0); spill.Passes.ShouldBe(1); spill.Runs.ShouldBe(0);
-        error.Message.ShouldBe("The hash ordinal sort record exceeds its bound after reserving the source reader workspace.");
-        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
-        TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
-        (await session.ExecuteAsync("SELECT 1")).Status.ShouldBe(DatabaseResultStatus.Success);
+            // Assert
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
+            var spill = SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull();
+            spill.Batches.ShouldBeGreaterThan(0); spill.Passes.ShouldBe(1); spill.Runs.ShouldBe(0);
+            error.Message.ShouldBe("The hash ordinal sort record exceeds its bound after reserving the source reader workspace.");
+            session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+            TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+            (await session.ExecuteAsync("SELECT 1")).Status.ShouldBe(DatabaseResultStatus.Success);
+        }
+        finally { SqlPlanExecutor.HashSpillPartitionHash = partitionHash; }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Hash cleanup: close failures preserve the initiating projection error and release the shared owner (#1789)")]

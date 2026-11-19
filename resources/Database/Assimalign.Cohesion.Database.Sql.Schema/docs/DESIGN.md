@@ -245,7 +245,8 @@ and migration baseline writer share the current v12 format with runtime schema c
 `NULL` text remains part of a declaration's identity even
 though SQL gives it the same database behavior as an absent default. Adding or removing a
 default changes column equivalence, so the planner carries both definitions in `AlterColumn`
-instead of reporting false convergence; the current dialect still refuses that operation.
+instead of reporting false convergence. The engine and SDK lower that operation through the
+shared MigrationLowering module described below.
 New tables and columns carry the default into their creation steps. The SQL provisioner can
 therefore reconstruct columns with defaults after a crash, preserving the declaration's spelling
 when it denotes the persisted literal, and plan only the remaining steps. Schema snapshots also
@@ -422,6 +423,34 @@ the schema, before an unreachable domain can be provisioned.
 A migration exception with a coded DatabaseException cause preserves that cause's complete
 structured Diagnostics list. The migration message adds application context; callers read
 the stable code and source span from the carrier.
+
+## Shared ALTER COLUMN lowering (#1756)
+
+Database.Sql compiles `shared/MigrationLowering` and Sql.Language's shared Types module;
+Sdk.Database.Tasks also compiles the shared Defaults module. Sql.Schema itself remains
+parser-free: the lowering uses its consumers' existing Sql.Language reference. Stateless helpers
+own ALTER COLUMN phase order, rewrite classification, declared type/identifier text and portable
+payload/type refusals. DEFAULT admission shares scalar-carrier, literal-only and persisted-sequence
+checks, with the normal declaration nesting limit and the higher ceiling for its grouping guard.
+The engine binding preserves its diagnostic carriers and literal tree round trip. The SDK binding
+raises DatabaseException without structured CS diagnostics and checks a render fixed point after ceiling reparsing;
+it preserves engine message text. Both consumers parse forward and rollback step text at the ceiling.
+No public helper, visibility grant or engine reference is added to the SDK. The guard checks every
+schema shared module for static classes, const fields, expression-bodied static properties,
+locks, events, constructors and module initializers, plus explicit consumer opt-ins.
+
+Physical rewrites remove an existing default, emit TYPE without reverse compensation, restore
+the declared default and change nullability last. Compatible facets keep the full-definition
+statement; a separate default change follows it. Defaults compare canonical literals, preserving
+absent/NULL equivalence. Domains render declared names and effective metadata; only an engine
+validates registrations, casts and stored values. The golden corpus pins forward/compensation SQL
+and refusals, plus non-ALTER DDL using the shared type/identifier renderer. SDK files contain
+forward statements only and explain joint typed publication in their header (#1778).
+Applied-history rollback classification remains an engine responsibility before rendering (#1779).
+Separate engine helpers remain in use for CREATE/ADD and reconciliation; removing those copies is tracked by #1861.
+Structural checks fail on any change to the compared traversal and domain-name bodies, and compare
+the traversal helpers' full parameter lists, including defaults. DEFAULT-reader and type-resolution
+checks compare sampled inputs and the corpus spellings.
 
 ## Temporal default text and schema identity (#1422)
 

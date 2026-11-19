@@ -54,7 +54,11 @@ internal sealed partial class SqlPlanExecutor
     /// subquery plan.
     /// </summary>
     private SqlSubqueryValues? _subqueryValues;
-    private bool _containsLike;
+    // Preserve the fitting executor's byte slot. Eligibility is fixed for all
+    // bound expressions of this statement, even if another session refreshes DDL.
+    private byte _expressionFlags;
+    private bool ContainsLike { get => (_expressionFlags & 1) != 0; set { if (value) { _expressionFlags |= 1; } } }
+    private bool CanSpillValues => (_expressionFlags & 2) != 0;
     private bool _isDml;
     private SqlStatementMetrics? _metrics;
 
@@ -72,11 +76,17 @@ internal sealed partial class SqlPlanExecutor
     /// name while the statement runs.
     /// </remarks>
     internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, SqlIndexManager indexManager, SqlBoundTableCache definitions)
+        : this(storage, catalog, indexManager, definitions, definitions.CanSpillValues)
+    {
+    }
+
+    internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, SqlIndexManager indexManager, SqlBoundTableCache definitions, bool canSpillValues)
     {
         _storage = storage;
         _catalog = catalog;
         _indexManager = indexManager;
         _definitions = definitions;
+        _expressionFlags = canSpillValues ? (byte)2 : (byte)0;
     }
 
     /// <summary>
@@ -88,10 +98,16 @@ internal sealed partial class SqlPlanExecutor
     private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken,
         bool[]? sharedColumns = null, bool containsLike = false, DateTimeOffset? transactionTimestamp = null)
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
-            _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
+            ContainsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (statement.Session is { } owner)
+        {
+            if (CanExecuteSpillSelect(plan, owner, cancellationToken))
+            { return ExecuteSpillRootAsync(plan, statement, cancellationToken, owner, null); }
+            statement = statement.WithoutSession();
+        }
         if (!SqlJsonPathExecution.IsStatement(statement.Metrics) && PlanUsesJson(plan, cancellationToken))
         { return ExecuteJsonStatementAsync(plan, statement, cancellationToken); }
         if (plan.ContainsRecursion && RecursiveState is null)
@@ -137,7 +153,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            _containsLike |= plan.ContainsLike;
+            ContainsLike |= plan.ContainsLike;
             _metrics = statement.Metrics;
             if (RecursiveState is not null && StatementInput(plan) is SqlRelationPlan)
             { return await ExecuteRecursiveQueryAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
@@ -248,7 +264,7 @@ internal sealed partial class SqlPlanExecutor
                     throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlanNotExecutable, plan.GetType().Name));
             }
         }
-        finally { if (statementRoot && _materializedRelations is { } relations) { ReleaseSelectMemory(ref relations.Reserved); } }
+        finally { if (statementRoot && _materializedRelations is { } relations) { ReleaseRelations(relations); } }
     }
 
     // ── SELECT ─────────────────────────────────────────────────────────
@@ -374,6 +390,8 @@ internal sealed partial class SqlPlanExecutor
     {
         spilled = null;
         SqlSelectMemory outputBytes = default, sourceBytes = default, sortedBytes = default;
+        List<object?[]>? unorderedRows = null;
+        SqlWindowInputSpool? windowSpool = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -382,6 +400,8 @@ internal sealed partial class SqlPlanExecutor
                 // The common scan needs only its output list. Avoid allocating sort state
                 // for an unordered query, including the unlimited single-row lookup path.
                 var projected = new List<object?[]>();
+                SqlOutputSpool? outputSpool = null;
+                unorderedRows = projected;
                 long skip = offset?.Count ?? 0;
                 long remaining = limit?.Count ?? long.MaxValue;
                 if (remaining == 0)
@@ -394,21 +414,52 @@ internal sealed partial class SqlPlanExecutor
                 {
                     var output = ProjectRow(inputs.Current, projections, evaluator, cancellationToken);
                     if (skip > 0) { skip--; continue; }
-                    SqlWindowMemory.For(_metrics)?.Retain(output);
+                    if (SqlWindowInputSpool.Retain(projected, output, SqlWindowMemory.For(_metrics), _metrics,
+                        _definitions.StatementMemoryBudget, spillOwner, cancellationToken, ref windowSpool))
+                    { if (--remaining == 0) { break; } continue; }
                     if (retainRows is null || projected.Count < retainRows)
                     {
-                        try { RetainSelectRow(ref outputBytes, output); projected.Add(output); }
-                        catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
-                            && hashInput is not null && CanSpillHashGroup(hashInput, spillOwner))
+                        if (outputSpool is not null)
+                        { outputSpool.Append(output, cancellationToken); }
+                        else
                         {
-                            spilled = SpoolHashGroupInput(projected, output, inputs, projections, evaluator, ref outputBytes, spillOwner!, cancellationToken);
-                            return [];
+                            try { RetainSelectRow(ref outputBytes, output); projected.Add(output); }
+                            catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                                && hashInput is not null && CanSpillHashGroup(hashInput, spillOwner))
+                            {
+                                SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, failure);
+                                spilled = SpoolHashGroupInput(projected, output, inputs, projections, evaluator, ref outputBytes, spillOwner!, cancellationToken);
+                                return [];
+                            }
+                            catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode
+                                && hashInput is null && spillOwner?.Database.Engine.TempSpace is not null && retainRows is null)
+                            {
+                                SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, failure);
+                                outputSpool = SqlOutputSpool.Add(projected, output, ref outputBytes, _metrics!, _definitions.StatementMemoryBudget, spillOwner, cancellationToken);
+                            }
                         }
                     }
                     if (--remaining == 0) { break; }
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 if (retainRows is not null) { _definitions.ObserveSelectRetention?.Invoke("subquery-body", true, projected.Count); }
+                if (windowSpool is not null)
+                { spilled = SqlWindowInputSpool.Take(projected, ((DatabaseResultSet)MaterializeProjected(projections, [])).Columns); windowSpool = null; return []; }
+                if (outputSpool is { } completed)
+                {
+                    var result = completed.Take(((DatabaseResultSet)MaterializeProjected(projections, [])).Columns, cancellationToken,
+                        isDistinct ? resultOffset?.Count ?? 0 : 0, isDistinct ? resultLimit?.Count ?? -1 : -1);
+                    if (isDistinct)
+                    {
+                        var collations = new Collation[projections.Count];
+                        for (int i = 0; i < collations.Length; i++)
+                        { collations[i] = projections[i].Collation.Resolve(evaluator.SubqueryValues); }
+                        result.Deduplicate(new GroupKeyComparer(collations),
+                            _metrics!, _definitions.StatementMemoryBudget, cancellationToken);
+                        result.CaptureMetrics(_metrics!);
+                    }
+                    spilled = result; return [];
+                }
                 return projected;
             }
             if (HasSequenceProjection(projections) &&
@@ -516,7 +567,12 @@ internal sealed partial class SqlPlanExecutor
             { spilled = FinishCollected(rows, projections, resultLimit, resultOffset, isDistinct, evaluator, cancellationToken, resolveEmptyCollations: false); return []; }
             return rows.Finish(resolveEmptyCollations: false);
         }
-        finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref outputBytes); }
+        catch (Exception failure) { if (unorderedRows is not null) { SqlOutputSpool.Release(unorderedRows, failure); } throw; }
+        finally
+        {
+            try { if (unorderedRows is not null) { SqlWindowInputSpool.Release(unorderedRows, windowSpool); SqlOutputSpool.Release(unorderedRows); } }
+            finally { ReleaseSelectMemory(ref sortedBytes); ReleaseSelectMemory(ref sourceBytes); ReleaseSelectMemory(ref outputBytes); }
+        }
     }
 
     private static object?[] OrderingRow(object?[] source, IReadOnlyList<SqlProjection> projections,

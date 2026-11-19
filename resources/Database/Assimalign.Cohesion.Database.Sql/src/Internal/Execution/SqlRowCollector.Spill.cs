@@ -22,21 +22,21 @@ internal sealed partial class SqlRowCollector
     { if (!_sharedStatements.TryGetValue(this, out _)) { _sharedStatements.Add(this, statement); } }
     internal static Action<string>? ObserveSpill { get; set; }
     internal static Action<string, object>? ObserveBuffer { get; set; }
-    internal bool HasSpilled => _spills.TryGetValue(this, out _);
+    internal bool HasSpilled => _spills.TryGetValue(this, out _) || SqlOutputSpool.For(_rows) is not null;
 
     private bool AdmitEntry(Entry entry, SqlDatabaseSession? owner)
     {
         try { ReserveEntry(entry); return true; }
         catch (SqlExecutionException exception) when (exception.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode)
-        { if (TrySpill(entry, owner)) { return false; } throw; }
+        { if (TrySpill(entry, owner, exception)) { return false; } throw; }
     }
 
-    private bool TrySpill(Entry pending, SqlDatabaseSession? owner)
+    private bool TrySpill(Entry pending, SqlDatabaseSession? owner, SqlExecutionException refusal)
     {
         if (owner?.Database.Engine.TempSpace is not { } space || _orderBy.Count == 0) { return false; }
         foreach (var order in _orderBy) { if (!order.Collation.IsFixed) { return false; } }
         bool deferred = SqlHashSpillMetrics.For(_metrics!)?.FullJoin == true;
-        var joinStatement = SqlHashSpillMetrics.For(_metrics!)?.JoinStatement;
+        var joinStatement = _metrics!.IsStageResult ? SqlHashSpillMetrics.JoinTemp(_metrics, owner) : SqlHashSpillMetrics.For(_metrics)?.JoinStatement;
         var statement = _sharedStatements.TryGetValue(this, out var shared) ? shared : joinStatement;
         bool chargeResidue = deferred || joinStatement is not null && ReferenceEquals(statement, joinStatement);
         System.Diagnostics.Debug.Assert(SqlHashSpillMetrics.For(_metrics!)?.HasOptionalArenas != true);
@@ -48,7 +48,8 @@ internal sealed partial class SqlRowCollector
         var columns = new SqlTempSortKeyCodec.Column[_orderBy.Count];
         for (int i = 0; i < columns.Length; i++)
         { columns[i] = new(_orderBy[i].IsDescending, _orderBy[i].NullsFirst, _collations[i]); }
-        SqlSpillLifetime.CheckCapacity(owner);
+        if (_metrics?.IsInternalResult != true) { SqlSpillLifetime.CheckCapacity(owner); }
+        SqlOperatorSpillRefusal.RecordOutputHandoff(_metrics!, refusal);
         var state = new Spill(owner, space, columns, (int)bound, grant, statement);
         try
         {
@@ -171,6 +172,8 @@ internal sealed partial class SqlRowCollector
 
     internal SqlSpilledResultSet TakeSpilled(IReadOnlyList<DatabaseColumn> columns, long offset, long limit)
     {
+        if (SqlOutputSpool.For(_rows) is { } output)
+        { return output.Take(columns, _cancellationToken, Math.Max(0, offset - _offset), limit); }
         var state = _spills.GetValue(this, _ => throw new InvalidOperationException());
         try
         {
@@ -181,7 +184,7 @@ internal sealed partial class SqlRowCollector
             state.Sorter.Dispose(); state.Sorter = null;
             Release(_memory.Bytes);
             var result = new SqlSpilledResultSet(columns, state.Statement, reader, offset, limit, state.Owner, state.Grant, state.MaximumDecodedRowBytes,
-                ownsStatement: !ReferenceEquals(state.Statement, SqlHashSpillMetrics.For(_metrics!)?.JoinStatement));
+                ownsStatement: !ReferenceEquals(state.Statement, SqlHashSpillMetrics.For(_metrics!)?.JoinStatement), stageResult: _metrics!.IsStageResult, internalResult: _metrics.IsInternalResult);
             _spills.Remove(this);
             return result;
         }

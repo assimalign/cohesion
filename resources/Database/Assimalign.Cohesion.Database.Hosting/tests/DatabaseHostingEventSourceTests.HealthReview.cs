@@ -40,10 +40,10 @@ public sealed partial class DatabaseHostingEventSourceTests
         using var recorder = new HostingEventRecorder(System.Diagnostics.Tracing.EventLevel.Informational);
         (await app.Context.CheckAsync(timeout.Token)).Status.ShouldBe(HealthStatus.Unhealthy);
         int inventoryReads = 0;
-        pausing.Inventory = PauseAsync;
+        pausing.OpenInventory = Pause;
 
         // Act
-        var older = app.Context.CheckAsync(timeout.Token).AsTask();
+        var older = Task.Run(() => app.Context.CheckAsync(timeout.Token).AsTask(), timeout.Token);
         try
         {
             await entered.Task.WaitAsync(timeout.Token);
@@ -60,14 +60,14 @@ public sealed partial class DatabaseHostingEventSourceTests
             .ShouldBe(["HealthDegraded", "HealthRestored"]);
         recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
 
-        async IAsyncEnumerable<DatabaseInstance> PauseAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+        IReadOnlyList<DatabaseInstance> Pause()
         {
             if (Interlocked.Increment(ref inventoryReads) == 1)
             {
                 entered.TrySetResult();
-                await release.Task.WaitAsync(cancellationToken);
+                release.Task.WaitAsync(timeout.Token).GetAwaiter().GetResult();
             }
-            yield break;
+            return [];
         }
     }
 

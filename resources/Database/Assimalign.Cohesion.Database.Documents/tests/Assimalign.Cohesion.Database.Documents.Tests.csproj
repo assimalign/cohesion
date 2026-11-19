@@ -7,6 +7,14 @@
 		<TieredCompilation>false</TieredCompilation>
 	</PropertyGroup>
 	<ItemGroup>
+		<!-- #1883: an idle thread pool worker exits after 20 s, and the arrays in its thread-local ArrayPool
+		     slots leave the heap with it, without the trim event the heap gate (DocumentHeapAcceptance) counts.
+		     A slot is trimmed with that event only after 30 s idle at low memory pressure, so on CI runners
+		     the exit came first and a heap reading lost memory the gate could not see. Workers never time
+		     out here; the gate refuses to run without this setting. -->
+		<RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.ThreadTimeoutMs" Value="-1" />
+	</ItemGroup>
+	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\SavepointUndoFault.cs" Link="TestObjects\SavepointUndoFault.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Transactions\tests\TestObjects\UndoMarkerDriver.cs" Link="TestObjects\UndoMarkerDriver.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DedicatedTestTask.cs" Link="TestObjects\DedicatedTestTask.cs" />

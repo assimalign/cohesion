@@ -1,5 +1,45 @@
 # Assimalign.Cohesion.Database — Design
 
+## Open database inventory (#1790)
+
+DatabaseEngine.OpenDatabases is a public non-virtual, synchronous snapshot over a protected
+abstract core. Every model supplies its existing published GetInstanceSnapshot. The root copies
+it to a new read-only list, excludes closing instances as TryGetDatabase does, retains offline
+open instances, and returns empty after disposal. It takes no engine lock, does no I/O and never
+opens, reopens or waits for a database. OfflineDatabases still names offline open instances.
+GetDatabasesAsync retains model enumeration semantics: Documents, Graph and Blob open stored
+databases through recovery; SQL and KeyValue enumerate open instances. Health reads OpenDatabases,
+pending reopens and FailedOpens in every model. A stored database never attempted by this process
+is absent; a failed open of stored data remains Unhealthy until successful open/create/drop,
+DatabaseNotFoundException or engine disposal clears its record (#1790).
+
+FailedOpens is a non-virtual lock-free read of an immutable snapshot of DatabaseOpenFailure values:
+name, structured code when present, exception type name, UTC failure time and consecutive attempts.
+No exception or message is retained. Code selection reads structured carriers and coded causes,
+including aggregate branches, preserving CK06003 over additional model diagnostics. Name-validation
+ArgumentException (ParamName "name", excluding ArgumentOutOfRangeException) and any failure while
+the caller's token is cancelled leave existing records unchanged. Engine disposal prevents
+publication and clears records; absence clears the name. Internal argument errors
+and another object's ObjectDisposedException are recorded. The model open cores
+validate existence before storage open, and their DatabaseNotFoundException distinguishes absence.
+Documents, Graph and Blob enumeration already routes each stored open through this base path.
+
+A separate completion gate covers synchronous lifecycle core invocation and completion, with
+create/open/drop taking that gate before any leaf registry lock. It never holds the composition
+or worker gate around model work and no health reader acquires it. Completed lifecycle calls take
+this engine-wide reentrant lock once, publishing success in the core's section. The base calls
+the synchronous part of every lifecycle core under that lock; cores run one at a time per engine.
+A core must not block on another thread that calls back into the same engine's lifecycle methods.
+Deferred completion paths force asynchronous continuations before taking the gate, including
+cleanup, so none takes it inline under a leaf's lock. The shipped leaves already serialize their
+cores under their registry locks. A deferred open retains
+a name-scoped completion token. Successful open/create/drop supersedes earlier deferred failures,
+even if the successful instance closes before the failure completes. A core returning a closing
+instance is not a successful public open; cancelling its close wait retains a prior record.
+The completed open path adds no allocation; failure publishes a new read-only collection, and
+clearing copies only when the name has a record. Events, exception delivery and corruption
+translation retain their existing paths.
+
 ## Engine root permissions (owner decisions 115 and 121)
 
 The model constructors prepare their roots before other file work through the internal
@@ -160,7 +200,6 @@ The abort remains a base because the shipped deadlock exception derives from it.
 Under statement atomicity a hard deadlock refuses the statement; the explicit victim
 transaction stays active with earlier work and locks until its caller rolls it back.
 
-
 ## Storage corruption (#1160)
 
 Storage corruption is `CK06003` (#1160). The engine translates a
@@ -212,13 +251,12 @@ bases serve their real variant sets: four typed models and three language models
 Model requests, parsers and servers belong in their model packages. Hosting composes
 any engine through the common root; execution callers use the concrete model session.
 
-The root is also the area's **rollup**: it references every child root — the
+The root is also the area's **rollup**: it references all nine child roots — the
 independently consumable base components a database is made of (`Database.Types`,
 `Database.Language`, `Database.Storage`, `Database.Transactions`,
-`Database.Execution`, `Database.Indexing`, `Database.Protocol`,
+`Database.Execution`, `Database.Indexing`, `Database.Types.Text`, `Database.Protocol`,
 `Database.Security`) — so one reference to the root delivers the whole base
 surface. Child roots never reference the root.
-
 
 ## Phase 29 composition contract (current)
 
@@ -828,7 +866,7 @@ ordinary storage transaction contention is retried as busy.
     worker, and every failure is written to the event source for the whole window; Blob's
     server refuses only the failing database meanwhile ("A failing worker refuses its database
     alone", below).
-  - *Journal admission (T3-27, #1283).* The limit still defaults to 4x CheckpointJournalSize
+  - *Journal admission (#1283).* The limit still defaults to 4x CheckpointJournalSize
     (1 GiB at the default trigger, or with the trigger off). Each model attaches every data
     and catalog interlock through ConfigureJournalAdmission after open-time provisioning and before publishing DatabaseInstance.
     IsJournalAdmissionPaused folds pure live-state reads for health. Reaching half the limit
@@ -1457,7 +1495,6 @@ DatabaseNotFoundException preserves structured diagnostics from an inner Databas
 An incomplete file set can therefore keep precise absence semantics for provisioning while
 its allocated model diagnostic remains available through Diagnostics.
 
-
 ## Model architecture test support
 
 The root test project owns the stateless ModelArchitecture helper, linked into the five implemented model test assemblies by the Database-scoped ModelArchitecture.targets. Cache has no component source and no architecture test until implementation. Each model build exports actual compiler inputs, including generated sources, references and conditional symbols; the test reconstructs a complete Roslyn compilation and rejects Storage-to-Catalog/engine and Catalog-to-engine symbol references by source folder. Manifest copying asks the referenced model project for its evaluated IntermediateOutputPath. The query removes the test executable's RuntimeIdentifier, matching SDK library references, while preserving the model's own RID and custom intermediate paths (#1809).
@@ -1503,7 +1540,7 @@ The coordinator owns the horizon/apply gate; models supply their current manager
 interfaces, model-specific vacuum loops or root access to index-page internals. Blob has no
 B-tree manager. Indexing DESIGN owns the physical rollback decision #1393 and pruning details.
 
-## Named platform endpoints (#1790, EN-A1)
+## Named platform endpoints (#1790)
 
 Server creation snapshots options before validation. When that snapshot has no Listener and
 COHESION_GATEWAY is nonempty, DatabaseServerOptions reads the current AppEnvironment flow with TryGetEndpoint: SQL uses sql,
@@ -1539,7 +1576,7 @@ releasing the first listener.
 
 The in-process platform currently assigns only http. Five-model tests assign the named runtime
 values directly and complete handshake/Ping, including under NativeAOT; named platform allocation
-and per-endpoint outputs remain ApplicationModel escalation E-AM1. No wire or store format changes.
+and per-endpoint outputs remain ApplicationModel.Hosting's named-endpoint open question. No wire or store format changes.
 
 ## Shared server options and TCP composition (#1391, D7 B)
 
@@ -1585,7 +1622,6 @@ structured diagnostic carrier exists. Standard .NET guards retain their argument
 The [error-code registry](ERROR-CODES.md) assigns two-character model prefixes and five decimal digits. Existing SQLSTATE classifications are preserved. PostgreSQL `src/backend/utils/errcodes.txt:52-62` informs the separation of stable classes from detailed conditions; no code is copied.
 
 The convention review also inspected Neo4j `community/common/src/main/java/org/neo4j/kernel/api/exceptions/Status.java:877-886` (portable classification/category/title identities) and RavenDB `src/Raven.Client/Exceptions/RavenException.cs:26-29` (exception-owned construction). Cohesion keeps the approved short numeric identities and generated resources; neither engine's code or naming scheme is copied.
-
 
 ## Shared validation message completion (#1470)
 
@@ -1637,7 +1673,6 @@ remain unchanged. Execution's parameterless InvalidOperationException/Convert ro
 their BCL kinds; adding a root carrier there would create a dependency cycle and expand the
 deferred #1264 P8 result contract. This audit introduces no such result API change.
 
-
 ## Debugger inspection (#1470)
 
 Eligible concrete source types use private nested debugger views of reviewed public/protected
@@ -1645,7 +1680,6 @@ state; existing inherited display/proxy pairs are reused. See the shared
 [debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
 Only stored fields and reviewed pure getters are projected; inspection does not execute queries, enumerate results, invoke clocks or mutate lifecycle state.
 Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
-
 
 ## TCP delivery completion (#1391)
 

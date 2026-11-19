@@ -2,7 +2,7 @@
 
 A normal `Sdk.Database` executable composes KeyValuePair, Graph and Blob servers through the
 shared public `Listen(Uri)` extension. It has no project or package references and uses the
-SDK's framework packs. It runs unmanaged without AddResource and leaves schema compilation off
+SDK's framework packs. It runs unmanaged and leaves schema compilation off
 because this fixture tests transport composition; SampleHost covers SQL schema compilation.
 
 Database.Testing launches the self-contained process, waits for its explicit READY notification,

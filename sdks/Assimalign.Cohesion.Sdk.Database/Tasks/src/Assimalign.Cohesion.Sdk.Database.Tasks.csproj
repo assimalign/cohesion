@@ -8,6 +8,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" Module="Types" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Schema" Module="MigrationLowering" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Schema" Module="Defaults" />
 	</ItemGroup>
 	<ItemGroup>
@@ -19,5 +20,8 @@
 		<CohesionPackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" />
 		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="runtime" />
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Types.Text\docs\SNOWBALL_LICENSE.txt" Pack="true" PackagePath="licenses/Database.Types.Text/SNOWBALL_LICENSE.txt" />
 	</ItemGroup>
 </Project>

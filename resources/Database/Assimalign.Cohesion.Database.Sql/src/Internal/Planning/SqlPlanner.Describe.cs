@@ -112,8 +112,8 @@ internal sealed partial class SqlPlanner
     {
         var nodes = new List<DatabasePlanNode>();
         var spillPlan = plan;
-        while (spillPlan is SqlWithPlan or SqlSubqueryPlan)
-        { spillPlan = spillPlan is SqlWithPlan with ? with.Input : ((SqlSubqueryPlan)spillPlan).Input; }
+        while (spillPlan is SqlWithPlan or SqlSubqueryPlan or SqlSequenceScopePlan)
+        { spillPlan = spillPlan is SqlWithPlan with ? with.Input : spillPlan is SqlSequenceScopePlan sequence ? sequence.Input : ((SqlSubqueryPlan)spillPlan).Input; }
         bool recursiveDemand = plan.ContainsRecursion || plan is SqlSequenceScopePlan { Input.ContainsRecursion: true };
         Visit(plan, null);
         return DatabasePlanDescription.Create(nodes, diagnostics);
@@ -202,7 +202,7 @@ internal sealed partial class SqlPlanner
             {
                 detail = (string.IsNullOrEmpty(detail) ? "" : detail + "; ") + $"spilled_bytes={spill.PhysicalBytes}; spill_peak_bytes={spill.PeakBytes}; spill_runs={spill.Runs}; spill_merge_passes={spill.MergePasses}";
             }
-            if (ReferenceEquals(current, spillPlan) && metrics is not null && SqlHashSpillMetrics.For(metrics) is { } hashSpill)
+            if (ReferenceEquals(current, spillPlan) && metrics is not null && SqlHashSpillMetrics.For(metrics) is { HasOperatorSpill: true } hashSpill)
             {
                 string prefix = SqlSortSpillMetrics.For(metrics) is null ? "" : "hash_";
                 detail = (string.IsNullOrEmpty(detail) ? "" : detail + "; ") + $"{prefix}spilled_bytes={hashSpill.PhysicalBytes}; {prefix}spill_peak_bytes={hashSpill.PeakBytes}; {prefix}spill_runs={hashSpill.Runs}; {prefix}spill_merge_passes={hashSpill.MergePasses}";
@@ -243,7 +243,8 @@ internal sealed partial class SqlPlanner
                                 "; boundary_visits=" + group.Functions.Sum(function => metrics.Analysis(function)?.WindowBoundaryVisits ?? 0)) +
                             "; functions=" + string.Join(", ", group.Functions.Select(function => function.Name)) +
                             "; sort_shared=" + group.SortShared.ToString().ToLowerInvariant() +
-                            (metrics?.ActualCandidates(group.Functions) is { } sorts ? "; sort_count=" + sorts : ""), actual: metrics?.ActualCandidates(group));
+                            (metrics?.ActualCandidates(group.Functions) is { } sorts ? "; sort_count=" + sorts : "") +
+                            SqlWindowSpillMetrics.Detail(metrics, group), actual: metrics?.ActualCandidates(group));
                         windowParent = groupId;
                     }
                     Visit(window.Input, windowParent);

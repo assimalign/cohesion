@@ -30,4 +30,8 @@ internal static class GraphTypeChanges
             !previous.Properties.Any(old => old.Name == property.Name && old.Type == property.Type
                 && (!property.Required || old.Required)));
     }
+
+    internal static bool RequiresValidation(GraphEdgeTypeDeclaration? previous, GraphEdgeTypeDeclaration next)
+        => previous is null || previous.SourceNodeType != next.SourceNodeType || previous.TargetNodeType != next.TargetNodeType ||
+            next.Properties.Any(property => !previous.Properties.Any(old => old.Name == property.Name && old.Type == property.Type && (!property.Required || old.Required)));
 }

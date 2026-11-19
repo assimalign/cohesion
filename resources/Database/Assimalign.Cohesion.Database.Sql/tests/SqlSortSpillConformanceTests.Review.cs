@@ -13,6 +13,9 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -255,26 +258,39 @@ public sealed partial class SqlSortSpillConformanceTests
         };
         string required = shape switch { 0 => "staged-drained", 1 => "output-spool", 2 => "transform", _ => "deduplicate" };
         await using (var warm = (DatabaseResultSet)await session.ExecuteAsync(sql)) { }
-        long baseline = LiveHeap.Read(); var samples = new Dictionary<string, long>();
-        SqlRowCollector.ObserveSpill = phase =>
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_AdditionalLiveStages_ShouldFitGrant));
+        var sampled = await batch.MeasureAsync($"shape={shape}", async readHeap =>
         {
-            if (phase != required && !(shape == 0 && phase == "staged-sort")) { return; }
-            samples[phase] = Math.Max(samples.GetValueOrDefault(phase),Math.Max(0, LiveHeap.Read()-baseline));
-        };
-        try
+            images.Drain(pool);
+
+            long baseline = readHeap(); var samples = new Dictionary<string, long>();
+            SqlRowCollector.ObserveSpill = phase =>
+            {
+                if (phase != required && !(shape == 0 && phase == "staged-sort")) { return; }
+                samples[phase] = Math.Max(samples.GetValueOrDefault(phase),Math.Max(0, readHeap()-baseline));
+            };
+            try
+            {
+                // Act
+                await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
+                await foreach (var row in result.GetRowsAsync()) { _ = row.FieldCount; }
+                // Assert
+                samples.ShouldContainKey(required);
+                return new Dictionary<string, long>(samples);
+            }
+            finally { SqlRowCollector.ObserveSpill = null; }
+        });
+        await batch.CheckAsync(() => sampled.Value.Select(sample => Ceiling(sample.Key, sample.Value, (long)(grant * 1.1) + constant, sampled.Term)).ToArray(), () =>
         {
-            // Act
-            await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql);
-            await foreach (var row in result.GetRowsAsync()) { _ = row.FieldCount; }
-            // Assert
-            samples.ShouldContainKey(required);
-            foreach (var sample in samples)
+            foreach (var sample in sampled.Value)
             {
                 _output.WriteLine($"LIVE_STAGE|{sample.Key}|bytes={sample.Value}|grant={grant}|constant={constant}");
-                sample.Value.ShouldBeLessThanOrEqualTo((long)(grant*1.1)+constant);
+                sample.Value.ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant);
             }
-        }
-        finally { SqlRowCollector.ObserveSpill = null; }
+        });
+        await batch.CompleteAsync();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Nested loop inner lists are collectible after input is drained (#1789)")]

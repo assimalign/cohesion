@@ -502,7 +502,8 @@ existed on a case-sensitive file system; now the directory is a pure function of
 (`DatabaseFileNames`, shared with every model; the area design, §3.3, has the reasoning). A name
 follows the area's one rule, with the same verdict on every OS: 1 to 128 ASCII letters, digits,
 `_`, `-` and `.`; no leading, trailing or doubled dot; no Windows device name before the first
-dot. Database enumeration includes persisted databases and opens them through recovery: it takes
+dot. Database enumeration includes persisted databases and opens them through recovery; health
+uses the non-opening OpenDatabases snapshot described below. Enumeration takes
 each directory that is a lower-case valid name holding `blob.dat`, so it skips a case-variant
 directory made outside the engine (outside the contract: on Windows and macOS the file system
 resolves an open's lower-case path to it). An open needs `blob.dat` too, so a directory without it,
@@ -518,6 +519,13 @@ A file set in another storage format (#1251) is refused by the storage before it
 read, and the engine names the database: "Database 'x' cannot be opened. CK06001: …", the
 storage's `StorageFormatException` as its inner exception, the files byte-identical
 (`BlobEngineTests`).
+
+GetDatabasesAsync opens stored databases through recovery; health uses OpenDatabases instead.
+Health never opens, reopens or waits for a database and takes no engine lock. A stored database
+never attempted by this process is absent from health. A failed stored open contributes an
+Unhealthy component from DatabaseEngine.FailedOpens, including when GetDatabasesAsync attempted
+it. Successful open/create/drop, absence or engine disposal clears that failure record (#1790).
+OpenDatabases retains offline open instances and excludes closing ones.
 
 ### Interrupted creation (#1421)
 

@@ -303,8 +303,12 @@ public sealed partial class GraphStore
     /// <exception cref="ArgumentOutOfRangeException">The identity is zero.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="GraphElementTooLargeException">The type and properties exceed one graph record.</exception>
-    public async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(StoredGraphRelationship relationship, Guid typeId,
+    public ValueTask<StoredGraphRelationship> CreateRelationshipAsync(StoredGraphRelationship relationship, Guid typeId,
         TransactionContext context, CancellationToken cancellationToken = default)
+        => CreateRelationshipAsync(relationship, typeId, context, cancellationToken, null);
+
+    internal async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(StoredGraphRelationship relationship, Guid typeId,
+        TransactionContext context, CancellationToken cancellationToken, Action<StoredGraphNode, StoredGraphNode>? validateEndpoints)
     {
         if (typeId == Guid.Empty) { throw new ArgumentException(ErrorMessages.RelationshipTypeIdInvalid, nameof(typeId)); }
         ArgumentException.ThrowIfNullOrWhiteSpace(relationship.Type);
@@ -317,10 +321,13 @@ public sealed partial class GraphStore
         if (FindNode(sourceId, latest) is null && FindNode(sourceId, context.Snapshot) is not null ||
             FindNode(targetId, latest) is null && FindNode(targetId, context.Snapshot) is not null)
         { throw new TransactionAbortedException(ErrorMessages.EndpointDeleted); }
-        if (FindNode(sourceId, latest) is null || FindNode(targetId, latest) is null)
+        var source = FindNode(sourceId, latest);
+        var target = FindNode(targetId, latest);
+        if (source is null || target is null)
         {
             throw new InvalidOperationException(ErrorMessages.StoreCreateRelationshipAsyncFailure);
         }
+        validateEndpoints?.Invoke(source.Value, target.Value);
         ulong id = relationship.Id;
         EnsureNew(2, id);
         byte[] bytes = await EncodeAsync(new GraphRecord(2, id, Relationship: relationship, TypeId: typeId), context.Sequence).ConfigureAwait(false);
@@ -357,6 +364,8 @@ public sealed partial class GraphStore
 
     // Instance counters for deterministic complexity tests; no process-global telemetry.
     private long _incidentRecordsDecoded;
+    private long _incidentRangeSeeks;
+    internal long IncidentRangeSeeks => Interlocked.Read(ref _incidentRangeSeeks);
     internal long IncidentRecordsDecoded => Interlocked.Read(ref _incidentRecordsDecoded);
 
     // Discover only the types present at this endpoint. Jump past each whole type run
@@ -424,6 +433,7 @@ public sealed partial class GraphStore
                 var low = AdjacencyKey(nodeId, selected, type ?? Guid.Empty, 0);
                 var high = AdjacencyKey(nodeId, selected, type ?? _maximumTypeId, ulong.MaxValue);
                 cancellationToken.ThrowIfCancellationRequested();
+                Interlocked.Increment(ref _incidentRangeSeeks);
                 await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(low, high, true, true), cancellationToken: cancellationToken);
                 while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
                 {

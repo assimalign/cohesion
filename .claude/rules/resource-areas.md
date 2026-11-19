@@ -7,10 +7,10 @@ layer on top of this file.
 
 > **In transition (2026-11-18).** The application model is being rebuilt as resource providers
 > run by a ResourceManager (`fabric.md`). Phase 1 removed every `<Area>.Hosting.ApplicationModel`
-> but Database's, plus `Sdk.Gateway` and the gateway templates. Phase 2 removes Database's
-> integration and `libraries/ApplicationModel` once the owner's Database PR merges. Until then the
-> rules below that mention `<Area>.Hosting.ApplicationModel` describe the one remaining package:
-> do not add a new one.
+> but Database's, plus `Sdk.Gateway` and the gateway templates; the owner's Database PR (#1869)
+> removed Database's integration. What remains of phase 2 is `libraries/ApplicationModel`. No
+> `<Area>.Hosting.ApplicationModel` package exists now: the rules below that mention one describe
+> the retired shape until phase 2 retires them. Do not add a new one.
 
 ## The hosting-isolation rule (build-enforced, all areas)
 
@@ -149,8 +149,8 @@ semicolon-delimited, in its own csproj:
   `Assimalign.Cohesion.<Area>.Hosting.ApplicationModel` joins the area's runtime module to
   `ApplicationModel.Hosting`, so it must reference that module (owner decisions 2026-10-28 and
   2026-10-29). The rule itself sanctions that one reference, by the project's exact name in its own
-  area (since 2026-10-31; until then each integration declared an exemption). The one remaining
-  instance is `resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
+  area (since 2026-10-31; until then each integration declared an exemption). The last instance,
+  Database's, was removed in #1869; none remains.
 
   Any other project needs the deviation protocol case-by-case; there is no standing
   `.Application` exemption.
@@ -194,9 +194,8 @@ await app.RunAsync();
 
 An SDK consumer is the composition root and may reference `<Area>.Hosting`; it is not a shipped
 resource-area library governed as an exemption holder. `Sdk.Gateway` and the gateway templates
-were removed in phase 1; until phase 2, a gateway that manages the Database resource is built
-directly on the `Assimalign.Cohesion.ApplicationModel.Gateway` package
-(`docs/libraries/ApplicationModel/DESIGN.md`). The replacement is the ResourceManager (`fabric.md`).
+were removed in phase 1, and Database's integration with #1869, so no resource can be managed by
+an old-model gateway now. The replacement is the ResourceManager (`fabric.md`).
 
 ### Executable acceptance fixtures live in `fixtures/`, beside the project that drives them
 
@@ -363,7 +362,7 @@ feature's configuration on the registration verb.
   `Web.Authentication`, not in `Web`). A large area may compose its root from **child roots** —
   packages of generic base abstractions and default implementations pulled into the parent root
   for maintainability, testability, and separation of concerns (precedent:
-  `Assimalign.Cohesion.Database` aggregates `Database.Types`/`Language`/`Storage`/
+  `Assimalign.Cohesion.Database` aggregates `Database.Types`/`Types.Text`/`Language`/`Storage`/
   `Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`). **The dependency arrow always
   points root → child; a child root never references the root** — that is what keeps each child
   independently consumable, and it means a child owns its own vocabulary (value types, enums)
@@ -437,8 +436,8 @@ feature's configuration on the registration verb.
     setting it knows, such as `cors`) followed by the ones the application adds. Behavior,
     managed and unmanaged, is in "The resource instance is the SDK consumer's project" above.
     The verb is an ordinary extension member, not a generated component integration, because the
-    package references the container directly. The one remaining instance:
-    `resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel` (its `docs/DESIGN.md`).
+    package references the container directly. The last instance, Database's, was removed in
+    #1869; none remains.
   - **References:** the area root, the area's exact `<Area>.Hosting` module (sanctioned by COHRES001 itself, with no
     `CohesionHostingIsolationExemptions` entry), `Assimalign.Cohesion.DependencyInjection`,
     `Assimalign.Cohesion.Hosting`, and `Assimalign.Cohesion.ApplicationModel.Hosting`, plus the
@@ -478,8 +477,8 @@ feature's configuration on the registration verb.
   area, including feature dependencies such as Web.Caching → Caching/InMemory. Validate with
   `dotnet pack resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/src/Assimalign.Cohesion.<Area>.Runtime.csproj`.
   App carries `Assimalign.Cohesion.Connections` because every area hosting module depends on it,
-  and `Assimalign.Cohesion.ApplicationModel.Hosting` because the remaining
-  `<Area>.Hosting.ApplicationModel` (Database's, until phase 2) builds on it; area frameworks must not duplicate those kernel
+  and `Assimalign.Cohesion.ApplicationModel.Hosting` until phase 2 removes `libraries/ApplicationModel`
+  (no `<Area>.Hosting.ApplicationModel` builds on it since #1869); area frameworks must not duplicate those kernel
   entries. `<Area>.Hosting.ApplicationModel` is a public `App.<Area>` member; the platform
   packages a resource opts into (`ApplicationModel.Hosting.InProcess`, the `cohesion-platforms`
   instance halves) are NuGet packages the application references, and no `ApplicationModel.Gateway*`

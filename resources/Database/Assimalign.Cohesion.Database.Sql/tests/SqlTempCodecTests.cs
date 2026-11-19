@@ -18,7 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed class SqlTempCodecTests
 {
     private readonly ITestOutputHelper _output;
-    public SqlTempCodecTests(ITestOutputHelper output) { _output = output; }
+    private readonly byte[] _scratch = new byte[16384];
+    public SqlTempCodecTests(ITestOutputHelper output) { _output = output; Array.Fill(_scratch, (byte)0xFF); }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Temp codecs: seeded differential against the collector over more than one million pairs")]
     public void TryEncode_SeededPairs_ShouldMatchCollectorAndRoundTripRows()
@@ -138,10 +139,13 @@ public sealed class SqlTempCodecTests
         SqlTempSortKeyCodec.TryEncode([1, false], columns, new byte[1], out _).ShouldBeFalse();
     }
 
-    private static void RoundTrip(object?[] row)
+    private void RoundTrip(object?[] row)
     {
         SqlTempRowCodec.TryEncode(row, out var bytes).ShouldBeTrue();
-        SqlTempRowCodec.TryDecode(bytes, out var decoded).ShouldBeTrue();
+        var scratch = _scratch;
+        SqlTempRowCodec.TryWrite(row, scratch, out int written).ShouldBeTrue();
+        scratch.AsSpan(0, written).ToArray().ShouldBe(bytes);
+        SqlTempRowCodec.TryDecode(scratch.AsSpan(0, written), out var decoded).ShouldBeTrue();
         decoded.Length.ShouldBe(row.Length);
         for (int i = 0; i < row.Length; i++)
         {

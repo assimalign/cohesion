@@ -373,7 +373,8 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// Either endpoint node does not exist, or a property does not match the graph definition
-    /// (both <c>CG03003</c>); the session belongs to another database (<c>CG07005</c>), it is
+    /// (both <c>CG03003</c>), or endpoint labels violate the declared edge type (<c>CG03013</c>);
+    /// the session belongs to another database (<c>CG07005</c>), it is
     /// closed, another statement holds it, or its transaction refuses statements (<c>CG04007</c>).
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
@@ -588,13 +589,38 @@ public sealed partial class GraphDatabase : DatabaseInstance
         string type, IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
         await LockWriterAsync(operation, token).ConfigureAwait(false);
-        var typeId = await ValidateRelationshipAsync(operation, type, properties, token).ConfigureAwait(false);
-        return Materialize(await Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)DataStorage.ReserveTransactionSequence(), from.Value, to.Value, type, properties ?? new Dictionary<string, object?>()), typeId, operation.Context, token).ConfigureAwait(false));
+        var edgeType = Catalog.GetEdgeTypeForWrite(type, operation.Context.Snapshot, LatestSnapshot(operation.Context));
+        if (edgeType is not null)
+        {
+            var latest = LatestSnapshot(operation.Context);
+            var source = Store.FindNode(from.Value, latest);
+            var target = from == to ? source : Store.FindNode(to.Value, latest);
+            if (source is { } first && target is { } last)
+            { ValidateEdgeType(edgeType, first.Labels, last.Labels, properties, false, false); }
+        }
+        var typeId = await ValidateRelationshipCoreAsync(operation, type, properties, token, edgeType).ConfigureAwait(false);
+        Action<StoredGraphNode, StoredGraphNode>? validate = edgeType is null ? null : EdgeEndpointValidator(edgeType, properties);
+        return Materialize(await Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)DataStorage.ReserveTransactionSequence(), from.Value, to.Value, type, properties ?? new Dictionary<string, object?>()), typeId, operation.Context, token, validate).ConfigureAwait(false));
     }
 
-    internal async ValueTask<Guid> ValidateRelationshipAsync(GraphOperation operation, string type,
-        IReadOnlyDictionary<string, object?>? properties, CancellationToken token, bool deferRequired = false)
+    internal ValueTask<Guid> ValidateRelationshipAsync(GraphOperation operation, string type,
+        IReadOnlyDictionary<string, object?>? properties, CancellationToken token, bool deferRequired = false,
+        IReadOnlyList<string>? sourceLabels = null, IReadOnlyList<string>? targetLabels = null)
     {
+        var edgeType = Catalog.GetEdgeTypeForWrite(type, operation.Context.Snapshot, LatestSnapshot(operation.Context));
+        return ValidateRelationshipCoreAsync(operation, type, properties, token, edgeType, deferRequired, sourceLabels, targetLabels);
+    }
+
+    internal async ValueTask<Guid> ValidateRelationshipCoreAsync(GraphOperation operation, string type,
+        IReadOnlyDictionary<string, object?>? properties, CancellationToken token, GraphEdgeTypeDeclaration? edgeType,
+        bool deferRequired = false, IReadOnlyList<string>? sourceLabels = null, IReadOnlyList<string>? targetLabels = null)
+    {
+        if (edgeType is not null)
+        {
+            if (sourceLabels is not null && targetLabels is not null)
+            { ValidateEdgeType(edgeType, sourceLabels, targetLabels, properties, deferRequired, false); }
+            else { ValidateEdgeProperties(edgeType, properties, deferRequired, false); }
+        }
         var metadata = Catalog.FindRelationshipType(type, operation.Context.Snapshot);
         if (metadata != Catalog.FindRelationshipType(type, LatestSnapshot(operation.Context))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
         if (metadata is null)
@@ -604,6 +630,31 @@ public sealed partial class GraphDatabase : DatabaseInstance
         }
         await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token, deferRequired).ConfigureAwait(false);
         return metadata.Value.Id;
+    }
+
+    internal static Action<StoredGraphNode, StoredGraphNode> EdgeEndpointValidator(GraphEdgeTypeDeclaration type, IReadOnlyDictionary<string, object?>? properties)
+        => (source, target) => ValidateEdgeType(type, source.Labels, target.Labels, properties, false, false);
+
+    internal static void ValidateEdgeType(GraphEdgeTypeDeclaration type, IReadOnlyList<string> sourceLabels,
+        IReadOnlyList<string> targetLabels, IReadOnlyDictionary<string, object?>? properties, bool deferRequired, bool existingData)
+    {
+        if (!deferRequired && (!sourceLabels.Contains(type.SourceNodeType, StringComparer.Ordinal) || !targetLabels.Contains(type.TargetNodeType, StringComparer.Ordinal)))
+        { throw DatabaseException.CreateGraphFailure(existingData ? "CG03010" : "CG03013", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            ErrorMessages.GraphEdgeEndpointViolation, type.RelationshipType, type.SourceNodeType, type.TargetNodeType)); }
+        ValidateEdgeProperties(type, properties, deferRequired, existingData);
+    }
+
+    private static void ValidateEdgeProperties(GraphEdgeTypeDeclaration type, IReadOnlyDictionary<string, object?>? properties,
+        bool deferRequired, bool existingData)
+    {
+        foreach (var property in type.Properties)
+        {
+            object? value = null;
+            bool present = properties?.TryGetValue(property.Name, out value) == true && value is not null;
+            if (!deferRequired && property.Required && !present || present && TypeOf(value) != property.Type)
+            { throw DatabaseException.CreateGraphFailure(existingData ? "CG03010" : "CG03003", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.GraphEdgePropertyViolation, type.RelationshipType, property.Name)); }
+        }
     }
 
     internal static GraphNode Materialize(StoredGraphNode node) => new(new GraphNodeId(node.Id), node.Labels, node.Properties);

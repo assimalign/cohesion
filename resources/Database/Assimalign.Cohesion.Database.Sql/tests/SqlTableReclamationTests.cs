@@ -42,7 +42,10 @@ public sealed class SqlTableReclamationTests
     {
         // Arrange: each definition occupies a catalog page which DROP can clear and reuse.
         string path = Path.Combine(Environment.CurrentDirectory, "_out", "1443", Guid.NewGuid().ToString("N"));
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        // A hang guard only. The work floor below (1,000 durable cycles per lane) does not shrink on a slow
+        // runner: the file-backed case on macOS ran past a 90 s guard once on CI, at a commit whose other
+        // macOS run passed.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         try
         {
             var options = new SqlDatabaseEngineOptions { MaintenanceInterval = TimeSpan.FromMilliseconds(2) };

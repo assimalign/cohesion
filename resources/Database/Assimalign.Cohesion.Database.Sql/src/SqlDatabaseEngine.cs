@@ -1149,6 +1149,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
+    protected override IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore() => GetInstanceSnapshot();
+
+    /// <inheritdoc />
     protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
         => EnumerateDatabasesAsync(cancellationToken);
 
@@ -1331,8 +1334,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     // cast: the sequence is covariant, so it is the base's sequence too.
     private async IAsyncEnumerable<SqlDatabase> EnumerateDatabasesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        // Recovery holds the registry monitor until the new instance is ready. Health must
-        // observe the already-published instances without joining that potentially long wait.
+        // GetDatabasesAsync enumerates the published instances without taking the recovery
+        // monitor. Health reads the separate synchronous OpenDatabases snapshot.
         cancellationToken.ThrowIfCancellationRequested();
         foreach (var database in GetInstanceSnapshot())
         {

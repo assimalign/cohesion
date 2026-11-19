@@ -182,10 +182,7 @@ internal sealed class DatabaseAdminEndpointService : IHostService, IDisposable, 
         // This check is readiness-only so liveness continues to describe the process itself.
         builder.AddCheck(
             "database.accepting",
-            () => applicationContext.State == HostState.Started
-                ? HealthCheckResult.Healthy("All database servers are accepting connections.")
-                : HealthCheckResult.Unhealthy(
-                    $"The database application is '{applicationContext.State}' and is not accepting connections."),
+            () => applicationContext.CheckReadiness(),
             tags: [HealthTags.Ready]);
 
         return builder.Build();

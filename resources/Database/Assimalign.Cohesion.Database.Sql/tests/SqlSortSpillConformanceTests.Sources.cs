@@ -166,8 +166,10 @@ public sealed partial class SqlSortSpillConformanceTests
         finally { received.Set(); BeforeRead(engine.TempSpace!,null); }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Spill TCP: a reset during delivery releases temp bytes and files (#1789)")]
-    public async Task GetRowsAsync_ClientReset_ShouldReleaseResult()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Spill TCP: a reset during ordered or unordered delivery releases temp bytes and files (#1789)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetRowsAsync_ClientReset_ShouldReleaseResult(bool unordered)
     {
         // Arrange
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -187,7 +189,7 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             // Act
             await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)SqlProtocolMessageType.Execute,
-                ProtocolExecuteMessage.Create("SELECT id,k FROM t ORDER BY k").Encode()), ceiling.Token);
+                ProtocolExecuteMessage.Create(unordered ? "SELECT id,k FROM t" : "SELECT id,k FROM t ORDER BY k").Encode()), ceiling.Token);
             await writer.FlushAsync(ceiling.Token);
             await entered.Task.WaitAsync(ceiling.Token);
             TempBytes(engine.TempSpace!).ShouldBeGreaterThan(0);

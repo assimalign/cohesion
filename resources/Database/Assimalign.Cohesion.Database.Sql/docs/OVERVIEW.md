@@ -39,6 +39,10 @@ HAVING and DISTINCT/ORDER BY/pagination, with named windows and shared compatibl
 (#1526, SQ-W1/SQ-W2/SQ-W3). ROWS, RANGE distances, GROUPS, exclusion, aggregate windows
 with FILTER and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute over their frames. Native moving
 aggregates use inverse transitions or monotonic queues; NULL treatment is supported.
+Eligible partitioned stages spool input/output and sort one charged partition at a time
+on the existing grant refusal (#1789). Group/encounter order and evaluation are
+preserved; an oversized single partition and reference-observing application catalogs keep
+the existing owner. DESIGN.md records the exact eligibility and capacity limits.
 
 ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
 shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
@@ -458,7 +462,7 @@ eligible root hash join, plain SELECT ORDER BY, ordered DISTINCT, fixed-state ha
 streamed scan/system-view hash DISTINCT, including a CTAS source root,
 hands off to configured temporary space. Its fully evaluated result decodes lazily and
 supports repeated or concurrent reads.
-Nested plans, windows, recursion, grouping sets and ordered sequence
+Nested plans, recursion, grouping sets and ordered sequence
 deferral retain their existing refusals; ordered DISTINCT's retained representatives must still fit.
 Hash aggregation keeps existing groups live and partitions new-group inputs, then restores
 first-seen order before output. COUNT, bounded SUM/AVG, fixed-width MIN/MAX (numeric, temporal,

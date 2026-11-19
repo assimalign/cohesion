@@ -21,11 +21,12 @@ internal sealed class DatabaseHealthTrace
     private long _nextObservation;
     private long _lastObservation;
 
-    internal async ValueTask<HealthCheckResult> CheckAsync(DatabaseApplicationContext context, CancellationToken cancellationToken)
+    internal async ValueTask<HealthCheckResult> CheckAsync(DatabaseApplicationContext context, CancellationToken cancellationToken,
+        DatabaseHealthObservations? components = null)
     {
         long sequence = Interlocked.Increment(ref _nextObservation);
         var observation = new Observation();
-        var result = await context.CheckCoreAsync(cancellationToken, observation).ConfigureAwait(false);
+        var result = await context.CheckCoreAsync(cancellationToken, observation, components).ConfigureAwait(false);
         lock (_gate)
         {
             // A slower, earlier check still returns its own result, but cannot replace
@@ -61,7 +62,17 @@ internal sealed class DatabaseHealthTrace
                     }
                 }
             }
-            // Missing databases and disposed engines are forgotten, never called restored.
+            // A cleared failed-open record is a restoration even when its name vanished (drop,
+            // absence or disposal). Existing instance conditions retain their forget semantics.
+            foreach (var engine in _conditions)
+            {
+                foreach (var entry in engine.Value)
+                {
+                    if (entry.Value.Reason == "Open failed" &&
+                        (!observation.Conditions.TryGetValue(engine.Key, out var current) || !current.ContainsKey(entry.Key)))
+                    { changes.Add(new Change(engine.Key, entry.Key, entry.Value, Restored: true)); }
+                }
+            }
             _conditions = observation.Conditions;
             if (changes.Count > 0) { _pending.Enqueue(changes); }
             if (_emitting || _pending.Count == 0) { return result; }
@@ -112,6 +123,9 @@ internal sealed class DatabaseHealthTrace
             var observed = conditions.GetValueOrDefault(name);
             conditions[name] = new Condition(observed?.Instance, "Offline", cause, observed?.Progress);
         }
+
+        internal void ObserveFailedOpen(DatabaseEngine engine, string name)
+            => ForEngine(engine)[name] = new Condition(null, "Open failed", null, null);
 
         private Dictionary<string, Condition> ForEngine(DatabaseEngine engine)
         {

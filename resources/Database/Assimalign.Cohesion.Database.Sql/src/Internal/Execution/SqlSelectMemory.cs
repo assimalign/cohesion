@@ -114,6 +114,21 @@ internal struct SqlSelectMemory
         return bytes;
     }
 
+    internal long RemoveConsumedPayload(object?[] row)
+    {
+        long bytes = RemoveRow(row) - (56L + 8L * row.Length);
+        for (int i = 0; i < row.Length; i++)
+        {
+            object? value = row[i];
+            if (SqlHashJoinTable.ValueBytes(value) >= WideValueThreshold && !SeenBefore(value, row, i)
+                && !_wideCells!.ContainsKey(value!))
+            { bytes -= WideValueEntryBytes; }
+        }
+        // The emptied map retains its capacity until the source is disposed. Keep
+        // its original identity allowance charged while releasing only cell payloads.
+        return bytes;
+    }
+
     internal void Replace(object?[] output, object?[] keys, object?[] previousOutput, object?[] previousKeys)
     {
         RemoveRow(previousOutput, 0);

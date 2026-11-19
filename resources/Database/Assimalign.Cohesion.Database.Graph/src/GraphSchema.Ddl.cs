@@ -21,6 +21,75 @@ public sealed partial class GraphSchema
     internal async ValueTask<DatabaseResult> ExecuteDdlAsync(GqlSchemaCommand command, IReadOnlyDictionary<string, object?>? parameters,
         Protocol.GraphQueryLimits? limits, Assimalign.Cohesion.Database.Language.Location? location, CancellationToken token)
     {
+        if (command.GraphType is { } graphType)
+        {
+            await WriteAsync(async op =>
+            {
+                ParameterBindings.Normalize(parameters, name => new GraphPlanningException("CG01014",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name)));
+                using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+                // Admit lowering buffers before constructing immutable declarations or mutation maps.
+                foreach (var node in graphType.Nodes)
+                {
+                    token.ThrowIfCancellationRequested(); op.QueryBudget.Consume();
+                    if (node is null || node.Label is null || node.ImpliedLabels is null || node.Properties is null)
+                    { throw new GraphPlanningException("CG05001", ErrorMessages.SchemaStandaloneRequired, location); }
+                    memory.Add(512L + node.Label.Length * 2L);
+                    foreach (string label in node.ImpliedLabels)
+                    {
+                        op.QueryBudget.Consume();
+                        if (label is null) { throw new GraphPlanningException("CG05001", ErrorMessages.SchemaStandaloneRequired, location); }
+                        memory.Add(64L + label.Length * 2L);
+                    }
+                    foreach (var property in node.Properties) { AdmitProperty(property); }
+                }
+                foreach (var edge in graphType.Edges)
+                {
+                    token.ThrowIfCancellationRequested(); op.QueryBudget.Consume();
+                    if (edge is null || edge.Type is null || edge.Source is null || edge.Target is null || edge.Properties is null)
+                    { throw new GraphPlanningException("CG05001", ErrorMessages.SchemaStandaloneRequired, location); }
+                    memory.Add(512L + (edge.Type.Length + edge.Source.Length + edge.Target.Length) * 2L);
+                    foreach (var property in edge.Properties) { AdmitProperty(property); }
+                }
+                void AdmitProperty(GqlGraphPropertyType property)
+                {
+                    token.ThrowIfCancellationRequested(); op.QueryBudget.Consume();
+                    if (property is null || property.Name is null || !Enum.IsDefined(property.Type))
+                    { throw new GraphPlanningException("CG05001", ErrorMessages.SchemaStandaloneRequired, location); }
+                    memory.Add(256L + property.Name.Length * 2L);
+                }
+                if (graphType.Operation == GqlGraphTypeOperation.Drop)
+                {
+                    var nodes = graphType.Nodes.Select(node => node.Label).ToHashSet(StringComparer.Ordinal);
+                    var edges = graphType.Edges.Select(edge => edge.Type).ToHashSet(StringComparer.Ordinal);
+                    await ChangeGraphTypeCoreAsync(op, (previous, budget) =>
+                    {
+                        if (nodes.Count == 0 && edges.Count == 0) { return previous; }
+                        var remainingNodes = (previous?.NodeTypes ?? []).ToDictionary(node => node.IdentifyingLabel, StringComparer.Ordinal);
+                        var remainingEdges = (previous?.EdgeTypes ?? []).ToDictionary(edge => edge.RelationshipType, StringComparer.Ordinal);
+                        foreach (string name in nodes) { budget.Consume(); if (!remainingNodes.Remove(name)) { throw InvalidGraphTypeChange("DROP", name); } }
+                        foreach (string name in edges) { budget.Consume(); if (!remainingEdges.Remove(name)) { throw InvalidGraphTypeChange("DROP", name); } }
+                        return GraphType.Create(remainingNodes.Values, remainingEdges.Values);
+                    }, token).ConfigureAwait(false);
+                }
+                else
+                {
+                    GraphType type;
+                    try
+                    {
+                        type = GraphType.Create(graphType.Nodes.Select(node => GraphNodeType.Create(node.Label, node.ImpliedLabels,
+                                node.Properties.Select(property => GraphPropertyType.Create(property.Name, StorageType(property.Type), property.Required)))),
+                            graphType.Edges.Select(edge => GraphEdgeType.Create(edge.Type, edge.Source, edge.Target,
+                                edge.Properties.Select(property => GraphPropertyType.Create(property.Name, StorageType(property.Type), property.Required)))));
+                    }
+                    catch (ArgumentException)
+                    { throw DatabaseException.CreateGraphFailure("CG03011", ErrorMessages.GraphTypeDuplicate); }
+                    await ChangeGraphTypeCoreAsync(op, (previous, _) => graphType.Operation == GqlGraphTypeOperation.Set ? type :
+                        MergeGraphTypes(previous, type, graphType.Operation == GqlGraphTypeOperation.Alter), token, type).ConfigureAwait(false);
+                }
+            }, token, limits, location).ConfigureAwait(false);
+            return new GraphMutationResult(1, []);
+        }
         long affected = 0;
         await WriteAsync(async op =>
         {

@@ -5,9 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 using Microsoft.Build.Framework;
@@ -234,7 +236,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or
-            InvalidOperationException or SqlSchemaValidationException or SqlSchemaMigrationException)
+            InvalidOperationException or InsufficientExecutionStackException or SqlSchemaValidationException or SqlSchemaMigrationException)
         {
             Log.LogError(null, "COHDBSDK206", null, null, 0, 0, 0, 0, exception.Message);
             return false;
@@ -320,6 +322,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             builder.Append("-- Cohesion database migration ").Append(migrationName).Append('\n');
             builder.Append("-- Source schema: ").Append(plan.SourceHash ?? "<empty>").Append('\n');
             builder.Append("-- Target schema: ").Append(plan.TargetHash).Append('\n');
+            builder.Append("-- Typed schema application publishes this migration jointly; this file applies per statement.\n");
             foreach (SqlSchemaMigrationOperation operation in plan.Operations)
             {
                 WriteOperation(builder, operation);
@@ -351,7 +354,14 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     builder.Append(";\n");
                     break;
                 case SqlSchemaMigrationOperationKind.AlterColumn:
-                    throw Unsupported(operation, ErrorMessages.AlterMetadataUnsupported);
+                    SqlMigrationLowering.RenderAlterColumns(operation,
+                        (_, statement, rollback) =>
+                        {
+                            ParseMigrationStatement(statement);
+                            if (rollback is not null) { ParseMigrationStatement(rollback); }
+                            builder.Append(statement).Append('\n');
+                        }, SqlMigrationDefaultLiteral.CanonicalDefault);
+                    break;
                 case SqlSchemaMigrationOperationKind.DropColumn:
                     builder.Append("ALTER TABLE ").Append(QualifiedTable(Required(operation.ParentName, operation)))
                         .Append(" DROP COLUMN ").Append(Identifier(operation.ObjectName)).Append(";\n");
@@ -375,6 +385,24 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                 default:
                     throw Unsupported(operation, ErrorMessages.MigrationKindUnknown);
             }
+        }
+
+        private static void ParseMigrationStatement(string text)
+        {
+            // Match SqlMigrationScriptStep: validate both directions at the dialect's ceiling,
+            // even though a migration file carries forward statements only.
+            var statement = new SqlQueryParser(new SqlQueryParserOptions
+            {
+                ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit,
+            }).Parse(text);
+            var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+            if (error is null) { return; }
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExecuteStatementCoreAsyncFailure, error.Code, error.Message);
+            if (error.Code == "CS00007")
+            {
+                throw new DatabaseException(ErrorMessages.StatementStackInsufficient, new InsufficientExecutionStackException(message));
+            }
+            throw new DatabaseException(message);
         }
 
         private static void WriteAddTable(StringBuilder builder, CompiledSchemaTable table)

@@ -21,7 +21,7 @@ public sealed partial class GraphSchema
     public ValueTask<GraphType?> GetGraphTypeAsync(CancellationToken cancellationToken = default)
         => _database.RunAsync(_session, op => new ValueTask<GraphType?>(_database.Catalog.GetGraphType(op.Context.Snapshot) is { } type ? GraphType.FromDeclaration(type) : null), cancellationToken);
 
-    /// <summary>Atomically replaces the current open graph type after validating existing member nodes.</summary>
+    /// <summary>Atomically replaces the current open graph type after validating existing member nodes and relationships.</summary>
     /// <param name="type">The complete replacement, including any edge declarations.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>Completion after commit.</returns>
@@ -171,149 +171,170 @@ public sealed partial class GraphSchema
     }
 
     private ValueTask ChangeGraphTypeAsync(Func<GraphType?, GraphPlanExecutor.ExpansionBudget, GraphType?> change, CancellationToken token, GraphType? input = null)
-        => WriteAsync(async op =>
-        {
-            using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
-            op.QueryBudget.Consume();
-            memory.Add(512); // Current-type publication and its singleton catalog route.
-            // Admit fragment capacity before ADD/ALTER allocate their dictionaries and copied
-            // result arrays. Existing declarations are covered by the catalog decode grant.
-            if (input is not null)
-            {
-                foreach (var node in input.NodeTypes)
-                {
-                    token.ThrowIfCancellationRequested();
-                    op.QueryBudget.Consume();
-                    memory.Add(512);
-                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(nodeType: node.Declaration));
-                }
-                foreach (var edge in input.EdgeTypes)
-                {
-                    token.ThrowIfCancellationRequested();
-                    op.QueryBudget.Consume();
-                    memory.Add(512);
-                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge.Declaration));
-                }
-            }
-            var loaded = _database.Catalog.LoadGraphType(op.Context.Snapshot, memory.Add, out var records);
-            var previous = loaded is null ? null : GraphType.FromDeclaration(loaded);
-            var type = change(previous, op.QueryBudget);
-            if (ReferenceEquals(type, previous)) { return; }
-            var oldNodes = (previous?.NodeTypes ?? []).ToDictionary(item => item.IdentifyingLabel, StringComparer.Ordinal);
-            var oldEdges = (previous?.EdgeTypes ?? []).ToDictionary(item => item.RelationshipType, StringComparer.Ordinal);
-            var newNodes = (type?.NodeTypes ?? []).ToDictionary(item => item.IdentifyingLabel, StringComparer.Ordinal);
-            var newEdges = (type?.EdgeTypes ?? []).ToDictionary(item => item.RelationshipType, StringComparer.Ordinal);
-            // Removal changes the rules over the old definitions, including removed implied
-            // labels. Check both sides of changed declarations, leaving retained ones alone.
-            foreach (var node in oldNodes.Values)
-            {
-                if (!newNodes.TryGetValue(node.IdentifyingLabel, out var next) || !GraphTypeChanges.Same(node.Declaration, next.Declaration))
-                { EnsureNodeMutable(node); }
-            }
-            foreach (var edge in oldEdges.Values)
-            {
-                if (!newEdges.TryGetValue(edge.RelationshipType, out var next) || !GraphTypeChanges.Same(edge.Declaration, next.Declaration))
-                { EnsureMutableDefinition(edge.RelationshipType, true); }
-            }
-            if (type is not null)
-            {
-                var names = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var node in type.NodeTypes)
-                {
-                    token.ThrowIfCancellationRequested();
-                    op.QueryBudget.Consume();
-                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(nodeType: node.Declaration));
-                    memory.Add(512L + node.IdentifyingLabel.Length * 2L + node.ImpliedLabels.Sum(label => 48L + label.Length * 2L)
-                        + node.Properties.Sum(property => 128L + property.Name.Length * 2L));
-                    names.Add(node.IdentifyingLabel);
-                }
-                foreach (var edge in type.EdgeTypes)
-                {
-                    token.ThrowIfCancellationRequested();
-                    op.QueryBudget.Consume();
-                    GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge.Declaration));
-                    memory.Add(512L + (edge.RelationshipType.Length + edge.SourceNodeType.Length + edge.TargetNodeType.Length) * 2L
-                        + edge.Properties.Sum(property => 128L + property.Name.Length * 2L));
-                    if (!names.Contains(edge.SourceNodeType) || !names.Contains(edge.TargetNodeType))
-                    { throw DatabaseException.CreateGraphFailure("CG03011", string.Format(CultureInfo.CurrentCulture, ErrorMessages.GraphTypeReferenceMissing, edge.RelationshipType)); }
-                }
-                foreach (var node in type.NodeTypes)
-                {
-                    foreach (string implied in node.ImpliedLabels)
-                    {
-                        op.QueryBudget.Consume();
-                        if (names.Contains(implied))
-                        { throw DatabaseException.CreateGraphFailure("CG03011", string.Format(CultureInfo.CurrentCulture, ErrorMessages.GraphTypeLabelOverlap, implied)); }
-                    }
-                    if (oldNodes.TryGetValue(node.IdentifyingLabel, out var old) && GraphTypeChanges.Same(old.Declaration, node.Declaration)) { continue; }
-                    EnsureNodeMutable(node);
-                    _database.Catalog.EnsureNodeTypeCompatible(node.Declaration, op.Context.Snapshot, op.QueryBudget.Consume, memory.Add);
-                }
-                foreach (var edge in type.EdgeTypes)
-                {
-                    if (oldEdges.TryGetValue(edge.RelationshipType, out var old) && GraphTypeChanges.Same(old.Declaration, edge.Declaration)) { continue; }
-                    EnsureMutableDefinition(edge.RelationshipType, true);
-                }
-                var latest = _database.LatestSnapshot(op.Context);
-                foreach (var nodeType in type.NodeTypes)
-                {
-                    if (!GraphTypeChanges.RequiresValidation(oldNodes.GetValueOrDefault(nodeType.IdentifyingLabel)?.Declaration, nodeType.Declaration)) { continue; }
-                    using var cursorMemory = new GraphMemoryOwner(op.QueryBudget.Memory);
-                    foreach (var node in _database.Store.StreamLabels([nodeType.IdentifyingLabel], latest, token, op.QueryBudget.Consume, cursorMemory.Add))
-                    {
-                        using var nodeMemory = new GraphMemoryOwner(op.QueryBudget.Memory);
-                        nodeMemory.RetainValue(GraphDatabase.Materialize(node), token);
-                        GraphDatabase.ValidateNodeType(nodeType.Declaration, node.Labels, node.Properties, false, existingData: true);
-                    }
-                }
-                // Discover tokens in the same logical transaction, independently of type enforcement.
-                foreach (var node in type.NodeTypes)
-                {
-                    op.QueryBudget.Consume();
-                    if (_database.Catalog.FindLabel(node.IdentifyingLabel, op.Context.Snapshot) is null) { memory.Add(1024); }
-                    await EnsureDefinitionAsync(op, node.IdentifyingLabel, false, token).ConfigureAwait(false);
-                    _database.Catalog.AfterGraphTypeMutation?.Invoke("label:" + node.IdentifyingLabel);
-                    foreach (string label in node.ImpliedLabels)
-                    {
-                        op.QueryBudget.Consume();
-                        if (_database.Catalog.FindLabel(label, op.Context.Snapshot) is null) { memory.Add(1024); }
-                        await EnsureDefinitionAsync(op, label, false, token).ConfigureAwait(false);
-                        _database.Catalog.AfterGraphTypeMutation?.Invoke("label:" + label);
-                    }
-                    foreach (var property in node.Properties)
-                    {
-                        op.QueryBudget.Consume();
-                        await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token, memory.Add).ConfigureAwait(false);
-                        _database.Catalog.AfterGraphTypeMutation?.Invoke("property:" + property.Name);
-                    }
-                }
-                foreach (var edge in type.EdgeTypes)
-                {
-                    op.QueryBudget.Consume();
-                    if (_database.Catalog.FindRelationshipType(edge.RelationshipType, op.Context.Snapshot) is null) { memory.Add(1024); }
-                    await EnsureDefinitionAsync(op, edge.RelationshipType, true, token).ConfigureAwait(false);
-                    _database.Catalog.AfterGraphTypeMutation?.Invoke("type:" + edge.RelationshipType);
-                    foreach (var property in edge.Properties)
-                    {
-                        op.QueryBudget.Consume();
-                        await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token, memory.Add).ConfigureAwait(false);
-                        _database.Catalog.AfterGraphTypeMutation?.Invoke("property:" + property.Name);
-                    }
-                }
-            }
-            op.AssertGraphTypePublication();
-            await _database.Catalog.SetGraphTypeAsync(type?.Declaration, records, op.Context, token).ConfigureAwait(false);
+        => WriteAsync(op => ChangeGraphTypeCoreAsync(op, change, token, input), token);
 
-            void EnsureNodeMutable(GraphNodeType node)
-            {
-                EnsureMutableDefinition(node.IdentifyingLabel, false);
-                foreach (string implied in node.ImpliedLabels) { EnsureMutableDefinition(implied, false); }
-            }
-            void EnsureMutableDefinition(string name, bool relationship)
+    private async ValueTask ChangeGraphTypeCoreAsync(GraphOperation op,
+        Func<GraphType?, GraphPlanExecutor.ExpansionBudget, GraphType?> change, CancellationToken token, GraphType? input = null)
+    {
+        using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+        op.QueryBudget.Consume();
+        memory.Add(512); // Current-type publication and its singleton catalog route.
+        // Admit fragment capacity before ADD/ALTER allocate their dictionaries and copied
+        // result arrays. Existing declarations are covered by the catalog decode grant.
+        if (input is not null)
+        {
+            foreach (var node in input.NodeTypes)
             {
                 token.ThrowIfCancellationRequested();
                 op.QueryBudget.Consume();
-                _database.Catalog.EnsureGraphTypeDefinitionMutable(name, relationship, op.Context.Snapshot);
+                memory.Add(512);
+                GraphCatalogCodec.GetEncodedSize(new CatalogRecord(nodeType: node.Declaration));
             }
-        }, token);
+            foreach (var edge in input.EdgeTypes)
+            {
+                token.ThrowIfCancellationRequested();
+                op.QueryBudget.Consume();
+                memory.Add(512);
+                GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge.Declaration));
+            }
+        }
+        var loaded = _database.Catalog.LoadGraphType(op.Context.Snapshot, memory.Add, out var records);
+        var previous = loaded is null ? null : GraphType.FromDeclaration(loaded);
+        var type = change(previous, op.QueryBudget);
+        if (ReferenceEquals(type, previous)) { return; }
+        var oldNodes = (previous?.NodeTypes ?? []).ToDictionary(item => item.IdentifyingLabel, StringComparer.Ordinal);
+        var oldEdges = (previous?.EdgeTypes ?? []).ToDictionary(item => item.RelationshipType, StringComparer.Ordinal);
+        var newNodes = (type?.NodeTypes ?? []).ToDictionary(item => item.IdentifyingLabel, StringComparer.Ordinal);
+        var newEdges = (type?.EdgeTypes ?? []).ToDictionary(item => item.RelationshipType, StringComparer.Ordinal);
+        // Removal changes the rules over the old definitions, including removed implied
+        // labels. Check both sides of changed declarations, leaving retained ones alone.
+        foreach (var node in oldNodes.Values)
+        {
+            if (!newNodes.TryGetValue(node.IdentifyingLabel, out var next) || !GraphTypeChanges.Same(node.Declaration, next.Declaration))
+            { EnsureNodeMutable(node); }
+        }
+        foreach (var edge in oldEdges.Values)
+        {
+            if (!newEdges.TryGetValue(edge.RelationshipType, out var next) || !GraphTypeChanges.Same(edge.Declaration, next.Declaration))
+            { EnsureMutableDefinition(edge.RelationshipType, true); }
+        }
+        if (type is not null)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var node in type.NodeTypes)
+            {
+                token.ThrowIfCancellationRequested();
+                op.QueryBudget.Consume();
+                GraphCatalogCodec.GetEncodedSize(new CatalogRecord(nodeType: node.Declaration));
+                memory.Add(512L + node.IdentifyingLabel.Length * 2L + node.ImpliedLabels.Sum(label => 48L + label.Length * 2L)
+                    + node.Properties.Sum(property => 128L + property.Name.Length * 2L));
+                names.Add(node.IdentifyingLabel);
+            }
+            foreach (var edge in type.EdgeTypes)
+            {
+                token.ThrowIfCancellationRequested();
+                op.QueryBudget.Consume();
+                GraphCatalogCodec.GetEncodedSize(new CatalogRecord(edgeType: edge.Declaration));
+                memory.Add(512L + (edge.RelationshipType.Length + edge.SourceNodeType.Length + edge.TargetNodeType.Length) * 2L
+                    + edge.Properties.Sum(property => 128L + property.Name.Length * 2L));
+                if (!names.Contains(edge.SourceNodeType) || !names.Contains(edge.TargetNodeType))
+                { throw DatabaseException.CreateGraphFailure("CG03011", string.Format(CultureInfo.CurrentCulture, ErrorMessages.GraphTypeReferenceMissing, edge.RelationshipType)); }
+            }
+            foreach (var node in type.NodeTypes)
+            {
+                foreach (string implied in node.ImpliedLabels)
+                {
+                    op.QueryBudget.Consume();
+                    if (names.Contains(implied))
+                    { throw DatabaseException.CreateGraphFailure("CG03011", string.Format(CultureInfo.CurrentCulture, ErrorMessages.GraphTypeLabelOverlap, implied)); }
+                }
+                if (oldNodes.TryGetValue(node.IdentifyingLabel, out var old) && GraphTypeChanges.Same(old.Declaration, node.Declaration)) { continue; }
+                EnsureNodeMutable(node);
+                _database.Catalog.EnsureNodeTypeCompatible(node.Declaration, op.Context.Snapshot, op.QueryBudget.Consume, memory.Add);
+            }
+            foreach (var edge in type.EdgeTypes)
+            {
+                if (oldEdges.TryGetValue(edge.RelationshipType, out var old) && GraphTypeChanges.Same(old.Declaration, edge.Declaration)) { continue; }
+                EnsureMutableDefinition(edge.RelationshipType, true);
+                _database.Catalog.EnsureEdgeTypeCompatible(edge.Declaration, op.Context.Snapshot, op.QueryBudget.Consume, memory.Add);
+            }
+            var latest = _database.LatestSnapshot(op.Context);
+            foreach (var nodeType in type.NodeTypes)
+            {
+                if (!GraphTypeChanges.RequiresValidation(oldNodes.GetValueOrDefault(nodeType.IdentifyingLabel)?.Declaration, nodeType.Declaration)) { continue; }
+                using var cursorMemory = new GraphMemoryOwner(op.QueryBudget.Memory);
+                foreach (var node in _database.Store.StreamLabels([nodeType.IdentifyingLabel], latest, token, op.QueryBudget.Consume, cursorMemory.Add))
+                {
+                    using var nodeMemory = new GraphMemoryOwner(op.QueryBudget.Memory);
+                    nodeMemory.RetainValue(GraphDatabase.Materialize(node), token);
+                    GraphDatabase.ValidateNodeType(nodeType.Declaration, node.Labels, node.Properties, false, existingData: true);
+                }
+            }
+            foreach (var edgeType in type.EdgeTypes)
+            {
+                if (!GraphTypeChanges.RequiresValidation(oldEdges.GetValueOrDefault(edgeType.RelationshipType)?.Declaration, edgeType.Declaration)) { continue; }
+                _database.Catalog.BeforeGraphTypeValidation?.Invoke(edgeType.RelationshipType);
+                using var cursorMemory = new GraphMemoryOwner(op.QueryBudget.Memory);
+                foreach (var edge in _database.Store.StreamRelationshipTypes([edgeType.RelationshipType], latest, token, op.QueryBudget.Consume, cursorMemory.Add))
+                {
+                    using var edgeMemory = new GraphMemoryOwner(op.QueryBudget.Memory);
+                    edgeMemory.RetainValue(GraphDatabase.Materialize(edge), token);
+                    op.QueryBudget.Consume();
+                    var source = _database.Store.FindNode(edge.SourceId, latest);
+                    var target = edge.SourceId == edge.TargetId ? source : _database.Store.FindNode(edge.TargetId, latest);
+                    if (source is { } from) { edgeMemory.RetainValue(GraphDatabase.Materialize(from), token); }
+                    if (target is { } to && edge.SourceId != edge.TargetId) { edgeMemory.RetainValue(GraphDatabase.Materialize(to), token); }
+                    GraphDatabase.ValidateEdgeType(edgeType.Declaration, source?.Labels ?? [], target?.Labels ?? [], edge.Properties, false, true);
+                }
+            }
+            // Discover tokens in the same logical transaction, independently of type enforcement.
+            foreach (var node in type.NodeTypes)
+            {
+                op.QueryBudget.Consume();
+                if (_database.Catalog.FindLabel(node.IdentifyingLabel, op.Context.Snapshot) is null) { memory.Add(1024); }
+                await EnsureDefinitionAsync(op, node.IdentifyingLabel, false, token).ConfigureAwait(false);
+                _database.Catalog.AfterGraphTypeMutation?.Invoke("label:" + node.IdentifyingLabel);
+                foreach (string label in node.ImpliedLabels)
+                {
+                    op.QueryBudget.Consume();
+                    if (_database.Catalog.FindLabel(label, op.Context.Snapshot) is null) { memory.Add(1024); }
+                    await EnsureDefinitionAsync(op, label, false, token).ConfigureAwait(false);
+                    _database.Catalog.AfterGraphTypeMutation?.Invoke("label:" + label);
+                }
+                foreach (var property in node.Properties)
+                {
+                    op.QueryBudget.Consume();
+                    await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token, memory.Add).ConfigureAwait(false);
+                    _database.Catalog.AfterGraphTypeMutation?.Invoke("property:" + property.Name);
+                }
+            }
+            foreach (var edge in type.EdgeTypes)
+            {
+                op.QueryBudget.Consume();
+                if (_database.Catalog.FindRelationshipType(edge.RelationshipType, op.Context.Snapshot) is null) { memory.Add(1024); }
+                await EnsureDefinitionAsync(op, edge.RelationshipType, true, token).ConfigureAwait(false);
+                _database.Catalog.AfterGraphTypeMutation?.Invoke("type:" + edge.RelationshipType);
+                foreach (var property in edge.Properties)
+                {
+                    op.QueryBudget.Consume();
+                    await _database.Catalog.DiscoverPropertyKeyAsync(property.Name, op.Context, token, memory.Add).ConfigureAwait(false);
+                    _database.Catalog.AfterGraphTypeMutation?.Invoke("property:" + property.Name);
+                }
+            }
+        }
+        op.AssertGraphTypePublication();
+        await _database.Catalog.SetGraphTypeAsync(type?.Declaration, records, op.Context, token).ConfigureAwait(false);
+
+        void EnsureNodeMutable(GraphNodeType node)
+        {
+            EnsureMutableDefinition(node.IdentifyingLabel, false);
+            foreach (string implied in node.ImpliedLabels) { EnsureMutableDefinition(implied, false); }
+        }
+        void EnsureMutableDefinition(string name, bool relationship)
+        {
+            token.ThrowIfCancellationRequested();
+            op.QueryBudget.Consume();
+            _database.Catalog.EnsureGraphTypeDefinitionMutable(name, relationship, op.Context.Snapshot);
+        }
+    }
 }

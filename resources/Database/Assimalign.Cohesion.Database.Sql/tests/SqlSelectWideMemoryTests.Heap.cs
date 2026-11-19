@@ -11,6 +11,9 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSelectWideMemoryTests
@@ -64,6 +67,7 @@ public sealed partial class SqlSelectWideMemoryTests
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        SqlDatabaseSession executionSession = session;
         foreach (string command in new[]
         {
             "CREATE SEQUENCE s", "CREATE TABLE t(k INT)",
@@ -82,60 +86,149 @@ public sealed partial class SqlSelectWideMemoryTests
         int length = tableAs ? 8000 : comparesWide ? 2048 : 65536;
         (await Execute(hasParameter ? new Dictionary<string, object?> { ["p"] = new string('x', length) } : null)).ShouldBe(expectedPeak);
         if (tableAs) { await session.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None); }
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
+        images.Drain(pool);
+
+        var batch = new Batch(pool, _output, nameof(ExecuteAsync_BufferHeap_ShouldReportMeasuredGrowth));
+        var rounds = new List<Sample<long>>();
         long largestGrowth = long.MinValue, observedCharge = 0;
         Dictionary<string, object?>? parameters = null;
 
         // Act
-        for (int round = 0; round < 3; round++)
+        for (int roundIndex = 0; roundIndex < 3; roundIndex++)
         {
-            parameters = null;
-            await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
-            long before = LiveHeap.Read();
-            if (hasParameter) { parameters = new Dictionary<string, object?> { ["p"] = new string('x', length) }; }
-            SqlStatementMetrics? active = null;
-            bool captured = false;
-            try
+            int round = roundIndex, measurement = 0;
+            var sampled = await batch.MeasureAsync($"shape={shape}|base={forceBase}|round={round}", async readHeap =>
             {
-                SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
+                parameters = null;
+                await using var retry = tableAs && measurement++ > 0 ? await BuildRetryFixture() : null;
+                executionSession = retry?.Session ?? session;
+                if (retry is not null)
                 {
-                    active = metrics;
-                    if (!tableAs && !captured && metrics.HashMemoryBytes == expectedPeak)
-                    { Capture(metrics.HashMemoryBytes); }
-                };
-                // Observe CTAS admission before writes add persistent storage to GC growth.
-                if (tableAs) { SqlPlanExecutor.TableAsSourceAdmitted = _ => Capture(active!.HashMemoryBytes); }
-                (await Execute(parameters)).ShouldBe(expectedPeak);
-            }
-            finally { SqlStatementMetrics.AfterMemoryReservation = null; SqlPlanExecutor.TableAsSourceAdmitted = null; }
-            captured.ShouldBeTrue();
-            if (tableAs) { await session.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None); }
+                    (await Execute(hasParameter ? new Dictionary<string, object?> { ["p"] = new string('x', length) } : null)).ShouldBe(expectedPeak);
+                    await executionSession.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None);
+                    for (int prior = 0; prior < round; prior++)
+                    {
+                        (await Execute(hasParameter ? new Dictionary<string, object?> { ["p"] = new string('x', length) } : null)).ShouldBe(expectedPeak);
+                        await executionSession.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None);
+                    }
+                }
+                long growth = long.MinValue;
+                parameters = null;
+                await executionSession.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
+                images.Drain(pool);
+                long before = readHeap();
+                if (hasParameter) { parameters = new Dictionary<string, object?> { ["p"] = new string('x', length) }; }
+                SqlStatementMetrics? active = null;
+                bool captured = false;
+                try
+                {
+                    SqlStatementMetrics.AfterMemoryReservation = (metrics, _) =>
+                    {
+                        active = metrics;
+                        if (!tableAs && !captured && metrics.HashMemoryBytes == expectedPeak)
+                        { Capture(metrics.HashMemoryBytes); }
+                    };
+                    // Observe CTAS admission before writes add persistent storage to GC growth.
+                    if (tableAs) { SqlPlanExecutor.TableAsSourceAdmitted = _ => Capture(active!.HashMemoryBytes); }
+                    (await Execute(parameters)).ShouldBe(expectedPeak);
+                }
+                finally { SqlStatementMetrics.AfterMemoryReservation = null; SqlPlanExecutor.TableAsSourceAdmitted = null; }
+                captured.ShouldBeTrue();
+                if (tableAs) { await executionSession.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None); }
 
-            void Capture(long charge)
-            {
-                captured = true;
-                largestGrowth = Math.Max(largestGrowth, LiveHeap.Read() - before);
-                observedCharge = charge;
-            }
+                return growth;
+
+                void Capture(long charge)
+                {
+                    captured = true;
+                    growth = Math.Max(growth, readHeap() - before);
+                    observedCharge = charge;
+                }
+            });
+            rounds.Add(sampled);
+            largestGrowth = Math.Max(largestGrowth, sampled.Value);
         }
 
         // Assert: raw GC growth deliberately remains visible, including uncharged fixed state.
-        largestGrowth.ShouldBeGreaterThan(0);
+        await batch.CheckAsync(() => [Floor("largest heap growth > 0", rounds.Max(x => x.Value), 0, Term.Maximum(rounds), true)], () =>
+        {
+            largestGrowth = rounds.Max(x => x.Value);
+            largestGrowth.ShouldBeGreaterThan(0);
+        });
+        await batch.CompleteAsync();
         observedCharge.ShouldBe(expectedObserved);
         _output.WriteLine($"BUFFER_HEAP|{shape}|base={forceBase}|peak={expectedPeak}|observedCharge={observedCharge}|heap={largestGrowth}|ratio={observedCharge / (double)largestGrowth:F6}");
         GC.KeepAlive(parameters);
 
+        async Task<BufferHeapFixture> BuildRetryFixture()
+        {
+            var retryBuilder = SqlDatabaseEngine.CreateBuilder("wide-buffer-heap");
+            retryBuilder.Options.StatementMemoryBudget = 1L << 30;
+            var retryEngine = await retryBuilder.BuildAsync(CancellationToken.None);
+            SqlDatabaseSession? retrySession = null;
+            try
+            {
+                var retryDatabase = await retryEngine.CreateDatabaseAsync("db", CancellationToken.None);
+                retrySession = await retryDatabase.CreateSessionAsync(CancellationToken.None);
+                foreach (string command in new[]
+                {
+                    "CREATE SEQUENCE s",
+                    "CREATE TABLE t(k INT)",
+                    "INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(1, count).Select(k => $"({k})")),
+                    "CREATE TABLE u(k INT)",
+                    "INSERT INTO u VALUES(1),(2)",
+                    "CREATE TABLE b(doc TEXT)",
+                    $"INSERT INTO b VALUES('{new string ('x', 8000)}')",
+                    "CREATE TABLE equal_text(k INT,doc TEXT)",
+                }
+
+                )
+                {
+                    await retrySession.ExecuteAsync(command, cancellationToken: CancellationToken.None);
+                }
+
+                await retrySession.ExecuteAsync("INSERT INTO equal_text SELECT k,@seed FROM t", new Dictionary<string, object?> { ["seed"] = new string ('x', 2000) }, CancellationToken.None);
+                retryDatabase.Definitions.ForceSelectRetentionBasePath = forceBase;
+                return new BufferHeapFixture(retryEngine, retrySession);
+            }
+            catch
+            {
+                try
+                {
+                    if (retrySession is not null)
+                    {
+                        await retrySession.DisposeAsync();
+                    }
+                }
+                finally
+                {
+                    await retryEngine.DisposeAsync();
+                }
+
+                throw;
+            }
+        }
+
         async Task<long> Execute(Dictionary<string, object?>? arguments)
         {
-            var result = await session.ExecuteAsync(sql, arguments, CancellationToken.None);
+            var result = await executionSession.ExecuteAsync(sql, arguments, CancellationToken.None);
             if (result is SqlMaterializedResultSet rows)
             {
                 await rows.DisposeAsync();
                 rows.ClearRows();
             }
-            var metrics = session.LastStatementMetrics.ShouldNotBeNull();
+            var metrics = executionSession.LastStatementMetrics.ShouldNotBeNull();
             metrics.HashMemoryBytes.ShouldBe(0);
             metrics.PlainSelectMemoryBytes.ShouldBe(0);
             return metrics.PeakHashMemoryBytes;
         }
     }
+    private sealed record BufferHeapFixture(SqlDatabaseEngine Engine, SqlDatabaseSession Session) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        { try { await Session.DisposeAsync(); } finally { await Engine.DisposeAsync(); } }
+    }
+
 }

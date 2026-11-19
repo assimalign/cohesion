@@ -380,6 +380,7 @@ internal static class CheckpointPace
     private abstract class WorkerLifetime : DatabaseEngine
     {
         private WorkerLifetime() : base("test-worker-lifetime", EngineModel.Sql) { }
+        protected override IReadOnlyList<DatabaseInstance> GetOpenDatabasesCore() => [];
         internal static ValueTask Release(DatabaseEngineWorker worker) => ReleaseUnownedWorkerAsync(worker);
     }
 

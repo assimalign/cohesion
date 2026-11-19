@@ -66,24 +66,34 @@ internal sealed class SqlWindowMemory : IDisposable
     internal void RetainResult(object?[] row, bool transient)
     {
         RetainValue(row);
-        foreach (var value in row) { if (value is not null) { RetainValue(value); } }
-        if (transient && _partitionRows is { } rows)
+        int retained = 0;
+        try
         {
-            if (rows.TryGetValue(row, out int references)) { rows[row] = references + 1; return; }
-            if (rows.Count == _partitionRowCapacity)
+            for (; retained < row.Length; retained++) { if (row[retained] is { } value) { RetainValue(value); } }
+            if (transient && _partitionRows is { } rows)
             {
-                int capacity = _partitionRowCapacity == 0 ? 4 : checked(_partitionRowCapacity * 2);
-                // Dictionary entries/buckets use less than 64 B per requested slot,
-                // including prime-capacity rounding. Charge old/new overlap first.
-                long next = 64L * capacity;
-                Reserve(next);
-                long old = 64L * _partitionRowCapacity;
-                rows.EnsureCapacity(capacity);
-                _partitionRowCapacity = capacity;
-                Release(old);
-                _partitionRowBytes += next - old;
+                if (rows.TryGetValue(row, out int references)) { rows[row] = references + 1; return; }
+                if (rows.Count == _partitionRowCapacity)
+                {
+                    int capacity = _partitionRowCapacity == 0 ? 4 : checked(_partitionRowCapacity * 2);
+                    // Dictionary entries/buckets use less than 64 B per requested slot,
+                    // including prime-capacity rounding. Charge old/new overlap first.
+                    long next = 64L * capacity;
+                    Reserve(next);
+                    long old = 64L * _partitionRowCapacity;
+                    rows.EnsureCapacity(capacity);
+                    _partitionRowCapacity = capacity;
+                    Release(old);
+                    _partitionRowBytes += next - old;
+                }
+                rows.Add(row, 1);
             }
-            rows.Add(row, 1);
+        }
+        catch
+        {
+            for (int i = 0; i < retained; i++) { if (row[i] is { } value) { ReleaseValue(value); } }
+            ReleaseValue(row);
+            throw;
         }
     }
 
@@ -126,17 +136,30 @@ internal sealed class SqlWindowMemory : IDisposable
     {
         int at = Find(value);
         if (at >= 0) { _entries[at].References++; return; }
-        Reserve(ObjectBytes(value));
-        if (_free < 0 && _count == _entries.Length) { Grow(); }
+        long bytes = ObjectBytes(value);
+        Reserve(bytes);
+        try { if (_free < 0 && _count == _entries.Length) { Grow(); } }
+        catch { Release(bytes); throw; }
         int bucket = Bucket(value);
         if (_free >= 0) { at = _free; _free = _entries[at].Next; }
         else { at = _count++; }
         _entries[at] = new(value, _buckets[bucket], 1);
         _buckets[bucket] = at;
-        if (value is SqlCharacter character) { RetainValue(character.Value); RetainValue(character.Text); }
+        if (value is SqlCharacter character)
+        {
+            bool retained = false;
+            try { RetainValue(character.Value); retained = true; RetainValue(character.Text); }
+            catch
+            {
+                if (retained) { ReleaseValue(character.Value); }
+                ReleaseValue(value, children: false); throw;
+            }
+        }
     }
 
-    internal void ReleaseValue(object value)
+    internal void ReleaseValue(object value) => ReleaseValue(value, children: true);
+
+    private void ReleaseValue(object value, bool children)
     {
         int at = Find(value);
         if (at < 0) { return; }
@@ -152,7 +175,7 @@ internal sealed class SqlWindowMemory : IDisposable
         _entries[at] = new(null, _free, 0);
         _free = at;
         Release(ObjectBytes(value));
-        if (value is SqlCharacter character) { ReleaseValue(character.Value); ReleaseValue(character.Text); }
+        if (children && value is SqlCharacter character) { ReleaseValue(character.Value); ReleaseValue(character.Text); }
     }
 
     private int Bucket(object value) => RuntimeHelpers.GetHashCode(value) & (_buckets.Length - 1);
@@ -203,10 +226,19 @@ internal sealed class SqlWindowMemory : IDisposable
 
     public void Dispose()
     {
+        SqlWindowInputSpool.ForgetRefusal(this);
         _current.Value = _previous;
         _entries = []; _buckets = []; _partitionRows = null;
         _metrics.ReleaseHashMemory(_reserved);
         _reserved = 0;
+    }
+
+    internal void Reset()
+    {
+        _entries = []; _buckets = []; _partitionRows = null;
+        _count = 0; _free = -1; _partitionRowBytes = 0; _partitionRowCapacity = 0;
+        _metrics.ReleaseHashMemory(_reserved); _reserved = 0;
+        Reserve(1024);
     }
 
     private record struct Entry(object? Value, int Next, int References);

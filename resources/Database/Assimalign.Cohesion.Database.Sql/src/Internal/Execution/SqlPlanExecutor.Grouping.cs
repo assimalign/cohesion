@@ -21,7 +21,8 @@ internal sealed partial class SqlPlanExecutor
     private Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken, SqlGroupPlan retentionPlan, SqlDatabaseSession? spillOwner = null)
     {
-        if (spillOwner is not null && plan.Aggregates.Any(aggregate => aggregate.OrderBy.Count > 0)) { spillOwner = null; }
+        if (spillOwner is not null && plan.Aggregates.Any(aggregate => aggregate.OrderBy.Count > 0))
+        { spillOwner = null; statement = statement.WithoutSession(); }
         return plan is SqlGroupingSetsPlan grouped ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
             : ExecutePlainGroupAsync(plan, statement, cancellationToken, retentionPlan, spillOwner);
     }
@@ -49,14 +50,18 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             input = (DatabaseResultSet)await (RecursiveState is null
-                ? spillOwner?.Database.Engine.TempSpace is not null && IsPlainRetentionInput(plan.Input) && CanPipelineSelectRetention()
-                    ? ExecuteSpillRootAsync(plan.Input, statement, cancellationToken, spillOwner, null, plan)
+                ? spillOwner?.Database.Engine.TempSpace is not null && IsPlainRetentionInput(plan.Input)
+                    && (CanPipelineSelectRetention() || SqlWindowMemory.For(_metrics) is not null)
+                    ? ExecuteSpillRootAsync(plan.Input, statement, cancellationToken, spillOwner, null,
+                        SqlWindowMemory.For(_metrics) is null ? plan : null)
                     : ExecuteAsync(plan.Input, statement, cancellationToken)
                 : RecursiveGroupInputAsync(plan, statement, cancellationToken)).ConfigureAwait(false);
             hashInput = input as HashGroupInput;
             _definitions.ObserveSelectRetention?.Invoke("group-input", false,
                 input is SqlMaterializedResultSet retainedInput ? retainedInput.Rows.Count : 0);
             inputBytes = AdmitSelectResult(input, cancellationToken);
+            if (input is SqlSpilledResultSet spilledInput)
+            { inputBytes = spilledInput.ReserveReader(statement.Metrics, _definitions.StatementMemoryBudget, converting: true); }
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
             var keys = plan.Keys;
             var aggregates = plan.Aggregates;
@@ -113,11 +118,13 @@ internal sealed partial class SqlPlanExecutor
                         }
                         catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code == SqlExecutionException.StatementMemoryBudgetCode && CanSpillHashGroup(plan, spillOwner))
                         {
+                            if (SqlWindowMemory.For(_metrics) is { } window) { SqlWindowInputSpool.RecordRefusal(window, failure); }
                             if (keyBytes.Bytes != previousBytes)
                             {
                                 long bytes = keyBytes.RemoveRow(key); keyBytes.Bytes -= bytes;
                                 _metrics!.ReleasePlainSelectMemory(bytes);
                             }
+                            SqlOperatorSpillRefusal.RecordOutputHandoff(statement.Metrics, failure);
                             hashSpill = new HashSpill(this, spillOwner!, keyCollations, plan, statement, hashInput?.Statement);
                             hashInput?.Relinquish();
                         }
@@ -159,6 +166,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
 
+            if (input is SqlSpilledResultSet) { ReleaseSelectMemory(ref inputBytes); }
             if (input is HashGroupInput stagedInput) { stagedInput.Consumed(); }
             ObserveHashSpill?.Invoke("groups-live", groups.Count);
             if (hashSpill is not null)
@@ -251,6 +259,12 @@ internal sealed partial class SqlPlanExecutor
                 }).ToArray();
                 return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
                     plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
+            }
+            if (collected.HasSpilled)
+            {
+                groups.Clear(); groups.TrimExcess();
+                if (input is SqlMaterializedResultSet consumed) { consumed.ClearRows(); ReleaseSelectMemory(ref inputBytes); }
+                ReleaseSelectMemory(ref keyBytes); ReleaseGroupMemory(aggregateMemory, ref retainedBytes); aggregateMemory = null;
             }
             return FinishCollected(collected, plan.Projections, plan.Limit, plan.Offset,
                 plan.IsDistinct, evaluator, cancellationToken, projectionCollations);
@@ -351,6 +365,7 @@ internal sealed partial class SqlPlanExecutor
                                     long bytes = keyBytes.RemoveRow(key); keyBytes.Bytes -= bytes;
                                     _metrics!.ReleasePlainSelectMemory(bytes);
                                 }
+                                SqlOperatorSpillRefusal.RecordOutputHandoff(statement.Metrics, failure);
                                 hashSpill = new HashSpill(this, spillOwner!, keyCollations, plan, statement);
                             }
                         }
@@ -481,6 +496,11 @@ internal sealed partial class SqlPlanExecutor
                     }).ToArray();
                     return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
                         plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
+                }
+                if (collected.HasSpilled)
+                {
+                    groups.Clear(); groups.TrimExcess();
+                    ReleaseSelectMemory(ref keyBytes); ReleaseGroupMemory(aggregateMemory, ref retainedBytes); aggregateMemory = null;
                 }
                 return FinishCollected(collected, plan.Projections, plan.Limit, plan.Offset,
                     plan.IsDistinct, evaluator, cancellationToken, projectionCollations);

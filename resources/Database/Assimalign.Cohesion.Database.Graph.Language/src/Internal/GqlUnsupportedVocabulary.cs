@@ -35,6 +35,7 @@ internal static class GqlUnsupportedVocabulary
         new("SESSION", "SESSION", GqlWordPosition.Clause),
         new("SHOW", "SHOW", GqlWordPosition.Clause),
         new("DROP", "DROP", GqlWordPosition.Clause),
+        // Standalone ALTER CURRENT GRAPH TYPE is parsed before this scan; all other ALTER positions remain refused.
         new("ALTER", "ALTER", GqlWordPosition.Clause),
         new("GRANT", "GRANT", GqlWordPosition.Clause),
         new("REVOKE", "REVOKE", GqlWordPosition.Clause),

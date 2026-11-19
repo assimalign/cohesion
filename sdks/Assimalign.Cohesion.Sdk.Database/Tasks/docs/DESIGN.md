@@ -112,8 +112,7 @@ be substituted for the fixed carrier. No reference or schema-artifact format cha
 
 ## Managed resources
 
-The SDK emits no resource manifest, and a Database application becomes a managed resource with
-`builder.Services.AddResource(...)` from `Database.Hosting.ApplicationModel`.
+The SDK emits no resource manifest.
 
 ## Model selection
 
@@ -281,8 +280,8 @@ atomically emits matching `NNNN_name.sql` and `NNNN_name.schema.json` files. The
 timestamps. Missing names, invalid schemas, unsupported/destructive operations, and path
 collisions fail without partial outputs. `KeyValuePair` fails explicitly because a SQL script is
 not a valid migration artifact for that model. SQL text uses the same guarded, `dbo`-qualified
-dialect as the runtime renderer; the current dialect explicitly rejects constraints,
-ALTER metadata, and required column additions that have no non-null literal default or backfill.
+dialect as the runtime renderer; the writer explicitly rejects constraint operations,
+ALTER TABLE metadata, and required column additions that have no non-null literal default or backfill.
 Every emitted column retains its DEFAULT. The literal carrier guard follows
 SqlSelectExpression.From's join-tree list (#1109): exactly one unaliased carrier table,
 with no joins or comma siblings. No new engine reference or visibility grant is needed. The migration writer validates it as exactly one SQL
@@ -293,6 +292,60 @@ conservative destructive-change opt-in; after that opt-in, a non-null default ma
 `COHDBSDK206` before either the SQL script or the new baseline is written. Engine-specific domain
 resolution and default value conversion remain runtime validation, as the SDK does not build an
 engine. SDK tests compare scripts for the same plans directly with `SqlMigrationScriptGenerator`.
+
+### ALTER COLUMN files (#1756)
+
+The writer and SqlMigrationScriptGenerator compile Sql.Schema's stateless
+`shared/MigrationLowering` module. It owns ALTER COLUMN statement text, phase order, rewrite
+classification and payload/type refusals. The writer's other statements keep their own type,
+identifier and DEFAULT helpers: one file can spell a type two ways or refuse a bad DEFAULT
+with two reasons. Converging CREATE TABLE and ADD COLUMN rendering with the engine, including
+their DEFAULT guard limits and keyword quoting, and sharing index rendering are tracked by #1860.
+
+ALTER DEFAULT admission shares the engine's scalar carrier, literal-only and persisted-sequence
+checks, with the normal declaration nesting limit and the higher ceiling for its grouping guard.
+The SDK binding raises DatabaseException with the engine's message text, without structured CS diagnostic
+codes; like the engine binding, it raises InsufficientExecutionStackException on stack exhaustion.
+It reparses rendered literals at the ceiling and requires a render fixed point;
+Sql.Language exposes no tree equivalence API, so the engine retains its stronger tree comparison.
+The task parses both forward and rollback statements at the engine's ceiling before accepting
+each lowered step, mapping the first parse error and parser stack refusal to the engine's reason.
+The shared lowering adds the operation context, and the task reports COHDBSDK206 before either
+file is written. The task takes no engine reference or internal visibility grant.
+
+DEFAULT-only SET/DROP changes retain the planner's destructive-change opt-in requirement.
+Physical rewrites drop an old default before TYPE, set the target default next and change
+nullability last. Compatible facets keep the engine's full-definition ALTER. Files carry forward
+statements only, with no compensation text; the rollback text is validated but never written.
+Domain columns name the declared domain; registrations, conversions, stored values, default
+bounds and typed-literal DEFAULT kind remain engine validation. Typed joint publication and applying
+the file refuse a typed-literal DEFAULT on another storage type (CS05013) or a type change without an
+assignment cast (CS02064); both per-step writers emit these statements. Mirroring those refusals in
+the SDK would make it stricter than the engine's per-step generator. Moving them earlier, for both
+writers, is tracked by #1863 and #1864. ALTER TABLE metadata and constraints keep their existing refusals.
+
+Typed schema application publishes jointly, including empty, inline and DEFAULT-only plans (#1778).
+Every generated migration has a header explaining that the SQL file applies per statement.
+An empty plan writes no file (COHDBSDK204). Files do not reproduce runtime publication or receipts. Applied-history rollback
+classification happens in the engine before rendering (#1779), so the forward writer needs no
+history access. Formats, runtime SQL statement text and compiled schema contracts are unchanged.
+
+The golden corpus pins engine forward and compensation SQL and refusals for every storage type,
+TYPE/DEFAULT/nullability combinations, compatible facets, domains, absent/NULL/equivalent defaults,
+parse failures, invalid payloads and type spellings. It also pins CREATE TABLE, ADD COLUMN,
+CREATE INDEX and constraint text for keyword, reserved, mixed-case, non-ASCII and quote-bearing
+identifiers. SDK parity covers every declaration-reachable ALTER shape, including refusal reasons;
+separate boundary checks pin raw metadata that declarations reject. Real-engine round trips compare
+catalog columns and values on empty/populated tables with inline migration enabled or disabled.
+The populated deferred variant asserts ProvisioningStop's Deferred outcome and DeferredStepBound, proving that the
+provisioning worker claimed the migration. Structural traversal, DEFAULT-reader and type-resolution
+checks pin the engine's separate helpers against the shared module. Resource equality checks cover
+every key used by both migration bindings and the task's statement parser. The shared-source guard
+derives every linked module from the SDK Tasks and Database.Sql CohesionSharedSource items and refuses
+static constructors and module initializers, including aliases collected across each module's files.
+Static field and property initializers remain allowed outside the schema modules, whose stricter guard
+checks static classes, const fields, expression-bodied static properties, locks, events and constructors,
+alongside explicit consumer opt-ins.
 
 ## Verification
 

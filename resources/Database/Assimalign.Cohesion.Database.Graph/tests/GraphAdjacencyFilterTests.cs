@@ -65,11 +65,11 @@ public sealed class GraphAdjacencyFilterTests
             await database.LockWriterAsync(operation, timeout.Token);
             var a = await operation.Updates.CreateNodeAsync(["Hub"], new Dictionary<string, object?>(), timeout.Token);
             var b = await operation.Updates.CreateNodeAsync(["Leaf"], new Dictionary<string, object?>(), timeout.Token);
-            await operation.Updates.CreateRelationshipAsync(a.Id, a.Id, "T", new Dictionary<string, object?>(), timeout.Token);
+            await operation.Updates.CreateRelationshipAsync(a, a, "T", new Dictionary<string, object?>(), timeout.Token);
             for (int i = 0; i < 32; i++)
             {
-                await operation.Updates.CreateRelationshipAsync(a.Id, b.Id, "Other", new Dictionary<string, object?>(), timeout.Token);
-                await operation.Updates.CreateRelationshipAsync(b.Id, a.Id, "T", new Dictionary<string, object?>(), timeout.Token);
+                await operation.Updates.CreateRelationshipAsync(a, b, "Other", new Dictionary<string, object?>(), timeout.Token);
+                await operation.Updates.CreateRelationshipAsync(b, a, "T", new Dictionary<string, object?>(), timeout.Token);
             }
             var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql("MATCH (a:Hub)-[:T]->{1}(b) RETURN a").Statement.GqlExpression);
             await GraphPlanExecutor.MatchAsync(database, operation, plan.MatchClauses[0].Paths[0], new(StringComparer.Ordinal), output, budget, null, timeout.Token);

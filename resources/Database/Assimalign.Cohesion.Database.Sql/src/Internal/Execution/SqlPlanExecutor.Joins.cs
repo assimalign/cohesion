@@ -52,7 +52,7 @@ internal sealed partial class SqlPlanExecutor
 
             var sharedColumns = new bool[plan.Columns.Count];
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken, sharedColumns);
-            var sourceOwner = spillOwner is not null && HasSequenceProjection(plan.Projections) && !OrderingUsesSequence(plan.Projections, plan.OrderByProjections?.Values)
+            var sourceOwner = spillOwner is not null && plan.OrderBy.Count > 0 && HasSequenceProjection(plan.Projections) && !OrderingUsesSequence(plan.Projections, plan.OrderByProjections?.Values)
                 ? null : spillOwner;
             matches = new List<object?[]>();
             await foreach (var row in EnumerateJoinRowsAsync(plan, statement, sharedColumns, cancellationToken, derivedRows, spillOwner: spillOwner).ConfigureAwait(false))
@@ -72,6 +72,11 @@ internal sealed partial class SqlPlanExecutor
             }
 
             _definitions.ObserveSelectRetention?.Invoke("join-matches", false, matches.Count);
+            if (SqlOutputSpool.For(matches) is { } outputSource)
+            {
+                return MaterializeSelect(outputSource.Read(cancellationToken), plan.Projections, [], plan.Limit, plan.Offset,
+                    plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken, spillOwner: spillOwner);
+            }
             if (SqlStagedSortSource.For(matches) is { } spooled)
             {
                 if (hashInput is not null)
@@ -93,8 +98,20 @@ internal sealed partial class SqlPlanExecutor
             return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
                 plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken, spillOwner: spillOwner, hashInput: hashInput);
         }
-        catch (Exception exception) { if (matches is not null) { SqlStagedSortSource.ReleaseAfterFailure(matches, exception); } throw; }
-        finally { if (matches is not null) { SqlStagedSortSource.Release(matches); } ReleaseSelectMemory(ref matchBytes); ReleaseSelectMemory(ref derivedBytes); }
+        catch (Exception exception) { if (matches is not null) { SqlOutputSpool.Release(matches, exception); SqlStagedSortSource.ReleaseAfterFailure(matches, exception); } throw; }
+        finally
+        {
+            try
+            {
+                if (matches is not null)
+                {
+                    try { SqlOutputSpool.Release(matches); }
+                    catch (SqlExecutionException) { /* Storage counted cleanup; preserve the computed result. */ }
+                    SqlStagedSortSource.Release(matches);
+                }
+            }
+            finally { ReleaseSelectMemory(ref matchBytes); ReleaseSelectMemory(ref derivedBytes); }
+        }
     }
 
     private async ValueTask<DatabaseResult> ExecutePipelinedJoinAsync(SqlJoinPlan plan,
@@ -265,7 +282,10 @@ internal sealed partial class SqlPlanExecutor
                                 {
                                     try { table.Add(item, cancellationToken); }
                                     catch (SqlExecutionException error) when (CanSpillJoinBuild(plan, hashKeys, spillOwner, error))
-                                    { table.Spill(spillOwner!, item, cancellationToken, error); }
+                                    {
+                                        if (statement.Metrics.IsStageResult || !CanSpillJoinRows(plan, spillOwner)) { SqlOperatorSpillRefusal.Record(statement.Metrics, error); }
+                                        table.Spill(spillOwner!, item, cancellationToken, error);
+                                    }
                                 }
                                 if (statement.Metrics.IsAnalyzing)
                                 { statement.Metrics.RecordHashSpillStatus(plan.Steps[level], table.IsSpilled); }
@@ -277,6 +297,7 @@ internal sealed partial class SqlPlanExecutor
                             if (buffered[level].Rows is null)
                             {
                                 var buffer = new List<object?[]>();
+                                buffered[level].Rows = buffer;
                                 foreach (var item in ReadInput(innerBinding))
                                 {
                                     if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
@@ -284,13 +305,12 @@ internal sealed partial class SqlPlanExecutor
                                         memory.Retain(item);
                                         memory.Reserve(32); // list storage, including growth
                                     }
-                                    RetainSelectRow(ref buffered[level].Memory, item, includeWindow: true);
-                                    buffer.Add(item);
+                                    RetainNestedLoopInner(buffer, item, ref buffered[level].Memory, plan, spillOwner, cancellationToken);
                                 }
-                                buffered[level].Rows = buffer;
+                                SqlJoinInnerSpool.For(buffer)?.Seal(cancellationToken);
                                 SqlRowCollector.ObserveBuffer?.Invoke("join-inner", buffer);
                             }
-                            candidates = buffered[level].Rows!;
+                            candidates = ReadNestedLoopInner(buffered[level].Rows!, cancellationToken);
                         }
                         else
                         {
@@ -334,7 +354,8 @@ internal sealed partial class SqlPlanExecutor
         {
             foreach (var cursor in cursors) { cursor?.Dispose(); }
             foreach (var hash in hashes) { hash?.Dispose(); }
-            for (int index = 0; index < buffered.Length; index++) { ReleaseSelectMemory(ref buffered[index].Memory); }
+            for (int index = 0; index < buffered.Length; index++)
+            { SqlJoinInnerSpool.Release(buffered[index].Rows); ReleaseSelectMemory(ref buffered[index].Memory); }
         }
 
         IEnumerable<object?[]> ReadInput(int binding)
@@ -376,7 +397,7 @@ internal sealed partial class SqlPlanExecutor
         {
             { Table: { } table } => Scan(table, statement, cancellationToken).Select(row => row.Values),
             { View: { } view } => ReadSystemRelation(view, statement, cancellationToken),
-            { Derived: { } derived } => derivedRows![derived],
+            { Derived: { } derived } => SqlSpilledResultSet.ReadRelation(derivedRows![derived], statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken),
             _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.RelationSourceUnknown),
         };
 

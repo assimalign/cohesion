@@ -15,6 +15,9 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Testing;
 
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapPool;
+using static Assimalign.Cohesion.Database.Sql.Tests.TestObjects.SqlHeapAcceptance;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
@@ -69,42 +72,60 @@ public sealed partial class SqlSortSpillConformanceTests
         // Arrange: the review's seven RPAD columns, 60 rows and default grant/quota.
         string query = "SELECT id," + string.Join(',', Enumerable.Range(0, 7).Select(i =>
             $"RPAD(CAST(id AS TEXT),{width},'{"xyzpqrs"[i]}') AS c{i + 1}")) + " FROM t ORDER BY id";
+        using var pool = new HashPoolEvents();
+        using var images = new WindowPoolLease();
         foreach (long grant in new[] { 1073741824L, 67108864L })
         {
-            var builder = SqlDatabaseEngine.CreateBuilder("ctas-oversized");
-            builder.Options.RootPath = Path.Combine(_root, "oversized-" + grant);
-            builder.Options.StatementMemoryBudget = grant;
-            builder.Options.BufferPoolCapacity = 1048576;
-            await using var engine = await builder.BuildAsync();
-            var database = await engine.CreateDatabaseAsync("db");
-            await using var session = await database.CreateSessionAsync(); await Seed(session, 60);
-            long baseline = 0, peak = 0; int encoded = 0, decoded = 0, sampling = 0, samples = 0;
-            using var started = new ManualResetEventSlim(); Thread? sampler = null;
-            SqlPlanExecutor.TableAsSourceAdmitted = _ =>
+            int measurement = 0;
+            var batch = new Batch(pool, _output, nameof(ExecuteAsync_TableAsOversizedRecord_ShouldKeepPageRefusal));
+            var sampled = await batch.MeasureAsync($"width={width}|grant={grant}", async readHeap =>
             {
-                baseline = LiveHeap.Read(); Volatile.Write(ref sampling, 1);
-                sampler = new Thread(() =>
+                var builder = SqlDatabaseEngine.CreateBuilder("ctas-oversized");
+                builder.Options.RootPath = Path.Combine(_root, measurement++ == 0 ? "oversized-" + grant : "oversized-" + grant + "-attempt-" + measurement);
+                builder.Options.StatementMemoryBudget = grant;
+                builder.Options.BufferPoolCapacity = 1048576;
+                await using var engine = await builder.BuildAsync();
+                var database = await engine.CreateDatabaseAsync("db");
+                await using var session = await database.CreateSessionAsync(); await Seed(session, 60);
+
+                images.Drain(pool);
+                long baseline = 0, peak = 0; int encoded = 0, decoded = 0, sampling = 0, samples = 0;
+                using var started = new ManualResetEventSlim(); Thread? sampler = null;
+                SqlPlanExecutor.TableAsSourceAdmitted = _ =>
                 {
-                    while (Volatile.Read(ref sampling) != 0)
-                    { peak = Math.Max(peak, LiveHeap.Read() - baseline); samples++; started.Set(); }
-                }) { IsBackground = true };
-                sampler.Start(); started.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
-            };
-            SqlPlanExecutor.TableAsSourceReading = (_, _) => decoded++;
-            SqlPlanExecutor.TableAsRecordEncoded = _ => encoded++;
-            try
+                    images.Drain(pool); baseline = readHeap(); Volatile.Write(ref sampling, 1);
+                    sampler = new Thread(() =>
+                    {
+                        while (Volatile.Read(ref sampling) != 0)
+                        { peak = Math.Max(peak, readHeap() - baseline); samples++; started.Set(); }
+                    }) { IsBackground = true };
+                    sampler.Start(); started.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+                };
+                SqlPlanExecutor.TableAsSourceReading = (_, _) => decoded++;
+                SqlPlanExecutor.TableAsRecordEncoded = _ => encoded++;
+                try
+                {
+                    // Act
+                    var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE TABLE archive AS " + query));
+                    Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); }
+                    _output.WriteLine($"CTAS_OVERSIZED|width={width}|grant={grant}|peak={peak}|decoded={decoded}|encoded={encoded}|samples={samples}|code={failure.Diagnostics[0].Code}");
+                    // Assert
+                    failure.Diagnostics[0].Code.ShouldBe("CS05042"); encoded.ShouldBe(0); samples.ShouldBeGreaterThan(0);
+                    database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse(); database.IsOffline.ShouldBeFalse();
+                    TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+                    if (grant == 67108864) { decoded.ShouldBe(1); }
+                    return peak;
+                }
+                finally { Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); } SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; }
+            });
+            await batch.CheckAsync(() => grant == 67108864 ? [Ceiling("oversized CTAS peak", sampled.Value, grant + 553240, sampled.Term)] : [], () =>
             {
-                // Act
-                var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE TABLE archive AS " + query));
-                Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); }
-                _output.WriteLine($"CTAS_OVERSIZED|width={width}|grant={grant}|peak={peak}|decoded={decoded}|encoded={encoded}|samples={samples}|code={failure.Diagnostics[0].Code}");
-                // Assert
-                failure.Diagnostics[0].Code.ShouldBe("CS05042"); encoded.ShouldBe(0); samples.ShouldBeGreaterThan(0);
-                database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse(); database.IsOffline.ShouldBeFalse();
-                TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
-                if (grant == 67108864) { decoded.ShouldBe(1); peak.ShouldBeLessThanOrEqualTo(grant + 553240); }
-            }
-            finally { Volatile.Write(ref sampling, 0); if (sampler is not null) { sampler.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue(); } SqlPlanExecutor.TableAsSourceAdmitted = null; SqlPlanExecutor.TableAsSourceReading = null; SqlPlanExecutor.TableAsRecordEncoded = null; }
+                if (grant == 67108864)
+                {
+                    sampled.Value.ShouldBeLessThanOrEqualTo(grant + 553240);
+                }
+            });
+            await batch.CompleteAsync();
         }
     }
 
@@ -154,10 +175,10 @@ public sealed partial class SqlSortSpillConformanceTests
         Files(reopened).ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS fitting-source refusal window stays unchanged pending follow-up (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS consumes source ownership after copy admission refuses, closing the fitting-source window (#1838, #1789)")]
     [InlineData(262144L, 1024, 80, 120)]
     [InlineData(67108864L, 7000, 4690, 4710)]
-    public async Task ExecuteAsync_TableAsFittingWindow_ShouldPinBothSides(long grant, int width, int first, int last)
+    public async Task ExecuteAsync_TableAsFittingWindow_ShouldCompleteEveryPoint(long grant, int width, int first, int last)
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("ctas-window");
@@ -184,19 +205,17 @@ public sealed partial class SqlSortSpillConformanceTests
             }
         }
         // Assert
-        fitting.ShouldNotBeEmpty(); refused.ShouldNotBeEmpty(); spilled.ShouldNotBeEmpty();
-        refused.ShouldBe(Enumerable.Range(refused[0], refused[^1] - refused[0] + 1));
-        fitting[^1].ShouldBe(grant == 262144 ? 85 : 4696);
-        refused[0].ShouldBe(grant == 262144 ? 86 : 4697); refused[^1].ShouldBe(grant == 262144 ? 113 : 4707);
+        fitting.ShouldNotBeEmpty(); refused.ShouldBeEmpty(); spilled.ShouldNotBeEmpty();
+        fitting.Concat(spilled).Order().ShouldBe(Enumerable.Range(first, last - first + 1));
         spilled[0].ShouldBe(grant == 262144 ? 114 : 4708);
-        _output.WriteLine($"CTAS_WINDOW|grant={grant}|width={width}|fitsThrough={fitting[^1]}|refuses={refused[0]}..{refused[^1]}|spillsFrom={spilled[0]}");
+        _output.WriteLine($"CTAS_WINDOW|grant={grant}|width={width}|fitsThrough={fitting[^1]}|refuses=0|spillsFrom={spilled[0]}");
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Unordered and ordered-index CTAS refuse until SQ-L4 while a sort spills (#1789)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Unordered and ordered-index CTAS spool on refusal, like sorted sources (#1789)")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ExecuteAsync_TableAsUnspooledSource_ShouldRefuseUntilSqL4(bool index)
+    public async Task ExecuteAsync_TableAsUnorderedSource_ShouldSpool(bool index)
     {
         // Arrange: ten grants of storable rows under the review's three statement shapes.
         await using var engine = await Create("ctas-unspooled", 262144);
@@ -206,9 +225,9 @@ public sealed partial class SqlSortSpillConformanceTests
         { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first, 100).Select(i => $"({i},'{new string('x', 1024)}')"))); }
         string query = index ? "SELECT * FROM t WHERE id >= 0 ORDER BY id" : "SELECT * FROM t";
         // Act / Assert
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE TABLE archive AS " + query));
-        failure.Diagnostics[0].Code.ShouldBe("CS05067"); database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse();
-        _output.WriteLine($"CTAS_UNSPOOLED|index={index}|code={failure.Diagnostics[0].Code}|path={session.LastStatementMetrics!.AccessPath}");
+        (await session.ExecuteAsync("CREATE TABLE archive AS " + query)).AffectedCount.ShouldBe(1200);
+        SqlSortSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull().Runs.ShouldBeGreaterThan(0);
+        _output.WriteLine($"CTAS_SPOOLED|index={index}|path={session.LastStatementMetrics!.AccessPath}");
         if (!index)
         {
             (await session.ExecuteAsync("CREATE TABLE sorted AS SELECT * FROM t ORDER BY id")).AffectedCount.ShouldBe(1200);
@@ -217,12 +236,12 @@ public sealed partial class SqlSortSpillConformanceTests
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Default-grant unordered and ordered-index CTAS refuse until SQ-L4; ten-grant sort completes (#1789)")]
-    public async Task ExecuteAsync_TableAsDefaultGrantUnspooledSources_ShouldRefuseUntilSqL4()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Default-grant unordered, ordered-index and sorted CTAS complete at ten grants (#1789)")]
+    public async Task ExecuteAsync_TableAsDefaultGrantSources_ShouldSpool()
     {
         // Arrange: default memory and temp quotas, ten grants of the review's storable shape.
         const int count = 10 * 67108864 / 232;
-        await using var engine = SqlDatabaseEngine.Create("ctas-default-unspooled", new() { RootPath = Path.Combine(_root, "default-unspooled") });
+        await using var engine = SqlDatabaseEngine.Create("ctas-default-spooled", new() { RootPath = Path.Combine(_root, "default-spooled") });
         var database = await engine.CreateDatabaseAsync("db"); await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY,note TEXT COLLATE binary)");
         for (int first = 0; first < count; first += 1000)
@@ -230,13 +249,13 @@ public sealed partial class SqlSortSpillConformanceTests
         // Act / Assert
         foreach (var statement in new[] { "CREATE TABLE a AS SELECT * FROM t", "CREATE TABLE c AS SELECT * FROM t WHERE id >= 0 ORDER BY id" })
         {
-            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(statement));
-            failure.Diagnostics[0].Code.ShouldBe("CS05067");
-            _output.WriteLine($"CTAS_DEFAULT_UNSPOOLED|sql={statement}|rows={count}|code={failure.Diagnostics[0].Code}|path={session.LastStatementMetrics!.AccessPath}");
+            (await session.ExecuteAsync(statement)).AffectedCount.ShouldBe(count);
+            SqlSortSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull().Runs.ShouldBeGreaterThan(0);
+            _output.WriteLine($"CTAS_DEFAULT_SPOOLED|sql={statement}|rows={count}|path={session.LastStatementMetrics!.AccessPath}");
         }
         (await session.ExecuteAsync("CREATE TABLE b AS SELECT * FROM t ORDER BY id")).AffectedCount.ShouldBe(count);
         SqlSortSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull();
-        database.Catalog.TryGetTable("dbo", "a", out _).ShouldBeFalse(); database.Catalog.TryGetTable("dbo", "c", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "a", out _).ShouldBeTrue(); database.Catalog.TryGetTable("dbo", "c", out _).ShouldBeTrue();
         database.Catalog.TryGetTable("dbo", "b", out _).ShouldBeTrue();
         _output.WriteLine($"CTAS_DEFAULT_SORTED|rows={count}|status=Success|grant=67108864");
         TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
@@ -287,8 +306,8 @@ public sealed partial class SqlSortSpillConformanceTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - CTAS ninth spill refuses CS05067 and preserves eight live readable results (#1789)")]
-    public async Task ExecuteAsync_TableAsEightLiveResults_ShouldRefuseWithoutAffectingReaders()
+    [Fact(DisplayName = "Cohesion Test [Sql] - CTAS source spill preserves all eight client-result slots and readers (#1789)")]
+    public async Task ExecuteAsync_TableAsEightLiveResults_ShouldCompleteWithoutAffectingReaders()
     {
         // Arrange
         await using var engine = await Create("ctas-eight", 262144); var database = await engine.CreateDatabaseAsync("db");
@@ -299,9 +318,11 @@ public sealed partial class SqlSortSpillConformanceTests
             for (int i = 0; i < 8; i++) { results.Add((await session.ExecuteAsync("SELECT id,k FROM t ORDER BY id")).ShouldBeOfType<SqlSpilledResultSet>()); }
             long live = TempBytes(engine.TempSpace!);
             // Act / Assert
-            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE TABLE archive AS SELECT id,k FROM t ORDER BY id"));
-            failure.Diagnostics[0].Code.ShouldBe("CS05067"); database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeFalse();
+            (await session.ExecuteAsync("CREATE TABLE archive AS SELECT id,k FROM t ORDER BY id")).AffectedCount.ShouldBe(4000);
+            database.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeTrue();
             TempBytes(engine.TempSpace!).ShouldBe(live);
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT id,k FROM t ORDER BY id"));
+            failure.Diagnostics[0].Code.ShouldBe("CS05067");
             foreach (var result in results) { (await Rows(result)).Select(row => row.Cells[0]).ShouldBe(Enumerable.Range(0, 4000).Cast<object?>()); }
         }
         finally { foreach (var result in results) { await result.DisposeAsync(); } }

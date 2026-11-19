@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSortSpillConformanceTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql] - Commerce hash shapes: default-grant annual aggregation completes; CTE/window and NOT IN owners retain their boundaries (#1789)")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Commerce hash shapes: default-grant annual aggregation and category rank complete; NOT IN keeps its owner (#1789)")]
     public async Task ExecuteAsync_CommerceHashShapes_ShouldCompleteRootGroupAndReportRemainingOwners()
     {
         // Arrange: exact SQL shapes from cohesion-benchmarks SQL.md:775,835,915.
@@ -71,10 +71,28 @@ public sealed partial class SqlSortSpillConformanceTests
             "WITH revenues AS (SELECT p.category_id,p.product_id,SUM(i.line_total) AS revenue FROM products p INNER JOIN order_items i ON p.product_id=i.product_id GROUP BY p.category_id,p.product_id), ranked AS (SELECT category_id,product_id,revenue,RANK() OVER(PARTITION BY category_id ORDER BY revenue DESC) AS revenue_rank FROM revenues) SELECT category_id,product_id,revenue,revenue_rank FROM ranked WHERE revenue_rank<=3 ORDER BY category_id,revenue_rank,product_id",
             "SELECT order_id,customer_id,order_date,total FROM orders WHERE status='paid' AND order_date<@end AND order_id NOT IN(SELECT order_id FROM shipments) ORDER BY order_date,order_id",
         ];
-        // These are explicit scope boundaries in SQ-L3a, rather than silently granting
-        // nested bodies, window buffers or eager subquery vectors permission to spill.
+        // The category-rank window completes; the eager NOT IN vector still refuses.
         foreach (string sql in remaining)
         {
+            if (sql.StartsWith("WITH", StringComparison.Ordinal))
+            {
+                await using (var result = (DatabaseResultSet)await session.ExecuteAsync(sql, parameters, guard.Token))
+                {
+                    long count = 0;
+                    await foreach (var row in result.GetRowsAsync(guard.Token))
+                    {
+                        long category = count / 1250;
+                        row.GetInt64(0).ShouldBe(category); row.GetInt64(1).ShouldBe(category + count % 1250 * 400);
+                        row.GetValue(2).ShouldBe(1m); row.GetInt64(3).ShouldBe(1); count++;
+                    }
+                    count.ShouldBe(500000);
+                    SqlHashSpillMetrics.For(session.LastStatementMetrics!).ShouldNotBeNull().Batches.ShouldBeGreaterThan(0);
+                    _output.WriteLine($"COMMERCE_WINDOW|rows={count}|runs={SqlHashSpillMetrics.For(session.LastStatementMetrics!)!.Runs}|examined={session.LastStatementMetrics!.RecordsExamined}");
+                }
+                session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0); session.LastStatementMetrics.PlainSelectMemoryBytes.ShouldBe(0);
+                TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
+                continue;
+            }
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, parameters, guard.Token));
             error.Diagnostics.ShouldContain(d => d.Code == "CS05067");
             var metrics = session.LastStatementMetrics!;

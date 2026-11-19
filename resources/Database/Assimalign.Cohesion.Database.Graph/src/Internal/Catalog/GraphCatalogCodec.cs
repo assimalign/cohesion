@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphCatalogCodec
 {
-    internal const byte FormatVersion = 4;
+    internal const byte FormatVersion = 5;
 
     private static readonly UTF8Encoding _utf8 = new(false, true);
 

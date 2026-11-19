@@ -112,7 +112,16 @@ public sealed class GraphTextIndexAdmissionIntegrationTests
             gate.JournalSizeLimit = 0; retiredHolder.Rollback();
             database.DataStorage.CheckpointJournalSize = 0;
             database.Coordinator.Checkpoint(guard.Token);
-            database.Coordinator.RunVersionPurgePass(guard.Token);
+            // The checkpoint worker clears its pending signal on its next pass.
+            // Reclamation keeps a yielded owner queued until that pass can run.
+            using var reclamationGuard = CancellationTokenSource.CreateLinkedTokenSource(guard.Token);
+            reclamationGuard.CancelAfter(TimeSpan.FromSeconds(30));
+            do
+            {
+                database.Coordinator.RunVersionPurgePass(reclamationGuard.Token);
+                if (database.DataStorage.GetOwnerIndexPageCount(id) == 0) { break; }
+                await Task.Delay(1, reclamationGuard.Token);
+            } while (true);
             database.DataStorage.GetOwnerIndexPages(id).ShouldBeEmpty();
         }
         finally { gate.JournalSizeLimit = 0; holder.Dispose(); await writing.WaitAsync(guard.Token); }

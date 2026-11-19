@@ -128,7 +128,7 @@ internal static class Program
         else { Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }
 
-    private static async Task SqlSpillStopAsync(string root)
+    private static async Task SqlSpillStopAsync(string root, bool unordered)
     {
         var engine = SqlDatabaseEngine.Create("spill-stop", new() { RootPath = root, StatementMemoryBudget = 262144, CheckpointJournalSize = 65536 });
         var database = await engine.CreateDatabaseAsync("db");
@@ -136,7 +136,7 @@ internal static class Program
         await session.ExecuteAsync("CREATE TABLE t(id INT)");
         for (int first = 0; first < 4000; first += 200)
         { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first,200).Select(i => $"({i})"))); }
-        var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id FROM t ORDER BY id DESC");
+        var result = (DatabaseResultSet)await session.ExecuteAsync(unordered ? "SELECT id FROM t" : "SELECT id FROM t ORDER BY id DESC");
         await using var reader = result.GetRowsAsync().GetAsyncEnumerator();
         if (!await reader.MoveNextAsync()) { throw new InvalidOperationException("missing spilled row"); }
         Console.WriteLine("SQL_SPILL_READY"); Console.Out.Flush();
@@ -176,7 +176,7 @@ internal static class Program
 
     private static async Task Main(string[] args)
     {
-        if (args[0] == "sql-spill-stop") { await SqlSpillStopAsync(args[1]); return; }
+        if (args[0] is "sql-spill-stop" or "sql-output-stop") { await SqlSpillStopAsync(args[1], args[0] == "sql-output-stop"); return; }
         if (args[0] == "sql-join-owner-stop") { await SqlJoinOwnerStopAsync(args[1], args[2] == "build"); return; }
         if (args[0] == "sql-ctas-sort-stop" || args[0] == "sql-ctas-copy-stop")
         { await SqlTableAsStopAsync(args[1], args[0] == "sql-ctas-copy-stop"); return; }
@@ -281,7 +281,7 @@ internal static class Program
         else
         {
             dataSet = model == "Documents" ? "document" : model.ToLowerInvariant();
-            byte current = model == "Graph" ? (byte)4 : (byte)1;
+            byte current = model == "Graph" ? (byte)5 : (byte)1;
             byte[] record = Metadata(legacy ? (model == "Graph" ? (byte)3 : (byte)0) : current);
             if (model == "Graph")
             {

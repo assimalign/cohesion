@@ -34,12 +34,12 @@ internal sealed class SqlStagedSortSource : IDisposable
     internal SqlStagedSortSource(SqlDatabaseSession owner, SqlStatementMetrics metrics, long budget, long grant)
     {
         System.Diagnostics.Debug.Assert(SqlHashSpillMetrics.For(metrics)?.HasOptionalArenas != true);
-        SqlSpillLifetime.CheckCapacity(owner);
+        if (!metrics.IsInternalResult) { SqlSpillLifetime.CheckCapacity(owner); }
         Owner = owner; _metrics = metrics; _budget = budget;
         long bound = (Math.Min(grant, int.MaxValue) - 32768) / 16 - 8192;
         if (grant < 65536 || bound < 16) { Refuse(); }
         _bound = (int)bound;
-        var shared = SqlHashSpillMetrics.For(metrics)?.JoinStatement;
+        var shared = metrics.IsStageResult ? SqlHashSpillMetrics.JoinTemp(metrics, owner) : SqlHashSpillMetrics.For(metrics)?.JoinStatement;
         _sharedStatement = shared is not null;
         Statement = shared ?? owner.Database.Engine.TempSpace!.CreateStatement(owner.Database.Engine.StatementTempSpaceQuota);
         try { _run = Statement.CreateRun(); }

@@ -10,9 +10,6 @@ on:
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
-      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
-      # change to the application model reruns the area.
-      - 'libraries/ApplicationModel/**'
       # The E2E job packs the SDK chain the SampleHost builds on (base and Database SDKs) through
       # Install-Local.ps1 and the packaging module beside it, and derives the SampleHost's SDK pins
       # from the root global.json (listed below); a change to any of them must re-run it.
@@ -43,9 +40,6 @@ on:
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
-      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
-      # change to the application model reruns the area.
-      - 'libraries/ApplicationModel/**'
       # The E2E job packs the SDK chain the SampleHost builds on (base and Database SDKs) through
       # Install-Local.ps1 and the packaging module beside it, and derives the SampleHost's SDK pins
       # from the root global.json (listed below); a change to any of them must re-run it.
@@ -87,10 +81,10 @@ jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
     runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
-    # T3 batch 4's all-OS runs (42335218592, 42340437624, attempts 1 and 2): Windows took 44m 40s
-    # once and passed 60m twice, in the last three suites. About 62m is the slowest; twice that,
-    # rounded up to 15 minutes, is 135.
-    timeout-minutes: 135
+    # Twice the slowest whole job, rounded up to 15 minutes. T3 batch 4's all-OS runs (42335218592,
+    # 42340437624) took up to about 62m, which set 135. T3 batch 6's all-OS run 44137397071 took
+    # 129m 56s on Windows, 1h 36m of it in the Sql suite: twice that, rounded up, is 270.
+    timeout-minutes: 270
     strategy:
       # Every leg reports its own result. With fail-fast, one failing leg cancels the others (#1093).
       fail-fast: false
@@ -125,7 +119,6 @@ jobs:
             'Assimalign.Cohesion.Database.Graph.Language',
             'Assimalign.Cohesion.Database.Graph.Protocol',
             'Assimalign.Cohesion.Database.Hosting',
-            'Assimalign.Cohesion.Database.Hosting.ApplicationModel',
             'Assimalign.Cohesion.Database.Indexing',
             'Assimalign.Cohesion.Database.KeyValuePair',
             'Assimalign.Cohesion.Database.KeyValuePair.Client',
@@ -142,7 +135,8 @@ jobs:
             'Assimalign.Cohesion.Database.Tcp',
             'Assimalign.Cohesion.Database.Testing',
             'Assimalign.Cohesion.Database.Transactions',
-            'Assimalign.Cohesion.Database.Types'
+            'Assimalign.Cohesion.Database.Types',
+            'Assimalign.Cohesion.Database.Types.Text'
         ]]
     steps:
       - uses: actions/checkout@v7
@@ -180,6 +174,7 @@ jobs:
   # - the Documents client guard, which drives OQL and document commands through real servers
   #   over InMemory and TCP, checking typed failures and pooled session reuse.
   # - the shared TCP guard, which authenticates and exchanges Ping/Pong with every model.
+  # - the Text guard, which checks analysis, analyzer identities and immutable vector values.
   # All guard projects set PublishAot. Each publish step fails on any IL2xxx/IL3xxx warning in its
   # output, whatever the project promotes to an error (the guard also makes ILC's warnings errors).
   sql-benchmarks:
@@ -303,6 +298,30 @@ jobs:
           }
           if ($checks -notcontains "Database.Tcp NativeAOT: 5/5 model servers passed.") {
             throw "Database.Tcp.AotSample did not complete all five model checks."
+          }
+
+      - name: Publish and run the Text NativeAOT guard
+        shell: pwsh
+        env:
+          MSBUILDDISABLENODEREUSE: '1'
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "text-aot-sample"
+          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Types.Text/samples/Assimalign.Cohesion.Database.Types.Text.AotSample/Assimalign.Cohesion.Database.Types.Text.AotSample.csproj" `
+              --configuration Release `
+              --runtime linux-x64 `
+              --output $output `
+              --nologo 2>&1
+          $log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT publish of Database.Types.Text.AotSample failed with exit code $LASTEXITCODE."
+          }
+          if ($log -match "warning IL[23][0-9]{3}") {
+            throw "NativeAOT publish of Database.Types.Text.AotSample reported IL2xxx/IL3xxx warnings."
+          }
+          $checks = & (Join-Path $output "Assimalign.Cohesion.Database.Types.Text.AotSample")
+          $checks | Write-Host
+          if ($LASTEXITCODE -ne 0 -or $checks -notcontains "Database.Types.Text NativeAOT: 5/5 checks passed.") {
+            throw "Database.Types.Text.AotSample did not complete all five checks."
           }
 
       - name: Publish and smoke-run the NativeAOT statement benchmark

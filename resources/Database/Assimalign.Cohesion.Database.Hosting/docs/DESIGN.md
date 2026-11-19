@@ -40,9 +40,9 @@ flowchart LR
     Model["Database model packages"] --> Root
 ```
 
-COHRES001–004 remain enforced. [Database.Hosting.ApplicationModel](../../Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md) supplies the managed-resource registration on `builder.Services`; the runtime itself references no ApplicationModel package.
+COHRES001–004 remain enforced. The runtime references no ApplicationModel package; the old model's Database integration was removed in #1869.
 
-## Platform binding and HTTP health (#1790, EN-A1)
+## Platform binding and HTTP health (#1790)
 
 When COHESION_GATEWAY is nonempty, each model server's options snapshot defaults a missing listener from its named runtime endpoint
 (sql, documents, graph, kv or blob); an explicit Listener or Listen(Uri) wins. The common root
@@ -50,12 +50,12 @@ owns that resolution, because Hosting receives an already constructed server. It
 model's validation, after the model's timer checks and the session-limit check, and before the
 missing-listener refusal, so an invalid snapshot never allocates a platform listener. It privately uses Connections.Tcp and shares the stateless binder with
 Database.Tcp. Hosting adds no model reference or public composition seam. See the
-[root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790-en-a1).
+[root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790).
 
 The concrete builder's AddHealthEndpoint(Uri) configures one plain HTTP listener; the last call
 wins. Registration validates an endpoint URI, literal IP address or localhost and refuses HTTPS
 without a certificate source. At Build, a nonempty runtime COHESION_GATEWAY plus a valid http
-endpoint assignment with a plain http scheme and a literal IP address or localhost overrides that explicit value (T3-28).
+endpoint assignment with a plain http scheme and a literal IP address or localhost overrides that explicit value (#1790).
 Event 19 names both endpoints when the assignment replaces a different explicit endpoint.
 A malformed or missing assignment is
 unset under Core's TryGetEndpoint contract; absent an explicit value, no listener is composed.
@@ -92,8 +92,78 @@ The existing /healthz, /readyz and /livez routes and /cohesion/v1 aliases retain
 transport-peer policies: namespaced routes admit loopback peers only; bare routes admit remote
 probes; forwarded headers never grant access. Readiness remains unavailable until the outer host
 is Started, after every model server confirmed accept. Liveness omits that readiness-only gate.
-Other /cohesion/v1 paths remain forbidden. No gateway readiness semantics, health contributors,
-resource actions, existing event identities, wire messages or store formats change in this run.
+Other /cohesion/v1 paths remain forbidden. Endpoint binding preserves existing event identities,
+wire messages and store formats. The observations below supplied the old model's instance health contributors (#1790) until #1869 removed that integration.
+
+## Transport-neutral health observations (#1790)
+
+DatabaseApplicationContext.GetHealthAsync returns immutable DatabaseHealthObservation snapshots from the
+same evaluation core as HTTP health. Every model reads DatabaseEngine.OpenDatabases: health
+never opens, reopens or waits for a database, and takes no engine lock. It excludes closing
+instances, keeps offline open instances, and reads pending reopens after each engine's snapshot.
+A stored database never attempted by this process is absent in every model. FailedOpens retains
+a failed stored open, including manual reopen with ReopenOfflineDatabases=false, as Unhealthy.
+Each record supplies reason, failureCode when present, reopenFault (exception type only), failedAt
+(invariant UTC round-trip string) and reopenAttempts (consecutive failures). Exception messages
+never enter health detail. Successful open/create/drop, absence or disposal clears the record.
+Open instances outrank pending reopens, which outrank failed-open records: one component per name.
+An offline instance keeps its cause and merges pending reopen attempts and fault; an online
+instance stays Healthy despite a stale pending entry.
+GetDatabasesAsync retains each model's enumeration semantics,
+including opening stored Documents, Graph and Blob databases through recovery.
+
+HealthComponentNames builds live membership synchronously from the registry frozen at Build,
+each engine's OpenDatabases, its pending reopens and FailedOpens. Discovery evaluates no health, awaits no
+work, blocks on no database lifecycle operation and tolerates a custom inventory failure by
+keeping that engine's name. Managed Build therefore runs no health pass, emits no health
+transition event, and needs no discovery cancellation token.
+Pending reopens are published as immutable snapshots when membership or reported detail changes,
+so discovery and health never acquire the reopen service's scheduling monitor. FailedOpens likewise
+publishes immutable snapshots on change; health and discovery take no engine completion gate.
+Engines follow registration order; within each engine, databases follow ordinal ignore-case
+component-name order in both discovery and complete observations; database.accepting is last.
+Consumers re-read membership to follow opens and drops. A retained database component that is
+no longer open, pending or recorded answers Unhealthy, "not open".
+
+The public names are `engine/<escaped engine>`,
+`database/<escaped engine>/<escaped lowercase database>`, and `database.accepting`.
+Each segment is URI-escaped separately; engine identity is ordinal and engine registration
+rejects invalid UTF-16. Only ASCII database letters are lower-cased, matching the storage-name
+fold on the built-in models' ASCII names while preserving custom names such as K and the Kelvin
+sign as distinct components. Open snapshots, offline entries and pending reopens use this same
+component spelling. Single-component lookup compares the complete component name ordinally.
+Engine observations retain engine-scoped state, workers and counts, excluding provisioning.*,
+offline.* and failedOpen.* database detail. Running is Healthy, Faulted is Degraded, and Disposed or unknown
+is Unhealthy. Database status preserves Offline over journal admission pause over provisioning
+over Healthy. Pending reopens remain Unhealthy with cause, attempts and last exception type.
+Held schemas are Degraded with failureCode, hashes and refused steps. Diagnostic values are
+invariant strings and provisioning detail retains the existing 4,096 UTF-16-unit bound.
+
+The all-component GetHealthAsync evaluates engines independently. Its single-component overload
+evaluates only the named engine; database.accepting evaluates only the host gate, with no
+inventory. Both public forms propagate cancellation of the caller's token, including with zero
+engines. Other evaluation exceptions except OutOfMemoryException become Unhealthy for that engine's components, naming
+exception types only; other engines and database.accepting remain independent. The single form
+also rejects a null, empty or white-space name with ArgumentException. The HTTP aggregate keeps
+its existing throwing-check behavior, descriptions and data; Web.Health folds a throwing check.
+A disposal observed after the inventory read fails closed for components and the HTTP aggregate.
+Documents, Graph and Blob are evaluated in database-name order, preserving provisioning indices
+and the provisioning and journal-pause lists. OutOfMemoryException propagates from discovery
+and evaluation rather than becoming an inventory failure.
+The component path does not construct the aggregate description. Partial checks do not replace
+the aggregate transition observer's view of other engines.
+
+/readyz is the minimum over all contributions; /livez is the minimum over engine and database
+contributions. database.accepting alone is the host's accept gate, not readiness: Healthy only
+when the outer host is Started, after every server confirmed accept. A host with no servers
+still follows that host gate. Tests pin aggregate/component status parity across the condition
+matrix. The HTTP routes and their Ready/Live tags remain unchanged.
+
+The builder reserves and registers DatabaseApplicationContext and IDatabaseApplicationContext
+through the same factory returning the application's context, alongside configuration,
+environment and logging. The application owns the non-disposable context; the provider must
+never own it. ValidateOnBuild does not invoke the factory before the context exists. Hosting
+takes no ApplicationModel reference.
 
 ## Build and configuration
 
@@ -108,7 +178,7 @@ The builder exposes the four host-level pieces `WebApplicationBuilder` exposes, 
 | `Environment` | `HostEnvironment` | from `Options.Environment` (`production` when unset) and `Options.ContentRootPath` | registered as `IHostEnvironment`; the application context's `Environment` |
 | `Configuration` | `ConfigurationManager` | empty; `CreateBuilder(args)` adds the default sources | registered as `IConfiguration`; owned and disposed by the application |
 | `Logging` | `LoggerFactoryBuilder` | empty | built once into the application's `LoggerFactory`, registered as `ILoggerFactory`, owned and disposed after the provider |
-| `Services` | `ServiceProviderBuilder` | `EnableDynamicCode = false`, `ValidateOnBuild`, `ValidateScopes` | checked, given the three registrations above, made read-only, built once into the application's `ServiceProvider` |
+| `Services` | `ServiceProviderBuilder` | `EnableDynamicCode = false`, `ValidateOnBuild`, `ValidateScopes` | checked, given the three infrastructure registrations above and a factory for the application's context, made read-only, built once into the application's `ServiceProvider` |
 
 The root `IDatabaseApplicationBuilder` gains none of them: model packages and other feature code compose against the root without the container, configuration or logging (COHRES004, `resource-areas.md`). The engine factories of `AddEngine(name, factory)` run at Build, after the container closed, so their `DatabaseApplicationBuildContext` carries the built counterparts, not the builders: `Environment` (`HostEnvironment`, the builder's instance), `Configuration` (`ConfigurationManager`, the builder's instance), `Services` (the built `ServiceProvider`; the DependencyInjection library's provider type is public, so the context names it rather than `IServiceProvider`) and `LoggerFactory` (the built `LoggerFactory`). One build context exists per application, and every named factory receives it.
 
@@ -122,7 +192,7 @@ The content root `CreateBuilder(args)` reads those files under is `AppContext.Ba
 
 One Cohesion service provider is built with `EnableDynamicCode = false`, `ValidateScopes = true`, and `ValidateOnBuild = true`. This selects the interpreted resolver on JIT and NativeAOT. Hosting permits closed factories and instances only, rejects implementation-type/open-generic activation, and reserves `IHostEnvironment`, `IConfiguration` and `ILoggerFactory` for the application's own pieces, which Build registers as borrowed instances. Model construction uses explicit assignments rather than reflection-based binding. Engine factories must not return provider-owned services; lifecycle factory forwarding has the idempotent-disposal caveat below.
 
-Root engine factories observe preceding engine registrations. They cannot depend on later registrations. Every engine is registered by name (owner decision 52 of 2026-10-09): a borrowed engine by its own `Name`, a factory by the name its registration gives, which the factory's product must match exactly (ordinal). The name is reserved at Add, so a duplicate is refused there, before any factory runs; the nameless factory overload, whose product's name could only be checked once the factory had returned, is deleted, because a model's factory now opens and provisions databases, which a duplicate engine must never reach (the duplicate would have run against the same data path). Names are nonempty, case-sensitive, and unique across models. `Context.GetEngine(name)` returns a borrowed reference, typed as the root base; the root's static extension `Context.GetEngine<TEngine>(name)` returns it as the model's engine (`SqlDatabaseEngine`, …).
+Root engine factories observe preceding engine registrations. They cannot depend on later registrations. Every engine is registered by name (owner decision 52 of 2026-10-09): a borrowed engine by its own `Name`, a factory by the name its registration gives, which the factory's product must match exactly (ordinal). The name is reserved at Add, so a duplicate is refused there, before any factory runs; the nameless factory overload, whose product's name could only be checked once the factory had returned, is deleted, because a model's factory now opens and provisions databases, which a duplicate engine must never reach (the duplicate would have run against the same data path). Names are nonempty, valid UTF-16, case-sensitive, and unique across models. `Context.GetEngine(name)` returns a borrowed reference, typed as the root base; the root's static extension `Context.GetEngine<TEngine>(name)` returns it as the model's engine (`SqlDatabaseEngine`, …).
 
 ## Concrete types (concrete-types plan, phase 6, #1262)
 
@@ -204,7 +274,7 @@ A pending/running database makes aggregate health Degraded. Offline databases re
 existing Unhealthy precedence. Completion removes the observation and restores Healthy when no
 other condition prevents it. Health data uses `engine.N.provisioning.M.*` entries. Enabled tracing reports changes in the
 observed database condition once, with transition deduplication described under Diagnostics.
-SQL inventory enumeration reads its existing published instance snapshot without entering the
+Health in every model reads OpenDatabases, a copy of its published instance snapshot, without entering the
 engine's recovery monitor. During automatic reopen, the reopen service's pending entry represents
 the recovering database until its replacement is published; health can still report that state
 and other databases' provisioning progress. Enumeration observes cancellation even for an empty snapshot.
@@ -242,7 +312,20 @@ The application permits one start lifecycle. Repeated Start while started is a h
 
 Health observes distinct engines, states and workers from the frozen runtime registry.
 
-Health also reports offline databases (#1243). A database whose journal or data fsync failed, whose journal's append buffer failed to drain (#1252), whose header slot write failed (#1268), or whose engine gave up on it after a background worker kept failing on it or its journal passed the engine's cap (owner decision 25) refuses every request until it is reopened, while its engine stays `Running`, so the engine state alone left health `Healthy`. The contribution reads each engine's `OfflineDatabases`, adds the databases the reopen service is still reopening (below), records `engine.N.offlineDatabaseCount`, `engine.N.offlineDatabases`, the total `offlineDatabaseCount` and `reopenOfflineDatabases`, and for each offline database `engine.N.offline.M.name`, its `cause` (the `StorageOfflineCause` name, read through `DatabaseEngine.GetOfflineError`) and, once a reopen failed, `reopenAttempts` and `reopenFault` (the exception type). It is `Unhealthy` while any database is offline, naming each as `engine/database (cause; n failed reopen attempt(s), last ExceptionType)`, and turns healthy again once every one is open. Like the worker faults, the output carries exception types only, never messages, because the endpoint is unauthenticated. Without the reopen service it turns healthy once the database is reopened (`OpenDatabaseAsync`, in process) or the process restarts and opens it again; an orchestrator that restarts an unhealthy process recovers it the way PostgreSQL's postmaster does after a `PANIC` (`restart_after_crash`, on by default, `src/backend/postmaster/postmaster.c:248`; the "reinitializing" restart at `3245-3252`). Hosting has no remote reopen command (an open owner decision, recorded with the #1243 review).
+Health also reports offline databases (#1243). Failed fsync, journal drain, header slot write,
+worker give-up or journal-cap enforcement refuses requests until reopen while the engine stays
+Running. Health merges an offline instance's cause with its pending reopen's attempts and fault
+into one component. An online instance outranks a stale pending reopen. Aggregate keys
+engine.N.offlineDatabaseCount, engine.N.offlineDatabases and offlineDatabaseCount count only
+offline databases, including pending reopens; engine.N.offline.M carries name, cause and, after a
+failed reopen, reopenAttempts and reopenFault (exception type only). Failed-open records have
+separate engine.N.failedOpenDatabases and engine.N.failedOpenDatabaseCount keys and a total
+failedOpenDatabaseCount, emitted when records exist. Their engine.N.failedOpen.M detail and
+component description say the open failed; the aggregate says each needs repair and an explicit
+open (OpenDatabaseAsync). The reopen service discovers offline instances and does not retry these
+records. A failed manual reopen, including with ReopenOfflineDatabases=false, retains its record
+until successful open/create/drop, absence or disposal clears it. Exception messages never enter
+health. Hosting has no remote reopen command (the #1243 owner decision remains open).
 
 Held SQL declarations (#1779) remain online with Degraded health. Provisioning.Detail carries
 both schema hashes and every refused step; health includes it in the description and the
@@ -260,7 +343,7 @@ observer starts fresh and does not invent a restoration event for an earlier pro
 
 ## Reopening offline databases (owner decision 22 of 2026-10-06)
 
-A running application reopens a database its engine reports offline by itself, with exponential backoff and jitter, until the reopen succeeds or the application stops. It is the module's own lifecycle service, `Internal/DatabaseReopenService`, registered at Build after the other services and before the servers (so it starts before them and stops after they drained), and owned by the application. `DatabaseApplicationOptions` configures it: `ReopenOfflineDatabases` (on by default; off leaves every offline database to the operator and composes no service), `ReopenInitialDelay` (one second, the engines' worker failure backoff) and `ReopenMaximumDelay` (one minute), validated at Build (the initial delay positive, the maximum at least the initial delay and at most `DatabaseApplicationOptions.MaximumReopenDelay`, the longest a timer waits) and copied with the other host settings.
+A running application reopens a database its engine reports offline by itself, with exponential backoff and jitter, until the reopen succeeds or the application stops. It is the module's own lifecycle service, `Internal/DatabaseReopenService`, registered at Build after the other services and before the servers (so it starts before them and stops after they drained), and owned by the application. `DatabaseApplicationOptions` configures it: `ReopenOfflineDatabases` (on by default; off leaves every offline database to the operator and composes no service; a failed manual reopen retains its Unhealthy failed-open record until successful open/create/drop, absence or disposal clears it), `ReopenInitialDelay` (one second, the engines' worker failure backoff) and `ReopenMaximumDelay` (one minute), validated at Build (the initial delay positive, the maximum at least the initial delay and at most `DatabaseApplicationOptions.MaximumReopenDelay`, the longest a timer waits) and copied with the other host settings.
 
 - **It reopens through the engine's own path.** The service polls each engine of the frozen registry (the server-fronted ones included) for `DatabaseEngine.OfflineDatabases`, at most once a second, or once per initial delay when that is shorter. A database it finds is reopened through `DatabaseEngine.OpenDatabaseAsync`: the engine closes the offline instance, which writes nothing, and opens the database again from its files, so the open's recovery decides every commit that was not confirmed (#1243), the decision-33 path a caller of `OpenDatabaseAsync` takes. The reopen returns the engine's new instance to the engine's registry; servers resolve databases by name, so their next session gets it.
 - **Backoff and jitter.** The first attempt waits a random time between half the initial delay and the initial delay; after the n-th failed attempt the next waits between half and all of `min(maximum, initial × 2^n)`. A reopen that keeps failing is tried less and less often, and two databases that failed together do not retry in lockstep. RavenDB's database landlord retries a database whose start failed after a randomized delay the same way (`src/Raven.Server/Documents/DatabasesLandlord.cs:1504-1510`), and lets the next access load a database whose load faulted (`:831-835`).
@@ -269,7 +352,7 @@ A running application reopens a database its engine reports offline by itself, w
 - **Only the instance the service reopened carries its backoff over.** The service remembers the `DatabaseInstance` its reopen returned. A database found offline with a remembered reopen is first checked, off the loop's thread because `TryGetDatabase` takes the engine's registry lock, to be that instance: the engine still holds it (an offline instance is still held, so the check finds it). A database dropped and created again under the same name within the window, or reopened by someone else, is another instance; its entry drops the remembered level and starts at the initial delay, counted from when it was found. The `OfflineDatabaseFound` event of such an entry is written once the check settled its delay.
 - **Databases are reopened side by side.** Each database's attempt runs on the thread pool, and the loop goes on without awaiting it: an attempt that hangs (a recovery stuck in its device) holds back that database only, while the loop keeps finding and reopening the others, other engines' included. One attempt or check per database runs at a time. Before the review the loop awaited each attempt in turn, so one hung recovery held every other database's reopen and stopped discovery.
 - **It never reopens a database that was dropped.** Before its first attempt the service lets go of a database its engine no longer lists: someone reopened it, dropped it, or its holder closed it (decision 33: the engine forgets it). After a failed attempt the engine no longer lists the database either, because its failed open left it closed, so the service keeps it until a reopen succeeds; a reopen that reports `DatabaseNotFoundException` means it was dropped meanwhile, and the service lets it go. A disposed engine's databases are let go.
-- **A database reopened elsewhere is let go at the next poll.** While a database whose attempt failed is not listed offline, each poll also checks whether its engine holds it open again (`TryGetDatabase`) and online (not in `OfflineDatabases`): an operator or another caller reopened it. The service then lets it go ("it was reopened elsewhere") and makes no further attempt, so health turns `Healthy` within a poll instead of after the backoff, which can be as long as `ReopenMaximumDelay`. The check waits for the engine's registry lock, which an open holds through its recovery, so it runs on the thread pool like an attempt, never on the loop's thread, and is awaited until the stop signal only. Health itself never takes that lock: it reports the service's pending entry until the poll lets it go.
+- **A database reopened elsewhere is let go at the next poll.** While a database whose attempt failed is not listed offline, each poll also checks whether its engine holds it open again (`TryGetDatabase`) and online (not in `OfflineDatabases`): an operator or another caller reopened it. The service then lets it go ("it was reopened elsewhere") and makes no further attempt, so health turns `Healthy` within a poll instead of after the backoff, which can be as long as `ReopenMaximumDelay`. The check waits for the engine's registry lock, which an open holds through its recovery, so it runs on the thread pool like an attempt, never on the loop's thread, and is awaited until the stop signal only. Health reads OpenDatabases without an engine lock in every model and reports the service's pending entry until the poll lets it go; it never invokes open or recovery.
 - **Health stays unhealthy until the reopen.** The service's pending reopens (`GetPendingReopens`) are part of the health contribution above, so a database whose reopen keeps failing stays `Unhealthy`, with its cause and attempts, though its engine no longer lists it; health turns `Healthy` with the successful reopen. The engine ends its workers' failure records of a database once it took it offline, and again when the reopen closes the offline instance (owner decision 25 review), so the engine reports `Running`, not `Faulted`, and health is not left `Degraded` by the failure that took the database offline.
 - **Stop never waits for it.** Every wait observes the service's stop signal, and an attempt or check runs on the thread pool and is awaited until that signal only: a stop during a backoff returns at once, and a stop during an attempt returns without it. The loop waits for its attempts and checks in flight as it ends, each of which ends at the stop signal. The attempt then finishes on its own (an engine's open runs to its end under the engine's lock, and the engine's disposal waits for that lock), and its outcome is still written to the event source. A failure of the loop itself is written and the next poll goes on: nothing ends the loop before the application stops.
 - **An embedded application that never starts** reopens nothing: the service runs between Start and Stop, like the servers. Its health still reports the offline databases.
@@ -294,13 +377,13 @@ The module raises its own events through one internal event source, named for th
 | 11 | `ApplicationStopped` | Informational | `hostId`, `durationMilliseconds` |
 | 12 | `ApplicationDisposeFailed` | Error | `hostId`, `failureCount`, `exceptionType`, `exceptionMessage` (first collected failure) |
 | 15 | `AdminEndpointFailed` | Error | `endpoint` (scheme and authority only), `operation` (`Start`, `Stop`, `Dispose`), `exceptionType`, `exceptionMessage` |
-| 16 | `HealthDegraded` | Warning | `hostId`, `engineName`, `database`, `reason` (`Provisioning`/`Offline`), `cause` (offline cause or empty), `operation`, `objectName`, `position`, `stepCount`, `rowsProcessed`, `totalRows`, `failureCode`, `detail` (4,096 characters) |
+| 16 | `HealthDegraded` | Warning | `hostId`, `engineName`, `database`, `reason` (`Provisioning`/`Offline`/`Open failed`), `cause` (offline cause or empty), `operation`, `objectName`, `position`, `stepCount`, `rowsProcessed`, `totalRows`, `failureCode`, `detail` (4,096 characters) |
 | 17 | `HealthRestored` | Informational | same as 16; the condition and last observed progress that cleared |
 | 18 | `HealthEndpointAssignmentSkipped` | Informational | `assignment` (`http`), `endpoint` (scheme and authority only), `scheme` |
 | 19 | `HealthEndpointOverridden` | Informational | `explicitEndpoint`, `platformEndpoint` (scheme and authority only) |
 
-Batch D part 2 (#1349) observes database health through the existing root inventory and
-provisioning state, with no SQL dependency or new public seam. The first enabled observation
+Health transition tracing (#1349, #1790) observes database health through the open-instance inventory,
+failed-open records and provisioning state, with no SQL dependency or new public seam. The first enabled observation
 of an unhealthy condition writes 16. Later observations write only on a change of reason or
 offline cause or database instance, or write 17 when the database is observed healthy again.
 Pending-to-running,
@@ -310,8 +393,10 @@ Provisioning observation (CS03402). Independent storage-safety latches retain Of
 `ProvisioningFailure` denotes only an in-memory publication fault after the catalog commit.
 Joint row counts restart at each table and phase. Operation, object name and position retain the
 job's first operation throughout preparation and do not identify later table work. Reopen-service pending entries
-remain Offline through recovery. A dropped/closed database or disposed engine is forgotten,
-never reported as restored. Healthy first observations write nothing.
+remain Offline through recovery. A failed-open record writes 16 with reason "Open failed" and
+empty cause/progress fields, using the existing payload. Its clearing writes 17 on the next
+observation, including after drop, absence or disposal. Other dropped/closed databases or disposed
+engines are forgotten, never reported as restored. Healthy first observations write nothing.
 
 This is Hosting's observed transition stream: a condition that begins and ends between health
 observations cannot be reported without a new model subscription seam, which this change does
