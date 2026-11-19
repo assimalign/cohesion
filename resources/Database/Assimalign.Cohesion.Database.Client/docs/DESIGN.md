@@ -579,5 +579,5 @@ the exchange-join guarantee of #1313.
 
 The retired HTTP command client and its command/observation envelopes are removed. Its bootstrap
 credential and /commands route belong to the old resource design; those routes now return 403.
-This package supplies wire clients only. Database.Hosting.ApplicationModel owns instance-side
-integration; Database-owned actions and HTTP health follow in T3 EN-A1–A3.
+This package supplies wire clients only. The old application model's Database integration was
+removed in #1869; no client-side counterpart remains. HTTP health binding follows T3 EN-A1–A3.

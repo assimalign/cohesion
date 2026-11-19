@@ -14,8 +14,8 @@ the same declaration, then creates or opens `sample` and provisions it before th
 attached to a running host, so the server never accepts a connection ahead of the schema.
 
 The fixture is owned by `Database.Testing`. The retired resource integration was removed on
-2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource
-integration is `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
+2026-10-31 with the application-model restart (assimalign/cohesion#1759), and its successor,
+`Assimalign.Cohesion.Database.Hosting.ApplicationModel`, was removed with the old application model in #1869.
 
 The opt-in Sample:TestHandshake=true mode reserves a loopback port in 20000-31999 through Build,
 retrying occupied/reserved candidates below the platform ephemeral ranges. It releases the port

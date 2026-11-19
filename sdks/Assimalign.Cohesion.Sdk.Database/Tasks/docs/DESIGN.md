@@ -112,8 +112,7 @@ be substituted for the fixed carrier. No reference or schema-artifact format cha
 
 ## Managed resources
 
-The SDK emits no resource manifest, and a Database application becomes a managed resource with
-`builder.Services.AddResource(...)` from `Database.Hosting.ApplicationModel`.
+The SDK emits no resource manifest.
 
 ## Model selection
 

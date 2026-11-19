@@ -10,9 +10,6 @@ on:
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
-      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
-      # change to the application model reruns the area.
-      - 'libraries/ApplicationModel/**'
       # The E2E job packs the SDK chain the SampleHost builds on (base and Database SDKs) through
       # Install-Local.ps1 and the packaging module beside it, and derives the SampleHost's SDK pins
       # from the root global.json (listed below); a change to any of them must re-run it.
@@ -43,9 +40,6 @@ on:
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
-      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
-      # change to the application model reruns the area.
-      - 'libraries/ApplicationModel/**'
       # The E2E job packs the SDK chain the SampleHost builds on (base and Database SDKs) through
       # Install-Local.ps1 and the packaging module beside it, and derives the SampleHost's SDK pins
       # from the root global.json (listed below); a change to any of them must re-run it.
@@ -125,7 +119,6 @@ jobs:
             'Assimalign.Cohesion.Database.Graph.Language',
             'Assimalign.Cohesion.Database.Graph.Protocol',
             'Assimalign.Cohesion.Database.Hosting',
-            'Assimalign.Cohesion.Database.Hosting.ApplicationModel',
             'Assimalign.Cohesion.Database.Indexing',
             'Assimalign.Cohesion.Database.KeyValuePair',
             'Assimalign.Cohesion.Database.KeyValuePair.Client',

@@ -40,7 +40,7 @@ flowchart LR
     Model["Database model packages"] --> Root
 ```
 
-COHRES001–004 remain enforced. [Database.Hosting.ApplicationModel](../../Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md) supplies the managed-resource registration on `builder.Services`; the runtime itself references no ApplicationModel package.
+COHRES001–004 remain enforced. The runtime references no ApplicationModel package; the old model's Database integration was removed in #1869.
 
 ## Platform binding and HTTP health (#1790)
 
@@ -93,7 +93,7 @@ transport-peer policies: namespaced routes admit loopback peers only; bare route
 probes; forwarded headers never grant access. Readiness remains unavailable until the outer host
 is Started, after every model server confirmed accept. Liveness omits that readiness-only gate.
 Other /cohesion/v1 paths remain forbidden. Endpoint binding preserves existing event identities,
-wire messages and store formats. The observations below supply instance health contributors (#1790).
+wire messages and store formats. The observations below supplied the old model's instance health contributors (#1790) until #1869 removed that integration.
 
 ## Transport-neutral health observations (#1790)
 
@@ -162,9 +162,8 @@ matrix. The HTTP routes and their Ready/Live tags remain unchanged.
 The builder reserves and registers DatabaseApplicationContext and IDatabaseApplicationContext
 through the same factory returning the application's context, alongside configuration,
 environment and logging. The application owns the non-disposable context; the provider must
-never own it. ValidateOnBuild does not invoke the factory before the context exists. The
-integration resolves it once; Hosting takes no ApplicationModel reference. ApplicationModel.Hosting's
-open questions and Gateway G18 still own gateway consumption and publication/readiness semantics.
+never own it. ValidateOnBuild does not invoke the factory before the context exists. Hosting
+takes no ApplicationModel reference.
 
 ## Build and configuration
 
