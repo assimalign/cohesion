@@ -67,6 +67,7 @@ public sealed partial class SqlSelectWideMemoryTests
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        SqlDatabaseSession executionSession = session;
         foreach (string command in new[]
         {
             "CREATE SEQUENCE s", "CREATE TABLE t(k INT)",
@@ -95,13 +96,27 @@ public sealed partial class SqlSelectWideMemoryTests
         Dictionary<string, object?>? parameters = null;
 
         // Act
-        for (int round = 0; round < 3; round++)
+        for (int roundIndex = 0; roundIndex < 3; roundIndex++)
         {
+            int round = roundIndex, measurement = 0;
             var sampled = await batch.MeasureAsync($"shape={shape}|base={forceBase}|round={round}", async readHeap =>
             {
+                parameters = null;
+                await using var retry = tableAs && measurement++ > 0 ? await BuildRetryFixture() : null;
+                executionSession = retry?.Session ?? session;
+                if (retry is not null)
+                {
+                    (await Execute(hasParameter ? new Dictionary<string, object?> { ["p"] = new string('x', length) } : null)).ShouldBe(expectedPeak);
+                    await executionSession.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None);
+                    for (int prior = 0; prior < round; prior++)
+                    {
+                        (await Execute(hasParameter ? new Dictionary<string, object?> { ["p"] = new string('x', length) } : null)).ShouldBe(expectedPeak);
+                        await executionSession.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None);
+                    }
+                }
                 long growth = long.MinValue;
                 parameters = null;
-                await session.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
+                await executionSession.ExecuteAsync("SELECT 0", cancellationToken: CancellationToken.None);
                 images.Drain(pool);
                 long before = readHeap();
                 if (hasParameter) { parameters = new Dictionary<string, object?> { ["p"] = new string('x', length) }; }
@@ -121,7 +136,7 @@ public sealed partial class SqlSelectWideMemoryTests
                 }
                 finally { SqlStatementMetrics.AfterMemoryReservation = null; SqlPlanExecutor.TableAsSourceAdmitted = null; }
                 captured.ShouldBeTrue();
-                if (tableAs) { await session.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None); }
+                if (tableAs) { await executionSession.ExecuteAsync("DROP TABLE dst", cancellationToken: CancellationToken.None); }
 
                 return growth;
 
@@ -147,18 +162,55 @@ public sealed partial class SqlSelectWideMemoryTests
         _output.WriteLine($"BUFFER_HEAP|{shape}|base={forceBase}|peak={expectedPeak}|observedCharge={observedCharge}|heap={largestGrowth}|ratio={observedCharge / (double)largestGrowth:F6}");
         GC.KeepAlive(parameters);
 
+        async Task<BufferHeapFixture> BuildRetryFixture()
+        {
+        var retryBuilder = SqlDatabaseEngine.CreateBuilder("wide-buffer-heap");
+        retryBuilder.Options.StatementMemoryBudget = 1L << 30;
+        var retryEngine = await retryBuilder.BuildAsync(CancellationToken.None);
+        SqlDatabaseSession? retrySession = null;
+        try
+        {
+        var retryDatabase = await retryEngine.CreateDatabaseAsync("db", CancellationToken.None);
+        retrySession = await retryDatabase.CreateSessionAsync(CancellationToken.None);
+        foreach (string command in new[]
+        {
+            "CREATE SEQUENCE s", "CREATE TABLE t(k INT)",
+            "INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(1, count).Select(k => $"({k})")),
+            "CREATE TABLE u(k INT)", "INSERT INTO u VALUES(1),(2)",
+            "CREATE TABLE b(doc TEXT)", $"INSERT INTO b VALUES('{new string('x', 8000)}')",
+            "CREATE TABLE equal_text(k INT,doc TEXT)",
+        }) { await retrySession.ExecuteAsync(command, cancellationToken: CancellationToken.None); }
+        await retrySession.ExecuteAsync("INSERT INTO equal_text SELECT k,@seed FROM t",
+            new Dictionary<string, object?> { ["seed"] = new string('x', 2000) }, CancellationToken.None);
+        retryDatabase.Definitions.ForceSelectRetentionBasePath = forceBase;
+            return new BufferHeapFixture(retryEngine, retrySession);
+            }
+            catch
+            {
+                try { if (retrySession is not null) { await retrySession.DisposeAsync(); } }
+                finally { await retryEngine.DisposeAsync(); }
+                throw;
+            }
+        }
+
         async Task<long> Execute(Dictionary<string, object?>? arguments)
         {
-            var result = await session.ExecuteAsync(sql, arguments, CancellationToken.None);
+            var result = await executionSession.ExecuteAsync(sql, arguments, CancellationToken.None);
             if (result is SqlMaterializedResultSet rows)
             {
                 await rows.DisposeAsync();
                 rows.ClearRows();
             }
-            var metrics = session.LastStatementMetrics.ShouldNotBeNull();
+            var metrics = executionSession.LastStatementMetrics.ShouldNotBeNull();
             metrics.HashMemoryBytes.ShouldBe(0);
             metrics.PlainSelectMemoryBytes.ShouldBe(0);
             return metrics.PeakHashMemoryBytes;
         }
     }
+    private sealed record BufferHeapFixture(SqlDatabaseEngine Engine, SqlDatabaseSession Session) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        { try { await Session.DisposeAsync(); } finally { await Engine.DisposeAsync(); } }
+    }
+
 }

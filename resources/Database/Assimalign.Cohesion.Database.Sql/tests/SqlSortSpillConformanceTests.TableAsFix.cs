@@ -76,16 +76,18 @@ public sealed partial class SqlSortSpillConformanceTests
         using var images = new WindowPoolLease();
         foreach (long grant in new[] { 1073741824L, 67108864L })
         {
-            var builder = SqlDatabaseEngine.CreateBuilder("ctas-oversized");
-            builder.Options.RootPath = Path.Combine(_root, "oversized-" + grant);
-            builder.Options.StatementMemoryBudget = grant;
-            builder.Options.BufferPoolCapacity = 1048576;
-            await using var engine = await builder.BuildAsync();
-            var database = await engine.CreateDatabaseAsync("db");
-            await using var session = await database.CreateSessionAsync(); await Seed(session, 60);
+            int measurement = 0;
             var batch = new Batch(pool, _output, nameof(ExecuteAsync_TableAsOversizedRecord_ShouldKeepPageRefusal));
             var sampled = await batch.MeasureAsync($"width={width}|grant={grant}", async readHeap =>
             {
+                var builder = SqlDatabaseEngine.CreateBuilder("ctas-oversized");
+                builder.Options.RootPath = Path.Combine(_root, measurement++ == 0 ? "oversized-" + grant : "oversized-" + grant + "-attempt-" + measurement);
+                builder.Options.StatementMemoryBudget = grant;
+                builder.Options.BufferPoolCapacity = 1048576;
+                await using var engine = await builder.BuildAsync();
+                var database = await engine.CreateDatabaseAsync("db");
+                await using var session = await database.CreateSessionAsync(); await Seed(session, 60);
+
                 images.Drain(pool);
                 long baseline = 0, peak = 0; int encoded = 0, decoded = 0, sampling = 0, samples = 0;
                 using var started = new ManualResetEventSlim(); Thread? sampler = null;
