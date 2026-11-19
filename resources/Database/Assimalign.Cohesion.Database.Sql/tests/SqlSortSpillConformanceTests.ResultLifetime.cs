@@ -235,13 +235,22 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             long growth = measuredPopulations[1].Min(x => x.Value) - measuredPopulations[0].Min(x => x.Value);
             Term term = Term.Maximum(measuredPopulations[1]) + Term.Maximum(measuredPopulations[0]);
-            return mutant ? [Floor("output retaining mutant growth", growth, 65536, term, true)]
-                : [Ceiling("output population growth", growth, 65536, term)];
+            return mutant ? [Floor("output retaining mutant growth", growth, 65536, term, true)] : [Ceiling("output population growth", growth, 65536, term)];
         }, () =>
         {
-            for (int p = 0; p < 2; p++) { populations[p] = measuredPopulations[p].Min(x => x.Value); }
-            if (mutant) { Should.Throw<ShouldAssertException>(AssertGrowth); }
-            else { AssertGrowth(); }
+            for (int p = 0; p < 2; p++)
+            {
+                populations[p] = measuredPopulations[p].Min(x => x.Value);
+            }
+
+            if (mutant)
+            {
+                Should.Throw<ShouldAssertException>(AssertGrowth);
+            }
+            else
+            {
+                AssertGrowth();
+            }
         });
         batch.Complete();
     }

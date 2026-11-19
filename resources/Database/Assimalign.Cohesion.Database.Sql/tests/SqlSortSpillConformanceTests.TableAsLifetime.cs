@@ -137,8 +137,14 @@ public sealed partial class SqlSortSpillConformanceTests
                 long peak = sampled.Value.Peak, workspace = sampled.Value.Workspace;
                 _output.WriteLine($"CTAS_LIVE|mutant={mutant}|rows={count}|peak={peak}|workspace={workspace}|weak={sampled.Value.Weak}|alive={sampled.Value.Alive}|poolPages=128");
                 void AssertBound() => peak.ShouldBeLessThanOrEqualTo(grant + constant);
-                if (mutant) { Should.Throw<ShouldAssertException>(AssertBound); }
-                else { AssertBound(); }
+                if (mutant)
+                {
+                    Should.Throw<ShouldAssertException>(AssertBound);
+                }
+                else
+                {
+                    AssertBound();
+                }
             });
         }
         if (!mutant)

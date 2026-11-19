@@ -81,7 +81,11 @@ public sealed partial class SqlSortSpillConformanceTests
         await batch.CheckAsync(() => [Ceiling("ordinal population growth", rounds[1].Min(x => x.Value.Measured) - rounds[0].Min(x => x.Value.Measured),
             131072, Term.Maximum(rounds[1]) + Term.Maximum(rounds[0]))], () =>
         {
-            for (int p = 0; p < 2; p++) { peaks[p] = rounds[p].Min(x => x.Value.Measured); }
+            for (int p = 0; p < 2; p++)
+            {
+                peaks[p] = rounds[p].Min(x => x.Value.Measured);
+            }
+
             (peaks[1] - peaks[0]).ShouldBeLessThanOrEqualTo(131072);
         });
         await batch.CompleteAsync();

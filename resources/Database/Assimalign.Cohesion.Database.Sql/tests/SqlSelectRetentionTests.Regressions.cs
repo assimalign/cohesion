@@ -262,14 +262,21 @@ public sealed partial class SqlSelectRetentionTests
                 Ceiling("streamed retained heap", optimized.Min(x => x.Value.Live), 2_000_000, Term.Maximum(optimized), true)], () =>
             {
                 // Assert: bounded retention, identical rows, observations and complete work.
-                var original = measuredBase.Value; var last = optimized[^1].Value;
-                var baseline = original.Rows; var actual = last.Rows;
-                long beforeLive = original.Live; afterLive = optimized.Min(x => x.Value.Live);
+                var original = measuredBase.Value;
+                var last = optimized[^1].Value;
+                var baseline = original.Rows;
+                var actual = last.Rows;
+                long beforeLive = original.Live;
+                afterLive = optimized.Min(x => x.Value.Live);
                 int before = original.Retained;
                 long reads = original.Reads, pairs = original.Pairs;
                 actual.ShouldBe(baseline);
                 before.ShouldBe(count);
-                if (shape.Item4 >= 0) { last.Retained.ShouldBe(shape.Item4); }
+                if (shape.Item4 >= 0)
+                {
+                    last.Retained.ShouldBe(shape.Item4);
+                }
+
                 beforeLive.ShouldBeGreaterThan(8_000_000);
                 afterLive.ShouldBeLessThan(2_000_000);
                 last.Reads.ShouldBe(reads);

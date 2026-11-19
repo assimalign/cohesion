@@ -296,9 +296,11 @@ public sealed partial class SqlSortSpillConformanceTests
         });
         await batch.CheckAsync(() => [Ceiling("combined peak", sampled.Value.Peak, budget + 262144, sampled.Term), ..sampled.Value.Samples.Select(sample => Ceiling(sample.Phase, sample.Live - sample.Charge, 262144, sampled.Term))], () =>
         {
-                    sampled.Value.Peak.ShouldBeLessThanOrEqualTo(budget + 262144);
-                    foreach (var (phase, live, charged) in sampled.Value.Samples)
-                    { (live - charged).ShouldBeLessThanOrEqualTo(262144, customMessage: phase); }
+            sampled.Value.Peak.ShouldBeLessThanOrEqualTo(budget + 262144);
+            foreach (var(phase, live, charged)in sampled.Value.Samples)
+            {
+                (live - charged).ShouldBeLessThanOrEqualTo(262144, customMessage: phase);
+            }
         });
         await batch.CompleteAsync();
     }

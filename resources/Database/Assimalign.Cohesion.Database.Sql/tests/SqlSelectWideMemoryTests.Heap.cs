@@ -164,31 +164,49 @@ public sealed partial class SqlSelectWideMemoryTests
 
         async Task<BufferHeapFixture> BuildRetryFixture()
         {
-        var retryBuilder = SqlDatabaseEngine.CreateBuilder("wide-buffer-heap");
-        retryBuilder.Options.StatementMemoryBudget = 1L << 30;
-        var retryEngine = await retryBuilder.BuildAsync(CancellationToken.None);
-        SqlDatabaseSession? retrySession = null;
-        try
-        {
-        var retryDatabase = await retryEngine.CreateDatabaseAsync("db", CancellationToken.None);
-        retrySession = await retryDatabase.CreateSessionAsync(CancellationToken.None);
-        foreach (string command in new[]
-        {
-            "CREATE SEQUENCE s", "CREATE TABLE t(k INT)",
-            "INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(1, count).Select(k => $"({k})")),
-            "CREATE TABLE u(k INT)", "INSERT INTO u VALUES(1),(2)",
-            "CREATE TABLE b(doc TEXT)", $"INSERT INTO b VALUES('{new string('x', 8000)}')",
-            "CREATE TABLE equal_text(k INT,doc TEXT)",
-        }) { await retrySession.ExecuteAsync(command, cancellationToken: CancellationToken.None); }
-        await retrySession.ExecuteAsync("INSERT INTO equal_text SELECT k,@seed FROM t",
-            new Dictionary<string, object?> { ["seed"] = new string('x', 2000) }, CancellationToken.None);
-        retryDatabase.Definitions.ForceSelectRetentionBasePath = forceBase;
-            return new BufferHeapFixture(retryEngine, retrySession);
+            var retryBuilder = SqlDatabaseEngine.CreateBuilder("wide-buffer-heap");
+            retryBuilder.Options.StatementMemoryBudget = 1L << 30;
+            var retryEngine = await retryBuilder.BuildAsync(CancellationToken.None);
+            SqlDatabaseSession? retrySession = null;
+            try
+            {
+                var retryDatabase = await retryEngine.CreateDatabaseAsync("db", CancellationToken.None);
+                retrySession = await retryDatabase.CreateSessionAsync(CancellationToken.None);
+                foreach (string command in new[]
+                {
+                    "CREATE SEQUENCE s",
+                    "CREATE TABLE t(k INT)",
+                    "INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(1, count).Select(k => $"({k})")),
+                    "CREATE TABLE u(k INT)",
+                    "INSERT INTO u VALUES(1),(2)",
+                    "CREATE TABLE b(doc TEXT)",
+                    $"INSERT INTO b VALUES('{new string ('x', 8000)}')",
+                    "CREATE TABLE equal_text(k INT,doc TEXT)",
+                }
+
+                )
+                {
+                    await retrySession.ExecuteAsync(command, cancellationToken: CancellationToken.None);
+                }
+
+                await retrySession.ExecuteAsync("INSERT INTO equal_text SELECT k,@seed FROM t", new Dictionary<string, object?> { ["seed"] = new string ('x', 2000) }, CancellationToken.None);
+                retryDatabase.Definitions.ForceSelectRetentionBasePath = forceBase;
+                return new BufferHeapFixture(retryEngine, retrySession);
             }
             catch
             {
-                try { if (retrySession is not null) { await retrySession.DisposeAsync(); } }
-                finally { await retryEngine.DisposeAsync(); }
+                try
+                {
+                    if (retrySession is not null)
+                    {
+                        await retrySession.DisposeAsync();
+                    }
+                }
+                finally
+                {
+                    await retryEngine.DisposeAsync();
+                }
+
                 throw;
             }
         }

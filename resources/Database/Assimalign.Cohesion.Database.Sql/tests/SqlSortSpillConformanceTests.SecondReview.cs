@@ -193,8 +193,8 @@ public sealed partial class SqlSortSpillConformanceTests
         });
         await batch.CheckAsync(() => [Ceiling("reader probe", sampled.Value.Live, allowance, sampled.Term), Ceiling("publication overlap", sampled.Value.OverlapLive, allowance, sampled.Term)], () =>
         {
-                sampled.Value.Live.ShouldBeLessThanOrEqualTo(allowance);
-                sampled.Value.OverlapLive.ShouldBeLessThanOrEqualTo(allowance);
+            sampled.Value.Live.ShouldBeLessThanOrEqualTo(allowance);
+            sampled.Value.OverlapLive.ShouldBeLessThanOrEqualTo(allowance);
         });
         await batch.CompleteAsync();
     }

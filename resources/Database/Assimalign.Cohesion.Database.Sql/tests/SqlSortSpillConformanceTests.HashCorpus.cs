@@ -189,8 +189,17 @@ public sealed partial class SqlSortSpillConformanceTests
                                 await using var baseline = await CreateCorpusEngineAsync(grants[grantIndex], false);
                                 (await ExecuteCorpusAsync(baseline, sql, fail)).Error.ShouldStartWith("CS05067|");
                             }
-                            else { CorpusEqual(sampled.Value.Expected!, accepted).ShouldBeTrue(customMessage: sql); matches++; }
-                            if (accepted.Passes > 0) { spills++; }
+                            else
+                            {
+                                CorpusEqual(sampled.Value.Expected!, accepted).ShouldBeTrue(customMessage: sql);
+                                matches++;
+                            }
+
+                            if (accepted.Passes > 0)
+                            {
+                                spills++;
+                            }
+
                             sampled.Value.ReleaseRows();
                         });
                         excesses[grantIndex] = prefix.Max(x => x.Value.Live) - grants[grantIndex] - 262144;

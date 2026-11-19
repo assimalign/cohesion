@@ -159,7 +159,7 @@ public sealed partial class SqlSortSpillConformanceTests
             {
                 long smallReplay = Replay(small.Normal), largeReplay = Replay(large.Normal);
                 (largeReplay - smallReplay).ShouldBeLessThanOrEqualTo(131072);
-                _output.WriteLine($"HASH_LIVE_DELTA|small={smallReplay}|large={largeReplay}|delta={largeReplay-smallReplay}|maximum=131072");
+                _output.WriteLine($"HASH_LIVE_DELTA|small={smallReplay}|large={largeReplay}|delta={largeReplay - smallReplay}|maximum=131072");
                 for (int execution = 0; execution < small.SmallMutant.Length; execution++)
                 {
                     long delta = large.SmallMutant[execution].Value.Replay - small.SmallMutant[execution].Value.Replay;
@@ -267,10 +267,17 @@ public sealed partial class SqlSortSpillConformanceTests
                         long replayPeak = sampled.Value.Replay, peak = sampled.Value.Peak;
                         replayPeak.ShouldBeGreaterThan(0);
                         peak.ShouldBeGreaterThan(0);
-                        if (mode == 0) { peak.ShouldBeLessThanOrEqualTo(grant + allowance); }
+                        if (mode == 0)
+                        {
+                            peak.ShouldBeLessThanOrEqualTo(grant + allowance);
+                        }
                         else
                         {
-                            if (mode == 1) { sampled.Value.Ordered.ShouldBeGreaterThan(grant + allowance); }
+                            if (mode == 1)
+                            {
+                                sampled.Value.Ordered.ShouldBeGreaterThan(grant + allowance);
+                            }
+
                             _output.WriteLine($"HASH_MUTANT|rows={count}|execution={execution}|object_bytes={(mode == 1 ? 1048 : 64)}|bytes={peak}|objects={sampled.Value.Retained}");
                         }
                     });

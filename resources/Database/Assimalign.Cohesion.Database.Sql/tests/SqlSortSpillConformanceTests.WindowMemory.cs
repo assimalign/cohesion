@@ -182,12 +182,18 @@ public sealed partial class SqlSortSpillConformanceTests
                     ? [Ceiling("window peak", current.Value, grant + handoff + runtimeSlack, current.Term)]
                     : [Floor("window retaining mutant", current.Value, grant + handoff + runtimeSlack, current.Term, true)], () =>
                 {
-                minimum = current.Value;
-                _output.WriteLine($"WINDOW_HEAP|rows={count}|partitions={count / 8}|mutant={mutant}|peak={minimum}|grant={grant}|handoff={handoff}|runtime_slack={runtimeSlack}");
-                void Bound() => minimum.ShouldBeLessThanOrEqualTo(grant + handoff + runtimeSlack);
-                peaks[mutant, count == 16384 ? 0 : 1] = minimum;
-                if (mutant == 0) { Bound(); }
-                else { Should.Throw<ShouldAssertException>(Bound); }
+                    minimum = current.Value;
+                    _output.WriteLine($"WINDOW_HEAP|rows={count}|partitions={count / 8}|mutant={mutant}|peak={minimum}|grant={grant}|handoff={handoff}|runtime_slack={runtimeSlack}");
+                    void Bound() => minimum.ShouldBeLessThanOrEqualTo(grant + handoff + runtimeSlack);
+                    peaks[mutant, count == 16384 ? 0 : 1] = minimum;
+                    if (mutant == 0)
+                    {
+                        Bound();
+                    }
+                    else
+                    {
+                        Should.Throw<ShouldAssertException>(Bound);
+                    }
                 });
             }
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
@@ -199,7 +205,13 @@ public sealed partial class SqlSortSpillConformanceTests
                 readings[mutant, 1].Term + readings[mutant, 0].Term, true)).ToArray(), () =>
         {
             for (int mutant = 0; mutant < 4; mutant++)
-            { for (int population = 0; population < 2; population++) { peaks[mutant, population] = readings[mutant, population].Value; } }
+            {
+                for (int population = 0; population < 2; population++)
+                {
+                    peaks[mutant, population] = readings[mutant, population].Value;
+                }
+            }
+
             Growth(0);
             Should.Throw<ShouldAssertException>(() => Growth(1));
             Should.Throw<ShouldAssertException>(() => Growth(2));

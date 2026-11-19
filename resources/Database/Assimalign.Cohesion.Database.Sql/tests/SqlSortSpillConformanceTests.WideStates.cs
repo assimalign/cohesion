@@ -57,12 +57,23 @@ public sealed partial class SqlSortSpillConformanceTests
         await batch.CheckAsync(() => [Ceiling("wide-state excess", sampled.Value.Live - grant - 262144, 0, sampled.Term)], () =>
         {
             var actual = sampled.Value;
-        long excess = actual.Live - grant - 262144;
-        _output.WriteLine($"WIDE_STATES|{function}|{type}|grant={grant}|live={actual.Live}|excess={excess}|levels={actual.Passes}|rows={actual.Rows.Length}|error={actual.Error}");
-        excess.ShouldBeLessThanOrEqualTo(0);
-        if (function is "SUM" or "AVG" && type == "DATE") { actual.Error.ShouldStartWith("CS01006|"); }
-        else if (function is "SUM" or "AVG" && type == "DOUBLE PRECISION") { actual.Error.ShouldStartWith("CS05067|"); }
-        else { actual.Error.ShouldBeNull(); actual.Rows.Length.ShouldBe(12000); actual.Passes.ShouldBeGreaterThan(0); }
+            long excess = actual.Live - grant - 262144;
+            _output.WriteLine($"WIDE_STATES|{function}|{type}|grant={grant}|live={actual.Live}|excess={excess}|levels={actual.Passes}|rows={actual.Rows.Length}|error={actual.Error}");
+            excess.ShouldBeLessThanOrEqualTo(0);
+            if (function is "SUM" or "AVG" && type == "DATE")
+            {
+                actual.Error.ShouldStartWith("CS01006|");
+            }
+            else if (function is "SUM" or "AVG" && type == "DOUBLE PRECISION")
+            {
+                actual.Error.ShouldStartWith("CS05067|");
+            }
+            else
+            {
+                actual.Error.ShouldBeNull();
+                actual.Rows.Length.ShouldBe(12000);
+                actual.Passes.ShouldBeGreaterThan(0);
+            }
         });
         await batch.CompleteAsync();
     }

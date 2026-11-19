@@ -139,7 +139,9 @@ public sealed partial class SqlSortSpillConformanceTests
                 Floor("fitting > 0", sample.Value.Fitting, 0, sample.Term, true)], () =>
             {
                 var measured = sample.Value;
-                measured.Entry.ShouldBeGreaterThan(0); measured.Replay.ShouldBeGreaterThan(0); measured.Fitting.ShouldBeGreaterThan(0);
+                measured.Entry.ShouldBeGreaterThan(0);
+                measured.Replay.ShouldBeGreaterThan(0);
+                measured.Fitting.ShouldBeGreaterThan(0);
             });
             var padded = batch.Measure($"round={round}|padded=True", readHeap =>
             {
@@ -151,10 +153,8 @@ public sealed partial class SqlSortSpillConformanceTests
             batch.Check(() =>
             {
                 var mutant = padded.Value;
-                double violation = Math.Max(Math.Max(mutant.Entry / 3072 - 32, (mutant.Replay - mutant.Entry) / 3072 - 64),
-                    Math.Max(mutant.Replay / 3072 - 96, mutant.Fitting / 3072 - 64));
-                return [Floor("padded entry > 32", mutant.Entry / 3072, 32, padded.Term / 3072, true),
-                    Floor("padded charge violation", violation, 0, padded.Term / 3072, true)];
+                double violation = Math.Max(Math.Max(mutant.Entry / 3072 - 32, (mutant.Replay - mutant.Entry) / 3072 - 64), Math.Max(mutant.Replay / 3072 - 96, mutant.Fitting / 3072 - 64));
+                return[Floor("padded entry > 32", mutant.Entry / 3072, 32, padded.Term / 3072, true), Floor("padded charge violation", violation, 0, padded.Term / 3072, true)];
             }, () =>
             {
                 var mutant = padded.Value;
@@ -169,10 +169,7 @@ public sealed partial class SqlSortSpillConformanceTests
         batch.Check(() =>
         {
             Term term = Term.Maximum(rounds);
-            return [Ceiling("entry <= 32", Entry() / 3072, 32, term / 3072),
-                Ceiling("replay overhead <= 64", (Replay() - Entry()) / 3072, 64, (term + term) / 3072),
-                Ceiling("replay <= 96", Replay() / 3072, 96, term / 3072),
-                Ceiling("fitting <= 64", Fitting() / 3072, 64, term / 3072)];
+            return[Ceiling("entry <= 32", Entry() / 3072, 32, term / 3072), Ceiling("replay overhead <= 64", (Replay() - Entry()) / 3072, 64, (term + term) / 3072), Ceiling("replay <= 96", Replay() / 3072, 96, term / 3072), Ceiling("fitting <= 64", Fitting() / 3072, 64, term / 3072)];
         }, () =>
         {
             long entry = Entry(), replay = Replay(), fitting = Fitting();

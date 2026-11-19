@@ -81,8 +81,19 @@ public sealed partial class SqlSortSpillConformanceTests
         });
         await batch.CheckAsync(() => sampled.Value.Select(sample => Ceiling(sample.Key, sample.Value, (long)(grant * 1.1) + constant, sampled.Term)).ToArray(), () =>
         {
-                    foreach (string phase in new[] { "handoff", "drained", "arena", "input", "delivery" })
-                    { sampled.Value[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant); }
+            foreach (string phase in new[]
+            {
+                "handoff",
+                "drained",
+                "arena",
+                "input",
+                "delivery"
+            }
+
+            )
+            {
+                sampled.Value[phase].ShouldBeLessThanOrEqualTo((long)(grant * 1.1) + constant);
+            }
         });
         await batch.CompleteAsync();
     }

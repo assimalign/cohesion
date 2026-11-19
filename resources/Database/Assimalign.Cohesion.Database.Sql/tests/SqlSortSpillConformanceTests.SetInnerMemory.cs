@@ -170,11 +170,23 @@ public sealed partial class SqlSortSpillConformanceTests
                 {
                     var value = sampled.Value;
                     long baseline = Math.Min(value.Before, value.After);
-                    return [Floor("set/inner peak floor", value.Measured, floor, sampled.Term),
-                        ..(shape == 0 ? new[] { Floor("set replay floor", value.ReplayPeak - baseline, floor, sampled.Term),
-                            Floor("set ordered floor", value.OrderedPeak - baseline, 8192, sampled.Term) } : []),
-                        ..(inner ? new[] { Floor("inner append floor", value.AppendPeak - baseline, 16384 + 8192, sampled.Term) } : []),
-                        ..(shape == 2 ? new[] { Floor("set partition floor", value.PartitionPeak - baseline, floor, sampled.Term) } : [])];
+                    return[Floor("set/inner peak floor", value.Measured, floor, sampled.Term), ..(shape == 0 ? new[]
+                    {
+                        Floor("set replay floor", value.ReplayPeak - baseline, floor, sampled.Term),
+                        Floor("set ordered floor", value.OrderedPeak - baseline, 8192, sampled.Term)
+                    }
+
+                    : []), ..(inner ? new[]
+                    {
+                        Floor("inner append floor", value.AppendPeak - baseline, 16384 + 8192, sampled.Term)
+                    }
+
+                    : []), ..(shape == 2 ? new[]
+                    {
+                        Floor("set partition floor", value.PartitionPeak - baseline, floor, sampled.Term)
+                    }
+
+                    : [])];
                 }, () =>
                 {
                     var value = sampled.Value;
@@ -186,8 +198,16 @@ public sealed partial class SqlSortSpillConformanceTests
                         (replayPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
                         (orderedPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(8192);
                     }
-                    if (inner) { (appendPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(16384 + 8192); }
-                    if (shape == 2) { (partitionPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor); }
+
+                    if (inner)
+                    {
+                        (appendPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(16384 + 8192);
+                    }
+
+                    if (shape == 2)
+                    {
+                        (partitionPeak - Math.Min(before, after)).ShouldBeGreaterThanOrEqualTo(floor);
+                    }
                 });
                 minimum = Math.Min(minimum, sampled.Value.Measured);
             }
@@ -199,15 +219,11 @@ public sealed partial class SqlSortSpillConformanceTests
         await batch.CheckAsync(() =>
         {
             Term small = Term.Maximum(rounds[0]), large = Term.Maximum(rounds[1]);
-            return mutant == 0
-                ? [Ceiling("small set/inner peak", Peak(0), grant + 65536, small),
-                    Ceiling("large set/inner peak", Peak(1), grant + 65536, large),
-                    Ceiling("set/inner growth", Peak(1) - Peak(0), 131072, small + large)]
-                : [Floor("set/inner mutant violation", Math.Max(Math.Max(Peak(0) - grant - 65536, Peak(1) - grant - 65536), Peak(1) - Peak(0) - 131072),
-                    0, small + large, true)];
+            return mutant == 0 ? [Ceiling("small set/inner peak", Peak(0), grant + 65536, small), Ceiling("large set/inner peak", Peak(1), grant + 65536, large), Ceiling("set/inner growth", Peak(1) - Peak(0), 131072, small + large)] : [Floor("set/inner mutant violation", Math.Max(Math.Max(Peak(0) - grant - 65536, Peak(1) - grant - 65536), Peak(1) - Peak(0) - 131072), 0, small + large, true)];
         }, () =>
         {
-            peaks[0] = Peak(0); peaks[1] = Peak(1);
+            peaks[0] = Peak(0);
+            peaks[1] = Peak(1);
             bool rejected = peaks[0] > grant + 65536 || peaks[1] > grant + 65536 || peaks[1] - peaks[0] > 131072;
             rejected.ShouldBe(mutant != 0);
         });

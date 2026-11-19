@@ -121,21 +121,17 @@ public sealed partial class SqlSortSpillConformanceTests
         batch.Check(() =>
         {
             Term smallTerm = Term.Maximum(small), largeTerm = Term.Maximum(large);
-            return [Ceiling("small peak", Peak(small), 1048576 + 262144, smallTerm),
-                Ceiling("large peak", Peak(large), 1048576 + 262144, largeTerm),
-                Ceiling("population peak growth", Peak(large) - Peak(small), 131072, largeTerm + smallTerm),
-                Ceiling("population replay growth", Replay(large) - Replay(small), 131072, largeTerm + smallTerm),
-                Floor("retaining mutant replay growth", retainedLarge.Value.Replay - retainedSmall.Value.Replay, 131072,
-                    retainedLarge.Term + retainedSmall.Term, true)];
+            return[Ceiling("small peak", Peak(small), 1048576 + 262144, smallTerm), Ceiling("large peak", Peak(large), 1048576 + 262144, largeTerm), Ceiling("population peak growth", Peak(large) - Peak(small), 131072, largeTerm + smallTerm), Ceiling("population replay growth", Replay(large) - Replay(small), 131072, largeTerm + smallTerm), Floor("retaining mutant replay growth", retainedLarge.Value.Replay - retainedSmall.Value.Replay, 131072, retainedLarge.Term + retainedSmall.Term, true)];
         }, () =>
         {
             var smallValue = (Peak: Peak(small), Replay: Replay(small));
             var largeValue = (Peak: Peak(large), Replay: Replay(large));
-            smallValue.Peak.ShouldBeLessThanOrEqualTo(1048576+262144); largeValue.Peak.ShouldBeLessThanOrEqualTo(1048576+262144);
-            (largeValue.Peak-smallValue.Peak).ShouldBeLessThanOrEqualTo(131072);
-            (largeValue.Replay-smallValue.Replay).ShouldBeLessThanOrEqualTo(131072);
-            (retainedLarge.Value.Replay-retainedSmall.Value.Replay).ShouldBeGreaterThan(131072);
-            _output.WriteLine($"JOIN_LIVE|full={full}|small={smallValue.Peak}|large={largeValue.Peak}|delta={largeValue.Peak-smallValue.Peak}|replay_delta={largeValue.Replay-smallValue.Replay}|mutant_replay_delta={retainedLarge.Value.Replay-retainedSmall.Value.Replay}");
+            smallValue.Peak.ShouldBeLessThanOrEqualTo(1048576 + 262144);
+            largeValue.Peak.ShouldBeLessThanOrEqualTo(1048576 + 262144);
+            (largeValue.Peak - smallValue.Peak).ShouldBeLessThanOrEqualTo(131072);
+            (largeValue.Replay - smallValue.Replay).ShouldBeLessThanOrEqualTo(131072);
+            (retainedLarge.Value.Replay - retainedSmall.Value.Replay).ShouldBeGreaterThan(131072);
+            _output.WriteLine($"JOIN_LIVE|full={full}|small={smallValue.Peak}|large={largeValue.Peak}|delta={largeValue.Peak - smallValue.Peak}|replay_delta={largeValue.Replay - smallValue.Replay}|mutant_replay_delta={retainedLarge.Value.Replay - retainedSmall.Value.Replay}");
         });
         batch.Complete();
         TempBytes(engine.TempSpace!).ShouldBe(0); Statements(engine.TempSpace!).ShouldBeEmpty(); Files(engine).ShouldBe(0);

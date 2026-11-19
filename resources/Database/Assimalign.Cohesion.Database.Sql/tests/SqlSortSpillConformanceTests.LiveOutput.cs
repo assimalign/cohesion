@@ -128,20 +128,26 @@ public sealed partial class SqlSortSpillConformanceTests
             {
                 long peak = rounds.Min(x => x.Value.Peak), drain = rounds.Min(x => x.Value.Drain);
                 Term term = Term.Maximum(rounds);
-                return mutant
-                    ? [Floor("output mutant violation", Math.Max(peak - grant - writer - slack, drain - writer - slack), 0, term, true)]
-                    : [Ceiling("output peak", peak, grant + writer + slack, term), Ceiling("output drain excess", drain, writer + slack, term)];
+                return mutant ? [Floor("output mutant violation", Math.Max(peak - grant - writer - slack, drain - writer - slack), 0, term, true)] : [Ceiling("output peak", peak, grant + writer + slack, term), Ceiling("output drain excess", drain, writer + slack, term)];
             }, () =>
             {
-                minimum = rounds.Min(x => x.Value.Peak); minimumDrain = rounds.Min(x => x.Value.Drain);
-            _output.WriteLine($"OUTPUT_DURING|grouped={grouped}|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|writer={writer}|slack={slack}|drainExcess={minimumDrain}");
-            void AssertBound()
-            {
-                minimum.ShouldBeLessThanOrEqualTo(grant + writer + slack);
-                minimumDrain.ShouldBeLessThanOrEqualTo(writer + slack);
-            }
-            if (mutant) { Should.Throw<ShouldAssertException>(AssertBound); }
-            else { AssertBound(); }
+                minimum = rounds.Min(x => x.Value.Peak);
+                minimumDrain = rounds.Min(x => x.Value.Drain);
+                _output.WriteLine($"OUTPUT_DURING|grouped={grouped}|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|writer={writer}|slack={slack}|drainExcess={minimumDrain}");
+                void AssertBound()
+                {
+                    minimum.ShouldBeLessThanOrEqualTo(grant + writer + slack);
+                    minimumDrain.ShouldBeLessThanOrEqualTo(writer + slack);
+                }
+
+                if (mutant)
+                {
+                    Should.Throw<ShouldAssertException>(AssertBound);
+                }
+                else
+                {
+                    AssertBound();
+                }
             });
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
@@ -153,7 +159,11 @@ public sealed partial class SqlSortSpillConformanceTests
                 Term.Maximum(populations[1]) + Term.Maximum(populations[0]))], () =>
             {
                 for (int population = 0; population < 2; population++)
-                { peaks[population] = populations[population].Min(x => x.Value.Peak); drainPeaks[population] = populations[population].Min(x => x.Value.Drain); }
+                {
+                    peaks[population] = populations[population].Min(x => x.Value.Peak);
+                    drainPeaks[population] = populations[population].Min(x => x.Value.Drain);
+                }
+
                 (peaks[1] - peaks[0]).ShouldBeLessThanOrEqualTo(slack);
                 (drainPeaks[1] - drainPeaks[0]).ShouldBeLessThanOrEqualTo(slack);
             });
@@ -246,10 +256,14 @@ public sealed partial class SqlSortSpillConformanceTests
             long excess = minimum - grant - batch - slack; excesses.Add(excess); copyPeaks.Add(minimumCopy);
             await acceptance.CheckAsync(() => mutant ? [] : [Ceiling("copy credit peak", rounds.Min(x => x.Value.Peak), grant + batch + slack, Term.Maximum(rounds))], () =>
             {
-                minimum = rounds.Min(x => x.Value.Peak); minimumCopy = rounds.Min(x => x.Value.Copy);
+                minimum = rounds.Min(x => x.Value.Peak);
+                minimumCopy = rounds.Min(x => x.Value.Copy);
                 excess = minimum - grant - batch - slack;
                 _output.WriteLine($"COPY_CREDIT_DURING|mutant={mutant}|rows={count}|peak={minimum}|grant={grant}|batch={batch}|slack={slack}|copyPeak={minimumCopy}");
-                if (!mutant) { excess.ShouldBeLessThanOrEqualTo(0); }
+                if (!mutant)
+                {
+                    excess.ShouldBeLessThanOrEqualTo(0);
+                }
             });
             TempBytes(engine.TempSpace!).ShouldBe(0); Files(engine).ShouldBe(0);
         }
@@ -257,11 +271,8 @@ public sealed partial class SqlSortSpillConformanceTests
         {
             long growth = populations[1].Min(x => x.Value.Copy) - populations[0].Min(x => x.Value.Copy);
             Term term = Term.Maximum(populations[1]) + Term.Maximum(populations[0]);
-            long excess = Math.Max(populations[0].Min(x => x.Value.Peak) - 64L * 10000 - batch - slack,
-                populations[1].Min(x => x.Value.Peak) - 64L * 100000 - batch - slack);
-            return mutant ? [Floor("copy mutant absolute growth", Math.Abs(growth), 524288, term, true),
-                    Floor("copy mutant peak violation", excess, 0, Term.Maximum(populations.SelectMany(x => x)), true)]
-                : [Ceiling("copy absolute population growth", Math.Abs(growth), 524288, term)];
+            long excess = Math.Max(populations[0].Min(x => x.Value.Peak) - 64L * 10000 - batch - slack, populations[1].Min(x => x.Value.Peak) - 64L * 100000 - batch - slack);
+            return mutant ? [Floor("copy mutant absolute growth", Math.Abs(growth), 524288, term, true), Floor("copy mutant peak violation", excess, 0, Term.Maximum(populations.SelectMany(x => x)), true)] : [Ceiling("copy absolute population growth", Math.Abs(growth), 524288, term)];
         }, () =>
         {
             for (int population = 0; population < 2; population++)
@@ -269,15 +280,19 @@ public sealed partial class SqlSortSpillConformanceTests
                 copyPeaks[population] = populations[population].Min(x => x.Value.Copy);
                 excesses[population] = populations[population].Min(x => x.Value.Peak) - 64L * (population == 0 ? 10000 : 100000) - batch - slack;
             }
-        long growth = copyPeaks[1] - copyPeaks[0];
-        _output.WriteLine($"COPY_CREDIT_GROWTH|mutant={mutant}|growth={growth}|bound=524288");
-        void AssertGrowth() => Math.Abs(growth).ShouldBeLessThanOrEqualTo(524288);
-        if (mutant)
-        {
-            Should.Throw<ShouldAssertException>(AssertGrowth);
-            Should.Throw<ShouldAssertException>(() => excesses.Max().ShouldBeLessThanOrEqualTo(0));
-        }
-        else { AssertGrowth(); }
+
+            long growth = copyPeaks[1] - copyPeaks[0];
+            _output.WriteLine($"COPY_CREDIT_GROWTH|mutant={mutant}|growth={growth}|bound=524288");
+            void AssertGrowth() => Math.Abs(growth).ShouldBeLessThanOrEqualTo(524288);
+            if (mutant)
+            {
+                Should.Throw<ShouldAssertException>(AssertGrowth);
+                Should.Throw<ShouldAssertException>(() => excesses.Max().ShouldBeLessThanOrEqualTo(0));
+            }
+            else
+            {
+                AssertGrowth();
+            }
         });
         await acceptance.CompleteAsync();
 
@@ -286,33 +301,50 @@ public sealed partial class SqlSortSpillConformanceTests
             long grant = 64L * count;
             var builder = SqlDatabaseEngine.CreateBuilder("credit-during");
             builder.Options.RootPath = Path.Combine(_root, $"credit-during-{mutant}-{count}{suffix}");
-            builder.Options.StatementMemoryBudget = grant; builder.Options.BufferPoolCapacity = 1048576;
+            builder.Options.StatementMemoryBudget = grant;
+            builder.Options.BufferPoolCapacity = 1048576;
             var engine = await builder.BuildAsync();
             SqlDatabaseSession? session = null;
             try
             {
-            session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
-            await session.ExecuteAsync("CREATE TABLE t(id INT,note TEXT)");
-            for (int first = 0; first < count; first += 200)
-            { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first, Math.Min(200,count-first)).Select(i => $"({i},NULL)"))); }
-            await session.ExecuteAsync("CREATE TABLE warm AS SELECT note FROM t");
-            await session.ExecuteAsync("CREATE TABLE pool_fill(note TEXT)");
-            for (int first = 0; first < 1000; first += 25)
-            { await session.ExecuteAsync("INSERT INTO pool_fill VALUES" + string.Join(',', Enumerable.Range(0, 25).Select(_ => "('" + new string('x', 2048) + "')"))); }
-            // Keep the warm owners alive so reclamation cannot evict frames during a sample.
-            for (int pass = 0; pass < 8 && TableAsPoolCount(TableAsPool(session.Database.DataStorage)) < 128; pass++)
-            {
-                await using var scan = (DatabaseResultSet)await session.ExecuteAsync("SELECT MAX(note) FROM pool_fill");
-                (await Rows(scan)).ShouldHaveSingleItem().Cells[0].ShouldBe(new string('x', 2048));
-            }
-            TableAsPoolCount(TableAsPool(session.Database.DataStorage)).ShouldBe(128);
+                session = await (await engine.CreateDatabaseAsync("db")).CreateSessionAsync();
+                await session.ExecuteAsync("CREATE TABLE t(id INT,note TEXT)");
+                for (int first = 0; first < count; first += 200)
+                {
+                    await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(first, Math.Min(200, count - first)).Select(i => $"({i},NULL)")));
+                }
 
-            return new CopyCreditFixture(engine, session);
+                await session.ExecuteAsync("CREATE TABLE warm AS SELECT note FROM t");
+                await session.ExecuteAsync("CREATE TABLE pool_fill(note TEXT)");
+                for (int first = 0; first < 1000; first += 25)
+                {
+                    await session.ExecuteAsync("INSERT INTO pool_fill VALUES" + string.Join(',', Enumerable.Range(0, 25).Select(_ => "('" + new string ('x', 2048) + "')")));
+                }
+
+                // Keep the warm owners alive so reclamation cannot evict frames during a sample.
+                for (int pass = 0; pass < 8 && TableAsPoolCount(TableAsPool(session.Database.DataStorage)) < 128; pass++)
+                {
+                    await using var scan = (DatabaseResultSet)await session.ExecuteAsync("SELECT MAX(note) FROM pool_fill");
+                    (await Rows(scan)).ShouldHaveSingleItem().Cells[0].ShouldBe(new string ('x', 2048));
+                }
+
+                TableAsPoolCount(TableAsPool(session.Database.DataStorage)).ShouldBe(128);
+                return new CopyCreditFixture(engine, session);
             }
             catch
             {
-                try { if (session is not null) { await session.DisposeAsync(); } }
-                finally { await engine.DisposeAsync(); }
+                try
+                {
+                    if (session is not null)
+                    {
+                        await session.DisposeAsync();
+                    }
+                }
+                finally
+                {
+                    await engine.DisposeAsync();
+                }
+
                 throw;
             }
         }

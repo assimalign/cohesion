@@ -120,7 +120,10 @@ public sealed partial class SqlSortSpillConformanceTests
             });
             await batch.CheckAsync(() => grant == 67108864 ? [Ceiling("oversized CTAS peak", sampled.Value, grant + 553240, sampled.Term)] : [], () =>
             {
-                        if (grant == 67108864) { sampled.Value.ShouldBeLessThanOrEqualTo(grant + 553240); }
+                if (grant == 67108864)
+                {
+                    sampled.Value.ShouldBeLessThanOrEqualTo(grant + 553240);
+                }
             });
             await batch.CompleteAsync();
         }
