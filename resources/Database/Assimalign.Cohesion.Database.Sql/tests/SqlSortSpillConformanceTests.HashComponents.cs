@@ -159,33 +159,36 @@ public sealed partial class SqlSortSpillConformanceTests
             {
                 var mutant = padded.Value;
                 (mutant.Entry / 3072).ShouldBeGreaterThan(32);
-                Should.Throw<ShouldAssertException>(() => CheckEntryCharges(mutant.Entry, mutant.Replay, mutant.Fitting));
+                Should.Throw<ShouldAssertException>(() => CheckEntryCharges(mutant.Entry, mutant.Replay, mutant.Replay - mutant.Entry, mutant.Fitting));
             });
         }
         long Entry() => rounds.Min(x => x.Value.Entry);
         long Replay() => rounds.Min(x => x.Value.Replay);
+        long Overhead() => rounds.Min(x => x.Value.Replay - x.Value.Entry);
         long Fitting() => rounds.Min(x => x.Value.Fitting);
-        // Assert: preserve every per-entry charge, including the difference of minima.
+        // Assert: each charge is its minimum over the three rounds. The replay overhead is each round's own
+        // difference: a difference of minima could pair one round's entry with another round's replay, so a
+        // single low entry reading (ambient heap activity in the test host) inflated it past the bound.
         batch.Check(() =>
         {
             Term term = Term.Maximum(rounds);
-            return[Ceiling("entry <= 32", Entry() / 3072, 32, term / 3072), Ceiling("replay overhead <= 64", (Replay() - Entry()) / 3072, 64, (term + term) / 3072), Ceiling("replay <= 96", Replay() / 3072, 96, term / 3072), Ceiling("fitting <= 64", Fitting() / 3072, 64, term / 3072)];
+            return[Ceiling("entry <= 32", Entry() / 3072, 32, term / 3072), Ceiling("replay overhead <= 64", Overhead() / 3072, 64, (term + term) / 3072), Ceiling("replay <= 96", Replay() / 3072, 96, term / 3072), Ceiling("fitting <= 64", Fitting() / 3072, 64, term / 3072)];
         }, () =>
         {
-            long entry = Entry(), replay = Replay(), fitting = Fitting();
-            _output.WriteLine($"ENTRY_CHARGE|entry={entry / 3072d}|replay={replay / 3072d}|distinct={fitting / 3072d}|bound=32/96/64");
-            CheckEntryCharges(entry, replay, fitting);
+            long entry = Entry(), replay = Replay(), overhead = Overhead(), fitting = Fitting();
+            _output.WriteLine($"ENTRY_CHARGE|entry={entry / 3072d}|replay={replay / 3072d}|overhead={overhead / 3072d}|distinct={fitting / 3072d}|bound=32/64/96/64");
+            CheckEntryCharges(entry, replay, overhead, fitting);
         });
         batch.Complete();
         return Task.CompletedTask;
     }
 
-    private static void CheckEntryCharges(long entry, long replay, long fitting)
+    private static void CheckEntryCharges(long entry, long replay, long overhead, long fitting)
     {
         // The contract is bytes per entry. Floor division excludes a constant sub-entry
         // heap artefact while an extra field on every entry still exceeds the same bound.
         (entry / 3072).ShouldBeLessThanOrEqualTo(32);
-        ((replay - entry) / 3072).ShouldBeLessThanOrEqualTo(64);
+        (overhead / 3072).ShouldBeLessThanOrEqualTo(64);
         (replay / 3072).ShouldBeLessThanOrEqualTo(96);
         (fitting / 3072).ShouldBeLessThanOrEqualTo(64);
     }
