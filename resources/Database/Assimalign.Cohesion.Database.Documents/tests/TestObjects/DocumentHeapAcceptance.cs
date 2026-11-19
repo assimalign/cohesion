@@ -52,6 +52,7 @@ internal static class DocumentHeapAcceptance
 
     internal sealed class Batch : IAsyncDisposable
     {
+        private const string ThreadTimeout = "System.Threading.ThreadPool.ThreadTimeoutMs";
         private readonly PoolEvents _events;
         private readonly ITestOutputHelper _output;
         private readonly string _test;
@@ -60,7 +61,15 @@ internal static class DocumentHeapAcceptance
         private readonly List<Func<ValueTask>> _release = [];
 
         internal Batch(PoolEvents events, ITestOutputHelper output, string test)
-        { _events = events; _output = output; _test = test; }
+        {
+            // An exiting thread pool worker frees the arrays in its thread-local pool slots without a trim
+            // event, which no check here could see or size; the test project keeps idle workers alive.
+            if (Convert.ToString(AppContext.GetData(ThreadTimeout), CultureInfo.InvariantCulture) != "-1")
+            {
+                throw new InvalidOperationException($"The heap gate needs {ThreadTimeout}=-1 in the test host's runtime configuration.");
+            }
+            _events = events; _output = output; _test = test;
+        }
 
         internal Sample<T> Measure<T>(FormattableString labels, Func<Func<long>, T> measure)
         {
