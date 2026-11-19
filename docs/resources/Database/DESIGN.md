@@ -550,10 +550,9 @@ The integration architecture, in the order the work items landed:
   assignment with a bindable host, reporting skipped assignments and endpoint replacement. An
   unmanaged application opts in through `AddHealthEndpoint(Uri)`; without either configuration no
   health listener starts. A bind failure fails start with `CK07102`. The wire protocol's `Ping`
-  remains distinct from readiness. The gateway does not consume contributors yet, and Gateway G18
-  still counts first publication before server accept. ApplicationModel.Hosting open question 2
-  covers health aggregation and question 7 covers the publication window; membership and batch
-  semantics need a separate owner decision.
+  remains distinct from readiness. Nothing consumes these observations as resource health since
+  the old model's integration was removed in #1869; the new application model decides how they are
+  consumed.
 - **Backup/restore (#161):** becomes an **engine-level, per-model operation on the data-machine contract** — a data machine that can be snapshotted while running (checkpoint + copy of the file sets; PITR later via WAL archiving per R11), not a host service (embedded consumers need it identically, R10). The storage layer already reserves the backup seams (`.bak` asset naming in the strategy contract). Design note only; the contract lands with #161.
 - **Authorization (#177 family):** `Database.Security` (child root) grows the authorization vocabulary (principals, roles, permission checks — beside the existing `DatabaseAuthenticator` authentication seam), and **per-model enforcement composes in the model packages** (SQL enforcing over its catalog objects), consistent with per-model servers: the server authenticates, the model authorizes. Design note only.
 
