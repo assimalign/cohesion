@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Shouldly;
@@ -149,24 +150,32 @@ public sealed class TcpDnsTransportTests
             $"Expected Transport or Timeout, got {ex.Code}");
     }
 
-    [Fact]
-    public async Task ExchangeAsync_TimesOutOnUnreachableEndpoint()
+    [Fact(DisplayName = "Cohesion Test [Dns.Client] - ExchangeAsync: Should fail with Transport or Timeout when nothing listens")]
+    public async Task ExchangeAsync_NothingListening_ShouldFailWithTransportOrTimeout()
     {
-        // 192.0.2.0/24 (TEST-NET-1, RFC 5737) is documentation-only address space — no host
-        // there to receive a connect.
+        // Arrange
+        // A socket bound to a loopback port that never listens holds the port: nothing can accept
+        // the connect, and the attempt never leaves the host. A documentation address such as
+        // TEST-NET-1 (192.0.2.1) is not a substitute: whether a SYN to it is dropped, refused or
+        // answered depends on the network the test runs on.
+        using var portHolder = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        portHolder.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+
         using var transport = new TcpDnsTransport(new TcpDnsTransportOptions
         {
-            EndPoint = new IPEndPoint(IPAddress.Parse("192.0.2.1"), 53),
+            EndPoint = portHolder.LocalEndPoint,
             ConnectTimeout = TimeSpan.FromMilliseconds(200),
             QueryTimeout = TimeSpan.FromSeconds(5),
         });
 
-        DnsException ex = await Assert.ThrowsAsync<DnsException>(
-            () => transport.ExchangeAsync(LoopbackUdpDnsServer.BuildMinimalResponse(0)));
-        // Either the connect times out (Timeout) or the kernel rejects the route (Transport).
-        Assert.True(
-            ex.Code is DnsErrorCode.Timeout or DnsErrorCode.Transport,
-            $"Expected Timeout or Transport, got {ex.Code}");
+        // Act
+        DnsException ex = await Should.ThrowAsync<DnsException>(
+            () => transport.ExchangeAsync(LoopbackUdpDnsServer.BuildMinimalResponse(0), CancellationToken.None));
+
+        // Assert
+        // Linux refuses the connect at once (Transport). Windows retries the SYN for longer than
+        // ConnectTimeout before it reports the refusal (Timeout).
+        ex.Code.ShouldBeOneOf(DnsErrorCode.Transport, DnsErrorCode.Timeout);
     }
 
     [Fact]

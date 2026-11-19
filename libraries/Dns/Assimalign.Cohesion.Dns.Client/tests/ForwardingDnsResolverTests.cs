@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using Shouldly;
 
 namespace Assimalign.Cohesion.Dns.Tests;
 
@@ -170,25 +171,41 @@ public sealed class ForwardingDnsResolverTests
         Assert.Equal(DnsErrorCode.Spoofed, ex.Code);
     }
 
-    [Fact]
-    public async Task ResolveAsync_FailsOverToSecondForwarderOnTransportFailure()
+    [Fact(DisplayName = "Cohesion Test [Dns.Client] - ResolveAsync: Should fail over to the second forwarder on transport failure")]
+    public async Task ResolveAsync_OnTransportFailure_ShouldFailOverToSecondForwarder()
     {
-        await using var server = new LoopbackUdpDnsServer();
-        server.OnRequest(req =>
+        // Arrange
+        var question = new DnsQuestion("example.com", DnsRecordType.A);
+
+        // The first forwarder is a loopback server that reads the query and never replies, so its
+        // transport times out without the query leaving the host. A documentation address such as
+        // TEST-NET-1 (192.0.2.1) is not a substitute: a network that intercepts outbound port 53
+        // answers it, and the resolver never fails over.
+        var silentServerQuestion = new TaskCompletionSource<DnsQuestion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var silentServer = new LoopbackUdpDnsServer();
+        silentServer.OnRequest(req =>
         {
+            silentServerQuestion.TrySetResult(DnsTestMessages.ParseQuery(req).Questions[0]);
+            return Array.Empty<byte>(); // black-hole
+        });
+
+        int answeringServerRequests = 0;
+        await using var answeringServer = new LoopbackUdpDnsServer();
+        answeringServer.OnRequest(req =>
+        {
+            answeringServerRequests++;
             DnsMessage query = DnsTestMessages.ParseQuery(req);
             return DnsTestMessages.BuildAnswer(query, new DnsRecord[] { DnsTestMessages.ExampleComA() });
         });
 
-        // First forwarder points to TEST-NET-1 (RFC 5737) so connect will fail or time out.
         using var bad = new UdpDnsTransport(new UdpDnsTransportOptions
         {
-            EndPoint = new IPEndPoint(IPAddress.Parse("192.0.2.1"), 53),
+            EndPoint = silentServer.EndPoint,
             QueryTimeout = TimeSpan.FromMilliseconds(200),
         });
         using var good = new UdpDnsTransport(new UdpDnsTransportOptions
         {
-            EndPoint = server.EndPoint,
+            EndPoint = answeringServer.EndPoint,
             QueryTimeout = TimeSpan.FromSeconds(1),
         });
 
@@ -198,8 +215,16 @@ public sealed class ForwardingDnsResolverTests
             QueryTimeout = TimeSpan.FromSeconds(5),
         });
 
-        DnsMessage answer = await resolver.ResolveAsync(new DnsQuestion("example.com", DnsRecordType.A));
-        Assert.Single(answer.Answers);
+        // Act
+        DnsMessage answer = await resolver.ResolveAsync(question, CancellationToken.None);
+
+        // Assert
+        // The first forwarder received the query, and the answer came from the second.
+        (await silentServerQuestion.Task.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBe(question);
+        answeringServerRequests.ShouldBe(1);
+        answer.Answers.ShouldHaveSingleItem()
+            .ShouldBeOfType<DnsARecord>()
+            .Address.ShouldBe(DnsTestMessages.ExampleComA().Address);
     }
 
     [Fact]
