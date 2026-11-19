@@ -13,8 +13,8 @@ using Assimalign.Cohesion.Logging;
 /// The file sink behind <see cref="W3CAccessLogProvider"/>: buffered, lock-serialized writes
 /// into per-UTC-day files (<c>{prefix}-{yyyyMMdd}.log</c>), size-based rolling into sequenced
 /// files within a day, oldest-first retention sweeps, and a periodic flush timer. Rolling
-/// decisions key off the <em>entry's</em> timestamp, so behavior is deterministic under a fake
-/// <see cref="TimeProvider"/> upstream.
+/// decisions key off the <em>entry's</em> timestamp, and retention reads that date back from the
+/// file names, so behavior is deterministic under a fake <see cref="TimeProvider"/> upstream.
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("W3CAccessLogWriter")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
@@ -247,10 +247,13 @@ internal sealed class W3CAccessLogWriter : IDisposable
 
         try
         {
-            var files = new List<FileInfo>();
+            var files = new List<RetentionCandidate>();
             foreach (string path in Directory.EnumerateFiles(_directory, _prefix + "-*.log"))
             {
-                files.Add(new FileInfo(path));
+                if (RetentionCandidate.TryParse(path, _prefix, out RetentionCandidate candidate))
+                {
+                    files.Add(candidate);
+                }
             }
 
             if (files.Count <= keep)
@@ -258,19 +261,25 @@ internal sealed class W3CAccessLogWriter : IDisposable
                 return;
             }
 
-            files.Sort(static (left, right) => left.LastWriteTimeUtc.CompareTo(right.LastWriteTimeUtc));
+            // Oldest first by the date and sequence in each name, never by last-write time: files
+            // written within one clock tick share a last-write time, and the tie then falls to the
+            // enumeration order, which is name order on NTFS but hash order on ext4.
+            files.Sort(RetentionCandidate.Compare);
 
+            // Compare names: every enumerated path and _currentPath sit in _directory, and a full
+            // path never equals _currentPath when _directory is relative.
+            string? currentName = Path.GetFileName(_currentPath);
             int excess = files.Count - keep;
             for (int i = 0; i < files.Count && excess > 0; i++)
             {
-                if (string.Equals(files[i].FullName, _currentPath, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(files[i].Name, currentName, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
                 try
                 {
-                    files[i].Delete();
+                    File.Delete(files[i].FilePath);
                 }
                 catch (Exception exception)
                 {
@@ -364,6 +373,67 @@ internal sealed class W3CAccessLogWriter : IDisposable
             : string.Create(CultureInfo.InvariantCulture, $"{_prefix}-{date:yyyyMMdd}.{sequence:D3}.log");
 
         return Path.Combine(_directory, name);
+    }
+
+    // A file the retention sweep may delete: one whose name BuildPath could have produced.
+    private readonly record struct RetentionCandidate(DateOnly Date, int Sequence, string Name, string FilePath)
+    {
+        private const string extension = ".log";
+
+        // Accepts {prefix}-{yyyyMMdd}.log as the day's sequence 0 and {prefix}-{yyyyMMdd}.{n}.log as
+        // sequence n. The prefix is checked literally because on Unix a prefix may contain '*' or
+        // '?', which widen the enumeration pattern; another prefix such as "access-api" never
+        // parses under "access", since "api-..." is not a date.
+        public static bool TryParse(string path, string prefix, out RetentionCandidate candidate)
+        {
+            candidate = default;
+            string name = Path.GetFileName(path);
+            ReadOnlySpan<char> rest = name;
+
+            if (rest.Length <= prefix.Length
+                || !rest.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                || rest[prefix.Length] != '-')
+            {
+                return false;
+            }
+
+            rest = rest[(prefix.Length + 1)..];
+            if (!rest.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            rest = rest[..^extension.Length];
+            if (rest.Length < 8
+                || !DateOnly.TryParseExact(rest[..8], "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly date))
+            {
+                return false;
+            }
+
+            int sequence = 0;
+            if (rest.Length > 8
+                && (rest[8] != '.' || !int.TryParse(rest[9..], NumberStyles.None, CultureInfo.InvariantCulture, out sequence)))
+            {
+                return false;
+            }
+
+            candidate = new RetentionCandidate(date, sequence, name, path);
+            return true;
+        }
+
+        // Oldest first. Sequences compare as numbers, so .1000 follows .999 and the unsequenced
+        // file leads its day. The ordinal name tie-break makes the order total, so the unstable
+        // List<T>.Sort cannot depend on enumeration order.
+        public static int Compare(RetentionCandidate left, RetentionCandidate right)
+        {
+            int order = left.Date.CompareTo(right.Date);
+            if (order == 0)
+            {
+                order = left.Sequence.CompareTo(right.Sequence);
+            }
+
+            return order != 0 ? order : string.CompareOrdinal(left.Name, right.Name);
+        }
     }
 
     private sealed class DebugView

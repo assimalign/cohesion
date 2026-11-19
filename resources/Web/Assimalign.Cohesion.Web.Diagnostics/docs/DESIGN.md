@@ -238,9 +238,20 @@ rewrites the request — and leaves every trust decision to `Web.ForwardedHeader
   millisecond precision.
 - **Files.** `{prefix}-{yyyyMMdd}.log` per UTC day, rolling to `{prefix}-{yyyyMMdd}.{seq:000}.log`
   when `FileSizeLimit` (approximate, char-counted) is exceeded; a restart appends to the day's
-  current file. Retention deletes oldest-first (by last-write time) beyond
-  `RetainedFileCountLimit`, never the active file. Rolling keys off the **entry's** timestamp,
-  which keeps the writer deterministic under a fake upstream `TimeProvider`.
+  current file. Rolling keys off the **entry's** timestamp, which keeps the writer deterministic
+  under a fake upstream `TimeProvider`.
+- **Retention.** Every file open deletes the oldest files beyond `RetainedFileCountLimit`, never
+  the active one (recognized by name, so a relative `Directory` cannot defeat the check). Oldest
+  means the UTC date in the name, then the sequence compared as a number: the unsequenced file is
+  its day's sequence 0, and `.1000` follows `.999`. An ordinal name tie-break makes the order total.
+  Only names the writer produces count; under prefix `access`, another prefix's
+  `access-api-20260701.log` and a hand-named `access-notes.log` are neither counted nor deleted.
+  *Rejected (2026-11-18):* last-write time, the original order. Files written within one clock
+  tick share a last-write time (ext4's coarse clock tied every back-to-back pair in a local probe;
+  NTFS tied most), and a tie then fell to enumeration order: name order on NTFS, but hash order on
+  ext4, which differs between file systems. Some Linux CI runners therefore deleted day two instead
+  of day one. Plain ordinal name order, which the option's documentation used to state, ranks
+  `.001` before the unsequenced file and `.1000` before `.999`.
 - **Buffering.** Writes are lock-serialized into a buffered `StreamWriter` and flushed on a
   timer (`FlushInterval`, default 1 s; `TimeSpan.Zero` = flush every write), on `Flush()`, and
   on disposal. Lines from concurrent exchanges never interleave.
