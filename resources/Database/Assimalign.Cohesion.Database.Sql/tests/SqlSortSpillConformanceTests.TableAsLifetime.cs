@@ -76,25 +76,23 @@ public sealed partial class SqlSortSpillConformanceTests
         using var images = new WindowPoolLease();
         foreach (int count in new[] { 4000, 16000 })
         {
-            var builder = SqlDatabaseEngine.CreateBuilder("ctas-live");
-            builder.Options.RootPath = Path.Combine(_root, "live-" + count);
-            builder.Options.BufferPoolCapacity = 1048576;
-            builder.Options.StatementMemoryBudget = grant; builder.Options.StatementTempSpaceQuota = 67108864;
-            builder.Functions.Add(SqlScalarFunction.Create("fresh", (long value) => new string((char)('a' + value % 23), 512), volatility: SqlFunctionVolatility.Immutable));
-            await using var engine = await builder.BuildAsync();
-            var database = await engine.CreateDatabaseAsync("db");
-            await using var session = await database.CreateSessionAsync(); await Seed(session, count);
-            const string query = "SELECT id,fresh(id) AS value FROM t ORDER BY id";
-            await session.ExecuteAsync("CREATE TABLE warm AS " + query);
-            database.DataStorage.BufferPoolCapacity.ShouldBe(128);
-            TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
-            bool remeasure = false;
+            int measurement = 0;
             await MeasureAndAssertAsync(pool, _output, nameof(ExecuteAsync_TableAsLiveCopy_ShouldReleaseDrainedRowsWithinBound), $"mutant={mutant}|rows={count}", async readHeap =>
             {
+                var builder = SqlDatabaseEngine.CreateBuilder("ctas-live");
+                builder.Options.RootPath = Path.Combine(_root, "live-" + count + "-" + measurement++);
+                builder.Options.BufferPoolCapacity = 1048576;
+                builder.Options.StatementMemoryBudget = grant; builder.Options.StatementTempSpaceQuota = 67108864;
+                builder.Functions.Add(SqlScalarFunction.Create("fresh", (long value) => new string((char)('a' + value % 23), 512), volatility: SqlFunctionVolatility.Immutable));
+                await using var engine = await builder.BuildAsync();
+                var database = await engine.CreateDatabaseAsync("db");
+                await using var session = await database.CreateSessionAsync(); await Seed(session, count);
+                const string query = "SELECT id,fresh(id) AS value FROM t ORDER BY id";
+                await session.ExecuteAsync("CREATE TABLE warm AS " + query);
+                database.DataStorage.BufferPoolCapacity.ShouldBe(128);
+                TableAsPoolCount(TableAsPool(database.DataStorage)).ShouldBe(128);
                 images.Drain(pool);
 
-                if (remeasure) { await session.ExecuteAsync("DROP TABLE archive"); }
-                remeasure = true;
                 long baseline = 0, peak = 0; int read = 0, encoded = 0, copies = 0; long workspace = 0;
                 var weak = new List<WeakReference>(); var retained = new List<object>();
                 SqlPlanExecutor.TableAsSourceAdmitted = _ => { images.Drain(pool); baseline = readHeap(); };
