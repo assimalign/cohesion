@@ -42,7 +42,10 @@ internal static class DocumentHeapPool
                 return;
             }
             long size = (24L + (long)length * width + 7) & ~7L;
-            if (args.EventId == 2) { Interlocked.Add(ref Allocated, size); }
+            if (args.EventId == 2)
+            {
+                if (pool == _bytes) { Interlocked.Add(ref Allocated, size); }
+            }
             else { Interlocked.Add(ref Trimmed, size); }
         }
     }
