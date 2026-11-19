@@ -37,8 +37,10 @@ public sealed class W3CAccessLogOptions
     public long? FileSizeLimit { get; set; } = 10 * 1024 * 1024;
 
     /// <summary>
-    /// Gets or sets how many log files are retained; when a roll creates a new file, the oldest
-    /// files (ordinal name order) beyond the limit are deleted. <see langword="null"/> disables
+    /// Gets or sets how many log files are retained; whenever the provider opens a file, its oldest
+    /// files beyond the limit are deleted, oldest by the UTC date and then the sequence number in
+    /// the file name. The file being written is never deleted, and files whose names the provider
+    /// does not produce are neither counted nor deleted. <see langword="null"/> disables
     /// retention. Defaults to 31.
     /// </summary>
     public int? RetainedFileCountLimit { get; set; } = 31;

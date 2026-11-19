@@ -10,6 +10,10 @@ namespace Assimalign.Cohesion.Web.Diagnostics.Tests;
 /// </summary>
 public class W3CAccessLogProviderTests : IDisposable
 {
+    // Last-write times the retention tests stamp on seeded files; they predate every file the
+    // provider creates during a test.
+    private static readonly DateTime _seededWriteTime = new(2026, 7, 12, 12, 0, 0, DateTimeKind.Utc);
+
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "cohesion-w3c-tests", Guid.NewGuid().ToString("N"));
 
     public void Dispose()
@@ -36,6 +40,19 @@ public class W3CAccessLogProviderTests : IDisposable
         using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using StreamReader reader = new(stream);
         return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// Creates a file in the log directory with an exact last-write time, so a retention test
+    /// controls the timestamps instead of inheriting the file system's clock resolution.
+    /// </summary>
+    private string SeedLogFile(string name, DateTime lastWriteTimeUtc)
+    {
+        Directory.CreateDirectory(_directory);
+        string path = Path.Combine(_directory, name);
+        File.WriteAllText(path, "seeded\n");
+        File.SetLastWriteTimeUtc(path, lastWriteTimeUtc);
+        return path;
     }
 
     private static LoggerEntry CreateExchangeEntry(DateTimeOffset timestamp, string path = "/orders", int status = 200)
@@ -151,6 +168,97 @@ public class W3CAccessLogProviderTests : IDisposable
         File.Exists(Path.Combine(_directory, "access-20260710.log")).ShouldBeFalse();
         File.Exists(Path.Combine(_directory, "access-20260711.log")).ShouldBeTrue();
         File.Exists(Path.Combine(_directory, "access-20260712.log")).ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Diagnostics] - W3C provider: Retention orders files by the date in their names, not by last-write time")]
+    [InlineData(0)]    // Tied last-write times: the directory's enumeration order used to decide.
+    [InlineData(3600)] // Day one written an hour after day two: last-write order is reversed.
+    public void Write_BeyondRetentionWithTiedOrReversedWriteTimes_ShouldDeleteOldestFileDate(int dayOneSecondsAfterDayTwo)
+    {
+        // Arrange
+        string dayOne = SeedLogFile("access-20260710.log", _seededWriteTime.AddSeconds(dayOneSecondsAfterDayTwo));
+        string dayTwo = SeedLogFile("access-20260711.log", _seededWriteTime);
+        using W3CAccessLogProvider provider = new(CreateOptions(options => options.RetainedFileCountLimit = 2));
+        ILogger logger = ((ILoggerProvider)provider).Create("access");
+
+        // Act — opening day three sweeps one file.
+        logger.Log(CreateExchangeEntry(new DateTimeOffset(2026, 7, 12, 12, 0, 0, TimeSpan.Zero)));
+
+        // Assert
+        File.Exists(dayOne).ShouldBeFalse();
+        File.Exists(dayTwo).ShouldBeTrue();
+        File.Exists(Path.Combine(_directory, "access-20260712.log")).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - W3C provider: Retention ranks a day's unsequenced file first and compares sequences numerically")]
+    public void Write_BeyondRetentionWithSequencedFiles_ShouldDeleteByDateThenSequence()
+    {
+        // Arrange — day one rolled past sequence 999. Ordinal name order would rank ".1000" before
+        // ".999" and both before the unsequenced file, and the last-write times run the same wrong
+        // way, so only the date and sequence in the names can pick the right files.
+        string unsequenced = SeedLogFile("access-20260710.log", _seededWriteTime.AddMinutes(2));
+        string sequence999 = SeedLogFile("access-20260710.999.log", _seededWriteTime.AddMinutes(1));
+        string sequence1000 = SeedLogFile("access-20260710.1000.log", _seededWriteTime);
+        using W3CAccessLogProvider provider = new(CreateOptions(options => options.RetainedFileCountLimit = 2));
+        ILogger logger = ((ILoggerProvider)provider).Create("access");
+
+        // Act — opening day two sweeps two files.
+        logger.Log(CreateExchangeEntry(new DateTimeOffset(2026, 7, 11, 12, 0, 0, TimeSpan.Zero)));
+
+        // Assert
+        File.Exists(unsequenced).ShouldBeFalse();
+        File.Exists(sequence999).ShouldBeFalse();
+        File.Exists(sequence1000).ShouldBeTrue();
+        File.Exists(Path.Combine(_directory, "access-20260711.log")).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - W3C provider: Retention neither counts nor deletes files the writer does not name")]
+    public void Write_BeyondRetentionWithForeignFiles_ShouldLeaveThemInPlace()
+    {
+        // Arrange — "access-*.log" also matches another prefix's file and a hand-named one, both
+        // older than anything the writer owns.
+        string otherPrefix = SeedLogFile("access-api-20260701.log", _seededWriteTime.AddDays(-30));
+        string handNamed = SeedLogFile("access-notes.log", _seededWriteTime.AddDays(-30));
+        string dayOne = SeedLogFile("access-20260710.log", _seededWriteTime);
+        string dayTwo = SeedLogFile("access-20260711.log", _seededWriteTime.AddMinutes(1));
+        using W3CAccessLogProvider provider = new(CreateOptions(options => options.RetainedFileCountLimit = 2));
+        ILogger logger = ((ILoggerProvider)provider).Create("access");
+
+        // Act — opening day three makes three writer files, one over the limit.
+        logger.Log(CreateExchangeEntry(new DateTimeOffset(2026, 7, 12, 12, 0, 0, TimeSpan.Zero)));
+
+        // Assert — only day one goes; counting the foreign files would have cost day two too.
+        File.Exists(dayOne).ShouldBeFalse();
+        File.Exists(dayTwo).ShouldBeTrue();
+        File.Exists(Path.Combine(_directory, "access-20260712.log")).ShouldBeTrue();
+        File.Exists(otherPrefix).ShouldBeTrue();
+        File.Exists(handNamed).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - W3C provider: Retention never deletes the active file, including under a relative directory")]
+    public void Write_BeyondRetentionWhenActiveFileIsOldest_ShouldKeepActiveFile()
+    {
+        // Arrange — a late entry reopens day one, the oldest file. The directory is relative because
+        // the active-file guard once compared absolute enumerated paths with the writer's own path.
+        string dayOne = SeedLogFile("access-20260710.log", _seededWriteTime);
+        string dayTwo = SeedLogFile("access-20260711.log", _seededWriteTime.AddMinutes(1));
+        string dayThree = SeedLogFile("access-20260712.log", _seededWriteTime.AddMinutes(2));
+        string relativeDirectory = Path.GetRelativePath(Directory.GetCurrentDirectory(), _directory);
+        using W3CAccessLogProvider provider = new(CreateOptions(options =>
+        {
+            options.Directory = relativeDirectory;
+            options.RetainedFileCountLimit = 2;
+        }));
+        ILogger logger = ((ILoggerProvider)provider).Create("access");
+
+        // Act
+        logger.Log(CreateExchangeEntry(new DateTimeOffset(2026, 7, 10, 23, 59, 59, TimeSpan.Zero), "/late"));
+
+        // Assert — day two, the oldest inactive file, goes instead.
+        File.Exists(dayOne).ShouldBeTrue();
+        ReadLogFile(dayOne).ShouldContain("/late", Case.Sensitive);
+        File.Exists(dayTwo).ShouldBeFalse();
+        File.Exists(dayThree).ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - W3C provider: Buffered output reaches disk on Flush and on dispose")]
