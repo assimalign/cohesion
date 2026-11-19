@@ -381,6 +381,22 @@ If a consumer build complains about an `Assimalign.Cohesion.Sdk` it can't resolv
 
 Per-area CI and the publish-less SDK consumer smoke prove the branch; **the release pipeline alone ships release versions.** The one other publisher, `ci-packages.yml`, stages CI-channel builds of `main` and of open pull requests in GitHub Packages and nowhere else. Nothing else publishes.
 
+### Runner selection — the `CI_RUNNERS` variable
+
+A job never names a runner label directly. It writes the GitHub-hosted label it wants and looks it
+up in the `CI_RUNNERS` organization variable, a JSON object from hosted label to replacement label:
+
+```yaml
+runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
+runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+```
+
+A label the variable omits, or an unset variable, runs on the GitHub-hosted runner. So the runner
+provider (Blacksmith since 2026-11) changes in the variable, per OS, without editing a workflow,
+and `matrix.os` keeps the hosted label, so job names and required-check names do not change.
+`release.yml` stays on GitHub-hosted runners: it holds the nuget.org publishing credential.
+`resource-database.yml` and `sdk-smoke.yml` join once PR #1869 merges.
+
 ### Per-area CI — `library-*.yml`, `resource-*.yml`
 
 Path-filtered on push, each workflow lists its area's projects and hands the whole list to the shared composite action at `.github/actions/build/action.yml`, one job per OS. The action restores, builds, and tests. **It does not pack or push** — publishing from there had every area workflow racing to push a package built from whatever was on `main`, at a version that had passed no release gate. These workflows declare `permissions: contents: read` only.

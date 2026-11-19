@@ -76,7 +76,7 @@ jobs:
       github.event_name != 'pull_request_target' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
        github.actor != 'dependabot[bot]')
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     # No measured run exists yet. The module stops starting requests after 45 minutes; 120 is the
     # no-evidence default in .claude/rules/build-system.md (job limits). Resize from the first runs.
     timeout-minutes: 120

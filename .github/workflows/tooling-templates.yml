@@ -68,7 +68,7 @@ concurrency:
 jobs:
   build:
     name: "Templates [${{ matrix.os }}]"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')[matrix.os] || matrix.os }}
     # The slowest successful job took 32m30s (run 38563045950); twice that, rounded up to 15 minutes.
     timeout-minutes: 75
     env:
