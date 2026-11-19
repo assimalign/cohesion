@@ -212,10 +212,11 @@ public sealed partial class SqlSortSpillConformanceTests
                 int mode = modeIndex;
                 for (int executionIndex = 1; executionIndex <= (mode == 1 ? 1 : 3); executionIndex++)
                 {
-                    int execution = executionIndex;
+                    int execution = executionIndex, weakCapacity = weak.Capacity, retainedCapacity = retained.Capacity;
                     var sampled = await batch.MeasureAsync($"rows={count}|execution={execution}|mutant={mode}", async readHeap =>
                     {
-                        weak.Clear(); retained.Clear(); mutant = mode;
+                        weak.Clear(); weak.Capacity = weakCapacity;
+                        retained.Clear(); retained.Capacity = retainedCapacity; mutant = mode;
                         images.Drain(pool);
                         long before = readHeap(), peak = 0, replayPeak = 0, replayDepth = 0;
                         long trimmedBefore = pool.Trimmed, rentedBefore = pool.Rented, allocatedBefore = pool.Allocated, droppedBefore = pool.Dropped, unknownBefore = pool.Unknown;

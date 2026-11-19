@@ -65,10 +65,10 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue, minimumDrain = long.MaxValue;
             for (int executionIndex = 0; executionIndex < 3; executionIndex++)
             {
-                int execution = executionIndex;
+                int execution = executionIndex, retainedCapacity = retained.Capacity;
                 var sampled = await batch.MeasureAsync($"grouped={grouped}|mutant={mutant}|rows={count}|execution={execution}", async readHeap =>
                 {
-                    retained.Clear();
+                    retained.Clear(); retained.Capacity = retainedCapacity;
                     images.Drain(pool);
                     long baseline = readHeap(), peak = 0, drainPeak = 0;
                     int appended = 0, drained = 0, sampled = 0, drainSamples = 0;
@@ -198,10 +198,10 @@ public sealed partial class SqlSortSpillConformanceTests
             long minimum = long.MaxValue, minimumCopy = long.MaxValue;
             for (int executionIndex = 0; executionIndex < 3; executionIndex++)
             {
-                int execution = executionIndex, measurement = 0;
+                int execution = executionIndex, measurement = 0, retainedCapacity = retained.Capacity;
                 var sampled = await acceptance.MeasureAsync($"mutant={mutant}|rows={count}|execution={execution}", async readHeap =>
                 {
-                    retained.Clear();
+                    retained.Clear(); retained.Capacity = retainedCapacity;
                     int attempt = measurement++;
                     await using var retry = attempt == 0 ? null : await BuildFixture(count, $"-execution-{execution}-attempt-{attempt}");
                     var targetSession = retry?.Session ?? session; var targetEngine = retry?.Engine ?? engine;

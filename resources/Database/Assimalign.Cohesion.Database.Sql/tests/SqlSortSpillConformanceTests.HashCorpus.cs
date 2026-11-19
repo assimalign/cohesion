@@ -55,9 +55,11 @@ public sealed partial class SqlSortSpillConformanceTests
     }
 
     private sealed record CorpusOutcome(RowValues[] Rows, string? Error, long Visits, long Peak, int Passes, long Batches, long TempPeak, long[] Calls, long Live = 0);
-    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true, WindowPoolLease? images = null, HashPoolEvents? pool = null, Func<long>? readHeap = null)
+    private async Task<CorpusOutcome> ExecuteCorpusAsync(CorpusRun run, string sql, long fail = -1, Dictionary<string, object?>? parameters = null, bool sample = false, bool everyTransition = true, WindowPoolLease? images = null, HashPoolEvents? pool = null, Func<long>? readHeap = null, int? logCapacity = null)
     {
-        run.Log.Clear(); run.FailAt = fail;
+        run.Log.Clear();
+        if (logCapacity is int capacity) { run.Log.Capacity = capacity; }
+        run.FailAt = fail;
         await run.Session.ExecuteAsync("ALTER SEQUENCE s RESTART WITH 1");
         RowValues[] rows = []; string? error = null; long live = 0;
         if (sample) { images?.Drain(pool!); }
@@ -164,13 +166,13 @@ public sealed partial class SqlSortSpillConformanceTests
                 {
                     if (pinPool)
                     {
-                        int grantIndex = index;
+                        int grantIndex = index, logCapacity = spilled[index].Log.Capacity;
                         CorpusOutcome? expectedForAttempt = expected;
                         var sampled = await acceptance!.MeasureAsync($"seed={corpusSeed}|statements={statements}|range=[{first},{last})|statement={test}|grant={grants[grantIndex]}|shard={shard}|shards={shards}", async readHeap =>
                         {
                             var candidateExpected = expectedForAttempt ?? await ExecuteCorpusAsync(unlimited, sql, fail);
                             expectedForAttempt = null;
-                            var outcome = await ExecuteCorpusAsync(spilled[grantIndex], sql, fail, sample: true, images: images, pool: pool, readHeap: readHeap);
+                            var outcome = await ExecuteCorpusAsync(spilled[grantIndex], sql, fail, sample: true, images: images, pool: pool, readHeap: readHeap, logCapacity: logCapacity);
                             return new CorpusHeapReading(candidateExpected, outcome);
                         });
                         recordings[grantIndex].Add(sampled);

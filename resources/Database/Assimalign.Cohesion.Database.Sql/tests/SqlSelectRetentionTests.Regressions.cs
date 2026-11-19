@@ -217,11 +217,14 @@ public sealed partial class SqlSelectRetentionTests
             // Act
             var batch = new Batch(pool, _output, nameof(ExecuteAsync_LargeInput_ShouldBoundIntermediateRetention));
             database.Definitions.ForceSelectRetentionBasePath = true;
+            int baseObservationCapacity = observations.EnsureCapacity(0);
             var measuredBase = await batch.MeasureAsync($"shape={shape.Item1}|base=True", async readHeap =>
             {
                 database.Definitions.ForceSelectRetentionBasePath = true;
                 readSample = readHeap;
-                observations.Clear(); calls = 0; sampledLive = 0;
+                observations.Clear();
+                if (observations.EnsureCapacity(0) != baseObservationCapacity) { observations = new Dictionary<string, int>(baseObservationCapacity); }
+                calls = 0; sampledLive = 0;
                 images.Drain(pool);
                 long startingLive = readHeap();
                 var rows = await Rows(session, shape.Item2);
@@ -234,12 +237,14 @@ public sealed partial class SqlSelectRetentionTests
             long afterLive = long.MaxValue;
             for (int roundIndex = 0; roundIndex < 3 && afterLive >= 2_000_000; roundIndex++)
             {
-                int round = roundIndex;
+                int round = roundIndex, observationCapacity = observations.EnsureCapacity(0);
                 var measured = await batch.MeasureAsync($"shape={shape.Item1}|base=False|round={round}", async readHeap =>
                 {
                     database.Definitions.ForceSelectRetentionBasePath = false;
                     readSample = readHeap;
-                    observations.Clear(); calls = 0; sampledLive = 0;
+                    observations.Clear();
+                    if (observations.EnsureCapacity(0) != observationCapacity) { observations = new Dictionary<string, int>(observationCapacity); }
+                    calls = 0; sampledLive = 0;
                     images.Drain(pool);
                     long startingLive = readHeap();
                     var rows = await Rows(session, shape.Item2);

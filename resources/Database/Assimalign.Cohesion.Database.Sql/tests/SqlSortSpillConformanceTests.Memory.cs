@@ -55,10 +55,13 @@ public sealed partial class SqlSortSpillConformanceTests
         using var pool = new HashPoolEvents();
         using var images = new WindowPoolLease();
         var batch = new Batch(pool, _output, nameof(ExecuteAsync_LiveObjects_ShouldFitGrantAcrossHandoffAndDelivery));
+        int weakCapacity = weak.Capacity, sampleCapacity = samples.EnsureCapacity(0);
         var sampled = await batch.MeasureAsync($"rows=4000", async readHeap =>
         {
             readSample = readHeap;
-            weak.Clear(); samples.Clear(); afterHandoff = false; observe = false;
+            weak.Clear(); weak.Capacity = weakCapacity; samples.Clear();
+            if (samples.EnsureCapacity(0) != sampleCapacity) { samples = new Dictionary<string, long>(sampleCapacity); }
+            afterHandoff = false; observe = false;
             images.Drain(pool);
 
             baseline = readHeap(); observe = true;
