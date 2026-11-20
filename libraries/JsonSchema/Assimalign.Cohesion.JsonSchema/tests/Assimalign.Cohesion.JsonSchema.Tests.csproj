@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.JsonSchema.Tests</RootNamespace>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.JsonSchema" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- The official JSON Schema Test Suite, vendored at the commit docs/PROVENANCE.md records. -->
+		<None Update="TestObjects\JSON-Schema-Test-Suite\**\*" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+</Project>

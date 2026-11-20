@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="SchemaJsonInvalid" xml:space="preserve"><value>The schema is not valid JSON.</value></data>
+  <data name="SchemaKindInvalid" xml:space="preserve"><value>The schema at {0} is neither an object nor a boolean.</value></data>
+  <data name="KeywordValueInvalid" xml:space="preserve"><value>The value of '{0}' at {1} does not have the shape its dialect requires.</value></data>
+  <data name="UriReferenceInvalid" xml:space="preserve"><value>The value of '{0}' at {1} is not a valid URI reference.</value></data>
+  <data name="IdFragmentInvalid" xml:space="preserve"><value>The value of '{0}' at {1} has a fragment, which this dialect does not allow in an identifier.</value></data>
+  <data name="AnchorInvalid" xml:space="preserve"><value>The value of '{0}' at {1} is not a valid anchor name.</value></data>
+  <data name="ReferenceUnresolved" xml:space="preserve"><value>The reference '{0}' at {1} names no known schema.</value></data>
+  <data name="DialectUnknown" xml:space="preserve"><value>The meta-schema '{0}' is not a known dialect, a registered dialect or a resolvable document.</value></data>
+  <data name="VocabularyUnsupported" xml:space="preserve"><value>The meta-schema '{0}' requires the vocabulary '{1}', which is not registered.</value></data>
+  <data name="ResourceDuplicate" xml:space="preserve"><value>A schema resource with the URI '{0}' is already registered.</value></data>
+  <data name="PatternInvalid" xml:space="preserve"><value>The regular expression '{0}' at {1} is not a supported ECMA-262 pattern: {2}</value></data>
+  <data name="PatternTimeout" xml:space="preserve"><value>The regular expression '{0}' at {1} exceeded the match timeout.</value></data>
+  <data name="EvaluationDepthExceeded" xml:space="preserve"><value>Evaluation exceeded the maximum depth of {0} nested schemas.</value></data>
+  <data name="ReferenceCycle" xml:space="preserve"><value>The reference at {0} re-enters a schema already being applied to the same instance location.</value></data>
+  <data name="MetaSchemaViolation" xml:space="preserve"><value>The schema does not conform to its meta-schema '{0}'.</value></data>
+  <data name="UriNotAbsolute" xml:space="preserve"><value>The URI must be absolute.</value></data>
+  <data name="JsonPointerNull" xml:space="preserve"><value>A JSON Pointer cannot be null.</value></data>
+  <data name="JsonPointerNoLeadingSlash" xml:space="preserve"><value>A non-empty JSON Pointer must start with '/'.</value></data>
+  <data name="JsonPointerEscapeInvalid" xml:space="preserve"><value>A JSON Pointer may use '~' only in the escapes '~0' and '~1'.</value></data>
+  <data name="JsonPointerDefault" xml:space="preserve"><value>The JSON Pointer is the default value, which holds no pointer.</value></data>
+  <data name="KeywordDuplicate" xml:space="preserve"><value>The keyword '{0}' is defined more than once.</value></data>
+  <data name="KeywordFactoryResultNull" xml:space="preserve"><value>The factory of the keyword '{0}' returned null.</value></data>
+  <data name="DialectCoreVocabularyInvalid" xml:space="preserve"><value>A dialect must include exactly one core vocabulary.</value></data>
+  <data name="InstanceUndefined" xml:space="preserve"><value>The instance is the default JsonElement, which holds no value.</value></data>
+  <data name="AnnotationUndefined" xml:space="preserve"><value>The annotation is the default JsonElement, which holds no value.</value></data>
+  <data name="InstanceMemberNotFound" xml:space="preserve"><value>The instance has no member with that name.</value></data>
+  <data name="InstanceItemNotFound" xml:space="preserve"><value>The instance has no item at that index.</value></data>
+  <data name="SubschemaNotFound" xml:space="preserve"><value>The keyword has no subschema at that location.</value></data>
+  <data name="KeywordContextClosed" xml:space="preserve"><value>The keyword context can be used only while the keyword evaluates.</value></data>
+  <data name="RegexUnmatchedParenthesis" xml:space="preserve"><value>a parenthesis is unmatched.</value></data>
+  <data name="RegexNothingToRepeat" xml:space="preserve"><value>a quantifier has nothing to repeat.</value></data>
+  <data name="RegexQuantifierRangeInvalid" xml:space="preserve"><value>a quantifier's minimum exceeds its maximum.</value></data>
+  <data name="RegexGroupInvalid" xml:space="preserve"><value>the group syntax is not ECMA-262.</value></data>
+  <data name="RegexGroupNameDuplicate" xml:space="preserve"><value>a group name is declared twice.</value></data>
+  <data name="RegexGroupNameInvalid" xml:space="preserve"><value>a group name is not a valid identifier.</value></data>
+  <data name="RegexTrailingBackslash" xml:space="preserve"><value>the pattern ends with a backslash.</value></data>
+  <data name="RegexBackreferenceInvalid" xml:space="preserve"><value>a backreference names no group.</value></data>
+  <data name="RegexEscapeInvalid" xml:space="preserve"><value>an escape is not defined by ECMA-262.</value></data>
+  <data name="RegexPropertyInvalid" xml:space="preserve"><value>a Unicode property escape is malformed.</value></data>
+  <data name="RegexPropertyUnsupported" xml:space="preserve"><value>a Unicode property is not supported.</value></data>
+  <data name="RegexClassUnterminated" xml:space="preserve"><value>a character class is not terminated.</value></data>
+  <data name="RegexClassRangeInvalid" xml:space="preserve"><value>a character class range is out of order or uses a class escape as an end.</value></data>
+</root>

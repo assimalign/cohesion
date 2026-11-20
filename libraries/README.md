@@ -19,6 +19,7 @@ Public API reference belongs in [cohesion-docs](https://github.com/assimalign/co
 | `Hosting` | Service hosting model and lifecycle. |
 | `Http` | HTTP protocol stack (HTTP/1.1, HTTP/2, HTTP/3/QPACK). |
 | `IdentityModel` | Identity, claims, and token model. |
+| `JsonSchema` | JSON Schema evaluation for draft-04 through 2020-12, and schema generation from `System.Text.Json` contracts. |
 | `Logging` | Logging abstractions and sinks. |
 | `ObjectMapping` | Object-to-object mapping. |
 | `ObjectPool` | Object pooling. |
