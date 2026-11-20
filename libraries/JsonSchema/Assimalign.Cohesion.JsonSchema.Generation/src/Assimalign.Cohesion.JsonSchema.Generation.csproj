@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<!-- The family shares the root's namespace, so JsonSchemaDocument.Generate needs no extra using. -->
+		<RootNamespace>Assimalign.Cohesion.JsonSchema</RootNamespace>
+		<Description>JSON Schema generation for Cohesion: generates a schema document from a System.Text.Json contract (JsonTypeInfo, including source-generated contexts) for the draft-07, 2019-09 or 2020-12 dialect. Wraps the BCL JsonSchemaExporter, hoists repeated and recursive shapes into $defs, applies nullability where each value is used, and returns a document the Assimalign.Cohesion.JsonSchema evaluator loads. NativeAOT- and trimming-safe.</Description>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.JsonSchema" />
+	</ItemGroup>
+
+</Project>
