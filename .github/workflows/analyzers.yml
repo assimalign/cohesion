@@ -27,6 +27,7 @@ on:
       - "resources/Web/Assimalign.Cohesion.Web.HostFiltering/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.OpenApi/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Proxy/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.Query/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.RateLimiting/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/src/**"

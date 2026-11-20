@@ -13,6 +13,7 @@ namespace Assimalign.Cohesion.Http;
 public sealed class HttpQueryCollection : IHttpQueryCollection
 {
     private readonly Dictionary<HttpQueryKey, HttpQueryValue> _store;
+    private HttpQuery? _source;
 
     /// <summary>
     /// Initializes an empty query collection.
@@ -51,6 +52,7 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
         {
             ThrowIfReadOnly();
             _store[key] = value;
+            _source = null;
         }
     }
 
@@ -73,6 +75,26 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
     public bool IsReadOnly { get; set; }
 
     /// <summary>
+    /// Gets the query text this collection was parsed from, or <see langword="null"/> when the collection
+    /// was built in code or has changed since it was parsed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="HttpQuery.Parse"/> sets it. Any call to <see cref="Add(HttpQueryKey, HttpQueryValue)"/>,
+    /// the indexer's setter, <see cref="Clear"/>, or a <c>Remove</c> that removes an entry clears it, because
+    /// the text would no longer describe the collection. Changing <see cref="IsReadOnly"/> keeps it.
+    /// </para>
+    /// <para>
+    /// The parsed collection does not round-trip: keys compare case-insensitively, repeated keys are
+    /// grouped, a parameter with an empty name is skipped, and <see cref="HttpQuery.Create"/> re-encodes
+    /// every name and value. Code that must pass the query on as the client sent it, such as a proxy or a
+    /// signed-URL check, reads this property first and falls back to <see cref="HttpQuery.Create"/> when it
+    /// is <see langword="null"/>.
+    /// </para>
+    /// </remarks>
+    public HttpQuery? Source => _source;
+
+    /// <summary>
     /// Appends query values, preserving existing occurrences and their order.
     /// </summary>
     /// <param name="key">The query key to add.</param>
@@ -83,6 +105,7 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
         _store[key] = _store.TryGetValue(key, out HttpQueryValue existing)
             ? HttpQueryValue.Concat(existing, value)
             : value;
+        _source = null;
     }
 
     /// <summary>
@@ -101,6 +124,7 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
     {
         ThrowIfReadOnly();
         _store.Clear();
+        _source = null;
     }
 
     /// <summary>
@@ -135,7 +159,7 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
     public bool Remove(HttpQueryKey key)
     {
         ThrowIfReadOnly();
-        return _store.Remove(key);
+        return ClearSourceWhen(_store.Remove(key));
     }
 
     /// <summary>
@@ -146,7 +170,7 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
     public bool Remove(KeyValuePair<HttpQueryKey, HttpQueryValue> item)
     {
         ThrowIfReadOnly();
-        return ((ICollection<KeyValuePair<HttpQueryKey, HttpQueryValue>>)_store).Remove(item);
+        return ClearSourceWhen(((ICollection<KeyValuePair<HttpQueryKey, HttpQueryValue>>)_store).Remove(item));
     }
 
     /// <inheritdoc />
@@ -164,6 +188,23 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
     IEnumerator IEnumerable.GetEnumerator()
     {
         return GetEnumerator();
+    }
+
+    // Records the query text a parse produced the collection from. Called last by HttpQuery.Parse, after
+    // the Add calls that would otherwise clear it.
+    internal void SetSource(HttpQuery source)
+    {
+        _source = source;
+    }
+
+    private bool ClearSourceWhen(bool removed)
+    {
+        if (removed)
+        {
+            _source = null;
+        }
+
+        return removed;
     }
 
     private void ThrowIfReadOnly()
@@ -187,5 +228,6 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
         public ICollection<HttpQueryValue> Values => _target.Values;
         public int Count => _target.Count;
         public bool IsReadOnly => _target.IsReadOnly;
+        public HttpQuery? Source => _target.Source;
     }
 }
