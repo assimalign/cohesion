@@ -31,4 +31,103 @@
   <data name="HandshakeTimedOut" xml:space="preserve">
     <value>The AMQP connection was not established within the handshake timeout of {0}.</value>
   </data>
+  <data name="ProtocolIdHasNoFrameType" xml:space="preserve">
+    <value>The selected AMQP protocol identifier does not map directly to an AMQP frame type.</value>
+  </data>
+  <data name="PayloadTruncated" xml:space="preserve">
+    <value>The AMQP payload ended unexpectedly.</value>
+  </data>
+  <data name="DescriptorMissing" xml:space="preserve">
+    <value>AMQP described values require a non-null descriptor.</value>
+  </data>
+  <data name="MapElementCountOdd" xml:space="preserve">
+    <value>AMQP maps require an even number of elements.</value>
+  </data>
+  <data name="MapKeyNull" xml:space="preserve">
+    <value>AMQP map keys cannot be null.</value>
+  </data>
+  <data name="ProtocolHeaderInvalid" xml:space="preserve">
+    <value>The AMQP protocol header is invalid.</value>
+  </data>
+  <data name="FrameHeaderTruncated" xml:space="preserve">
+    <value>The AMQP frame is smaller than the minimum frame header size.</value>
+  </data>
+  <data name="FrameSizeMismatch" xml:space="preserve">
+    <value>The AMQP frame size does not match the supplied payload.</value>
+  </data>
+  <data name="FrameDataOffsetInvalid" xml:space="preserve">
+    <value>The AMQP frame data offset is invalid.</value>
+  </data>
+  <data name="FrameTypeMismatch" xml:space="preserve">
+    <value>The AMQP frame type does not match the current protocol phase.</value>
+  </data>
+  <data name="PerformativeMissing" xml:space="preserve">
+    <value>The AMQP frame does not contain a performative.</value>
+  </data>
+  <data name="FrameSizeFieldInvalid" xml:space="preserve">
+    <value>The AMQP frame size is invalid.</value>
+  </data>
+  <data name="SectionNotDescribed" xml:space="preserve">
+    <value>AMQP message sections must be encoded as described values.</value>
+  </data>
+  <data name="SectionDescriptorNotNumeric" xml:space="preserve">
+    <value>AMQP message section descriptors must be numeric.</value>
+  </data>
+  <data name="PerformativeNotDescribed" xml:space="preserve">
+    <value>AMQP performatives must be encoded as described values.</value>
+  </data>
+  <data name="PerformativeDescriptorNotNumeric" xml:space="preserve">
+    <value>AMQP performative descriptors must be numeric.</value>
+  </data>
+  <data name="ValueNotList" xml:space="preserve">
+    <value>The AMQP value was expected to be encoded as a list.</value>
+  </data>
+  <data name="ValueNotBoolean" xml:space="preserve">
+    <value>The AMQP value was expected to be a boolean.</value>
+  </data>
+  <data name="ValueNotByte" xml:space="preserve">
+    <value>The AMQP value was expected to be a byte.</value>
+  </data>
+  <data name="ValueNotUnsignedInteger" xml:space="preserve">
+    <value>The AMQP value was expected to be an unsigned integer.</value>
+  </data>
+  <data name="ValueNotSymbol" xml:space="preserve">
+    <value>The AMQP value was expected to be a symbol.</value>
+  </data>
+  <data name="ArrayElementNotSymbol" xml:space="preserve">
+    <value>The AMQP array element was expected to be a symbol.</value>
+  </data>
+  <data name="ValueNotSymbolArray" xml:space="preserve">
+    <value>The AMQP value was expected to be a symbol array.</value>
+  </data>
+  <data name="ValueNotBinary" xml:space="preserve">
+    <value>The AMQP value was expected to be binary.</value>
+  </data>
+  <data name="ValueNotMap" xml:space="preserve">
+    <value>The AMQP value was expected to be a map.</value>
+  </data>
+  <data name="ApplicationPropertyKeyNotString" xml:space="preserve">
+    <value>The AMQP application-properties map requires string keys.</value>
+  </data>
+  <data name="UnsettledMapInvalid" xml:space="preserve">
+    <value>The AMQP unsettled map was expected to be a map.</value>
+  </data>
+  <data name="ValueTypeUnsupported" xml:space="preserve">
+    <value>The AMQP value type '{0}' is not supported.</value>
+  </data>
+  <data name="FormatCodeUnsupported" xml:space="preserve">
+    <value>The AMQP format code '0x{0:x2}' is not supported.</value>
+  </data>
+  <data name="FrameTooLarge" xml:space="preserve">
+    <value>The encoded AMQP frame size '{0}' exceeds the configured maximum frame size '{1}'.</value>
+  </data>
+  <data name="SectionDescriptorUnsupported" xml:space="preserve">
+    <value>The AMQP message section descriptor '0x{0:x}' is not supported.</value>
+  </data>
+  <data name="PerformativeTypeUnsupported" xml:space="preserve">
+    <value>The AMQP performative type '{0}' is not supported.</value>
+  </data>
+  <data name="PerformativeDescriptorInvalid" xml:space="preserve">
+    <value>The AMQP performative descriptor '0x{0:x}' is not valid for the current protocol phase.</value>
+  </data>
 </root>

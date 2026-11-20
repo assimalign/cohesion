@@ -98,7 +98,7 @@ internal ref struct AmqpBufferReader
     {
         if (Remaining < length)
         {
-            throw new AmqpProtocolException("The AMQP payload ended unexpectedly.");
+            throw new AmqpProtocolException(ErrorMessages.PayloadTruncated);
         }
     }
 

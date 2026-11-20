@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO.Pipelines;
 
 namespace Assimalign.Cohesion.Amqp.Connections.Internal;
@@ -58,7 +59,7 @@ internal static partial class AmqpEncoding
             bytes[2] != (byte) 'Q' ||
             bytes[3] != (byte) 'P')
         {
-            throw new AmqpProtocolException("The AMQP protocol header is invalid.");
+            throw new AmqpProtocolException(ErrorMessages.ProtocolHeaderInvalid);
         }
 
         return new AmqpProtocolHeader((AmqpProtocolId) bytes[4], bytes[5], bytes[6], bytes[7]);
@@ -81,7 +82,7 @@ internal static partial class AmqpEncoding
 
         if (size > maxFrameSize)
         {
-            throw new AmqpProtocolException($"The encoded AMQP frame size '{size}' exceeds the configured maximum frame size '{maxFrameSize}'.");
+            throw new AmqpProtocolException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FrameTooLarge, size, maxFrameSize));
         }
 
         ArrayBufferWriter<byte> frameWriter = new();
@@ -98,7 +99,7 @@ internal static partial class AmqpEncoding
     {
         if (bytes.Length < 8)
         {
-            throw new AmqpProtocolException("The AMQP frame is smaller than the minimum frame header size.");
+            throw new AmqpProtocolException(ErrorMessages.FrameHeaderTruncated);
         }
 
         uint size = BinaryPrimitives.ReadUInt32BigEndian(bytes);
@@ -109,24 +110,24 @@ internal static partial class AmqpEncoding
 
         if (size != bytes.Length)
         {
-            throw new AmqpProtocolException("The AMQP frame size does not match the supplied payload.");
+            throw new AmqpProtocolException(ErrorMessages.FrameSizeMismatch);
         }
 
         if (offset < 8 || offset > bytes.Length)
         {
-            throw new AmqpProtocolException("The AMQP frame data offset is invalid.");
+            throw new AmqpProtocolException(ErrorMessages.FrameDataOffsetInvalid);
         }
 
         if (frameType != (byte) expectedFrameType)
         {
-            throw new AmqpProtocolException("The AMQP frame type does not match the current protocol phase.");
+            throw new AmqpProtocolException(ErrorMessages.FrameTypeMismatch);
         }
 
         AmqpBufferReader reader = new(bytes[offset..]);
 
         if (reader.End)
         {
-            throw new AmqpProtocolException("The AMQP frame does not contain a performative.");
+            throw new AmqpProtocolException(ErrorMessages.PerformativeMissing);
         }
 
         AmqpPerformative performative = ReadPerformative(ref reader, expectedFrameType);
@@ -150,7 +151,7 @@ internal static partial class AmqpEncoding
 
         if (size < 8)
         {
-            throw new AmqpProtocolException("The AMQP frame size is invalid.");
+            throw new AmqpProtocolException(ErrorMessages.FrameSizeFieldInvalid);
         }
 
         if (buffer.Length < size)
@@ -260,14 +261,14 @@ internal static partial class AmqpEncoding
         {
             if (reader.ReadByte() != 0x00)
             {
-                throw new AmqpProtocolException("AMQP message sections must be encoded as described values.");
+                throw new AmqpProtocolException(ErrorMessages.SectionNotDescribed);
             }
 
             (object descriptor, object? value) = ReadDescribedRaw(ref reader);
 
             if (descriptor is not ulong descriptorCode)
             {
-                throw new AmqpProtocolException("AMQP message section descriptors must be numeric.");
+                throw new AmqpProtocolException(ErrorMessages.SectionDescriptorNotNumeric);
             }
 
             switch (descriptorCode)
@@ -302,7 +303,7 @@ internal static partial class AmqpEncoding
                     message.Footer = AsSymbolMap(value);
                     break;
                 default:
-                    throw new AmqpProtocolException($"The AMQP message section descriptor '0x{descriptorCode:x}' is not supported.");
+                    throw new AmqpProtocolException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.SectionDescriptorUnsupported, descriptorCode));
             }
         }
 
@@ -359,7 +360,7 @@ internal static partial class AmqpEncoding
                 WriteDescribedList(writer, SaslOutcomeDescriptor, new object?[] { (byte) saslOutcome.Code, saslOutcome.AdditionalData });
                 return;
             default:
-                throw new AmqpProtocolException($"The AMQP performative type '{performative.GetType().FullName}' is not supported.");
+                throw new AmqpProtocolException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.PerformativeTypeUnsupported, performative.GetType().FullName));
         }
     }
 
@@ -367,7 +368,7 @@ internal static partial class AmqpEncoding
     {
         if (reader.ReadByte() != 0x00)
         {
-            throw new AmqpProtocolException("AMQP performatives must be encoded as described values.");
+            throw new AmqpProtocolException(ErrorMessages.PerformativeNotDescribed);
         }
 
         (object descriptor, object? value) = ReadDescribedRaw(ref reader);
@@ -375,7 +376,7 @@ internal static partial class AmqpEncoding
 
         if (descriptor is not ulong descriptorCode)
         {
-            throw new AmqpProtocolException("AMQP performative descriptors must be numeric.");
+            throw new AmqpProtocolException(ErrorMessages.PerformativeDescriptorNotNumeric);
         }
 
         if (descriptorCode == OpenDescriptor && frameType == AmqpFrameType.Amqp &&
@@ -400,7 +401,7 @@ internal static partial class AmqpEncoding
             SaslChallengeDescriptor when frameType == AmqpFrameType.Sasl => new AmqpSaslChallengePerformative { Challenge = AsBinary(GetField(fields, 0)) },
             SaslResponseDescriptor when frameType == AmqpFrameType.Sasl => new AmqpSaslResponsePerformative { Response = AsBinary(GetField(fields, 0)) },
             SaslOutcomeDescriptor when frameType == AmqpFrameType.Sasl => new AmqpSaslOutcomePerformative { Code = (AmqpSaslCode) AsByte(GetField(fields, 0)), AdditionalData = AsBinaryNullable(GetField(fields, 1)) },
-            _ => throw new AmqpProtocolException($"The AMQP performative descriptor '0x{descriptorCode:x}' is not valid for the current protocol phase.")
+            _ => throw new AmqpProtocolException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.PerformativeDescriptorInvalid, descriptorCode))
         };
     }
 
@@ -448,18 +449,18 @@ internal static partial class AmqpEncoding
     }
 
     private static object? GetField(object?[] fields, int index) => index < fields.Length ? fields[index] : null;
-    private static object?[] GetList(object? value) => value as object?[] ?? throw new AmqpProtocolException("The AMQP value was expected to be encoded as a list.");
+    private static object?[] GetList(object? value) => value as object?[] ?? throw new AmqpProtocolException(ErrorMessages.ValueNotList);
     private static string? AsString(object? value) => value as string;
-    private static bool AsBool(object? value) => AsBoolNullable(value) ?? throw new AmqpProtocolException("The AMQP value was expected to be a boolean.");
+    private static bool AsBool(object? value) => AsBoolNullable(value) ?? throw new AmqpProtocolException(ErrorMessages.ValueNotBoolean);
     private static bool? AsBoolNullable(object? value) => value is bool boolean ? boolean : null;
-    private static byte AsByte(object? value) => AsByteNullable(value) ?? throw new AmqpProtocolException("The AMQP value was expected to be a byte.");
+    private static byte AsByte(object? value) => AsByteNullable(value) ?? throw new AmqpProtocolException(ErrorMessages.ValueNotByte);
     private static byte? AsByteNullable(object? value) => value switch { byte byteValue => byteValue, sbyte signedByteValue => unchecked((byte) signedByteValue), _ => null };
     private static ushort? AsUShortNullable(object? value) => value switch { ushort ushortValue => ushortValue, uint uintValue when uintValue <= ushort.MaxValue => (ushort) uintValue, _ => null };
-    private static uint AsUInt(object? value) => AsUIntNullable(value) ?? throw new AmqpProtocolException("The AMQP value was expected to be an unsigned integer.");
+    private static uint AsUInt(object? value) => AsUIntNullable(value) ?? throw new AmqpProtocolException(ErrorMessages.ValueNotUnsignedInteger);
     private static uint? AsUIntNullable(object? value) => value switch { uint uintValue => uintValue, int intValue when intValue >= 0 => unchecked((uint) intValue), byte byteValue => byteValue, ushort ushortValue => ushortValue, _ => null };
     private static ulong? AsULongNullable(object? value) => value switch { ulong ulongValue => ulongValue, long longValue when longValue >= 0 => unchecked((ulong) longValue), uint uintValue => uintValue, _ => null };
     private static DateTimeOffset? AsTimestampNullable(object? value) => value is DateTimeOffset timestamp ? timestamp : default(DateTimeOffset?);
-    private static AmqpSymbol AsSymbol(object? value) => AsSymbolNullable(value) ?? throw new AmqpProtocolException("The AMQP value was expected to be a symbol.");
+    private static AmqpSymbol AsSymbol(object? value) => AsSymbolNullable(value) ?? throw new AmqpProtocolException(ErrorMessages.ValueNotSymbol);
     private static AmqpSymbol? AsSymbolNullable(object? value) => value is AmqpSymbol symbol ? symbol : default(AmqpSymbol?);
 
     private static IReadOnlyList<AmqpSymbol>? AsSymbolList(object? value)
@@ -468,12 +469,12 @@ internal static partial class AmqpEncoding
         {
             null => null,
             AmqpSymbol[] symbols => symbols,
-            object?[] objects => Array.ConvertAll(objects, static item => item is AmqpSymbol symbol ? symbol : throw new AmqpProtocolException("The AMQP array element was expected to be a symbol.")),
-            _ => throw new AmqpProtocolException("The AMQP value was expected to be a symbol array.")
+            object?[] objects => Array.ConvertAll(objects, static item => item is AmqpSymbol symbol ? symbol : throw new AmqpProtocolException(ErrorMessages.ArrayElementNotSymbol)),
+            _ => throw new AmqpProtocolException(ErrorMessages.ValueNotSymbolArray)
         };
     }
 
-    private static ReadOnlyMemory<byte> AsBinary(object? value) => AsBinaryNullable(value) ?? throw new AmqpProtocolException("The AMQP value was expected to be binary.");
+    private static ReadOnlyMemory<byte> AsBinary(object? value) => AsBinaryNullable(value) ?? throw new AmqpProtocolException(ErrorMessages.ValueNotBinary);
     private static ReadOnlyMemory<byte>? AsBinaryNullable(object? value) => value switch { byte[] byteArray => byteArray, ReadOnlyMemory<byte> memory => memory, _ => null };
     private static AmqpDescribedValue? AsDescribedValue(object? value) => value as AmqpDescribedValue;
     private static AmqpSource? AsSource(object? value) => value as AmqpSource;
@@ -487,7 +488,7 @@ internal static partial class AmqpEncoding
             return null;
         }
 
-        Dictionary<object, object?> map = value as Dictionary<object, object?> ?? throw new AmqpProtocolException("The AMQP value was expected to be a map.");
+        Dictionary<object, object?> map = value as Dictionary<object, object?> ?? throw new AmqpProtocolException(ErrorMessages.ValueNotMap);
         Dictionary<AmqpSymbol, object?> converted = new(map.Count);
 
         foreach ((object key, object? mapValue) in map)
@@ -505,14 +506,14 @@ internal static partial class AmqpEncoding
             return null;
         }
 
-        Dictionary<object, object?> map = value as Dictionary<object, object?> ?? throw new AmqpProtocolException("The AMQP value was expected to be a map.");
+        Dictionary<object, object?> map = value as Dictionary<object, object?> ?? throw new AmqpProtocolException(ErrorMessages.ValueNotMap);
         Dictionary<string, object?> converted = new(map.Count);
 
         foreach ((object key, object? mapValue) in map)
         {
             if (key is not string stringKey)
             {
-                throw new AmqpProtocolException("The AMQP application-properties map requires string keys.");
+                throw new AmqpProtocolException(ErrorMessages.ApplicationPropertyKeyNotString);
             }
 
             converted[stringKey] = mapValue;
@@ -528,7 +529,7 @@ internal static partial class AmqpEncoding
             return null;
         }
 
-        Dictionary<object, object?> map = value as Dictionary<object, object?> ?? throw new AmqpProtocolException("The AMQP unsettled map was expected to be a map.");
+        Dictionary<object, object?> map = value as Dictionary<object, object?> ?? throw new AmqpProtocolException(ErrorMessages.UnsettledMapInvalid);
         Dictionary<ReadOnlyMemory<byte>, AmqpDescribedValue?> converted = new(map.Count);
 
         foreach ((object key, object? unsettledValue) in map)

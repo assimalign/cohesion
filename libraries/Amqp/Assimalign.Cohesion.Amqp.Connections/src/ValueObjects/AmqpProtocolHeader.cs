@@ -50,7 +50,7 @@ public readonly struct AmqpProtocolHeader : IEquatable<AmqpProtocolHeader>
     {
         AmqpProtocolId.Amqp => AmqpFrameType.Amqp,
         AmqpProtocolId.Sasl => AmqpFrameType.Sasl,
-        _ => throw new InvalidOperationException("The selected AMQP protocol identifier does not map directly to an AMQP frame type.")
+        _ => throw new InvalidOperationException(ErrorMessages.ProtocolIdHasNoFrameType)
     };
 
     /// <summary>

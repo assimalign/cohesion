@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 
 namespace Assimalign.Cohesion.Amqp.Connections.Internal;
@@ -129,7 +130,7 @@ internal static partial class AmqpEncoding
                 WriteList(writer, objectList);
                 return;
             default:
-                throw new AmqpProtocolException($"The AMQP value type '{value.GetType().FullName}' is not supported.");
+                throw new AmqpProtocolException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueTypeUnsupported, value.GetType().FullName));
         }
     }
 
@@ -179,7 +180,7 @@ internal static partial class AmqpEncoding
             0xd1 => ReadMap(ref reader, reader.ReadInt32(), true),
             0xe0 => ReadArray(ref reader, reader.ReadByte(), false),
             0xf0 => ReadArray(ref reader, reader.ReadInt32(), true),
-            _ => throw new AmqpProtocolException($"The AMQP format code '0x{formatCode:x2}' is not supported.")
+            _ => throw new AmqpProtocolException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FormatCodeUnsupported, formatCode))
         };
     }
 
@@ -200,7 +201,7 @@ internal static partial class AmqpEncoding
 
         if (descriptor is null)
         {
-            throw new AmqpProtocolException("AMQP described values require a non-null descriptor.");
+            throw new AmqpProtocolException(ErrorMessages.DescriptorMissing);
         }
 
         object? value = ReadValue(ref reader);
@@ -268,7 +269,7 @@ internal static partial class AmqpEncoding
 
         if ((count & 1) != 0)
         {
-            throw new AmqpProtocolException("AMQP maps require an even number of elements.");
+            throw new AmqpProtocolException(ErrorMessages.MapElementCountOdd);
         }
 
         Dictionary<object, object?> values = new(count / 2);
@@ -280,7 +281,7 @@ internal static partial class AmqpEncoding
 
             if (key is null)
             {
-                throw new AmqpProtocolException("AMQP map keys cannot be null.");
+                throw new AmqpProtocolException(ErrorMessages.MapKeyNull);
             }
 
             values[key] = mapValue;
