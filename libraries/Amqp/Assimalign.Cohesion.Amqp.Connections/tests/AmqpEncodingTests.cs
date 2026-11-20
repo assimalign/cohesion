@@ -145,6 +145,65 @@ public class AmqpEncodingTests
         };
     }
 
+    public static TheoryData<AmqpArray> DescribedArrays()
+    {
+        // One array of each element type, described so that each decodes as an AmqpArray, from every CLR type
+        // the encoder writes that type from; the string array is long enough to widen its elements.
+        return new TheoryData<AmqpArray>
+        {
+            new(AmqpPrimitiveType.Null, [], 7ul),
+            new(AmqpPrimitiveType.Boolean, [true, false], 7ul),
+            new(AmqpPrimitiveType.UByte, [byte.MinValue, byte.MaxValue], 7ul),
+            new(AmqpPrimitiveType.UShort, [ushort.MinValue, ushort.MaxValue], 7ul),
+            new(AmqpPrimitiveType.UInt, [uint.MinValue, uint.MaxValue], 7ul),
+            new(AmqpPrimitiveType.ULong, [ulong.MinValue, ulong.MaxValue], 7ul),
+            new(AmqpPrimitiveType.Byte, [sbyte.MinValue, sbyte.MaxValue], 7ul),
+            new(AmqpPrimitiveType.Short, [short.MinValue, short.MaxValue], 7ul),
+            new(AmqpPrimitiveType.Int, [int.MinValue, int.MaxValue], 7ul),
+            new(AmqpPrimitiveType.Long, [long.MinValue, long.MaxValue], 7ul),
+            new(AmqpPrimitiveType.Float, [-1.25f, float.MaxValue], 7ul),
+            new(AmqpPrimitiveType.Double, [-1.25d, double.MaxValue], 7ul),
+            new(AmqpPrimitiveType.Decimal32, [new AmqpDecimal32(uint.MaxValue)], 7ul),
+            new(AmqpPrimitiveType.Decimal64, [new AmqpDecimal64(ulong.MaxValue)], 7ul),
+            new(AmqpPrimitiveType.Decimal128, [new AmqpDecimal128(UInt128.MaxValue)], 7ul),
+            new(AmqpPrimitiveType.Char, [new Rune(0x1F600), 'a'], 7ul),
+            new(AmqpPrimitiveType.Timestamp, [DateTimeOffset.FromUnixTimeMilliseconds(1), new DateTime(1970, 1, 1, 0, 0, 0, 2, DateTimeKind.Utc)], 7ul),
+            new(AmqpPrimitiveType.Uuid, [new Guid("00112233-4455-6677-8899-aabbccddeeff")], 7ul),
+            new(AmqpPrimitiveType.Binary, [new byte[] { 1 }, new ReadOnlyMemory<byte>([2]), new Memory<byte>([3]), new ArraySegment<byte>([4]), AmqpDeliveryTag.Create(5ul)], 7ul),
+            new(AmqpPrimitiveType.String, ["a", new string('b', 300)], "x:strings"),
+            new(AmqpPrimitiveType.Symbol, [new AmqpSymbol("a"), new AmqpSymbol("b")], "x:symbols"),
+            new(AmqpPrimitiveType.List, [new List<object?> { 1 }, new object?[] { "a" }, new ArrayList { 2 }, new List<object?>()], 7ul),
+            new(AmqpPrimitiveType.Map, [new Dictionary<object, object?> { ["k"] = 1 }, new Dictionary<string, object?> { ["j"] = 2 }, new Hashtable { ["h"] = 3 }], 7ul),
+            new(AmqpPrimitiveType.Array, [new int[] { 1 }, new AmqpArray(AmqpPrimitiveType.UByte, [(byte)1]), new AmqpArray(AmqpPrimitiveType.String, ["a"], 8ul)], 7ul)
+        };
+    }
+
+    public static TheoryData<AmqpArray, string> RefusedAmqpArrays()
+    {
+        static string Mismatch(int index, Type type, AmqpPrimitiveType elementType)
+        {
+            return string.Format(CultureInfo.CurrentCulture, ErrorMessages.ArrayElementTypeMismatch, index, type, elementType);
+        }
+
+        return new TheoryData<AmqpArray, string>
+        {
+            { new(AmqpPrimitiveType.Int, [1, 2L]), Mismatch(1, typeof(long), AmqpPrimitiveType.Int) },
+            { new(AmqpPrimitiveType.UByte, [(byte)1, (sbyte)1]), Mismatch(1, typeof(sbyte), AmqpPrimitiveType.UByte) },
+            { new(AmqpPrimitiveType.Binary, [new byte[] { 1 }, new sbyte[] { 1 }]), Mismatch(1, typeof(sbyte[]), AmqpPrimitiveType.Binary) },
+            { new(AmqpPrimitiveType.Timestamp, [DateTimeOffset.UnixEpoch, 1L]), Mismatch(1, typeof(long), AmqpPrimitiveType.Timestamp) },
+            { new(AmqpPrimitiveType.Int, [1, null]), string.Format(CultureInfo.CurrentCulture, ErrorMessages.ArrayElementNull, 1) },
+            { new(AmqpPrimitiveType.Symbol, [new AmqpSymbol("a"), default(AmqpSymbol)]), string.Format(CultureInfo.CurrentCulture, ErrorMessages.ArrayElementNull, 1) },
+            { new(AmqpPrimitiveType.String, ["a", new string(['\ud800'])]), string.Format(CultureInfo.CurrentCulture, ErrorMessages.StringSurrogateUnpaired, 0) },
+            { new(AmqpPrimitiveType.Char, [new Rune('a'), '\ud800']), string.Format(CultureInfo.CurrentCulture, ErrorMessages.CharSurrogate, 0xD800) },
+            { new(AmqpPrimitiveType.Null, [null]), ErrorMessages.ArrayOfNullNotEmpty },
+            { new(AmqpPrimitiveType.List, [new List<object?>(), "a"]), Mismatch(1, typeof(string), AmqpPrimitiveType.List) },
+            { new(AmqpPrimitiveType.List, [new List<object?> { TimeSpan.Zero }]), string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValueTypeUnsupported, typeof(TimeSpan)) },
+            { new(AmqpPrimitiveType.Map, [new List<object?>()]), Mismatch(0, typeof(List<object?>), AmqpPrimitiveType.Map) },
+            { new(AmqpPrimitiveType.Array, [new int[] { 1 }, new List<object?>()]), Mismatch(1, typeof(List<object?>), AmqpPrimitiveType.Array) },
+            { new(AmqpPrimitiveType.Array, [new AmqpArray(AmqpPrimitiveType.Int, [1, "a"])]), Mismatch(1, typeof(string), AmqpPrimitiveType.Int) }
+        };
+    }
+
     public static TheoryData<object> MapsWithNullKey()
     {
         // A default symbol encodes as null wherever it is written, so each map shape meets it as a key.
@@ -511,21 +570,132 @@ public class AmqpEncodingTests
         decodedTarget.Durable.ShouldBe(AmqpTerminusDurability.UnsettledState);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReadValue: Should wrap each element of a described array in its descriptor")]
-    public void ReadValue_WithDescribedArray_ShouldDescribeEachElement()
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReadValue: Should keep the descriptor a described array's elements share, once for the array")]
+    public void ReadValue_WithDescribedArray_ShouldKeepTheSharedDescriptor()
     {
-        // Arrange
+        // Arrange: an array8 of two smalluints, each described by the symbol "x" (AMQP 1.0 Part 1, section 1.6.24).
         byte[] encoded = Convert.FromHexString("e0080200a30178520102");
 
         // Act
-        object?[] decoded = Decode(encoded).ShouldBeOfType<object?[]>();
+        AmqpArray decoded = Decode(encoded).ShouldBeOfType<AmqpArray>();
+        AmqpArray again = Decode(Encode(decoded)).ShouldBeOfType<AmqpArray>();
 
         // Assert
-        decoded.Length.ShouldBe(2);
-        AmqpDescribedValue first = decoded[0].ShouldBeOfType<AmqpDescribedValue>();
-        first.Descriptor.ShouldBe(new AmqpSymbol("x"));
-        first.Value.ShouldBe(1u);
-        decoded[1].ShouldBeOfType<AmqpDescribedValue>().Value.ShouldBe(2u);
+        decoded.ElementType.ShouldBe(AmqpPrimitiveType.UInt);
+        decoded.Descriptor.ShouldBe(new AmqpSymbol("x"));
+        decoded.Elements.ShouldBe([1u, 2u]);
+        again.ElementType.ShouldBe(AmqpPrimitiveType.UInt);
+        again.Descriptor.ShouldBe(new AmqpSymbol("x"));
+        again.Elements.ShouldBe([1u, 2u]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should write an AmqpArray of every element type back as the same array")]
+    [MemberData(nameof(DescribedArrays))]
+    public void WriteValue_WithDescribedAmqpArray_ShouldRoundTrip(AmqpArray array)
+    {
+        // Act
+        byte[] encoded = Encode(array);
+        AmqpArray decoded = Decode(encoded).ShouldBeOfType<AmqpArray>();
+
+        // Assert: the same type, descriptor and elements, which encode the same way.
+        decoded.ElementType.ShouldBe(array.ElementType);
+        decoded.Descriptor.ShouldBe(array.Descriptor);
+        decoded.Elements.Count.ShouldBe(array.Elements.Count);
+        Convert.ToHexStringLower(Encode(decoded)).ShouldBe(Convert.ToHexStringLower(encoded));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReadValue: Should decode an undescribed AmqpArray whose element type has a CLR array as that array")]
+    public void ReadValue_WithUndescribedAmqpArrayOfInt_ShouldReturnTypedArray()
+    {
+        // Arrange
+        AmqpArray array = new(AmqpPrimitiveType.Int, [1, 2]);
+
+        // Act
+        object? decoded = Decode(Encode(array));
+
+        // Assert
+        decoded.ShouldBeOfType<int[]>().ShouldBe([1, 2]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should widen every list of an AmqpArray when one needs a 32-bit size")]
+    public void WriteValue_WithLongListInAmqpArray_ShouldWidenEveryElement()
+    {
+        // Arrange
+        AmqpArray array = new(AmqpPrimitiveType.List, [new List<object?> { 1 }, new List<object?> { new string('a', 300) }]);
+
+        // Act
+        byte[] encoded = Encode(array);
+        AmqpArray decoded = Decode(encoded).ShouldBeOfType<AmqpArray>();
+
+        // Assert: the first list keeps its count and its smallint under a 32-bit size.
+        encoded[0].ShouldBe(AmqpFormatCode.Array32);
+        encoded[9].ShouldBe(AmqpFormatCode.List32);
+        Convert.ToHexStringLower(encoded.AsSpan(10, 10)).ShouldBe("00000006000000015401");
+        decoded.Elements[0].ShouldBeOfType<List<object?>>().ShouldBe([1]);
+        decoded.Elements[1].ShouldBeOfType<List<object?>>().ShouldHaveSingleItem().ShouldBe(new string('a', 300));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should widen every string of an AmqpArray when one needs a 32-bit length")]
+    public void WriteValue_WithLongStringInAmqpArray_ShouldWidenEveryElement()
+    {
+        // Arrange
+        AmqpArray array = new(AmqpPrimitiveType.String, ["a", new string('b', 256)], 1ul);
+
+        // Act
+        byte[] encoded = Encode(array);
+
+        // Assert: after the header and the descriptor 0x00 0x53 0x01, the str32 constructor and the first string.
+        encoded[0].ShouldBe(AmqpFormatCode.Array32);
+        Convert.ToHexStringLower(encoded.AsSpan(9, 3)).ShouldBe("005301");
+        encoded[12].ShouldBe(AmqpFormatCode.String32);
+        Convert.ToHexStringLower(encoded.AsSpan(13, 5)).ShouldBe("0000000161");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should refuse an AmqpArray element that is not a value of its element type before writing any of it")]
+    [MemberData(nameof(RefusedAmqpArrays))]
+    public void WriteValue_WithRefusedAmqpArrayElement_ShouldWriteNothing(AmqpArray array, string expectedMessage)
+    {
+        // Arrange
+        using AmqpBufferWriter writer = new();
+
+        AmqpEncoder.WriteValue(writer, "before");
+
+        int length = writer.Length;
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => AmqpEncoder.WriteValue(writer, array));
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        exception.Message.ShouldStartWith(expectedMessage, Case.Sensitive);
+        writer.Length.ShouldBe(length);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should cap nested AmqpArrays, a shared descriptor counted, where the reader caps them")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WriteValue_WithNestedAmqpArrays_ShouldCapNestingAsTheReaderDoes(bool described)
+    {
+        // Arrange: the reader counts each array a level, and the descriptor of a described array one more.
+        int levels = described ? AmqpEncoder.MaxNestingDepth - 1 : AmqpEncoder.MaxNestingDepth;
+        object accepted = new AmqpArray(AmqpPrimitiveType.UByte, [], described ? 1ul : null);
+
+        for (int i = 1; i < levels; i++)
+        {
+            accepted = new AmqpArray(AmqpPrimitiveType.Array, [accepted]);
+        }
+
+        AmqpArray refused = new(AmqpPrimitiveType.Array, [accepted]);
+
+        // Act
+        byte[] encoded = Encode(accepted);
+        ArgumentException exception = Should.Throw<ArgumentException>(() => Encode(refused));
+
+        // Assert: one array more is refused by both sides; it encodes as an array8 holding the accepted array.
+        Decode(encoded).ShouldBeOfType<AmqpArray>();
+        exception.Message.ShouldStartWith(ErrorMessages.ValueNestingTooDeep, Case.Sensitive);
+        Should.Throw<AmqpException>(() => Decode([AmqpFormatCode.Array8, (byte)(encoded.Length + 1), 1, .. encoded]))
+            .Message.ShouldBe(ErrorMessages.ValueNestingTooDeep);
     }
 
     [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - ReadValue: Should fail malformed input with a decode error")]

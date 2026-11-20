@@ -421,22 +421,12 @@ internal static class AmqpEncoder
             case AmqpSymbol symbol:
                 WriteSymbol(writer, symbol);
                 return;
-            // The runtime lets an sbyte[] pass for a byte[], so binary is matched by exact type.
-            case byte[] bytes when bytes.GetType() == typeof(byte[]):
-                WriteBinary(writer, bytes);
-                return;
-            case ReadOnlyMemory<byte> readOnlyMemory:
-                WriteBinary(writer, readOnlyMemory.Span);
-                return;
-            case Memory<byte> memory:
-                WriteBinary(writer, memory.Span);
-                return;
-            case ArraySegment<byte> segment:
-                WriteBinary(writer, segment);
-                return;
-            case AmqpDeliveryTag deliveryTag:
-                WriteBinary(writer, deliveryTag.Value.Span);
-                return;
+        }
+
+        if (TryGetBinary(value, out ReadOnlyMemory<byte> binary))
+        {
+            WriteBinary(writer, binary.Span);
+            return;
         }
 
         ThrowIfTooDeep(depth);
@@ -448,6 +438,9 @@ internal static class AmqpEncoder
 
         switch (value)
         {
+            case AmqpArray amqpArray:
+                WriteArray(writer, amqpArray, depth);
+                return;
             case AmqpDescribedValue described:
                 WriteDescribed(writer, described, depth);
                 return;
@@ -678,19 +671,28 @@ internal static class AmqpEncoder
     private static void WriteDescribed(AmqpBufferWriter writer, AmqpDescribedValue described, int depth)
     {
         ThrowIfTooDeep(depth);
+        WriteDescriptor(writer, described.Descriptor);
+
+        // The reader counts a descriptor as a level of nesting, so the described value is one level deeper.
+        WriteValue(writer, described.Value, depth + 1);
+    }
+
+    /// <summary>
+    /// Writes the constructor of a described value and its descriptor, an <see cref="AmqpSymbol"/> or a
+    /// <see cref="ulong"/>, as the model's described values and arrays hold it.
+    /// </summary>
+    private static void WriteDescriptor(AmqpBufferWriter writer, object descriptor)
+    {
         writer.WriteByte(AmqpFormatCode.Described);
 
-        if (described.Descriptor is ulong code)
+        if (descriptor is ulong code)
         {
             WriteULong(writer, code);
         }
         else
         {
-            WriteSymbol(writer, (AmqpSymbol)described.Descriptor);
+            WriteSymbol(writer, (AmqpSymbol)descriptor);
         }
-
-        // The reader counts a descriptor as a level of nesting, so the described value is one level deeper.
-        WriteValue(writer, described.Value, depth + 1);
     }
 
     /// <summary>
@@ -891,6 +893,372 @@ internal static class AmqpEncoder
         EndCompound(writer, start, values.Length, AmqpFormatCode.Array8);
     }
 
+    /// <summary>
+    /// Writes an <see cref="AmqpArray"/>: its elements under the one constructor of its element type, after the
+    /// descriptor they share when they are described (Part 1, sections 1.6.24 and 1.2).
+    /// </summary>
+    /// <remarks>
+    /// Every element is checked against the element type, and a variable-width one measured, before the array
+    /// begins, so a refused element leaves nothing written. The elements share the constructor, so one binary,
+    /// string or symbol past 255 octets widens all of them; lists, maps and arrays are written by
+    /// <see cref="WriteCompoundArray"/>.
+    /// </remarks>
+    /// <param name="writer">The buffer.</param>
+    /// <param name="array">The array.</param>
+    /// <param name="depth">The number of compound and described values that enclose the array.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown, before anything is written, when an element is null or not a value of the element type, when an
+    /// element has no place in an array (a default symbol, or a string or char with half of a surrogate pair), when
+    /// an array of null holds elements, or when the array nests too deeply.
+    /// </exception>
+    private static void WriteArray(AmqpBufferWriter writer, AmqpArray array, int depth)
+    {
+        // The reader counts the descriptor of a described array as a level of nesting inside the array.
+        if (array.Descriptor is not null)
+        {
+            ThrowIfTooDeep(depth + 1);
+        }
+
+        AmqpPrimitiveType type = array.ElementType;
+
+        if (type is AmqpPrimitiveType.List or AmqpPrimitiveType.Map or AmqpPrimitiveType.Array)
+        {
+            WriteCompoundArray(writer, array, depth);
+            return;
+        }
+
+        IReadOnlyList<object?> elements = array.Elements;
+
+        // The null constructor has no width, so the reader refuses an array of null that counts any element.
+        if (type == AmqpPrimitiveType.Null && elements.Count > 0)
+        {
+            throw new ArgumentException(ErrorMessages.ArrayOfNullNotEmpty, "value");
+        }
+
+        bool narrow = true;
+
+        for (int i = 0; i < elements.Count; i++)
+        {
+            narrow &= MeasureArrayElement(type, elements[i], i) <= byte.MaxValue;
+        }
+
+        int start = BeginCompound(writer, AmqpFormatCode.Array32);
+
+        if (array.Descriptor is object descriptor)
+        {
+            WriteDescriptor(writer, descriptor);
+        }
+
+        writer.WriteByte(GetElementConstructor(type, narrow));
+
+        for (int i = 0; i < elements.Count; i++)
+        {
+            WriteArrayElement(writer, type, elements[i]!, narrow);
+        }
+
+        EndCompound(writer, start, elements.Count, AmqpFormatCode.Array8);
+    }
+
+    /// <summary>
+    /// Writes an <see cref="AmqpArray"/> of lists, maps or arrays.
+    /// </summary>
+    /// <remarks>
+    /// Each element is encoded on its own first, which checks it and everything it holds before the array begins,
+    /// and shows whether it is a value of the element type: a value that encodes as anything else, such as a
+    /// described list, is refused. The elements then share the narrowest constructor every one of them fits, the
+    /// 8-bit one unless an element counts more than 255 members or takes more than 254 octets after its count.
+    /// </remarks>
+    private static void WriteCompoundArray(AmqpBufferWriter writer, AmqpArray array, int depth)
+    {
+        IReadOnlyList<object?> elements = array.Elements;
+        using AmqpBufferWriter encoded = new();
+        bool narrow = true;
+
+        for (int i = 0; i < elements.Count; i++)
+        {
+            object element = elements[i] ?? throw ArrayElementNull(i);
+            int start = encoded.Length;
+
+            // The reader reads an element of the array one level deeper than the array.
+            WriteValue(encoded, element, depth + 1);
+
+            ReadOnlySpan<byte> value = encoded.WrittenSpan.Slice(start);
+
+            if (!IsEncodedAs(value[0], array.ElementType))
+            {
+                throw ArrayElementTypeMismatch(i, element, array.ElementType);
+            }
+
+            SplitCompound(value, out uint count, out ReadOnlySpan<byte> body);
+            narrow &= count <= byte.MaxValue && body.Length < byte.MaxValue;
+        }
+
+        int arrayStart = BeginCompound(writer, AmqpFormatCode.Array32);
+
+        if (array.Descriptor is object descriptor)
+        {
+            WriteDescriptor(writer, descriptor);
+        }
+
+        writer.WriteByte(GetElementConstructor(array.ElementType, narrow));
+
+        ReadOnlySpan<byte> remaining = encoded.WrittenSpan;
+
+        while (!remaining.IsEmpty)
+        {
+            int length = SplitCompound(remaining, out uint count, out ReadOnlySpan<byte> body);
+
+            // An element keeps its count and body under the shared constructor's width; its own constructor goes.
+            if (narrow)
+            {
+                writer.WriteByte((byte)(body.Length + 1));
+                writer.WriteByte((byte)count);
+            }
+            else
+            {
+                writer.WriteUInt32(checked((uint)(body.Length + 4)));
+                writer.WriteUInt32(count);
+            }
+
+            writer.Write(body);
+            remaining = remaining.Slice(length);
+        }
+
+        EndCompound(writer, arrayStart, elements.Count, AmqpFormatCode.Array8);
+    }
+
+    /// <summary>
+    /// Splits an encoded list, map or array into its count and its body, the octets after the count, and returns
+    /// the length of the whole encoding.
+    /// </summary>
+    private static int SplitCompound(ReadOnlySpan<byte> encoded, out uint count, out ReadOnlySpan<byte> body)
+    {
+        switch (encoded[0])
+        {
+            case AmqpFormatCode.List0:
+                count = 0;
+                body = default;
+                return 1;
+            case AmqpFormatCode.List8:
+            case AmqpFormatCode.Map8:
+            case AmqpFormatCode.Array8:
+                int size8 = encoded[1];
+
+                count = encoded[2];
+                body = encoded.Slice(3, size8 - 1);
+                return 2 + size8;
+            default:
+                int size32 = (int)BinaryPrimitives.ReadUInt32BigEndian(encoded.Slice(1));
+
+                count = BinaryPrimitives.ReadUInt32BigEndian(encoded.Slice(5));
+                body = encoded.Slice(9, size32 - 4);
+                return 5 + size32;
+        }
+    }
+
+    /// <summary>
+    /// Reports whether an encoding's constructor is one of a compound element type's: a list, map or array.
+    /// </summary>
+    private static bool IsEncodedAs(byte constructor, AmqpPrimitiveType type)
+    {
+        return type switch
+        {
+            AmqpPrimitiveType.List => constructor is AmqpFormatCode.List0 or AmqpFormatCode.List8 or AmqpFormatCode.List32,
+            AmqpPrimitiveType.Map => constructor is AmqpFormatCode.Map8 or AmqpFormatCode.Map32,
+            _ => constructor is AmqpFormatCode.Array8 or AmqpFormatCode.Array32
+        };
+    }
+
+    /// <summary>
+    /// Checks that an element is a value of an array's element type, and returns its length in octets when the
+    /// type is binary, string or symbol, whose elements carry their length, or zero.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the element is null, a default symbol, a string or char with half of a surrogate pair, or not a
+    /// value of the element type.
+    /// </exception>
+    private static int MeasureArrayElement(AmqpPrimitiveType type, object? element, int index)
+    {
+        // A boxed value keeps its exact type, so these tests do not let an int pass for a uint.
+        switch (type)
+        {
+            case AmqpPrimitiveType.Boolean when element is bool:
+            case AmqpPrimitiveType.UByte when element is byte:
+            case AmqpPrimitiveType.UShort when element is ushort:
+            case AmqpPrimitiveType.UInt when element is uint:
+            case AmqpPrimitiveType.ULong when element is ulong:
+            case AmqpPrimitiveType.Byte when element is sbyte:
+            case AmqpPrimitiveType.Short when element is short:
+            case AmqpPrimitiveType.Int when element is int:
+            case AmqpPrimitiveType.Long when element is long:
+            case AmqpPrimitiveType.Float when element is float:
+            case AmqpPrimitiveType.Double when element is double:
+            case AmqpPrimitiveType.Decimal32 when element is AmqpDecimal32:
+            case AmqpPrimitiveType.Decimal64 when element is AmqpDecimal64:
+            case AmqpPrimitiveType.Decimal128 when element is AmqpDecimal128:
+            case AmqpPrimitiveType.Char when element is Rune:
+            case AmqpPrimitiveType.Timestamp when element is DateTimeOffset or DateTime:
+            case AmqpPrimitiveType.Uuid when element is Guid:
+                return 0;
+            case AmqpPrimitiveType.Char when element is char character:
+                return char.IsSurrogate(character) ? throw CharSurrogate(character) : 0;
+            case AmqpPrimitiveType.String when element is string text:
+                return GetUtf8Length(text);
+            case AmqpPrimitiveType.Symbol when element is AmqpSymbol symbol:
+                return symbol.Value?.Length ?? throw ArrayElementNull(index);
+            case AmqpPrimitiveType.Binary when TryGetBinary(element, out ReadOnlyMemory<byte> bytes):
+                return bytes.Length;
+        }
+
+        throw element is null ? ArrayElementNull(index) : ArrayElementTypeMismatch(index, element, type);
+    }
+
+    /// <summary>
+    /// Writes an element of an array, which <see cref="MeasureArrayElement"/> has checked, without its constructor.
+    /// </summary>
+    private static void WriteArrayElement(AmqpBufferWriter writer, AmqpPrimitiveType type, object element, bool narrow)
+    {
+        switch (type)
+        {
+            case AmqpPrimitiveType.Boolean:
+                writer.WriteByte((bool)element ? (byte)1 : (byte)0);
+                break;
+            case AmqpPrimitiveType.UByte:
+                writer.WriteByte((byte)element);
+                break;
+            case AmqpPrimitiveType.UShort:
+                writer.WriteUInt16((ushort)element);
+                break;
+            case AmqpPrimitiveType.UInt:
+                writer.WriteUInt32((uint)element);
+                break;
+            case AmqpPrimitiveType.ULong:
+                writer.WriteUInt64((ulong)element);
+                break;
+            case AmqpPrimitiveType.Byte:
+                writer.WriteByte((byte)(sbyte)element);
+                break;
+            case AmqpPrimitiveType.Short:
+                BinaryPrimitives.WriteInt16BigEndian(writer.Reserve(2), (short)element);
+                break;
+            case AmqpPrimitiveType.Int:
+                BinaryPrimitives.WriteInt32BigEndian(writer.Reserve(4), (int)element);
+                break;
+            case AmqpPrimitiveType.Long:
+                BinaryPrimitives.WriteInt64BigEndian(writer.Reserve(8), (long)element);
+                break;
+            case AmqpPrimitiveType.Float:
+                BinaryPrimitives.WriteSingleBigEndian(writer.Reserve(4), (float)element);
+                break;
+            case AmqpPrimitiveType.Double:
+                BinaryPrimitives.WriteDoubleBigEndian(writer.Reserve(8), (double)element);
+                break;
+            case AmqpPrimitiveType.Decimal32:
+                writer.WriteUInt32(((AmqpDecimal32)element).Bits);
+                break;
+            case AmqpPrimitiveType.Decimal64:
+                writer.WriteUInt64(((AmqpDecimal64)element).Bits);
+                break;
+            case AmqpPrimitiveType.Decimal128:
+                BinaryPrimitives.WriteUInt128BigEndian(writer.Reserve(16), ((AmqpDecimal128)element).Bits);
+                break;
+            case AmqpPrimitiveType.Char:
+                writer.WriteUInt32(element is Rune rune ? (uint)rune.Value : (char)element);
+                break;
+            case AmqpPrimitiveType.Timestamp:
+                DateTimeOffset timestamp = element is DateTime dateTime ? ToTimestamp(dateTime) : (DateTimeOffset)element;
+
+                BinaryPrimitives.WriteInt64BigEndian(writer.Reserve(8), timestamp.ToUnixTimeMilliseconds());
+                break;
+            case AmqpPrimitiveType.Uuid:
+                ((Guid)element).TryWriteBytes(writer.Reserve(16), bigEndian: true, out _);
+                break;
+            case AmqpPrimitiveType.Binary:
+                TryGetBinary(element, out ReadOnlyMemory<byte> bytes);
+                WriteElementLength(writer, bytes.Length, narrow);
+                writer.Write(bytes.Span);
+                break;
+            case AmqpPrimitiveType.String:
+                string text = (string)element;
+                int length = _utf8.GetByteCount(text);
+
+                WriteElementLength(writer, length, narrow);
+                _utf8.GetBytes(text, writer.Reserve(length));
+                break;
+            case AmqpPrimitiveType.Symbol:
+                // A symbol is seven-bit ASCII, so its length in octets is its length in characters.
+                string name = ((AmqpSymbol)element).Value!;
+
+                WriteElementLength(writer, name.Length, narrow);
+                Encoding.ASCII.GetBytes(name, writer.Reserve(name.Length));
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Gets the constructor an array writes once for all of its elements: the 8-bit form of a variable-width or
+    /// compound type when <paramref name="narrow"/> is <see langword="true"/>, and the 32-bit form otherwise.
+    /// </summary>
+    private static byte GetElementConstructor(AmqpPrimitiveType type, bool narrow)
+    {
+        return type switch
+        {
+            AmqpPrimitiveType.Null => AmqpFormatCode.Null,
+            AmqpPrimitiveType.Boolean => AmqpFormatCode.Boolean,
+            AmqpPrimitiveType.UByte => AmqpFormatCode.UByte,
+            AmqpPrimitiveType.UShort => AmqpFormatCode.UShort,
+            AmqpPrimitiveType.UInt => AmqpFormatCode.UInt,
+            AmqpPrimitiveType.ULong => AmqpFormatCode.ULong,
+            AmqpPrimitiveType.Byte => AmqpFormatCode.Byte,
+            AmqpPrimitiveType.Short => AmqpFormatCode.Short,
+            AmqpPrimitiveType.Int => AmqpFormatCode.Int,
+            AmqpPrimitiveType.Long => AmqpFormatCode.Long,
+            AmqpPrimitiveType.Float => AmqpFormatCode.Float,
+            AmqpPrimitiveType.Double => AmqpFormatCode.Double,
+            AmqpPrimitiveType.Decimal32 => AmqpFormatCode.Decimal32,
+            AmqpPrimitiveType.Decimal64 => AmqpFormatCode.Decimal64,
+            AmqpPrimitiveType.Decimal128 => AmqpFormatCode.Decimal128,
+            AmqpPrimitiveType.Char => AmqpFormatCode.Char,
+            AmqpPrimitiveType.Timestamp => AmqpFormatCode.Timestamp,
+            AmqpPrimitiveType.Uuid => AmqpFormatCode.Uuid,
+            AmqpPrimitiveType.Binary => narrow ? AmqpFormatCode.Binary8 : AmqpFormatCode.Binary32,
+            AmqpPrimitiveType.String => narrow ? AmqpFormatCode.String8 : AmqpFormatCode.String32,
+            AmqpPrimitiveType.Symbol => narrow ? AmqpFormatCode.Symbol8 : AmqpFormatCode.Symbol32,
+            AmqpPrimitiveType.List => narrow ? AmqpFormatCode.List8 : AmqpFormatCode.List32,
+            AmqpPrimitiveType.Map => narrow ? AmqpFormatCode.Map8 : AmqpFormatCode.Map32,
+            _ => narrow ? AmqpFormatCode.Array8 : AmqpFormatCode.Array32
+        };
+    }
+
+    /// <summary>
+    /// Gets the octets of a value the encoder writes as binary.
+    /// </summary>
+    private static bool TryGetBinary(object? value, out ReadOnlyMemory<byte> bytes)
+    {
+        switch (value)
+        {
+            // The runtime lets an sbyte[] pass for a byte[], so binary is matched by exact type.
+            case byte[] array when array.GetType() == typeof(byte[]):
+                bytes = array;
+                return true;
+            case ReadOnlyMemory<byte> readOnlyMemory:
+                bytes = readOnlyMemory;
+                return true;
+            case Memory<byte> memory:
+                bytes = memory;
+                return true;
+            case ArraySegment<byte> segment:
+                bytes = segment;
+                return true;
+            case AmqpDeliveryTag deliveryTag:
+                bytes = deliveryTag.Value;
+                return true;
+            default:
+                bytes = default;
+                return false;
+        }
+    }
+
     private static void WriteElementLength(AmqpBufferWriter writer, int length, bool narrow)
     {
         if (narrow)
@@ -959,6 +1327,13 @@ internal static class AmqpEncoder
     private static ArgumentException ArrayElementNull(int index)
     {
         return new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ArrayElementNull, index), "value");
+    }
+
+    private static ArgumentException ArrayElementTypeMismatch(int index, object element, AmqpPrimitiveType type)
+    {
+        return new ArgumentException(
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.ArrayElementTypeMismatch, index, element.GetType(), type),
+            "value");
     }
 
     private static ArgumentException CharSurrogate(char value)

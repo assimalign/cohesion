@@ -252,6 +252,29 @@ carries) are enforced by the engine; the types only carry the values.
   represent every value of the wire types, so no conversion is implied.
 - **`AmqpDescribedValue`** carries a descriptor and a value for described types the model does not
   name, so an application extension type survives a decode and re-encode.
+- **`AmqpArray`** carries an AMQP array that no CLR array type holds (Part 1 §1.6.24, #1929): an
+  array of ubyte (a `byte[]` is binary), of null, of lists, maps or arrays, or one whose elements
+  share a descriptor, which the array carries once for all of them (Part 1 §1.2). Its
+  `ElementType` is an `AmqpPrimitiveType`, the primitive types numbered as their sections of Part 1
+  §1.6, so `default` names none. Every other array decodes to the typed CLR array of its element
+  type, as before.
+
+### Why a model type for arrays, and why it checks so little
+
+Before #1929 the codec decoded those arrays to `object?[]`, which the encoder writes as a *list*,
+and a described array to an `object?[]` of `AmqpDescribedValue`, which loses that the descriptor was
+shared. A relay that decoded and re-encoded a value changed its type on the wire. A new CLR shape
+was the only way to keep it: no typed CLR array can say "array of list" or "array of ubyte" without
+clashing with a mapping that already exists (`byte[]` is binary, `object?[]` is a list).
+
+`AmqpArray` follows `AmqpDescribedValue`: a public constructor, and validation only of what the type
+itself defines, the element type and the descriptor (through the same descriptor rule both types
+share). Whether each element is a value of the element type is the encoder's question, because only
+the encoder knows which CLR types it writes each AMQP type from; `AmqpPrimitiveType` documents them
+member by member. The encoder checks every element before it writes any of the array, so a refused
+array leaves nothing behind, the same promise it makes for typed arrays. The alternative, checking
+elements in the constructor, would have put the codec's CLR mapping into the contracts package
+twice, once there and once in the encoder, and the two could drift.
 
 ## SASL
 

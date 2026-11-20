@@ -85,6 +85,11 @@ internal static class AmqpAotChecks
             ["symbol-array"] = new[] { new AmqpSymbol("a"), new AmqpSymbol("b") },
             ["uuid-array"] = new[] { Guid.Empty },
             ["empty-array"] = Array.Empty<long>(),
+            ["ubyte-array"] = new AmqpArray(AmqpPrimitiveType.UByte, [(byte)1, (byte)255]),
+            ["described-array"] = new AmqpArray(AmqpPrimitiveType.String, ["a", "b"], new AmqpSymbol("aot:array")),
+            ["list-array"] = new AmqpArray(AmqpPrimitiveType.List, [new List<object?> { 1, "two" }, new List<object?>()]),
+            ["map-array"] = new AmqpArray(AmqpPrimitiveType.Map, [new Dictionary<object, object?> { ["k"] = 1 }]),
+            ["array-array"] = new AmqpArray(AmqpPrimitiveType.Array, [new[] { 1, 2 }, new AmqpArray(AmqpPrimitiveType.UByte, [(byte)3])]),
             ["described"] = new AmqpDescribedValue(new AmqpSymbol("aot:described"), "payload"),
             ["described-ulong"] = new AmqpDescribedValue(0x0000_4141_0000_0001ul, 9)
         };

@@ -67,7 +67,7 @@ internal static class AmqpTypeSystemCorpus
             typeof(AmqpSymbol[]), typeof(string[]), typeof(byte[][]), typeof(bool[]), typeof(sbyte[]), typeof(short[]), typeof(ushort[]),
             typeof(int[]), typeof(uint[]), typeof(long[]), typeof(ulong[]), typeof(float[]), typeof(double[]), typeof(AmqpDecimal32[]),
             typeof(AmqpDecimal64[]), typeof(AmqpDecimal128[]), typeof(Rune[]), typeof(char[]), typeof(DateTimeOffset[]), typeof(DateTime[]),
-            typeof(Guid[])
+            typeof(Guid[]), typeof(AmqpArray)
         ]),
         new("described", "Part 1, sections 1.2 and 1.5", [0x00], null, [typeof(AmqpDescribedValue)])
     ];
@@ -190,6 +190,7 @@ internal static class AmqpTypeSystemCorpus
         new("map8 with an odd count", "map", "c1020140", null, decodeRefused, ErrorMessages.MapElementCountOdd),
         new("map8 with a null key", "map", "c103024040", null, decodeRefused, ErrorMessages.MapKeyNull),
         new("map8 with a repeated key", "map", "c10704540140540140", null, decodeRefused, ErrorMessages.MapKeyDuplicate),
+        new("map8 with a binary key and an array-of-byte key of the same octets", "map", "c10f04a00201025401e004025101025402", new Dictionary<object, object?> { [new byte[] { 1, 2 }] = 1, [new sbyte[] { 1, 2 }] = 2 }, roundTrip),
 
         new("array8 of int", "array", "e00a02710000000100000002", new int[] { 1, 2 }, roundTrip),
         new("array8 empty", "array", "e0020071", Array.Empty<int>(), roundTrip),
@@ -215,8 +216,21 @@ internal static class AmqpTypeSystemCorpus
         new("array8 of timestamp", "array", "e00a01830000000000000001", new DateTimeOffset[] { DateTimeOffset.FromUnixTimeMilliseconds(1) }, roundTrip),
         new("array8 of timestamp from dates and times", "array", "e00a01830000000000000001", new DateTime[] { new(1970, 1, 1, 0, 0, 0, 1, DateTimeKind.Utc) }, encodeOnly),
         new("array8 of uuid", "array", "e012019800112233445566778899aabbccddeeff", new Guid[] { new("00112233-4455-6677-8899-aabbccddeeff") }, roundTrip),
-        new("array8 of ubyte, read as objects", "array", "e00402500102", new object?[] { (byte)1, (byte)2 }, decodeOnly),
-        new("array8 of described values, read as objects", "array", "e00902005301a101610162", new object?[] { new AmqpDescribedValue(1ul, "a"), new AmqpDescribedValue(1ul, "b") }, decodeOnly),
+        new("array8 empty, of uint0", "array", "e0020043", Array.Empty<uint>(), decodeOnly),
+        new("array8 of ubyte", "array", "e00402500102", new AmqpArray(AmqpPrimitiveType.UByte, [(byte)1, (byte)2]), roundTrip),
+        new("array8 of described strings", "array", "e00902005301a101610162", new AmqpArray(AmqpPrimitiveType.String, ["a", "b"], 1ul), roundTrip),
+        new("array8 of described smalluints", "array", "e0080200a30178520102", new AmqpArray(AmqpPrimitiveType.UInt, [1u, 2u], new AmqpSymbol("x")), decodeOnly),
+        new("array8 empty, of null", "array", "e0020040", new AmqpArray(AmqpPrimitiveType.Null, []), roundTrip),
+        new("array8 of list8", "array", "e00b02c0030154010401a10161", new AmqpArray(AmqpPrimitiveType.List, [new List<object?> { 1 }, new List<object?> { "a" }]), roundTrip),
+        new("array8 of list32", "array", "e01702d0000000060000000154010000000700000001a10161", new AmqpArray(AmqpPrimitiveType.List, [new List<object?> { 1 }, new List<object?> { "a" }]), decodeOnly),
+        new("array8 of empty lists", "array", "e00602c001000100", new AmqpArray(AmqpPrimitiveType.List, [new List<object?>(), new List<object?>()]), roundTrip),
+        new("array8 empty, of list8", "array", "e00200c0", new AmqpArray(AmqpPrimitiveType.List, []), roundTrip),
+        new("array8 empty, of list0", "array", "e0020045", new AmqpArray(AmqpPrimitiveType.List, []), decodeOnly),
+        new("array8 of map8", "array", "e00901c10602a1016b5401", new AmqpArray(AmqpPrimitiveType.Map, [new Dictionary<object, object?> { ["k"] = 1 }]), roundTrip),
+        new("array8 of map32", "array", "e00f01d10000000900000002a1016b5401", new AmqpArray(AmqpPrimitiveType.Map, [new Dictionary<object, object?> { ["k"] = 1 }]), decodeOnly),
+        new("array8 of array8", "array", "e00e02e0060171000000010401a10161", new AmqpArray(AmqpPrimitiveType.Array, [new int[] { 1 }, new string[] { "a" }]), roundTrip),
+        new("array8 of array32", "array", "e01a02f0000000090000000171000000010000000700000001a10161", new AmqpArray(AmqpPrimitiveType.Array, [new int[] { 1 }, new string[] { "a" }]), decodeOnly),
+        new("array8 of int from an AmqpArray", "array", "e00a02710000000100000002", new AmqpArray(AmqpPrimitiveType.Int, [1, 2]), encodeOnly),
         new("array8 of zero-width elements", "array", "e003024000", null, decodeRefused, ErrorMessages.ArrayElementWidthInvalid),
         new("array8 counting more elements than its octets carry", "array", "e003057100", null, decodeRefused, ErrorMessages.CompoundCountInvalid),
         new("array8 counting more uuids than its octets carry", "array", "e012029800112233445566778899aabbccddeeff", null, decodeRefused, ErrorMessages.CompoundCountInvalid),
@@ -225,6 +239,13 @@ internal static class AmqpTypeSystemCorpus
         new("array of symbol holding a default symbol", "array", string.Empty, new AmqpSymbol[] { "a", default }, encodeRefused, Format(ErrorMessages.ArrayElementNull, 1)),
         new("array of binary holding null", "array", string.Empty, new byte[]?[] { [1], null }, encodeRefused, Format(ErrorMessages.ArrayElementNull, 1)),
         new("array of char holding half of a surrogate pair", "array", string.Empty, new char[] { 'a', '\ud800' }, encodeRefused, Format(ErrorMessages.CharSurrogate, 0xD800)),
+        new("array of int holding a long", "array", string.Empty, new AmqpArray(AmqpPrimitiveType.Int, [1, 2L]), encodeRefused, Format(ErrorMessages.ArrayElementTypeMismatch, 1, typeof(long), AmqpPrimitiveType.Int)),
+        new("array of uint holding an int", "array", string.Empty, new AmqpArray(AmqpPrimitiveType.UInt, [1u, 2]), encodeRefused, Format(ErrorMessages.ArrayElementTypeMismatch, 1, typeof(int), AmqpPrimitiveType.UInt)),
+        new("array of binary holding an array of byte", "array", string.Empty, new AmqpArray(AmqpPrimitiveType.Binary, [new byte[] { 1 }, new sbyte[] { 1 }]), encodeRefused, Format(ErrorMessages.ArrayElementTypeMismatch, 1, typeof(sbyte[]), AmqpPrimitiveType.Binary)),
+        new("array of lists holding a map", "array", string.Empty, new AmqpArray(AmqpPrimitiveType.List, [new List<object?>(), new Dictionary<object, object?>()]), encodeRefused, Format(ErrorMessages.ArrayElementTypeMismatch, 1, typeof(Dictionary<object, object?>), AmqpPrimitiveType.List)),
+        new("array of lists holding a described list", "array", string.Empty, new AmqpArray(AmqpPrimitiveType.List, [new AmqpDescribedValue(1ul, new List<object?>())]), encodeRefused, Format(ErrorMessages.ArrayElementTypeMismatch, 0, typeof(AmqpDescribedValue), AmqpPrimitiveType.List)),
+        new("array of ubyte holding null", "array", string.Empty, new AmqpArray(AmqpPrimitiveType.UByte, [(byte)1, null]), encodeRefused, Format(ErrorMessages.ArrayElementNull, 1)),
+        new("array of null holding an element", "array", string.Empty, new AmqpArray(AmqpPrimitiveType.Null, [null]), encodeRefused, ErrorMessages.ArrayOfNullNotEmpty),
 
         new("described with a numeric descriptor", "described", "005301a10161", new AmqpDescribedValue(1ul, "a"), roundTrip),
         new("described with a symbolic descriptor", "described", "00a303783a7940", new AmqpDescribedValue(new AmqpSymbol("x:y"), null), roundTrip),
@@ -269,8 +290,8 @@ internal static class AmqpTypeSystemCorpus
         return Types.Single(type => type.Name == name);
     }
 
-    private static string Format(string format, int argument)
+    private static string Format(string format, params object[] arguments)
     {
-        return string.Format(CultureInfo.CurrentCulture, format, argument);
+        return string.Format(CultureInfo.CurrentCulture, format, arguments);
     }
 }

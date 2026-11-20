@@ -402,7 +402,7 @@ maps record instead (above).
 | Category | Entries | Exposed by |
 |---|---|---|
 | Malformed frame | D1 to D4 | a frame too large, written only in part, or read under the wrong limit |
-| Malformed message | D5 to D17 | a value or message the type system or message format refuses, or one the codec changed |
+| Malformed message | D5 to D17, D27 | a value or message the type system or message format refuses, or one the codec changed |
 | Invalid state | D18, D19 | an operation in a state where it behaved wrongly: a failed answer to an attach, a disposal |
 | Invalid negotiation | D20 to D26 | a protocol header, SASL exchange or `open` negotiated wrongly or stalled on |
 
@@ -415,10 +415,10 @@ tests for the defects nothing else pinned: an encoder failure that left part of 
 D2) and a disposal held up by a peer that never answers `close` (D19).
 
 **Verified on 2026-11-20.** Each entry's defect was put back into the engine on its own, by an exact
-edit of the code that fixed it, and the tests and cases the entry names were run: all 26 entries
-failed as named. Two were put back in their original form rather than by removing the fix: D8
-counts each compound twice, and D13 restores the old check that only annotations come first and
-the footer last.
+edit of the code that fixed it, and the tests and cases the entry names were run: all 27 entries
+failed as named (D27 the same day, when #1929 found and fixed it). Two were put back in their
+original form rather than by removing the fix: D8 counts each compound twice, and D13 restores the
+old check that only annotations come first and the footer last.
 
 Two past defects have no entry:
 
@@ -542,7 +542,7 @@ begins a described value), each supported CLR type, and each refusal, checked in
 | symbol (§1.6.21) | `0xa3`, `0xb3` | `AmqpSymbol` | `AmqpSymbol` |
 | list (§1.6.22) | `0x45`, `0xc0`, `0xd0` | `List<object?>` | `IReadOnlyList<object?>`, `IList` |
 | map (§1.6.23) | `0xc1`, `0xd1` | `Dictionary<object, object?>`, keys compared as AMQP values | `IReadOnlyDictionary<AmqpSymbol, object?>`, `IReadOnlyDictionary<string, object?>`, `IReadOnlyDictionary<object, object?>`, `IDictionary` |
-| array (§1.6.24) | `0xe0`, `0xf0` | a typed CLR array, by element type (below) | a typed CLR array (below) |
+| array (§1.6.24) | `0xe0`, `0xf0` | a typed CLR array, by element type, or `AmqpArray` (below) | a typed CLR array or `AmqpArray` (below) |
 | described (§1.2, §1.5) | `0x00` | the model type its descriptor names, such as `AmqpError` or `AmqpSource`; otherwise `AmqpDescribedValue` | `AmqpDescribedValue` and the model types |
 
 - **Every constructor is read; the smallest is written.** The encoder picks `uint0`, `smalluint`,
@@ -553,9 +553,25 @@ begins a described value), each supported CLR type, and each refusal, checked in
   `AmqpSymbol[]`, `string[]`, `byte[][]`, `bool[]`, `sbyte[]`, the matching numeric array,
   `AmqpDecimalNN[]`, `Rune[]`, `DateTimeOffset[]` or `Guid[]`, and the encoder writes each of those,
   plus `char[]` and `DateTime[]`, as an array. Any other CLR collection is written as a list.
-- **Three kinds of array come back as `object?[]`:** an array of ubyte (a `byte[]` is binary), an
-  array of described values, and an array of lists, maps or arrays. They re-encode as lists, so they
-  do not survive decode and encode unchanged; #1929 tracks a type that keeps them arrays.
+- **Every other array is an `AmqpArray` (#1929):** an array of ubyte (a `byte[]` is binary), of
+  null, of lists, maps or arrays, and any array whose elements are described, whose descriptor the
+  `AmqpArray` keeps once for all of them. Until #1929 these came back as `object?[]`, which
+  re-encodes as a list, so a relay changed their type on the wire. The encoder writes an `AmqpArray`
+  back as the same array: its element type's constructor and its descriptor. An `AmqpArray` of a
+  type that has a CLR array, an array of int say, is written the same way and decodes as an `int[]`
+  unless it is described.
+- **Every element of an `AmqpArray` is checked before any of it is written.** An element that is
+  not a value of the element type, by the CLR types the type table names, is refused with
+  `ArgumentException`, as are a null element and an array of null that counts any. A list, map or
+  array element is encoded on its own first, which checks everything it holds and refuses a value
+  that encodes as anything else, such as a described list. The checks are type tests on each
+  element, no reflection, so they stay NativeAOT-safe.
+- **Array elements share the narrowest constructor that fits all of them.** One string, binary or
+  symbol past 255 octets, or one list, map or array past 254 octets after its count, widens every
+  element, as the elements share the constructor. Fixed-width elements take their full width (an
+  array of uint uses `0x70`), as they do in a typed array. So a peer's array of `list32` elements
+  that would fit `list8` comes back as `list8`: the type survives decode and encode, the width may
+  not.
 - **An array holds no null.** A null string or binary, or a default `AmqpSymbol`, in an array is
   refused with `ArgumentException` before any of the array is written; a list can hold null. On
   decode, an element constructor with no width (`null`, `true`, `uint0`, ...) in a non-empty array is
@@ -579,12 +595,14 @@ begins a described value), each supported CLR type, and each refusal, checked in
   `System.Decimal` is not converted, because its range and precision differ; it is refused like any
   other unsupported type.
 - **Maps have distinct, non-null keys.** A decoded map with a null key or a repeated key is
-  refused; keys compare as AMQP values, so two binary keys with the same octets are the same key.
+  refused; keys compare as AMQP values, so two binary keys with the same octets are the same key,
+  and a binary key is never the same key as an array of byte with the same octets (D27).
 - **Unsupported CLR types are refused by name.** `decimal`, `TimeSpan`, `Half`, `Int128`,
   `UInt128`, `BigInteger`, `DateOnly`, `TimeOnly`, enums, `nint`, `nuint`, `Uri`, sets and any other
   type throw `ArgumentException` naming the type. An enum is not written as its underlying number.
 - **Nesting is bounded.** Compound and described values nest at most 64 deep, counted the same way
-  by the encoder and the reader, so whatever one writes the other reads.
+  by the encoder and the reader, so whatever one writes the other reads. The descriptor a described
+  array's elements share counts as one level inside the array.
 
 ### Symbols and frame sizes (#1484)
 
@@ -666,7 +684,8 @@ for the whole `libraries/` tree).
 A guard proves it on every change to the area (#433).
 `samples/Assimalign.Cohesion.Amqp.Connections.AotSample` publishes with `PublishAot=true` and every
 trim and AOT warning as an error, then runs eleven checks over TCP loopback: establishment with SASL
-PLAIN, every Part 1 type, every Part 3 section, the four outcomes, a pre-settled and a multi-frame
+PLAIN, every Part 1 type (`AmqpArray`s of ubyte, described strings, lists, maps and arrays
+included), every Part 3 section, the four outcomes, a pre-settled and a multi-frame
 transfer, a transaction, the codec, a refused link, a refused login, and a close with an error. The
 `aot-guard` job in `.github/workflows/library-amqp.yml` publishes it for `linux-x64` and fails on
 any IL warning, a non-zero exit, or a summary line that does not report every check passed.

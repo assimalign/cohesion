@@ -31,7 +31,7 @@ programs against this package alone.
 | Messages | `AmqpMessage`; its sections `AmqpHeader`, `AmqpProperties`, the annotation and property maps, and one body: `AmqpDataBody`, `AmqpSequenceBody` or `AmqpValueBody` |
 | Delivery states | `AmqpDeliveryState`: `AmqpReceived`, `AmqpTransactionalState`, and the outcomes `AmqpAccepted`, `AmqpRejected`, `AmqpReleased`, `AmqpModified` and `AmqpDeclared` |
 | Termini | `AmqpSource`, `AmqpTarget` and `AmqpCoordinator` (both `IAmqpTarget`), `AmqpTerminusDurability`, `AmqpTerminusExpiryPolicy`, `AmqpDistributionMode`, `AmqpLifetimePolicy`, `AmqpNodeProperties` |
-| Values | `AmqpSymbol`, `AmqpDeliveryTag`, `AmqpDecimal32`, `AmqpDecimal64`, `AmqpDecimal128`, `AmqpDescribedValue` |
+| Values | `AmqpSymbol`, `AmqpDeliveryTag`, `AmqpDecimal32`, `AmqpDecimal64`, `AmqpDecimal128`, `AmqpDescribedValue`, `AmqpArray` with `AmqpPrimitiveType` |
 | SASL | `IAmqpSaslClientMechanism`, `IAmqpSaslServerMechanism` and their exchanges; PLAIN, ANONYMOUS and EXTERNAL on both sides; `IAmqpSaslConnectionInfo`, read as `connection.AmqpSasl` |
 | Transactions | `AmqpTransactionController` (`IAmqpTransactionController`), `AmqpTransactionCoordinator` (`IAmqpTransactionCoordinator`) over an `IAmqpTransactionHandler`, `AmqpDeclare`, `AmqpDischarge`, `AmqpTransactionCapability` |
 | Errors | `AmqpException` with `AmqpErrorCode`; `AmqpError` and the standard conditions in `AmqpErrorCondition` |

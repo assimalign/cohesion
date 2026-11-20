@@ -686,22 +686,48 @@ internal ref struct AmqpReader
         return map;
     }
 
+    /// <summary>
+    /// Reads an array: as the typed CLR array of its element type where there is one and its elements are not
+    /// described, and as an <see cref="AmqpArray"/> otherwise, which keeps the element type and the descriptor.
+    /// </summary>
     private object ReadArrayBody(byte code)
     {
         AmqpReader elements = ReadArrayHeader(code, out int count, out byte elementCode, out object? descriptor);
 
-        if (descriptor is not null)
+        if (descriptor is null && elements.TryReadTypedArray(elementCode, count, out Array? typed))
         {
-            object?[] described = new object?[count];
-
-            for (int i = 0; i < described.Length; i++)
-            {
-                described[i] = new AmqpDescribedValue(descriptor, elements.ReadBody(elementCode));
-            }
-
-            return described;
+            return typed;
         }
 
+        // An array of ubyte (a byte[] is binary), null, lists, maps or arrays, or of described values: no CLR
+        // array type holds one, so an AmqpArray keeps what the encoder needs to write it back the same.
+        object?[] values = new object?[count];
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            values[i] = elements.ReadBody(elementCode);
+        }
+
+        return new AmqpArray(GetPrimitiveType(elementCode), values, descriptor);
+    }
+
+    /// <summary>
+    /// Reads the elements of an array whose element type has a CLR array type of its own into that array.
+    /// </summary>
+    /// <param name="elementCode">The element constructor.</param>
+    /// <param name="count">The number of elements.</param>
+    /// <param name="array">The array, when the element type has a CLR array type.</param>
+    /// <returns><see langword="true"/> when the element type has a CLR array type and the elements were read.</returns>
+    private bool TryReadTypedArray(byte elementCode, int count, [NotNullWhen(true)] out Array? array)
+    {
+        array = ReadTypedArray(elementCode, count);
+        return array is not null;
+    }
+
+    private Array? ReadTypedArray(byte elementCode, int count)
+    {
+        // The constructors without a width (true, false, uint0, ulong0) count only an empty array, which the
+        // array header has checked, and name the type as surely as the others.
         switch (elementCode)
         {
             case AmqpFormatCode.Symbol8:
@@ -710,7 +736,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < symbols.Length; i++)
                 {
-                    symbols[i] = elements.ReadSymbolBody(elementCode);
+                    symbols[i] = ReadSymbolBody(elementCode);
                 }
 
                 return symbols;
@@ -720,7 +746,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < strings.Length; i++)
                 {
-                    strings[i] = elements.ReadStringBody(elementCode);
+                    strings[i] = ReadStringBody(elementCode);
                 }
 
                 return strings;
@@ -730,17 +756,18 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < ints.Length; i++)
                 {
-                    ints[i] = elements.ReadIntBody(elementCode);
+                    ints[i] = ReadIntBody(elementCode);
                 }
 
                 return ints;
+            case AmqpFormatCode.UInt0:
             case AmqpFormatCode.SmallUInt:
             case AmqpFormatCode.UInt:
                 uint[] uints = new uint[count];
 
                 for (int i = 0; i < uints.Length; i++)
                 {
-                    uints[i] = elements.ReadUIntBody(elementCode);
+                    uints[i] = ReadUIntBody(elementCode);
                 }
 
                 return uints;
@@ -750,17 +777,18 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < longs.Length; i++)
                 {
-                    longs[i] = elements.ReadLongBody(elementCode);
+                    longs[i] = ReadLongBody(elementCode);
                 }
 
                 return longs;
+            case AmqpFormatCode.ULong0:
             case AmqpFormatCode.SmallULong:
             case AmqpFormatCode.ULong:
                 ulong[] ulongs = new ulong[count];
 
                 for (int i = 0; i < ulongs.Length; i++)
                 {
-                    ulongs[i] = elements.ReadULongBody(elementCode);
+                    ulongs[i] = ReadULongBody(elementCode);
                 }
 
                 return ulongs;
@@ -769,7 +797,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < shorts.Length; i++)
                 {
-                    shorts[i] = BinaryPrimitives.ReadInt16BigEndian(elements.ReadBytes(2));
+                    shorts[i] = BinaryPrimitives.ReadInt16BigEndian(ReadBytes(2));
                 }
 
                 return shorts;
@@ -778,7 +806,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < ushorts.Length; i++)
                 {
-                    ushorts[i] = BinaryPrimitives.ReadUInt16BigEndian(elements.ReadBytes(2));
+                    ushorts[i] = BinaryPrimitives.ReadUInt16BigEndian(ReadBytes(2));
                 }
 
                 return ushorts;
@@ -787,16 +815,18 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < sbytes.Length; i++)
                 {
-                    sbytes[i] = (sbyte)elements.ReadByte();
+                    sbytes[i] = (sbyte)ReadByte();
                 }
 
                 return sbytes;
+            case AmqpFormatCode.BooleanTrue:
+            case AmqpFormatCode.BooleanFalse:
             case AmqpFormatCode.Boolean:
                 bool[] booleans = new bool[count];
 
                 for (int i = 0; i < booleans.Length; i++)
                 {
-                    booleans[i] = elements.ReadBooleanByte();
+                    booleans[i] = ReadBooleanByte();
                 }
 
                 return booleans;
@@ -805,7 +835,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < singles.Length; i++)
                 {
-                    singles[i] = BinaryPrimitives.ReadSingleBigEndian(elements.ReadBytes(4));
+                    singles[i] = BinaryPrimitives.ReadSingleBigEndian(ReadBytes(4));
                 }
 
                 return singles;
@@ -814,7 +844,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < doubles.Length; i++)
                 {
-                    doubles[i] = BinaryPrimitives.ReadDoubleBigEndian(elements.ReadBytes(8));
+                    doubles[i] = BinaryPrimitives.ReadDoubleBigEndian(ReadBytes(8));
                 }
 
                 return doubles;
@@ -823,7 +853,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < uuids.Length; i++)
                 {
-                    uuids[i] = new Guid(elements.ReadBytes(16), bigEndian: true);
+                    uuids[i] = new Guid(ReadBytes(16), bigEndian: true);
                 }
 
                 return uuids;
@@ -832,7 +862,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < timestamps.Length; i++)
                 {
-                    timestamps[i] = elements.ReadTimestampBody();
+                    timestamps[i] = ReadTimestampBody();
                 }
 
                 return timestamps;
@@ -841,7 +871,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < decimal32s.Length; i++)
                 {
-                    decimal32s[i] = new AmqpDecimal32(BinaryPrimitives.ReadUInt32BigEndian(elements.ReadBytes(4)));
+                    decimal32s[i] = new AmqpDecimal32(BinaryPrimitives.ReadUInt32BigEndian(ReadBytes(4)));
                 }
 
                 return decimal32s;
@@ -850,7 +880,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < decimal64s.Length; i++)
                 {
-                    decimal64s[i] = new AmqpDecimal64(BinaryPrimitives.ReadUInt64BigEndian(elements.ReadBytes(8)));
+                    decimal64s[i] = new AmqpDecimal64(BinaryPrimitives.ReadUInt64BigEndian(ReadBytes(8)));
                 }
 
                 return decimal64s;
@@ -859,7 +889,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < decimal128s.Length; i++)
                 {
-                    decimal128s[i] = new AmqpDecimal128(BinaryPrimitives.ReadUInt128BigEndian(elements.ReadBytes(16)));
+                    decimal128s[i] = new AmqpDecimal128(BinaryPrimitives.ReadUInt128BigEndian(ReadBytes(16)));
                 }
 
                 return decimal128s;
@@ -868,7 +898,7 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < runes.Length; i++)
                 {
-                    runes[i] = elements.ReadCharBody();
+                    runes[i] = ReadCharBody();
                 }
 
                 return runes;
@@ -878,22 +908,48 @@ internal ref struct AmqpReader
 
                 for (int i = 0; i < binaries.Length; i++)
                 {
-                    binaries[i] = elements.ReadVariableBody(elementCode).ToArray();
+                    binaries[i] = ReadVariableBody(elementCode).ToArray();
                 }
 
                 return binaries;
             default:
-                // An array of ubyte, list, map or array: no CLR array type holds one without a clash (a
-                // byte[] is binary), so its elements come back as objects.
-                object?[] values = new object?[count];
-
-                for (int i = 0; i < values.Length; i++)
-                {
-                    values[i] = elements.ReadBody(elementCode);
-                }
-
-                return values;
+                return null;
         }
+    }
+
+    /// <summary>
+    /// Gets the primitive type an element constructor encodes.
+    /// </summary>
+    private static AmqpPrimitiveType GetPrimitiveType(byte code)
+    {
+        return code switch
+        {
+            AmqpFormatCode.Null => AmqpPrimitiveType.Null,
+            AmqpFormatCode.Boolean or AmqpFormatCode.BooleanTrue or AmqpFormatCode.BooleanFalse => AmqpPrimitiveType.Boolean,
+            AmqpFormatCode.UByte => AmqpPrimitiveType.UByte,
+            AmqpFormatCode.UShort => AmqpPrimitiveType.UShort,
+            AmqpFormatCode.UInt or AmqpFormatCode.SmallUInt or AmqpFormatCode.UInt0 => AmqpPrimitiveType.UInt,
+            AmqpFormatCode.ULong or AmqpFormatCode.SmallULong or AmqpFormatCode.ULong0 => AmqpPrimitiveType.ULong,
+            AmqpFormatCode.Byte => AmqpPrimitiveType.Byte,
+            AmqpFormatCode.Short => AmqpPrimitiveType.Short,
+            AmqpFormatCode.Int or AmqpFormatCode.SmallInt => AmqpPrimitiveType.Int,
+            AmqpFormatCode.Long or AmqpFormatCode.SmallLong => AmqpPrimitiveType.Long,
+            AmqpFormatCode.Float => AmqpPrimitiveType.Float,
+            AmqpFormatCode.Double => AmqpPrimitiveType.Double,
+            AmqpFormatCode.Decimal32 => AmqpPrimitiveType.Decimal32,
+            AmqpFormatCode.Decimal64 => AmqpPrimitiveType.Decimal64,
+            AmqpFormatCode.Decimal128 => AmqpPrimitiveType.Decimal128,
+            AmqpFormatCode.Char => AmqpPrimitiveType.Char,
+            AmqpFormatCode.Timestamp => AmqpPrimitiveType.Timestamp,
+            AmqpFormatCode.Uuid => AmqpPrimitiveType.Uuid,
+            AmqpFormatCode.Binary8 or AmqpFormatCode.Binary32 => AmqpPrimitiveType.Binary,
+            AmqpFormatCode.String8 or AmqpFormatCode.String32 => AmqpPrimitiveType.String,
+            AmqpFormatCode.Symbol8 or AmqpFormatCode.Symbol32 => AmqpPrimitiveType.Symbol,
+            AmqpFormatCode.List0 or AmqpFormatCode.List8 or AmqpFormatCode.List32 => AmqpPrimitiveType.List,
+            AmqpFormatCode.Map8 or AmqpFormatCode.Map32 => AmqpPrimitiveType.Map,
+            AmqpFormatCode.Array8 or AmqpFormatCode.Array32 => AmqpPrimitiveType.Array,
+            _ => throw UnsupportedFormatCode(code)
+        };
     }
 
     /// <summary>

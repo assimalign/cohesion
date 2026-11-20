@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Amqp.Internal;
+
 namespace Assimalign.Cohesion.Amqp;
 
 /// <summary>
@@ -28,15 +30,7 @@ public sealed class AmqpDescribedValue
     {
         ArgumentNullException.ThrowIfNull(descriptor);
 
-        Descriptor = descriptor switch
-        {
-            AmqpSymbol { Value: not null } symbol => symbol,
-            ulong code => code,
-            string name => AmqpSymbol.TryCreate(name, out AmqpSymbol named)
-                ? named
-                : throw new ArgumentException(ErrorMessages.SymbolInvalid, nameof(descriptor)),
-            _ => throw new ArgumentException(ErrorMessages.DescriptorTypeInvalid, nameof(descriptor))
-        };
+        Descriptor = AmqpDescriptors.Normalize(descriptor, nameof(descriptor));
         Value = value;
     }
 

@@ -82,6 +82,12 @@
   <data name="ArrayElementNull" xml:space="preserve">
     <value>Element {0} of the array is null, which an AMQP array cannot hold; a list can.</value>
   </data>
+  <data name="ArrayElementTypeMismatch" xml:space="preserve">
+    <value>Element {0} of the array is a '{1}', which is not a value of the array's element type, {2}; every element of an AMQP array has the one type its constructor names.</value>
+  </data>
+  <data name="ArrayOfNullNotEmpty" xml:space="preserve">
+    <value>An AMQP array of null holds no elements: its element constructor has no width, so a reader could not count them.</value>
+  </data>
   <data name="TimestampOutOfRange" xml:space="preserve">
     <value>An encoded AMQP timestamp is outside the range a DateTimeOffset represents.</value>
   </data>

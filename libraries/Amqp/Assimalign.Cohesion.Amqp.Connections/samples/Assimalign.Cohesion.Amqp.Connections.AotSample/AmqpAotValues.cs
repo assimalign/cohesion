@@ -1,11 +1,12 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Amqp.Connections.AotSample;
 
 /// <summary>
-/// Compares a value the guard sent with the value that arrived, structurally: a list, map, typed array, binary
-/// or described value by its contents, and anything else by its own equality and CLR type.
+/// Compares a value the guard sent with the value that arrived, structurally: a list, map, typed array, AMQP array,
+/// binary or described value by its contents, and anything else by its own equality and CLR type.
 /// </summary>
 internal static class AmqpAotValues
 {
@@ -26,6 +27,10 @@ internal static class AmqpAotValues
             AmqpDescribedValue described => actual is AmqpDescribedValue other
                 && AreEqual(described.Descriptor, other.Descriptor)
                 && AreEqual(described.Value, other.Value),
+            AmqpArray array => actual is AmqpArray other
+                && array.ElementType == other.ElementType
+                && AreEqual(array.Descriptor, other.Descriptor)
+                && ElementsEqual(array.Elements, other.Elements),
             IDictionary map => actual is IDictionary other && MapsEqual(map, other),
             IList list => actual.GetType() == expected.GetType() && ListsEqual(list, (IList)actual),
             _ => actual.GetType() == expected.GetType() && expected.Equals(actual)
@@ -33,6 +38,24 @@ internal static class AmqpAotValues
     }
 
     private static bool ListsEqual(IList expected, IList actual)
+    {
+        if (expected.Count != actual.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < expected.Count; index++)
+        {
+            if (!AreEqual(expected[index], actual[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ElementsEqual(IReadOnlyList<object?> expected, IReadOnlyList<object?> actual)
     {
         if (expected.Count != actual.Count)
         {
