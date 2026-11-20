@@ -4,7 +4,9 @@
 		<Platform Name="x64" />
 		<Platform Name="x86" />
 	</Configurations>
-	<Folder Name="/Amqp/" />
+	<Folder Name="/Amqp/">
+		<File Path="README.md" />
+	</Folder>
 	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp/">
 		<File Path="Assimalign.Cohesion.Amqp/README.md" />
 	</Folder>

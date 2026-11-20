@@ -729,8 +729,9 @@ string payloads. Fully NativeAOT compatible.
   driver's own internal event source. There is no separate toolbox assembly and no
   `InternalsVisibleTo` between shipped assemblies.
 - **`Assimalign.Cohesion.Connections.Security`** — TLS as `TlsConnectionLayer` / `UpgradeToTlsAsync`.
-- **`Assimalign.Cohesion.Http.Connections` / `Assimalign.Cohesion.Amqp.Transports`** — application
-  protocols consuming these contracts by capability.
+- **`Assimalign.Cohesion.Http.Connections` / `Assimalign.Cohesion.Amqp.Connections`** — application
+  protocols consuming these contracts by capability. AMQP establishes its connections as an
+  `IConnectionLayer` on the layered listener and factory, as TLS does.
 
 ## Driver composition seams
 

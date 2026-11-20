@@ -9,7 +9,9 @@
 		<File Path="Directory.Build.targets" />
 		<File Path="README.md" />
 	</Folder>
-	<Folder Name="/libraries/Amqp/" />
+	<Folder Name="/libraries/Amqp/">
+		<File Path="Amqp/README.md" />
+	</Folder>
 	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp/">
 		<File Path="Amqp/Assimalign.Cohesion.Amqp/README.md" />
 	</Folder>

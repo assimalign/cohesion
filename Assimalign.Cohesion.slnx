@@ -219,7 +219,9 @@
 		<File Path="libraries/Directory.Build.targets" />
 		<File Path="libraries/README.md" />
 	</Folder>
-	<Folder Name="/cohesion/libraries/Amqp/" />
+	<Folder Name="/cohesion/libraries/Amqp/">
+		<File Path="libraries/Amqp/README.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/">
 		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp/README.md" />
 	</Folder>
@@ -231,6 +233,10 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/">
 		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/docs/">
+		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/docs/DESIGN.md" />
+		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/">
 		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/Assimalign.Cohesion.Amqp.Connections.csproj" />
