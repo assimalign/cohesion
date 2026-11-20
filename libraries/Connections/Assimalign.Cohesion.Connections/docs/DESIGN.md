@@ -581,8 +581,10 @@ that wire-level behavior change. HTTP-specific API changes are recorded in Http.
   connection whose client reset it before the accept, which Windows reports by failing the
   accept (#1308), and it waits and retries when the process runs out of descriptors or buffers,
   which clears once connections close (#1312).
-- Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close;
-  `Abort(Exception?)` to tear down immediately, discarding in-flight data. A multiplexed transport's
+- Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close
+  without discarding what was already written (TCP waits at most its close timeout for a peer that
+  does not read, then aborts, #1086); `Abort(Exception?)` to tear down immediately, discarding
+  in-flight data. A multiplexed transport's
   streams and connections can also abort with a transport-specific application error code. Optional
   directional aborts end one stream direction at a time (see "Application error codes", above). `ConnectionClosed` is
   signaled on closure. A stream of a multiplexed connection also signals it when its peer abandons
