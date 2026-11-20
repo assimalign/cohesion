@@ -44,13 +44,36 @@ flowchart LR
     Tls --> Conn
 ```
 
-The six packages not drawn — `Http.ClientFactory`, `Http.DigestFields`, `Http.Forwarded`,
-`Http.InterimResponses`, `Http.RequestLimits`, and `Http.Sessions` — each reference the root
-`Assimalign.Cohesion.Http` and nothing else, so they would add six nodes and six identical arrows
-without adding information. `Http.ExtendedConnect` references only the root too; it is drawn
-because `Http.WebSockets` references it. The root's own reference to `Assimalign.Cohesion.Core` is
-stated under [Layering](#layering) rather than drawn. The full reference graph for every Cohesion
-assembly is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+The diagram above is at the twelve-node ceiling, so `Http.Proxy`, the forwarding and tunneling
+mechanism a proxy is built from, gets its own. It references the root and four concern packages,
+each of which references only the root:
+
+```mermaid
+flowchart LR
+    Proxy["Http.Proxy"]
+    Root["Http — area root"]
+    Upgrade["Http.ProtocolUpgrade"]
+    Ext["Http.ExtendedConnect"]
+    Fwd["Http.Forwarded"]
+    Streaming["Http.Streaming"]
+    Proxy --> Root
+    Proxy --> Upgrade
+    Proxy --> Ext
+    Proxy --> Fwd
+    Proxy --> Streaming
+    Upgrade --> Root
+    Ext --> Root
+    Fwd --> Root
+    Streaming --> Root
+```
+
+The five packages not drawn — `Http.ClientFactory`, `Http.DigestFields`, `Http.InterimResponses`,
+`Http.RequestLimits`, and `Http.Sessions` — each reference the root `Assimalign.Cohesion.Http` and
+nothing else, so they would add five nodes and five identical arrows without adding information.
+`Http.ExtendedConnect` and `Http.Forwarded` reference only the root too; they are drawn because
+`Http.WebSockets` and `Http.Proxy` reference them. The root's own reference to
+`Assimalign.Cohesion.Core` is stated under [Layering](#layering) rather than drawn. The full
+reference graph for every Cohesion assembly is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## The per-concern packaging rule
 
@@ -63,7 +86,9 @@ surface is the signal that a new package is due.
 This is why `Http.Forwarded` exists separately from the trust middleware in
 `resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders`: the primitives and the feature contract
 are protocol-level and belong here; the policy that decides which proxies to trust is a web-server
-concern and belongs there.
+concern and belongs there. The same split puts the forwarding and tunneling mechanism in
+`Http.Proxy` and the reverse proxy's routes and the forward proxy's access rules in
+`resources/Web/Assimalign.Cohesion.Web.Proxy`.
 
 ## Layering
 
@@ -82,7 +107,9 @@ configuration binding are `*.Hosting` concerns one layer up.
 Per-project `docs/OVERVIEW.md` and `docs/DESIGN.md` live beside each project's
 `src/`. Start at [Assimalign.Cohesion.Http/docs/DESIGN.md](Assimalign.Cohesion.Http/docs/DESIGN.md)
 for the root abstractions and the feature-collection model. The server transport is introduced in
-[Http.Connections overview](Assimalign.Cohesion.Http.Connections/docs/OVERVIEW.md).
+[Http.Connections overview](Assimalign.Cohesion.Http.Connections/docs/OVERVIEW.md), and the
+forwarder and tunnel a proxy is built from in
+[Http.Proxy overview](Assimalign.Cohesion.Http.Proxy/docs/OVERVIEW.md).
 Decisions that span more than one package
 (server WebSockets, trailers) are in [docs/libraries/Http/DECISIONS.md](../../docs/libraries/Http/DECISIONS.md).
 Public API reference belongs in [cohesion-docs](https://github.com/assimalign/cohesion-docs).

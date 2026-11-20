@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+		<Description>HTTP forwarding and tunneling for the Cohesion HTTP family. Forwards one exchange to an upstream server through an HttpMessageInvoker (the mechanism of a reverse proxy and of an absolute-form forward proxy), passes HTTP/1.1 protocol upgrades and WebSocket extended CONNECT through, and relays an HTTP/1.1 CONNECT tunnel. Routing, policy and composition ship in Assimalign.Cohesion.Web.Proxy.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ExtendedConnect" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+	</ItemGroup>
+</Project>

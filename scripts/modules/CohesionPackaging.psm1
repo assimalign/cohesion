@@ -139,6 +139,7 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Http/Assimalign.Cohesion.Http.Connections'
     'libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect'
     'libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade'
+    'libraries/Http/Assimalign.Cohesion.Http.Proxy'
     'libraries/Http/Assimalign.Cohesion.Http.RequestLimits'
     'libraries/Http/Assimalign.Cohesion.Http.Cookies'
     'libraries/Http/Assimalign.Cohesion.Http.Antiforgery'
