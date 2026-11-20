@@ -777,6 +777,13 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
         if (TryCreateRemoteLinkLocked(attach, role, out link))
         {
+            // An attach whose fields contradict each other ends only its link (AMQP 1.0 Part 2, section 2.8.15).
+            if (AmqpAttachRules.FindViolation(attach, opening: true) is string violation)
+            {
+                link.RefuseLocked(new AmqpError(AmqpErrorCondition.InvalidField, violation));
+                return;
+            }
+
             _linksByName.Add((attach.Name, role), link);
             _requests.Writer.TryWrite(new AmqpLinkRequest(this, link, attach));
         }

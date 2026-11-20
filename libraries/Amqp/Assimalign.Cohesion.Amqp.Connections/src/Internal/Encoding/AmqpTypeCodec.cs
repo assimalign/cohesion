@@ -281,7 +281,7 @@ internal static class AmqpTypeCodec
         AmqpEncoder.WriteSymbolMap(writer, source.DynamicNodeProperties, depth + 2);
         list.Field(source.DynamicNodeProperties is null);
         list.WriteSymbol(source.DistributionMode);
-        AmqpEncoder.WriteSymbolMap(writer, source.Filter, depth + 2);
+        WriteFilterSet(writer, source.Filter, depth + 2);
         list.Field(source.Filter is null);
 
         if (source.DefaultOutcome is null)
@@ -316,13 +316,13 @@ internal static class AmqpTypeCodec
         AmqpSource source = new();
 
         source.Address = count > 0 ? fields.ReadAddress() : null;
-        source.Durable = (AmqpTerminusDurability)((count > 1 ? fields.ReadNullableUInt() : null) ?? 0u);
-        source.ExpiryPolicy = (count > 2 ? fields.ReadSymbol() : null) ?? AmqpTerminusExpiryPolicy.SessionEnd;
+        source.Durable = ReadDurability(ref fields, count > 1);
+        source.ExpiryPolicy = ReadExpiryPolicy(ref fields, count > 2);
         source.Timeout = (count > 3 ? fields.ReadNullableUInt() : null) ?? 0u;
         source.Dynamic = count > 4 && fields.ReadBoolean(false);
         source.DynamicNodeProperties = count > 5 ? fields.ReadSymbolMap() : null;
         source.DistributionMode = count > 6 ? fields.ReadSymbol() : null;
-        source.Filter = count > 7 ? fields.ReadSymbolMap() : null;
+        source.Filter = count > 7 ? fields.ReadFilterSet() : null;
         source.DefaultOutcome = count > 8 ? ReadOutcome(ref fields) : null;
         source.Outcomes = count > 9 ? fields.ReadSymbolMultiple() : null;
         source.Capabilities = count > 10 ? fields.ReadSymbolMultiple() : null;
@@ -408,8 +408,8 @@ internal static class AmqpTypeCodec
         AmqpTarget target = new();
 
         target.Address = count > 0 ? fields.ReadAddress() : null;
-        target.Durable = (AmqpTerminusDurability)((count > 1 ? fields.ReadNullableUInt() : null) ?? 0u);
-        target.ExpiryPolicy = (count > 2 ? fields.ReadSymbol() : null) ?? AmqpTerminusExpiryPolicy.SessionEnd;
+        target.Durable = ReadDurability(ref fields, count > 1);
+        target.ExpiryPolicy = ReadExpiryPolicy(ref fields, count > 2);
         target.Timeout = (count > 3 ? fields.ReadNullableUInt() : null) ?? 0u;
         target.Dynamic = count > 4 && fields.ReadBoolean(false);
         target.DynamicNodeProperties = count > 5 ? fields.ReadSymbolMap() : null;
@@ -565,6 +565,70 @@ internal static class AmqpTypeCodec
     {
         AmqpEncoder.WriteDescriptor(writer, descriptor);
         writer.WriteByte(AmqpFormatCode.List0);
+    }
+
+    /// <summary>
+    /// Writes a source's filter set, whose values must be described filters or <c>null</c> (AMQP 1.0 Part 3,
+    /// section 3.5.8).
+    /// </summary>
+    /// <exception cref="ArgumentException">Thrown when a filter's value is not an <see cref="AmqpDescribedValue"/> or <see langword="null"/>.</exception>
+    private static void WriteFilterSet(AmqpBufferWriter writer, IReadOnlyDictionary<AmqpSymbol, object?>? filters, int depth)
+    {
+        if (filters is not null)
+        {
+            foreach (KeyValuePair<AmqpSymbol, object?> filter in filters)
+            {
+                if (filter.Value is not (null or AmqpDescribedValue))
+                {
+                    throw new ArgumentException(
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.FilterValueInvalid, filter.Key),
+                        nameof(filters));
+                }
+            }
+        }
+
+        AmqpEncoder.WriteSymbolMap(writer, filters, depth);
+    }
+
+    /// <summary>
+    /// Reads a terminus's durability, which must be one of the three AMQP 1.0 defines (Part 3, section 3.5.5).
+    /// </summary>
+    private static AmqpTerminusDurability ReadDurability(ref AmqpReader fields, bool present)
+    {
+        uint durable = (present ? fields.ReadNullableUInt() : null) ?? 0u;
+
+        if (durable > (uint)AmqpTerminusDurability.UnsettledState)
+        {
+            throw AmqpException.ProtocolViolation(
+                AmqpErrorCondition.InvalidField,
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TerminusDurabilityInvalid, durable));
+        }
+
+        return (AmqpTerminusDurability)durable;
+    }
+
+    /// <summary>
+    /// Reads a terminus's expiry policy, which must be one of the four AMQP 1.0 defines (Part 3,
+    /// section 3.5.6); an absent policy is <c>session-end</c>.
+    /// </summary>
+    private static AmqpSymbol ReadExpiryPolicy(ref AmqpReader fields, bool present)
+    {
+        if ((present ? fields.ReadSymbol() : null) is not AmqpSymbol policy)
+        {
+            return AmqpTerminusExpiryPolicy.SessionEnd;
+        }
+
+        if (policy != AmqpTerminusExpiryPolicy.LinkDetach
+            && policy != AmqpTerminusExpiryPolicy.SessionEnd
+            && policy != AmqpTerminusExpiryPolicy.ConnectionClose
+            && policy != AmqpTerminusExpiryPolicy.Never)
+        {
+            throw AmqpException.ProtocolViolation(
+                AmqpErrorCondition.InvalidField,
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TerminusExpiryPolicyInvalid, policy));
+        }
+
+        return policy;
     }
 
     private static void WriteExpiryPolicy(ref AmqpListWriter list, AmqpSymbol policy)

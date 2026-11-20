@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.Amqp;
 
@@ -28,10 +29,19 @@ internal sealed class AmqpSaslOutcomePerformative : AmqpPerformative
 
     public static AmqpSaslOutcomePerformative Decode(ref AmqpReader fields, int count)
     {
-        byte? code = count > 0 ? fields.ReadNullableUByte() : null;
+        byte code = (count > 0 ? fields.ReadNullableUByte() : null) ?? throw MandatoryFieldMissing("sasl-outcome", "code");
+
+        // The code is a restricted ubyte whose choices are ok through sys-temp (AMQP 1.0 Part 5, section 5.3.3.6).
+        if (code > (byte)AmqpSaslCode.SysTemp)
+        {
+            throw AmqpException.ProtocolViolation(
+                AmqpErrorCondition.InvalidField,
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.SaslCodeInvalid, code));
+        }
+
         AmqpSaslOutcomePerformative outcome = new()
         {
-            Code = (AmqpSaslCode)(code ?? throw MandatoryFieldMissing("sasl-outcome", "code"))
+            Code = (AmqpSaslCode)code
         };
 
         if (count > 1 && fields.ReadBinary(out ReadOnlySpan<byte> additionalData))

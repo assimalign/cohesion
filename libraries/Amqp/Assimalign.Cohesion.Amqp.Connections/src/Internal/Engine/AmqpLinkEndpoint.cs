@@ -196,10 +196,14 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     /// <summary>
     /// Sends the <c>attach</c> of a link the application attaches.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown when the options make an <c>attach</c> that breaks a rule spanning its fields, or carry a value the encoder refuses.</exception>
     /// <exception cref="AmqpException">Thrown when the encoded <c>attach</c> exceeds the peer's maximum frame size.</exception>
     internal void AttachLocked()
     {
-        _session.WriteFrameLocked(CreateAttach(_localSource, _localTarget));
+        AmqpAttachPerformative attach = CreateAttach(_localSource, _localTarget);
+
+        ThrowIfRuleBroken(attach, opening: true);
+        _session.WriteFrameLocked(attach);
         _state = AmqpLinkState.AttachSent;
         OnAttachSentLocked();
     }
@@ -354,43 +358,22 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     /// <summary>
     /// Answers the <c>attach</c> of a link the peer attached, accepting it with the application's options.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown when the options make an <c>attach</c> that breaks a rule spanning its fields, or carry a value the encoder refuses; the request stays unanswered.</exception>
     /// <exception cref="AmqpException">Thrown when the encoded <c>attach</c> exceeds the peer's maximum frame size; the request stays unanswered.</exception>
     private protected void AnswerLocked(AmqpLinkOptions? options)
     {
         Debug.Assert(_state == AmqpLinkState.RemoteAttached);
 
-        if (_role == AmqpRole.Sender)
-        {
-            // The sender decides the source and its settlement mode; the target stays the receiver's.
-            _localSource = options?.Source ?? _remoteSource;
-            _localTarget = _remoteTarget;
+        // The answer is sent before the link takes its values, so an answer that fails leaves the request as
+        // the peer proposed it: a refusal or a second answer carries none of the failed options.
+        AmqpAttachPerformative answer = CreateAnswer(options);
 
-            if (options is not null)
-            {
-                _senderSettleMode = options.SenderSettleMode;
-            }
-        }
-        else
-        {
-            // The receiver decides the target and its settlement mode; the source stays the sender's.
-            _localSource = _remoteSource;
-            _localTarget = options?.Target ?? _remoteTarget;
-
-            if (options is not null)
-            {
-                _receiverSettleMode = options.ReceiverSettleMode;
-            }
-        }
-
-        if (options is not null)
-        {
-            ApplyLocalOptions(options);
-        }
-
-        _session.WriteFrameLocked(CreateAttach(_localSource, _localTarget));
+        ThrowIfRuleBroken(answer, opening: false);
+        _session.WriteFrameLocked(answer);
+        ApplyLocalAttach(answer);
         _state = AmqpLinkState.Attached;
         _attached.TrySetResult();
-        OnAcceptedLocked();
+        OnAcceptedLocked(options);
     }
 
     /// <summary>
@@ -442,9 +425,10 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     }
 
     /// <summary>
-    /// Called once the application accepted a link the peer attached and the answer is written.
+    /// Called once the application accepted a link the peer attached and the answer is written, to take the
+    /// options that apply only to its own role.
     /// </summary>
-    private protected virtual void OnAcceptedLocked()
+    private protected virtual void OnAcceptedLocked(AmqpLinkOptions? options)
     {
     }
 
@@ -534,6 +518,54 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         }
     }
 
+    /// <summary>
+    /// Refuses an <c>attach</c> of the link's own that breaks a rule spanning its fields, before it is sent,
+    /// as the application's mistake.
+    /// </summary>
+    /// <param name="attach">The attach.</param>
+    /// <param name="opening"><see langword="true"/> when the attach opens the link; <see langword="false"/> when it answers the peer's.</param>
+    /// <exception cref="ArgumentException">Thrown when the attach breaks a rule.</exception>
+    private static void ThrowIfRuleBroken(AmqpAttachPerformative attach, bool opening)
+    {
+        if (AmqpAttachRules.FindViolation(attach, opening) is string violation)
+        {
+            throw new ArgumentException(violation, "options");
+        }
+    }
+
+    /// <summary>
+    /// Creates the answer to the peer's <c>attach</c>. The sender decides the source and its settlement mode
+    /// and the receiver the target and its; the other terminus stays the peer's.
+    /// </summary>
+    private AmqpAttachPerformative CreateAnswer(AmqpLinkOptions? options)
+    {
+        AmqpAttachPerformative answer = _role == AmqpRole.Sender
+            ? CreateAttach(options?.Source ?? _remoteSource, _remoteTarget)
+            : CreateAttach(_remoteSource, options?.Target ?? _remoteTarget);
+
+        if (options is null)
+        {
+            return answer;
+        }
+
+        if (_role == AmqpRole.Sender)
+        {
+            answer.SenderSettleMode = options.SenderSettleMode;
+        }
+        else
+        {
+            answer.ReceiverSettleMode = options.ReceiverSettleMode;
+        }
+
+        answer.MaxMessageSize = options.MaxMessageSize;
+        answer.Unsettled = options.Unsettled;
+        answer.IncompleteUnsettled = options.IncompleteUnsettled;
+        answer.OfferedCapabilities = options.OfferedCapabilities;
+        answer.DesiredCapabilities = options.DesiredCapabilities;
+        answer.Properties = options.Properties;
+        return answer;
+    }
+
     private AmqpAttachPerformative CreateAttach(AmqpSource? source, IAmqpTarget? target)
     {
         return new AmqpAttachPerformative
@@ -553,6 +585,20 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
             DesiredCapabilities = _desiredCapabilities,
             Properties = _properties
         };
+    }
+
+    private void ApplyLocalAttach(AmqpAttachPerformative attach)
+    {
+        _localSource = attach.Source;
+        _localTarget = attach.Target;
+        _senderSettleMode = attach.SenderSettleMode;
+        _receiverSettleMode = attach.ReceiverSettleMode;
+        _localMaxMessageSize = attach.MaxMessageSize;
+        _localUnsettled = attach.Unsettled;
+        _localIncompleteUnsettled = attach.IncompleteUnsettled;
+        _offeredCapabilities = attach.OfferedCapabilities;
+        _desiredCapabilities = attach.DesiredCapabilities;
+        _properties = attach.Properties;
     }
 
     private void ApplyLocalOptions(AmqpLinkOptions options)

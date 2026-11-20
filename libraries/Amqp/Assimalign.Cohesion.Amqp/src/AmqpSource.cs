@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Amqp;
@@ -22,13 +23,43 @@ public sealed class AmqpSource
     /// <summary>
     /// Gets or sets what state of the source is retained durably. Defaults to <see cref="AmqpTerminusDurability.None"/>.
     /// </summary>
-    public AmqpTerminusDurability Durable { get; set; }
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is not one AMQP 1.0 defines (Part 3, section 3.5.5).</exception>
+    public AmqpTerminusDurability Durable
+    {
+        get;
+        set
+        {
+            if (!Enum.IsDefined(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            field = value;
+        }
+    }
 
     /// <summary>
-    /// Gets or sets the event that starts the source's expiry timer. Defaults to
-    /// <see cref="AmqpTerminusExpiryPolicy.SessionEnd"/>, which the wire also encodes by omission.
+    /// Gets or sets the event that starts the source's expiry timer: one of the policies on
+    /// <see cref="AmqpTerminusExpiryPolicy"/>. Defaults to <see cref="AmqpTerminusExpiryPolicy.SessionEnd"/>,
+    /// which the wire also encodes by omission.
     /// </summary>
-    public AmqpSymbol ExpiryPolicy { get; set; } = AmqpTerminusExpiryPolicy.SessionEnd;
+    /// <exception cref="ArgumentException">Thrown when the value is not one of the policies AMQP 1.0 defines (Part 3, section 3.5.6).</exception>
+    public AmqpSymbol ExpiryPolicy
+    {
+        get;
+        set
+        {
+            if (value != AmqpTerminusExpiryPolicy.LinkDetach
+                && value != AmqpTerminusExpiryPolicy.SessionEnd
+                && value != AmqpTerminusExpiryPolicy.ConnectionClose
+                && value != AmqpTerminusExpiryPolicy.Never)
+            {
+                throw new ArgumentException(ErrorMessages.ExpiryPolicyInvalid, nameof(value));
+            }
+
+            field = value;
+        }
+    } = AmqpTerminusExpiryPolicy.SessionEnd;
 
     /// <summary>
     /// Gets or sets how long, in seconds, the source survives once its expiry timer starts. Defaults to 0.
@@ -56,8 +87,8 @@ public sealed class AmqpSource
     /// Gets or sets the filters the source applies, keyed by filter name, or <see langword="null"/> for none.
     /// </summary>
     /// <remarks>
-    /// Each value is a described filter, normally an <see cref="AmqpDescribedValue"/>, or
-    /// <see langword="null"/>.
+    /// Each value is a described filter, an <see cref="AmqpDescribedValue"/>, or <see langword="null"/>
+    /// (Part 3, section 3.5.8); a link whose source carries any other value is refused when it attaches.
     /// </remarks>
     public IReadOnlyDictionary<AmqpSymbol, object?>? Filter { get; set; }
 

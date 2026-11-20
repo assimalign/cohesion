@@ -173,14 +173,10 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
     /// <summary>
     /// Accepts a link the peer attached as a receiver and answers its <c>attach</c>.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown when the options make an <c>attach</c> that breaks a rule spanning its fields, or carry a value the encoder refuses; the request stays unanswered.</exception>
     /// <exception cref="AmqpException">Thrown when the encoded <c>attach</c> exceeds the peer's maximum frame size; the request stays unanswered.</exception>
     internal void AcceptLocked(AmqpSenderOptions? options)
     {
-        if (options is not null)
-        {
-            _autoCompleteDrain = options.AutoCompleteDrain;
-        }
-
         AnswerLocked(options);
     }
 
@@ -231,8 +227,13 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         FailLocked(AmqpErrorCondition.IllegalState, ErrorMessages.LinkRoleUnexpected);
     }
 
-    private protected override void OnAcceptedLocked()
+    private protected override void OnAcceptedLocked(AmqpLinkOptions? options)
     {
+        if (options is AmqpSenderOptions sender)
+        {
+            _autoCompleteDrain = sender.AutoCompleteDrain;
+        }
+
         // A receiver may have asked for a drain before the application answered.
         TryAutoCompleteDrainLocked();
     }
@@ -441,7 +442,18 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         int start = AmqpFrame.Begin(buffer, AmqpFrame.AmqpType, session.Channel);
 
         _transfer.More = true;
-        _transfer.Encode(buffer);
+
+        try
+        {
+            _transfer.Encode(buffer);
+        }
+        catch (Exception)
+        {
+            // Justified catch-all: a delivery state the encoder refuses must not leave a partial frame
+            // behind to corrupt the frames after it. Later encodings of the same state cannot fail.
+            buffer.Truncate(start);
+            throw;
+        }
 
         int room = maxFrameSize - (buffer.Length - start);
 

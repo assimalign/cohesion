@@ -34,4 +34,7 @@
   <data name="TransactionOutcomeUnexpected" xml:space="preserve">
     <value>The transaction coordinator answered with the unexpected outcome '{0}'.</value>
   </data>
+  <data name="ExpiryPolicyInvalid" xml:space="preserve">
+    <value>The terminus expiry policy must be one AMQP 1.0 defines: link-detach, session-end, connection-close or never.</value>
+  </data>
 </root>

@@ -135,14 +135,10 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
     /// <summary>
     /// Accepts a link the peer attached as a sender, answers its <c>attach</c>, and grants the prefetch credit.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown when the options make an <c>attach</c> that breaks a rule spanning its fields, or carry a value the encoder refuses; the request stays unanswered.</exception>
     /// <exception cref="AmqpException">Thrown when the encoded <c>attach</c> exceeds the peer's maximum frame size; the request stays unanswered.</exception>
     internal void AcceptLocked(AmqpReceiverOptions? options)
     {
-        if (options is not null)
-        {
-            _prefetch = options.Prefetch;
-        }
-
         AnswerLocked(options);
     }
 
@@ -354,8 +350,13 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
         _deliveryCountKnown = true;
     }
 
-    private protected override void OnAcceptedLocked()
+    private protected override void OnAcceptedLocked(AmqpLinkOptions? options)
     {
+        if (options is AmqpReceiverOptions receiver)
+        {
+            _prefetch = receiver.Prefetch;
+        }
+
         GrantPrefetchLocked();
     }
 

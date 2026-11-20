@@ -126,4 +126,67 @@ public class AmqpOptionsTests
         target.Timeout.ShouldBe(0u);
         target.Dynamic.ShouldBeFalse();
     }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp] - Durable: Should refuse a terminus durability the specification does not define")]
+    public void Durable_WithUndefinedValue_ShouldThrowArgumentOutOfRangeException()
+    {
+        // Arrange
+        AmqpSource source = new();
+        AmqpTarget target = new();
+
+        // Act
+        ArgumentOutOfRangeException sourceException = Should.Throw<ArgumentOutOfRangeException>(() => source.Durable = (AmqpTerminusDurability)3);
+        ArgumentOutOfRangeException targetException = Should.Throw<ArgumentOutOfRangeException>(() => target.Durable = (AmqpTerminusDurability)3);
+        source.Durable = AmqpTerminusDurability.UnsettledState;
+        target.Durable = AmqpTerminusDurability.Configuration;
+
+        // Assert
+        sourceException.ParamName.ShouldBe("value");
+        targetException.ParamName.ShouldBe("value");
+        source.Durable.ShouldBe(AmqpTerminusDurability.UnsettledState);
+        target.Durable.ShouldBe(AmqpTerminusDurability.Configuration);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp] - ExpiryPolicy: Should refuse an expiry policy the specification does not define")]
+    [InlineData("later")]
+    [InlineData("SESSION-END")]
+    [InlineData(null)]
+    public void ExpiryPolicy_WithUndefinedPolicy_ShouldThrowArgumentException(string? policy)
+    {
+        // Arrange
+        AmqpSymbol symbol = policy is null ? default : new AmqpSymbol(policy);
+        AmqpSource source = new();
+        AmqpTarget target = new();
+
+        // Act
+        ArgumentException sourceException = Should.Throw<ArgumentException>(() => source.ExpiryPolicy = symbol);
+        ArgumentException targetException = Should.Throw<ArgumentException>(() => target.ExpiryPolicy = symbol);
+
+        // Assert
+        sourceException.ParamName.ShouldBe("value");
+        targetException.ParamName.ShouldBe("value");
+        source.ExpiryPolicy.ShouldBe(AmqpTerminusExpiryPolicy.SessionEnd);
+        target.ExpiryPolicy.ShouldBe(AmqpTerminusExpiryPolicy.SessionEnd);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp] - ExpiryPolicy: Should accept each of the four policies the specification defines")]
+    [InlineData("link-detach")]
+    [InlineData("session-end")]
+    [InlineData("connection-close")]
+    [InlineData("never")]
+    public void ExpiryPolicy_WithDefinedPolicy_ShouldKeepIt(string policy)
+    {
+        // Arrange
+        AmqpSymbol symbol = new(policy);
+        AmqpSource source = new();
+        AmqpTarget target = new();
+
+        // Act
+        source.ExpiryPolicy = symbol;
+        target.ExpiryPolicy = symbol;
+
+        // Assert
+        source.ExpiryPolicy.ShouldBe(symbol);
+        target.ExpiryPolicy.ShouldBe(symbol);
+    }
 }

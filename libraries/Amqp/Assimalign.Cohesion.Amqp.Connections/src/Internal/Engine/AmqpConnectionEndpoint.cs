@@ -318,8 +318,9 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
     }
 
     /// <summary>
-    /// Writes a frame on the connection, under the lock.
+    /// Writes a frame on the connection, under the lock. A frame that fails leaves nothing written.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown when the performative carries a value the encoder refuses.</exception>
     /// <exception cref="AmqpException">Thrown when the encoded frame exceeds the peer's maximum frame size.</exception>
     internal void WriteFrameLocked(ushort channel, AmqpPerformative performative)
     {
@@ -328,7 +329,17 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
         AmqpBufferWriter buffer = _writer.Buffer;
         int start = buffer.Length;
 
-        AmqpFrame.Write(buffer, AmqpFrame.AmqpType, channel, performative);
+        try
+        {
+            AmqpFrame.Write(buffer, AmqpFrame.AmqpType, channel, performative);
+        }
+        catch (Exception)
+        {
+            // Justified catch-all: whatever the encoder throws, such as for a value the type system cannot
+            // carry, the partial frame must not reach the carrier, where it would corrupt every frame behind it.
+            buffer.Truncate(start);
+            throw;
+        }
 
         int size = buffer.Length - start;
 

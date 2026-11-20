@@ -390,6 +390,52 @@ internal ref struct AmqpReader
     }
 
     /// <summary>
+    /// Reads a filter set: a map from filter names to described filters or <c>null</c> (AMQP 1.0 Part 3,
+    /// section 3.5.8). Unlike <see cref="ReadSymbolMap"/>, a key that is not a symbol is refused rather
+    /// than skipped: a filter dropped on the way in would admit the messages the receiver filtered out.
+    /// </summary>
+    /// <exception cref="AmqpException">
+    /// Thrown with <c>amqp:invalid-field</c> when a filter's value is neither described nor <c>null</c>,
+    /// or with <c>amqp:decode-error</c> when a key is not a symbol or appears twice.
+    /// </exception>
+    public Dictionary<AmqpSymbol, object?>? ReadFilterSet()
+    {
+        if (TryReadNull())
+        {
+            return null;
+        }
+
+        AmqpReader entries = ReadMap(out int count);
+        Dictionary<AmqpSymbol, object?> filters = new(count / 2);
+
+        for (int i = 0; i < count; i += 2)
+        {
+            byte code = entries.ReadByte();
+
+            if (code is not (AmqpFormatCode.Symbol8 or AmqpFormatCode.Symbol32))
+            {
+                throw AmqpException.DecodeError(ErrorMessages.MapKeyNotSymbol);
+            }
+
+            AmqpSymbol name = entries.ReadSymbolBody(code);
+
+            if (entries.PeekFormatCode() is not (AmqpFormatCode.Described or AmqpFormatCode.Null))
+            {
+                throw AmqpException.ProtocolViolation(
+                    AmqpErrorCondition.InvalidField,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.FilterNotDescribed, name));
+            }
+
+            if (!filters.TryAdd(name, entries.ReadValue()))
+            {
+                throw AmqpException.DecodeError(ErrorMessages.MapKeyDuplicate);
+            }
+        }
+
+        return filters;
+    }
+
+    /// <summary>
     /// Reads a map keyed by strings, such as <c>application-properties</c>.
     /// </summary>
     public Dictionary<string, object?>? ReadStringMap()

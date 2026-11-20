@@ -328,6 +328,30 @@
   <data name="SaslFrameEmpty" xml:space="preserve">
     <value>The peer sent an empty frame during the SASL exchange, which AMQP 1.0 makes an irrecoverable error.</value>
   </data>
+  <data name="TerminusDurabilityInvalid" xml:space="preserve">
+    <value>The peer sent the terminus durability {0}, which AMQP 1.0 does not define.</value>
+  </data>
+  <data name="TerminusExpiryPolicyInvalid" xml:space="preserve">
+    <value>The peer sent the terminus expiry policy '{0}', which AMQP 1.0 does not define.</value>
+  </data>
+  <data name="FilterNotDescribed" xml:space="preserve">
+    <value>The peer sent the filter '{0}' with a value that is neither described nor null.</value>
+  </data>
+  <data name="FilterValueInvalid" xml:space="preserve">
+    <value>The filter '{0}' must be an AmqpDescribedValue or null.</value>
+  </data>
+  <data name="SaslCodeInvalid" xml:space="preserve">
+    <value>The peer sent the SASL outcome code {0}, which AMQP 1.0 does not define.</value>
+  </data>
+  <data name="InitialDeliveryCountMissing" xml:space="preserve">
+    <value>The sender's attach carries no initial-delivery-count.</value>
+  </data>
+  <data name="DynamicNodePropertiesUnexpected" xml:space="preserve">
+    <value>The {0} carries dynamic-node-properties but is not dynamic.</value>
+  </data>
+  <data name="DynamicAddressUnexpected" xml:space="preserve">
+    <value>The attach asks for a dynamic {0} and names its address, which the endpoint that creates the node assigns.</value>
+  </data>
   <data name="SaslFrameBodyInvalid" xml:space="preserve">
     <value>The peer sent a SASL frame whose body holds more than one value.</value>
   </data>

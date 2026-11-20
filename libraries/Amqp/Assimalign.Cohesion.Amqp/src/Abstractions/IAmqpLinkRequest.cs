@@ -96,6 +96,7 @@ public interface IAmqpLinkRequest
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The attached sender.</returns>
     /// <exception cref="System.InvalidOperationException">Thrown when <see cref="Role"/> is not <see cref="AmqpRole.Sender"/>, or the request was already answered.</exception>
+    /// <exception cref="System.ArgumentException">Thrown when the options make an answering <c>attach</c> AMQP 1.0 forbids, or carry a value the type system cannot encode. The request stays unanswered.</exception>
     /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.SessionEnded"/> when the session has ended.</exception>
     ValueTask<IAmqpSender> AcceptSenderAsync(AmqpSenderOptions? options = null, CancellationToken cancellationToken = default);
 
@@ -111,6 +112,7 @@ public interface IAmqpLinkRequest
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The attached receiver.</returns>
     /// <exception cref="System.InvalidOperationException">Thrown when <see cref="Role"/> is not <see cref="AmqpRole.Receiver"/>, or the request was already answered.</exception>
+    /// <exception cref="System.ArgumentException">Thrown when the options make an answering <c>attach</c> AMQP 1.0 forbids, or carry a value the type system cannot encode. The request stays unanswered.</exception>
     /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.SessionEnded"/> when the session has ended.</exception>
     ValueTask<IAmqpReceiver> AcceptReceiverAsync(AmqpReceiverOptions? options = null, CancellationToken cancellationToken = default);
 

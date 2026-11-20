@@ -55,6 +55,12 @@ public interface IAmqpSession : IAsyncDisposable
     /// <param name="cancellationToken">A token to cancel the wait for the peer's answer.</param>
     /// <returns>The attached sender.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the options make an <c>attach</c> AMQP 1.0 forbids, such as dynamic node properties on a
+    /// terminus that is not dynamic, an address on a dynamic terminus this end asks for, or a filter that
+    /// is not an <see cref="AmqpDescribedValue"/>; or when they carry a value the type system cannot encode.
+    /// Nothing is sent.
+    /// </exception>
     /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.LinkDetached"/> when the peer refuses the link, or with <see cref="AmqpErrorCode.SessionEnded"/> when the session ends first.</exception>
     /// <exception cref="InvalidOperationException">Thrown when every handle the peer accepts is in use.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the wait is canceled. The link is detached once the peer answers.</exception>
@@ -68,6 +74,12 @@ public interface IAmqpSession : IAsyncDisposable
     /// <param name="cancellationToken">A token to cancel the wait for the peer's answer.</param>
     /// <returns>The attached receiver.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the options make an <c>attach</c> AMQP 1.0 forbids, such as dynamic node properties on a
+    /// terminus that is not dynamic, an address on a dynamic terminus this end asks for, or a filter that
+    /// is not an <see cref="AmqpDescribedValue"/>; or when they carry a value the type system cannot encode.
+    /// Nothing is sent.
+    /// </exception>
     /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.LinkDetached"/> when the peer refuses the link, or with <see cref="AmqpErrorCode.SessionEnded"/> when the session ends first.</exception>
     /// <exception cref="InvalidOperationException">Thrown when every handle the peer accepts is in use.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the wait is canceled. The link is detached once the peer answers.</exception>
