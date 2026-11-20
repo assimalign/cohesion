@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="FalseSchemaFailed" xml:space="preserve"><value>The boolean schema false allows no value.</value></data>
+  <data name="ReferenceFailed" xml:space="preserve"><value>The value does not match the referenced schema.</value></data>
+  <data name="AllOfFailed" xml:space="preserve"><value>The value does not match every allOf schema.</value></data>
+  <data name="AnyOfFailed" xml:space="preserve"><value>The value matches none of the anyOf schemas.</value></data>
+  <data name="OneOfNoneMatched" xml:space="preserve"><value>The value matches none of the oneOf schemas.</value></data>
+  <data name="OneOfManyMatched" xml:space="preserve"><value>The value matches more than one oneOf schema, including those at indexes {0} and {1}.</value></data>
+  <data name="NotFailed" xml:space="preserve"><value>The value matches the schema that not forbids.</value></data>
+  <data name="ConditionalBranchFailed" xml:space="preserve"><value>The value does not match the {0} schema its if outcome selects.</value></data>
+  <data name="PropertiesFailed" xml:space="preserve"><value>One or more members do not match their properties schemas.</value></data>
+  <data name="PatternPropertiesFailed" xml:space="preserve"><value>One or more members do not match the patternProperties schemas their names match.</value></data>
+  <data name="AdditionalPropertiesFailed" xml:space="preserve"><value>One or more additional members do not match the additionalProperties schema.</value></data>
+  <data name="AdditionalPropertiesNotAllowed" xml:space="preserve"><value>The object has members that additionalProperties does not allow.</value></data>
+  <data name="PropertyNamesFailed" xml:space="preserve"><value>One or more member names do not match the propertyNames schema.</value></data>
+  <data name="DependentSchemasFailed" xml:space="preserve"><value>The value does not match the schema a present member depends on.</value></data>
+  <data name="DependentRequiredMissing" xml:space="preserve"><value>The member '{0}' requires members that are missing: {1}.</value></data>
+  <data name="PrefixItemsFailed" xml:space="preserve"><value>One or more items do not match their positional schemas.</value></data>
+  <data name="ItemsFailed" xml:space="preserve"><value>One or more items do not match the items schema.</value></data>
+  <data name="ItemsNotAllowed" xml:space="preserve"><value>The array has items that items does not allow.</value></data>
+  <data name="AdditionalItemsFailed" xml:space="preserve"><value>One or more additional items do not match the additionalItems schema.</value></data>
+  <data name="AdditionalItemsNotAllowed" xml:space="preserve"><value>The array has items that additionalItems does not allow.</value></data>
+  <data name="ContainsTooFew" xml:space="preserve"><value>Fewer than {0} items match the contains schema.</value></data>
+  <data name="ContainsTooMany" xml:space="preserve"><value>More than {0} items match the contains schema.</value></data>
+  <data name="UnevaluatedPropertiesFailed" xml:space="preserve"><value>One or more unevaluated members do not match the unevaluatedProperties schema.</value></data>
+  <data name="UnevaluatedPropertiesNotAllowed" xml:space="preserve"><value>The object has unevaluated members, which unevaluatedProperties does not allow.</value></data>
+  <data name="UnevaluatedItemsFailed" xml:space="preserve"><value>One or more unevaluated items do not match the unevaluatedItems schema.</value></data>
+  <data name="UnevaluatedItemsNotAllowed" xml:space="preserve"><value>The array has unevaluated items, which unevaluatedItems does not allow.</value></data>
+  <data name="TypeMismatch" xml:space="preserve"><value>Expected a value of type {0}, but found {1}.</value></data>
+  <data name="EnumMismatch" xml:space="preserve"><value>The value is not one of the values enum lists.</value></data>
+  <data name="ConstMismatch" xml:space="preserve"><value>The value does not equal the const value.</value></data>
+  <data name="MultipleOfFailed" xml:space="preserve"><value>The number is not a multiple of {0}.</value></data>
+  <data name="MaximumExceeded" xml:space="preserve"><value>The number is greater than the maximum of {0}.</value></data>
+  <data name="ExclusiveMaximumExceeded" xml:space="preserve"><value>The number is not less than the exclusive maximum of {0}.</value></data>
+  <data name="MinimumNotMet" xml:space="preserve"><value>The number is less than the minimum of {0}.</value></data>
+  <data name="ExclusiveMinimumNotMet" xml:space="preserve"><value>The number is not greater than the exclusive minimum of {0}.</value></data>
+  <data name="MaxLengthExceeded" xml:space="preserve"><value>The string is longer than {0} characters.</value></data>
+  <data name="MinLengthNotMet" xml:space="preserve"><value>The string is shorter than {0} characters.</value></data>
+  <data name="PatternMismatch" xml:space="preserve"><value>The string does not match the pattern '{0}'.</value></data>
+  <data name="MaxItemsExceeded" xml:space="preserve"><value>The array has more than {0} items.</value></data>
+  <data name="MinItemsNotMet" xml:space="preserve"><value>The array has fewer than {0} items.</value></data>
+  <data name="UniqueItemsFailed" xml:space="preserve"><value>The items at indexes {0} and {1} are equal.</value></data>
+  <data name="MaxPropertiesExceeded" xml:space="preserve"><value>The object has more than {0} members.</value></data>
+  <data name="MinPropertiesNotMet" xml:space="preserve"><value>The object has fewer than {0} members.</value></data>
+  <data name="RequiredMissing" xml:space="preserve"><value>Required members are missing: {0}.</value></data>
+  <data name="FormatInvalid" xml:space="preserve"><value>The value is not a valid '{0}'.</value></data>
+  <data name="FormatUnknown" xml:space="preserve"><value>The format '{0}' is not known, and the format-assertion vocabulary fails unknown formats.</value></data>
+  <data name="ContentEncodingInvalid" xml:space="preserve"><value>The string is not valid '{0}' content.</value></data>
+  <data name="ContentMediaTypeInvalid" xml:space="preserve"><value>The content is not valid '{0}'.</value></data>
+  <data name="ContentSchemaFailed" xml:space="preserve"><value>The decoded content does not match the contentSchema schema.</value></data>
+  <data name="CustomKeywordFailed" xml:space="preserve"><value>The value does not satisfy the '{0}' keyword.</value></data>
+</root>

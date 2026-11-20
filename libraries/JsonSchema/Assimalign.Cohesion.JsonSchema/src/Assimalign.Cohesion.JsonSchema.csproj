@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.JsonSchema</RootNamespace>
+		<Description>JSON Schema for Cohesion: loads schema documents, resolves $ref, $dynamicRef and $recursiveRef across documents, and evaluates JSON instances against the draft-04, draft-06, draft-07, 2019-09 and 2020-12 dialects with exact number semantics, ECMA-262 patterns, format validation and the specification's Flag, Basic, Detailed and Verbose output. Custom keywords, vocabularies and dialects plug in through public seams. Built on System.Text.Json only; NativeAOT- and trimming-safe.</Description>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\JsonPointer.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.JsonSchema"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
+	</ItemGroup>
+
+	<!-- The official meta-schemas, served by every registry without a network round trip
+	     (src/MetaSchemas/LICENSE, docs/PROVENANCE.md). -->
+	<ItemGroup>
+		<EmbeddedResource Include="MetaSchemas\draft-04\schema.json" LogicalName="MetaSchemas/draft-04/schema.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-06\schema.json" LogicalName="MetaSchemas/draft-06/schema.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-07\schema.json" LogicalName="MetaSchemas/draft-07/schema.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2019-09\schema.json" LogicalName="MetaSchemas/draft-2019-09/schema.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2019-09\meta\applicator.json" LogicalName="MetaSchemas/draft-2019-09/meta/applicator.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2019-09\meta\content.json" LogicalName="MetaSchemas/draft-2019-09/meta/content.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2019-09\meta\core.json" LogicalName="MetaSchemas/draft-2019-09/meta/core.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2019-09\meta\format.json" LogicalName="MetaSchemas/draft-2019-09/meta/format.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2019-09\meta\meta-data.json" LogicalName="MetaSchemas/draft-2019-09/meta/meta-data.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2019-09\meta\validation.json" LogicalName="MetaSchemas/draft-2019-09/meta/validation.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2020-12\schema.json" LogicalName="MetaSchemas/draft-2020-12/schema.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2020-12\meta\applicator.json" LogicalName="MetaSchemas/draft-2020-12/meta/applicator.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2020-12\meta\content.json" LogicalName="MetaSchemas/draft-2020-12/meta/content.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2020-12\meta\core.json" LogicalName="MetaSchemas/draft-2020-12/meta/core.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2020-12\meta\format-annotation.json" LogicalName="MetaSchemas/draft-2020-12/meta/format-annotation.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2020-12\meta\format-assertion.json" LogicalName="MetaSchemas/draft-2020-12/meta/format-assertion.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2020-12\meta\meta-data.json" LogicalName="MetaSchemas/draft-2020-12/meta/meta-data.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2020-12\meta\unevaluated.json" LogicalName="MetaSchemas/draft-2020-12/meta/unevaluated.json" />
+		<EmbeddedResource Include="MetaSchemas\draft-2020-12\meta\validation.json" LogicalName="MetaSchemas/draft-2020-12/meta/validation.json" />
+	</ItemGroup>
+
+</Project>
