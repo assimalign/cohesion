@@ -925,6 +925,17 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Proxy/" />
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Proxy/docs/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Proxy/docs/DESIGN.md" />
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Proxy/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Proxy/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Proxy/src/Assimalign.Cohesion.Http.Proxy.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Proxy/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Proxy/tests/Assimalign.Cohesion.Http.Proxy.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Tls/" />
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Tls/docs/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Tls/docs/DESIGN.md" />
@@ -2411,6 +2422,17 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.ProblemDetails/tests/Assimalign.Cohesion.Web.ProblemDetails.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Proxy/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Proxy/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Proxy/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Proxy/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Proxy/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Proxy/src/Assimalign.Cohesion.Web.Proxy.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Proxy/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Proxy/tests/Assimalign.Cohesion.Web.Proxy.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/docs/">

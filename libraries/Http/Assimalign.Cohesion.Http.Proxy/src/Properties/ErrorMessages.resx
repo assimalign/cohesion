@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="DestinationInvalid" xml:space="preserve">
+    <value>The destination must be an absolute http or https URI.</value>
+  </data>
+  <data name="DestinationPrefixInvalid" xml:space="preserve">
+    <value>The destination prefix must be an absolute http or https URI without a query, a fragment or user information.</value>
+  </data>
+  <data name="PathNotNormalized" xml:space="preserve">
+    <value>The path must be normalized with HttpForwarder.TryNormalizePath before a destination is built from it.</value>
+  </data>
+  <data name="RequestContentReused" xml:space="preserve">
+    <value>The client's request body can be sent only once, and the invoker asked for it again.</value>
+  </data>
+  <data name="ViaPseudonymInvalid" xml:space="preserve">
+    <value>A Via pseudonym must be an HTTP token.</value>
+  </data>
+</root>

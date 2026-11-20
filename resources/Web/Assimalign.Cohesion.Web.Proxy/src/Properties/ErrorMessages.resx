@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="ForwardProxyHandlerConnects" xml:space="preserve">
+    <value>ConfigureHandler set {0} on a forward-proxy handler. The forward proxy connects to each destination itself, so it can check the address it connects to: ConnectCallback must stay null and UseProxy false.</value>
+  </data>
+  <data name="ForwardProxyNotRegistered" xml:space="preserve">
+    <value>UseForwardProxy places the middleware that builder.Services.AddForwardProxy(proxy =&gt; ...) registers, and no forward proxy is registered. Call AddForwardProxy with the rules that say which destinations clients may reach.</value>
+  </data>
+  <data name="ForwardProxyTunnelConnects" xml:space="preserve">
+    <value>ForwardProxyOptions.Tunnel.ConnectCallback is set. The forward proxy connects each tunnel itself, so it can check the address it connects to.</value>
+  </data>
+  <data name="HandlerCannotProxy" xml:space="preserve">
+    <value>ConfigureHandler turned on {0}. A proxy relays redirects, cookies and encoded bodies as the destination sends them, so AllowAutoRedirect and UseCookies must stay false and AutomaticDecompression must stay None.</value>
+  </data>
+  <data name="ReverseProxyNotRegistered" xml:space="preserve">
+    <value>UseReverseProxy places the middleware that builder.Services.AddReverseProxy(proxy =&gt; ...) registers, and no reverse proxy is registered. Call AddReverseProxy with the routes to forward.</value>
+  </data>
+  <data name="RouteDestinationInvalid" xml:space="preserve">
+    <value>Route '{0}' has the destination '{1}', which is not an absolute http or https URI without a query, a fragment or user information.</value>
+  </data>
+  <data name="RouteDestinationsMissing" xml:space="preserve">
+    <value>Route '{0}' has no destination. A reverse-proxy route needs at least one.</value>
+  </data>
+  <data name="RouteHostPatternEmpty" xml:space="preserve">
+    <value>Route '{0}' has an empty host pattern.</value>
+  </data>
+  <data name="RouteHostPatternInvalid" xml:space="preserve">
+    <value>Route '{0}' has a host pattern that is not valid. {1}</value>
+  </data>
+  <data name="RouteHostsNull" xml:space="preserve">
+    <value>Route '{0}' has a null host list. Leave Hosts empty to match any host.</value>
+  </data>
+  <data name="RouteNameDuplicate" xml:space="preserve">
+    <value>More than one reverse-proxy route is named '{0}'. Route names must be unique.</value>
+  </data>
+  <data name="RouteNameMissing" xml:space="preserve">
+    <value>The route at index {0} has no name. Each reverse-proxy route needs a unique name.</value>
+  </data>
+  <data name="RouteNull" xml:space="preserve">
+    <value>The route at index {0} is null.</value>
+  </data>
+  <data name="RoutePathPrefixInvalid" xml:space="preserve">
+    <value>Route '{0}' has the path prefix '{1}', which is not an absolute path without '.' or '..' segments.</value>
+  </data>
+  <data name="RuleHostPatternEmpty" xml:space="preserve">
+    <value>The rule at index {0} has an empty host pattern.</value>
+  </data>
+  <data name="RuleHostPatternInvalid" xml:space="preserve">
+    <value>The rule at index {0} has a host pattern that is not valid. {1}</value>
+  </data>
+  <data name="RuleHostsMissing" xml:space="preserve">
+    <value>The rule at index {0} names no host. A forward-proxy rule needs at least one host pattern; '*' allows any host.</value>
+  </data>
+  <data name="RuleNull" xml:space="preserve">
+    <value>The rule at index {0} is null.</value>
+  </data>
+  <data name="RulePortInvalid" xml:space="preserve">
+    <value>The rule at index {0} allows port {1}, which is not from 1 to 65535.</value>
+  </data>
+  <data name="RulePortsNull" xml:space="preserve">
+    <value>The rule at index {0} has a null port list. Leave Ports empty to allow the default ports.</value>
+  </data>
+</root>
