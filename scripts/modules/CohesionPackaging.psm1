@@ -159,6 +159,10 @@ $script:CohesionReleaseLibrary = @(
     'libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken'
     'libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml'
 
+    # libraries/JsonSchema
+    'libraries/JsonSchema/Assimalign.Cohesion.JsonSchema'
+    'libraries/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation'
+
     # libraries/Logging
     'libraries/Logging/Assimalign.Cohesion.Logging'
     'libraries/Logging/Assimalign.Cohesion.Logging.Console'
