@@ -21,6 +21,10 @@ internal static class AmqpEncoder
 
     private const int compoundHeaderSize = 9;
 
+    // UTF-8 that throws on half of a surrogate pair instead of writing U+FFFD, so that no string changes
+    // on its way to the peer (AMQP 1.0 Part 1, section 1.6.20).
+    private static readonly UTF8Encoding _utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     public static void WriteNull(AmqpBufferWriter writer)
     {
         writer.WriteByte(AmqpFormatCode.Null);
@@ -182,15 +186,7 @@ internal static class AmqpEncoder
 
     public static void WriteTimestamp(AmqpBufferWriter writer, DateTime value)
     {
-        // An unspecified kind is taken as UTC, the clock AMQP timestamps count in.
-        DateTime utc = value.Kind switch
-        {
-            DateTimeKind.Local => value.ToUniversalTime(),
-            DateTimeKind.Unspecified => DateTime.SpecifyKind(value, DateTimeKind.Utc),
-            _ => value
-        };
-
-        WriteTimestamp(writer, new DateTimeOffset(utc));
+        WriteTimestamp(writer, ToTimestamp(value));
     }
 
     public static void WriteUuid(AmqpBufferWriter writer, Guid value)
@@ -208,6 +204,10 @@ internal static class AmqpEncoder
         writer.Write(value);
     }
 
+    /// <summary>
+    /// Writes a string, or <c>null</c>.
+    /// </summary>
+    /// <exception cref="ArgumentException">Thrown when the string holds half of a surrogate pair, which has no UTF-8 encoding.</exception>
     public static void WriteString(AmqpBufferWriter writer, string? value)
     {
         if (value is null)
@@ -216,10 +216,10 @@ internal static class AmqpEncoder
             return;
         }
 
-        int length = Encoding.UTF8.GetByteCount(value);
+        int length = GetUtf8Length(value);
 
         WriteVariableHeader(writer, length, AmqpFormatCode.String8, AmqpFormatCode.String32);
-        Encoding.UTF8.GetBytes(value, writer.Reserve(length));
+        _utf8.GetBytes(value, writer.Reserve(length));
     }
 
     /// <summary>
@@ -243,6 +243,7 @@ internal static class AmqpEncoder
     /// <summary>
     /// Writes an array of symbols, or <c>null</c>.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown when an element is a default symbol, which holds no value and so has no place in an array.</exception>
     public static void WriteSymbolArray(AmqpBufferWriter writer, IReadOnlyList<AmqpSymbol>? values)
     {
         if (values is null)
@@ -251,15 +252,14 @@ internal static class AmqpEncoder
             return;
         }
 
+        // Every element shares the constructor, so a single long symbol widens all of them.
         bool narrow = true;
 
         for (int i = 0; i < values.Count; i++)
         {
-            if ((values[i].Value?.Length ?? 0) > byte.MaxValue)
-            {
-                narrow = false;
-                break;
-            }
+            int length = values[i].Value?.Length ?? throw ArrayElementNull(i);
+
+            narrow &= length <= byte.MaxValue;
         }
 
         int start = BeginCompound(writer, AmqpFormatCode.Array32);
@@ -268,17 +268,9 @@ internal static class AmqpEncoder
 
         for (int i = 0; i < values.Count; i++)
         {
-            string text = values[i].Value ?? string.Empty;
+            string text = values[i].Value!;
 
-            if (narrow)
-            {
-                writer.WriteByte((byte)text.Length);
-            }
-            else
-            {
-                writer.WriteUInt32((uint)text.Length);
-            }
-
+            WriteElementLength(writer, text.Length, narrow);
             Encoding.ASCII.GetBytes(text, writer.Reserve(text.Length));
         }
 
@@ -409,6 +401,8 @@ internal static class AmqpEncoder
             case Rune rune:
                 WriteChar(writer, rune);
                 return;
+            case char character when char.IsSurrogate(character):
+                throw CharSurrogate(character);
             case char character:
                 WriteChar(writer, new Rune(character));
                 return;
@@ -694,11 +688,24 @@ internal static class AmqpEncoder
     /// Writes an array whose element type has an AMQP array encoding.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// An array is written as an AMQP array when its element type maps to one AMQP type (Part 1, section
+    /// 1.6.24): symbol, string, binary (a <see cref="byte"/>[][]), boolean, byte (<see cref="sbyte"/>), short,
+    /// ushort, int, uint, long, ulong, float, double, decimal32, decimal64, decimal128, char (<see cref="Rune"/>
+    /// or <see cref="char"/>), timestamp (<see cref="DateTimeOffset"/> or <see cref="DateTime"/>) and uuid. A
+    /// <see cref="byte"/>[] is binary, never an array of ubyte. The caller writes any other array as a list.
+    /// </para>
+    /// <para>
     /// The runtime lets an array pass a type test for another array of the same element size and signedness
     /// rules (a <see cref="uint"/>[] is an <see cref="int"/>[], an enum[] is its underlying type's array), so
-    /// the element type is matched exactly. Any other array is written as a list, or refused, by the caller.
+    /// the element type is matched exactly.
+    /// </para>
     /// </remarks>
     /// <returns><see langword="true"/> when the array was written.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown, before anything is written, when an element has no place in an AMQP array: a null string or
+    /// binary, a default symbol, or a string or char with half of a surrogate pair.
+    /// </exception>
     private static bool TryWriteArray(AmqpBufferWriter writer, Array array)
     {
         Type type = array.GetType();
@@ -710,6 +717,10 @@ internal static class AmqpEncoder
         else if (type == typeof(string[]))
         {
             WriteStringArray(writer, (string[])array);
+        }
+        else if (type == typeof(byte[][]))
+        {
+            WriteBinaryArray(writer, (byte[][])array);
         }
         else if (type == typeof(int[]))
         {
@@ -751,6 +762,26 @@ internal static class AmqpEncoder
         {
             WriteFixedArray(writer, (double[])array, AmqpFormatCode.Double, 8, static (span, item) => BinaryPrimitives.WriteDoubleBigEndian(span, item));
         }
+        else if (type == typeof(AmqpDecimal32[]))
+        {
+            WriteFixedArray(writer, (AmqpDecimal32[])array, AmqpFormatCode.Decimal32, 4, static (span, item) => BinaryPrimitives.WriteUInt32BigEndian(span, item.Bits));
+        }
+        else if (type == typeof(AmqpDecimal64[]))
+        {
+            WriteFixedArray(writer, (AmqpDecimal64[])array, AmqpFormatCode.Decimal64, 8, static (span, item) => BinaryPrimitives.WriteUInt64BigEndian(span, item.Bits));
+        }
+        else if (type == typeof(AmqpDecimal128[]))
+        {
+            WriteFixedArray(writer, (AmqpDecimal128[])array, AmqpFormatCode.Decimal128, 16, static (span, item) => BinaryPrimitives.WriteUInt128BigEndian(span, item.Bits));
+        }
+        else if (type == typeof(Rune[]))
+        {
+            WriteFixedArray(writer, (Rune[])array, AmqpFormatCode.Char, 4, static (span, item) => BinaryPrimitives.WriteUInt32BigEndian(span, (uint)item.Value));
+        }
+        else if (type == typeof(char[]))
+        {
+            WriteCharArray(writer, (char[])array);
+        }
         else if (type == typeof(Guid[]))
         {
             WriteFixedArray(writer, (Guid[])array, AmqpFormatCode.Uuid, 16, static (span, item) => item.TryWriteBytes(span, bigEndian: true, out _));
@@ -758,6 +789,10 @@ internal static class AmqpEncoder
         else if (type == typeof(DateTimeOffset[]))
         {
             WriteFixedArray(writer, (DateTimeOffset[])array, AmqpFormatCode.Timestamp, 8, static (span, item) => BinaryPrimitives.WriteInt64BigEndian(span, item.ToUnixTimeMilliseconds()));
+        }
+        else if (type == typeof(DateTime[]))
+        {
+            WriteFixedArray(writer, (DateTime[])array, AmqpFormatCode.Timestamp, 8, static (span, item) => BinaryPrimitives.WriteInt64BigEndian(span, ToTimestamp(item).ToUnixTimeMilliseconds()));
         }
         else
         {
@@ -769,40 +804,68 @@ internal static class AmqpEncoder
 
     private static void WriteStringArray(AmqpBufferWriter writer, string[] values)
     {
-        int start = BeginCompound(writer, AmqpFormatCode.Array32);
-
-        // Every element shares the constructor, so a single long string widens all of them.
+        // Every element shares the constructor, so a single long string widens all of them. Each element is
+        // checked before the array begins, so a refused one leaves nothing written.
         bool narrow = true;
 
-        foreach (string value in values)
+        for (int i = 0; i < values.Length; i++)
         {
-            if (Encoding.UTF8.GetByteCount(value ?? string.Empty) > byte.MaxValue)
-            {
-                narrow = false;
-                break;
-            }
+            string value = values[i] ?? throw ArrayElementNull(i);
+
+            narrow &= GetUtf8Length(value) <= byte.MaxValue;
         }
+
+        int start = BeginCompound(writer, AmqpFormatCode.Array32);
 
         writer.WriteByte(narrow ? AmqpFormatCode.String8 : AmqpFormatCode.String32);
 
         foreach (string value in values)
         {
-            string text = value ?? string.Empty;
-            int length = Encoding.UTF8.GetByteCount(text);
+            int length = _utf8.GetByteCount(value);
 
-            if (narrow)
-            {
-                writer.WriteByte((byte)length);
-            }
-            else
-            {
-                writer.WriteUInt32((uint)length);
-            }
-
-            Encoding.UTF8.GetBytes(text, writer.Reserve(length));
+            WriteElementLength(writer, length, narrow);
+            _utf8.GetBytes(value, writer.Reserve(length));
         }
 
         EndCompound(writer, start, values.Length, AmqpFormatCode.Array8);
+    }
+
+    private static void WriteBinaryArray(AmqpBufferWriter writer, byte[][] values)
+    {
+        // As for strings, a single binary past 255 octets widens every element.
+        bool narrow = true;
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            byte[] value = values[i] ?? throw ArrayElementNull(i);
+
+            narrow &= value.Length <= byte.MaxValue;
+        }
+
+        int start = BeginCompound(writer, AmqpFormatCode.Array32);
+
+        writer.WriteByte(narrow ? AmqpFormatCode.Binary8 : AmqpFormatCode.Binary32);
+
+        foreach (byte[] value in values)
+        {
+            WriteElementLength(writer, value.Length, narrow);
+            writer.Write(value);
+        }
+
+        EndCompound(writer, start, values.Length, AmqpFormatCode.Array8);
+    }
+
+    private static void WriteCharArray(AmqpBufferWriter writer, char[] values)
+    {
+        foreach (char value in values)
+        {
+            if (char.IsSurrogate(value))
+            {
+                throw CharSurrogate(value);
+            }
+        }
+
+        WriteFixedArray(writer, values, AmqpFormatCode.Char, 4, static (span, item) => BinaryPrimitives.WriteUInt32BigEndian(span, item));
     }
 
     private static void WriteFixedArray<T>(AmqpBufferWriter writer, T[] values, byte constructor, int width, SpanWriter<T> write)
@@ -817,6 +880,60 @@ internal static class AmqpEncoder
         }
 
         EndCompound(writer, start, values.Length, AmqpFormatCode.Array8);
+    }
+
+    private static void WriteElementLength(AmqpBufferWriter writer, int length, bool narrow)
+    {
+        if (narrow)
+        {
+            writer.WriteByte((byte)length);
+        }
+        else
+        {
+            writer.WriteUInt32((uint)length);
+        }
+    }
+
+    /// <summary>
+    /// Measures a string in UTF-8, refusing one that holds half of a surrogate pair: UTF-8 has no encoding for
+    /// it, and the replacement character a lenient encoder writes would change the string in transit.
+    /// </summary>
+    private static int GetUtf8Length(string value)
+    {
+        try
+        {
+            return _utf8.GetByteCount(value);
+        }
+        catch (EncoderFallbackException exception)
+        {
+            throw new ArgumentException(
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.StringSurrogateUnpaired, exception.Index),
+                nameof(value),
+                exception);
+        }
+    }
+
+    // A timestamp counts milliseconds of UTC, so a local time is converted and an unspecified one taken as UTC.
+    private static DateTimeOffset ToTimestamp(DateTime value)
+    {
+        DateTime utc = value.Kind switch
+        {
+            DateTimeKind.Local => value.ToUniversalTime(),
+            DateTimeKind.Unspecified => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+            _ => value
+        };
+
+        return new DateTimeOffset(utc);
+    }
+
+    private static ArgumentException ArrayElementNull(int index)
+    {
+        return new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ArrayElementNull, index), "value");
+    }
+
+    private static ArgumentException CharSurrogate(char value)
+    {
+        return new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CharSurrogate, (int)value), nameof(value));
     }
 
     private static void WriteVariableHeader(AmqpBufferWriter writer, int length, byte constructor8, byte constructor32)

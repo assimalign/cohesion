@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Amqp;
 
 /// <summary>
 /// Represents an AMQP <c>decimal32</c> value: an IEEE 754-2008 decimal32 number in the binary integer
-/// decimal encoding (AMQP 1.0 Part 1, section 1.6.12).
+/// decimal encoding (AMQP 1.0 Part 1, section 1.6.13).
 /// </summary>
 /// <remarks>
 /// .NET has no IEEE decimal type, so the value carries the encoding's bits unchanged and round-trips

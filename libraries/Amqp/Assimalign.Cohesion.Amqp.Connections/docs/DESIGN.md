@@ -320,6 +320,81 @@ as `AmqpProtocolException`.
   zero previously failed later with `AmqpProtocolException`. Decoding a peer Open below 512 now
   throws `AmqpProtocolException`.
 
+## The type surface (#408)
+
+The codec supports the whole AMQP 1.0 Part 1 type system and nothing outside it. Each type decodes
+to one CLR type and is written from a short, closed list of CLR types; anything else is refused
+rather than guessed at. The table is the decision. Its executable form is `AmqpTypeSystemCorpus` in
+the tests: an encoding for each of the 40 constructors (Part 1's 39 format codes and `0x00`, which
+begins a described value), each supported CLR type, and each refusal, checked in both directions.
+
+| AMQP type (Part 1) | Constructors | Decodes to | Written from |
+| --- | --- | --- | --- |
+| null (§1.6.1) | `0x40` | `null` | `null` |
+| boolean (§1.6.2) | `0x41`, `0x42`, `0x56` | `bool` | `bool` |
+| ubyte (§1.6.3) | `0x50` | `byte` | `byte` |
+| ushort (§1.6.4) | `0x60` | `ushort` | `ushort` |
+| uint (§1.6.5) | `0x43`, `0x52`, `0x70` | `uint` | `uint` |
+| ulong (§1.6.6) | `0x44`, `0x53`, `0x80` | `ulong` | `ulong` |
+| byte (§1.6.7) | `0x51` | `sbyte` | `sbyte` |
+| short (§1.6.8) | `0x61` | `short` | `short` |
+| int (§1.6.9) | `0x54`, `0x71` | `int` | `int` |
+| long (§1.6.10) | `0x55`, `0x81` | `long` | `long` |
+| float (§1.6.11) | `0x72` | `float` | `float` |
+| double (§1.6.12) | `0x82` | `double` | `double` |
+| decimal32, decimal64, decimal128 (§1.6.13 to §1.6.15) | `0x74`, `0x84`, `0x94` | `AmqpDecimal32`, `AmqpDecimal64`, `AmqpDecimal128` | the same |
+| char (§1.6.16) | `0x73` | `Rune` | `Rune`, `char` |
+| timestamp (§1.6.17) | `0x83` | `DateTimeOffset`, offset zero | `DateTimeOffset`, `DateTime` |
+| uuid (§1.6.18) | `0x98` | `Guid` | `Guid` |
+| binary (§1.6.19) | `0xa0`, `0xb0` | `byte[]` | `byte[]`, `ReadOnlyMemory<byte>`, `Memory<byte>`, `ArraySegment<byte>`, `AmqpDeliveryTag` |
+| string (§1.6.20) | `0xa1`, `0xb1` | `string` | `string` |
+| symbol (§1.6.21) | `0xa3`, `0xb3` | `AmqpSymbol` | `AmqpSymbol` |
+| list (§1.6.22) | `0x45`, `0xc0`, `0xd0` | `List<object?>` | `IReadOnlyList<object?>`, `IList` |
+| map (§1.6.23) | `0xc1`, `0xd1` | `Dictionary<object, object?>`, keys compared as AMQP values | `IReadOnlyDictionary<AmqpSymbol, object?>`, `IReadOnlyDictionary<string, object?>`, `IReadOnlyDictionary<object, object?>`, `IDictionary` |
+| array (§1.6.24) | `0xe0`, `0xf0` | a typed CLR array, by element type (below) | a typed CLR array (below) |
+| described (§1.2, §1.5) | `0x00` | the model type its descriptor names, such as `AmqpError` or `AmqpSource`; otherwise `AmqpDescribedValue` | `AmqpDescribedValue` and the model types |
+
+- **Every constructor is read; the smallest is written.** The encoder picks `uint0`, `smalluint`,
+  the 8-bit forms of variable-width and compound values, and so on, as the value allows. The reader
+  accepts the wider forms a peer may send.
+- **Arrays are typed by their element.** An array of symbol, string, binary, boolean, byte, short,
+  ushort, int, uint, long, ulong, float, double, a decimal, char, timestamp or uuid decodes to
+  `AmqpSymbol[]`, `string[]`, `byte[][]`, `bool[]`, `sbyte[]`, the matching numeric array,
+  `AmqpDecimalNN[]`, `Rune[]`, `DateTimeOffset[]` or `Guid[]`, and the encoder writes each of those,
+  plus `char[]` and `DateTime[]`, as an array. Any other CLR collection is written as a list.
+- **Three kinds of array come back as `object?[]`:** an array of ubyte (a `byte[]` is binary), an
+  array of described values, and an array of lists, maps or arrays. They re-encode as lists, so they
+  do not survive decode and encode unchanged; #1929 tracks a type that keeps them arrays.
+- **An array holds no null.** A null string or binary, or a default `AmqpSymbol`, in an array is
+  refused with `ArgumentException` before any of the array is written; a list can hold null. On
+  decode, an element constructor with no width (`null`, `true`, `uint0`, ...) in a non-empty array is
+  refused, because a few octets could otherwise claim any number of elements; an array that claims
+  more elements than its octets carry at each element's minimum width is refused before anything
+  is allocated for them; and an element constructor Part 1 does not define is refused even in an
+  empty array.
+- **Strings are Unicode, both ways.** The encoder refuses half of a surrogate pair with
+  `ArgumentException` instead of writing U+FFFD, and the reader refuses malformed UTF-8 (overlong
+  forms and encoded surrogates included) with `amqp:decode-error` instead of replacing it. A
+  replacement would change the string in transit, and two different strings, such as two addresses
+  or message ids, could decode as one. Mainstream AMQP stacks send valid UTF-8, so the rule costs no
+  interoperability.
+- **A char is one Unicode scalar value.** A `char` that is half of a surrogate pair is refused on
+  encode; write the pair as a `Rune` or a string. A surrogate or a code point past U+10FFFF is
+  refused on decode.
+- **A timestamp counts UTC milliseconds.** The encoder drops sub-millisecond ticks, takes a
+  `DateTime` of unspecified kind as UTC and converts a local one. A decoded timestamp outside the
+  range of `DateTimeOffset` is refused.
+- **Decimals keep their bits.** The decimal types carry the IEEE 754-2008 encoding unchanged.
+  `System.Decimal` is not converted, because its range and precision differ; it is refused like any
+  other unsupported type.
+- **Maps have distinct, non-null keys.** A decoded map with a null key or a repeated key is
+  refused; keys compare as AMQP values, so two binary keys with the same octets are the same key.
+- **Unsupported CLR types are refused by name.** `decimal`, `TimeSpan`, `Half`, `Int128`,
+  `UInt128`, `BigInteger`, `DateOnly`, `TimeOnly`, enums, `nint`, `nuint`, `Uri`, sets and any other
+  type throw `ArgumentException` naming the type. An enum is not written as its underlying number.
+- **Nesting is bounded.** Compound and described values nest at most 64 deep, counted the same way
+  by the encoder and the reader, so whatever one writes the other reads.
+
 ## Error model
 
 - **`AmqpProtocolException` is the area root**, inheriting `Exception` directly per the

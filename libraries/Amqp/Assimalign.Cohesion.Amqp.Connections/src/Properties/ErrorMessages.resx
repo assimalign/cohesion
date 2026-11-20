@@ -70,6 +70,18 @@
   <data name="CharInvalid" xml:space="preserve">
     <value>An encoded AMQP char is not a Unicode scalar value.</value>
   </data>
+  <data name="CharSurrogate" xml:space="preserve">
+    <value>The char U+{0:X4} is half of a surrogate pair, not a Unicode scalar value, so it has no AMQP char encoding; write the pair as a Rune or a string.</value>
+  </data>
+  <data name="StringNotUtf8" xml:space="preserve">
+    <value>An encoded AMQP string is not valid UTF-8.</value>
+  </data>
+  <data name="StringSurrogateUnpaired" xml:space="preserve">
+    <value>The string holds half of a surrogate pair at index {0}, so it has no UTF-8 encoding; AMQP strings carry Unicode text only.</value>
+  </data>
+  <data name="ArrayElementNull" xml:space="preserve">
+    <value>Element {0} of the array is null, which an AMQP array cannot hold; a list can.</value>
+  </data>
   <data name="TimestampOutOfRange" xml:space="preserve">
     <value>An encoded AMQP timestamp is outside the range a DateTimeOffset represents.</value>
   </data>

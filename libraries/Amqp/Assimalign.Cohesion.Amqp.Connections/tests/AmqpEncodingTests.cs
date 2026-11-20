@@ -123,7 +123,25 @@ public class AmqpEncodingTests
             new float[] { -1.25f, float.MaxValue },
             new double[] { -1.25d, double.MaxValue },
             new Guid[] { new Guid("00112233-4455-6677-8899-aabbccddeeff"), Guid.Empty },
-            new DateTimeOffset[] { DateTimeOffset.FromUnixTimeMilliseconds(0), DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000) }
+            new DateTimeOffset[] { DateTimeOffset.FromUnixTimeMilliseconds(0), DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000) },
+            new AmqpDecimal32[] { new(0u), new(uint.MaxValue) },
+            new AmqpDecimal64[] { new(0ul), new(ulong.MaxValue) },
+            new AmqpDecimal128[] { new(UInt128.Zero), new(UInt128.MaxValue) },
+            new Rune[] { new(0), new(0xFFFD), new(0x10FFFF) },
+            new byte[][] { [], [1, 2, 3] },
+            new byte[][] { [1], new byte[300] }
+        };
+    }
+
+    public static TheoryData<Array> RefusedArrays()
+    {
+        return new TheoryData<Array>
+        {
+            new string?[] { "a", null },
+            new AmqpSymbol[] { "a", default },
+            new byte[]?[] { [1], null },
+            new char[] { 'a', '\ud800' },
+            new string[] { "a", new(['\ud800']) }
         };
     }
 
@@ -216,6 +234,67 @@ public class AmqpEncodingTests
         encoded[0].ShouldBe(AmqpFormatCode.Array32);
         encoded[9].ShouldBe(AmqpFormatCode.String32);
         Convert.ToHexStringLower(encoded.AsSpan(10, 5)).ShouldBe("0000000161");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should widen every binary of an array when one needs a 32-bit length")]
+    public void WriteValue_WithLongBinaryInArray_ShouldWidenEveryElement()
+    {
+        // Arrange
+        byte[][] values = [[7], new byte[256]];
+
+        // Act
+        byte[] encoded = Encode(values);
+
+        // Assert
+        encoded[0].ShouldBe(AmqpFormatCode.Array32);
+        encoded[9].ShouldBe(AmqpFormatCode.Binary32);
+        Convert.ToHexStringLower(encoded.AsSpan(10, 5)).ShouldBe("0000000107");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should refuse an array element that has no place in an array before writing any of it")]
+    [MemberData(nameof(RefusedArrays))]
+    public void WriteValue_WithRefusedArrayElement_ShouldWriteNothing(Array value)
+    {
+        // Arrange
+        using AmqpBufferWriter writer = new();
+
+        AmqpEncoder.WriteValue(writer, "before");
+
+        int length = writer.Length;
+
+        // Act
+        Should.Throw<ArgumentException>(() => AmqpEncoder.WriteValue(writer, value));
+
+        // Assert
+        writer.Length.ShouldBe(length);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should refuse half of a surrogate pair in a string before writing any of it")]
+    public void WriteValue_WithUnpairedSurrogateInString_ShouldWriteNothing()
+    {
+        // Arrange
+        using AmqpBufferWriter writer = new();
+        string value = new(['a', 'b', '\udfff']);
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => AmqpEncoder.WriteValue(writer, value));
+
+        // Assert
+        exception.Message.ShouldStartWith(string.Format(CultureInfo.CurrentCulture, ErrorMessages.StringSurrogateUnpaired, 2), Case.Sensitive);
+        writer.Length.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should write a surrogate pair in a string as one four-octet character")]
+    public void WriteValue_WithSurrogatePairInString_ShouldWriteOneCharacter()
+    {
+        // Arrange
+        string value = new(['\ud83d', '\ude00']);
+
+        // Act
+        byte[] encoded = Encode(value);
+
+        // Assert
+        Convert.ToHexStringLower(encoded).ShouldBe("a104f09f9880");
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReadValue: Should decode nested lists and maps")]

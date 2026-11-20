@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
+using System.Text.Unicode;
 
 using Assimalign.Cohesion.Amqp;
 
@@ -18,7 +19,8 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// Every read validates what the bytes claim against what the buffer holds, so hostile input fails
 /// with <c>amqp:decode-error</c> instead of reading out of range, recursing without bound, or
 /// allocating beyond its own size: a compound value reads through a child reader confined to its
-/// declared size, an element count may not exceed the octets that carry it, and nesting is capped at
+/// declared size, an element count may not exceed what the octets that carry it can hold (for an
+/// array, at its element constructor's minimum width), and nesting is capped at
 /// <see cref="AmqpEncoder.MaxNestingDepth"/>.
 /// </para>
 /// <para>
@@ -831,7 +833,55 @@ internal ref struct AmqpReader
                 }
 
                 return timestamps;
+            case AmqpFormatCode.Decimal32:
+                AmqpDecimal32[] decimal32s = new AmqpDecimal32[count];
+
+                for (int i = 0; i < decimal32s.Length; i++)
+                {
+                    decimal32s[i] = new AmqpDecimal32(BinaryPrimitives.ReadUInt32BigEndian(elements.ReadBytes(4)));
+                }
+
+                return decimal32s;
+            case AmqpFormatCode.Decimal64:
+                AmqpDecimal64[] decimal64s = new AmqpDecimal64[count];
+
+                for (int i = 0; i < decimal64s.Length; i++)
+                {
+                    decimal64s[i] = new AmqpDecimal64(BinaryPrimitives.ReadUInt64BigEndian(elements.ReadBytes(8)));
+                }
+
+                return decimal64s;
+            case AmqpFormatCode.Decimal128:
+                AmqpDecimal128[] decimal128s = new AmqpDecimal128[count];
+
+                for (int i = 0; i < decimal128s.Length; i++)
+                {
+                    decimal128s[i] = new AmqpDecimal128(BinaryPrimitives.ReadUInt128BigEndian(elements.ReadBytes(16)));
+                }
+
+                return decimal128s;
+            case AmqpFormatCode.Char:
+                Rune[] runes = new Rune[count];
+
+                for (int i = 0; i < runes.Length; i++)
+                {
+                    runes[i] = elements.ReadCharBody();
+                }
+
+                return runes;
+            case AmqpFormatCode.Binary8:
+            case AmqpFormatCode.Binary32:
+                byte[][] binaries = new byte[count][];
+
+                for (int i = 0; i < binaries.Length; i++)
+                {
+                    binaries[i] = elements.ReadVariableBody(elementCode).ToArray();
+                }
+
+                return binaries;
             default:
+                // An array of ubyte, list, map or array: no CLR array type holds one without a clash (a
+                // byte[] is binary), so its elements come back as objects.
                 object?[] values = new object?[count];
 
                 for (int i = 0; i < values.Length; i++)
@@ -882,10 +932,19 @@ internal ref struct AmqpReader
             elementCode = elements.ReadByte();
         }
 
-        // An element constructor without a width would let a few bytes claim any number of elements.
-        if (count > 0 && IsZeroWidth(elementCode))
+        // An element constructor without a width would let a few bytes claim any number of elements. Every
+        // element takes at least its constructor's minimum width, so a count the octets cannot carry is
+        // refused before anything is allocated for the elements.
+        int width = GetMinimumWidth(elementCode);
+
+        if (count > 0 && width == 0)
         {
             throw AmqpException.DecodeError(ErrorMessages.ArrayElementWidthInvalid);
+        }
+
+        if ((long)count * width > elements.Remaining)
+        {
+            throw AmqpException.DecodeError(ErrorMessages.CompoundCountInvalid);
         }
 
         return elements;
@@ -1056,7 +1115,16 @@ internal ref struct AmqpReader
 
     private string ReadStringBody(byte code)
     {
-        return Encoding.UTF8.GetString(ReadVariableBody(code));
+        ReadOnlySpan<byte> bytes = ReadVariableBody(code);
+
+        // Decoding malformed UTF-8 would replace it, so two different strings, such as two addresses or
+        // message ids, could decode as one; it is refused instead (AMQP 1.0 Part 1, section 1.6.20).
+        if (!Utf8.IsValid(bytes))
+        {
+            throw AmqpException.DecodeError(ErrorMessages.StringNotUtf8);
+        }
+
+        return Encoding.UTF8.GetString(bytes);
     }
 
     private AmqpSymbol ReadSymbolBody(byte code)
@@ -1134,14 +1202,53 @@ internal ref struct AmqpReader
         }
     }
 
-    private static bool IsZeroWidth(byte code)
+    /// <summary>
+    /// Gets the fewest octets the body of a value with the given constructor takes: its width when the width
+    /// is fixed, otherwise the width of its size field.
+    /// </summary>
+    private static int GetMinimumWidth(byte code)
     {
-        return code is AmqpFormatCode.Null
-            or AmqpFormatCode.BooleanTrue
-            or AmqpFormatCode.BooleanFalse
-            or AmqpFormatCode.UInt0
-            or AmqpFormatCode.ULong0
-            or AmqpFormatCode.List0;
+        return code switch
+        {
+            AmqpFormatCode.Null
+                or AmqpFormatCode.BooleanTrue
+                or AmqpFormatCode.BooleanFalse
+                or AmqpFormatCode.UInt0
+                or AmqpFormatCode.ULong0
+                or AmqpFormatCode.List0 => 0,
+            AmqpFormatCode.Boolean
+                or AmqpFormatCode.UByte
+                or AmqpFormatCode.Byte
+                or AmqpFormatCode.SmallUInt
+                or AmqpFormatCode.SmallULong
+                or AmqpFormatCode.SmallInt
+                or AmqpFormatCode.SmallLong => 1,
+            AmqpFormatCode.UShort or AmqpFormatCode.Short => 2,
+            AmqpFormatCode.UInt
+                or AmqpFormatCode.Int
+                or AmqpFormatCode.Float
+                or AmqpFormatCode.Char
+                or AmqpFormatCode.Decimal32 => 4,
+            AmqpFormatCode.ULong
+                or AmqpFormatCode.Long
+                or AmqpFormatCode.Double
+                or AmqpFormatCode.Timestamp
+                or AmqpFormatCode.Decimal64 => 8,
+            AmqpFormatCode.Uuid or AmqpFormatCode.Decimal128 => 16,
+            AmqpFormatCode.Binary8
+                or AmqpFormatCode.String8
+                or AmqpFormatCode.Symbol8
+                or AmqpFormatCode.List8
+                or AmqpFormatCode.Map8
+                or AmqpFormatCode.Array8 => 1,
+            AmqpFormatCode.Binary32
+                or AmqpFormatCode.String32
+                or AmqpFormatCode.Symbol32
+                or AmqpFormatCode.List32
+                or AmqpFormatCode.Map32
+                or AmqpFormatCode.Array32 => 4,
+            _ => throw UnsupportedFormatCode(code)
+        };
     }
 
     private static AmqpException UnsupportedFormatCode(byte code)
