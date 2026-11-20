@@ -413,8 +413,9 @@ flowchart TD
   with. Every node that runs the same code serves the same set, and a registration is gone when
   the code that defines it is.
 - **Every write that names a locked identifier is answered `Locked`**: add, replace, and remove
-  alike. That includes its credentials. A locked registration's secret or certificate rotates by
-  changing the code or the configuration the code reads, and deploying.
+  alike. That includes its credentials (owner decision, 2026-11-19). A locked registration's
+  secret or certificate rotates by changing the code or the configuration the code reads, and
+  deploying.
 - **Code wins.** A stored registration with the identifier of a locked one is not served by any
   read, and a write may not claim an audience a locked registration exposes.
 - **Locked is where the object is defined, not a flag on it.** `IsLocked` is set by the registry
@@ -426,6 +427,15 @@ a restart would have to reconcile what the code says with what the store holds, 
 removed from the code would live on as a stored record that nothing defines. Holding the locked
 set outside the store makes all three impossible. The cost is accepted: the locked set is in
 memory on every node, and it must be small enough to define in code.
+
+Why a locked registration's credentials are locked with it (owner decision, 2026-11-19): two
+alternatives were weighed and refused. One let the credentials rotate through the API while the
+rest of the definition stayed locked; the other let each registration choose. Both need a stored
+credential record beside the code-first definition, so what authenticates the application would be
+whatever the store holds and not what the code says, and "locked" would no longer mean one thing.
+The cost is accepted here too: rotating a locked registration's secret or certificate is a
+deployment, not an API call. A registration that must rotate without one is created at run time,
+or uses a federated credential, which holds no secret.
 
 A stored registration that code shadows is left in the store. It is served again if the code that
 shadows it is removed, which keeps a deployment reversible, and until then its audiences stay
@@ -653,7 +663,7 @@ and the app registration work under #69 (delivered here as #1923):
 | Builder verb for a store, and Hosting on the store | None; Hosting keeps internal state | The next increment (#1913) |
 | Code-first clients versus stored clients | Decided 2026-11-19: both. A registration defined in code is locked and never stored; one created at run time is stored (*App registrations*) | Hosting adopting the registry (#1913) |
 | Where the registration model lives | In the root, because every part of the hub reads it | The owner's confirmation. `resource-areas.md` keeps feature abstractions out of an area root; the alternative is an `IdentityHub.Clients` feature package that the root's builder contract could then not name |
-| What "locked" covers | The whole registration, credentials included | The owner's confirmation. Letting a locked registration's credentials rotate through the API would need a stored credential record beside the locked definition |
+| What "locked" covers | Decided 2026-11-19: the whole registration, credentials included. Rotating a locked registration's credentials through the API was refused (*Code-first objects are locked*) | Nothing |
 | The cost of a chosen secret | PBKDF2-HMAC-SHA256, 600,000 iterations; 1 for a generated secret | The owner's confirmation, and the rate limit on the endpoint that verifies secrets (#1913) |
 | A stored registration that code shadows | Left in the store, not served, not reported | #1925 |
 | The management web API and the `IdentityHub.Models` application DTOs | Neither exists on this model | #1924 |
