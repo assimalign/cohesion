@@ -110,7 +110,8 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
         {
             lock (Sync)
             {
-                return _partial?.RemoteState;
+                // An ignored resume is not the application's to see.
+                return _partial is { IsIgnored: false } partial ? partial.RemoteState : null;
             }
         }
     }
@@ -314,6 +315,12 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
                 return;
             }
 
+            if (FailIfUnsettledRuleBrokenLocked(transfer, deliveryTag, out bool resumed))
+            {
+                return;
+            }
+
+            // An ignored resume still takes credit: the sender counted it like any delivery (section 2.6.7).
             _linkCredit--;
             _deliveryCount = unchecked(_deliveryCount + 1);
 
@@ -324,10 +331,12 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
                 transfer.MessageFormat ?? 0,
                 transfer.Settled == true,
                 transfer.State,
-                transfer.Resume,
+                resumed,
+                transfer.Resume && !resumed,
                 ReceiverSettleMode == AmqpReceiverSettleMode.First || transfer.ReceiverSettleMode == AmqpReceiverSettleMode.First);
 
-            if (!delivery.IsSettled)
+            // An ignored delivery is neither tracked nor settled: the receiver acts as if it never arrived.
+            if (!delivery.IsSettled && !delivery.IsIgnored)
             {
                 session.AddIncomingLocked(delivery);
             }
@@ -344,8 +353,36 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
                 return;
             }
 
+            // A continuation may repeat the delivery's tag and message format, and MUST NOT change either
+            // (AMQP 1.0 Part 2, section 2.7.5).
+            if (transfer.DeliveryTag is AmqpDeliveryTag deliveryTag && deliveryTag != delivery.DeliveryTag)
+            {
+                FailLocked(
+                    AmqpErrorCondition.InvalidField,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransferDeliveryTagMismatch, delivery.DeliveryTag, deliveryTag));
+                return;
+            }
+
+            if (transfer.MessageFormat is uint messageFormat && messageFormat != delivery.MessageFormat)
+            {
+                FailLocked(
+                    AmqpErrorCondition.InvalidField,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransferMessageFormatMismatch, delivery.DeliveryId, delivery.MessageFormat, messageFormat));
+                return;
+            }
+
             if (FailIfControlTransferInvalidLocked(transfer))
             {
+                return;
+            }
+
+            // Only the first frame of a resumed delivery carries the received state (AMQP 1.0 Part 3,
+            // section 3.4.1).
+            if (transfer.State is AmqpReceived)
+            {
+                FailLocked(
+                    AmqpErrorCondition.InvalidField,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransferReceivedNotFirst, delivery.DeliveryId));
                 return;
             }
 
@@ -356,6 +393,16 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
                 FailLocked(
                     AmqpErrorCondition.InvalidField,
                     string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeliveryTransactionChanged, delivery.DeliveryId));
+                return;
+            }
+
+            // A terminal outcome the sender stated stands: no later frame can alter it (AMQP 1.0 Part 2, section
+            // 2.7.5).
+            if (transfer.State is AmqpDeliveryState stated && !delivery.KeepsOutcome(stated))
+            {
+                FailLocked(
+                    AmqpErrorCondition.IllegalState,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeliveryOutcomeChanged, delivery.DeliveryId));
                 return;
             }
 
@@ -370,10 +417,22 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
 
         if (transfer.Aborted)
         {
-            // An aborted delivery is discarded and settled implicitly (AMQP 1.0 Part 2, section 2.6.14).
+            // An aborted delivery is discarded and settled implicitly (AMQP 1.0 Part 2, section 2.6.14). A resumed
+            // one still reaches the application, which discards what it kept of it (Part 3, section 3.4.6).
             _partial = null;
-            delivery.DiscardLocked();
             session.RemoveIncomingLocked(delivery.DeliveryId);
+
+            if (delivery.IsResumed)
+            {
+                delivery.AbortLocked();
+                _buffered++;
+                _deliveries.Writer.TryWrite(delivery);
+            }
+            else
+            {
+                delivery.DiscardLocked();
+            }
+
             CheckDrainedLocked();
             TopUpLocked();
             return;
@@ -393,10 +452,69 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
         }
 
         _partial = null;
+
+        if (delivery.IsIgnored)
+        {
+            // Nothing reaches the application, so the credit the ignored delivery took is topped up here.
+            CheckDrainedLocked();
+            TopUpLocked();
+            return;
+        }
+
         delivery.CompleteLocked();
         _buffered++;
         _deliveries.Writer.TryWrite(delivery);
         CheckDrainedLocked();
+    }
+
+    /// <summary>
+    /// Applies the rules the unsettled maps of the link's attach frames set for the first frame of a delivery
+    /// (AMQP 1.0 Part 2, section 2.6.13, and Part 3, section 3.4.1), and detaches the link when the sender
+    /// breaks one.
+    /// </summary>
+    /// <param name="transfer">The delivery's first frame.</param>
+    /// <param name="deliveryTag">The delivery's tag.</param>
+    /// <param name="resumed">
+    /// <see langword="true"/> when the frame resumes a delivery the receiver waits for; a resume of any other
+    /// delivery is ignored.
+    /// </param>
+    /// <returns><see langword="true"/> when the link was detached.</returns>
+    private bool FailIfUnsettledRuleBrokenLocked(AmqpTransferPerformative transfer, AmqpDeliveryTag deliveryTag, out bool resumed)
+    {
+        if (transfer.Resume)
+        {
+            // The receiver MUST ignore a resumed delivery it does not hold, and holds each one until a transfer
+            // resumes or aborts it, once.
+            resumed = TakeResumableLocked(deliveryTag);
+            return false;
+        }
+
+        resumed = false;
+
+        if (transfer.State is AmqpReceived)
+        {
+            FailLocked(AmqpErrorCondition.InvalidField, ErrorMessages.TransferReceivedNotResumed);
+            return true;
+        }
+
+        // Only once both maps are complete can a new delivery create unsettled state; a receiver that sent an
+        // incomplete map MUST detach on one.
+        if (UnsettledIncomplete)
+        {
+            FailLocked(AmqpErrorCondition.IllegalState, ErrorMessages.TransferNewWhileUnsettledIncomplete);
+            return true;
+        }
+
+        // A delivery both maps list MUST be resumed, and its tag stays taken until it is.
+        if (IsResumableLocked(deliveryTag))
+        {
+            FailLocked(
+                AmqpErrorCondition.IllegalState,
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransferTagAwaitsResume, deliveryTag));
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

@@ -1009,12 +1009,20 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
         {
             AmqpIncomingDelivery delivery = _incoming[deliveryId];
 
-            // A link that breaks a transaction rule fails once the range is walked, since failing it here would
+            // A link whose sender breaks a rule fails once the range is walked, since failing it here would
             // change the deliveries under the walk. The control link carries no transactional work (AMQP 1.0
             // Part 4, section 4.1), and a delivery stays in the transaction its first frame named (section 4.4.1).
             if (state is AmqpTransactionalState && delivery.ReceiverEndpoint.IsControlLink)
             {
                 (failures ??= []).Add((delivery.ReceiverEndpoint, AmqpErrorCondition.NotAllowed, ErrorMessages.CoordinatorDispositionTransactional));
+                continue;
+            }
+
+            // Only the first frame of a resumed delivery carries the received state, never a sender's
+            // disposition (AMQP 1.0 Part 3, section 3.4.1).
+            if (state is AmqpReceived)
+            {
+                (failures ??= []).Add((delivery.ReceiverEndpoint, AmqpErrorCondition.InvalidField, ErrorMessages.DispositionReceivedFromSender));
                 continue;
             }
 
@@ -1024,6 +1032,17 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
                     delivery.ReceiverEndpoint,
                     AmqpErrorCondition.InvalidField,
                     string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeliveryTransactionChanged, deliveryId)));
+                continue;
+            }
+
+            // A terminal outcome the sender stated, on a transfer or an earlier disposition, stands (AMQP 1.0
+            // Part 2, section 2.7.5).
+            if (state is not null && !delivery.KeepsOutcome(state))
+            {
+                (failures ??= []).Add((
+                    delivery.ReceiverEndpoint,
+                    AmqpErrorCondition.IllegalState,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeliveryOutcomeChanged, deliveryId)));
                 continue;
             }
 

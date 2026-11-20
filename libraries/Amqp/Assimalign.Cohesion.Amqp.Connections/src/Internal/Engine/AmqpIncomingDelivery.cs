@@ -13,9 +13,15 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// settling it (AMQP 1.0 Part 2, section 2.6.12).
 /// </summary>
 /// <remarks>
+/// <para>
 /// The receiver builds the delivery under the connection's lock and hands it to the application once its
 /// last frame arrived; from then on its payload never changes. An unsettled delivery is tracked by the
 /// session until it settles.
+/// </para>
+/// <para>
+/// A resume of a delivery the receiver does not hold is ignored (AMQP 1.0 Part 2, section 2.6.13): its frames
+/// are measured and checked like any others, but nothing is kept, tracked or handed to the application.
+/// </para>
 /// </remarks>
 [DebuggerDisplay("AmqpDelivery {DeliveryTag} (Settled = {IsSettled})")]
 [DebuggerTypeProxy(typeof(DebugView))]
@@ -26,12 +32,14 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
     private readonly AmqpDeliveryTag _deliveryTag;
     private readonly uint _messageFormat;
     private readonly bool _resumed;
+    private readonly bool _ignored;
     private readonly bool _settlesFirst;
     private AmqpBufferWriter? _builder;
     private ReadOnlyMemory<byte> _payload;
     private long _length;
     private bool _settled;
     private bool _settling;
+    private bool _aborted;
     private AmqpDeliveryState? _remoteState;
     private TaskCompletionSource? _settlement;
     private AmqpException? _failure;
@@ -44,6 +52,7 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
         bool settled,
         AmqpDeliveryState? remoteState,
         bool resumed,
+        bool ignored,
         bool settlesFirst)
     {
         _receiver = receiver;
@@ -53,6 +62,7 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
         _settled = settled;
         _remoteState = remoteState;
         _resumed = resumed;
+        _ignored = ignored;
         _settlesFirst = settlesFirst;
     }
 
@@ -74,6 +84,14 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
     public AmqpDeliveryState? RemoteState => Volatile.Read(ref _remoteState);
 
     public bool IsResumed => _resumed;
+
+    public bool IsAborted => Volatile.Read(ref _aborted);
+
+    /// <summary>
+    /// Gets a value indicating whether the delivery is a resume the receiver ignores, because it does not hold
+    /// the delivery.
+    /// </summary>
+    internal bool IsIgnored => _ignored;
 
     /// <summary>
     /// Gets the delivery-id the peer's session numbered the delivery with.
@@ -144,6 +162,12 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
             return false;
         }
 
+        // An ignored delivery is only measured.
+        if (_ignored)
+        {
+            return true;
+        }
+
         if (_builder is null && !more && _length == payload.Length)
         {
             // A delivery in one frame is copied once, straight into its payload.
@@ -166,6 +190,21 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
         return RemoteState is AmqpTransactionalState current
             ? state is AmqpTransactionalState next && next.TransactionId.Span.SequenceEqual(current.TransactionId.Span)
             : state is not AmqpTransactionalState;
+    }
+
+    /// <summary>
+    /// Returns whether a state the sender sends after it stated a terminal outcome for the delivery restates that
+    /// outcome: once a transfer or a disposition of the sender's states one, no later transfer or disposition it
+    /// sends can alter it (AMQP 1.0 Part 2, section 2.7.5).
+    /// </summary>
+    /// <remarks>
+    /// Outcomes compare by kind, since the fields of a rejected or modified outcome describe it rather than make
+    /// another. The outcome inside a transactional state is provisional until the transaction is discharged
+    /// (AMQP 1.0 Part 4, section 4.4.1), so only a plain outcome is held.
+    /// </remarks>
+    internal bool KeepsOutcome(AmqpDeliveryState state)
+    {
+        return RemoteState is not AmqpOutcome current || (state is AmqpOutcome next && next.GetType() == current.GetType());
     }
 
     /// <summary>
@@ -204,6 +243,17 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
     {
         _builder?.Dispose();
         _builder = null;
+    }
+
+    /// <summary>
+    /// Marks a resumed delivery the sender aborted, which reaches the application settled and empty.
+    /// </summary>
+    internal void AbortLocked()
+    {
+        DiscardLocked();
+        _payload = ReadOnlyMemory<byte>.Empty;
+        Volatile.Write(ref _aborted, true);
+        Volatile.Write(ref _settled, true);
     }
 
     /// <summary>
@@ -271,5 +321,6 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
         public bool IsSettled => _delivery.IsSettled;
         public AmqpDeliveryState? RemoteState => _delivery.RemoteState;
         public bool IsResumed => _delivery.IsResumed;
+        public bool IsAborted => _delivery.IsAborted;
     }
 }

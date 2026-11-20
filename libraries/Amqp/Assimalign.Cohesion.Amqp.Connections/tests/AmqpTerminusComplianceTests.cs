@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Amqp;
 using Assimalign.Cohesion.Amqp.Connections.Internal;
 using Assimalign.Cohesion.Connections;
 
+using static Assimalign.Cohesion.Amqp.Connections.Tests.AmqpPeerScript;
+
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 /// <summary>
@@ -340,21 +342,5 @@ public class AmqpTerminusComplianceTests
 
         reader.IsEnd.ShouldBeTrue();
         return performative.ShouldBeOfType<AmqpAttachPerformative>();
-    }
-
-    private static async Task<T> ReadUntilAsync<T>(AmqpTestPeer peer, CancellationToken cancellationToken)
-        where T : AmqpPerformative
-    {
-        while (true)
-        {
-            AmqpTestFrame frame = await peer.ReadNonEmptyFrameAsync(cancellationToken);
-
-            if (frame.Performative is T performative)
-            {
-                return performative;
-            }
-
-            frame.Performative.ShouldNotBeOfType<AmqpClosePerformative>();
-        }
     }
 }

@@ -52,10 +52,36 @@ public interface IAmqpDelivery
     AmqpDeliveryState? RemoteState { get; }
 
     /// <summary>
-    /// Gets a value indicating whether the sender resumed the delivery from an earlier attachment of the
-    /// link (AMQP 1.0 Part 2, section 2.6.13), such as one <see cref="AmqpLinkOptions.Unsettled"/> listed.
+    /// Gets a value indicating whether the sender resumed the delivery from an earlier attachment of the link:
+    /// one the link's <see cref="IAmqpLink.UnsettledReconciliation"/> lists as
+    /// <see cref="AmqpUnsettledReconciliation.Resumable"/> (AMQP 1.0 Part 2, section 2.6.13).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A resumed delivery carries the sender's state in <see cref="RemoteState"/>, and may carry part of the
+    /// message or none of it. An <see cref="AmqpReceived"/> state names the section and offset its payload starts
+    /// at; a payload with no state starts at the beginning of the message; a terminal outcome with no payload
+    /// restates the outcome at the sender, which the receiver echoes when it settles (AMQP 1.0 Part 3,
+    /// section 3.4.6).
+    /// </para>
+    /// <para>
+    /// The link keeps no payload across attachments: the application joins a resumed payload to the data it kept
+    /// of the delivery, skipping what it already has. A resume of a delivery the receiver did not list is
+    /// ignored, as section 2.6.13 requires, and never reaches the application.
+    /// </para>
+    /// </remarks>
     bool IsResumed { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the sender aborted the delivery. Only a resumed delivery reaches the
+    /// application aborted, so it can discard what it kept of the delivery from an earlier attachment of the
+    /// link (AMQP 1.0 Part 3, section 3.4.6).
+    /// </summary>
+    /// <remarks>
+    /// An aborted delivery is settled and carries no payload (AMQP 1.0 Part 2, section 2.6.14). A delivery that
+    /// is not resumed is discarded when the sender aborts it, and never reaches the application.
+    /// </remarks>
+    bool IsAborted { get; }
 
     /// <summary>
     /// Decodes the payload as an AMQP 1.0 message.

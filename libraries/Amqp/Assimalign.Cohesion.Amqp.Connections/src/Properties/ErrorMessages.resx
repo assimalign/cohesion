@@ -439,4 +439,40 @@
   <data name="CoordinatorAnswerTransactional" xml:space="preserve">
     <value>The peer answered a declare or discharge with a transactional state; the link to a transaction coordinator carries no transactional work.</value>
   </data>
+  <data name="DeliveryReceivedNotResumed" xml:space="preserve">
+    <value>Only a resumed delivery can carry the received state, on its first frame.</value>
+  </data>
+  <data name="DeliveryResumeTagUnknown" xml:space="preserve">
+    <value>The link's unsettled maps do not list the delivery {0} as resumable, or it was already resumed or aborted.</value>
+  </data>
+  <data name="DeliveryNewWhileUnsettledIncomplete" xml:space="preserve">
+    <value>An unsettled map of the link's attach was incomplete, so only resumed deliveries can be sent until the link attaches again with complete maps.</value>
+  </data>
+  <data name="DeliveryTagAwaitsResume" xml:space="preserve">
+    <value>The receiver waits for the delivery {0} from an earlier attachment to be resumed, so a new delivery cannot take its tag.</value>
+  </data>
+  <data name="TransferReceivedNotResumed" xml:space="preserve">
+    <value>The peer sent the received state on a delivery it did not resume.</value>
+  </data>
+  <data name="TransferReceivedNotFirst" xml:space="preserve">
+    <value>The peer sent the received state on a later frame of the delivery {0}.</value>
+  </data>
+  <data name="TransferNewWhileUnsettledIncomplete" xml:space="preserve">
+    <value>The peer sent a new delivery while an unsettled map of the link's attach was incomplete.</value>
+  </data>
+  <data name="TransferTagAwaitsResume" xml:space="preserve">
+    <value>The peer sent a new delivery under the tag {0} of a delivery it must resume.</value>
+  </data>
+  <data name="TransferDeliveryTagMismatch" xml:space="preserve">
+    <value>The peer continued the delivery tagged {0} with a transfer tagged {1}.</value>
+  </data>
+  <data name="TransferMessageFormatMismatch" xml:space="preserve">
+    <value>The peer continued the delivery {0} of message format {1} with a transfer of message format {2}.</value>
+  </data>
+  <data name="DispositionReceivedFromSender" xml:space="preserve">
+    <value>The peer sent the received state in a sender's disposition.</value>
+  </data>
+  <data name="DeliveryOutcomeChanged" xml:space="preserve">
+    <value>The sender of delivery {0} changed the terminal outcome it stated for the delivery.</value>
+  </data>
 </root>

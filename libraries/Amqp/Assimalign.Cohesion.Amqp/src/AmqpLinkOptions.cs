@@ -104,9 +104,18 @@ public abstract class AmqpLinkOptions
     /// by delivery tag, or <see langword="null"/> for none (AMQP 1.0 Part 2, section 2.6.13).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The link sends the map in its <c>attach</c>, so the peer can reconcile the deliveries a detach or a
     /// lost connection left unsettled. A value is the delivery's last known state, or
     /// <see langword="null"/> when the endpoint knows none.
+    /// </para>
+    /// <para>
+    /// Once both <c>attach</c> frames are exchanged, the link compares the two maps into its
+    /// <see cref="IAmqpLink.UnsettledReconciliation"/>, which decides what the sender resumes and what the
+    /// receiver considers settled. The link keeps no state across attachments: the application keeps each
+    /// delivery's state and data between them, and supplies the map again when it attaches the link under the
+    /// same name.
+    /// </para>
     /// </remarks>
     public IReadOnlyDictionary<AmqpDeliveryTag, AmqpDeliveryState?>? Unsettled { get; set; }
 
@@ -114,6 +123,11 @@ public abstract class AmqpLinkOptions
     /// Gets or sets a value indicating whether <see cref="Unsettled"/> holds only part of the unsettled
     /// deliveries, because there were too many to send in one <c>attach</c>.
     /// </summary>
+    /// <remarks>
+    /// While either end's map is incomplete the link carries only resumed deliveries: the two ends resume and
+    /// settle what they can, then detach and attach the link again until both maps fit (AMQP 1.0 Part 2,
+    /// section 2.6.13).
+    /// </remarks>
     public bool IncompleteUnsettled { get; set; }
 
     /// <summary>

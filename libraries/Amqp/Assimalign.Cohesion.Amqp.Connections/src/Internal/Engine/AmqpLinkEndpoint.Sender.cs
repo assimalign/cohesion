@@ -166,6 +166,13 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
             throw new ArgumentException(ErrorMessages.DeliveryResumeTagRequired, nameof(options));
         }
 
+        // The received state tells the receiver where a resumed delivery's payload starts, so only the first
+        // frame of a resumed delivery carries it (AMQP 1.0 Part 3, section 3.4.1).
+        if (options is { State: AmqpReceived, Resume: false })
+        {
+            throw new ArgumentException(ErrorMessages.DeliveryReceivedNotResumed, nameof(options));
+        }
+
         if (RemoteMaxMessageSize is ulong maxMessageSize && (ulong)payload.Length > maxMessageSize)
         {
             throw new AmqpException(
@@ -173,44 +180,22 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.MessageSizeExceeded, payload.Length, maxMessageSize));
         }
 
-        lock (Sync)
-        {
-            ThrowIfNotAttachedLocked();
-            _pendingSends++;
-        }
-
-        AmqpOutgoingDelivery? delivery;
-
-        try
-        {
-            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-            try
-            {
-                delivery = await TransferAsync(payload, options, settled, cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                _sendLock.Release();
-            }
-        }
-        finally
-        {
-            lock (Sync)
-            {
-                _pendingSends--;
-
-                if (TryAutoCompleteDrainLocked())
-                {
-                    SessionEndpoint.Writer.Schedule();
-                }
-            }
-        }
+        AmqpOutgoingDelivery? delivery = await SendCoreAsync(payload, options, settled, false, cancellationToken).ConfigureAwait(false);
 
         // A delivery sent settled is done once its frames are queued; an unsettled one waits for the outcome.
         return delivery is null
             ? null
             : await delivery.Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask AbortDeliveryAsync(AmqpDeliveryTag deliveryTag, CancellationToken cancellationToken = default)
+    {
+        // A sender that cannot resume a delivery to completion sends a resuming transfer with the aborted flag
+        // (AMQP 1.0 Part 3, section 3.4.6). Under the settled sender settlement mode every delivery is sent
+        // settled; under the others an aborted transfer may say either, and is settled implicitly anyway.
+        AmqpDeliveryOptions options = new() { DeliveryTag = deliveryTag, Resume = true };
+
+        await SendCoreAsync(ReadOnlyMemory<byte>.Empty, options, SenderSettleMode == AmqpSenderSettleMode.Settled, true, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -334,6 +319,109 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         return true;
     }
 
+    /// <summary>
+    /// Sends one delivery, or the aborting transfer of one carried over from an earlier attachment, once the
+    /// sends ahead of it are done.
+    /// </summary>
+    /// <returns>The delivery, until its outcome settles it; <see langword="null"/> for one sent settled or aborted.</returns>
+    private async ValueTask<AmqpOutgoingDelivery?> SendCoreAsync(
+        ReadOnlyMemory<byte> payload,
+        AmqpDeliveryOptions? options,
+        bool settled,
+        bool abort,
+        CancellationToken cancellationToken)
+    {
+        lock (Sync)
+        {
+            ThrowIfNotAttachedLocked();
+            ThrowIfUnsettledRuleBrokenLocked(options, abort);
+            _pendingSends++;
+        }
+
+        try
+        {
+            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                return await TransferAsync(payload, options, settled, abort, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
+        }
+        finally
+        {
+            lock (Sync)
+            {
+                _pendingSends--;
+
+                if (TryAutoCompleteDrainLocked())
+                {
+                    SessionEndpoint.Writer.Schedule();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Refuses a delivery the unsettled maps of the link's attach frames rule out (AMQP 1.0 Part 2, section
+    /// 2.6.13): a resume of a delivery the receiver does not hold or that was already resumed, a new delivery
+    /// while either map was incomplete, and a new delivery under the tag of one the receiver waits to have
+    /// resumed. A send is checked when it is admitted and again before its first frame, since a send ahead of
+    /// it may have resumed the same delivery in between.
+    /// </summary>
+    /// <exception cref="ArgumentException">Thrown when the tag breaks a rule.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the delivery is new and either map was incomplete.</exception>
+    private void ThrowIfUnsettledRuleBrokenLocked(AmqpDeliveryOptions? options, bool abort)
+    {
+        if (options is { Resume: true, DeliveryTag: AmqpDeliveryTag resumed })
+        {
+            // The receiver ignores a resume of a delivery it does not hold, so the delivery would never settle,
+            // and a sender MUST NOT resume one it does not hold itself.
+            if (!IsResumableLocked(resumed))
+            {
+                throw new ArgumentException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeliveryResumeTagUnknown, resumed),
+                    abort ? "deliveryTag" : nameof(options));
+            }
+
+            return;
+        }
+
+        // Only once both maps are complete can a new delivery create unsettled state.
+        if (UnsettledIncomplete)
+        {
+            throw new InvalidOperationException(ErrorMessages.DeliveryNewWhileUnsettledIncomplete);
+        }
+
+        // A delivery both maps list MUST be resumed, and its tag stays taken until it is.
+        if (options?.DeliveryTag is AmqpDeliveryTag tag && IsResumableLocked(tag))
+        {
+            throw new ArgumentException(
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeliveryTagAwaitsResume, tag),
+                nameof(options));
+        }
+    }
+
+    /// <summary>
+    /// Returns the tag the next generated delivery takes, past every tag either unsettled map of the attach
+    /// listed.
+    /// </summary>
+    private AmqpDeliveryTag NextGeneratedTagLocked()
+    {
+        AmqpDeliveryTag tag = AmqpDeliveryTag.Create(_nextTag);
+
+        while (IsCarriedOverLocked(tag))
+        {
+            _nextTag++;
+            tag = AmqpDeliveryTag.Create(_nextTag);
+        }
+
+        return tag;
+    }
+
     private bool ResolveSettled(AmqpDeliveryOptions? options)
     {
         bool? requested = options?.Settled;
@@ -393,6 +481,7 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         ReadOnlyMemory<byte> payload,
         AmqpDeliveryOptions? options,
         bool settled,
+        bool abort,
         CancellationToken cancellationToken)
     {
         AmqpOutgoingDelivery? delivery = null;
@@ -419,7 +508,7 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
                     }
                     else
                     {
-                        complete = StartDeliveryLocked(payload.Span, options, settled, ref offset, out delivery);
+                        complete = StartDeliveryLocked(payload.Span, options, settled, abort, ref offset, out delivery);
                         started = true;
                     }
 
@@ -456,17 +545,26 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
     /// <summary>
     /// Writes the first frame of a delivery and commits the delivery: it takes a delivery-id and a unit of credit.
     /// </summary>
+    /// <param name="payload">The delivery's payload.</param>
+    /// <param name="options">The delivery's options.</param>
+    /// <param name="settled">Whether the delivery is sent settled.</param>
+    /// <param name="abort">Whether the frame aborts a delivery carried over from an earlier attachment, and is its only one.</param>
+    /// <param name="offset">The offset of the payload the next frame starts at.</param>
+    /// <param name="delivery">The delivery, when it waits for an outcome.</param>
     /// <returns><see langword="true"/> when the frame carried the whole payload.</returns>
-    /// <exception cref="ArgumentException">Thrown, before anything is committed, when the delivery state leaves no room for the payload in a frame.</exception>
+    /// <exception cref="ArgumentException">Thrown, before anything is committed, when the delivery state leaves no room for the payload in a frame, or a send ahead of this one resumed the same delivery.</exception>
     private bool StartDeliveryLocked(
         ReadOnlySpan<byte> payload,
         AmqpDeliveryOptions? options,
         bool settled,
+        bool abort,
         ref int offset,
         out AmqpOutgoingDelivery? delivery)
     {
+        ThrowIfUnsettledRuleBrokenLocked(options, abort);
+
         AmqpSessionEndpoint session = SessionEndpoint;
-        AmqpDeliveryTag tag = options?.DeliveryTag ?? AmqpDeliveryTag.Create(_nextTag);
+        AmqpDeliveryTag tag = options?.DeliveryTag ?? NextGeneratedTagLocked();
         AmqpTransferPerformative transfer = _transfer;
         bool complete;
 
@@ -478,7 +576,7 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         transfer.ReceiverSettleMode = null;
         transfer.State = options?.State;
         transfer.Resume = options?.Resume ?? false;
-        transfer.Aborted = false;
+        transfer.Aborted = abort;
         transfer.Batchable = false;
 
         try
@@ -496,6 +594,7 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
             transfer.Settled = null;
             transfer.State = transfer.State as AmqpTransactionalState;
             transfer.Resume = false;
+            transfer.Aborted = false;
         }
 
         uint deliveryId = session.AllocateDeliveryIdLocked();
@@ -504,11 +603,17 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         {
             _nextTag++;
         }
+        else if (options.Resume)
+        {
+            // A delivery is resumed once per attachment: from here on it is a delivery of this one.
+            TakeResumableLocked(tag);
+        }
 
         _linkCredit--;
         _deliveryCount = unchecked(_deliveryCount + 1);
 
-        if (settled)
+        // An aborted delivery is settled implicitly (AMQP 1.0 Part 2, section 2.6.14).
+        if (settled || abort)
         {
             delivery = null;
         }

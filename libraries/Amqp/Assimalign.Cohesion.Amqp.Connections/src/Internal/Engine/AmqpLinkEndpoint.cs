@@ -59,6 +59,9 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     private IReadOnlyList<AmqpSymbol>? _remoteOfferedCapabilities;
     private IReadOnlyList<AmqpSymbol>? _remoteDesiredCapabilities;
     private IReadOnlyDictionary<AmqpSymbol, object?>? _remoteProperties;
+    private AmqpUnsettledReconciliation _unsettledReconciliation;
+    private HashSet<AmqpDeliveryTag>? _resumable;
+    private bool _hasCarriedOver;
 
     /// <summary>
     /// Creates the endpoint of a link the application attaches.
@@ -99,6 +102,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         _detached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _detachedSource = new CancellationTokenSource();
         _detachedToken = _detachedSource.Token;
+        _unsettledReconciliation = AmqpUnsettledReconciliation.Create(null, false, null, false);
     }
 
     public IAmqpSession Session => _session;
@@ -123,6 +127,8 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     public IReadOnlyDictionary<AmqpDeliveryTag, AmqpDeliveryState?>? RemoteUnsettled => _remoteUnsettled;
 
     public bool RemoteIncompleteUnsettled => _remoteIncompleteUnsettled;
+
+    public AmqpUnsettledReconciliation UnsettledReconciliation => Volatile.Read(ref _unsettledReconciliation);
 
     public IReadOnlyList<AmqpSymbol>? RemoteOfferedCapabilities => _remoteOfferedCapabilities;
 
@@ -174,6 +180,12 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     /// <see langword="null"/> for a receiver.
     /// </summary>
     private protected abstract uint? InitialDeliveryCount { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether either end's unsettled map was incomplete, so only resumed deliveries
+    /// may flow until the link attaches again (AMQP 1.0 Part 2, section 2.6.13).
+    /// </summary>
+    private protected bool UnsettledIncomplete => !_unsettledReconciliation.IsComplete;
 
     public ValueTask DetachAsync(AmqpError? error = null, CancellationToken cancellationToken = default)
     {
@@ -276,6 +288,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         }
 
         _state = AmqpLinkState.Attached;
+        ReconcileUnsettledLocked();
         OnRemoteAttachLocked(attach);
 
         if (_closeWhenAttached)
@@ -383,6 +396,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         ThrowIfRuleBroken(answer, opening: false);
         _session.WriteFrameLocked(answer);
         ApplyLocalAttach(answer);
+        ReconcileUnsettledLocked();
         _state = AmqpLinkState.Attached;
         _attached.TrySetResult();
         OnAcceptedLocked(options);
@@ -420,6 +434,43 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     internal AmqpException GetDetachedExceptionLocked()
     {
         return _detachedException ?? AmqpException.LinkDetached(null);
+    }
+
+    /// <summary>
+    /// Returns whether a delivery from an earlier attachment waits to be resumed or aborted: the reconciliation
+    /// lists it as resumable, and no transfer has resumed it on this attachment yet.
+    /// </summary>
+    private protected bool IsResumableLocked(AmqpDeliveryTag deliveryTag)
+    {
+        return _resumable?.Contains(deliveryTag) == true;
+    }
+
+    /// <summary>
+    /// Takes a delivery off those that wait to be resumed, once a transfer resumes or aborts it.
+    /// </summary>
+    /// <returns><see langword="true"/> when the delivery waited to be resumed.</returns>
+    private protected bool TakeResumableLocked(AmqpDeliveryTag deliveryTag)
+    {
+        return _resumable?.Remove(deliveryTag) == true;
+    }
+
+    /// <summary>
+    /// Returns whether either end's unsettled map listed a tag: a delivery from an earlier attachment under it
+    /// may still be unsettled at one end, so a new delivery does not take it (AMQP 1.0 Part 2, section 2.6.12).
+    /// </summary>
+    private protected bool IsCarriedOverLocked(AmqpDeliveryTag deliveryTag)
+    {
+        if (!_hasCarriedOver)
+        {
+            return false;
+        }
+
+        AmqpUnsettledReconciliation reconciliation = _unsettledReconciliation;
+
+        return reconciliation.Resumable.Contains(deliveryTag)
+            || reconciliation.Settled.Contains(deliveryTag)
+            || reconciliation.UnknownToReceiver.Contains(deliveryTag)
+            || reconciliation.InDoubt.Contains(deliveryTag);
     }
 
     /// <summary>
@@ -532,6 +583,25 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
                 Error = new AmqpError(error.Condition)
             });
         }
+    }
+
+    /// <summary>
+    /// Compares the two ends' unsettled maps once both <c>attach</c> frames are known, before the link carries a
+    /// delivery (AMQP 1.0 Part 2, section 2.6.13). The sender's map is the source's and the receiver's the
+    /// target's, whichever end this is.
+    /// </summary>
+    private void ReconcileUnsettledLocked()
+    {
+        AmqpUnsettledReconciliation reconciliation = _role == AmqpRole.Sender
+            ? AmqpUnsettledReconciliation.Create(_localUnsettled, _localIncompleteUnsettled, _remoteUnsettled, _remoteIncompleteUnsettled)
+            : AmqpUnsettledReconciliation.Create(_remoteUnsettled, _remoteIncompleteUnsettled, _localUnsettled, _localIncompleteUnsettled);
+
+        _hasCarriedOver = reconciliation.Resumable.Count > 0
+            || reconciliation.Settled.Count > 0
+            || reconciliation.UnknownToReceiver.Count > 0
+            || reconciliation.InDoubt.Count > 0;
+        _resumable = reconciliation.Resumable.Count > 0 ? new HashSet<AmqpDeliveryTag>(reconciliation.Resumable) : null;
+        Volatile.Write(ref _unsettledReconciliation, reconciliation);
     }
 
     /// <summary>
@@ -661,6 +731,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         public ulong? RemoteMaxMessageSize => _link.RemoteMaxMessageSize;
         public IReadOnlyDictionary<AmqpDeliveryTag, AmqpDeliveryState?>? RemoteUnsettled => _link.RemoteUnsettled;
         public bool RemoteIncompleteUnsettled => _link.RemoteIncompleteUnsettled;
+        public AmqpUnsettledReconciliation UnsettledReconciliation => _link.UnsettledReconciliation;
         public bool IsDetached => _link.LinkDetached.IsCancellationRequested;
     }
 }

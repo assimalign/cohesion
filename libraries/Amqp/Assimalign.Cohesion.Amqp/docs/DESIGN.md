@@ -128,7 +128,9 @@ The engine enforces one principle, and the model's contracts state it where it s
 - **Drain.** A receiver can ask the sender to use or give back its credit. With
   `AmqpSenderOptions.AutoCompleteDrain` (the default) the sender answers at once; without it the
   application sends what it has and calls `CompleteDrain`.
-- **Delivery tags** are generated per link unless `AmqpDeliveryOptions.DeliveryTag` supplies one.
+- **Delivery tags** are generated per link unless `AmqpDeliveryOptions.DeliveryTag` supplies one. A
+  generated tag skips every tag either unsettled map of the link's `attach` listed, since a delivery
+  from an earlier attachment may still be unsettled at one end.
 
 ## Receiving
 
@@ -137,7 +139,8 @@ The engine enforces one principle, and the model's contracts state it where it s
   application takes them. With zero, the application grants credit with `AddCredit`. `DrainAsync`
   asks the sender to drain and completes when the link has no credit.
 - **A delivery is whole when it is received.** `ReceiveAsync` and `TryReceive` return deliveries
-  whose last frame has arrived; an aborted delivery is discarded and never returned.
+  whose last frame has arrived. An aborted delivery is discarded and never returned, unless it was
+  resumed from an earlier attachment (see "Resuming a link").
 - **Settlement verbs map to outcomes.** `AcceptAsync`, `RejectAsync`, `ReleaseAsync` and
   `ModifyAsync` send the matching outcome; `SettleAsync` sends any state, including a
   transactional one. Under the first settle mode the receiver settles at once; under the second it
@@ -145,6 +148,55 @@ The engine enforces one principle, and the model's contracts state it where it s
 - **Decoding is the application's choice.** `Payload` is the delivery's bytes; `GetMessage`
   decodes them on each call and throws `AmqpErrorCode.ProtocolViolation` for a payload that is not
   a valid message. A broker stores and forwards `Payload` and decodes only what it routes on.
+
+## Resuming a link
+
+A link detached without closing (`DetachAsync`) can be attached again under the same name, and the
+deliveries it left unsettled carried over to the new attachment (Part 2 §2.6.13). The engine keeps
+no delivery state across attachments, so recovery is the application's: it lists the deliveries it
+still holds unsettled, each with the state it holds it in, in `AmqpLinkOptions.Unsettled` (and sets
+`IncompleteUnsettled` when that map is only part of them), and reads the peer's map from
+`RemoteUnsettled`.
+
+`IAmqpLink.UnsettledReconciliation` compares the two maps once both `attach` frames are known, at
+both ends alike: the sender's map is the source's and the receiver's the target's, whichever end
+attached first. `AmqpUnsettledReconciliation.Create` makes the same comparison without a link. Every
+tag either map lists falls in exactly one set:
+
+| Listed by | Set | What happens to the delivery |
+|---|---|---|
+| Both maps, or the target's while the source's is incomplete | `Resumable` | The sender resumes it or aborts it, once; the receiver takes one resume of it and holds its tag until then |
+| The source's only, while the target's is complete | `UnknownToReceiver` | The receiver would ignore a resume, so the sender sends the message again as a new delivery, or nothing when its own state shows the receiver had all of it |
+| The target's only, while the source's is complete | `Settled` | The receiver considers it settled, and the sender sends nothing |
+| The source's only, while the target's is incomplete | `InDoubt` | The receiver may hold it without having listed it, so it waits for a later attachment |
+
+- **Resuming is a send.** `SendAsync` with `AmqpDeliveryOptions.Resume` and the delivery's tag
+  resumes it: from where the receiver's map says it stopped, with an `AmqpReceived` state naming the
+  section and offset its payload starts at; whole, with no state; or with no payload at all, to
+  convey only the sender's outcome or settlement when the receiver already has the whole message.
+  A delivery the sender cannot resume to completion is aborted with `IAmqpSender.AbortDeliveryAsync`,
+  one resuming frame with the aborted flag, after which the message may go again as a new delivery.
+  Part 3 §3.4.6 walks through every case, and the engine's compliance tests run that example end to
+  end.
+- **The engine holds both ends to the comparison.** A sender refuses, before sending anything, a
+  resume or abort of a delivery that is not resumable or was already resumed, a new delivery under a
+  tag that waits to be resumed (`ArgumentException`), and any new delivery while either map is
+  incomplete (`InvalidOperationException`): until then the two ends resume and settle what they can,
+  then detach and attach again. A receiver ignores a resume of a delivery it does not wait for, as
+  §2.6.13 requires, while the delivery still takes its unit of credit, and detaches a link whose
+  sender starts a new delivery it should not.
+- **The specification allows one resume the engine refuses.** A sender that has not yet seen the
+  receiver's map may pipeline a resume of a delivery only the source lists, which the receiver
+  ignores. The engine sends only once it holds the receiver's map, so such a resume could only be
+  ignored and its delivery would never settle; it is refused instead.
+- **The application joins what the link does not keep.** `IAmqpDelivery.IsResumed` marks a resumed
+  delivery, and its `RemoteState` says where its payload starts: the application joins that payload
+  to the data it kept of the delivery, skipping what it already has. A resumed delivery the sender
+  aborts reaches the application with `IsAborted`, settled and empty, so the application can discard
+  what it kept.
+- **The received state belongs to resumes.** Only the first frame of a resumed delivery carries an
+  `AmqpReceived` (Part 3 §3.4.1). A sender refuses one anywhere else, and a receiver detaches a link
+  whose sender sends one anywhere else.
 
 ## Messages
 
@@ -173,6 +225,12 @@ The engine enforces one principle, and the model's contracts state it where it s
 a declare). Constructors are `private protected` so every state has a wire form: an application
 state with no descriptor could not be sent. Each type exposes its `Descriptor` symbol, which is what
 a source's `Outcomes` list names.
+
+A terminal outcome the sender states for a delivery, on a `transfer` or a `disposition`, does not
+change afterwards (Part 2 §2.7.5): the engine detaches a link whose sender states a different
+outcome later with `amqp:illegal-state`. Outcomes compare by kind, so a `rejected` that restates a
+`rejected` with another error stands. An outcome inside an `AmqpTransactionalState` is provisional
+until the transaction is discharged (Part 4 §4.4.1), so it is not held.
 
 ## Termini
 

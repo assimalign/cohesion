@@ -18,8 +18,16 @@ public sealed class AmqpDeliveryOptions
     /// unique on its link.
     /// </summary>
     /// <remarks>
-    /// A tag of the application's choosing must be unique among the link's unsettled deliveries, except when
-    /// <see cref="Resume"/> resends a delivery from an earlier attachment of the link.
+    /// <para>
+    /// A tag must be unique among the deliveries either end of the link may consider unsettled (AMQP 1.0
+    /// Part 2, section 2.6.12), so a tag of the application's choosing is not one of the link's unsettled
+    /// deliveries, except when <see cref="Resume"/> resumes a delivery from an earlier attachment of the link.
+    /// A new delivery cannot take the tag of one the receiver waits to have resumed.
+    /// </para>
+    /// <para>
+    /// A generated tag skips every tag either unsettled map of the link's attach listed, since a delivery from
+    /// an earlier attachment may still be unsettled at one end.
+    /// </para>
     /// </remarks>
     public AmqpDeliveryTag? DeliveryTag { get; set; }
 
@@ -50,8 +58,10 @@ public sealed class AmqpDeliveryOptions
     /// coordinator refuses one: the control link carries no transactional work (section 4.1).
     /// </para>
     /// <para>
-    /// A resumed delivery carries the state the sender last knew, such as an <see cref="AmqpReceived"/> that
-    /// tells the receiver where to resume.
+    /// A resumed delivery carries the state the sender last knew: an <see cref="AmqpReceived"/> that names the
+    /// section and offset the payload starts at, or the terminal outcome at the sender (AMQP 1.0 Part 3,
+    /// section 3.4.6). Only a resumed delivery may carry an <see cref="AmqpReceived"/>, which goes on its first
+    /// frame alone (section 3.4.1).
     /// </para>
     /// </remarks>
     public AmqpDeliveryState? State { get; set; }
@@ -61,8 +71,17 @@ public sealed class AmqpDeliveryOptions
     /// link, under the same <see cref="DeliveryTag"/> (AMQP 1.0 Part 2, section 2.6.13).
     /// </summary>
     /// <remarks>
-    /// The peer's <see cref="IAmqpLink.RemoteUnsettled"/> map tells the sender which deliveries the receiver
-    /// still holds and in what state. A resumed delivery requires an explicit <see cref="DeliveryTag"/>.
+    /// <para>
+    /// A resumed delivery requires an explicit <see cref="DeliveryTag"/> that the link's
+    /// <see cref="IAmqpLink.UnsettledReconciliation"/> lists as resumable, and each such delivery is resumed
+    /// once per attachment. The peer's <see cref="IAmqpLink.RemoteUnsettled"/> map tells the sender the state
+    /// the receiver holds it in, and so where to resume it from.
+    /// </para>
+    /// <para>
+    /// A resumed delivery may carry no payload when the receiver already has all of it, to convey only the
+    /// sender's terminal state and settlement. A delivery the sender cannot resume to completion is aborted
+    /// with <see cref="IAmqpSender.AbortDeliveryAsync(AmqpDeliveryTag, System.Threading.CancellationToken)"/>.
+    /// </para>
     /// </remarks>
     public bool Resume { get; set; }
 }

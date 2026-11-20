@@ -27,6 +27,7 @@ programs against this package alone.
 |---|---|
 | Connection, session, link | `IAmqpConnection`, `IAmqpSession`, `IAmqpLink`, `IAmqpSender`, `IAmqpReceiver`, `IAmqpLinkRequest` (an incoming attach to accept or refuse), `IAmqpDelivery` |
 | Options | `AmqpSessionOptions`, `AmqpLinkOptions` with `AmqpSenderOptions` and `AmqpReceiverOptions`, `AmqpDeliveryOptions` |
+| Link resumption | `AmqpUnsettledReconciliation` (`IAmqpLink.UnsettledReconciliation`), `AmqpDeliveryOptions.Resume`, `IAmqpSender.AbortDeliveryAsync`, `IAmqpDelivery.IsResumed` and `IsAborted` |
 | Messages | `AmqpMessage`; its sections `AmqpHeader`, `AmqpProperties`, the annotation and property maps, and one body: `AmqpDataBody`, `AmqpSequenceBody` or `AmqpValueBody` |
 | Delivery states | `AmqpDeliveryState`: `AmqpReceived`, `AmqpTransactionalState`, and the outcomes `AmqpAccepted`, `AmqpRejected`, `AmqpReleased`, `AmqpModified` and `AmqpDeclared` |
 | Termini | `AmqpSource`, `AmqpTarget` and `AmqpCoordinator` (both `IAmqpTarget`), `AmqpTerminusDurability`, `AmqpTerminusExpiryPolicy`, `AmqpDistributionMode`, `AmqpLifetimePolicy`, `AmqpNodeProperties` |
@@ -108,5 +109,5 @@ src/
 ├── Internal/          the built-in SASL exchanges
 ├── ValueObjects/      AmqpSymbol, AmqpDeliveryTag and the decimal types
 ├── Properties/        AssemblyInfo.cs and ErrorMessages.resx
-└── *.cs               messages, delivery states, termini, options, SASL mechanisms, transactions
+└── *.cs               messages, delivery states, termini, options, link resumption, SASL mechanisms, transactions
 ```

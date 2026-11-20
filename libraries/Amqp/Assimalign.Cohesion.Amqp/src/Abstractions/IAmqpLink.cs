@@ -77,6 +77,19 @@ public interface IAmqpLink : IAsyncDisposable
     bool RemoteIncompleteUnsettled { get; }
 
     /// <summary>
+    /// Gets the comparison of the two ends' unsettled maps from the link's <c>attach</c> frames: the deliveries
+    /// from earlier attachments the sender resumes, those the receiver considers settled, and those the
+    /// receiver has no record of (AMQP 1.0 Part 2, section 2.6.13).
+    /// </summary>
+    /// <remarks>
+    /// The link holds both ends to it: a sender resumes or aborts only a delivery in
+    /// <see cref="AmqpUnsettledReconciliation.Resumable"/>, once, and sends no new delivery under such a tag or
+    /// while either map was incomplete; a receiver ignores a resume of any other delivery. For a link neither end
+    /// resumed, every set is empty.
+    /// </remarks>
+    AmqpUnsettledReconciliation UnsettledReconciliation { get; }
+
+    /// <summary>
     /// Gets the extension capabilities the peer offered in its <c>attach</c>, or <see langword="null"/>.
     /// </summary>
     IReadOnlyList<AmqpSymbol>? RemoteOfferedCapabilities { get; }

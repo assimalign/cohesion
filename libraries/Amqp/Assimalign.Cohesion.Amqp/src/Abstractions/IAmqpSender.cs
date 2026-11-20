@@ -96,7 +96,8 @@ public interface IAmqpSender : IAmqpLink
     /// settled or settled by the receiver without one.
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="message"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when a value in the message has no AMQP representation or nests too deeply, or an application property holds a list, map or array. Nothing is sent.</exception>
+    /// <exception cref="ArgumentException">Thrown when a value in the message has no AMQP representation or nests too deeply, or an application property holds a list, map or array, or when the options break a rule of the link (see <see cref="SendAsync(ReadOnlyMemory{byte}, AmqpDeliveryOptions?, CancellationToken)"/>). Nothing is sent.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the delivery is new and either unsettled map of the link's attach was incomplete (<see cref="AmqpUnsettledReconciliation.IsComplete"/>). Nothing is sent.</exception>
     /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.MessageSizeExceeded"/> when the encoded message exceeds <see cref="IAmqpLink.RemoteMaxMessageSize"/>, or with <see cref="AmqpErrorCode.LinkDetached"/> when the link detaches first.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the send is canceled.</exception>
     ValueTask<AmqpDeliveryState?> SendAsync(AmqpMessage message, AmqpDeliveryOptions? options = null, CancellationToken cancellationToken = default);
@@ -111,7 +112,41 @@ public interface IAmqpSender : IAmqpLink
     /// The receiver's outcome for an unsettled delivery, or <see langword="null"/> for a delivery sent
     /// settled or settled by the receiver without one.
     /// </returns>
+    /// <remarks>
+    /// A resumed delivery (<see cref="AmqpDeliveryOptions.Resume"/>) may carry an empty payload when the
+    /// receiver already has the whole message and only the sender's terminal state or settlement is left to
+    /// convey (AMQP 1.0 Part 2, section 2.7.5).
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// Thrown, before anything is sent, when the options break a rule of the link: a settlement the link's
+    /// sender settlement mode rules out; a settled or transactional delivery on a link to a transaction
+    /// coordinator; a resumed delivery without a tag, or whose tag
+    /// <see cref="IAmqpLink.UnsettledReconciliation"/> does not list as resumable or that was already resumed;
+    /// a new delivery under the tag of one the receiver waits to have resumed; an <see cref="AmqpReceived"/>
+    /// state on a delivery that is not resumed; or a delivery state too large to leave room for payload in a
+    /// frame.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">Thrown when the delivery is new and either unsettled map of the link's attach was incomplete (<see cref="AmqpUnsettledReconciliation.IsComplete"/>): only resumed deliveries can be sent until the link attaches again with complete maps (AMQP 1.0 Part 2, section 2.6.13). Nothing is sent.</exception>
     /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.MessageSizeExceeded"/> when the payload exceeds <see cref="IAmqpLink.RemoteMaxMessageSize"/>, or with <see cref="AmqpErrorCode.LinkDetached"/> when the link detaches first.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the send is canceled.</exception>
     ValueTask<AmqpDeliveryState?> SendAsync(ReadOnlyMemory<byte> payload, AmqpDeliveryOptions? options = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Aborts a delivery carried over from an earlier attachment of the link: sends one resuming
+    /// <c>transfer</c> with the aborted flag, so the receiver discards what it holds of the delivery and both
+    /// ends consider it settled (AMQP 1.0 Part 3, section 3.4.6).
+    /// </summary>
+    /// <param name="deliveryTag">The tag of a delivery <see cref="IAmqpLink.UnsettledReconciliation"/> lists as resumable, which has not been resumed or aborted yet.</param>
+    /// <param name="cancellationToken">A token to cancel the wait for link credit and the session's window.</param>
+    /// <returns>A task that completes once the transfer is queued.</returns>
+    /// <remarks>
+    /// A sender aborts a delivery it cannot resume to completion: the receiver lacks data the sender can no
+    /// longer resend, or the sender reached a terminal outcome before the receiver had the whole message. It may
+    /// then send the message again as a new delivery. The transfer takes a unit of link credit, like any
+    /// delivery.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <see cref="IAmqpLink.UnsettledReconciliation"/> does not list the delivery as resumable, or it was already resumed or aborted. Nothing is sent.</exception>
+    /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.LinkDetached"/> when the link detaches first.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the wait is canceled; nothing was sent.</exception>
+    ValueTask AbortDeliveryAsync(AmqpDeliveryTag deliveryTag, CancellationToken cancellationToken = default);
 }

@@ -10,6 +10,8 @@ using Xunit;
 using Assimalign.Cohesion.Amqp;
 using Assimalign.Cohesion.Amqp.Connections.Internal;
 
+using static Assimalign.Cohesion.Amqp.Connections.Tests.AmqpPeerScript;
+
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 /// <summary>
@@ -505,9 +507,9 @@ public class AmqpTransactionComplianceTests
         IAmqpSender sender = await AttachPeerReceiverAsync(peer, session, new AmqpSenderOptions { TransactionalAcquisition = true }, timeout.Token);
 
         // Act
-        await WriteFlowAndWaitAsync(peer, engineBegin, CreateLinkFlow(engineBegin, credit: 5, transactionId: _transactionA), timeout.Token);
+        await WriteFlowAndWaitAsync(peer, CreateLinkFlow(engineBegin, credit: 5, transactionId: _transactionA), timeout.Token);
         ReadOnlyMemory<byte>? named = sender.AcquisitionTransactionId;
-        await WriteFlowAndWaitAsync(peer, engineBegin, CreateLinkFlow(engineBegin, credit: 6), timeout.Token);
+        await WriteFlowAndWaitAsync(peer, CreateLinkFlow(engineBegin, credit: 6), timeout.Token);
         ReadOnlyMemory<byte>? kept = sender.AcquisitionTransactionId;
         bool clearedOther = sender.ClearAcquisitionTransaction(_transactionB);
         bool cleared = sender.ClearAcquisitionTransaction(_transactionA);
@@ -570,12 +572,6 @@ public class AmqpTransactionComplianceTests
 
     private static readonly byte[] _declarePayload = [0x00, 0x53, 0x77, 0x00, 0x53, 0x31, 0x45];
 
-    private static async Task<IAmqpSession> BeginAsync(AmqpScriptedHost host, CancellationToken cancellationToken)
-    {
-        await host.Peer.BeginAsync(null, cancellationToken);
-        return await host.Connection.AcceptSessionAsync(cancellationToken);
-    }
-
     private static async Task AssertContinuationRefusedAsync(AmqpDeliveryState? firstState, AmqpDeliveryState laterState)
     {
         // Arrange
@@ -595,91 +591,6 @@ public class AmqpTransactionComplianceTests
         // Assert
         detach.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.InvalidField);
         receiver.TryReceive(out _).ShouldBeFalse();
-    }
-
-    private static AmqpTransferPerformative CreateTransfer(uint deliveryId, bool settled = false, AmqpDeliveryState? state = null)
-    {
-        return new AmqpTransferPerformative
-        {
-            Handle = 0,
-            DeliveryId = deliveryId,
-            DeliveryTag = AmqpDeliveryTag.Create(deliveryId),
-            MessageFormat = 0,
-            Settled = settled,
-            State = state
-        };
-    }
-
-    private static AmqpAttachPerformative CreateReceiverAttach(IAmqpTarget target)
-    {
-        return new AmqpAttachPerformative
-        {
-            Name = "link",
-            Handle = 0,
-            Role = AmqpRole.Receiver,
-            Source = new AmqpSource { Address = "queue" },
-            Target = target
-        };
-    }
-
-    private static AmqpFlowPerformative CreateLinkFlow(AmqpBeginPerformative engineBegin, uint credit, byte[]? transactionId = null, uint incomingWindow = 100)
-    {
-        return new AmqpFlowPerformative
-        {
-            NextIncomingId = engineBegin.NextOutgoingId,
-            IncomingWindow = incomingWindow,
-            NextOutgoingId = 1,
-            OutgoingWindow = 100,
-            Handle = 0,
-            DeliveryCount = 0,
-            LinkCredit = credit,
-            Properties = transactionId is null ? null : new Dictionary<AmqpSymbol, object?> { [new AmqpSymbol("txn-id")] = transactionId }
-        };
-    }
-
-    /// <summary>
-    /// The peer attaches a sending link; the engine accepts it as a receiver.
-    /// </summary>
-    private static async Task<IAmqpReceiver> AttachPeerSenderAsync(
-        AmqpTestPeer peer,
-        IAmqpSession session,
-        IAmqpTarget target,
-        AmqpReceiverOptions? options,
-        CancellationToken cancellationToken)
-    {
-        await peer.WriteFrameAsync(0, new AmqpAttachPerformative
-        {
-            Name = "link",
-            Handle = 0,
-            Role = AmqpRole.Sender,
-            Source = new AmqpSource { Address = "peer" },
-            Target = target,
-            InitialDeliveryCount = 0
-        }, cancellationToken);
-
-        IAmqpLinkRequest request = await session.AcceptLinkAsync(cancellationToken);
-        IAmqpReceiver receiver = await request.AcceptReceiverAsync(options, cancellationToken);
-
-        await ReadUntilAsync<AmqpAttachPerformative>(peer, cancellationToken);
-        return receiver;
-    }
-
-    /// <summary>
-    /// The peer attaches a receiving link; the engine accepts it as a sender.
-    /// </summary>
-    private static async Task<IAmqpSender> AttachPeerReceiverAsync(
-        AmqpTestPeer peer,
-        IAmqpSession session,
-        AmqpSenderOptions? options,
-        CancellationToken cancellationToken)
-    {
-        await peer.WriteFrameAsync(0, CreateReceiverAttach(new AmqpTarget { Address = "peer" }), cancellationToken);
-
-        IAmqpLinkRequest request = await session.AcceptLinkAsync(cancellationToken);
-        IAmqpSender sender = await request.AcceptSenderAsync(options, cancellationToken);
-
-        await ReadUntilAsync<AmqpAttachPerformative>(peer, cancellationToken);
-        return sender;
     }
 
     /// <summary>
@@ -721,60 +632,5 @@ public class AmqpTransactionComplianceTests
         // The engine's echo proves the credit arrived.
         await ReadUntilAsync<AmqpFlowPerformative>(peer, cancellationToken);
         return sender;
-    }
-
-    private static async Task WriteFlowAndWaitAsync(AmqpTestPeer peer, AmqpBeginPerformative engineBegin, AmqpFlowPerformative flow, CancellationToken cancellationToken)
-    {
-        flow.Echo = true;
-        await peer.WriteFrameAsync(0, flow, cancellationToken);
-
-        // The engine answers an echo once it applied the flow.
-        await ReadUntilAsync<AmqpFlowPerformative>(peer, cancellationToken);
-    }
-
-    private static async Task<List<AmqpTransferPerformative>> ReadDeliveryAsync(AmqpTestPeer peer, CancellationToken cancellationToken)
-    {
-        List<AmqpTransferPerformative> frames = [];
-
-        while (true)
-        {
-            AmqpTransferPerformative frame = await ReadUntilAsync<AmqpTransferPerformative>(peer, cancellationToken);
-
-            frames.Add(frame);
-
-            if (!frame.More)
-            {
-                return frames;
-            }
-        }
-    }
-
-    private static async Task<AmqpDeliveryState?> WaitForPartialStateAsync(IAmqpReceiver receiver, CancellationToken cancellationToken)
-    {
-        while (receiver.PartialDeliveryState is null)
-        {
-            await Task.Delay(10, cancellationToken);
-        }
-
-        return receiver.PartialDeliveryState;
-    }
-
-    private static async Task<T> ReadUntilAsync<T>(AmqpTestPeer peer, CancellationToken cancellationToken)
-        where T : AmqpPerformative
-    {
-        List<string> skipped = [];
-
-        while (true)
-        {
-            AmqpTestFrame frame = await peer.ReadNonEmptyFrameAsync(cancellationToken);
-
-            if (frame.Performative is T performative)
-            {
-                return performative;
-            }
-
-            frame.Performative.ShouldNotBeOfType<AmqpClosePerformative>($"The engine closed the connection after {string.Join(", ", skipped)}.");
-            skipped.Add(frame.Performative!.PerformativeName);
-        }
     }
 }
