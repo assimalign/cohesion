@@ -1,0 +1,36 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/JsonSchema/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/JsonSchema/Assimalign.Cohesion.JsonSchema/docs/">
+		<File Path="Assimalign.Cohesion.JsonSchema/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.JsonSchema/docs/OVERVIEW.md" />
+		<File Path="Assimalign.Cohesion.JsonSchema/docs/PROVENANCE.md" />
+	</Folder>
+	<Folder Name="/JsonSchema/Assimalign.Cohesion.JsonSchema/samples/Assimalign.Cohesion.JsonSchema.AotSample/">
+		<Project Path="Assimalign.Cohesion.JsonSchema/samples/Assimalign.Cohesion.JsonSchema.AotSample/Assimalign.Cohesion.JsonSchema.AotSample.csproj" />
+	</Folder>
+	<Folder Name="/JsonSchema/Assimalign.Cohesion.JsonSchema/src/">
+		<Project Path="Assimalign.Cohesion.JsonSchema/src/Assimalign.Cohesion.JsonSchema.csproj" />
+	</Folder>
+	<Folder Name="/JsonSchema/Assimalign.Cohesion.JsonSchema/tests/">
+		<Project Path="Assimalign.Cohesion.JsonSchema/tests/Assimalign.Cohesion.JsonSchema.Tests.csproj" />
+	</Folder>
+	<Folder Name="/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/docs/">
+		<File Path="Assimalign.Cohesion.JsonSchema.Generation/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.JsonSchema.Generation/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/src/">
+		<Project Path="Assimalign.Cohesion.JsonSchema.Generation/src/Assimalign.Cohesion.JsonSchema.Generation.csproj" />
+	</Folder>
+	<Folder Name="/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/tests/">
+		<Project Path="Assimalign.Cohesion.JsonSchema.Generation/tests/Assimalign.Cohesion.JsonSchema.Generation.Tests.csproj" />
+	</Folder>
+</Solution>

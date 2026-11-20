@@ -157,6 +157,17 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Proxy/" />
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Proxy/docs/">
+		<File Path="Assimalign.Cohesion.Http.Proxy/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Http.Proxy/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Proxy/src/">
+		<Project Path="Assimalign.Cohesion.Http.Proxy/src/Assimalign.Cohesion.Http.Proxy.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Proxy/tests/">
+		<Project Path="Assimalign.Cohesion.Http.Proxy/tests/Assimalign.Cohesion.Http.Proxy.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.RequestLimits/">
 		<File Path="Assimalign.Cohesion.Http.RequestLimits/README.md" />
 	</Folder>

@@ -55,6 +55,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.HttpsPolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ProblemDetails" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Proxy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Query" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.RateLimiting" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.RequestTimeouts" />
@@ -82,6 +83,9 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forms" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forwarded" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
+        <!-- Public, not private: Web.Proxy's options expose HttpForwarderOptions and
+             HttpTunnelOptions, so applications compile against it. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Proxy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Sessions" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.WebSockets" />

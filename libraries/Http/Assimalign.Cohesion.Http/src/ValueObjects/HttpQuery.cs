@@ -36,6 +36,7 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
     /// <see cref="HttpQueryKey"/> is never empty, and RFC 3986 §3.4 gives the query no syntax that
     /// would require one. The parameter stays in the raw <see cref="Value"/>. Skipping it, rather than
     /// failing, keeps a request any client can send from failing as it is read.
+    /// The collection's <see cref="HttpQueryCollection.Source"/> is this query until the collection changes.
     /// </remarks>
     /// <returns>A parsed <see cref="HttpQueryCollection"/>.</returns>
     public HttpQueryCollection Parse()
@@ -44,6 +45,7 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
 
         if (string.IsNullOrEmpty(Value))
         {
+            collection.SetSource(this);
             return collection;
         }
 
@@ -62,6 +64,7 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
             collection.Add(key, rawValue);
         }
 
+        collection.SetSource(this);
         return collection;
     }
 
@@ -77,8 +80,9 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
     /// A manually added key with zero occurrences is likewise written as one empty occurrence.
     /// </para>
     /// <para>
-    /// The result is the query a redirect carries, not the bytes the request carried: a transport keeps only
-    /// the parsed collection, so the original order and percent-encoding are not available to reproduce.
+    /// The result is the query a redirect carries, not the bytes the request carried: the parsed collection
+    /// does not keep the original order and percent-encoding. While a parsed collection is unchanged, its
+    /// <see cref="IHttpQueryCollection.Source"/> holds the received text.
     /// </para>
     /// </remarks>
     /// <param name="query">The parsed query.</param>

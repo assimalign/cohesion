@@ -79,6 +79,7 @@ jobs:
             'Assimalign.Cohesion.Web.HttpsPolicy',
             'Assimalign.Cohesion.Web.OpenApi',
             'Assimalign.Cohesion.Web.ProblemDetails',
+            'Assimalign.Cohesion.Web.Proxy',
             'Assimalign.Cohesion.Web.Query',
             'Assimalign.Cohesion.Web.RateLimiting',
             'Assimalign.Cohesion.Web.RequestTimeouts',

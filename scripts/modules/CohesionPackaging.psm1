@@ -140,6 +140,7 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Http/Assimalign.Cohesion.Http.Connections'
     'libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect'
     'libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade'
+    'libraries/Http/Assimalign.Cohesion.Http.Proxy'
     'libraries/Http/Assimalign.Cohesion.Http.RequestLimits'
     'libraries/Http/Assimalign.Cohesion.Http.Cookies'
     'libraries/Http/Assimalign.Cohesion.Http.Antiforgery'
@@ -159,6 +160,10 @@ $script:CohesionReleaseLibrary = @(
     'libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token'
     'libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken'
     'libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml'
+
+    # libraries/JsonSchema
+    'libraries/JsonSchema/Assimalign.Cohesion.JsonSchema'
+    'libraries/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation'
 
     # libraries/Logging
     'libraries/Logging/Assimalign.Cohesion.Logging'
@@ -337,6 +342,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.HttpsPolicy'
     'resources/Web/Assimalign.Cohesion.Web.OpenApi'
     'resources/Web/Assimalign.Cohesion.Web.ProblemDetails'
+    'resources/Web/Assimalign.Cohesion.Web.Proxy'
     'resources/Web/Assimalign.Cohesion.Web.Query'
     'resources/Web/Assimalign.Cohesion.Web.RateLimiting'
     'resources/Web/Assimalign.Cohesion.Web.RequestTimeouts'
