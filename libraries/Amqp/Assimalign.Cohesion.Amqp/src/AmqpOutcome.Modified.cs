@@ -9,6 +9,12 @@ namespace Assimalign.Cohesion.Amqp;
 public sealed class AmqpModified : AmqpOutcome
 {
     /// <summary>
+    /// Gets the outcome's symbolic descriptor, <c>amqp:modified:list</c>, the name a source lists in
+    /// <see cref="AmqpSource.Outcomes"/> to say a receiver may choose it.
+    /// </summary>
+    public static AmqpSymbol Descriptor { get; } = new("amqp:modified:list");
+
+    /// <summary>
     /// Initializes a new modified outcome.
     /// </summary>
     /// <param name="deliveryFailed">Whether the source counts the attempt as a failed delivery, incrementing the message's delivery count.</param>

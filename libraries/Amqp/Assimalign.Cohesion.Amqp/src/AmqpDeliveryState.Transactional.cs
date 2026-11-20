@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Amqp;
 /// <summary>
 /// Represents the <c>transactional-state</c> delivery state: the delivery's transfer or outcome is part of
 /// a transaction, and takes effect only when the transaction is discharged successfully (AMQP 1.0 Part 4,
-/// section 4.5.5).
+/// section 4.5.6).
 /// </summary>
 /// <remarks>
 /// A sender puts work under a transaction by sending the delivery with this state

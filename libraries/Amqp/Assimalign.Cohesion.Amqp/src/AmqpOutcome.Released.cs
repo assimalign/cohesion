@@ -7,6 +7,12 @@ namespace Assimalign.Cohesion.Amqp;
 public sealed class AmqpReleased : AmqpOutcome
 {
     /// <summary>
+    /// Gets the outcome's symbolic descriptor, <c>amqp:released:list</c>, the name a source lists in
+    /// <see cref="AmqpSource.Outcomes"/> to say a receiver may choose it.
+    /// </summary>
+    public static AmqpSymbol Descriptor { get; } = new("amqp:released:list");
+
+    /// <summary>
     /// Initializes a new released outcome. <see cref="Instance"/> avoids the allocation.
     /// </summary>
     public AmqpReleased()

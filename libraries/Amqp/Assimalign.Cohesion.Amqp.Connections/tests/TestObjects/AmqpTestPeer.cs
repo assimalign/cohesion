@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipelines;
@@ -133,6 +134,21 @@ internal sealed class AmqpTestPeer : IAsyncDisposable
 
         AmqpFrame.Write(buffer, type, channel, performative, payload.Span);
         await WriteAsync(buffer.ToArray(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes an AMQP frame around a body encoded by hand, such as a performative the encoder would refuse.
+    /// </summary>
+    public async Task WriteFrameBodyAsync(ushort channel, ReadOnlyMemory<byte> body, CancellationToken cancellationToken)
+    {
+        byte[] frame = new byte[8 + body.Length];
+
+        BinaryPrimitives.WriteUInt32BigEndian(frame, (uint)frame.Length);
+        frame[4] = 2;
+        frame[5] = AmqpFrame.AmqpType;
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(6), channel);
+        body.CopyTo(frame.AsMemory(8));
+        await WriteAsync(frame, cancellationToken);
     }
 
     public async Task<byte[]> ReadProtocolHeaderAsync(CancellationToken cancellationToken)

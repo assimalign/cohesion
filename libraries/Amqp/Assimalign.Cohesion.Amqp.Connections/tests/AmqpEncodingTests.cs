@@ -804,6 +804,47 @@ public class AmqpEncodingTests
         address.ShouldBe("q1");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should write each lifetime policy as its numeric descriptor over an empty list and read it back as its instance")]
+    [InlineData("delete-on-close", "00532b45")]
+    [InlineData("delete-on-no-links", "00532c45")]
+    [InlineData("delete-on-no-messages", "00532d45")]
+    [InlineData("delete-on-no-links-or-messages", "00532e45")]
+    public void WriteValue_WithLifetimePolicy_ShouldRoundTrip(string name, string hex)
+    {
+        // Arrange
+        AmqpLifetimePolicy policy = name switch
+        {
+            "delete-on-close" => AmqpLifetimePolicy.DeleteOnClose,
+            "delete-on-no-links" => AmqpLifetimePolicy.DeleteOnNoLinks,
+            "delete-on-no-messages" => AmqpLifetimePolicy.DeleteOnNoMessages,
+            _ => AmqpLifetimePolicy.DeleteOnNoLinksOrMessages
+        };
+
+        // Act
+        byte[] encoded = Encode(policy);
+        object? decoded = Decode(encoded);
+
+        // Assert
+        Convert.ToHexStringLower(encoded).ShouldBe(hex);
+        decoded.ShouldBeSameAs(policy);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - ReadValue: Should refuse a lifetime policy whose body is not a list")]
+    [InlineData("00532ba10178")]
+    [InlineData("00a319616d71703a64656c6574652d6f6e2d636c6f73653a6c69737440")]
+    public void ReadValue_WithLifetimePolicyNotList_ShouldThrowDecodeError(string hex)
+    {
+        // Arrange: delete-on-close over a string, and under its symbolic descriptor over null.
+        byte[] encoded = Convert.FromHexString(hex);
+
+        // Act
+        AmqpException exception = Should.Throw<AmqpException>(() => Decode(encoded));
+
+        // Assert
+        exception.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.DecodeError);
+        exception.Message.ShouldBe(ErrorMessages.ValueNotList);
+    }
+
     private static byte[] Encode(object? value)
     {
         using AmqpBufferWriter writer = new();

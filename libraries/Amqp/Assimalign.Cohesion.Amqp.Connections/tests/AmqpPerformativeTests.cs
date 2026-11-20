@@ -302,18 +302,19 @@ public class AmqpPerformativeTests
         exception.Message.ShouldBe(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TerminusExpiryPolicyInvalid, "later"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should refuse a filter whose value is neither described nor null")]
-    public void Decode_WithFilterNotDescribed_ShouldThrowInvalidField()
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should keep a filter whose value is neither described nor null, for the attach rules to refuse with its link")]
+    public void Decode_WithFilterNotDescribed_ShouldKeepTheValue()
     {
         // Arrange: a source whose filter set maps the symbol "f" to the string "x".
         byte[] encoded = Convert.FromHexString("005312c01e06a1016143414040005328c0110840404040404040c10702a30166a10178");
 
         // Act
-        AmqpException exception = Should.Throw<AmqpException>(() => Decode<AmqpAttachPerformative>(encoded));
+        AmqpAttachPerformative attach = Decode<AmqpAttachPerformative>(encoded);
 
         // Assert
-        exception.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.InvalidField);
-        exception.Message.ShouldBe(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FilterNotDescribed, "f"));
+        attach.Source.ShouldBeOfType<AmqpSource>().Filter.ShouldNotBeNull()[new AmqpSymbol("f")].ShouldBe("x");
+        AmqpAttachRules.FindViolation(attach, opening: true)
+            .ShouldBe(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FilterNotDescribed, "f"));
     }
 
     [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should refuse a filter set keyed by anything but distinct symbols")]
@@ -368,7 +369,8 @@ public class AmqpPerformativeTests
         ArgumentException exception = Should.Throw<ArgumentException>(() => attach.Encode(writer));
 
         // Assert
-        exception.Message.ShouldStartWith(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FilterValueInvalid, "f"));
+        exception.ParamName.ShouldBe("value");
+        exception.Message.ShouldStartWith(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FilterNotDescribed, "f"));
     }
 
     [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should refuse a SASL outcome code the specification does not define")]

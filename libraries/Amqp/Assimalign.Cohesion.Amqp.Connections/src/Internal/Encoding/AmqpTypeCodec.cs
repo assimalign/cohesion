@@ -267,9 +267,18 @@ internal static class AmqpTypeCodec
         WriteSource(writer, source, 1);
     }
 
+    /// <summary>
+    /// Writes a source.
+    /// </summary>
+    /// <exception cref="ArgumentException">Thrown when a filter is not described, or a standard node property has the wrong type.</exception>
     internal static void WriteSource(AmqpBufferWriter writer, AmqpSource source, int depth)
     {
         AmqpEncoder.ThrowIfTooDeep(depth);
+
+        if (AmqpTerminusRules.FindViolation("source", source.DynamicNodeProperties, source.Filter) is string violation)
+        {
+            throw new ArgumentException(violation, "value");
+        }
 
         AmqpListWriter list = new(writer, AmqpDescriptor.Source);
 
@@ -281,7 +290,7 @@ internal static class AmqpTypeCodec
         AmqpEncoder.WriteSymbolMap(writer, source.DynamicNodeProperties, depth + 2);
         list.Field(source.DynamicNodeProperties is null);
         list.WriteSymbol(source.DistributionMode);
-        WriteFilterSet(writer, source.Filter, depth + 2);
+        AmqpEncoder.WriteSymbolMap(writer, source.Filter, depth + 2);
         list.Field(source.Filter is null);
 
         if (source.DefaultOutcome is null)
@@ -322,7 +331,10 @@ internal static class AmqpTypeCodec
         source.Dynamic = count > 4 && fields.ReadBoolean(false);
         source.DynamicNodeProperties = count > 5 ? fields.ReadFields() : null;
         source.DistributionMode = count > 6 ? fields.ReadSymbol() : null;
-        source.Filter = count > 7 ? fields.ReadFilterSet() : null;
+        // A filter set is keyed by symbols like fields (section 3.5.8): a filter dropped on the way in would
+        // admit the messages it filters out, so any other key fails decoding. A value that is not a filter is
+        // kept, and refused with the link that carries it (AmqpAttachRules).
+        source.Filter = count > 7 ? fields.ReadFields() : null;
         source.DefaultOutcome = count > 8 ? ReadOutcome(ref fields) : null;
         source.Outcomes = count > 9 ? fields.ReadSymbolMultiple() : null;
         source.Capabilities = count > 10 ? fields.ReadSymbolMultiple() : null;
@@ -354,9 +366,18 @@ internal static class AmqpTypeCodec
         }
     }
 
+    /// <summary>
+    /// Writes a messaging-node target.
+    /// </summary>
+    /// <exception cref="ArgumentException">Thrown when a standard node property has the wrong type.</exception>
     internal static void WriteTarget(AmqpBufferWriter writer, AmqpTarget target, int depth)
     {
         AmqpEncoder.ThrowIfTooDeep(depth);
+
+        if (AmqpTerminusRules.FindViolation("target", target.DynamicNodeProperties, null) is string violation)
+        {
+            throw new ArgumentException(violation, "value");
+        }
 
         AmqpListWriter list = new(writer, AmqpDescriptor.Target);
 
@@ -561,33 +582,37 @@ internal static class AmqpTypeCodec
         return transactionId.ToArray();
     }
 
+    /// <summary>
+    /// Writes a lifetime policy: a described empty list under the policy's numeric descriptor (AMQP 1.0
+    /// Part 3, sections 3.5.10 to 3.5.13).
+    /// </summary>
+    internal static void WriteLifetimePolicy(AmqpBufferWriter writer, AmqpLifetimePolicy policy)
+    {
+        // The four instances are the only ones, and each names a descriptor AMQP 1.0 defines.
+        AmqpDescriptor.TryGetCode(policy.Descriptor.Value!, out ulong code);
+        WriteEmpty(writer, code);
+    }
+
+    /// <summary>
+    /// Reads the body of a lifetime policy, a list whose fields, of which AMQP 1.0 defines none, are ignored.
+    /// </summary>
+    internal static AmqpLifetimePolicy ReadLifetimePolicyBody(ref AmqpReader reader, ulong code)
+    {
+        reader.ReadList(out _);
+
+        return code switch
+        {
+            AmqpDescriptor.DeleteOnClose => AmqpLifetimePolicy.DeleteOnClose,
+            AmqpDescriptor.DeleteOnNoLinks => AmqpLifetimePolicy.DeleteOnNoLinks,
+            AmqpDescriptor.DeleteOnNoMessages => AmqpLifetimePolicy.DeleteOnNoMessages,
+            _ => AmqpLifetimePolicy.DeleteOnNoLinksOrMessages
+        };
+    }
+
     private static void WriteEmpty(AmqpBufferWriter writer, ulong descriptor)
     {
         AmqpEncoder.WriteDescriptor(writer, descriptor);
         writer.WriteByte(AmqpFormatCode.List0);
-    }
-
-    /// <summary>
-    /// Writes a source's filter set, whose values must be described filters or <c>null</c> (AMQP 1.0 Part 3,
-    /// section 3.5.8).
-    /// </summary>
-    /// <exception cref="ArgumentException">Thrown when a filter's value is not an <see cref="AmqpDescribedValue"/> or <see langword="null"/>.</exception>
-    private static void WriteFilterSet(AmqpBufferWriter writer, IReadOnlyDictionary<AmqpSymbol, object?>? filters, int depth)
-    {
-        if (filters is not null)
-        {
-            foreach (KeyValuePair<AmqpSymbol, object?> filter in filters)
-            {
-                if (filter.Value is not (null or AmqpDescribedValue))
-                {
-                    throw new ArgumentException(
-                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.FilterValueInvalid, filter.Key),
-                        nameof(filters));
-                }
-            }
-        }
-
-        AmqpEncoder.WriteSymbolMap(writer, filters, depth);
     }
 
     /// <summary>

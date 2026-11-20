@@ -5,14 +5,23 @@ using Assimalign.Cohesion.Amqp;
 namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 
 /// <summary>
-/// Checks the rules on an <c>attach</c> that span more than one of its fields, which decoding a single
-/// field cannot see (AMQP 1.0 Part 2, section 2.7.3; Part 3, sections 3.5.3 and 3.5.4).
+/// Checks the rules on an <c>attach</c> that decoding a single field cannot see: those that span more than
+/// one of its fields, and the values inside its termini that AMQP 1.0 does not allow (Part 2, section 2.7.3;
+/// Part 3, sections 3.5.3, 3.5.4, 3.5.8 and 3.5.9).
 /// </summary>
 /// <remarks>
+/// <para>
 /// A peer's attach that opens a link and breaks one is refused with <c>amqp:invalid-field</c>, which ends
 /// only that link; a local one is refused before it is sent, as the application's mistake. A peer's attach
 /// that answers a link this endpoint opened is not checked: a refusal's reason travels in the
 /// <c>detach</c> that follows it, and failing the link on the attach would hide that reason.
+/// </para>
+/// <para>
+/// A dynamic terminus follows the role of the endpoint that sends it. The endpoint that owns the terminus
+/// (the sender for a source, the receiver for a target) creates the node and names its address. The other
+/// endpoint's attach that opens the link asks for the node and names no address; in an answer it echoes the
+/// owner's terminus, so the request rule does not apply there.
+/// </para>
 /// </remarks>
 internal static class AmqpAttachRules
 {
@@ -33,16 +42,16 @@ internal static class AmqpAttachRules
             return ErrorMessages.InitialDeliveryCountMissing;
         }
 
-        // In an attach that opens a link, the terminus the other end owns is a request: a receiver's source
-        // and a sender's target name the node they want, or ask for a dynamic one.
         if (attach.Source is AmqpSource source)
         {
-            string? violation = FindViolation(
+            string? violation = FindDynamicViolation(
                 "source",
                 source.Dynamic,
                 source.Address,
                 source.DynamicNodeProperties is not null,
-                opening && attach.Role == AmqpRole.Receiver);
+                owner: attach.Role == AmqpRole.Sender,
+                opening)
+                ?? AmqpTerminusRules.FindViolation("source", source.DynamicNodeProperties, source.Filter);
 
             if (violation is not null)
             {
@@ -52,18 +61,20 @@ internal static class AmqpAttachRules
 
         if (attach.Target is AmqpTarget target)
         {
-            return FindViolation(
+            return FindDynamicViolation(
                 "target",
                 target.Dynamic,
                 target.Address,
                 target.DynamicNodeProperties is not null,
-                opening && attach.Role == AmqpRole.Sender);
+                owner: attach.Role == AmqpRole.Receiver,
+                opening)
+                ?? AmqpTerminusRules.FindViolation("target", target.DynamicNodeProperties, null);
         }
 
         return null;
     }
 
-    private static string? FindViolation(string terminus, bool dynamic, string? address, bool hasDynamicNodeProperties, bool request)
+    private static string? FindDynamicViolation(string terminus, bool dynamic, string? address, bool hasDynamicNodeProperties, bool owner, bool opening)
     {
         // Only a dynamic node is created with properties (Part 3, sections 3.5.3 and 3.5.4).
         if (hasDynamicNodeProperties && !dynamic)
@@ -71,8 +82,19 @@ internal static class AmqpAttachRules
             return string.Format(CultureInfo.CurrentCulture, ErrorMessages.DynamicNodePropertiesUnexpected, terminus);
         }
 
+        if (!dynamic)
+        {
+            return null;
+        }
+
+        // The endpoint that owns the terminus created the node, so it names the address it assigned.
+        if (owner && address is null)
+        {
+            return string.Format(CultureInfo.CurrentCulture, ErrorMessages.DynamicAddressMissing, terminus);
+        }
+
         // A request for a dynamic node leaves the address to the endpoint that creates the node.
-        if (request && dynamic && address is not null)
+        if (!owner && opening && address is not null)
         {
             return string.Format(CultureInfo.CurrentCulture, ErrorMessages.DynamicAddressUnexpected, terminus);
         }

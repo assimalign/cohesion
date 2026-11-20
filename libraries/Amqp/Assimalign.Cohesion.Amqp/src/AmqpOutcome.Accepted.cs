@@ -7,6 +7,12 @@ namespace Assimalign.Cohesion.Amqp;
 public sealed class AmqpAccepted : AmqpOutcome
 {
     /// <summary>
+    /// Gets the outcome's symbolic descriptor, <c>amqp:accepted:list</c>, the name a source lists in
+    /// <see cref="AmqpSource.Outcomes"/> to say a receiver may choose it.
+    /// </summary>
+    public static AmqpSymbol Descriptor { get; } = new("amqp:accepted:list");
+
+    /// <summary>
     /// Initializes a new accepted outcome. <see cref="Instance"/> avoids the allocation.
     /// </summary>
     public AmqpAccepted()

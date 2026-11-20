@@ -7,6 +7,12 @@ namespace Assimalign.Cohesion.Amqp;
 public sealed class AmqpRejected : AmqpOutcome
 {
     /// <summary>
+    /// Gets the outcome's symbolic descriptor, <c>amqp:rejected:list</c>, the name a source lists in
+    /// <see cref="AmqpSource.Outcomes"/> to say a receiver may choose it.
+    /// </summary>
+    public static AmqpSymbol Descriptor { get; } = new("amqp:rejected:list");
+
+    /// <summary>
     /// Initializes a new rejected outcome.
     /// </summary>
     /// <param name="error">The reason the message was rejected, or <see langword="null"/>.</param>

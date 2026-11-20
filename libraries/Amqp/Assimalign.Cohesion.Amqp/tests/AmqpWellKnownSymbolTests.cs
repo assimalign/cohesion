@@ -64,7 +64,24 @@ public class AmqpWellKnownSymbolTests
 
         // Part 3, section 3.5.7 (std-dist-mode).
         { AmqpDistributionMode.Move, "move" },
-        { AmqpDistributionMode.Copy, "copy" }
+        { AmqpDistributionMode.Copy, "copy" },
+
+        // Part 3, section 3.5.9 (node-properties).
+        { AmqpNodeProperties.LifetimePolicy, "lifetime-policy" },
+        { AmqpNodeProperties.SupportedDistributionModes, "supported-dist-modes" },
+
+        // Part 3, sections 3.5.10 to 3.5.13 (lifetime policies).
+        { AmqpLifetimePolicy.DeleteOnClose.Descriptor, "amqp:delete-on-close:list" },
+        { AmqpLifetimePolicy.DeleteOnNoLinks.Descriptor, "amqp:delete-on-no-links:list" },
+        { AmqpLifetimePolicy.DeleteOnNoMessages.Descriptor, "amqp:delete-on-no-messages:list" },
+        { AmqpLifetimePolicy.DeleteOnNoLinksOrMessages.Descriptor, "amqp:delete-on-no-links-or-messages:list" },
+
+        // Part 3, sections 3.4.2 to 3.4.5 (outcomes), and Part 4, section 4.5.5 (declared).
+        { AmqpAccepted.Descriptor, "amqp:accepted:list" },
+        { AmqpRejected.Descriptor, "amqp:rejected:list" },
+        { AmqpReleased.Descriptor, "amqp:released:list" },
+        { AmqpModified.Descriptor, "amqp:modified:list" },
+        { AmqpDeclared.Descriptor, "amqp:declared:list" }
     };
 
     [Theory(DisplayName = "Cohesion Test [Amqp] - Value: Should spell each well-known symbol as the specification does")]

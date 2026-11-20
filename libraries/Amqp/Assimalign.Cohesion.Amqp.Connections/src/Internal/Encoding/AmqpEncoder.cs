@@ -472,6 +472,9 @@ internal static class AmqpEncoder
             case AmqpDischarge discharge:
                 AmqpTypeCodec.WriteDischarge(writer, discharge);
                 return;
+            case AmqpLifetimePolicy policy:
+                AmqpTypeCodec.WriteLifetimePolicy(writer, policy);
+                return;
             case IReadOnlyDictionary<AmqpSymbol, object?> symbolMap:
                 WriteSymbolMap(writer, symbolMap, depth);
                 return;

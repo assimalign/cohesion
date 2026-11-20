@@ -174,7 +174,8 @@ public class AmqpAttachRulesTests
         AmqpDeliveryState? outcome = await send;
 
         // Assert
-        exception.Message.ShouldStartWith(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FilterValueInvalid, "selector"));
+        exception.ParamName.ShouldBe("options");
+        exception.Message.ShouldStartWith(string.Format(CultureInfo.CurrentCulture, ErrorMessages.FilterNotDescribed, "selector"));
         outcome.ShouldBeOfType<AmqpAccepted>();
         host.Client.State.ShouldBe(ConnectionState.Open);
         host.Server.State.ShouldBe(ConnectionState.Open);
