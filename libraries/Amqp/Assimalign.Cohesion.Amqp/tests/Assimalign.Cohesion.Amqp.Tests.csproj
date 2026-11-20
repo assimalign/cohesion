@@ -7,6 +7,7 @@
 
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Amqp" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
     </ItemGroup>
     <ItemGroup>
         <CohesionPackageReference Include="coverlet.collector" />
