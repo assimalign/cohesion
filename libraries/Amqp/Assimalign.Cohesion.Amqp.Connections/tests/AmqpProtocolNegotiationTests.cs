@@ -91,6 +91,36 @@ public class AmqpProtocolNegotiationTests
         sentToPeer.ShouldBe(AmqpTestWire.Combine(AmqpTestWire.Sasl10Header, AmqpTestWire.Amqp10Header));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - SwitchProtocolAsync: Should read a peer header pipelined after the SASL frame the connection received")]
+    public async Task SwitchProtocolAsync_OnPeerHeaderPipelinedAfterSaslFrame_ShouldReadBufferedHeader()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        TestConnection carrier = new();
+        await carrier.WritePeerAsync(
+            AmqpTestWire.Combine(
+                AmqpTestWire.Sasl10Header,
+                AmqpFrameCodec.Encode(new AmqpFrame(0, new AmqpSaslInitPerformative { Mechanism = "ANONYMOUS" }), AmqpFrameType.Sasl),
+                AmqpTestWire.Amqp10Header),
+            timeout.Token);
+        TestConnectionListener listener = new();
+        listener.Enqueue(carrier);
+        await using AmqpConnectionListener amqp = AmqpConnectionListener.Create(listener, new AmqpConnectionListenerOptions
+        {
+            InitialProtocolHeader = AmqpProtocolHeader.Sasl10
+        });
+        await using IAmqpConnection connection = await amqp.AcceptAsync(timeout.Token);
+        AmqpFrame saslInit = await AmqpTestWire.ReceiveFrameAsync(connection, timeout.Token);
+
+        // Act
+        AmqpProtocolHeader amqpHeader = await connection.SwitchProtocolAsync(AmqpProtocolHeader.Amqp10, timeout.Token);
+
+        // Assert
+        saslInit.Performative.ShouldBeOfType<AmqpSaslInitPerformative>().Mechanism.ShouldBe((AmqpSymbol)"ANONYMOUS");
+        amqpHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
+        connection.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - SendAsync: Should encode SASL frames while the connection is in the SASL phase")]
     public async Task SendAsync_InSaslPhase_ShouldWriteSaslFrame()
     {

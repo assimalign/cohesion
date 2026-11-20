@@ -141,6 +141,7 @@ internal sealed class AmqpCarrierConnection : AmqpConnection
         {
             ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
             ReadOnlySequence<byte> buffer = result.Buffer;
+            bool needsMoreBytes = false;
 
             try
             {
@@ -148,6 +149,9 @@ internal sealed class AmqpCarrierConnection : AmqpConnection
                 {
                     yield return frame;
                 }
+
+                // What is left is at most part of a frame, so the next read must wait for more bytes.
+                needsMoreBytes = true;
 
                 if (result.IsCompleted)
                 {
@@ -161,7 +165,17 @@ internal sealed class AmqpCarrierConnection : AmqpConnection
             }
             finally
             {
-                reader.AdvanceTo(buffer.Start, buffer.End);
+                if (needsMoreBytes)
+                {
+                    reader.AdvanceTo(buffer.Start, buffer.End);
+                }
+                else
+                {
+                    // The consumer stopped after a frame, or a frame was malformed. Marking the rest examined
+                    // would make the next read wait for new bytes while complete frames, or the peer's next
+                    // protocol header, are already buffered.
+                    reader.AdvanceTo(buffer.Start);
+                }
             }
         }
     }

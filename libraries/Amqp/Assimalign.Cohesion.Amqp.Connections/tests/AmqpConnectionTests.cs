@@ -84,6 +84,31 @@ public class AmqpConnectionTests
         frame.Performative.ShouldBeOfType<AmqpOpenPerformative>().ContainerId.ShouldBe("remote-container");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReceiveAsync: Should return an already buffered frame after the previous receive stopped early")]
+    public async Task ReceiveAsync_AfterEarlierReceiveStoppedWithFramesBuffered_ShouldReturnNextBufferedFrame()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        TestConnection carrier = new();
+        await carrier.WritePeerAsync(
+            AmqpTestWire.Combine(
+                AmqpTestWire.Amqp10Header,
+                AmqpFrameCodec.Encode(new AmqpFrame(0, new AmqpOpenPerformative { ContainerId = "first" })),
+                AmqpFrameCodec.Encode(new AmqpFrame(0, new AmqpBeginPerformative { NextOutgoingId = 7 }))),
+            timeout.Token);
+        await using IAmqpConnection connection = await ConnectAsync(carrier, options: null, timeout.Token);
+
+        // Both frames arrived in one write; this receive stops after the first.
+        AmqpFrame first = await AmqpTestWire.ReceiveFrameAsync(connection, timeout.Token);
+
+        // Act
+        AmqpFrame second = await AmqpTestWire.ReceiveFrameAsync(connection, timeout.Token);
+
+        // Assert
+        first.Performative.ShouldBeOfType<AmqpOpenPerformative>().ContainerId.ShouldBe("first");
+        second.Performative.ShouldBeOfType<AmqpBeginPerformative>().NextOutgoingId.ShouldBe((uint)7);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReceiveAsync: Should complete without frames when the peer ends the stream between frames")]
     public async Task ReceiveAsync_OnPeerEndingBetweenFrames_ShouldCompleteWithoutFrames()
     {
