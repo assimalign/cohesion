@@ -72,7 +72,8 @@ internal static class AmqpHeaderPhaseCorpus
         new("H16", "The open declares the idle timeout its sender requires, half its own threshold; a peer keeps its partner's with empty frames on channel 0 when it has nothing else to send, none when its partner declares none, and none after its close.", "Part 2, sections 2.4.5 and 2.7.1", false),
         new("H17", "A peer that cannot keep the idle timeout its partner declares closes the connection with the reason; this engine keeps 100 ms and up.", "Part 2, sections 2.4.5 and 2.7.1", true),
         new("H18", "Empty frames are taken on any channel the receiver accepts; a channel above its channel-max, a close's included, is a framing error, and only AMQP frames, empty or not, travel once the connection is open. A close that answers the receiver's own ends the connection whatever its channel, since refusing it would only hold the socket.", "Part 2, sections 2.3.1, 2.4.3, 2.4.5 and 2.7.1", true),
-        new("H19", "A frame is at least 8 bytes with a data offset of at least 2, and an AMQP frame's extended header is ignored.", "Part 2, sections 2.3.1 and 2.3.2", true)
+        new("H19", "A frame is at least 8 bytes with a data offset of at least 2, and an AMQP frame's extended header is ignored.", "Part 2, sections 2.3.1 and 2.3.2", true),
+        new("H20", "A max-frame-size under 512 bytes, the lower bound of the agreed maximum, is taken as 512: both peers must accept frames that large, so the meaning is clear.", "Part 2, sections 2.7.1 and 2.8.19", false, Leniency: true)
     ];
 
     /// <summary>
@@ -160,6 +161,14 @@ internal static class AmqpHeaderPhaseCorpus
         return open;
     }
 
+    private static AmqpOpenPerformative OpenWithMaxFrameSize(uint maxFrameSize)
+    {
+        AmqpOpenPerformative open = AmqpTestPeer.CreateOpen();
+
+        open.MaxFrameSize = maxFrameSize;
+        return open;
+    }
+
     private static AmqpSaslMechanismsPerformative Mechanisms(string mechanism)
     {
         return new AmqpSaslMechanismsPerformative { Mechanisms = [mechanism] };
@@ -208,6 +217,11 @@ internal static class AmqpHeaderPhaseCorpus
     private static Action<IAmqpConnection> AuthenticatedWith(string mechanism)
     {
         return connection => connection.Features.Get<IAmqpSaslConnectionInfo>().ShouldNotBeNull().Mechanism.ShouldBe((AmqpSymbol)mechanism);
+    }
+
+    private static Action<IAmqpConnection> SendsFramesUpTo(uint maxFrameSize)
+    {
+        return connection => connection.MaxFrameSize.ShouldBe(maxFrameSize);
     }
 
     private static Action<IAmqpConnection> KeepsIdleTimeout(int milliseconds)
@@ -709,7 +723,15 @@ internal static class AmqpHeaderPhaseCorpus
                 opened),
             Factory("a server's frame that declares 7 bytes after open is closed with a framing error", "H19", none,
                 [.. ServerOpens(), Write(FrameHeader(7, 2)), ExpectClose(AmqpErrorCondition.FramingError, ErrorMessages.FrameSizeInvalid)],
-                opened)
+                opened),
+
+            // H20: a declared maximum under the lower bound is taken as the bound.
+            Listener("a client that declares a max-frame-size of 256 opens with a limit of 512", "H20", none,
+                [.. ClientOpens(OpenWithMaxFrameSize(256)), ExpectAlive()],
+                AmqpHeaderPhaseOutcome.Open(SendsFramesUpTo(512))),
+            Factory("a server that declares a max-frame-size of 0 opens with a limit of 512", "H20", none,
+                [.. ServerOpens(OpenWithMaxFrameSize(0)), ExpectAlive()],
+                AmqpHeaderPhaseOutcome.Open(SendsFramesUpTo(512)))
         ];
     }
 }
