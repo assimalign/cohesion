@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.JsonSchema.AotSample</RootNamespace>
+		<!--
+		    The NativeAOT guard for the JsonSchema family. It loads schemas in every dialect, follows
+		    $ref, $dynamicRef and remote references, asserts formats (idn-hostname's IDNA tables
+		    included), registers a custom format and keyword, validates a schema against its
+		    meta-schema, writes each output format, and generates documents from a source-generated
+		    contract in draft-07, 2019-09 and 2020-12 that accept what the contract serializes. It
+		    prints one line per check and exits 1 when any fails, so a trimmed or AOT-compiled build
+		    that loses a code path fails the run, not only the build. Two layers, as the IdentityModel
+		    AotSample has them: the trim and AOT analyzer diagnostics are errors in this project's own
+		    compilation, and the published binary is run:
+
+		        dotnet publish libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/samples/Assimalign.Cohesion.JsonSchema.AotSample/Assimalign.Cohesion.JsonSchema.AotSample.csproj -c Release -r linux-x64
+
+		    Use the publishing host's RID. CI publishes and runs it for linux-x64
+		    (.github/workflows/library-json-schema.yml). PublishAot is set here, not on the command
+		    line, because a global -p:PublishAot=true reaches the netstandard2.0 analyzers in the
+		    reference graph and fails them with NETSDK1207. A harness, not a library: never packed.
+
+		    The gate is no IL2xxx or IL3xxx warning at all: ILC treats every warning of its
+		    whole-program analysis as an error and reports each one at its source.
+		-->
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+		<PublishAot>true</PublishAot>
+		<WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051</WarningsAsErrors>
+		<IlcTreatWarningsAsErrors>true</IlcTreatWarningsAsErrors>
+		<TrimmerSingleWarn>false</TrimmerSingleWarn>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.JsonSchema" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.JsonSchema.Generation" />
+	</ItemGroup>
+</Project>
