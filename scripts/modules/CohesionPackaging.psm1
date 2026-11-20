@@ -60,6 +60,7 @@ Set-StrictMode -Version 3.0
 # shipped so customer test projects can invoke their own resource Program under an ambient scope.
 $script:CohesionReleaseLibrary = @(
     # libraries/Amqp
+    'libraries/Amqp/Assimalign.Cohesion.Amqp'
     'libraries/Amqp/Assimalign.Cohesion.Amqp.Connections'
 
     # libraries/ApplicationModel
@@ -424,9 +425,9 @@ $script:CohesionReleaseRuntimeIdentifier = @(
 # Source-less projects to ship ANYWAY, to reserve the package id on nuget.org before the
 # implementation lands. Empty by default, and the default is the safe one.
 #
-# Four projects under libraries/ and resources/ currently compile to an empty assembly - Amqp and
-# the three Dns.Client transports. They are real CI citizens, but a STANDALONE
-# `Assimalign.Cohesion.Amqp` package on nuget.org is a different artifact: a permanent,
+# Three projects under libraries/ and resources/ currently compile to an empty assembly - the
+# three Dns.Client transports. They are real CI citizens, but a STANDALONE
+# `Assimalign.Cohesion.Dns.Client.Doh` package on nuget.org is a different artifact: a permanent,
 # unlistable-only promise of functionality the download does not contain.
 #
 # So the release omits them, and the omission is reversible; publishing is not. Adding a name here

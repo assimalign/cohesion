@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 224 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 551 |
+| Declared project references | 554 |
 | Declared shared-source links | 77 |
 
 ## Ambiguous project names
@@ -187,10 +187,19 @@ every shipped `resources/**` project off the `ApplicationModel.Gateway*` assembl
 
 2 shipped projects.
 
+Intra-area references:
+
+```mermaid
+flowchart LR
+    N0["Amqp"]
+    N1["Amqp.Connections"]
+    N1 --> N0
+```
+
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
-| `Assimalign.Cohesion.Amqp` | — | — | — | — |
-| `Assimalign.Cohesion.Amqp.Connections` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Core` | — | — | — |
+| `Assimalign.Cohesion.Amqp` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Core` | — | — | — |
+| `Assimalign.Cohesion.Amqp.Connections` | `Assimalign.Cohesion.Amqp`<br>`Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Core` | — | — | — |
 
 ### `libraries/ApplicationModel`
 
@@ -1045,12 +1054,12 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | Assembly | Referenced by | Top referrers |
 | --- | --- | --- |
 | `Assimalign.Cohesion.Http` | 88 | Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Connections.NamedPipes.Tests, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database.Hosting.Tests, … |
-| `Assimalign.Cohesion.Core` | 83 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Definition, … |
+| `Assimalign.Cohesion.Core` | 84 | Assimalign.Cohesion.Amqp, Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, … |
 | `Assimalign.Cohesion.Web` | 62 | Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Hosting.Tests, Assimalign.Cohesion.IdentityHub.Hosting, … |
-| `Assimalign.Cohesion.Connections` | 44 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory, Assimalign.Cohesion.Connections.NamedPipes, … |
+| `Assimalign.Cohesion.Connections` | 45 | Assimalign.Cohesion.Amqp, Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory, … |
 | `Assimalign.Cohesion.Web.Routing` | 37 | Assimalign.Cohesion.IntegrationCheck, Assimalign.Cohesion.SourceGeneration.Web.Tests, Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Antiforgery.Tests, … |
+| `Assimalign.Cohesion.Connections.InMemory` | 31 | Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Amqp.Tests, Assimalign.Cohesion.Connections.InMemory.Tests, Assimalign.Cohesion.Connections.Security.Tests, … |
 | `Assimalign.Cohesion.Connections.Tcp` | 31 | Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob.Client.Tests, Assimalign.Cohesion.Database.Blob.Tests, … |
-| `Assimalign.Cohesion.Connections.InMemory` | 30 | Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory.Tests, Assimalign.Cohesion.Connections.Security.Tests, Assimalign.Cohesion.Connections.Tests, … |
 | `Assimalign.Cohesion.Web.Hosting` | 29 | Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.IdentityHub.Hosting, Assimalign.Cohesion.LogSpace.Hosting, … |
 | `Assimalign.Cohesion.Hosting` | 27 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests, Assimalign.Cohesion.ApplicationModel.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, … |
 | `Assimalign.Cohesion.Http.Streaming` | 25 | Assimalign.Cohesion.Http.Connections.Tests, Assimalign.Cohesion.Http.ServerSentEvents, Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse, Assimalign.Cohesion.Http.ServerSentEvents.Tests, … |
