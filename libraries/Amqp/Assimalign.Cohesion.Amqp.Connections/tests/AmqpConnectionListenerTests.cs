@@ -123,8 +123,15 @@ public class AmqpConnectionListenerTests
         TestConnectionListener carrier = new();
         carrier.Enqueue(stalled);
         AmqpConnectionListener listener = AmqpConnectionListener.Create(carrier);
+        AmqpTestPeer peer = new(stalled);
         Task<IAmqpConnection> pending = listener.AcceptAsync(timeout.Token).AsTask();
-        await stalled.WritePeerAsync("AMQP"u8.ToArray(), timeout.Token);
+
+        // The listener answers the header only after it has taken the carrier off its queue and started
+        // establishing it. Waiting for the answer leaves the connection in flight, waiting for an open
+        // that never comes; without it, a busy thread pool could leave the carrier still queued.
+        await peer.WriteProtocolHeaderAsync(AmqpFrame.AmqpProtocolId, timeout.Token);
+        byte[] answer = await peer.ReadProtocolHeaderAsync(timeout.Token);
+        answer.ShouldBe(AmqpFrame.AmqpProtocolHeader.ToArray());
 
         // Act
         await listener.DisposeAsync();
