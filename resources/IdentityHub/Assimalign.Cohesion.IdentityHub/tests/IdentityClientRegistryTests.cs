@@ -16,6 +16,9 @@ namespace Assimalign.Cohesion.IdentityHub.Tests;
 /// </summary>
 public class IdentityClientRegistryTests
 {
+    // The identifier IdentityClientId.FromName derives from "orders-api", as a store key spells it.
+    private const string ordersApiId = "bec0a3ee-3f3c-599e-bd0b-3b7194e035ba";
+
     private static readonly IdentityHubRecordSetName _clients = new("clients");
 
     private readonly InMemoryIdentityHubStore _store = new();
@@ -37,9 +40,14 @@ public class IdentityClientRegistryTests
         IdentityClientRegistry registry = IdentityClientRegistry.Create(
             _store,
             [TestClients.Web(), TestClients.Daemon(), TestClients.Api()]);
+        IdentityClientRegistry reordered = IdentityClientRegistry.Create(
+            _store,
+            [TestClients.Api(), TestClients.Web(), TestClients.Daemon()]);
 
         // Assert
-        registry.Locked.Select(client => client.Id.Value).ShouldBe(["orders-api", "orders-daemon", "orders-web"]);
+        IdentityClientId[] expected = InIdentifierOrder("orders-api", "orders-daemon", "orders-web");
+        registry.Locked.Select(client => client.Id).ShouldBe(expected);
+        reordered.Locked.Select(client => client.Id).ShouldBe(expected);
         registry.Locked.ShouldAllBe(client => client.IsLocked && client.Version == null);
     }
 
@@ -51,8 +59,8 @@ public class IdentityClientRegistryTests
 
         // Act
         IdentityClientRegistry registry = IdentityClientRegistry.Create(recording, [TestClients.Api(), TestClients.Web()]);
-        IIdentityClient? found = await registry.FindAsync("orders-api", CancellationToken.None);
-        IIdentityClient? byAudience = await registry.FindByAudienceAsync("api://orders", CancellationToken.None);
+        IdentityClient? found = await registry.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None);
+        IdentityClient? byAudience = await registry.FindByAudienceAsync("api://orders", CancellationToken.None);
 
         // Assert
         found.ShouldNotBeNull();
@@ -86,7 +94,7 @@ public class IdentityClientRegistryTests
         // Assert
         nullEntry.ParamName.ShouldBe("clients");
         repeated.ParamName.ShouldBe("clients");
-        repeated.Message.ShouldContain("'orders-api'", Case.Sensitive);
+        repeated.Message.ShouldContain($"'Orders API ({IdentityClientId.FromName("orders-api")})'", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - Create: Should refuse one audience exposed by two registrations")]
@@ -99,8 +107,8 @@ public class IdentityClientRegistryTests
         // Assert
         exception.ParamName.ShouldBe("clients");
         exception.Message.ShouldContain("'api://orders'", Case.Sensitive);
-        exception.Message.ShouldContain("'orders-api'", Case.Sensitive);
-        exception.Message.ShouldContain("'orders-api-v2'", Case.Sensitive);
+        exception.Message.ShouldContain($"'Orders API ({IdentityClientId.FromName("orders-api")})'", Case.Sensitive);
+        exception.Message.ShouldContain($"'Orders API ({IdentityClientId.FromName("orders-api-v2")})'", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - Create: Should refuse a permission that another registration defined in code does not expose")]
@@ -109,13 +117,13 @@ public class IdentityClientRegistryTests
         // Arrange
         IdentityClient web = IdentityClient.Create(new()
         {
-            Id = "orders-web",
-            Permissions = { IdentityClientPermission.Delegated("orders-api", "orders.write") },
+            Id = IdentityClientId.FromName("orders-web"),
+            Permissions = { IdentityClientPermission.Delegated(IdentityClientId.FromName("orders-api"), "orders.write") },
         });
         IdentityClient daemon = IdentityClient.Create(new()
         {
-            Id = "orders-daemon",
-            Permissions = { IdentityClientPermission.Application("orders-api", "orders.read") },
+            Id = IdentityClientId.FromName("orders-daemon"),
+            Permissions = { IdentityClientPermission.Application(IdentityClientId.FromName("orders-api"), "orders.read") },
         });
 
         // Act
@@ -126,9 +134,10 @@ public class IdentityClientRegistryTests
 
         // Assert
         scope.ParamName.ShouldBe("clients");
-        scope.Message.ShouldContain("'orders-web'", Case.Sensitive);
+        scope.Message.ShouldContain($"'{IdentityClientId.FromName("orders-web")}'", Case.Sensitive);
         scope.Message.ShouldContain("'orders.write'", Case.Sensitive);
-        role.Message.ShouldContain("'orders-daemon'", Case.Sensitive);
+        scope.Message.ShouldContain($"'Orders API ({IdentityClientId.FromName("orders-api")})'", Case.Sensitive);
+        role.Message.ShouldContain($"'{IdentityClientId.FromName("orders-daemon")}'", Case.Sensitive);
         role.Message.ShouldContain("'orders.read'", Case.Sensitive);
     }
 
@@ -139,27 +148,7 @@ public class IdentityClientRegistryTests
         IdentityClientRegistry registry = IdentityClientRegistry.Create(_store, [TestClients.Web(api: "stored-api")]);
 
         // Assert
-        registry.Locked.Single().Permissions.Single().Resource.Value.ShouldBe("stored-api");
-    }
-
-    [Fact(DisplayName = "Cohesion Test [IdentityHub] - Create: Should copy another implementation through validation")]
-    public void Create_WithAnotherImplementation_ShouldValidateAndCopyIt()
-    {
-        // Arrange
-        var foreign = new StubIdentityClient { Id = "foreign-api", DisplayName = "Foreign", Audiences = [new IdentityClientAudience("api://foreign")] };
-        var invalid = new StubIdentityClient { Id = "foreign-web", DisplayName = "Foreign", Grants = IdentityClientGrants.AuthorizationCode };
-
-        // Act
-        IdentityClientRegistry registry = IdentityClientRegistry.Create(_store, [foreign]);
-        foreign.DisplayName = "Changed afterwards";
-        ArgumentException refused = Should.Throw<ArgumentException>(() => IdentityClientRegistry.Create(_store, [invalid]));
-
-        // Assert
-        IIdentityClient locked = registry.Locked.Single();
-        locked.ShouldBeOfType<IdentityClient>();
-        locked.DisplayName.ShouldBe("Foreign");
-        locked.IsLocked.ShouldBeTrue();
-        refused.Message.ShouldContain("'foreign-web'", Case.Sensitive);
+        registry.Locked.Single().Permissions.Single().Resource.ShouldBe(IdentityClientId.FromName("stored-api"));
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - FindAsync: Should return a stored registration with the version it was read at")]
@@ -170,8 +159,8 @@ public class IdentityClientRegistryTests
         IdentityClientWriteResult added = await registry.TryAddAsync(TestClients.Api(), CancellationToken.None);
 
         // Act
-        IIdentityClient? found = await registry.FindAsync("orders-api", CancellationToken.None);
-        IIdentityClient? missing = await registry.FindAsync("no-such-client", CancellationToken.None);
+        IdentityClient? found = await registry.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None);
+        IdentityClient? missing = await registry.FindAsync(IdentityClientId.FromName("no-such-client"), CancellationToken.None);
 
         // Assert
         found.ShouldNotBeNull();
@@ -197,7 +186,7 @@ public class IdentityClientRegistryTests
         // Assert
         noId.ParamName.ShouldBe("id");
         noAudience.ParamName.ShouldBe("audience");
-        await Should.ThrowAsync<OperationCanceledException>(async () => await registry.FindAsync("orders-api", canceled.Token));
+        await Should.ThrowAsync<OperationCanceledException>(async () => await registry.FindAsync(IdentityClientId.FromName("orders-api"), canceled.Token));
         await Should.ThrowAsync<OperationCanceledException>(async () => await registry.FindByAudienceAsync("api://orders", canceled.Token));
         await Should.ThrowAsync<OperationCanceledException>(async () => await registry.ListAsync(cancellationToken: canceled.Token));
     }
@@ -208,17 +197,41 @@ public class IdentityClientRegistryTests
         // Arrange
         await _store.TryAddAsync(
             _clients,
-            new IdentityHubRecord(new IdentityHubRecordKey("orders-api"), Encoding.UTF8.GetBytes("""{"v":7}""")),
+            new IdentityHubRecord(new IdentityHubRecordKey(ordersApiId), Encoding.UTF8.GetBytes("""{"v":7}""")),
             CancellationToken.None);
         IdentityClientRegistry registry = IdentityClientRegistry.Create(_store);
 
         // Act
         IdentityHubStoreException exception = await Should.ThrowAsync<IdentityHubStoreException>(
-            async () => await registry.FindAsync("orders-api", CancellationToken.None));
+            async () => await registry.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None));
 
         // Assert
         exception.Code.ShouldBe(IdentityHubErrorCode.StoreRecordCorrupt);
-        exception.Key!.Value.Value.ShouldBe("orders-api");
+        exception.Key!.Value.Value.ShouldBe(ordersApiId);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [IdentityHub] - ListAsync: Should report a stored record whose key is not the one spelling of an identifier as a corrupt record")]
+    [InlineData("orders-api")]
+    [InlineData("BEC0A3EE-3F3C-599E-BD0B-3B7194E035BA")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task ListAsync_WithAStoredKeyThatIsNoClientIdentifier_ShouldThrowRecordCorrupt(string key)
+    {
+        // Arrange
+        await _store.TryAddAsync(
+            _clients,
+            new IdentityHubRecord(
+                new IdentityHubRecordKey(key),
+                Encoding.UTF8.GetBytes("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00"}""")),
+            CancellationToken.None);
+        IdentityClientRegistry registry = IdentityClientRegistry.Create(_store);
+
+        // Act
+        IdentityHubStoreException exception = await Should.ThrowAsync<IdentityHubStoreException>(
+            async () => await registry.ListAsync(cancellationToken: CancellationToken.None));
+
+        // Assert
+        exception.Code.ShouldBe(IdentityHubErrorCode.StoreRecordCorrupt);
+        exception.Key!.Value.Value.ShouldBe(key);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - FindByAudienceAsync: Should find the stored registration that exposes an audience")]
@@ -229,15 +242,15 @@ public class IdentityClientRegistryTests
         await registry.TryAddAsync(TestClients.Api("billing-api", "api://billing"), CancellationToken.None);
 
         // Act
-        IIdentityClient? locked = await registry.FindByAudienceAsync("api://orders", CancellationToken.None);
-        IIdentityClient? stored = await registry.FindByAudienceAsync("api://billing", CancellationToken.None);
-        IIdentityClient? missing = await registry.FindByAudienceAsync("api://shipping", CancellationToken.None);
-        IIdentityClient? otherCase = await registry.FindByAudienceAsync("api://Billing", CancellationToken.None);
+        IdentityClient? locked = await registry.FindByAudienceAsync("api://orders", CancellationToken.None);
+        IdentityClient? stored = await registry.FindByAudienceAsync("api://billing", CancellationToken.None);
+        IdentityClient? missing = await registry.FindByAudienceAsync("api://shipping", CancellationToken.None);
+        IdentityClient? otherCase = await registry.FindByAudienceAsync("api://Billing", CancellationToken.None);
 
         // Assert
-        locked!.Id.Value.ShouldBe("orders-api");
+        locked!.Id.ShouldBe(IdentityClientId.FromName("orders-api"));
         locked.IsLocked.ShouldBeTrue();
-        stored!.Id.Value.ShouldBe("billing-api");
+        stored!.Id.ShouldBe(IdentityClientId.FromName("billing-api"));
         stored.IsLocked.ShouldBeFalse();
         stored.Version.ShouldNotBeNull();
         missing.ShouldBeNull();
@@ -292,7 +305,7 @@ public class IdentityClientRegistryTests
 
         // Assert
         result.Status.ShouldBe(IdentityClientWriteStatus.IdConflict);
-        (await registry.FindAsync("orders-api", CancellationToken.None))!.Audiences.Single().Value.ShouldBe("api://orders");
+        (await registry.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None))!.Audiences.Single().Value.ShouldBe("api://orders");
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - TryAddAsync: Should answer AudienceConflict for an audience code exposes, without reaching the store")]
@@ -321,7 +334,7 @@ public class IdentityClientRegistryTests
         await registry.TryAddAsync(TestClients.Api(), CancellationToken.None);
         IdentityClient contender = IdentityClient.Create(new()
         {
-            Id = "orders-api-v2",
+            Id = IdentityClientId.FromName("orders-api-v2"),
             Audiences = { "api://orders-v2", "api://orders" },
         });
 
@@ -331,21 +344,19 @@ public class IdentityClientRegistryTests
         // Assert
         result.Status.ShouldBe(IdentityClientWriteStatus.AudienceConflict);
         result.ConflictingAudience.Value.ShouldBe("api://orders");
-        (await registry.FindAsync("orders-api-v2", CancellationToken.None)).ShouldBeNull();
+        (await registry.FindAsync(IdentityClientId.FromName("orders-api-v2"), CancellationToken.None)).ShouldBeNull();
         (await registry.FindByAudienceAsync("api://orders-v2", CancellationToken.None)).ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [IdentityHub] - TryAddAsync: Should refuse null and a registration that is not valid")]
-    public async Task TryAddAsync_WithNullOrAnInvalidRegistration_ShouldThrow()
+    [Fact(DisplayName = "Cohesion Test [IdentityHub] - TryAddAsync: Should refuse a null registration")]
+    public async Task TryAddAsync_WithANullRegistration_ShouldThrowArgumentNullException()
     {
         // Arrange
         IdentityClientRegistry registry = IdentityClientRegistry.Create(_store);
-        var invalid = new StubIdentityClient { Id = "foreign-web", DisplayName = "Foreign", Grants = IdentityClientGrants.AuthorizationCode };
 
         // Act
         ArgumentNullException nullClient = await Should.ThrowAsync<ArgumentNullException>(
             async () => await registry.TryAddAsync(null!));
-        await Should.ThrowAsync<ArgumentException>(async () => await registry.TryAddAsync(invalid));
 
         // Assert
         nullClient.ParamName.ShouldBe("client");
@@ -357,12 +368,12 @@ public class IdentityClientRegistryTests
     {
         // Arrange
         IdentityClientRegistry source = IdentityClientRegistry.Create(new InMemoryIdentityHubStore(), [TestClients.Api()]);
-        IIdentityClient locked = (await source.FindAsync("orders-api", CancellationToken.None))!;
+        IdentityClient locked = (await source.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None))!;
         IdentityClientRegistry registry = IdentityClientRegistry.Create(_store);
 
         // Act
         IdentityClientWriteResult result = await registry.TryAddAsync(locked, CancellationToken.None);
-        IIdentityClient? stored = await registry.FindAsync("orders-api", CancellationToken.None);
+        IdentityClient? stored = await registry.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None);
 
         // Assert
         result.Status.ShouldBe(IdentityClientWriteStatus.Written);
@@ -376,7 +387,7 @@ public class IdentityClientRegistryTests
         // Arrange
         IdentityClientRegistry registry = IdentityClientRegistry.Create(_store);
         await registry.TryAddAsync(TestClients.Api(), CancellationToken.None);
-        IIdentityClient read = (await registry.FindAsync("orders-api", CancellationToken.None))!;
+        IdentityClient read = (await registry.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None))!;
         IdentityClientDescriptor descriptor = IdentityClientDescriptor.From(read);
         descriptor.DisplayName = "Orders API v2";
         descriptor.Scopes.Add(IdentityClientScope.Create("orders.write"));
@@ -386,7 +397,7 @@ public class IdentityClientRegistryTests
             IdentityClient.Create(descriptor),
             read.Version!.Value,
             CancellationToken.None);
-        IIdentityClient replaced = (await registry.FindAsync("orders-api", CancellationToken.None))!;
+        IdentityClient replaced = (await registry.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None))!;
 
         // Assert
         result.Status.ShouldBe(IdentityClientWriteStatus.Written);
@@ -414,7 +425,7 @@ public class IdentityClientRegistryTests
         // Assert
         stale.Status.ShouldBe(IdentityClientWriteStatus.VersionConflict);
         gone.Status.ShouldBe(IdentityClientWriteStatus.VersionConflict);
-        (await registry.FindAsync("billing-api", CancellationToken.None)).ShouldBeNull();
+        (await registry.FindAsync(IdentityClientId.FromName("billing-api"), CancellationToken.None)).ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - TryReplaceAsync: Should answer Locked for a registration code defines")]
@@ -457,7 +468,7 @@ public class IdentityClientRegistryTests
         stored.ConflictingAudience.Value.ShouldBe("api://orders");
         locked.Status.ShouldBe(IdentityClientWriteStatus.AudienceConflict);
         locked.ConflictingAudience.Value.ShouldBe("api://locked");
-        (await registry.FindByAudienceAsync("api://billing", CancellationToken.None))!.Id.Value.ShouldBe("billing-api");
+        (await registry.FindByAudienceAsync("api://billing", CancellationToken.None))!.Id.ShouldBe(IdentityClientId.FromName("billing-api"));
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - TryReplaceAsync: Should free an audience the replacement no longer exposes")]
@@ -475,8 +486,8 @@ public class IdentityClientRegistryTests
 
         // Assert
         taken.Status.ShouldBe(IdentityClientWriteStatus.Written);
-        (await registry.FindByAudienceAsync("api://orders", CancellationToken.None))!.Id.Value.ShouldBe("legacy-api");
-        (await registry.FindByAudienceAsync("api://orders-v2", CancellationToken.None))!.Id.Value.ShouldBe("orders-api");
+        (await registry.FindByAudienceAsync("api://orders", CancellationToken.None))!.Id.ShouldBe(IdentityClientId.FromName("legacy-api"));
+        (await registry.FindByAudienceAsync("api://orders-v2", CancellationToken.None))!.Id.ShouldBe(IdentityClientId.FromName("orders-api"));
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - TryReplaceAsync: Should refuse null and a default version")]
@@ -504,16 +515,16 @@ public class IdentityClientRegistryTests
         IdentityClientWriteResult added = await registry.TryAddAsync(TestClients.Api(), CancellationToken.None);
 
         // Act
-        IdentityClientWriteResult stale = await registry.TryRemoveAsync("orders-api", "not-the-version", CancellationToken.None);
-        IdentityClientWriteResult removed = await registry.TryRemoveAsync("orders-api", added.Version, CancellationToken.None);
-        IdentityClientWriteResult again = await registry.TryRemoveAsync("orders-api", added.Version, CancellationToken.None);
+        IdentityClientWriteResult stale = await registry.TryRemoveAsync(IdentityClientId.FromName("orders-api"), "not-the-version", CancellationToken.None);
+        IdentityClientWriteResult removed = await registry.TryRemoveAsync(IdentityClientId.FromName("orders-api"), added.Version, CancellationToken.None);
+        IdentityClientWriteResult again = await registry.TryRemoveAsync(IdentityClientId.FromName("orders-api"), added.Version, CancellationToken.None);
 
         // Assert
         stale.Status.ShouldBe(IdentityClientWriteStatus.VersionConflict);
         removed.Status.ShouldBe(IdentityClientWriteStatus.Removed);
         removed.IsApplied.ShouldBeTrue();
         again.Status.ShouldBe(IdentityClientWriteStatus.VersionConflict);
-        (await registry.FindAsync("orders-api", CancellationToken.None)).ShouldBeNull();
+        (await registry.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None)).ShouldBeNull();
         (await registry.FindByAudienceAsync("api://orders", CancellationToken.None)).ShouldBeNull();
         _store.CountHeld(_clients).ShouldBe(0);
     }
@@ -526,12 +537,12 @@ public class IdentityClientRegistryTests
         IdentityClientRegistry registry = IdentityClientRegistry.Create(recording, [TestClients.Api()]);
 
         // Act
-        IdentityClientWriteResult result = await registry.TryRemoveAsync("orders-api", "1", CancellationToken.None);
+        IdentityClientWriteResult result = await registry.TryRemoveAsync(IdentityClientId.FromName("orders-api"), "1", CancellationToken.None);
 
         // Assert
         result.Status.ShouldBe(IdentityClientWriteStatus.Locked);
         recording.Calls.ShouldBeEmpty();
-        (await registry.FindAsync("orders-api", CancellationToken.None)).ShouldNotBeNull();
+        (await registry.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None)).ShouldNotBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - TryRemoveAsync: Should refuse a default identifier and a default version")]
@@ -542,7 +553,7 @@ public class IdentityClientRegistryTests
 
         // Act
         ArgumentException noId = await Should.ThrowAsync<ArgumentException>(async () => await registry.TryRemoveAsync(default, "1"));
-        ArgumentException noVersion = await Should.ThrowAsync<ArgumentException>(async () => await registry.TryRemoveAsync("orders-api", default));
+        ArgumentException noVersion = await Should.ThrowAsync<ArgumentException>(async () => await registry.TryRemoveAsync(IdentityClientId.FromName("orders-api"), default));
 
         // Assert
         noId.ParamName.ShouldBe("id");
@@ -560,16 +571,16 @@ public class IdentityClientRegistryTests
         IdentityClientRegistry after = IdentityClientRegistry.Create(_store, [TestClients.Api("orders-api", "api://orders")]);
 
         // Act
-        IIdentityClient found = (await after.FindAsync("orders-api", CancellationToken.None))!;
-        IIdentityClient? byShadowedAudience = await after.FindByAudienceAsync("api://orders-runtime", CancellationToken.None);
+        IdentityClient found = (await after.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None))!;
+        IdentityClient? byShadowedAudience = await after.FindByAudienceAsync("api://orders-runtime", CancellationToken.None);
         IdentityClientPage page = await after.ListAsync(cancellationToken: CancellationToken.None);
-        IdentityClientWriteResult remove = await after.TryRemoveAsync("orders-api", added.Version, CancellationToken.None);
+        IdentityClientWriteResult remove = await after.TryRemoveAsync(IdentityClientId.FromName("orders-api"), added.Version, CancellationToken.None);
 
         // Assert
         found.IsLocked.ShouldBeTrue();
         found.Audiences.Single().Value.ShouldBe("api://orders");
         byShadowedAudience.ShouldBeNull();
-        page.Clients.Select(client => client.Id.Value).ShouldBe(["orders-api"]);
+        page.Clients.Select(client => client.Id).ShouldBe(Ids("orders-api"));
         page.Clients.Single().IsLocked.ShouldBeTrue();
         remove.Status.ShouldBe(IdentityClientWriteStatus.Locked);
         _store.CountHeld(_clients).ShouldBe(1);
@@ -585,11 +596,81 @@ public class IdentityClientRegistryTests
 
         // Act
         IdentityClientRegistry rolledBack = IdentityClientRegistry.Create(_store);
-        IIdentityClient found = (await rolledBack.FindAsync("orders-api", CancellationToken.None))!;
+        IdentityClient found = (await rolledBack.FindAsync(IdentityClientId.FromName("orders-api"), CancellationToken.None))!;
 
         // Assert
         found.IsLocked.ShouldBeFalse();
         found.Audiences.Single().Value.ShouldBe("api://orders-runtime");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [IdentityHub] - Adoption: Should lock a registration created at run time once code defines its name")]
+    public async Task Adoption_WhenCodeDefinesTheNameARegistrationWasCreatedUnder_ShouldServeTheCodeDefinitionLocked()
+    {
+        // Arrange: a registration created at run time under a name, with a secret issued at run
+        // time, then a deployment whose code defines that name in another case.
+        IdentityClientRegistry before = IdentityClientRegistry.Create(_store);
+        IdentityClientWriteResult created = await before.TryAddAsync(
+            IdentityClient.Create(new()
+            {
+                Id = IdentityClientId.FromName("Orders-Daemon"),
+                DisplayName = "Created at run time",
+                Grants = IdentityClientGrants.ClientCredentials,
+                Credentials = { IdentityClientSecretCredential.Generate("issued-at-run-time", out string issued) },
+            }),
+            CancellationToken.None);
+        IdentityClientSecretCredential deployed = IdentityClientSecretCredential.Generate("deployed", out string fromDeployment);
+        IdentityClient defined = IdentityClient.Create(new()
+        {
+            Id = IdentityClientId.FromName("orders-daemon"),
+            DisplayName = "Orders daemon",
+            Grants = IdentityClientGrants.ClientCredentials,
+            Credentials = { deployed },
+        });
+
+        // Act
+        IdentityClientRegistry after = IdentityClientRegistry.Create(_store, [defined]);
+        IdentityClient served = (await after.FindAsync(IdentityClientId.FromName("ORDERS-DAEMON"), CancellationToken.None))!;
+        IdentityClientPage page = await after.ListAsync(cancellationToken: CancellationToken.None);
+        IdentityClientWriteResult replace = await after.TryReplaceAsync(defined, created.Version, CancellationToken.None);
+        IdentityClientWriteResult remove = await after.TryRemoveAsync(defined.Id, created.Version, CancellationToken.None);
+        IdentityClientWriteResult add = await after.TryAddAsync(defined, CancellationToken.None);
+
+        // Assert: code wins whole, so the secret issued at run time is no longer accepted.
+        created.Status.ShouldBe(IdentityClientWriteStatus.Written);
+        served.IsLocked.ShouldBeTrue();
+        served.Version.ShouldBeNull();
+        served.DisplayName.ShouldBe("Orders daemon");
+        var secret = served.Credentials.Single().ShouldBeOfType<IdentityClientSecretCredential>();
+        secret.Id.Value.ShouldBe("deployed");
+        secret.Verify(fromDeployment, DateTimeOffset.UtcNow).ShouldBeTrue();
+        secret.Verify(issued, DateTimeOffset.UtcNow).ShouldBeFalse();
+        page.Clients.Single().ShouldBeSameAs(served);
+        replace.Status.ShouldBe(IdentityClientWriteStatus.Locked);
+        remove.Status.ShouldBe(IdentityClientWriteStatus.Locked);
+        add.Status.ShouldBe(IdentityClientWriteStatus.Locked);
+        _store.CountHeld(_clients).ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [IdentityHub] - Adoption: Should leave a registration created under a random identifier to the API")]
+    public async Task Adoption_WithARegistrationCreatedUnderARandomIdentifier_ShouldNotLockIt()
+    {
+        // Arrange
+        IdentityClientRegistry before = IdentityClientRegistry.Create(_store);
+        IdentityClientId random = IdentityClientId.New();
+        await before.TryAddAsync(
+            IdentityClient.Create(new() { Id = random, DisplayName = "orders-api", Audiences = { "api://orders-runtime" } }),
+            CancellationToken.None);
+
+        // Act
+        IdentityClientRegistry after = IdentityClientRegistry.Create(_store, [TestClients.Api()]);
+        IdentityClient stored = (await after.FindAsync(random, CancellationToken.None))!;
+        IdentityClientPage page = await after.ListAsync(cancellationToken: CancellationToken.None);
+
+        // Assert
+        stored.IsLocked.ShouldBeFalse();
+        stored.Version.ShouldNotBeNull();
+        page.Clients.Select(client => client.Id).ShouldBe([IdentityClientId.FromName("orders-api"), random]);
+        page.Clients.Select(client => client.IsLocked).ShouldBe([true, false]);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - ListAsync: Should list the registrations defined in code first, then the stored ones")]
@@ -604,7 +685,7 @@ public class IdentityClientRegistryTests
 
         // Assert
         page.Continuation.ShouldBeNull();
-        page.Clients.Select(client => client.Id.Value).ShouldBe(["orders-api", "orders-web", "billing-api"]);
+        page.Clients.Select(client => client.Id).ShouldBe([.. InIdentifierOrder("orders-api", "orders-web"), IdentityClientId.FromName("billing-api")]);
         page.Clients.Select(client => client.IsLocked).ShouldBe([true, true, false]);
         page.Clients[2].Version.ShouldNotBeNull();
     }
@@ -633,12 +714,11 @@ public class IdentityClientRegistryTests
             ]);
 
         // Act
-        List<IIdentityClient> listed = await ListAllAsync(registry, limit);
+        List<IdentityClient> listed = await ListAllAsync(registry, limit);
 
         // Assert
-        listed.Select(client => client.Id.Value).Take(3).ShouldBe(["locked-1", "locked-2", "locked-3"]);
-        listed.Select(client => client.Id.Value).Skip(3).OrderBy(id => id, StringComparer.Ordinal)
-            .ShouldBe(["stored-1", "stored-2", "stored-3"]);
+        listed.Select(client => client.Id).Take(3).ShouldBe(InIdentifierOrder("locked-1", "locked-2", "locked-3"));
+        listed.Select(client => client.Id).Skip(3).ShouldBe(Ids("stored-1", "stored-2", "stored-3"), ignoreOrder: true);
         listed.Count(client => client.IsLocked).ShouldBe(3);
     }
 
@@ -655,11 +735,11 @@ public class IdentityClientRegistryTests
         IdentityClientPage third = await registry.ListAsync(1, second.Continuation, CancellationToken.None);
 
         // Assert
-        first.Clients.Single().Id.Value.ShouldBe("orders-api");
+        first.Clients.Single().Id.ShouldBe(IdentityClientId.FromName("orders-api"));
         first.Continuation.ShouldNotBeNull();
-        second.Clients.Single().Id.Value.ShouldBe("orders-web");
+        second.Clients.Single().Id.ShouldBe(IdentityClientId.FromName("orders-web"));
         second.Continuation.ShouldNotBeNull();
-        third.Clients.Single().Id.Value.ShouldBe("billing-api");
+        third.Clients.Single().Id.ShouldBe(IdentityClientId.FromName("billing-api"));
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - ListAsync: Should list an empty registry as one empty last page")]
@@ -689,13 +769,12 @@ public class IdentityClientRegistryTests
             [TestClients.Api("locked-1", "api://locked-1")]);
 
         // Act
-        List<IIdentityClient> listed = await ListAllAsync(registry, 10);
-        IIdentityClient? byAudience = await registry.FindByAudienceAsync("api://stored-2", CancellationToken.None);
+        List<IdentityClient> listed = await ListAllAsync(registry, 10);
+        IdentityClient? byAudience = await registry.FindByAudienceAsync("api://stored-2", CancellationToken.None);
 
         // Assert
-        listed.Select(client => client.Id.Value).OrderBy(id => id, StringComparer.Ordinal)
-            .ShouldBe(["locked-1", "stored-1", "stored-2", "stored-3"]);
-        byAudience!.Id.Value.ShouldBe("stored-2");
+        listed.Select(client => client.Id).ShouldBe(Ids("locked-1", "stored-1", "stored-2", "stored-3"), ignoreOrder: true);
+        byAudience!.Id.ShouldBe(IdentityClientId.FromName("stored-2"));
     }
 
     [Theory(DisplayName = "Cohesion Test [IdentityHub] - ListAsync: Should refuse a continuation it did not issue")]
@@ -775,13 +854,25 @@ public class IdentityClientRegistryTests
         // Assert
         recording.Calls.ShouldBe(["TryAddCoreAsync"]);
         recording.Set.Value.ShouldBe("clients");
-        recording.Record!.Key.Value.ShouldBe("orders-api");
+        recording.Record!.Key.Value.ShouldBe(ordersApiId);
         recording.CancellationToken.ShouldBe(source.Token);
     }
 
-    private static async Task<List<IIdentityClient>> ListAllAsync(IdentityClientRegistry registry, int limit)
+    private static IdentityClientId[] Ids(params string[] names)
     {
-        var listed = new List<IIdentityClient>();
+        return names.Select(name => IdentityClientId.FromName(name)).ToArray();
+    }
+
+    // The order the registry documents for its locked registrations: the ordinal order of the
+    // identifiers' text. Sorting the text here keeps the expectation apart from Guid.CompareTo.
+    private static IdentityClientId[] InIdentifierOrder(params string[] names)
+    {
+        return Ids(names).OrderBy(id => id.ToString(), StringComparer.Ordinal).ToArray();
+    }
+
+    private static async Task<List<IdentityClient>> ListAllAsync(IdentityClientRegistry registry, int limit)
+    {
+        var listed = new List<IdentityClient>();
         string? continuation = null;
         int pages = 0;
         do

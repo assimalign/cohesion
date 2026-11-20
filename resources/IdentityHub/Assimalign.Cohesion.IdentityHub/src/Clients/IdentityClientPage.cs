@@ -35,7 +35,7 @@ public sealed class IdentityClientPage
     /// <paramref name="clients"/> holds a <see langword="null"/> registration, or
     /// <paramref name="continuation"/> is empty.
     /// </exception>
-    public IdentityClientPage(IEnumerable<IIdentityClient> clients, string? continuation)
+    public IdentityClientPage(IEnumerable<IdentityClient> clients, string? continuation)
     {
         ArgumentNullException.ThrowIfNull(clients);
         if (continuation is { Length: 0 })
@@ -43,8 +43,8 @@ public sealed class IdentityClientPage
             throw new ArgumentException(ErrorMessages.PageContinuationEmpty, nameof(continuation));
         }
 
-        var snapshot = new List<IIdentityClient>();
-        foreach (IIdentityClient client in clients)
+        var snapshot = new List<IdentityClient>();
+        foreach (IdentityClient client in clients)
         {
             if (client is null)
             {
@@ -61,7 +61,7 @@ public sealed class IdentityClientPage
     /// <summary>
     /// Gets the page's registrations.
     /// </summary>
-    public IReadOnlyList<IIdentityClient> Clients { get; }
+    public IReadOnlyList<IdentityClient> Clients { get; }
 
     /// <summary>
     /// Gets the token that continues the enumeration after this page, or <see langword="null"/>

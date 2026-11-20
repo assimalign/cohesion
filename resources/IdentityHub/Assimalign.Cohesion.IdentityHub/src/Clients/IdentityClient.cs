@@ -7,32 +7,54 @@ using Assimalign.Cohesion.IdentityHub.Internal;
 namespace Assimalign.Cohesion.IdentityHub;
 
 /// <summary>
-/// An app registration: the validated, immutable snapshot of an
-/// <see cref="IdentityClientDescriptor"/>.
+/// An app registration: one application the identity hub knows, with how it signs in, what it
+/// proves its identity with, the API it exposes, and the permissions it holds on other APIs.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="Create(IdentityClientDescriptor)"/> is the one place a registration is checked as
-/// a whole. A registration that exists is therefore consistent: a grant has what it needs, a
-/// name appears once, and every list is within its limit. The same check runs when a stored
-/// registration is read back, so the limits may grow in a later version and never shrink.
+/// A registration plays either or both of two parts. As a <b>client</b> it obtains tokens: it
+/// lists the grants it may use (<see cref="Grants"/>), where a user may be sent back to
+/// (<see cref="Redirects"/>), what it authenticates with (<see cref="Credentials"/>), and what
+/// it may be issued (<see cref="Permissions"/>). As a <b>resource</b> it exposes an API: the
+/// audiences tokens for it carry (<see cref="Audiences"/>), and the scopes and roles other
+/// registrations may hold on it (<see cref="Scopes"/>, <see cref="Roles"/>).
 /// </para>
 /// <para>
+/// <b>A registration is the validated, immutable snapshot of an
+/// <see cref="IdentityClientDescriptor"/>.</b> <see cref="Create(IdentityClientDescriptor)"/> is
+/// the one place a registration is checked as a whole, and the only way one comes to exist. A
+/// registration that exists is therefore consistent: a grant has what it needs, a name appears
+/// once, and every list is within its limit. The same check runs when a stored registration is
+/// read back, so the limits may grow in a later version and never shrink.
+/// </para>
+/// <para>
+/// Changing a registration is storing a replacement through an
+/// <see cref="IIdentityClientRegistry"/>, which is also what says whether it may change at all.
 /// A registration written in code is handed to an <see cref="IdentityClientRegistry"/>, which
-/// serves it locked. One created at run time is stored through the same registry.
+/// serves it <see cref="IsLocked"/> and refuses every write to it. One created at run time is
+/// stored through the same registry.
+/// </para>
+/// <para>
+/// There is no interface for a registration. It is a value with one set of rules, not a
+/// behavior with variants: a second implementation could only weaken what
+/// <see cref="Create(IdentityClientDescriptor)"/> guarantees.
 /// </para>
 /// </remarks>
 /// <example>
 /// <code>
 /// IdentityClient api = IdentityClient.Create(new()
 /// {
-///     Id = "orders-api",
+///     Id = IdentityClientId.FromName("orders-api"),
+///     DisplayName = "Orders API",
 ///     Audiences = { "api://orders" },
 ///     Scopes = { IdentityClientScope.Create("orders.read") },
 /// });
 /// </code>
 /// </example>
-public sealed class IdentityClient : IIdentityClient
+// Deviates from the repo interface-first rule per design decision: an app registration is a
+// validated value with one fixed behavior, so it ships as a concrete type with no interface
+// (owner, 2026-11-20).
+public sealed class IdentityClient
 {
     /// <summary>
     /// The longest display name, in characters.
@@ -134,46 +156,85 @@ public sealed class IdentityClient : IIdentityClient
     /// </summary>
     public static TimeSpan MaxAccessTokenLifetime { get; } = TimeSpan.FromHours(24);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the registration's identifier: the OAuth <c>client_id</c>.
+    /// </summary>
     public IdentityClientId Id { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the name a person is shown for the application. It is the identifier's text when
+    /// the registration did not say.
+    /// </summary>
     public string DisplayName { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets what the application is, in words a person is shown, when it is described.
+    /// </summary>
     public string? Description { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets a value indicating whether the registration is defined in code. A locked
+    /// registration is read like any other and changes only where it is defined: its registry
+    /// answers every write to it with <see cref="IdentityClientWriteStatus.Locked"/>.
+    /// </summary>
+    /// <remarks>
+    /// The registry that serves a registration sets this value. It is <see langword="false"/> on
+    /// a registration no registry has served yet.
+    /// </remarks>
     public bool IsLocked { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the version of the stored state the registration was read from, which a replace or a
+    /// remove names to act only on that state. It is <see langword="null"/> for a locked
+    /// registration and for one no registry has served yet.
+    /// </summary>
     public IdentityHubRecordVersion? Version { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets a value indicating whether the application can authenticate itself: it holds at
+    /// least one credential. A registration without one is a public client.
+    /// </summary>
     public bool IsConfidential => Credentials.Count > 0;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the grants the application may use to obtain tokens.
+    /// </summary>
     public IdentityClientGrants Grants { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets how long an access token issued to the application is valid.
+    /// </summary>
     public TimeSpan AccessTokenLifetime { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the URIs a user may be sent back to after the authorization code grant.
+    /// </summary>
     public IReadOnlyList<IdentityClientRedirect> Redirects { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets what the application proves its identity with.
+    /// </summary>
     public IReadOnlyList<IdentityClientCredential> Credentials { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the audiences of the API the registration exposes. No other registration exposes
+    /// any of them.
+    /// </summary>
     public IReadOnlyList<IdentityClientAudience> Audiences { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the scopes of the API the registration exposes.
+    /// </summary>
     public IReadOnlyList<IdentityClientScope> Scopes { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the roles of the API the registration exposes.
+    /// </summary>
     public IReadOnlyList<IdentityClientRole> Roles { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the permissions the application holds on APIs: the most it may be issued.
+    /// </summary>
     public IReadOnlyList<IdentityClientPermission> Permissions { get; }
 
     /// <summary>
@@ -208,7 +269,7 @@ public sealed class IdentityClient : IIdentityClient
         ArgumentNullException.ThrowIfNull(descriptor);
 
         IdentityClientId id = descriptor.Id;
-        if (id.Value is null)
+        if (id.Value == Guid.Empty)
         {
             throw new ArgumentException(ErrorMessages.ClientIdRequired, nameof(descriptor));
         }
@@ -217,20 +278,25 @@ public sealed class IdentityClient : IIdentityClient
         if (displayName is not null &&
             !IdentityClientGrammar.IsText(displayName, MaxDisplayNameLength, allowLineBreaks: false))
         {
-            throw Refuse(ErrorMessages.ClientDisplayNameInvalid, id);
+            throw Refuse(ErrorMessages.ClientDisplayNameInvalid, id.ToString());
         }
+
+        // What a message calls the registration. The name an identifier was derived from is not
+        // kept, and a GUID alone tells a reader nothing, so the display name leads when there
+        // is one.
+        string label = Describe(id, displayName);
 
         string? description = descriptor.Description is { Length: > 0 } ? descriptor.Description : null;
         if (description is not null &&
             !IdentityClientGrammar.IsText(description, MaxDescriptionLength, allowLineBreaks: true))
         {
-            throw Refuse(ErrorMessages.ClientDescriptionInvalid, id);
+            throw Refuse(ErrorMessages.ClientDescriptionInvalid, label);
         }
 
         IdentityClientGrants grants = descriptor.Grants;
         if ((grants & ~allGrants) is not IdentityClientGrants.None)
         {
-            throw Refuse(ErrorMessages.ClientGrantsInvalid, id);
+            throw Refuse(ErrorMessages.ClientGrantsInvalid, label);
         }
 
         TimeSpan lifetime = descriptor.AccessTokenLifetime;
@@ -239,11 +305,11 @@ public sealed class IdentityClient : IIdentityClient
             throw new ArgumentOutOfRangeException(
                 nameof(descriptor),
                 lifetime,
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientLifetimeInvalid, id, MaxAccessTokenLifetime));
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientLifetimeInvalid, label, MaxAccessTokenLifetime));
         }
 
         IdentityClientRedirect[] redirects = Snapshot(
-            id,
+            label,
             descriptor.Redirects,
             nameof(descriptor.Redirects),
             MaxRedirectCount,
@@ -251,7 +317,7 @@ public sealed class IdentityClient : IIdentityClient
             ErrorMessages.ClientRedirectDuplicate);
 
         IdentityClientCredential[] credentials = Snapshot(
-            id,
+            label,
             descriptor.Credentials,
             nameof(descriptor.Credentials),
             MaxCredentialCount,
@@ -259,7 +325,7 @@ public sealed class IdentityClient : IIdentityClient
             ErrorMessages.ClientCredentialDuplicate);
 
         IdentityClientAudience[] audiences = Snapshot(
-            id,
+            label,
             descriptor.Audiences,
             nameof(descriptor.Audiences),
             MaxAudienceCount,
@@ -267,7 +333,7 @@ public sealed class IdentityClient : IIdentityClient
             ErrorMessages.ClientAudienceDuplicate);
 
         IdentityClientScope[] scopes = Snapshot(
-            id,
+            label,
             descriptor.Scopes,
             nameof(descriptor.Scopes),
             MaxScopeCount,
@@ -275,7 +341,7 @@ public sealed class IdentityClient : IIdentityClient
             ErrorMessages.ClientScopeDuplicate);
 
         IdentityClientRole[] roles = Snapshot(
-            id,
+            label,
             descriptor.Roles,
             nameof(descriptor.Roles),
             MaxRoleCount,
@@ -283,43 +349,43 @@ public sealed class IdentityClient : IIdentityClient
             ErrorMessages.ClientRoleDuplicate);
 
         IdentityClientPermission[] permissions = Snapshot(
-            id,
+            label,
             descriptor.Permissions,
             nameof(descriptor.Permissions),
             MaxPermissionCount,
-            static permission => permission.Resource.Value is null ? null : permission.ToString(),
+            static permission => permission.Resource.Value == Guid.Empty ? null : permission.ToString(),
             ErrorMessages.ClientPermissionDuplicate);
 
         bool usesAuthorizationCode = (grants & IdentityClientGrants.AuthorizationCode) is not IdentityClientGrants.None;
         if (usesAuthorizationCode && redirects.Length is 0)
         {
-            throw Refuse(ErrorMessages.ClientRedirectRequired, id);
+            throw Refuse(ErrorMessages.ClientRedirectRequired, label);
         }
 
         if (!usesAuthorizationCode && redirects.Length is not 0)
         {
-            throw Refuse(ErrorMessages.ClientRedirectUnused, id);
+            throw Refuse(ErrorMessages.ClientRedirectUnused, label);
         }
 
         if ((grants & IdentityClientGrants.ClientCredentials) is not IdentityClientGrants.None && credentials.Length is 0)
         {
-            throw Refuse(ErrorMessages.ClientCredentialRequired, id);
+            throw Refuse(ErrorMessages.ClientCredentialRequired, label);
         }
 
         if ((grants & IdentityClientGrants.RefreshToken) is not IdentityClientGrants.None &&
             (grants & (IdentityClientGrants.AuthorizationCode | IdentityClientGrants.DeviceCode)) is IdentityClientGrants.None)
         {
-            throw Refuse(ErrorMessages.ClientRefreshUnused, id);
+            throw Refuse(ErrorMessages.ClientRefreshUnused, label);
         }
 
         if (audiences.Length is 0 && (scopes.Length is not 0 || roles.Length is not 0))
         {
-            throw Refuse(ErrorMessages.ClientAudienceRequired, id);
+            throw Refuse(ErrorMessages.ClientAudienceRequired, label);
         }
 
         var client = new IdentityClient(
             id,
-            displayName ?? id.Value,
+            displayName ?? id.ToString(),
             description,
             grants,
             lifetime,
@@ -341,9 +407,9 @@ public sealed class IdentityClient : IIdentityClient
                         permission.Kind is IdentityClientPermissionKind.Delegated
                             ? ErrorMessages.ClientScopeUnknown
                             : ErrorMessages.ClientRoleUnknown,
-                        id,
+                        label,
                         permission.Name,
-                        permission.Resource),
+                        label),
                     nameof(descriptor));
             }
         }
@@ -358,13 +424,13 @@ public sealed class IdentityClient : IIdentityClient
     public override string ToString() => Id.ToString();
 
     /// <summary>
-    /// Returns a registration this type validated: the one given when it is already an
-    /// <see cref="IdentityClient"/>, or a validated copy of another implementation.
+    /// Returns what a message calls a registration: its display name and its identifier, or the
+    /// identifier alone when it has no display name of its own.
     /// </summary>
-    /// <exception cref="ArgumentException">The other implementation's contents break a rule.</exception>
-    internal static IdentityClient From(IIdentityClient client)
+    internal static string Describe(IdentityClient client)
     {
-        return client as IdentityClient ?? Create(IdentityClientDescriptor.From(client));
+        string id = client.Id.ToString();
+        return Describe(client.Id, string.Equals(client.DisplayName, id, StringComparison.Ordinal) ? null : client.DisplayName);
     }
 
     /// <summary>
@@ -416,8 +482,13 @@ public sealed class IdentityClient : IIdentityClient
         return false;
     }
 
+    private static string Describe(IdentityClientId id, string? displayName)
+    {
+        return displayName is null ? id.ToString() : string.Concat(displayName, " (", id.ToString(), ")");
+    }
+
     private static T[] Snapshot<T>(
-        IdentityClientId id,
+        string label,
         IList<T> source,
         string listName,
         int maxCount,
@@ -427,7 +498,7 @@ public sealed class IdentityClient : IIdentityClient
         if (source.Count > maxCount)
         {
             throw new ArgumentException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientListTooLong, id, listName, maxCount),
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientListTooLong, label, listName, maxCount),
                 "descriptor");
         }
 
@@ -445,14 +516,14 @@ public sealed class IdentityClient : IIdentityClient
             if (name is null)
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientListEntryRequired, id, listName),
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientListEntryRequired, label, listName),
                     "descriptor");
             }
 
             if (!names.Add(name))
             {
                 throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, duplicateMessage, id, name),
+                    string.Format(CultureInfo.CurrentCulture, duplicateMessage, label, name),
                     "descriptor");
             }
 
@@ -462,8 +533,8 @@ public sealed class IdentityClient : IIdentityClient
         return snapshot;
     }
 
-    private static ArgumentException Refuse(string message, IdentityClientId id)
+    private static ArgumentException Refuse(string message, string label)
     {
-        return new ArgumentException(string.Format(CultureInfo.CurrentCulture, message, id), "descriptor");
+        return new ArgumentException(string.Format(CultureInfo.CurrentCulture, message, label), "descriptor");
     }
 }

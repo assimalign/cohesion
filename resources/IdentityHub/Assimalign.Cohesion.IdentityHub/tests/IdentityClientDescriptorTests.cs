@@ -15,7 +15,7 @@ public class IdentityClientDescriptorTests
         var descriptor = new IdentityClientDescriptor();
 
         // Assert
-        descriptor.Id.Value.ShouldBeNull();
+        descriptor.Id.ShouldBe(IdentityClientId.Empty);
         descriptor.DisplayName.ShouldBeNull();
         descriptor.Description.ShouldBeNull();
         descriptor.Grants.ShouldBe(IdentityClientGrants.None);
@@ -34,7 +34,7 @@ public class IdentityClientDescriptorTests
         // Arrange
         IdentityClient client = IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             DisplayName = "Orders",
             Description = "Takes orders.",
             Grants = IdentityClientGrants.AuthorizationCode | IdentityClientGrants.ClientCredentials,
@@ -44,7 +44,7 @@ public class IdentityClientDescriptorTests
             Audiences = { "api://orders" },
             Scopes = { IdentityClientScope.Create("orders.read") },
             Roles = { IdentityClientRole.Create("orders.process", IdentityClientRoleMembers.Applications) },
-            Permissions = { IdentityClientPermission.Application("orders", "orders.process") },
+            Permissions = { IdentityClientPermission.Application(IdentityClientId.FromName("orders"), "orders.process") },
         });
 
         // Act
@@ -98,31 +98,6 @@ public class IdentityClientDescriptorTests
         // Assert
         fromLocked.IsLocked.ShouldBeFalse();
         fromStored.Version.ShouldBeNull();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [IdentityHub] - From: Should read another implementation that leaves a list null")]
-    public void From_WithAnImplementationThatLeavesAListNull_ShouldTreatItAsEmpty()
-    {
-        // Arrange
-        var foreign = new StubIdentityClient
-        {
-            Id = "foreign",
-            DisplayName = "Foreign",
-            Redirects = null!,
-            Credentials = null!,
-            Audiences = null!,
-            Scopes = null!,
-            Roles = null!,
-            Permissions = null!,
-        };
-
-        // Act
-        IdentityClientDescriptor descriptor = IdentityClientDescriptor.From(foreign);
-
-        // Assert
-        descriptor.Id.Value.ShouldBe("foreign");
-        descriptor.Redirects.ShouldBeEmpty();
-        descriptor.Permissions.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - From: Should refuse a null registration")]

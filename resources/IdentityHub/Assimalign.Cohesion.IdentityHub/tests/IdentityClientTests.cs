@@ -18,7 +18,7 @@ public class IdentityClientTests
         IdentityClientSecretCredential secret = IdentityClientSecretCredential.Generate("primary", out _);
         var descriptor = new IdentityClientDescriptor
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             DisplayName = "Orders",
             Description = "Takes orders.\nShips them.",
             Grants = IdentityClientGrants.AuthorizationCode | IdentityClientGrants.ClientCredentials | IdentityClientGrants.RefreshToken,
@@ -28,14 +28,14 @@ public class IdentityClientTests
             Audiences = { "api://orders" },
             Scopes = { IdentityClientScope.Create("orders.read") },
             Roles = { IdentityClientRole.Create("orders.process", IdentityClientRoleMembers.Applications) },
-            Permissions = { IdentityClientPermission.Delegated("billing-api", "invoices.read") },
+            Permissions = { IdentityClientPermission.Delegated(IdentityClientId.FromName("billing-api"), "invoices.read") },
         };
 
         // Act
         IdentityClient client = IdentityClient.Create(descriptor);
 
         // Assert
-        client.Id.Value.ShouldBe("orders");
+        client.Id.ShouldBe(IdentityClientId.FromName("orders"));
         client.DisplayName.ShouldBe("Orders");
         client.Description.ShouldBe("Takes orders.\nShips them.");
         client.Grants.ShouldBe(descriptor.Grants);
@@ -45,21 +45,21 @@ public class IdentityClientTests
         client.Audiences.Single().Value.ShouldBe("api://orders");
         client.Scopes.Single().Name.Value.ShouldBe("orders.read");
         client.Roles.Single().Name.Value.ShouldBe("orders.process");
-        client.Permissions.Single().ShouldBe(IdentityClientPermission.Delegated("billing-api", "invoices.read"));
+        client.Permissions.Single().ShouldBe(IdentityClientPermission.Delegated(IdentityClientId.FromName("billing-api"), "invoices.read"));
         client.IsConfidential.ShouldBeTrue();
         client.IsLocked.ShouldBeFalse();
         client.Version.ShouldBeNull();
-        client.ToString().ShouldBe("orders");
+        client.ToString().ShouldBe("e2b89555-2aff-5db0-afe6-8c8b4e065cdf");
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - Create: Should apply the defaults of a registration that only names itself")]
     public void Create_WithOnlyAnIdentifier_ShouldApplyTheDefaults()
     {
         // Act
-        IdentityClient client = IdentityClient.Create(new() { Id = "orders", Description = string.Empty });
+        IdentityClient client = IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Description = string.Empty });
 
         // Assert
-        client.DisplayName.ShouldBe("orders");
+        client.DisplayName.ShouldBe("e2b89555-2aff-5db0-afe6-8c8b4e065cdf");
         client.Description.ShouldBeNull();
         client.Grants.ShouldBe(IdentityClientGrants.None);
         client.AccessTokenLifetime.ShouldBe(TimeSpan.FromHours(1));
@@ -76,7 +76,7 @@ public class IdentityClientTests
     public void Create_ThenChangingTheDescriptor_ShouldNotChangeTheRegistration()
     {
         // Arrange
-        var descriptor = new IdentityClientDescriptor { Id = "orders-api", Audiences = { "api://orders" } };
+        var descriptor = new IdentityClientDescriptor { Id = IdentityClientId.FromName("orders-api"), Audiences = { "api://orders" } };
         IdentityClient client = IdentityClient.Create(descriptor);
 
         // Act
@@ -84,7 +84,7 @@ public class IdentityClientTests
         descriptor.Audiences.Add("api://changed");
 
         // Assert
-        client.DisplayName.ShouldBe("orders-api");
+        client.DisplayName.ShouldBe("bec0a3ee-3f3c-599e-bd0b-3b7194e035ba");
         client.Audiences.Count.ShouldBe(1);
     }
 
@@ -108,11 +108,11 @@ public class IdentityClientTests
     {
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", DisplayName = displayName }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), DisplayName = displayName }));
 
         // Assert
         exception.ParamName.ShouldBe("descriptor");
-        exception.Message.ShouldContain("'orders'", Case.Sensitive);
+        exception.Message.ShouldContain($"'{IdentityClientId.FromName("orders")}'", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - Create: Should accept text at its limit and refuse it beyond")]
@@ -123,13 +123,13 @@ public class IdentityClientTests
         string longestDescription = new('d', IdentityClient.MaxDescriptionLength);
 
         // Act
-        IdentityClient atLimit = IdentityClient.Create(new() { Id = "orders", DisplayName = longestName, Description = longestDescription });
+        IdentityClient atLimit = IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), DisplayName = longestName, Description = longestDescription });
         ArgumentException longName = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", DisplayName = longestName + "n" }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), DisplayName = longestName + "n" }));
         ArgumentException longDescription = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Description = longestDescription + "d" }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Description = longestDescription + "d" }));
         ArgumentException controlDescription = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Description = "bell\u0007" }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Description = "bell\u0007" }));
 
         // Assert
         atLimit.DisplayName.ShouldBe(longestName);
@@ -144,10 +144,10 @@ public class IdentityClientTests
     {
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Grants = (IdentityClientGrants)16 }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Grants = (IdentityClientGrants)16 }));
 
         // Assert
-        exception.Message.ShouldContain("'orders'", Case.Sensitive);
+        exception.Message.ShouldContain($"'{IdentityClientId.FromName("orders")}'", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [IdentityHub] - Create: Should refuse an access token lifetime that is not positive or is longer than a day")]
@@ -158,7 +158,7 @@ public class IdentityClientTests
     {
         // Act
         ArgumentOutOfRangeException exception = Should.Throw<ArgumentOutOfRangeException>(
-            () => IdentityClient.Create(new() { Id = "orders", AccessTokenLifetime = TimeSpan.FromSeconds(seconds) }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), AccessTokenLifetime = TimeSpan.FromSeconds(seconds) }));
 
         // Assert
         exception.ParamName.ShouldBe("descriptor");
@@ -169,7 +169,7 @@ public class IdentityClientTests
     public void Create_WithTheLongestLifetime_ShouldKeepIt()
     {
         // Act
-        IdentityClient client = IdentityClient.Create(new() { Id = "orders", AccessTokenLifetime = IdentityClient.MaxAccessTokenLifetime });
+        IdentityClient client = IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), AccessTokenLifetime = IdentityClient.MaxAccessTokenLifetime });
 
         // Assert
         IdentityClient.MaxAccessTokenLifetime.ShouldBe(TimeSpan.FromHours(24));
@@ -182,11 +182,11 @@ public class IdentityClientTests
     {
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders-web", Grants = IdentityClientGrants.AuthorizationCode }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders-web"), Grants = IdentityClientGrants.AuthorizationCode }));
 
         // Assert
         exception.Message.ShouldContain("redirect");
-        exception.Message.ShouldContain("'orders-web'", Case.Sensitive);
+        exception.Message.ShouldContain($"'{IdentityClientId.FromName("orders-web")}'", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - Create: Should refuse a redirect on a registration that does not use the authorization code grant")]
@@ -195,7 +195,7 @@ public class IdentityClientTests
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders-device",
+            Id = IdentityClientId.FromName("orders-device"),
             Grants = IdentityClientGrants.DeviceCode,
             Redirects = { IdentityClientRedirect.Web("https://orders.example/signin") },
         }));
@@ -209,7 +209,7 @@ public class IdentityClientTests
     {
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders-daemon", Grants = IdentityClientGrants.ClientCredentials }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders-daemon"), Grants = IdentityClientGrants.ClientCredentials }));
 
         // Assert
         exception.Message.ShouldContain("credential");
@@ -223,16 +223,16 @@ public class IdentityClientTests
 
         // Act
         ArgumentException alone = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Grants = IdentityClientGrants.RefreshToken }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Grants = IdentityClientGrants.RefreshToken }));
         ArgumentException withClientCredentials = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             Grants = IdentityClientGrants.RefreshToken | IdentityClientGrants.ClientCredentials,
             Credentials = { secret },
         }));
         IdentityClient withDeviceCode = IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             Grants = IdentityClientGrants.RefreshToken | IdentityClientGrants.DeviceCode,
         });
 
@@ -247,10 +247,10 @@ public class IdentityClientTests
     {
         // Act
         ArgumentException scope = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders-api", Scopes = { IdentityClientScope.Create("orders.read") } }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders-api"), Scopes = { IdentityClientScope.Create("orders.read") } }));
         ArgumentException role = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders-api",
+            Id = IdentityClientId.FromName("orders-api"),
             Roles = { IdentityClientRole.Create("orders.process", IdentityClientRoleMembers.Users) },
         }));
 
@@ -269,7 +269,7 @@ public class IdentityClientTests
         // Act
         ArgumentException redirect = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             Grants = IdentityClientGrants.AuthorizationCode,
             Redirects =
             {
@@ -278,18 +278,18 @@ public class IdentityClientTests
             },
         }));
         ArgumentException credential = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Credentials = { first, second } }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Credentials = { first, second } }));
         ArgumentException audience = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Audiences = { "api://orders", "api://orders" } }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Audiences = { "api://orders", "api://orders" } }));
         ArgumentException scope = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             Audiences = { "api://orders" },
             Scopes = { IdentityClientScope.Create("orders.read"), IdentityClientScope.Create("orders.read", "Again") },
         }));
         ArgumentException role = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             Audiences = { "api://orders" },
             Roles =
             {
@@ -299,11 +299,11 @@ public class IdentityClientTests
         }));
         ArgumentException permission = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             Permissions =
             {
-                IdentityClientPermission.Delegated("billing-api", "invoices.read"),
-                IdentityClientPermission.Delegated("billing-api", "invoices.read"),
+                IdentityClientPermission.Delegated(IdentityClientId.FromName("billing-api"), "invoices.read"),
+                IdentityClientPermission.Delegated(IdentityClientId.FromName("billing-api"), "invoices.read"),
             },
         }));
 
@@ -313,7 +313,7 @@ public class IdentityClientTests
         audience.Message.ShouldContain("'api://orders'", Case.Sensitive);
         scope.Message.ShouldContain("'orders.read'", Case.Sensitive);
         role.Message.ShouldContain("'orders.process'", Case.Sensitive);
-        permission.Message.ShouldContain("billing-api/invoices.read", Case.Sensitive);
+        permission.Message.ShouldContain($"{IdentityClientId.FromName("billing-api")}/invoices.read", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - Create: Should allow a scope and a role of one name, and one name under both permission kinds")]
@@ -322,14 +322,14 @@ public class IdentityClientTests
         // Act
         IdentityClient client = IdentityClient.Create(new()
         {
-            Id = "orders-api",
+            Id = IdentityClientId.FromName("orders-api"),
             Audiences = { "api://orders" },
             Scopes = { IdentityClientScope.Create("orders.read") },
             Roles = { IdentityClientRole.Create("orders.read", IdentityClientRoleMembers.Applications) },
             Permissions =
             {
-                IdentityClientPermission.Delegated("orders-api", "orders.read"),
-                IdentityClientPermission.Application("orders-api", "orders.read"),
+                IdentityClientPermission.Delegated(IdentityClientId.FromName("orders-api"), "orders.read"),
+                IdentityClientPermission.Application(IdentityClientId.FromName("orders-api"), "orders.read"),
             },
         });
 
@@ -345,20 +345,20 @@ public class IdentityClientTests
         // Act
         ArgumentException redirect = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             Grants = IdentityClientGrants.AuthorizationCode,
             Redirects = { default },
         }));
         ArgumentException credential = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Credentials = { null! } }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Credentials = { null! } }));
         ArgumentException audience = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Audiences = { default } }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Audiences = { default } }));
         ArgumentException scope = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Audiences = { "api://orders" }, Scopes = { null! } }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Audiences = { "api://orders" }, Scopes = { null! } }));
         ArgumentException role = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Audiences = { "api://orders" }, Roles = { null! } }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Audiences = { "api://orders" }, Roles = { null! } }));
         ArgumentException permission = Should.Throw<ArgumentException>(
-            () => IdentityClient.Create(new() { Id = "orders", Permissions = { default } }));
+            () => IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), Permissions = { default } }));
 
         // Assert
         redirect.Message.ShouldContain("'Redirects'", Case.Sensitive);
@@ -407,7 +407,7 @@ public class IdentityClientTests
         ArgumentException permissions = Should.Throw<ArgumentException>(() =>
         {
             IdentityClientDescriptor descriptor = Maximal();
-            descriptor.Permissions.Add(IdentityClientPermission.Delegated("billing-api", "one.more"));
+            descriptor.Permissions.Add(IdentityClientPermission.Delegated(IdentityClientId.FromName("billing-api"), "one.more"));
             IdentityClient.Create(descriptor);
         });
 
@@ -432,10 +432,10 @@ public class IdentityClientTests
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders-api",
+            Id = IdentityClientId.FromName("orders-api"),
             Audiences = { "api://orders" },
             Scopes = { IdentityClientScope.Create("orders.read") },
-            Permissions = { IdentityClientPermission.Delegated("orders-api", "orders.write") },
+            Permissions = { IdentityClientPermission.Delegated(IdentityClientId.FromName("orders-api"), "orders.write") },
         }));
 
         // Assert
@@ -449,10 +449,10 @@ public class IdentityClientTests
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(() => IdentityClient.Create(new()
         {
-            Id = "orders-api",
+            Id = IdentityClientId.FromName("orders-api"),
             Audiences = { "api://orders" },
             Roles = { IdentityClientRole.Create("orders.approve", IdentityClientRoleMembers.Users) },
-            Permissions = { IdentityClientPermission.Application("orders-api", "orders.approve") },
+            Permissions = { IdentityClientPermission.Application(IdentityClientId.FromName("orders-api"), "orders.approve") },
         }));
 
         // Assert
@@ -466,12 +466,12 @@ public class IdentityClientTests
         // Act
         IdentityClient client = IdentityClient.Create(new()
         {
-            Id = "orders-web",
-            Permissions = { IdentityClientPermission.Delegated("no-such-api", "no.such.scope") },
+            Id = IdentityClientId.FromName("orders-web"),
+            Permissions = { IdentityClientPermission.Delegated(IdentityClientId.FromName("no-such-api"), "no.such.scope") },
         });
 
         // Assert
-        client.Permissions.Single().Resource.Value.ShouldBe("no-such-api");
+        client.Permissions.Single().Resource.ShouldBe(IdentityClientId.FromName("no-such-api"));
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - Exposes: Should match a scope for a delegated permission and an application role for an application one")]
@@ -480,7 +480,7 @@ public class IdentityClientTests
         // Arrange
         IdentityClient api = IdentityClient.Create(new()
         {
-            Id = "orders-api",
+            Id = IdentityClientId.FromName("orders-api"),
             Audiences = { "api://orders" },
             Scopes = { IdentityClientScope.Create("orders.read") },
             Roles =
@@ -491,40 +491,11 @@ public class IdentityClientTests
         });
 
         // Act + Assert
-        api.Exposes(IdentityClientPermission.Delegated("orders-api", "orders.read")).ShouldBeTrue();
-        api.Exposes(IdentityClientPermission.Delegated("orders-api", "orders.process")).ShouldBeFalse();
-        api.Exposes(IdentityClientPermission.Application("orders-api", "orders.process")).ShouldBeTrue();
-        api.Exposes(IdentityClientPermission.Application("orders-api", "orders.approve")).ShouldBeFalse();
-        api.Exposes(IdentityClientPermission.Application("orders-api", "orders.read")).ShouldBeFalse();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [IdentityHub] - From: Should return an IdentityClient as it is and copy another implementation through validation")]
-    public void From_WithEachImplementation_ShouldReturnAValidatedRegistration()
-    {
-        // Arrange
-        IdentityClient known = TestClients.Api();
-        var foreign = new StubIdentityClient
-        {
-            Id = "foreign-api",
-            DisplayName = "Foreign",
-            Audiences = [new IdentityClientAudience("api://foreign")],
-            IsLocked = true,
-            Version = new IdentityHubRecordVersion("9"),
-        };
-        var invalid = new StubIdentityClient { Id = "foreign-web", DisplayName = "Foreign", Grants = IdentityClientGrants.AuthorizationCode };
-
-        // Act
-        IdentityClient same = IdentityClient.From(known);
-        IdentityClient copied = IdentityClient.From(foreign);
-        ArgumentException refused = Should.Throw<ArgumentException>(() => IdentityClient.From(invalid));
-
-        // Assert
-        same.ShouldBeSameAs(known);
-        copied.Id.Value.ShouldBe("foreign-api");
-        copied.Audiences.Single().Value.ShouldBe("api://foreign");
-        copied.IsLocked.ShouldBeFalse();
-        copied.Version.ShouldBeNull();
-        refused.Message.ShouldContain("'foreign-web'", Case.Sensitive);
+        api.Exposes(IdentityClientPermission.Delegated(IdentityClientId.FromName("orders-api"), "orders.read")).ShouldBeTrue();
+        api.Exposes(IdentityClientPermission.Delegated(IdentityClientId.FromName("orders-api"), "orders.process")).ShouldBeFalse();
+        api.Exposes(IdentityClientPermission.Application(IdentityClientId.FromName("orders-api"), "orders.process")).ShouldBeTrue();
+        api.Exposes(IdentityClientPermission.Application(IdentityClientId.FromName("orders-api"), "orders.approve")).ShouldBeFalse();
+        api.Exposes(IdentityClientPermission.Application(IdentityClientId.FromName("orders-api"), "orders.read")).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - AsLocked, AsStored: Should set what a registry says about a registration and nothing else")]
@@ -554,7 +525,7 @@ public class IdentityClientTests
     {
         var descriptor = new IdentityClientDescriptor
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             Grants = IdentityClientGrants.AuthorizationCode | IdentityClientGrants.ClientCredentials,
         };
 
@@ -585,7 +556,7 @@ public class IdentityClientTests
 
         for (int index = 0; index < IdentityClient.MaxPermissionCount; index++)
         {
-            descriptor.Permissions.Add(IdentityClientPermission.Delegated("billing-api", $"invoices.scope.{index}"));
+            descriptor.Permissions.Add(IdentityClientPermission.Delegated(IdentityClientId.FromName("billing-api"), $"invoices.scope.{index}"));
         }
 
         return descriptor;

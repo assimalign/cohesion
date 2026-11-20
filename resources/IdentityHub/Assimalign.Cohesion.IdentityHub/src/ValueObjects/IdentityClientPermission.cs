@@ -14,9 +14,11 @@ namespace Assimalign.Cohesion.IdentityHub;
 /// permission for that user; it never widens one.
 /// </para>
 /// <para>
-/// A permission refers to its API by <see cref="Resource"/> and <see cref="Name"/>, not by an
-/// opaque identifier, so that code can state it. The reference is resolved when a token is
-/// issued: a permission whose API or name does not exist then grants nothing.
+/// A permission refers to its API by the registration's identifier (<see cref="Resource"/>)
+/// and the name of the scope or role (<see cref="Name"/>), so that code can state it:
+/// <see cref="IdentityClientId.FromName"/> gives the identifier of an API defined under a name.
+/// The reference is resolved when a token is issued: a permission whose API or name does not
+/// exist then grants nothing.
 /// <see langword="default"/> is not a permission and every registration boundary refuses it.
 /// </para>
 /// </remarks>
@@ -37,7 +39,7 @@ public readonly record struct IdentityClientPermission
         IdentityClientPermissionName name,
         IdentityClientPermissionKind kind)
     {
-        if (resource.Value is null)
+        if (resource.Value == Guid.Empty)
         {
             throw new ArgumentException(ErrorMessages.ClientIdRequired, nameof(resource));
         }
@@ -101,12 +103,12 @@ public readonly record struct IdentityClientPermission
     }
 
     /// <summary>
-    /// Returns the permission as the API, the name, and how it is exercised, such as
-    /// <c>orders-api/orders.read (Delegated)</c>.
+    /// Returns the permission as the API's identifier, the name, and how it is exercised, such
+    /// as <c>bec0a3ee-3f3c-599e-bd0b-3b7194e035ba/orders.read (Delegated)</c>.
     /// </summary>
     /// <returns>The permission as text, or an empty string for <see langword="default"/>.</returns>
     public override string ToString()
     {
-        return Resource.Value is null ? string.Empty : $"{Resource}/{Name} ({Kind})";
+        return Resource.Value == Guid.Empty ? string.Empty : $"{Resource}/{Name} ({Kind})";
     }
 }

@@ -25,13 +25,14 @@ public sealed class IdentityClientDescriptor
 {
     /// <summary>
     /// Gets or sets the registration's identifier: the OAuth <c>client_id</c>. Required at
-    /// materialization.
+    /// materialization. A registration defined in code derives it from a name with
+    /// <see cref="IdentityClientId.FromName"/>.
     /// </summary>
     public IdentityClientId Id { get; set; }
 
     /// <summary>
     /// Gets or sets the name a person is shown for the application: 1 to 128 characters with no
-    /// control character. When it is <see langword="null"/>, the identifier is shown.
+    /// control character. When it is <see langword="null"/>, the identifier's text is shown.
     /// </summary>
     public string? DisplayName { get; set; }
 
@@ -88,13 +89,13 @@ public sealed class IdentityClientDescriptor
     /// a replacement.
     /// </summary>
     /// <remarks>
-    /// <see cref="IIdentityClient.IsLocked"/> and <see cref="IIdentityClient.Version"/> are not
+    /// <see cref="IdentityClient.IsLocked"/> and <see cref="IdentityClient.Version"/> are not
     /// contents: a registry sets them, so they are not copied.
     /// </remarks>
     /// <param name="client">The registration to copy.</param>
     /// <returns>A descriptor the caller may change freely.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="client"/> is <see langword="null"/>.</exception>
-    public static IdentityClientDescriptor From(IIdentityClient client)
+    public static IdentityClientDescriptor From(IdentityClient client)
     {
         ArgumentNullException.ThrowIfNull(client);
 
@@ -116,13 +117,8 @@ public sealed class IdentityClientDescriptor
         return descriptor;
     }
 
-    private static void Copy<T>(IReadOnlyList<T>? source, IList<T> destination)
+    private static void Copy<T>(IReadOnlyList<T> source, IList<T> destination)
     {
-        if (source is null)
-        {
-            return;
-        }
-
         for (int index = 0; index < source.Count; index++)
         {
             destination.Add(source[index]);

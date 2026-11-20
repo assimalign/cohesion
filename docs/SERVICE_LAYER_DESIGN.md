@@ -194,9 +194,9 @@ Current state:
 - `IdentityHub` is blocked by the current incompleteness of `libraries/IdentityModel`. The identity service should not invent its own foundational object model if the shared identity contracts are still partial.
 
 Root abstractions:
-- Reuse `IIdentityHub`, `IIdentityClient`, `IIdentityProvider`, `IIdentityContext`, `IIdentityResult`, and related client abstractions.
+- Reuse `IIdentityHub`, `IIdentityProvider`, `IIdentityContext`, `IIdentityResult`, and related client abstractions.
 - Add `ITokenService`, `IFederationProvider`, and `IProvisioningService`.
-- `IIdentityClient` is defined: it is an app registration, one application as a client, an API, or both, served by `IIdentityClientRegistry` in the root. IdentityHub is code-first, and an identity object defined in code is locked: it is read like any other and changes only in the code, while the same kind of object created at run time lives in the store. Every later identity object (auth flows, conditional access) follows that rule. The model and the reasoning are in the root's `docs/DESIGN.md`, "App registrations".
+- The app registration is defined as the concrete `IdentityClient`, which replaced the `IIdentityClient` placeholder (2026-11-20): one application as a client, an API, or both, identified by a GUID that `IdentityClientId.FromName` derives from a name, and served by `IIdentityClientRegistry` in the root. IdentityHub is code-first, and an identity object defined in code is locked: it is read like any other and changes only in the code, while the same kind of object created at run time lives in the store. Every later identity object (auth flows, conditional access) follows that rule. The model and the reasoning are in the root's `docs/DESIGN.md`, "App registrations".
 - Persistence is one seam, `IIdentityHubStore`: a versioned record store whose payload layouts belong to feature-owned codecs. It replaces the earlier plan of one typed store per entity (`IKeyStore`, `IDirectoryStore`, `ISessionStore`, `IAuditStore`). The contract and the reasoning are in `resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/DESIGN.md`.
 
 Project plan:

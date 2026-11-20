@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.IdentityHub.Internal;
 /// </summary>
 internal static class IdentityClientGrammar
 {
-    internal const int MaxIdLength = 128;
+    internal const int MaxNameLength = 128;
     internal const int MaxCredentialIdLength = 64;
     internal const int MaxPermissionNameLength = 128;
     internal const int MaxAudienceLength = 256;

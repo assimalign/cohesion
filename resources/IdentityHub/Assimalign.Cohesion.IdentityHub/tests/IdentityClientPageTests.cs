@@ -12,7 +12,7 @@ public class IdentityClientPageTests
     public void Constructor_WithRegistrations_ShouldCopyThem()
     {
         // Arrange
-        var clients = new List<IIdentityClient> { TestClients.Api() };
+        var clients = new List<IdentityClient> { TestClients.Api() };
 
         // Act
         var page = new IdentityClientPage(clients, "next");

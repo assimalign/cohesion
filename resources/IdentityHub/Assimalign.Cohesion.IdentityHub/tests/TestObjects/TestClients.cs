@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.IdentityHub.Tests;
 
 /// <summary>
 /// App registrations the tests share: an API, a web application that signs users in, and a
-/// daemon that authenticates as itself.
+/// daemon that authenticates as itself. Each takes the name its identifier is derived from.
 /// </summary>
 internal static class TestClients
 {
@@ -16,11 +16,11 @@ internal static class TestClients
     /// An API: one audience, the scope <c>orders.read</c>, and the role <c>orders.process</c>
     /// open to applications.
     /// </summary>
-    public static IdentityClient Api(string id = "orders-api", string audience = "api://orders")
+    public static IdentityClient Api(string name = "orders-api", string audience = "api://orders")
     {
         return IdentityClient.Create(new()
         {
-            Id = id,
+            Id = IdentityClientId.FromName(name),
             DisplayName = "Orders API",
             Audiences = { audience },
             Scopes = { IdentityClientScope.Create("orders.read", "Read orders") },
@@ -31,28 +31,28 @@ internal static class TestClients
     /// <summary>
     /// A public web application that signs users in and reads orders on their behalf.
     /// </summary>
-    public static IdentityClient Web(string id = "orders-web", string api = "orders-api")
+    public static IdentityClient Web(string name = "orders-web", string api = "orders-api")
     {
         return IdentityClient.Create(new()
         {
-            Id = id,
+            Id = IdentityClientId.FromName(name),
             Grants = IdentityClientGrants.AuthorizationCode | IdentityClientGrants.RefreshToken,
             Redirects = { IdentityClientRedirect.Web("https://orders.example/signin") },
-            Permissions = { IdentityClientPermission.Delegated(api, "orders.read") },
+            Permissions = { IdentityClientPermission.Delegated(IdentityClientId.FromName(api), "orders.read") },
         });
     }
 
     /// <summary>
     /// A confidential daemon that processes orders as itself.
     /// </summary>
-    public static IdentityClient Daemon(string id = "orders-daemon", string api = "orders-api")
+    public static IdentityClient Daemon(string name = "orders-daemon", string api = "orders-api")
     {
         return IdentityClient.Create(new()
         {
-            Id = id,
+            Id = IdentityClientId.FromName(name),
             Grants = IdentityClientGrants.ClientCredentials,
             Credentials = { IdentityClientSecretCredential.Generate("primary", out _) },
-            Permissions = { IdentityClientPermission.Application(api, "orders.process") },
+            Permissions = { IdentityClientPermission.Application(IdentityClientId.FromName(api), "orders.process") },
         });
     }
 

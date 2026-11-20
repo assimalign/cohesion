@@ -12,7 +12,7 @@ seams every other IdentityHub package builds against, and the first of those ide
 - **The store seam.** `IIdentityHubStore` is the one contract between the hub and the data layer
   that keeps its state. The hub reads and writes every durable fact through it and depends on no
   concrete store, so the same hub runs on memory, on an embedded database, or on a managed service.
-- **App registrations.** `IIdentityClient` is an application the hub knows, as a client, as an
+- **App registrations.** `IdentityClient` is an application the hub knows, as a client, as an
   API, or as both, and `IIdentityClientRegistry` serves them: the ones defined in code, which are
   locked, over the ones kept in the store. Every later identity object follows the same rule
   (*Code-first objects are locked*).
@@ -328,16 +328,17 @@ root does not already have.
 ### What a registration is
 
 An app registration is the hub's first identity object: one application the hub knows, and
-everything the hub needs to issue a token to it or for it. `IIdentityClient` is the contract,
-`IdentityClient` the implementation, and `IIdentityClientRegistry` what serves and changes them.
+everything the hub needs to issue a token to it or for it. `IdentityClient` is the registration,
+a concrete type with no interface beside it (*Why a registration is a concrete type*), and
+`IIdentityClientRegistry` is what serves and changes registrations.
 
 The shape follows the app registration of Microsoft Entra: one object is a client, an API, or
 both. It is that one feature and not a copy of Entra (see *What it leaves out*).
 
 | A registration holds | Meaning | Limit |
 | --- | --- | --- |
-| `Id` | The OAuth `client_id` | 128 characters |
-| `DisplayName`, `Description` | What a person is shown. The display name defaults to the identifier | 128 and 256 characters |
+| `Id` | The OAuth `client_id`: a GUID, derived from a name or random (*Deterministic identifiers*) | 36 characters as text |
+| `DisplayName`, `Description` | What a person is shown. The display name defaults to the identifier's text | 128 and 256 characters |
 | `Grants` | The grants the application may use: authorization code, client credentials, device code, refresh token | Flags |
 | `AccessTokenLifetime` | How long an access token issued to it is valid. One hour unless set | 24 hours |
 | `Redirects` | Where a user may be sent back to, each with its platform: web, single-page, or native | 64 |
@@ -353,7 +354,7 @@ A registration is defined with one object initializer and is immutable from then
 ```csharp
 IdentityClient api = IdentityClient.Create(new()
 {
-    Id = "orders-api",
+    Id = IdentityClientId.FromName("orders-api"),
     DisplayName = "Orders API",
     Audiences = { "api://orders" },
     Scopes = { IdentityClientScope.Create("orders.read", "Read orders") },
@@ -362,18 +363,20 @@ IdentityClient api = IdentityClient.Create(new()
 
 IdentityClient web = IdentityClient.Create(new()
 {
-    Id = "orders-web",
+    Id = IdentityClientId.FromName("orders-web"),
+    DisplayName = "Orders web",
     Grants = IdentityClientGrants.AuthorizationCode | IdentityClientGrants.RefreshToken,
     Redirects = { IdentityClientRedirect.Web("https://orders.example/signin") },
-    Permissions = { IdentityClientPermission.Delegated("orders-api", "orders.read") },
+    Permissions = { IdentityClientPermission.Delegated(api.Id, "orders.read") },
 });
 
 IdentityClient daemon = IdentityClient.Create(new()
 {
-    Id = "orders-daemon",
+    Id = IdentityClientId.FromName("orders-daemon"),
+    DisplayName = "Orders daemon",
     Grants = IdentityClientGrants.ClientCredentials,
     Credentials = { IdentityClientCertificateCredential.Create("deploy-2026", certificate) },
-    Permissions = { IdentityClientPermission.Application("orders-api", "orders.process") },
+    Permissions = { IdentityClientPermission.Application(api.Id, "orders.process") },
 });
 
 IdentityClientRegistry registry = IdentityClientRegistry.Create(store, [api, web, daemon]);
@@ -384,6 +387,28 @@ checks every rule in the next section, and refuses the whole descriptor with an 
 that names the registration and the rule. Nothing constructs a registration any other way: a
 registration read back from a store goes through the same `Create`, so a stored record that breaks
 a rule is reported as corrupt and is never served.
+
+### Why a registration is a concrete type
+
+`IdentityClient` is a `public sealed class` with a private constructor and `Create`, and there is
+no `IIdentityClient` (owner decision, 2026-11-20). Until that day the interface was the contract
+and `IdentityClient` its one implementation.
+
+- **A registration is a validated value with one behavior.** Every rule is checked once, in
+  `Create`, and nothing about a registration varies by implementation. An interface promised a
+  second implementation that had no reason to exist.
+- **The interface cost a trust problem.** A registry could be handed an implementation it did not
+  create, which could break a rule or report its own `IsLocked`. The registry therefore copied
+  every foreign implementation through `Create` before it kept or stored it. With a concrete type
+  that path is gone: what a registry holds is, by construction, what `Create` checked.
+- **The seam consumers swap is the registry.** `IIdentityClientRegistry` stays an interface, as
+  does `IIdentityHubStore`. Those are the two things with more than one implementation.
+
+This departs from the repository's interface-first rule (`general-rules.md`, "Public APIs use
+interfaces"). The departure covers this one type, is marked at its declaration, and follows the
+same reasoning as `IdentityClientCredential`, which has no interface either. The cost is
+accepted: a test cannot substitute a fake registration. It builds a real one with `Create`, which
+is one object initializer.
 
 ### Code-first objects are locked
 
@@ -441,6 +466,39 @@ A stored registration that code shadows is left in the store. It is served again
 shadows it is removed, which keeps a deployment reversible, and until then its audiences stay
 taken among stored registrations. Nothing reports or removes such a record today (#1925).
 
+### Code adopts a registration by its identifier
+
+Locking does not close the API. A registration can be created at run time first and brought under
+code later, the way a database object created with plain SQL can later be declared in the schema
+the code owns (owner decision, 2026-11-20):
+
+1. An operator creates a registration through the API under the identifier
+   `IdentityClientId.FromName("orders-api")`. It is stored, and it can be replaced and removed.
+2. A later deployment defines `orders-api` in code. `FromName` derives the same identifier on
+   every machine, so the code definition and the stored registration have one identifier.
+3. From that deployment on the registry serves the code definition, locked. The stored record is
+   shadowed, and every write that names the identifier is answered `Locked`.
+
+Three consequences are decisions and not accidents:
+
+- **Code wins whole. Nothing is merged.** The registration served after adoption is exactly what
+  the code defines. A redirect, a permission, or a credential that only the stored registration
+  held is no longer served, so **a secret issued through the API stops being accepted at the
+  deployment that adopts the registration**. The code definition has to carry the credentials the
+  application will use, and the application has to hold them, before that deployment. Merging the
+  stored credentials into the code definition was refused for the reason given above: "locked"
+  would no longer mean that the code is the whole definition.
+- **Adoption is by identifier, not by name.** A registration created under a random identifier
+  (`IdentityClientId.New()`) is adopted by no name. Code can still adopt it by defining a
+  registration with that identifier written out (`IdentityClientId.Parse("...")`).
+- **Adoption is reversible.** The stored record is left in place (#1925), so a deployment that
+  drops the code definition serves the stored registration again, with the credentials it had.
+
+What adoption does not settle is what was issued before it. A token or a grant issued to the
+stored registration carries the same `client_id` as the code definition, so it stays valid for its
+lifetime. Whether a grant survives a change of its registration's definition is the hub service's
+decision (#1917).
+
 ### The rules a registration keeps
 
 `IdentityClient.Create` refuses a descriptor that breaks any of these, so no other code has to
@@ -468,7 +526,9 @@ Each single-valued input is a value object with one rule (`general-rules.md`).
 
 | Type | Rule | Why |
 | --- | --- | --- |
-| `IdentityClientId`, `IdentityClientCredentialId` | The unreserved characters of RFC 3986 section 2.3, starting and ending with a letter or digit. Ordinal | It needs no escaping in a URL path, a form body, or HTTP Basic authentication, and it is the record key |
+| `IdentityClientId` | A GUID. Its text is the 36-character form with hyphens, in lowercase. The empty GUID identifies no registration, and every boundary refuses it | It is the OAuth `client_id` and the record key, and it has one shape whether it was derived from a name or generated |
+| `IdentityClientName` | 1 to 128 unreserved characters of RFC 3986 section 2.3, starting and ending with a letter or digit. Compared without regard to case | It is what `IdentityClientId.FromName` derives an identifier from, and what a person types in code and in an API call |
+| `IdentityClientCredentialId` | The same characters as a name, 1 to 64 of them. Ordinal | It names one credential inside its registration and is stored as written |
 | `IdentityClientPermissionName` | A scope token of RFC 6749 section 3.3. Ordinal | It is one entry of a space-delimited `scope` parameter |
 | `IdentityClientAudience` | The StringOrURI of RFC 7519 section 2, in visible ASCII, with no fragment. Ordinal | It is compared with the `aud` claim as a string |
 | `IdentityClientRedirect` | A URI in RFC 3986 characters and a platform. `https`, or `http` to a host written as `localhost` or a loopback address; a native application may use a private scheme that holds a `.` (RFC 8252 section 7.1). No wildcard, fragment, or user information | It is where an authorization code is sent |
@@ -478,6 +538,44 @@ OAuth 2.1 requires. Three refusals exist because a parser and a browser can read
 ways: a backslash, which a browser reads as a slash and other parsers do not; an authority not
 introduced by `//`; and the host name `loopback`, which .NET's `Uri` reports as `localhost`. The
 host is therefore read from the string as written, not from the parser.
+
+### Deterministic identifiers
+
+`IdentityClientId` is a GUID (owner decision, 2026-11-20). Until then it was a string in the name
+grammar, and the name was the identifier.
+
+- **`IdentityClientId.FromName(name)` derives the identifier.** It is the RFC 9562 version 5 UUID
+  of the lowercase name, as UTF-8, in the namespace `14af0e0d-a974-4487-871d-ef1dd83f6ad3`:
+  `orders-api` derives `bec0a3ee-3f3c-599e-bd0b-3b7194e035ba`. The same shape as
+  `GatewayId.FromName` and `ProviderId.FromName`, on Core's `Guid.AsDeterministicGuid`.
+- **`IdentityClientId.New()` is random**, for a registration that no code will ever name.
+- **The namespace and the lowercasing are the contract.** A script in any language derives the
+  same identifier, which is what lets a pipeline create a registration through the API today that
+  code adopts tomorrow. Changing either one changes every derived identifier and detaches every
+  stored registration from the code that names it. The tests pin three names to identifiers
+  computed with Python's `uuid.uuid5`, so the contract is not whatever this implementation does.
+- **Names compare without regard to case** and are lowercased before they are hashed. This is the
+  hub's rule and not a specification's: `orders-api` in code and `Orders-API` typed into an API
+  call must not be two registrations that silently never meet.
+- **Version 5 hashes with SHA-1, which is acceptable here** because the identifier is not a
+  secret and protects nothing. Anyone who knows a name can compute its identifier, and a
+  `client_id` is public in any case.
+
+Why a GUID and not the name itself: every identifier has one fixed shape, whether a person named
+it or the hub generated it, and the name stops being something a rename has to preserve on the
+wire. The cost is accepted: an identifier no longer says which application it is.
+
+**The name is not kept on the registration.** The owner's sketch passes an identifier, not a name,
+and a registration created under a random identifier has no name to keep. Two things follow:
+
+- `DisplayName` is what tells a person which application a registration is. It defaults to the
+  identifier's text, so a registration defined with no display name is a bare GUID wherever it is
+  shown.
+- A message that refuses a registration names it as `Orders API (bec0a3ee-...)`, display name
+  first, and as the bare identifier when there is no display name.
+
+Keeping the name as a field of the registration and of the stored layout is an open decision
+(*Non-goals and open decisions*).
 
 ### Credentials
 
@@ -532,9 +630,10 @@ registry drops a stored registration that code shadows after the store has count
 ends when the continuation is null. The registry's continuation wraps the store's, and a token it
 did not issue is answered with `StoreContinuationInvalid`.
 
-A registry does not trust an `IIdentityClient` it did not create. An implementation other than
-`IdentityClient` is copied through `IdentityClient.Create` before it is kept or stored, so a
-foreign implementation cannot carry a rule violation, or an `IsLocked` it set itself, into the hub.
+A registry is handed only what `IdentityClient.Create` produced, because nothing else constructs
+a registration. It still never takes `IsLocked` or `Version` from its input: a registration read
+from one registry and added to another is stored for its contents, and served back with the
+state the second registry gives it.
 
 ### The stored layout
 
@@ -543,7 +642,7 @@ Stored registrations are the first record set built on the store seam.
 | Part | Value |
 | --- | --- |
 | Record set | `clients` |
-| Key | The registration's identifier |
+| Key | The registration's identifier, in its one spelling: 36 lowercase characters with hyphens |
 | Index entries | One unique `audience` entry per audience, which is what keeps an audience with one registration |
 | Payload | UTF-8 JSON with a layout version, `"v": 1` |
 | Expiry | None |
@@ -553,6 +652,12 @@ unknown member is fatal, and so is a layout version other than 1: a registration
 wrote is refused by an older one, not half read. Empty lists are left out. A maximal registration
 is under half of the store's 1 MiB payload limit, and a test holds it there. A payload never holds
 a secret: a secret credential is stored as its salt, verifier, and iteration count.
+
+An identifier is stored in one spelling, in the key and in a permission's `resource` alike. A key
+or a `resource` that is uppercase, has braces or no hyphens, is the empty GUID, or is not a GUID
+is a corrupt record and is never read as "close enough": two spellings of one identifier would be
+two keys for one registration. The layout version stayed 1 when the identifier became a GUID,
+because no hub has been released that wrote the earlier form.
 
 ### What it leaves out
 
@@ -578,17 +683,24 @@ The model, the registry, and the stored layout are in the root, and nothing call
 - `IdentityHub.Hosting` still issues tokens from `IIdentityHubApplicationBuilder.AddClient` and
   `IdentityHubClientOptions`. A registration defined with `IdentityClient.Create` is not a client
   the token endpoint knows until Hosting adopts the registry (#1913).
-- No web API manages stored registrations (#1924).
+- The builder has no verb for a code-first registration yet. The one designed for it is
+  `builder.AddClient(IdentityClientId.FromName("orders-api"), client => { ... })`, where the
+  callback fills an `IdentityClientDescriptor`. It replaces today's `AddClient(Action<IdentityHubClientOptions>)`
+  in the change that moves the token endpoint onto the registry (#1913), because a verb that
+  registers a client the token endpoint does not serve would be a trap.
+- No web API manages stored registrations (#1924). Run-time creation exists below it:
+  `IIdentityClientRegistry.TryAddAsync`. The endpoint derives the identifier with `FromName` when
+  the caller gives a name, which is what makes the registration adoptable.
 - `IdentityHub.Models` holds older application DTOs with a different shape. They are untouched
   and are reconciled with this model when the web API is designed (#1924).
-- `IIdentityClient` shares the word "client" with the `IdentityHub.Client` package, which is the
-  library an application uses to call a hub. The interface kept the name it had as a placeholder.
+- `IdentityClient` shares the word "client" with the `IdentityHub.Client` package, which is the
+  library an application uses to call a hub. The type kept the name its placeholder interface had.
 
 ## The application seam
 
 The area root owns the public contracts composed by an IdentityHub resource. `IIdentityHubApplicationBuilder` declares token audiences with `AddAudience`, registers OAuth clients with `AddClient`, and builds `IIdentityHubApplication`. The public concrete application, builder, and context live in `Assimalign.Cohesion.IdentityHub.Hosting`.
 
-`AddClient` and `IdentityHubClientOptions` predate the app registration model and still drive Hosting: a non-empty `ClientSecret` enables `client_credentials`, `AllowDeviceAuthorization` enables the device grant, clients list the audiences they may request, and build fails if a client names an undeclared audience or enables no grant. They are transitional. When Hosting adopts the registry (#1913), the builder takes registrations defined with `IdentityClient.Create`, and `AddAudience`, `AddClient`, and `IdentityHubClientOptions` are reshaped onto that model or retired.
+`AddClient` and `IdentityHubClientOptions` predate the app registration model and still drive Hosting: a non-empty `ClientSecret` enables `client_credentials`, `AllowDeviceAuthorization` enables the device grant, clients list the audiences they may request, and build fails if a client names an undeclared audience or enables no grant. They are transitional. When Hosting adopts the registry (#1913), `AddClient` becomes `AddClient(IdentityClientId id, Action<IdentityClientDescriptor> configure)`, which defines a locked registration, and `AddAudience` and `IdentityHubClientOptions` are reshaped onto that model or retired.
 
 The builder has no verb for a store yet. `IdentityHub.Hosting` still keeps its device
 authorizations, signing key, and clients in its own internal types, and moving them onto
@@ -624,7 +736,8 @@ task through `build/Targets/Build.ErrorMessages.targets`. The generated source s
 Six interfaces in `Abstractions/` are empty or nearly so and predate both seams: `IIdentityHub`,
 `IIdentityClientAdapter`, `IIdentityClientContext`, `IIdentityContext`, `IIdentityProvider`, and
 `IIdentityResult`. Nothing implements or consumes them. A seventh, `IIdentityClient`, was an
-empty placeholder for an app registration and is now defined (*App registrations*).
+empty placeholder for an app registration. It was defined on 2026-11-19 and removed the next day
+in favor of the concrete `IdentityClient` (*Why a registration is a concrete type*).
 `docs/SERVICE_LAYER_DESIGN.md` names the six as the future hub service contracts, so they are left
 untouched here. One of them is already wrong for that role: `IIdentityProvider.Authenticate`
 returns a `ClaimsPrincipal`, while the area builds on IdentityModel's subject and claim contracts.
@@ -634,6 +747,8 @@ Defining or retiring them is its own increment, the one in which the issuer logi
 ## Removed types
 
 Three public types were removed when the store seam was added. None had a caller in the repository.
+A fourth, the `IIdentityClient` interface, was removed on 2026-11-20 when the registration became
+a concrete type (*Why a registration is a concrete type*).
 
 - `AuthorizationType`: an empty enum declared in a namespace that did not match the project.
 - `DateTimeUtil` and `EpochTime`: date helpers unrelated to an identity hub, whose documentation
@@ -662,6 +777,11 @@ and the app registration work under #69 (delivered here as #1923):
 | Limits (key 512, name 64, payload 1 MiB, 16 index entries) | Provisional | The first durable store (#1916) |
 | Builder verb for a store, and Hosting on the store | None; Hosting keeps internal state | The next increment (#1913) |
 | Code-first clients versus stored clients | Decided 2026-11-19: both. A registration defined in code is locked and never stored; one created at run time is stored (*App registrations*) | Hosting adopting the registry (#1913) |
+| A registration as a concrete type | Decided 2026-11-20: `IdentityClient` with no interface, a recorded departure from the interface-first rule (*Why a registration is a concrete type*) | Nothing |
+| The client identifier | Decided 2026-11-20: a GUID. One defined in code is derived from a name with `FromName`, so code adopts a registration created at run time under that name (*Deterministic identifiers*) | Nothing. The namespace GUID and the lowercasing are fixed from the first release |
+| What adoption does to what the stored registration held | Code wins whole: from the deployment that adopts a registration, only the code definition's redirects, permissions, and credentials are served. A secret issued through the API stops being accepted | The owner's confirmation. The alternative, merging stored credentials into a locked registration, was refused on 2026-11-19 for locked registrations in general |
+| Whether a registration keeps the name its identifier was derived from | It does not. A message names a registration by display name and identifier, and by a bare GUID when it has no display name | The owner. Keeping the name adds a field to the model and the stored layout, and leaves a registration created under a random identifier without one |
+| The builder verb for a code-first registration | Designed, not built: `AddClient(IdentityClientId, Action<IdentityClientDescriptor>)` | #1913, in the change that moves the token endpoint onto the registry, unless the owner wants the verb sooner |
 | Where the registration model lives | In the root, because every part of the hub reads it | The owner's confirmation. `resource-areas.md` keeps feature abstractions out of an area root; the alternative is an `IdentityHub.Clients` feature package that the root's builder contract could then not name |
 | What "locked" covers | Decided 2026-11-19: the whole registration, credentials included. Rotating a locked registration's credentials through the API was refused (*Code-first objects are locked*) | Nothing |
 | The cost of a chosen secret | PBKDF2-HMAC-SHA256, 600,000 iterations; 1 for a generated secret | The owner's confirmation, and the rate limit on the endpoint that verifies secrets (#1913) |

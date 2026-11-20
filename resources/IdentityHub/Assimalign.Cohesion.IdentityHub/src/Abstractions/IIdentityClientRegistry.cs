@@ -11,10 +11,17 @@ namespace Assimalign.Cohesion.IdentityHub;
 /// <remarks>
 /// <para>
 /// <b>Code defines, the registry serves, and code wins.</b> A registration defined in code is
-/// read like any other, carries <see cref="IIdentityClient.IsLocked"/>, and is never written:
+/// read like any other, carries <see cref="IdentityClient.IsLocked"/>, and is never written:
 /// every write that names it is answered <see cref="IdentityClientWriteStatus.Locked"/>, and it
 /// changes only where it is defined. A stored registration that has the identifier of one
 /// defined in code is not served.
+/// </para>
+/// <para>
+/// <b>Code adopts by identifier.</b> A registration created while the hub runs is stored and may
+/// change. When a later deployment defines a registration with the same identifier, which
+/// <see cref="IdentityClientId.FromName"/> makes the same for the same name, the registry serves
+/// the one from code, locked, from then on. Adoption replaces the registration whole: the
+/// stored one, with any secret issued to it, is no longer served.
 /// </para>
 /// <para>
 /// <b>Writes are conditional and report their outcome.</b> A registration is immutable, so a
@@ -39,7 +46,7 @@ public interface IIdentityClientRegistry
     /// The store could not complete the read, or the stored registration could not be decoded.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    ValueTask<IIdentityClient?> FindAsync(IdentityClientId id, CancellationToken cancellationToken = default);
+    ValueTask<IdentityClient?> FindAsync(IdentityClientId id, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Finds the registration that exposes an audience: the API a token for that audience is for.
@@ -52,7 +59,7 @@ public interface IIdentityClientRegistry
     /// The store could not complete the read, or the stored registration could not be decoded.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    ValueTask<IIdentityClient?> FindByAudienceAsync(IdentityClientAudience audience, CancellationToken cancellationToken = default);
+    ValueTask<IdentityClient?> FindByAudienceAsync(IdentityClientAudience audience, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Reads one page of the registrations: the ones defined in code first, in the order of their
@@ -83,7 +90,11 @@ public interface IIdentityClientRegistry
     /// <summary>
     /// Stores a new registration.
     /// </summary>
-    /// <param name="client">The registration to store.</param>
+    /// <param name="client">
+    /// The registration to store. Its identifier is its own to choose: one derived from a name
+    /// with <see cref="IdentityClientId.FromName"/> can be adopted by code later, and a random
+    /// one cannot.
+    /// </param>
     /// <param name="cancellationToken">The token that cancels the write.</param>
     /// <returns>
     /// <see cref="IdentityClientWriteStatus.Written"/> with the stored version;
@@ -93,16 +104,15 @@ public interface IIdentityClientRegistry
     /// one of its audiences.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="client"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="client"/> is not a valid registration.</exception>
     /// <exception cref="IdentityHubStoreException">The store could not complete the write.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    ValueTask<IdentityClientWriteResult> TryAddAsync(IIdentityClient client, CancellationToken cancellationToken = default);
+    ValueTask<IdentityClientWriteResult> TryAddAsync(IdentityClient client, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Replaces a stored registration, when its version is the expected one.
     /// </summary>
     /// <param name="client">The replacement, whose identifier names the registration to replace.</param>
-    /// <param name="expectedVersion">The <see cref="IIdentityClient.Version"/> the caller read.</param>
+    /// <param name="expectedVersion">The <see cref="IdentityClient.Version"/> the caller read.</param>
     /// <param name="cancellationToken">The token that cancels the write.</param>
     /// <returns>
     /// <see cref="IdentityClientWriteStatus.Written"/> with the new version;
@@ -112,14 +122,11 @@ public interface IIdentityClientRegistry
     /// registration exposes one of its audiences.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="client"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">
-    /// <paramref name="client"/> is not a valid registration, or <paramref name="expectedVersion"/>
-    /// is <see langword="default"/>.
-    /// </exception>
+    /// <exception cref="ArgumentException"><paramref name="expectedVersion"/> is <see langword="default"/>.</exception>
     /// <exception cref="IdentityHubStoreException">The store could not complete the write.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     ValueTask<IdentityClientWriteResult> TryReplaceAsync(
-        IIdentityClient client,
+        IdentityClient client,
         IdentityHubRecordVersion expectedVersion,
         CancellationToken cancellationToken = default);
 
@@ -131,7 +138,7 @@ public interface IIdentityClientRegistry
     /// nothing from then on.
     /// </remarks>
     /// <param name="id">The identifier of the registration to remove.</param>
-    /// <param name="expectedVersion">The <see cref="IIdentityClient.Version"/> the caller read.</param>
+    /// <param name="expectedVersion">The <see cref="IdentityClient.Version"/> the caller read.</param>
     /// <param name="cancellationToken">The token that cancels the write.</param>
     /// <returns>
     /// <see cref="IdentityClientWriteStatus.Removed"/>;

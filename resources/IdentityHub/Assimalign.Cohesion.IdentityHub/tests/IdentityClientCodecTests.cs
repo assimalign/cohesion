@@ -20,6 +20,10 @@ public class IdentityClientCodecTests
 {
     private const string minimal = """{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00"}""";
 
+    // The identifiers IdentityClientId.FromName derives from "orders" and "billing-api".
+    private const string ordersId = "e2b89555-2aff-5db0-afe6-8c8b4e065cdf";
+    private const string billingId = "8326245d-bea7-522f-abd6-42b01007b275";
+
     private static readonly DateTimeOffset _now = TestClients.Now;
 
     private readonly IdentityClientCodec _codec = IdentityClientCodec.Instance;
@@ -30,7 +34,7 @@ public class IdentityClientCodecTests
         // Arrange
         IdentityClient client = IdentityClient.Create(new()
         {
-            Id = "orders-api",
+            Id = IdentityClientId.FromName("orders-api"),
             Audiences = { "api://orders", "https://orders.example/api" },
         });
 
@@ -39,7 +43,8 @@ public class IdentityClientCodecTests
 
         // Assert
         _codec.Set.Value.ShouldBe("clients");
-        record.Key.Value.ShouldBe("orders-api");
+        record.Key.Value.ShouldBe("bec0a3ee-3f3c-599e-bd0b-3b7194e035ba");
+        record.Key.ShouldBe(IdentityClientCodec.KeyOf(client.Id));
         record.ExpiresAt.ShouldBeNull();
         record.Indexes.Count.ShouldBe(2);
         record.Indexes.ShouldAllBe(index => index.Name.Value == "audience" && index.IsUnique);
@@ -102,7 +107,7 @@ public class IdentityClientCodecTests
     public void Encode_WithARegistrationThatOnlyNamesItself_ShouldWriteNoEmptyMember()
     {
         // Arrange
-        IdentityClient client = IdentityClient.Create(new() { Id = "orders" });
+        IdentityClient client = IdentityClient.Create(new() { Id = IdentityClientId.FromName("orders"), DisplayName = "orders" });
 
         // Act
         string payload = Encoding.UTF8.GetString(_codec.Encode(client).Payload.Span);
@@ -119,7 +124,7 @@ public class IdentityClientCodecTests
         IdentityClientSecretCredential generated = IdentityClientSecretCredential.Generate("generated", out string secret);
         IdentityClient client = IdentityClient.Create(new()
         {
-            Id = "orders-daemon",
+            Id = IdentityClientId.FromName("orders-daemon"),
             Credentials = { generated, IdentityClientSecretCredential.Create("chosen", chosen) },
         });
 
@@ -194,7 +199,7 @@ public class IdentityClientCodecTests
         IdentityClient client = _codec.Decode(Record(minimal));
 
         // Assert
-        client.Id.Value.ShouldBe("orders");
+        client.Id.ShouldBe(IdentityClientId.FromName("orders"));
         client.DisplayName.ShouldBe("orders");
         client.Grants.ShouldBe(IdentityClientGrants.None);
         client.AccessTokenLifetime.ShouldBe(TimeSpan.FromHours(1));
@@ -207,7 +212,7 @@ public class IdentityClientCodecTests
         // Arrange
         IdentityClient client = IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             DisplayName = "Commandes — 注文 \U0001F4E6",
             Description = "L'API des commandes <b>&</b> \"livraisons\".\n\tDeux lignes.",
         });
@@ -223,7 +228,7 @@ public class IdentityClientCodecTests
     [Theory(DisplayName = "Cohesion Test [IdentityHub] - Decode: Should refuse a member the layout does not know")]
     [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","tenant":"a"}""")]
     [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","grants":["authorization_code"],"redirects":[{"uri":"https://orders.example/signin","platform":"web","wildcard":true}]}""")]
-    [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","permissions":[{"resource":"billing-api","name":"invoices.read","kind":"delegated","consent":"admin"}]}""")]
+    [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","permissions":[{"resource":"8326245d-bea7-522f-abd6-42b01007b275","name":"invoices.read","kind":"delegated","consent":"admin"}]}""")]
     public void Decode_WithAnUnknownMember_ShouldThrowJsonException(string payload)
     {
         // Act + Assert
@@ -261,8 +266,11 @@ public class IdentityClientCodecTests
     [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","audiences":["api://orders"],"scopes":[{"name":"orders.read"}]}""")]
     [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","audiences":["api://orders"],"roles":[{"name":"orders.process","displayName":"Process"}]}""")]
     [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","audiences":["api://orders"],"roles":[{"name":"orders.process","displayName":"Process","members":["group"]}]}""")]
-    [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","permissions":[{"resource":"billing-api","name":"invoices.read","kind":"admin"}]}""")]
+    [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","permissions":[{"resource":"8326245d-bea7-522f-abd6-42b01007b275","name":"invoices.read","kind":"admin"}]}""")]
     [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","permissions":[{"name":"invoices.read","kind":"delegated"}]}""")]
+    [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","permissions":[{"resource":"billing-api","name":"invoices.read","kind":"delegated"}]}""")]
+    [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","permissions":[{"resource":"8326245D-BEA7-522F-ABD6-42B01007B275","name":"invoices.read","kind":"delegated"}]}""")]
+    [InlineData("""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","permissions":[{"resource":"00000000-0000-0000-0000-000000000000","name":"invoices.read","kind":"delegated"}]}""")]
     public void Decode_WithAPayloadOutsideTheLayout_ShouldThrowFormatException(string payload)
     {
         // Act + Assert
@@ -291,11 +299,31 @@ public class IdentityClientCodecTests
         Should.Throw<ArgumentException>(() => _codec.Decode(Record(payload)));
     }
 
-    [Fact(DisplayName = "Cohesion Test [IdentityHub] - Decode: Should refuse a record whose key is not a client identifier")]
-    public void Decode_WithAKeyThatIsNoClientIdentifier_ShouldThrowArgumentException()
+    [Theory(DisplayName = "Cohesion Test [IdentityHub] - Decode: Should refuse a record whose key is not the one spelling of a client identifier")]
+    [InlineData("orders")]
+    [InlineData("not a client id")]
+    [InlineData("E2B89555-2AFF-5DB0-AFE6-8C8B4E065CDF")]
+    [InlineData("e2b895552aff5db0afe68c8b4e065cdf")]
+    [InlineData("{e2b89555-2aff-5db0-afe6-8c8b4e065cdf}")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public void Decode_WithAKeyThatIsNoClientIdentifier_ShouldThrowFormatException(string key)
     {
         // Act + Assert
-        Should.Throw<ArgumentException>(() => _codec.Decode(Record(minimal, "not a client id")));
+        Should.Throw<FormatException>(() => _codec.Decode(Record(minimal, key)));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [IdentityHub] - Decode: Should read the identifier from the key and a permission's API from its identifier")]
+    public void Decode_WithIdentifiersInTheirOneSpelling_ShouldReadThem()
+    {
+        // Arrange
+        string payload = $$"""{"v":1,"displayName":"orders","accessTokenLifetime":"01:00:00","permissions":[{"resource":"{{billingId}}","name":"invoices.read","kind":"delegated"}]}""";
+
+        // Act
+        IdentityClient client = _codec.Decode(Record(payload));
+
+        // Assert
+        client.Id.ShouldBe(IdentityClientId.FromName("orders"));
+        client.Permissions.Single().Resource.ShouldBe(IdentityClientId.FromName("billing-api"));
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - Encode, Decode: Should refuse null")]
@@ -315,7 +343,7 @@ public class IdentityClientCodecTests
         string wideDescription = new('鍵', IdentityClient.MaxDescriptionLength);
         var descriptor = new IdentityClientDescriptor
         {
-            Id = new string('c', IdentityClientId.MaxLength),
+            Id = IdentityClientId.New(),
             DisplayName = wideName,
             Description = wideDescription,
             Grants = IdentityClientGrants.AuthorizationCode | IdentityClientGrants.ClientCredentials |
@@ -358,10 +386,11 @@ public class IdentityClientCodecTests
                 wideDescription));
         }
 
+        IdentityClientId api = IdentityClientId.New();
         for (int index = 0; index < IdentityClient.MaxPermissionCount; index++)
         {
             descriptor.Permissions.Add(IdentityClientPermission.Application(
-                new string('b', IdentityClientId.MaxLength),
+                api,
                 Longest($"p{index:D3}", IdentityClientPermissionName.MaxLength)));
         }
 
@@ -382,7 +411,7 @@ public class IdentityClientCodecTests
         decoded.DisplayName.ShouldBe(wideName);
     }
 
-    private static IdentityHubRecord Record(string payload, string key = "orders")
+    private static IdentityHubRecord Record(string payload, string key = ordersId)
     {
         return new IdentityHubRecord(new IdentityHubRecordKey(key), Encoding.UTF8.GetBytes(payload));
     }
@@ -408,7 +437,7 @@ public class IdentityClientCodecTests
         using X509Certificate2 certificate = TestClients.Certificate(_now, _now.AddDays(365));
         return IdentityClient.Create(new()
         {
-            Id = "orders",
+            Id = IdentityClientId.FromName("orders"),
             DisplayName = "Orders",
             Description = "Takes orders.",
             Grants = IdentityClientGrants.AuthorizationCode | IdentityClientGrants.ClientCredentials |
@@ -438,8 +467,8 @@ public class IdentityClientCodecTests
             },
             Permissions =
             {
-                IdentityClientPermission.Delegated("billing-api", "invoices.read"),
-                IdentityClientPermission.Application("orders", "orders.process"),
+                IdentityClientPermission.Delegated(IdentityClientId.FromName("billing-api"), "invoices.read"),
+                IdentityClientPermission.Application(IdentityClientId.FromName("orders"), "orders.process"),
             },
         });
     }

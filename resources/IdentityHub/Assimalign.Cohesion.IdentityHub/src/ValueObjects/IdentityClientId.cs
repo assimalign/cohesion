@@ -1,49 +1,57 @@
-using Assimalign.Cohesion.IdentityHub.Internal;
+using System;
 
 namespace Assimalign.Cohesion.IdentityHub;
 
 /// <summary>
-/// The identifier of an app registration: the OAuth <c>client_id</c> a client presents, and the
-/// name another registration uses to refer to it.
+/// The identifier of an app registration: the OAuth <c>client_id</c> a client presents, and what
+/// another registration refers to it by. It is a GUID.
 /// </summary>
 /// <remarks>
 /// <para>
-/// An identifier is 1 to 128 characters from the unreserved set of RFC 3986 section 2.3
-/// (letters, digits, <c>-</c>, <c>.</c>, <c>_</c>, <c>~</c>), starting and ending with a letter
-/// or digit: <c>orders-api</c>, <c>billing.worker</c>, or a GUID. It therefore needs no
-/// escaping in a URL path segment, a form body, or HTTP Basic authentication, where RFC 6749
-/// section 2.3.1 would otherwise have a client encode it.
+/// <b>A registration defined in code derives its identifier from a name</b> with
+/// <see cref="FromName"/>, so the identifier is the same in every deployment and on every node
+/// without being written down anywhere. A registration created at run time under the same name
+/// gets the same identifier, and that is what lets code take it over: once code defines the
+/// name, the registry serves the registration from code, locked, in place of the stored one. A
+/// registration no code will name takes a random identifier from <see cref="New"/>.
 /// </para>
 /// <para>
-/// Identifiers compare ordinally, as RFC 6749 treats a client identifier as an exact string.
-/// A registration defined in code names its own identifier, because the identifier has to be
-/// the same in every deployment. An identifier is not a secret.
-/// <see langword="default"/> holds no identifier and every registration boundary refuses it.
+/// The identifier's text is the 36-character form with hyphens, in lowercase:
+/// <c>bec0a3ee-3f3c-599e-bd0b-3b7194e035ba</c> is the one <c>orders-api</c> derives. It needs
+/// no escaping in a URL path segment, a form body, or HTTP Basic authentication, where RFC 6749
+/// section 2.3.1 would otherwise have a client encode it. An identifier is not a secret.
+/// </para>
+/// <para>
+/// <see langword="default"/> is the empty GUID, which identifies no registration: every
+/// registration boundary refuses it.
 /// </para>
 /// </remarks>
 public readonly partial struct IdentityClientId
 {
-    /// <summary>
-    /// The longest client identifier, in characters.
-    /// </summary>
-    public const int MaxLength = IdentityClientGrammar.MaxIdLength;
+    // The UUIDv5 namespace of client identifiers. It is part of the contract: a tool in any
+    // language derives the same identifier from a name, and changing it changes every derived
+    // identifier, which would detach every registration created under a name from the code that
+    // defines that name.
+    private static readonly Guid _namespace = new("14af0e0d-a974-4487-871d-ef1dd83f6ad3");
 
     /// <summary>
-    /// Determines whether a value is a client identifier.
+    /// Derives the identifier of the registration with a name.
     /// </summary>
-    /// <param name="value">The candidate identifier.</param>
-    /// <param name="message">The reason the identifier is refused, or <see langword="null"/> when it is valid.</param>
-    /// <returns><see langword="true"/> when the value follows the client identifier grammar.</returns>
-    public static partial bool IsValid(string value, out string? message)
+    /// <remarks>
+    /// The identifier is the RFC 9562 version 5 UUID of the lowercase name in the client
+    /// identifier namespace, <c>14af0e0d-a974-4487-871d-ef1dd83f6ad3</c>. Names that compare
+    /// equal therefore derive one identifier, on every machine and in every version of the hub.
+    /// </remarks>
+    /// <param name="name">The name of the registration.</param>
+    /// <returns>The identifier every registration with the name has.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
+    public static IdentityClientId FromName(IdentityClientName name)
     {
-        // The value is not echoed: it may hold the character that made it invalid.
-        if (!IdentityClientGrammar.IsIdentifier(value, MaxLength))
+        if (name.Value is null)
         {
-            message = ErrorMessages.ClientIdInvalid;
-            return false;
+            throw new ArgumentException(ErrorMessages.ClientNameRequired, nameof(name));
         }
 
-        message = null;
-        return true;
+        return new IdentityClientId(Guid.AsDeterministicGuid(name.Value.ToLowerInvariant(), _namespace));
     }
 }

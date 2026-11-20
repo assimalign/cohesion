@@ -9,9 +9,9 @@ using System.Text.Json;
 namespace Assimalign.Cohesion.IdentityHub.Internal;
 
 /// <summary>
-/// Stores app registrations in the <c>clients</c> record set: the registration's identifier is
-/// the record's key, each audience it exposes is a unique <c>audience</c> index entry, and the
-/// rest is a JSON payload laid out by <see cref="IdentityClientPayload"/>.
+/// Stores app registrations in the <c>clients</c> record set: the text of the registration's
+/// identifier is the record's key, each audience it exposes is a unique <c>audience</c> index
+/// entry, and the rest is a JSON payload laid out by <see cref="IdentityClientPayload"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,6 +22,11 @@ namespace Assimalign.Cohesion.IdentityHub.Internal;
 /// A record is decoded by rebuilding a descriptor and creating the registration from it, so a
 /// stored registration passes every check a new one does. A secret is stored as its verifier,
 /// never in the clear.
+/// </para>
+/// <para>
+/// An identifier is written in one spelling, the 36-character lowercase form with hyphens, and
+/// read back only in that spelling. Record keys compare ordinally, so a second spelling of one
+/// GUID would be a second record with the same identifier.
 /// </para>
 /// </remarks>
 internal sealed class IdentityClientCodec : IIdentityHubRecordCodec<IdentityClient>
@@ -45,6 +50,8 @@ internal sealed class IdentityClientCodec : IIdentityHubRecordCodec<IdentityClie
     private const string application = "application";
     private const string user = "user";
 
+    private const string idFormat = "D";
+
     // The payload is never placed in markup, so only what JSON itself requires is escaped. That
     // keeps a registration at its limits well inside the store's payload limit.
     private static readonly JsonWriterOptions _writerOptions = new()
@@ -61,6 +68,14 @@ internal sealed class IdentityClientCodec : IIdentityHubRecordCodec<IdentityClie
     public static IdentityHubRecordIndexName AudienceIndex { get; } = new("audience");
 
     public IdentityHubRecordSetName Set { get; } = new("clients");
+
+    /// <summary>
+    /// Returns the key a registration is stored under: the text of its identifier.
+    /// </summary>
+    public static IdentityHubRecordKey KeyOf(IdentityClientId id)
+    {
+        return new IdentityHubRecordKey(WriteId(id));
+    }
 
     public IdentityHubRecord Encode(IdentityClient value)
     {
@@ -97,7 +112,7 @@ internal sealed class IdentityClientCodec : IIdentityHubRecordCodec<IdentityClie
         }
 
         return new IdentityHubRecord(
-            new IdentityHubRecordKey(value.Id.Value),
+            KeyOf(value.Id),
             buffer.WrittenMemory,
             expiresAt: null,
             indexes);
@@ -119,7 +134,7 @@ internal sealed class IdentityClientCodec : IIdentityHubRecordCodec<IdentityClie
 
         var descriptor = new IdentityClientDescriptor
         {
-            Id = new IdentityClientId(record.Key.Value),
+            Id = ReadId(record.Key.Value),
             DisplayName = Require(payload.DisplayName),
             Description = payload.Description,
             Grants = ReadGrants(payload.Grants),
@@ -182,7 +197,7 @@ internal sealed class IdentityClientCodec : IIdentityHubRecordCodec<IdentityClie
             {
                 IdentityClientPayload.Permission stored = Require(permission);
                 descriptor.Permissions.Add(new IdentityClientPermission(
-                    new IdentityClientId(Require(stored.Resource)),
+                    ReadId(stored.Resource),
                     new IdentityClientPermissionName(Require(stored.Name)),
                     ReadPermissionKind(stored.Kind)));
             }
@@ -496,7 +511,7 @@ internal sealed class IdentityClientCodec : IIdentityHubRecordCodec<IdentityClie
             IdentityClientPermission permission = permissions[index];
             stored.Add(new IdentityClientPayload.Permission
             {
-                Resource = permission.Resource.Value,
+                Resource = WriteId(permission.Resource),
                 Name = permission.Name.Value,
                 Kind = permission.Kind switch
                 {
@@ -518,6 +533,23 @@ internal sealed class IdentityClientCodec : IIdentityHubRecordCodec<IdentityClie
             application => IdentityClientPermissionKind.Application,
             _ => throw new FormatException(ErrorMessages.ClientPayloadInvalid),
         };
+    }
+
+    private static string WriteId(IdentityClientId id)
+    {
+        return id.Value.ToString(idFormat, CultureInfo.InvariantCulture);
+    }
+
+    private static IdentityClientId ReadId(string? text)
+    {
+        if (!Guid.TryParseExact(text, idFormat, out Guid value) ||
+            value == Guid.Empty ||
+            !string.Equals(value.ToString(idFormat, CultureInfo.InvariantCulture), text, StringComparison.Ordinal))
+        {
+            throw new FormatException(ErrorMessages.ClientPayloadInvalid);
+        }
+
+        return new IdentityClientId(value);
     }
 
     private static T Require<T>(T? value)

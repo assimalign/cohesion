@@ -75,11 +75,14 @@
   <data name="IndexNotUnique" xml:space="preserve">
     <value>Index '{1}' of record set '{0}' holds more than one record for the value.</value>
   </data>
-  <data name="ClientIdInvalid" xml:space="preserve">
-    <value>A client identifier is 1 to 128 characters: ASCII letters, digits, '-', '.', '_' and '~', starting and ending with a letter or digit.</value>
+  <data name="ClientNameInvalid" xml:space="preserve">
+    <value>A client name is 1 to 128 characters: ASCII letters, digits, '-', '.', '_' and '~', starting and ending with a letter or digit.</value>
+  </data>
+  <data name="ClientNameRequired" xml:space="preserve">
+    <value>A client name is required.</value>
   </data>
   <data name="ClientIdRequired" xml:space="preserve">
-    <value>A client identifier is required.</value>
+    <value>A client identifier is required: the empty GUID identifies no client.</value>
   </data>
   <data name="CredentialIdInvalid" xml:space="preserve">
     <value>A credential identifier is 1 to 64 characters: ASCII letters, digits, '-', '.', '_' and '~', starting and ending with a letter or digit.</value>

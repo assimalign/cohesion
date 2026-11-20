@@ -37,14 +37,20 @@
 						   ObjectHasImplicitOperators="true"
 						   ObjectHasIsValidMethod="true"
 						   ObjectComparison="Ordinal" />
-		<!-- The app registration vocabulary. Each compares ordinally: RFC 6749 treats a client identifier and a scope token as exact strings, and RFC 7519 compares an audience the same way. -->
+		<!-- The app registration vocabulary. A client identifier is a GUID, so it has no grammar of its own: the rule lives in the name it may be derived from. A client name compares case-insensitively, so two spellings of one name derive one identifier. -->
 		<CohesionValueType Include="ValueObjects\IdentityClientId.cs"
+						   ObjectRuntimeType="Guid"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\IdentityClientName.cs"
 						   ObjectRuntimeType="String"
 						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
 						   ObjectAccessModifier="public"
 						   ObjectHasImplicitOperators="true"
 						   ObjectHasIsValidMethod="true"
-						   ObjectComparison="Ordinal" />
+						   ObjectComparison="OrdinalIgnoreCase" />
+		<!-- The rest compares ordinally: RFC 6749 treats a scope token as an exact string, and RFC 7519 compares an audience the same way. -->
 		<CohesionValueType Include="ValueObjects\IdentityClientCredentialId.cs"
 						   ObjectRuntimeType="String"
 						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
